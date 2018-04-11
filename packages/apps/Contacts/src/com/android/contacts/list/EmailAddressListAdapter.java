@@ -23,14 +23,15 @@ import android.net.Uri;
 import android.net.Uri.Builder;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Email;
-import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Data;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 
+import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.list.ContactEntryListAdapter;
 import com.android.contacts.common.list.ContactListItemView;
+import com.android.contacts.common.preference.ContactsPreferences;
 
 /**
  * A cursor adapter for the {@link Email#CONTENT_TYPE} content type.
@@ -44,7 +45,8 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
             Email.LABEL,                     // 2
             Email.DATA,                      // 3
             Email.PHOTO_ID,                  // 4
-            Email.DISPLAY_NAME_PRIMARY,      // 5
+            Email.LOOKUP_KEY,                // 5
+            Email.DISPLAY_NAME_PRIMARY,      // 6
         };
 
         private static final String[] PROJECTION_ALTERNATIVE = new String[] {
@@ -53,7 +55,8 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
             Email.LABEL,                     // 2
             Email.DATA,                      // 3
             Email.PHOTO_ID,                  // 4
-            Email.DISPLAY_NAME_ALTERNATIVE,  // 5
+            Email.LOOKUP_KEY,                // 5
+            Email.DISPLAY_NAME_ALTERNATIVE,  // 6
         };
 
         public static final int EMAIL_ID           = 0;
@@ -61,7 +64,8 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
         public static final int EMAIL_LABEL        = 2;
         public static final int EMAIL_ADDRESS      = 3;
         public static final int EMAIL_PHOTO_ID     = 4;
-        public static final int EMAIL_DISPLAY_NAME = 5;
+        public static final int EMAIL_LOOKUP_KEY   = 5;
+        public static final int EMAIL_DISPLAY_NAME = 6;
     }
 
     private final CharSequence mUnknownNameText;
@@ -82,7 +86,7 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
         } else {
             builder = Email.CONTENT_URI.buildUpon();
             if (isSectionHeaderDisplayEnabled()) {
-                builder.appendQueryParameter(ContactCounts.ADDRESS_BOOK_INDEX_EXTRAS, "true");
+                builder.appendQueryParameter(Email.EXTRA_ADDRESS_BOOK_INDEX, "true");
             }
         }
         builder.appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY,
@@ -90,13 +94,13 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
         builder.appendQueryParameter(ContactsContract.REMOVE_DUPLICATE_ENTRIES, "true");
         loader.setUri(builder.build());
 
-        if (getContactNameDisplayOrder() == ContactsContract.Preferences.DISPLAY_ORDER_PRIMARY) {
+        if (getContactNameDisplayOrder() == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
             loader.setProjection(EmailQuery.PROJECTION_PRIMARY);
         } else {
             loader.setProjection(EmailQuery.PROJECTION_ALTERNATIVE);
         }
 
-        if (getSortOrder() == ContactsContract.Preferences.SORT_ORDER_PRIMARY) {
+        if (getSortOrder() == ContactsPreferences.SORT_ORDER_PRIMARY) {
             loader.setSortOrder(Email.SORT_KEY_PRIMARY);
         } else {
             loader.setSortOrder(Email.SORT_KEY_ALTERNATIVE);
@@ -118,9 +122,9 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
     }
 
     @Override
-    protected View newView(Context context, int partition, Cursor cursor, int position,
-            ViewGroup parent) {
-        final ContactListItemView view = new ContactListItemView(context, null);
+    protected ContactListItemView newView(
+            Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
+        ContactListItemView view = super.newView(context, partition, cursor, position, parent);
         view.setUnknownNameText(mUnknownNameText);
         view.setQuickContactEnabled(isQuickContactEnabled());
         return view;
@@ -128,9 +132,11 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
 
     @Override
     protected void bindView(View itemView, int partition, Cursor cursor, int position) {
+        super.bindView(itemView, partition, cursor, position);
         ContactListItemView view = (ContactListItemView)itemView;
         bindSectionHeaderAndDivider(view, position);
         bindName(view, cursor);
+        bindViewId(view, cursor, EmailQuery.EMAIL_ID);
         bindPhoto(view, cursor);
         bindEmailAddress(view, cursor);
     }
@@ -154,15 +160,7 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
             String title = (String)getSections()[section];
             view.setSectionHeader(title);
         } else {
-            view.setDividerVisible(false);
             view.setSectionHeader(null);
-        }
-
-        // move the divider for the last item in a section
-        if (getPositionForSection(section + 1) - 1 == position) {
-            view.setDividerVisible(false);
-        } else {
-            view.setDividerVisible(true);
         }
     }
 
@@ -175,8 +173,13 @@ public class EmailAddressListAdapter extends ContactEntryListAdapter {
         if (!cursor.isNull(EmailQuery.EMAIL_PHOTO_ID)) {
             photoId = cursor.getLong(EmailQuery.EMAIL_PHOTO_ID);
         }
-
-        getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false);
+        DefaultImageRequest request = null;
+        if (photoId == 0) {
+             request = getDefaultImageRequestFromCursor(cursor, EmailQuery.EMAIL_DISPLAY_NAME,
+                    EmailQuery.EMAIL_LOOKUP_KEY);
+        }
+        getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false, getCircularPhotos(),
+                request);
     }
 //
 //    protected void bindSearchSnippet(final ContactListItemView view, Cursor cursor) {

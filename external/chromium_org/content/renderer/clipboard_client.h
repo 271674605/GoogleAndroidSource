@@ -5,6 +5,7 @@
 #ifndef CONTENT_RENDERER_CLIPBOARD_CLIENT_H_
 #define CONTENT_RENDERER_CLIPBOARD_CLIENT_H_
 
+#include "content/common/clipboard_format.h"
 #include "ui/base/clipboard/clipboard.h"
 
 class GURL;
@@ -33,47 +34,42 @@ class ClipboardClient {
   virtual ui::Clipboard* GetClipboard() = 0;
 
   // Get a sequence number which uniquely identifies clipboard state.
-  virtual uint64 GetSequenceNumber(ui::Clipboard::Buffer buffer) = 0;
+  virtual uint64 GetSequenceNumber(ui::ClipboardType type) = 0;
 
   // Tests whether the clipboard contains a certain format
-  virtual bool IsFormatAvailable(const ui::Clipboard::FormatType& format,
-                                 ui::Clipboard::Buffer buffer) = 0;
+  virtual bool IsFormatAvailable(ClipboardFormat format,
+                                 ui::ClipboardType type) = 0;
 
   // Clear the contents of the clipboard.
-  virtual void Clear(ui::Clipboard::Buffer buffer) = 0;
+  virtual void Clear(ui::ClipboardType type) = 0;
 
   // Reads the available types from the clipboard, if available.
-  virtual void ReadAvailableTypes(ui::Clipboard::Buffer buffer,
+  virtual void ReadAvailableTypes(ui::ClipboardType type,
                                   std::vector<base::string16>* types,
                                   bool* contains_filenames) = 0;
 
-  // Reads UNICODE text from the clipboard, if available.
-  virtual void ReadText(ui::Clipboard::Buffer buffer,
+  // Reads text from the clipboard, trying UNICODE first, then falling back to
+  // ASCII.
+  virtual void ReadText(ui::ClipboardType type,
                         base::string16* result) = 0;
 
-  // Reads ASCII text from the clipboard, if available.
-  virtual void ReadAsciiText(ui::Clipboard::Buffer buffer,
-                             std::string* result) = 0;
-
   // Reads HTML from the clipboard, if available.
-  virtual void ReadHTML(ui::Clipboard::Buffer buffer, base::string16* markup,
-                        GURL* url, uint32* fragment_start,
+  virtual void ReadHTML(ui::ClipboardType type,
+                        base::string16* markup,
+                        GURL* url,
+                        uint32* fragment_start,
                         uint32* fragment_end) = 0;
 
   // Reads RTF from the clipboard, if available.
-  virtual void ReadRTF(ui::Clipboard::Buffer buffer, std::string* result) = 0;
+  virtual void ReadRTF(ui::ClipboardType type, std::string* result) = 0;
 
   // Reads and image from the clipboard, if available.
-  virtual void ReadImage(ui::Clipboard::Buffer buffer, std::string* data) = 0;
+  virtual void ReadImage(ui::ClipboardType type, std::string* data) = 0;
 
   // Reads a custom data type from the clipboard, if available.
-  virtual void ReadCustomData(ui::Clipboard::Buffer buffer,
+  virtual void ReadCustomData(ui::ClipboardType clipboard_type,
                               const base::string16& type,
                               base::string16* data) = 0;
-
-  // Reads raw data from the clipboard for a given format.
-  virtual void ReadData(const ui::Clipboard::FormatType& format,
-                        std::string* data) = 0;
 
   // Creates a context to write clipboard data. May return NULL.
   virtual WriteContext* CreateWriteContext() = 0;

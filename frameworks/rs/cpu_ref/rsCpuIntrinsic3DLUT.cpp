@@ -52,9 +52,10 @@ void RsdCpuScriptIntrinsic3DLUT::setGlobalObj(uint32_t slot, ObjectBase *data) {
     mLUT.set(static_cast<Allocation *>(data));
 }
 
-extern "C" void rsdIntrinsic3DLUT_K(void *dst, const void *src, const void *lut,
-                                    size_t lut_stride_y, size_t lut_stride_z,
-                                    uint32_t count, const void *constants);
+extern "C" void rsdIntrinsic3DLUT_K(void *dst, void const *in, size_t count,
+                                      void const *lut,
+                                      int32_t pitchy, int32_t pitchz,
+                                      int dimx, int dimy, int dimz);
 
 
 void RsdCpuScriptIntrinsic3DLUT::kernel(const RsForEachStubParamStruct *p,
@@ -70,9 +71,9 @@ void RsdCpuScriptIntrinsic3DLUT::kernel(const RsForEachStubParamStruct *p,
     const uchar *bp = (const uchar *)cp->mLUT->mHal.drvState.lod[0].mallocPtr;
 
     int4 dims = {
-        cp->mLUT->mHal.drvState.lod[0].dimX - 1,
-        cp->mLUT->mHal.drvState.lod[0].dimY - 1,
-        cp->mLUT->mHal.drvState.lod[0].dimZ - 1,
+        static_cast<int>(cp->mLUT->mHal.drvState.lod[0].dimX - 1),
+        static_cast<int>(cp->mLUT->mHal.drvState.lod[0].dimY - 1),
+        static_cast<int>(cp->mLUT->mHal.drvState.lod[0].dimZ - 1),
         -1
     };
     const float4 m = (float4)(1.f / 255.f) * convert_float4(dims);
@@ -82,26 +83,21 @@ void RsdCpuScriptIntrinsic3DLUT::kernel(const RsForEachStubParamStruct *p,
 
     //ALOGE("strides %zu %zu", stride_y, stride_z);
 
-    while (x1 < x2) {
-#if defined(ARCH_ARM_HAVE_VFP)
-        if (gArchUseSIMD) {
-            int32_t len = (x2 - x1 - 1) >> 1;
-            if(len > 0) {
-                const short neon_constants[] = {
-                    coordMul.x, coordMul.y, coordMul.z, 0,
-                    0, 0, 0, 0xffff,
-
-                };
-
-                rsdIntrinsic3DLUT_K(out, in, bp, stride_y, stride_z, len, neon_constants);
-                x1 += len << 1;
-                out += len << 1;
-                in += len << 1;
-            }
+#if defined(ARCH_ARM_USE_INTRINSICS)
+    if (gArchUseSIMD) {
+        int32_t len = x2 - x1;
+        if(len > 0) {
+            rsdIntrinsic3DLUT_K(out, in, len,
+                                bp, stride_y, stride_z,
+                                dims.x, dims.y, dims.z);
+            x1 += len;
+            out += len;
+            in += len;
         }
-
+    }
 #endif
 
+    while (x1 < x2) {
         int4 baseCoord = convert_int4(*in) * coordMul;
         int4 coord1 = baseCoord >> (int4)15;
         //int4 coord2 = min(coord1 + 1, gDims - 1);

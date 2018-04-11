@@ -19,6 +19,7 @@ package com.android.providers.contacts;
 import static com.android.providers.contacts.TestUtils.cv;
 
 import android.accounts.Account;
+import android.content.ContentProvider;
 import android.content.ContentProviderOperation;
 import android.content.ContentProviderResult;
 import android.content.ContentResolver;
@@ -26,10 +27,16 @@ import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Entity;
 import android.content.EntityIterator;
+import android.content.pm.UserInfo;
 import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
+import android.database.MatrixCursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.os.UserManager;
+import android.provider.CallLog.Calls;
+import android.provider.CallLog;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.AggregationExceptions;
 import android.provider.ContactsContract.CommonDataKinds.Callable;
@@ -43,7 +50,6 @@ import android.provider.ContactsContract.CommonDataKinds.Photo;
 import android.provider.ContactsContract.CommonDataKinds.SipAddress;
 import android.provider.ContactsContract.CommonDataKinds.StructuredName;
 import android.provider.ContactsContract.CommonDataKinds.StructuredPostal;
-import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.DataUsageFeedback;
@@ -59,7 +65,7 @@ import android.provider.ContactsContract.Profile;
 import android.provider.ContactsContract.ProviderStatus;
 import android.provider.ContactsContract.RawContacts;
 import android.provider.ContactsContract.RawContactsEntity;
-import android.provider.ContactsContract.SearchSnippetColumns;
+import android.provider.ContactsContract.SearchSnippets;
 import android.provider.ContactsContract.Settings;
 import android.provider.ContactsContract.StatusUpdates;
 import android.provider.ContactsContract.StreamItemPhotos;
@@ -70,6 +76,9 @@ import android.test.suitebuilder.annotation.LargeTest;
 import android.text.TextUtils;
 
 import com.android.internal.util.ArrayUtils;
+import com.android.providers.contacts.CallLogProviderTest.TestCallLogProvider;
+import com.android.providers.contacts.ContactsActor.AlteringUserContext;
+import com.android.providers.contacts.ContactsActor.MockUserManager;
 import com.android.providers.contacts.ContactsDatabaseHelper.AggregationExceptionColumns;
 import com.android.providers.contacts.ContactsDatabaseHelper.ContactsColumns;
 import com.android.providers.contacts.ContactsDatabaseHelper.DataUsageStatColumns;
@@ -85,6 +94,7 @@ import com.android.providers.contacts.testutil.DeletedContactUtil;
 import com.android.providers.contacts.testutil.RawContactUtil;
 import com.android.providers.contacts.testutil.TestUtil;
 import com.android.providers.contacts.tests.R;
+
 import com.google.android.collect.Lists;
 import com.google.android.collect.Sets;
 
@@ -131,6 +141,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -171,6 +182,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -215,6 +227,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -263,6 +276,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -282,7 +296,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.CONTACT_STATUS_LABEL,
                 Contacts.CONTACT_STATUS_ICON,
                 Contacts.CONTACT_LAST_UPDATED_TIMESTAMP,
-                SearchSnippetColumns.SNIPPET,
+                SearchSnippets.SNIPPET,
         });
     }
 
@@ -388,6 +402,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -465,6 +480,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -555,6 +571,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.TIMES_CONTACTED,
                 Contacts.STARRED,
                 Contacts.PINNED,
+                Contacts.IN_DEFAULT_DIRECTORY,
                 Contacts.IN_VISIBLE_GROUP,
                 Contacts.PHOTO_ID,
                 Contacts.PHOTO_FILE_ID,
@@ -575,6 +592,8 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 Contacts.CONTACT_STATUS_ICON,
                 Contacts.CONTACT_LAST_UPDATED_TIMESTAMP,
                 GroupMembership.GROUP_SOURCE_ID,
+                DataUsageStatColumns.TIMES_USED,
+                DataUsageStatColumns.LAST_TIME_USED,
         });
     }
 
@@ -635,7 +654,9 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 PhoneLookup.LAST_TIME_CONTACTED,
                 PhoneLookup.TIMES_CONTACTED,
                 PhoneLookup.STARRED,
+                PhoneLookup.IN_DEFAULT_DIRECTORY,
                 PhoneLookup.IN_VISIBLE_GROUP,
+                PhoneLookup.PHOTO_FILE_ID,
                 PhoneLookup.PHOTO_ID,
                 PhoneLookup.PHOTO_URI,
                 PhoneLookup.PHOTO_THUMBNAIL_URI,
@@ -647,6 +668,32 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 PhoneLookup.LABEL,
                 PhoneLookup.NORMALIZED_NUMBER,
         });
+    }
+
+    public void testPhoneLookupEnterpriseProjection() {
+        assertProjection(PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI
+                        .buildUpon().appendPath("123").build(),
+                new String[]{
+                        PhoneLookup._ID,
+                        PhoneLookup.LOOKUP_KEY,
+                        PhoneLookup.DISPLAY_NAME,
+                        PhoneLookup.LAST_TIME_CONTACTED,
+                        PhoneLookup.TIMES_CONTACTED,
+                        PhoneLookup.STARRED,
+                        PhoneLookup.IN_DEFAULT_DIRECTORY,
+                        PhoneLookup.IN_VISIBLE_GROUP,
+                        PhoneLookup.PHOTO_FILE_ID,
+                        PhoneLookup.PHOTO_ID,
+                        PhoneLookup.PHOTO_URI,
+                        PhoneLookup.PHOTO_THUMBNAIL_URI,
+                        PhoneLookup.CUSTOM_RINGTONE,
+                        PhoneLookup.HAS_PHONE_NUMBER,
+                        PhoneLookup.SEND_TO_VOICEMAIL,
+                        PhoneLookup.NUMBER,
+                        PhoneLookup.TYPE,
+                        PhoneLookup.LABEL,
+                        PhoneLookup.NORMALIZED_NUMBER,
+                });
     }
 
     public void testGroupsProjection() {
@@ -979,6 +1026,32 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         Uri contactDataUri = Uri.withAppendedPath(contactUri, Contacts.Data.CONTENT_DIRECTORY);
         assertSelection(contactDataUri, values, Data._ID, dataId);
         assertNetworkNotified(true);
+    }
+
+    public void testDataInsertPhoneNumberTooLongIsTrimmed() {
+        long rawContactId = RawContactUtil.createRawContactWithName(mResolver, "John", "Doe");
+
+        ContentValues values = new ContentValues();
+        values.put(Data.RAW_CONTACT_ID, rawContactId);
+        values.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            sb.append("12345");
+        }
+        final String phoneNumber1500Chars = sb.toString();
+        values.put(Phone.NUMBER, phoneNumber1500Chars);
+
+        Uri dataUri = mResolver.insert(Data.CONTENT_URI, values);
+        final long dataId = ContentUris.parseId(dataUri);
+
+        sb.setLength(0);
+        for (int i = 0; i < 200; i++) {
+            sb.append("12345");
+        }
+        final String phoneNumber1000Chars = sb.toString();
+        final ContentValues expected = new ContentValues();
+        expected.put(Phone.NUMBER, phoneNumber1000Chars);
+        assertSelection(dataUri, expected, Data._ID, dataId);
     }
 
     public void testRawContactDataQuery() {
@@ -1353,6 +1426,131 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         assertEquals(0, getCount(lookupUri2, null, null));
     }
 
+    public void testPhoneLookupStarUseCases() {
+        // Create two raw contacts with numbers "*123" and "12 3". This is a real life example
+        // from b/13195334.
+        final ContentValues values = new ContentValues();
+        Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        long rawContactId = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId, "Emergency", /* familyName =*/ null);
+        insertPhoneNumber(rawContactId, "*123");
+
+        rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        rawContactId = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId, "Voicemail", /* familyName =*/ null);
+        insertPhoneNumber(rawContactId, "12 3");
+
+        // Verify: "123" returns the "Voicemail" raw contact id. It should not match
+        // a phone number that starts with a "*".
+        Uri lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "123");
+        values.clear();
+        values.put(PhoneLookup.DISPLAY_NAME, "Voicemail");
+        assertStoredValues(lookupUri, null, null, new ContentValues[] {values});
+
+        lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "(1) 23");
+        values.clear();
+        values.put(PhoneLookup.DISPLAY_NAME, "Voicemail");
+        assertStoredValues(lookupUri, null, null, new ContentValues[] {values});
+
+        // Verify: "*123" returns the "Emergency" raw contact id.
+        lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "*1-23");
+        values.clear();
+        values.put(PhoneLookup.DISPLAY_NAME, "Emergency");
+        assertStoredValues(lookupUri, null, null, new ContentValues[] {values});
+    }
+
+    public void testPhoneLookupReturnsNothingRatherThanStar() {
+        // Create Emergency raw contact with "*123456789" number.
+        final ContentValues values = new ContentValues();
+        final Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        final long rawContactId1 = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId1, "Emergency",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId1, "*123456789");
+
+        // Lookup should return no results. It does not ignore stars even when no other matches.
+        final Uri lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "123456789");
+        assertEquals(0, getCount(lookupUri, null, null));
+    }
+
+    public void testPhoneLookupReturnsNothingRatherThanMissStar() {
+        // Create Voice Mail raw contact with "123456789" number.
+        final ContentValues values = new ContentValues();
+        final Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        final long rawContactId1 = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId1, "Voice mail",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId1, "123456789");
+
+        // Lookup should return no results. It does not ignore stars even when no other matches.
+        final Uri lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "*123456789");
+        assertEquals(0, getCount(lookupUri, null, null));
+    }
+
+    public void testPhoneLookupStarNoFallbackMatch() {
+        final ContentValues values = new ContentValues();
+        final Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        final long rawContactId1 = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId1, "Voice mail",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId1, "*011123456789");
+
+        // The numbers "+123456789" and "*011123456789" are a "fallback" match. The + is equivalent
+        // to "011". This lookup should return no results. Lookup does not ignore
+        // stars, even when doing a fallback lookup.
+        final Uri lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "+123456789");
+        assertEquals(0, getCount(lookupUri, null, null));
+    }
+
+    public void testPhoneLookupStarNotBreakFallbackMatching() {
+        // Create a raw contact with a phone number starting with "011"
+        Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, new ContentValues());
+        long rawContactId = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId, "No star",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId, "011123456789");
+
+        // Create a raw contact with a phone number starting with "*011"
+        rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, new ContentValues());
+        rawContactId = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId, "Has star",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId, "*011123456789");
+
+        // A phone number starting with "+" can (fallback) match the same phone number starting
+        // with "001". Verify that this fallback matching still occurs in the presence of
+        // numbers starting with "*"s.
+        final Uri lookupUri1 = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI,
+                "+123456789");
+        final ContentValues values = new ContentValues();
+        values.put(PhoneLookup.DISPLAY_NAME, "No star");
+        assertStoredValues(lookupUri1, null, null, new ContentValues[]{values});
+    }
+
+    public void testPhoneLookupExplicitProjection() {
+        final ContentValues values = new ContentValues();
+        final Uri rawContactUri = mResolver.insert(RawContacts.CONTENT_URI, values);
+        final long rawContactId1 = ContentUris.parseId(rawContactUri);
+        DataUtil.insertStructuredName(mResolver, rawContactId1, "Voice mail",
+                /* familyName =*/ null);
+        insertPhoneNumber(rawContactId1, "+1234567");
+
+        // Performing a query with a non-null projection with or without PhoneLookup.Number inside
+        // it should not cause a crash.
+        Uri lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "1234567");
+        String[] projection = new String[] {PhoneLookup.DISPLAY_NAME};
+        mResolver.query(lookupUri, projection, null, null, null);
+        projection = new String[] {PhoneLookup.DISPLAY_NAME, PhoneLookup.NUMBER};
+        mResolver.query(lookupUri, projection, null, null, null);
+
+        // Shouldn't crash for a fallback query either
+        lookupUri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, "*0111234567");
+        projection = new String[] {PhoneLookup.DISPLAY_NAME};
+        mResolver.query(lookupUri, projection, null, null, null);
+        projection = new String[] {PhoneLookup.DISPLAY_NAME, PhoneLookup.NUMBER};
+        mResolver.query(lookupUri, projection, null, null, null);
+    }
+
     public void testPhoneLookupUseCases() {
         ContentValues values = new ContentValues();
         Uri rawContactUri;
@@ -1551,6 +1749,299 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
             // upon test completion or failure
             dbHelper.setUseStrictPhoneNumberComparisonForTest(oldUseStrict);
         }
+    }
+
+    /**
+     * Test for enterprise caller-id, but with no corp profile.
+     */
+    public void testPhoneLookupEnterprise_noCorpProfile() throws Exception {
+
+        Uri uri1 = Uri.withAppendedPath(PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI, "408-111-1111");
+
+        // No contacts profile, no data.
+        assertEquals(0, getCount(uri1));
+
+        // Insert a contact into the primary CP2.
+        long rawContactId = ContentUris.parseId(
+                mResolver.insert(RawContacts.CONTENT_URI, new ContentValues()));
+        DataUtil.insertStructuredName(mResolver, rawContactId, "Contact1", "Doe");
+        insertPhoneNumber(rawContactId, "408-111-1111");
+
+        // Do the query again and check the result.
+        Cursor c = mResolver.query(uri1, null, null, null, null);
+        try {
+            assertEquals(1, c.getCount());
+            c.moveToPosition(0);
+            long contactId = c.getLong(c.getColumnIndex(PhoneLookup._ID));
+            assertFalse(Contacts.isEnterpriseContactId(contactId)); // Make sure it's not rewritten.
+        } finally {
+            c.close();
+        }
+    }
+
+    /**
+     * Set up the corp user / CP2 and returns the corp CP2 instance.
+     *
+     * Create a second instance of CP2, and add it to the resolver, with the "user-id@" authority.
+     */
+    private SynchronousContactsProvider2 setUpCorpProvider() throws Exception {
+        mActor.mockUserManager.setUsers(MockUserManager.PRIMARY_USER, MockUserManager.CORP_USER);
+
+        // Note here we use a standalone CP2 so it'll have its own db helper.
+        // Also use AlteringUserContext here to report the corp user id.
+        return mActor.addProvider(StandaloneContactsProvider2.class,
+                "" + MockUserManager.CORP_USER.id + "@com.android.contacts",
+                new AlteringUserContext(mActor.getProviderContext(), MockUserManager.CORP_USER.id));
+    }
+
+    /**
+     * Test for enterprise caller-id, with the corp profile.
+     *
+     * Note: in this test, we add one more provider instance for the authority
+     * "10@com.android.contacts" and use it as the corp cp2.
+     */
+    public void testPhoneLookupEnterprise_withCorpProfile() throws Exception {
+        final SynchronousContactsProvider2 corpCp2 = setUpCorpProvider();
+
+        Uri uri1 = Uri.withAppendedPath(PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI, "408-111-1111");
+        Uri uri2 = Uri.withAppendedPath(PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI, "408-222-2222");
+
+        // First, test with no contacts on either profile.
+        assertEquals(0, getCount(uri1));
+
+        // Insert a contact to the primary CP2.
+        long rawContactId = ContentUris.parseId(
+                mResolver.insert(RawContacts.CONTENT_URI, new ContentValues()));
+        DataUtil.insertStructuredName(mResolver, rawContactId, "Contact1", "Doe");
+        insertPhoneNumber(rawContactId, "408-111-1111");
+
+        // Insert a contact to the corp CP2, with the same phone number, but with a different name.
+        rawContactId = ContentUris.parseId(
+                corpCp2.insert(RawContacts.CONTENT_URI, new ContentValues()));
+        // Insert a name
+        ContentValues cv = cv(
+                Data.RAW_CONTACT_ID, rawContactId,
+                Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE,
+                StructuredName.DISPLAY_NAME, "Contact2 Corp",
+                StructuredName.GIVEN_NAME, "Contact2",
+                StructuredName.FAMILY_NAME, "Corp");
+        corpCp2.insert(ContactsContract.Data.CONTENT_URI, cv);
+
+        // Insert a number
+        cv = cv(
+                Data.RAW_CONTACT_ID, rawContactId,
+                Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE,
+                Phone.NUMBER, "408-111-1111",
+                Phone.TYPE, Phone.TYPE_HOME);
+        corpCp2.insert(ContactsContract.Data.CONTENT_URI, cv);
+
+        // Insert one more contact to the corp CP2, with a different number.
+        rawContactId = ContentUris.parseId(
+                corpCp2.insert(RawContacts.CONTENT_URI, new ContentValues()));
+        // Insert a name
+        cv = cv(
+                Data.RAW_CONTACT_ID, rawContactId,
+                Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE,
+                StructuredName.DISPLAY_NAME, "Contact3 Corp",
+                StructuredName.GIVEN_NAME, "Contact3",
+                StructuredName.FAMILY_NAME, "Corp");
+        corpCp2.insert(ContactsContract.Data.CONTENT_URI, cv);
+
+        // Insert a number
+        cv = cv(
+                Data.RAW_CONTACT_ID, rawContactId,
+                Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE,
+                Phone.NUMBER, "408-222-2222",
+                Phone.TYPE, Phone.TYPE_HOME);
+        corpCp2.insert(ContactsContract.Data.CONTENT_URI, cv);
+
+        // Okay, now execute queries and check the result.
+
+        // The first URL hits the contact in the primary CP2.
+        // There's also a contact with this phone number in the corp CP2, but that will be ignored.
+        Cursor c = mResolver.query(uri1, null, null, null, null);
+        try {
+            assertEquals(1, c.getCount());
+            c.moveToPosition(0);
+            assertEquals("Contact1 Doe", c.getString(c.getColumnIndex(PhoneLookup.DISPLAY_NAME)));
+
+            // Make sure it has a personal contact ID.
+            long contactId = c.getLong(c.getColumnIndex(PhoneLookup._ID));
+            assertFalse(Contacts.isEnterpriseContactId(contactId));
+        } finally {
+            c.close();
+        }
+
+        // Test for the second phone number, which only exists in the corp cp2.
+        c = mResolver.query(uri2, null, null, null, null);
+        try {
+            // This one actually returns 2 identical rows, probably because of the join
+            // in phone_lookup.  Callers only care the first row, so returning multiple identical
+            // rows should be fine.
+            assertTrue(c.getCount() > 0);
+            c.moveToPosition(0);
+            assertEquals("Contact3 Corp", c.getString(c.getColumnIndex(PhoneLookup.DISPLAY_NAME)));
+
+            // Make sure it has a corp contact ID.
+            long contactId = c.getLong(c.getColumnIndex(PhoneLookup._ID));
+            assertTrue(Contacts.isEnterpriseContactId(contactId));
+        } finally {
+            c.close();
+        }
+    }
+
+    public void testUpgradeToVersion910_CallsDeletedForCorpProfileOnly() throws Exception {
+        CallLogProvider provider =
+                (CallLogProvider) addProvider(TestCallLogProvider.class, CallLog.AUTHORITY);
+        final ContactsDatabaseHelper helper = provider.getDatabaseHelper(mContext);
+        final SQLiteDatabase db = helper.getWritableDatabase();
+
+        final ContentValues values = new ContentValues();
+        values.put(Calls.NUMBER, "123456789");
+        values.put(Calls.DATE, System.currentTimeMillis());
+        values.put(Calls.TYPE, Calls.OUTGOING_TYPE);
+        values.put(Calls.DURATION, 10000);
+
+        mResolver.insert(Calls.CONTENT_URI, values);
+        assertEquals(1, getCount(Calls.CONTENT_URI));
+
+        helper.upgradeToVersion910(db);
+        assertEquals(1, getCount(Calls.CONTENT_URI));
+
+        mActor.mockUserManager.myUser = MockUserManager.CORP_USER.id;
+        mActor.mockUserManager.setUsers(MockUserManager.CORP_USER);
+
+        helper.upgradeToVersion910(db);
+
+        // Switch back to the primary user to ensure that the calls table was really cleared, and
+        // we are not getting an empty cursor just because of the call log read/write restriction
+        // on managed profiles.
+        mActor.mockUserManager.myUser = MockUserManager.PRIMARY_USER.id;
+        mActor.mockUserManager.setUsers(MockUserManager.PRIMARY_USER);
+        assertEquals(0, getCount(Calls.CONTENT_URI));
+    }
+
+    public void testRewriteCorpPhoneLookup() {
+        // 19 columns
+        final MatrixCursor c = new MatrixCursor(new String[] {
+                PhoneLookup._ID,
+                PhoneLookup.LOOKUP_KEY,
+                PhoneLookup.DISPLAY_NAME,
+                PhoneLookup.LAST_TIME_CONTACTED,
+                PhoneLookup.TIMES_CONTACTED,
+                PhoneLookup.STARRED,
+                PhoneLookup.IN_DEFAULT_DIRECTORY,
+                PhoneLookup.IN_VISIBLE_GROUP,
+                PhoneLookup.PHOTO_FILE_ID,
+                PhoneLookup.PHOTO_ID,
+                PhoneLookup.PHOTO_URI,
+                PhoneLookup.PHOTO_THUMBNAIL_URI,
+                PhoneLookup.CUSTOM_RINGTONE,
+                PhoneLookup.HAS_PHONE_NUMBER,
+                PhoneLookup.SEND_TO_VOICEMAIL,
+                PhoneLookup.NUMBER,
+                PhoneLookup.TYPE,
+                PhoneLookup.LABEL,
+                PhoneLookup.NORMALIZED_NUMBER
+        });
+
+        // First, convert and make sure it returns an empty cursor.
+        Cursor rewritten = ContactsProvider2.rewriteCorpPhoneLookup(c);
+        assertEquals(0, rewritten.getCount());
+        assertEquals(19, rewritten.getColumnCount());
+
+        c.addRow(new Object[] {
+                1L, // PhoneLookup._ID,
+                null, // PhoneLookup.LOOKUP_KEY,
+                null, // PhoneLookup.DISPLAY_NAME,
+                null, // PhoneLookup.LAST_TIME_CONTACTED,
+                null, // PhoneLookup.TIMES_CONTACTED,
+                null, // PhoneLookup.STARRED,
+                null, // PhoneLookup.IN_DEFAULT_DIRECTORY,
+                null, // PhoneLookup.IN_VISIBLE_GROUP,
+                null, // PhoneLookup.PHOTO_FILE_ID,
+                null, // PhoneLookup.PHOTO_ID,
+                null, // PhoneLookup.PHOTO_URI,
+                null, // PhoneLookup.PHOTO_THUMBNAIL_URI,
+                null, // PhoneLookup.CUSTOM_RINGTONE,
+                null, // PhoneLookup.HAS_PHONE_NUMBER,
+                null, // PhoneLookup.SEND_TO_VOICEMAIL,
+                null, // PhoneLookup.NUMBER,
+                null, // PhoneLookup.TYPE,
+                null, // PhoneLookup.LABEL,
+                null, // PhoneLookup.NORMALIZED_NUMBER
+        });
+
+        c.addRow(new Object[] {
+                10L, // PhoneLookup._ID,
+                "key", // PhoneLookup.LOOKUP_KEY,
+                "name", // PhoneLookup.DISPLAY_NAME,
+                123, // PhoneLookup.LAST_TIME_CONTACTED,
+                456, // PhoneLookup.TIMES_CONTACTED,
+                1, // PhoneLookup.STARRED,
+                1, // PhoneLookup.IN_DEFAULT_DIRECTORY,
+                1, // PhoneLookup.IN_VISIBLE_GROUP,
+                1001, // PhoneLookup.PHOTO_FILE_ID,
+                1002, // PhoneLookup.PHOTO_ID,
+                "content://a/a", // PhoneLookup.PHOTO_URI,
+                "content://a/b", // PhoneLookup.PHOTO_THUMBNAIL_URI,
+                "content://a/c", // PhoneLookup.CUSTOM_RINGTONE,
+                1, // PhoneLookup.HAS_PHONE_NUMBER,
+                1, // PhoneLookup.SEND_TO_VOICEMAIL,
+                "1234", // PhoneLookup.NUMBER,
+                1, // PhoneLookup.TYPE,
+                "label", // PhoneLookup.LABEL,
+                "+1234", // PhoneLookup.NORMALIZED_NUMBER
+        });
+        rewritten = ContactsProvider2.rewriteCorpPhoneLookup(c);
+        assertEquals(2, rewritten.getCount());
+
+        rewritten.moveToPosition(0);
+        int column = 0;
+        assertEquals(1000000001L, rewritten.getLong(column++)); // We offset ID for corp contacts.
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++));
+
+
+        rewritten.moveToNext();
+        column = 0;
+        assertEquals(1000000010L, rewritten.getLong(column++)); // With offset.
+        assertEquals("key", rewritten.getString(column++));
+        assertEquals("name", rewritten.getString(column++));
+        assertEquals(123, rewritten.getInt(column++));
+        assertEquals(456, rewritten.getInt(column++));
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals(null, rewritten.getString(column++)); // photo file id
+        assertEquals(null, rewritten.getString(column++)); // photo id
+        assertEquals("content://com.android.contacts/contacts_corp/10/display_photo",
+                rewritten.getString(column++));
+        assertEquals("content://com.android.contacts/contacts_corp/10/photo",
+                rewritten.getString(column++));
+        assertEquals(null, rewritten.getString(column++)); // ringtone
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals("1234", rewritten.getString(column++));
+        assertEquals(1, rewritten.getInt(column++));
+        assertEquals("label", rewritten.getString(column++));
+        assertEquals("+1234", rewritten.getString(column++));
     }
 
     public void testPhoneUpdate() {
@@ -2055,6 +2546,28 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         markInvisible(contactId);
 
         assertEquals(0, getCount(uri, null, null));
+    }
+
+    public void testInDefaultDirectoryData() {
+        final ContentValues values = new ContentValues();
+        final long contactId = createContact(values, "John", "Doe",
+                "18004664411", "goog411@acme.com", StatusUpdates.INVISIBLE, 4, 1, 0,
+                StatusUpdates.CAPABILITY_HAS_CAMERA);
+
+        final StringBuilder query = new StringBuilder()
+                .append(Data.MIMETYPE).append("='").append(Email.CONTENT_ITEM_TYPE)
+                .append("' AND ").append(Email.DATA).append("=? AND ")
+                .append(Contacts.IN_DEFAULT_DIRECTORY).append("=1");
+
+        assertEquals(1,
+                getCount(Email.CONTENT_URI, query.toString(), new String[]{"goog411@acme.com"}));
+
+        // Fire!
+        markInvisible(contactId);
+
+        // Verify: making a contact visible changes the IN_DEFAULT_DIRECTORY data value.
+        assertEquals(0,
+                getCount(Email.CONTENT_URI, query.toString(), new String[]{"goog411@acme.com"}));
     }
 
     public void testContactablesQuery() {
@@ -3765,7 +4278,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
 
         values.clear();
         values.put(Contacts._ID, contactId);
-        values.put(SearchSnippetColumns.SNIPPET, "acmecorp");
+        values.put(SearchSnippets.SNIPPET, "acmecorp");
         assertContainsValues(filterUri, values);
     }
 
@@ -3781,7 +4294,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
 
         values.clear();
         values.put(Contacts._ID, contactId);
-        values.put(SearchSnippetColumns.SNIPPET, "acme@corp.com");
+        values.put(SearchSnippets.SNIPPET, "acme@corp.com");
         assertStoredValues(filterUri, values);
     }
 
@@ -3808,7 +4321,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
 
         values.clear();
         values.put(Contacts._ID, contactId);
-        values.put(SearchSnippetColumns.SNIPPET, "[(860) 555-1234]");
+        values.put(SearchSnippets.SNIPPET, "[(860) 555-1234]");
 
         assertStoredValues(Uri.withAppendedPath(Contacts.CONTENT_FILTER_URI,
                 Uri.encode("86 (0) 5-55-12-34")), values);
@@ -3839,7 +4352,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         final ContentValues values = new ContentValues();
         values.clear();
         values.put(Contacts._ID, contactId);
-        values.put(SearchSnippetColumns.SNIPPET, snippet);
+        values.put(SearchSnippets.SNIPPET, snippet);
         return values;
     }
 
@@ -3854,7 +4367,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
 
         values.clear();
         values.put(Contacts._ID, contactId);
-        values.put(SearchSnippetColumns.SNIPPET, "Incredible");
+        values.put(SearchSnippets.SNIPPET, "Incredible");
         assertStoredValues(filterUri, values);
     }
 
@@ -6600,7 +7113,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
 
     public void testContactCounts() {
         Uri uri = Contacts.CONTENT_URI.buildUpon()
-                .appendQueryParameter(ContactCounts.ADDRESS_BOOK_INDEX_EXTRAS, "true").build();
+                .appendQueryParameter(Contacts.EXTRA_ADDRESS_BOOK_INDEX, "true").build();
 
         RawContactUtil.createRawContact(mResolver);
         RawContactUtil.createRawContactWithName(mResolver, "James", "Sullivan");
@@ -6628,41 +7141,15 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         cursor.close();
     }
 
-    public void testContactCountsWithGermanNames() {
-        if (!hasGermanCollator()) {
-            return;
-        }
-        ContactLocaleUtils.setLocale(Locale.GERMANY);
-
-        Uri uri = Contacts.CONTENT_URI.buildUpon()
-                .appendQueryParameter(ContactCounts.ADDRESS_BOOK_INDEX_EXTRAS, "true").build();
-
-        RawContactUtil.createRawContactWithName(mResolver, "Josef", "Sacher");
-        RawContactUtil.createRawContactWithName(mResolver, "Franz", "Schiller");
-        RawContactUtil.createRawContactWithName(mResolver, "Eckart", "Steiff");
-        RawContactUtil.createRawContactWithName(mResolver, "Klaus", "Seiler");
-        RawContactUtil.createRawContactWithName(mResolver, "Lars", "Sultan");
-        RawContactUtil.createRawContactWithName(mResolver, "Heidi", "Rilke");
-        RawContactUtil.createRawContactWithName(mResolver, "Suse", "Thomas");
-
-        Cursor cursor = mResolver.query(uri,
-                new String[]{Contacts.DISPLAY_NAME},
-                null, null, Contacts.SORT_KEY_ALTERNATIVE);
-
-        assertFirstLetterValues(cursor, "R", "S", "Sch", "St", "T");
-        assertFirstLetterCounts(cursor,   1,   3,     1,    1,   1);
-        cursor.close();
-    }
-
     private void assertFirstLetterValues(Cursor cursor, String... expected) {
         String[] actual = cursor.getExtras()
-                .getStringArray(ContactCounts.EXTRA_ADDRESS_BOOK_INDEX_TITLES);
+                .getStringArray(Contacts.EXTRA_ADDRESS_BOOK_INDEX_TITLES);
         MoreAsserts.assertEquals(expected, actual);
     }
 
     private void assertFirstLetterCounts(Cursor cursor, int... expected) {
         int[] actual = cursor.getExtras()
-                .getIntArray(ContactCounts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS);
+                .getIntArray(Contacts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS);
         MoreAsserts.assertEquals(expected, actual);
     }
 
@@ -7780,7 +8267,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
     /*******************************************************
      * Pinning support tests
      */
-    public void testPinnedPositionsUpdateForceStar() {
+    public void testPinnedPositionsUpdate() {
         final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
         final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
         final DatabaseAsserts.ContactIdPair i3 = DatabaseAsserts.assertAndCreateContact(mResolver);
@@ -7802,18 +8289,20 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 cv(RawContacts._ID, i4.mRawContactId, RawContacts.PINNED, unpinned)
         );
 
-        final ContentValues values = cv(i1.mContactId, 1, i3.mContactId, 3, i4.mContactId, 2);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon()
-                .appendQueryParameter(PinnedPositions.STAR_WHEN_PINNING, "true").build(),
-                values, null, null);
+        final ArrayList<ContentProviderOperation> operations =
+                new ArrayList<ContentProviderOperation>();
 
-        // Pinning a contact should automatically star it if we specified the boolean parameter
+        operations.add(newPinningOperation(i1.mContactId, 1, true));
+        operations.add(newPinningOperation(i3.mContactId, 3, true));
+        operations.add(newPinningOperation(i4.mContactId, 2, false));
+
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
 
         assertStoredValuesWithProjection(Contacts.CONTENT_URI,
                 cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 1),
                 cv(Contacts._ID, i2.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
                 cv(Contacts._ID, i3.mContactId, Contacts.PINNED, 3, Contacts.STARRED, 1),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 1)
+                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 0)
         );
 
         // Make sure the values are propagated to raw contacts
@@ -7825,17 +8314,18 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                 cv(RawContacts._ID, i4.mRawContactId, RawContacts.PINNED, 2)
         );
 
-        final ContentValues unpin = cv(i3.mContactId, unpinned);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon()
-                .appendQueryParameter(PinnedPositions.STAR_WHEN_PINNING, "true").build(),
-                unpin, null, null);
+        operations.clear();
 
-        // Unpinning a contact should automatically unstar it
+        // Now unpin the contact
+        operations.add(newPinningOperation(i3.mContactId, unpinned, false));
+
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
+
         assertStoredValuesWithProjection(Contacts.CONTENT_URI,
                 cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 1),
                 cv(Contacts._ID, i2.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
                 cv(Contacts._ID, i3.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 1)
+                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 0)
         );
 
         assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
@@ -7844,132 +8334,7 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                         RawContacts.STARRED, 0),
                 cv(Contacts._ID, i3.mRawContactId, RawContacts.PINNED, unpinned,
                         RawContacts.STARRED, 0),
-                cv(Contacts._ID, i4.mRawContactId, RawContacts.PINNED, 2, RawContacts.STARRED, 1)
-        );
-    }
-
-    public void testPinnedPositionsUpdateDontForceStar() {
-        final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i3 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i4 = DatabaseAsserts.assertAndCreateContact(mResolver);
-
-        final int unpinned = PinnedPositions.UNPINNED;
-
-        final ContentValues values = cv(i1.mContactId, 1, i3.mContactId, 3, i4.mContactId, 2);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI, values, null, null);
-
-        // Pinning a contact should not automatically star it
-
-        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 0),
-                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
-                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, 3, Contacts.STARRED, 0),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 0)
-        );
-
-        // Make sure the values are propagated to raw contacts
-
-        assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 1,
-                        RawContacts.STARRED, 0),
-                cv(RawContacts._ID, i2.mRawContactId, RawContacts.PINNED, unpinned,
-                        RawContacts.STARRED, 0),
-                cv(RawContacts._ID, i3.mRawContactId, RawContacts.PINNED, 3,
-                        RawContacts.STARRED, 0),
-                cv(RawContacts._ID, i4.mRawContactId, RawContacts.PINNED, 2,
-                        RawContacts.STARRED, 0)
-        );
-
-
-        // Manually star contact 3
-        assertEquals(1, updateItem(Contacts.CONTENT_URI, i3.mContactId, Contacts.STARRED, "1"));
-
-        // Check the third contact and raw contact is starred
-        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 0),
-                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
-                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, 3, Contacts.STARRED, 1),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 0)
-        );
-
-        assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 1,
-                        RawContacts.STARRED, 0),
-                cv(RawContacts._ID, i2.mRawContactId, RawContacts.PINNED, unpinned,
-                        RawContacts.STARRED, 0),
-                cv(RawContacts._ID, i3.mRawContactId, RawContacts.PINNED, 3,
-                        RawContacts.STARRED, 1),
-                cv(RawContacts._ID, i4.mRawContactId, RawContacts.PINNED, 2,
-                        RawContacts.STARRED, 0)
-        );
-
-        final ContentValues unpin = cv(i3.mContactId, unpinned);
-
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI, unpin, null, null);
-
-        // Unpinning a contact should not automatically unstar it
-        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 0),
-                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 0),
-                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, unpinned, Contacts.STARRED, 1),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, 2, Contacts.STARRED, 0)
-        );
-
-        assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mRawContactId, RawContacts.PINNED, 1, RawContacts.STARRED, 0),
-                cv(Contacts._ID, i2.mRawContactId, RawContacts.PINNED, unpinned,
-                        RawContacts.STARRED, 0),
-                cv(Contacts._ID, i3.mRawContactId, RawContacts.PINNED, unpinned,
-                        RawContacts.STARRED, 1),
                 cv(Contacts._ID, i4.mRawContactId, RawContacts.PINNED, 2, RawContacts.STARRED, 0)
-        );
-    }
-
-    public void testPinnedPositionsUpdateIllegalValues() {
-        final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i3 = DatabaseAsserts.assertAndCreateContact(mResolver);
-        final DatabaseAsserts.ContactIdPair i4 = DatabaseAsserts.assertAndCreateContact(mResolver);
-
-        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED)
-        );
-
-        // Unsupported string
-        final ContentValues values = cv(i1.mContactId, 1, i3.mContactId, 3, i4.mContactId,
-                "undemotemeplease!");
-        try {
-            mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI, values, null, null);
-            fail("Pinned position must be an integer.");
-        } catch (IllegalArgumentException expected) {
-        }
-
-        // Float
-        final ContentValues values2 = cv(i1.mContactId, "1.1");
-        try {
-            mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI, values2, null, null);
-            fail("Pinned position must be an integer");
-        } catch (IllegalArgumentException expected) {
-        }
-
-        // nothing should have been changed
-
-        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED),
-                cv(Contacts._ID, i4.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED)
-        );
-
-        assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, PinnedPositions.UNPINNED),
-                cv(RawContacts._ID, i2.mRawContactId, RawContacts.PINNED, PinnedPositions.UNPINNED),
-                cv(RawContacts._ID, i3.mRawContactId, RawContacts.PINNED, PinnedPositions.UNPINNED),
-                cv(RawContacts._ID, i4.mRawContactId, RawContacts.PINNED, PinnedPositions.UNPINNED)
         );
     }
 
@@ -7981,11 +8346,16 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         final DatabaseAsserts.ContactIdPair i5 = DatabaseAsserts.assertAndCreateContact(mResolver);
         final DatabaseAsserts.ContactIdPair i6 = DatabaseAsserts.assertAndCreateContact(mResolver);
 
-        final ContentValues values = cv(i1.mContactId, 1, i2.mContactId, 2, i3.mContactId, 3,
-                i5.mContactId, 5, i6.mContactId, 6);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon()
-                .appendQueryParameter(PinnedPositions.STAR_WHEN_PINNING, "true").build(),
-                values, null, null);
+        final ArrayList<ContentProviderOperation> operations =
+                new ArrayList<ContentProviderOperation>();
+
+        operations.add(newPinningOperation(i1.mContactId, 1, true));
+        operations.add(newPinningOperation(i2.mContactId, 2, true));
+        operations.add(newPinningOperation(i3.mContactId, 3, true));
+        operations.add(newPinningOperation(i5.mContactId, 5, true));
+        operations.add(newPinningOperation(i6.mContactId, 6, true));
+
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
 
         // aggregate raw contact 1 and 4 together.
         setAggregationException(AggregationExceptions.TYPE_KEEP_TOGETHER, i1.mRawContactId,
@@ -8058,12 +8428,10 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
                         RawContacts.STARRED, 1)
         );
 
-
-
         // now demote contact 5
-        final ContentValues cv = cv(i5.mContactId, PinnedPositions.DEMOTED);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon().build(),
-                cv, null, null);
+        operations.clear();
+        operations.add(newPinningOperation(i5.mContactId, PinnedPositions.DEMOTED, false));
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
 
         // Get new contact Ids for contacts composing of raw contacts 1 and 4 because they have
         // changed.
@@ -8091,49 +8459,159 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
         );
     }
 
+    public void testPinnedPositionsDemoteIllegalArguments() {
+        try {
+            mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD,
+                    null, null);
+            fail();
+        } catch (IllegalArgumentException expected) {
+        }
+
+        try {
+            mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD,
+                    "1.1", null);
+            fail();
+        } catch (IllegalArgumentException expected) {
+        }
+
+        try {
+            mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD,
+                    "NotANumber", null);
+            fail();
+        } catch (IllegalArgumentException expected) {
+        }
+
+        // Valid contact ID that does not correspond to an actual contact is silently ignored
+        mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD, "999",
+                null);
+    }
+
     public void testPinnedPositionsAfterDemoteAndUndemote() {
         final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
         final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
 
-        final ContentValues values = cv(i1.mContactId, 0, i2.mContactId, PinnedPositions.DEMOTED);
-
         // Pin contact 1 and demote contact 2
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon().
-                appendQueryParameter(PinnedPositions.STAR_WHEN_PINNING, "true").
-                build(), values, null, null);
+        final ArrayList<ContentProviderOperation> operations =
+                new ArrayList<ContentProviderOperation>();
+        operations.add(newPinningOperation(i1.mContactId, 1, true));
+        operations.add(newPinningOperation(i2.mContactId, PinnedPositions.DEMOTED, false));
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
 
         assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 0, Contacts.STARRED, 1),
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 1),
                 cv(Contacts._ID, i2.mContactId, Contacts.PINNED, PinnedPositions.DEMOTED,
                         Contacts.STARRED, 0)
         );
 
         assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 0,
+                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 1,
                         RawContacts.STARRED, 1),
                 cv(RawContacts._ID, i2.mRawContactId, RawContacts.PINNED, PinnedPositions.DEMOTED,
                         RawContacts.STARRED, 0)
         );
 
         // Now undemote both contacts
-        final ContentValues values2 = cv(i1.mContactId, PinnedPositions.UNDEMOTE, i2.mContactId,
-                PinnedPositions.UNDEMOTE);
-        mResolver.update(ContactsContract.PinnedPositions.UPDATE_URI.buildUpon().
-                build(), values2, null, null);
+        mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD,
+                String.valueOf(i1.mContactId), null);
+        mResolver.call(ContactsContract.AUTHORITY_URI, PinnedPositions.UNDEMOTE_METHOD,
+                String.valueOf(i2.mContactId), null);
+
 
         // Contact 1 remains pinned at 0, while contact 2 becomes unpinned
         assertStoredValuesWithProjection(Contacts.CONTENT_URI,
-                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 0, Contacts.STARRED, 1),
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1, Contacts.STARRED, 1),
                 cv(Contacts._ID, i2.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED,
                         Contacts.STARRED, 0)
         );
 
         assertStoredValuesWithProjection(RawContacts.CONTENT_URI,
-                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 0,
+                cv(RawContacts._ID, i1.mRawContactId, RawContacts.PINNED, 1,
                         RawContacts.STARRED, 1),
                 cv(RawContacts._ID, i2.mRawContactId, RawContacts.PINNED, PinnedPositions.UNPINNED,
                         RawContacts.STARRED, 0)
         );
+    }
+
+    /**
+     * Verifies that any existing pinned contacts have their pinned positions incremented by one
+     * after the upgrade step
+     */
+    public void testPinnedPositionsUpgradeTo906_PinnedContactsIncrementedByOne() {
+        final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
+        final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
+        final DatabaseAsserts.ContactIdPair i3 = DatabaseAsserts.assertAndCreateContact(mResolver);
+        final ArrayList<ContentProviderOperation> operations =
+                new ArrayList<ContentProviderOperation>();
+        operations.add(newPinningOperation(i1.mContactId, 0, true));
+        operations.add(newPinningOperation(i2.mContactId, 5, true));
+        operations.add(newPinningOperation(i3.mContactId, Integer.MAX_VALUE - 2, true));
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
+
+        final ContactsDatabaseHelper helper =
+                ((ContactsDatabaseHelper) ((ContactsProvider2) getProvider()).getDatabaseHelper());
+        SQLiteDatabase db = helper.getWritableDatabase();
+        helper.upgradeToVersion906(db);
+        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 1),
+                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, 6),
+                cv(Contacts._ID, i3.mContactId, Contacts.PINNED, Integer.MAX_VALUE - 1)
+        );
+    }
+
+    /**
+     * Verifies that any unpinned contacts (or those with pinned position Integer.MAX_VALUE - 1)
+     * have their pinned positions correctly set to 0 after the upgrade step.
+     */
+    public void testPinnedPositionsUpgradeTo906_UnpinnedValueCorrectlyUpdated() {
+        final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
+        final DatabaseAsserts.ContactIdPair i2 = DatabaseAsserts.assertAndCreateContact(mResolver);
+        final ArrayList<ContentProviderOperation> operations =
+                new ArrayList<ContentProviderOperation>();
+        operations.add(newPinningOperation(i1.mContactId, Integer.MAX_VALUE -1 , true));
+        operations.add(newPinningOperation(i2.mContactId, Integer.MAX_VALUE, true));
+        CommonDatabaseUtils.applyBatch(mResolver, operations);
+
+        final ContactsDatabaseHelper helper =
+                ((ContactsDatabaseHelper) ((ContactsProvider2) getProvider()).getDatabaseHelper());
+        SQLiteDatabase db = helper.getWritableDatabase();
+        helper.upgradeToVersion906(db);
+
+        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 0),
+                cv(Contacts._ID, i2.mContactId, Contacts.PINNED, 0)
+        );
+    }
+
+    /**
+     * Tests the functionality of the
+     * {@link ContactsContract.PinnedPositions#pin(ContentResolver, long, int)} API.
+     */
+    public void testPinnedPositions_ContactsContractPinnedPositionsPin() {
+        final DatabaseAsserts.ContactIdPair i1 = DatabaseAsserts.assertAndCreateContact(mResolver);
+
+        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED)
+        );
+
+        ContactsContract.PinnedPositions.pin(mResolver,  i1.mContactId, 5);
+
+        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, 5)
+        );
+
+        ContactsContract.PinnedPositions.pin(mResolver,  i1.mContactId, PinnedPositions.UNPINNED);
+
+        assertStoredValuesWithProjection(Contacts.CONTENT_URI,
+                cv(Contacts._ID, i1.mContactId, Contacts.PINNED, PinnedPositions.UNPINNED)
+        );
+    }
+
+    private ContentProviderOperation newPinningOperation(long id, int pinned, boolean star) {
+        final Uri uri = Uri.withAppendedPath(Contacts.CONTENT_URI, String.valueOf(id));
+        final ContentValues values = new ContentValues();
+        values.put(Contacts.PINNED, pinned);
+        values.put(Contacts.STARRED, star ? 1 : 0);
+        return ContentProviderOperation.newUpdate(uri).withValues(values).build();
     }
 
     /**

@@ -24,6 +24,7 @@ import android.content.res.Resources;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.support.v4.text.BidiFormatter;
 import android.support.v4.util.SparseArrayCompat;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -34,6 +35,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.R;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.content.ObjectCursor;
@@ -41,7 +43,7 @@ import com.android.mail.content.ObjectCursorLoader;
 import com.android.mail.providers.Account;
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Folder;
-import com.android.mail.providers.MessageInfo;
+import com.android.mail.providers.ParticipantInfo;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.AccountCapabilities;
 import com.android.mail.providers.UIProvider.ConversationListQueryParameters;
@@ -53,6 +55,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -220,7 +223,7 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
                 LayoutInflater.from(getContext()).inflate(R.layout.folder_teaser_item, null);
 
         final ImageView imageView = (ImageView) itemView.findViewById(R.id.folder_imageView);
-        imageView.setImageResource(R.drawable.ic_menu_folders_holo_light);
+        imageView.setImageResource(R.drawable.ic_menu_move_to_holo_light);
         // Remove background
         imageView.setBackgroundColor(Color.TRANSPARENT);
 
@@ -292,11 +295,13 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
 
             // Add all folder views to the teaser
             int added = 0;
+            // If we're only over the limit by one, don't truncate the list.
+            boolean truncate = folderHolders.size() > sCollapsedFolderThreshold + 1;
             for (final FolderHolder folderHolder : folderHolders) {
                 mNestedFolderContainer.addView(folderHolder.getItemView());
                 added++;
 
-                if (added >= sCollapsedFolderThreshold && mCollapsed) {
+                if (truncate && added >= sCollapsedFolderThreshold && mCollapsed) {
                     // We will display the rest when "Show more" is clicked
                     break;
                 }
@@ -343,7 +348,7 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
             }
 
             mShowMoreFoldersCountTextView.setText(Integer.toString(unreadCount));
-        } else if (displayed > sCollapsedFolderThreshold) {
+        } else if (displayed > sCollapsedFolderThreshold + 1) {
             // We are expanded
             mShowMoreFoldersRow.setVisibility(VISIBLE);
             mShowMoreFoldersTextView.setText(R.string.hide_folders);
@@ -360,7 +365,9 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
         final String unreadText = Utils.getUnreadCountString(getContext(), folder.unreadCount);
         folderHolder.getCountTextView().setText(unreadText.isEmpty() ? "0" : unreadText);
 
-        final String sendersText = TextUtils.join(", ", folderHolder.getUnreadSenders());
+        final String sendersText = TextUtils.join(
+                getResources().getString(R.string.enumeration_comma),
+                folderHolder.getUnreadSenders());
         folderHolder.getSendersTextView().setText(sendersText);
     }
 
@@ -479,6 +486,7 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
                              * unread count has changed.
                              */
                             if (oldFolder == null || oldFolder.unreadCount != folder.unreadCount) {
+                                populateUnreadSenders(holder, folder.unreadSenders);
                                 updateViews(holder);
                             }
                         } else {
@@ -491,6 +499,7 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
                             // because it doesn't scale. Disabling it for now, until we can
                             // optimize it.
                             // initFolderLoader(getLoaderId(folder.id));
+                            populateUnreadSenders(newHolder, folder.unreadSenders);
 
                             updateViews(newHolder);
 
@@ -528,11 +537,52 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
         @Override
         public Loader<ObjectCursor<Folder>> onCreateLoader(final int id, final Bundle args) {
             final ObjectCursorLoader<Folder> loader = new ObjectCursorLoader<Folder>(getContext(),
-                    mFolderListUri, UIProvider.FOLDERS_PROJECTION, Folder.FACTORY);
+                    mFolderListUri, UIProvider.FOLDERS_PROJECTION_WITH_UNREAD_SENDERS,
+                    Folder.FACTORY);
             loader.setUpdateThrottle(mFolderItemUpdateDelayMs);
             return loader;
         }
     };
+
+    /**
+     * This code is intended to roughly duplicate the FolderLoaderCallback's onLoadFinished
+     */
+    private void populateUnreadSenders(final FolderHolder folderHolder,
+            final String unreadSenders) {
+        if (TextUtils.isEmpty(unreadSenders)) {
+            folderHolder.setUnreadSenders(Collections.<String>emptyList());
+            return;
+        }
+        // Use a LinkedHashMap here to maintain ordering
+        final Map<String, String> emailtoNameMap = Maps.newLinkedHashMap();
+
+        final Address[] senderAddresses = Address.parse(unreadSenders);
+
+        final BidiFormatter bidiFormatter = mAdapter.getBidiFormatter();
+        for (final Address senderAddress : senderAddresses) {
+            String sender = senderAddress.getPersonal();
+            sender = (sender != null) ? bidiFormatter.unicodeWrap(sender) : null;
+            final String senderEmail = senderAddress.getAddress();
+
+            if (!TextUtils.isEmpty(sender)) {
+                final String existingSender = emailtoNameMap.get(senderEmail);
+                if (!TextUtils.isEmpty(existingSender)) {
+                    // Prefer longer names
+                    if (existingSender.length() >= sender.length()) {
+                        // old name is longer
+                        sender = existingSender;
+                    }
+                }
+                emailtoNameMap.put(senderEmail, sender);
+            }
+            if (emailtoNameMap.size() >= 20) {
+                break;
+            }
+        }
+
+        final List<String> senders = Lists.newArrayList(emailtoNameMap.values());
+        folderHolder.setUnreadSenders(senders);
+    }
 
     private final LoaderCallbacks<ObjectCursor<Conversation>> mFolderLoaderCallbacks =
             new LoaderCallbacks<ObjectCursor<Conversation>>() {
@@ -568,13 +618,13 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
                         String senderEmail = null;
                         int priority = Integer.MIN_VALUE;
 
-                        // Find the highest priority sender
-                        for (final MessageInfo messageInfo :
-                            conversation.conversationInfo.messageInfos) {
-                            if (sender == null || priority < messageInfo.priority) {
-                                sender = messageInfo.sender;
-                                senderEmail = messageInfo.senderEmail;
-                                priority = messageInfo.priority;
+                        // Find the highest priority participant
+                        for (final ParticipantInfo p :
+                                conversation.conversationInfo.participantInfos) {
+                            if (sender == null || priority < p.priority) {
+                                sender = p.name;
+                                senderEmail = p.email;
+                                priority = p.priority;
                             }
                         }
 
@@ -624,4 +674,10 @@ public class NestedFolderTeaserView extends LinearLayout implements Conversation
                     UIProvider.CONVERSATION_PROJECTION, Conversation.FACTORY);
         }
     };
+
+    @Override
+    public boolean commitLeaveBehindItem() {
+        // This view has no leave-behind
+        return false;
+    }
 }

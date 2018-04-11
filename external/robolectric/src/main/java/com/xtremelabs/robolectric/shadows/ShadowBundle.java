@@ -4,9 +4,9 @@ import static com.xtremelabs.robolectric.Robolectric.shadowOf_;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import android.os.Build;
 import android.os.Bundle;
@@ -19,7 +19,7 @@ import com.xtremelabs.robolectric.internal.Implements;
 @SuppressWarnings({ "UnusedDeclaration" })
 @Implements(Bundle.class)
 public class ShadowBundle {
-    Map<String, Object> map = new HashMap<String, Object>();
+    Map<String, Object> map = new TreeMap<String, Object>();
 
     public void __constructor__(Bundle b) {
         putAll(b);
@@ -449,5 +449,9 @@ public class ShadowBundle {
     @Implementation
     public int hashCode() {
         return map != null ? map.hashCode() : 0;
+    }
+
+    public static void reset() {
+        Robolectric.Reflection.setFinalStaticField(Bundle.class, "EMPTY", new Bundle());
     }
 }

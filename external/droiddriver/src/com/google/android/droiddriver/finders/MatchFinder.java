@@ -24,27 +24,23 @@ import com.google.android.droiddriver.util.Logs;
 
 /**
  * Traverses the UiElement tree and returns the first UiElement satisfying
- * {@link #matches(UiElement)}.
+ * {@link #predicate}.
  */
-public abstract class MatchFinder implements Finder {
-  /**
-   * Returns true if the {@code element} matches the implementing finder. The
-   * implementing finder should not poll.
-   *
-   * @param element The element to validate against
-   * @return true if the element matches
-   */
-  public abstract boolean matches(UiElement element);
+public class MatchFinder implements Finder {
+  protected final Predicate<? super UiElement> predicate;
 
-  /**
-   * {@inheritDoc}
-   *
-   * <p>
-   * It is recommended that this method return the description of the finder,
-   * for example, "ByAttribute{text equals OK}".
-   */
+  public MatchFinder(Predicate<? super UiElement> predicate) {
+    if (predicate == null) {
+      this.predicate = Predicates.any();
+    } else {
+      this.predicate = predicate;
+    }
+  }
+
   @Override
-  public abstract String toString();
+  public String toString() {
+    return predicate.toString();
+  }
 
   @Override
   public UiElement find(UiElement context) {
@@ -52,17 +48,7 @@ public abstract class MatchFinder implements Finder {
       Logs.log(Log.INFO, "Found match: " + context);
       return context;
     }
-    int childCount = context.getChildCount();
-    for (int i = 0; i < childCount; i++) {
-      UiElement child = context.getChild(i);
-      if (child == null) {
-        Logs.log(Log.INFO, "Skip null child for " + context);
-        continue;
-      }
-      if (!child.isVisible()) {
-        Logs.log(Log.VERBOSE, "Skip invisible child: " + child);
-        continue;
-      }
+    for (UiElement child : context.getChildren(UiElement.VISIBLE)) {
       try {
         return find(child);
       } catch (ElementNotFoundException enfe) {
@@ -70,5 +56,17 @@ public abstract class MatchFinder implements Finder {
       }
     }
     throw new ElementNotFoundException(this);
+  }
+
+  /**
+   * Returns true if the {@code element} matches this finder. This can be used
+   * to test the exact match of {@code element} when this finder is used in
+   * {@link By#anyOf(MatchFinder...)}.
+   *
+   * @param element The element to validate against
+   * @return true if the element matches
+   */
+  public final boolean matches(UiElement element) {
+    return predicate.apply(element);
   }
 }

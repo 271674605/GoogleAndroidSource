@@ -24,9 +24,11 @@
 
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <utils/NativeHandle.h>
 
 #include <ui/Fence.h>
 
+#include <gui/IProducerListener.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/GLConsumer.h>
@@ -65,6 +67,7 @@ Surface::Surface(
     mCrop.clear();
     mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
     mTransform = 0;
+    mStickyTransform = 0;
     mDefaultWidth = 0;
     mDefaultHeight = 0;
     mUserWidth = 0;
@@ -84,6 +87,17 @@ Surface::~Surface() {
 
 sp<IGraphicBufferProducer> Surface::getIGraphicBufferProducer() const {
     return mGraphicBufferProducer;
+}
+
+void Surface::setSidebandStream(const sp<NativeHandle>& stream) {
+    mGraphicBufferProducer->setSidebandStream(stream);
+}
+
+void Surface::allocateBuffers() {
+    uint32_t reqWidth = mReqWidth ? mReqWidth : mUserWidth;
+    uint32_t reqHeight = mReqHeight ? mReqHeight : mUserHeight;
+    mGraphicBufferProducer->allocateBuffers(mSwapIntervalZero, mReqWidth,
+            mReqHeight, mReqFormat, mReqUsage);
 }
 
 int Surface::hook_setSwapInterval(ANativeWindow* window, int interval) {
@@ -178,19 +192,38 @@ int Surface::setSwapInterval(int interval) {
 int Surface::dequeueBuffer(android_native_buffer_t** buffer, int* fenceFd) {
     ATRACE_CALL();
     ALOGV("Surface::dequeueBuffer");
-    Mutex::Autolock lock(mMutex);
+
+    int reqW;
+    int reqH;
+    bool swapIntervalZero;
+    uint32_t reqFormat;
+    uint32_t reqUsage;
+
+    {
+        Mutex::Autolock lock(mMutex);
+
+        reqW = mReqWidth ? mReqWidth : mUserWidth;
+        reqH = mReqHeight ? mReqHeight : mUserHeight;
+
+        swapIntervalZero = mSwapIntervalZero;
+        reqFormat = mReqFormat;
+        reqUsage = mReqUsage;
+    } // Drop the lock so that we can still touch the Surface while blocking in IGBP::dequeueBuffer
+
     int buf = -1;
-    int reqW = mReqWidth ? mReqWidth : mUserWidth;
-    int reqH = mReqHeight ? mReqHeight : mUserHeight;
     sp<Fence> fence;
-    status_t result = mGraphicBufferProducer->dequeueBuffer(&buf, &fence, mSwapIntervalZero,
-            reqW, reqH, mReqFormat, mReqUsage);
+    status_t result = mGraphicBufferProducer->dequeueBuffer(&buf, &fence, swapIntervalZero,
+            reqW, reqH, reqFormat, reqUsage);
+
     if (result < 0) {
-        ALOGV("dequeueBuffer: IGraphicBufferProducer::dequeueBuffer(%d, %d, %d, %d)"
-             "failed: %d", mReqWidth, mReqHeight, mReqFormat, mReqUsage,
+        ALOGV("dequeueBuffer: IGraphicBufferProducer::dequeueBuffer(%d, %d, %d, %d, %d)"
+             "failed: %d", swapIntervalZero, reqW, reqH, reqFormat, reqUsage,
              result);
         return result;
     }
+
+    Mutex::Autolock lock(mMutex);
+
     sp<GraphicBuffer>& gbuf(mSlots[buf].buffer);
 
     // this should never happen
@@ -204,6 +237,7 @@ int Surface::dequeueBuffer(android_native_buffer_t** buffer, int* fenceFd) {
         result = mGraphicBufferProducer->requestBuffer(buf, &gbuf);
         if (result != NO_ERROR) {
             ALOGE("dequeueBuffer: IGraphicBufferProducer::requestBuffer failed: %d", result);
+            mGraphicBufferProducer->cancelBuffer(buf, fence);
             return result;
         }
     }
@@ -251,7 +285,7 @@ int Surface::getSlotFromBufferLocked(
     return BAD_VALUE;
 }
 
-int Surface::lockBuffer_DEPRECATED(android_native_buffer_t* buffer) {
+int Surface::lockBuffer_DEPRECATED(android_native_buffer_t* buffer __attribute__((unused))) {
     ALOGV("Surface::lockBuffer");
     Mutex::Autolock lock(mMutex);
     return OK;
@@ -284,14 +318,21 @@ int Surface::queueBuffer(android_native_buffer_t* buffer, int fenceFd) {
     sp<Fence> fence(fenceFd >= 0 ? new Fence(fenceFd) : Fence::NO_FENCE);
     IGraphicBufferProducer::QueueBufferOutput output;
     IGraphicBufferProducer::QueueBufferInput input(timestamp, isAutoTimestamp,
-            crop, mScalingMode, mTransform, mSwapIntervalZero, fence);
+            crop, mScalingMode, mTransform ^ mStickyTransform, mSwapIntervalZero,
+            fence, mStickyTransform);
     status_t err = mGraphicBufferProducer->queueBuffer(i, input, &output);
     if (err != OK)  {
         ALOGE("queueBuffer: error queuing buffer to SurfaceTexture, %d", err);
     }
     uint32_t numPendingBuffers = 0;
-    output.deflate(&mDefaultWidth, &mDefaultHeight, &mTransformHint,
+    uint32_t hint = 0;
+    output.deflate(&mDefaultWidth, &mDefaultHeight, &hint,
             &numPendingBuffers);
+
+    // Disable transform hint if sticky transform is set.
+    if (mStickyTransform == 0) {
+        mTransformHint = hint;
+    }
 
     mConsumerRunningBehind = (numPendingBuffers >= 2);
 
@@ -374,6 +415,9 @@ int Surface::perform(int operation, va_list args)
     case NATIVE_WINDOW_SET_BUFFERS_TRANSFORM:
         res = dispatchSetBuffersTransform(args);
         break;
+    case NATIVE_WINDOW_SET_BUFFERS_STICKY_TRANSFORM:
+        res = dispatchSetBuffersStickyTransform(args);
+        break;
     case NATIVE_WINDOW_SET_BUFFERS_TIMESTAMP:
         res = dispatchSetBuffersTimestamp(args);
         break;
@@ -400,6 +444,9 @@ int Surface::perform(int operation, va_list args)
         break;
     case NATIVE_WINDOW_API_DISCONNECT:
         res = dispatchDisconnect(args);
+        break;
+    case NATIVE_WINDOW_SET_SIDEBAND_STREAM:
+        res = dispatchSetSidebandStream(args);
         break;
     default:
         res = NAME_NOT_FOUND;
@@ -471,6 +518,11 @@ int Surface::dispatchSetBuffersTransform(va_list args) {
     return setBuffersTransform(transform);
 }
 
+int Surface::dispatchSetBuffersStickyTransform(va_list args) {
+    int transform = va_arg(args, int);
+    return setBuffersStickyTransform(transform);
+}
+
 int Surface::dispatchSetBuffersTimestamp(va_list args) {
     int64_t timestamp = va_arg(args, int64_t);
     return setBuffersTimestamp(timestamp);
@@ -482,22 +534,35 @@ int Surface::dispatchLock(va_list args) {
     return lock(outBuffer, inOutDirtyBounds);
 }
 
-int Surface::dispatchUnlockAndPost(va_list args) {
+int Surface::dispatchUnlockAndPost(va_list args __attribute__((unused))) {
     return unlockAndPost();
 }
 
+int Surface::dispatchSetSidebandStream(va_list args) {
+    native_handle_t* sH = va_arg(args, native_handle_t*);
+    sp<NativeHandle> sidebandHandle = NativeHandle::create(sH, false);
+    setSidebandStream(sidebandHandle);
+    return OK;
+}
 
 int Surface::connect(int api) {
     ATRACE_CALL();
     ALOGV("Surface::connect");
-    static sp<BBinder> sLife = new BBinder();
+    static sp<IProducerListener> listener = new DummyProducerListener();
     Mutex::Autolock lock(mMutex);
     IGraphicBufferProducer::QueueBufferOutput output;
-    int err = mGraphicBufferProducer->connect(sLife, api, mProducerControlledByApp, &output);
+    int err = mGraphicBufferProducer->connect(listener, api, mProducerControlledByApp, &output);
     if (err == NO_ERROR) {
         uint32_t numPendingBuffers = 0;
-        output.deflate(&mDefaultWidth, &mDefaultHeight, &mTransformHint,
+        uint32_t hint = 0;
+        output.deflate(&mDefaultWidth, &mDefaultHeight, &hint,
                 &numPendingBuffers);
+
+        // Disable transform hint if sticky transform is set.
+        if (mStickyTransform == 0) {
+            mTransformHint = hint;
+        }
+
         mConsumerRunningBehind = (numPendingBuffers >= 2);
     }
     if (!err && api == NATIVE_WINDOW_API_CPU) {
@@ -521,6 +586,8 @@ int Surface::disconnect(int api) {
         mCrop.clear();
         mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
         mTransform = 0;
+        mStickyTransform = 0;
+
         if (api == NATIVE_WINDOW_API_CPU) {
             mConnectedToCpu = false;
         }
@@ -647,6 +714,15 @@ int Surface::setBuffersTransform(int transform)
     return NO_ERROR;
 }
 
+int Surface::setBuffersStickyTransform(int transform)
+{
+    ATRACE_CALL();
+    ALOGV("Surface::setBuffersStickyTransform");
+    Mutex::Autolock lock(mMutex);
+    mStickyTransform = transform;
+    return NO_ERROR;
+}
+
 int Surface::setBuffersTimestamp(int64_t timestamp)
 {
     ALOGV("Surface::setBuffersTimestamp");
@@ -740,15 +816,6 @@ status_t Surface::lock(
     ALOGE_IF(err, "dequeueBuffer failed (%s)", strerror(-err));
     if (err == NO_ERROR) {
         sp<GraphicBuffer> backBuffer(GraphicBuffer::getSelf(out));
-        sp<Fence> fence(new Fence(fenceFd));
-
-        err = fence->waitForever("Surface::lock");
-        if (err != OK) {
-            ALOGE("Fence::wait failed (%s)", strerror(-err));
-            cancelBuffer(out, fenceFd);
-            return err;
-        }
-
         const Rect bounds(backBuffer->width, backBuffer->height);
 
         Region newDirtyRegion;
@@ -799,9 +866,9 @@ status_t Surface::lock(
         }
 
         void* vaddr;
-        status_t res = backBuffer->lock(
+        status_t res = backBuffer->lockAsync(
                 GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
-                newDirtyRegion.bounds(), &vaddr);
+                newDirtyRegion.bounds(), &vaddr, fenceFd);
 
         ALOGW_IF(res, "failed locking buffer (handle = %p)",
                 backBuffer->handle);
@@ -827,10 +894,11 @@ status_t Surface::unlockAndPost()
         return INVALID_OPERATION;
     }
 
-    status_t err = mLockedBuffer->unlock();
+    int fd = -1;
+    status_t err = mLockedBuffer->unlockAsync(&fd);
     ALOGE_IF(err, "failed unlocking buffer (%p)", mLockedBuffer->handle);
 
-    err = queueBuffer(mLockedBuffer.get(), -1);
+    err = queueBuffer(mLockedBuffer.get(), fd);
     ALOGE_IF(err, "queueBuffer (handle=%p) failed (%s)",
             mLockedBuffer->handle, strerror(-err));
 

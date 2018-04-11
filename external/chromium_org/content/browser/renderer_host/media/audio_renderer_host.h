@@ -39,6 +39,7 @@
 
 #include <map>
 
+#include "base/atomic_ref_count.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -47,7 +48,9 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_view_host.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_logging.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/audio/simple_sources.h"
 
@@ -72,17 +75,26 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
                     MediaInternals* media_internals,
                     MediaStreamManager* media_stream_manager);
 
+  // Calls |callback| with the list of AudioOutputControllers for this object.
+  void GetOutputControllers(
+      int render_view_id,
+      const RenderViewHost::GetAudioOutputControllersCallback& callback) const;
+
   // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+
+  // Returns true if any streams managed by this host are actively playing.  Can
+  // be called from any thread.
+  bool HasActiveAudio();
 
  private:
   friend class AudioRendererHostTest;
   friend class BrowserThread;
   friend class base::DeleteHelper<AudioRendererHost>;
   friend class MockAudioRendererHost;
+  friend class TestAudioRendererHost;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, MockStreamDataConversation);
 
@@ -104,6 +116,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // message.
   void OnCreateStream(int stream_id,
                       int render_view_id,
+                      int render_frame_id,
                       int session_id,
                       const media::AudioParameters& params);
 
@@ -124,8 +137,11 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // NotifyStreamCreated message to the peer.
   void DoCompleteCreation(int stream_id);
 
-  // Propagate measured power level of the audio signal to MediaObserver.
-  void DoNotifyAudioPowerLevel(int stream_id, float power_dbfs, bool clipped);
+  // Send playing/paused status to the renderer.
+  void DoNotifyStreamStateChanged(int stream_id, bool is_playing);
+
+  RenderViewHost::AudioOutputControllerList DoGetOutputControllers(
+      int render_view_id) const;
 
   // Send an error message to the renderer.
   void SendErrorMessage(int stream_id);
@@ -146,13 +162,16 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
 
   media::AudioManager* const audio_manager_;
   AudioMirroringManager* const mirroring_manager_;
-  MediaInternals* const media_internals_;
+  scoped_ptr<media::AudioLog> audio_log_;
 
   // Used to access to AudioInputDeviceManager.
   MediaStreamManager* media_stream_manager_;
 
   // A map of stream IDs to audio sources.
   AudioEntryMap audio_entries_;
+
+  // The number of streams in the playing state.
+  base::AtomicRefCount num_playing_streams_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHost);
 };

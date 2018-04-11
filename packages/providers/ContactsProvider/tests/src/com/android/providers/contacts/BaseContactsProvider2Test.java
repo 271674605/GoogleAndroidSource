@@ -79,6 +79,19 @@ import java.util.Set;
  */
 public abstract class BaseContactsProvider2Test extends PhotoLoadingTestCase {
 
+    static final String ADD_VOICEMAIL_PERMISSION =
+            "com.android.voicemail.permission.ADD_VOICEMAIL";
+    /*
+     * Permission to allow querying voicemails
+     */
+    static final String READ_VOICEMAIL_PERMISSION =
+            "com.android.voicemail.permission.READ_VOICEMAIL";
+    /*
+     * Permission to allow deleting and updating voicemails
+     */
+    static final String WRITE_VOICEMAIL_PERMISSION =
+            "com.android.voicemail.permission.WRITE_VOICEMAIL";
+
     protected static final String PACKAGE = "ContactsProvider2Test";
     public static final String READ_ONLY_ACCOUNT_TYPE =
             SynchronousContactsProvider2.READ_ONLY_ACCOUNT_TYPE;
@@ -1160,6 +1173,10 @@ public abstract class BaseContactsProvider2Test extends PhotoLoadingTestCase {
             projection[i] = iter.next().getKey();
         }
         return projection;
+    }
+
+    protected int getCount(Uri uri) {
+        return getCount(uri, null, null);
     }
 
     protected int getCount(Uri uri, String selection, String[] selectionArgs) {

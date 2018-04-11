@@ -45,9 +45,7 @@ import java.util.Arrays;
  */
 public class CdmaInboundSmsHandler extends InboundSmsHandler {
 
-    private final PhoneBase mPhone;
     private final CdmaSMSDispatcher mSmsDispatcher;
-    private final CellBroadcastHandler mCellBroadcastHandler;
     private final CdmaServiceCategoryProgramHandler mServiceCategoryProgramHandler;
 
     private byte[] mLastDispatchedSmsFingerprint;
@@ -61,12 +59,11 @@ public class CdmaInboundSmsHandler extends InboundSmsHandler {
      */
     private CdmaInboundSmsHandler(Context context, SmsStorageMonitor storageMonitor,
             PhoneBase phone, CdmaSMSDispatcher smsDispatcher) {
-        super("CdmaInboundSmsHandler", context, storageMonitor);
+        super("CdmaInboundSmsHandler", context, storageMonitor, phone,
+                CellBroadcastHandler.makeCellBroadcastHandler(context, phone));
         mSmsDispatcher = smsDispatcher;
-        mCellBroadcastHandler = CellBroadcastHandler.makeCellBroadcastHandler(context);
         mServiceCategoryProgramHandler = CdmaServiceCategoryProgramHandler.makeScpHandler(context,
                 phone.mCi);
-        mPhone = phone;
         phone.mCi.setOnNewCdmaSms(getHandler(), EVENT_NEW_SMS, null);
     }
 
@@ -214,6 +211,19 @@ public class CdmaInboundSmsHandler extends InboundSmsHandler {
     }
 
     /**
+     * Called when the phone changes the default method updates mPhone
+     * mStorageMonitor and mCellBroadcastHandler.updatePhoneObject.
+     * Override if different or other behavior is desired.
+     *
+     * @param phone
+     */
+    @Override
+    protected void onUpdatePhoneObject(PhoneBase phone) {
+        super.onUpdatePhoneObject(phone);
+        mCellBroadcastHandler.updatePhoneObject(phone);
+    }
+
+    /**
      * Convert Android result code to CDMA SMS failure cause.
      * @param rc the Android SMS intent result value
      * @return 0 for success, or a CDMA SMS failure cause value
@@ -245,7 +255,7 @@ public class CdmaInboundSmsHandler extends InboundSmsHandler {
         // Store the voicemail count in preferences.
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
         SharedPreferences.Editor editor = sp.edit();
-        editor.putInt(CDMAPhone.VM_COUNT_CDMA, voicemailCount);
+        editor.putInt(CDMAPhone.VM_COUNT_CDMA + mPhone.getPhoneId(), voicemailCount);
         editor.apply();
         mPhone.setVoiceMessageWaiting(1, voicemailCount);
     }

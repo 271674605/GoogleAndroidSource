@@ -1208,11 +1208,13 @@ OMX_ERRORTYPE Exynos_OMX_VideoDecodeSetParameter(
         break;
     case OMX_IndexParamPortDefinition:
     {
-        OMX_PARAM_PORTDEFINITIONTYPE *pPortDefinition = (OMX_PARAM_PORTDEFINITIONTYPE *)ComponentParameterStructure;
-        OMX_U32                       portIndex = pPortDefinition->nPortIndex;
-        EXYNOS_OMX_BASEPORT             *pExynosPort;
+        OMX_PARAM_PORTDEFINITIONTYPE  *pPortDefinition = (OMX_PARAM_PORTDEFINITIONTYPE *)ComponentParameterStructure;
+        EXYNOS_OMX_VIDEODEC_COMPONENT *pVideoDec = (EXYNOS_OMX_VIDEODEC_COMPONENT *)pExynosComponent->hComponentHandle;
+        OMX_U32                        portIndex = pPortDefinition->nPortIndex;
+        EXYNOS_OMX_BASEPORT           *pExynosPort;
         OMX_U32 width, height, size;
         OMX_U32 realWidth, realHeight;
+        OMX_U32 originalWidth, originalHeight;
 
         if (portIndex >= pExynosComponent->portParam.nPorts) {
             ret = OMX_ErrorBadPortIndex;
@@ -1231,11 +1233,15 @@ OMX_ERRORTYPE Exynos_OMX_VideoDecodeSetParameter(
                 goto EXIT;
             }
         }
-        if (pPortDefinition->nBufferCountActual < pExynosPort->portDefinition.nBufferCountMin) {
+        if ((pPortDefinition->nBufferCountActual < pExynosPort->portDefinition.nBufferCountMin) ||
+            ((pVideoDec->bDRMPlayerMode == OMX_TRUE) &&
+             (pPortDefinition->nBufferCountActual > (pExynosPort->portDefinition.nBufferCountMin + MAX_DISPLAY_EXTRA_BUFFER)))) {
             ret = OMX_ErrorBadParameter;
             goto EXIT;
         }
 
+        originalWidth = pExynosPort->portDefinition.format.video.nFrameWidth;
+        originalHeight = pExynosPort->portDefinition.format.video.nFrameHeight;
         Exynos_OSAL_Memcpy(&pExynosPort->portDefinition, pPortDefinition, pPortDefinition->nSize);
 
 #ifdef USE_ANB // Modified by Google engineer
@@ -1257,12 +1263,28 @@ OMX_ERRORTYPE Exynos_OMX_VideoDecodeSetParameter(
         pExynosPort->portDefinition.format.video.nSliceHeight = height;
         pExynosPort->portDefinition.nBufferSize = (size > pExynosPort->portDefinition.nBufferSize) ? size : pExynosPort->portDefinition.nBufferSize;
 
+        if (realWidth != originalWidth || realHeight != originalHeight) {
+            pExynosPort->cropRectangle.nTop = 0;
+            pExynosPort->cropRectangle.nLeft = 0;
+            pExynosPort->cropRectangle.nWidth = realWidth;
+            pExynosPort->cropRectangle.nHeight = realHeight;
+        }
+
         if (portIndex == INPUT_PORT_INDEX) {
             EXYNOS_OMX_BASEPORT *pExynosOutputPort = &pExynosComponent->pExynosPort[OUTPUT_PORT_INDEX];
             pExynosOutputPort->portDefinition.format.video.nFrameWidth = pExynosPort->portDefinition.format.video.nFrameWidth;
             pExynosOutputPort->portDefinition.format.video.nFrameHeight = pExynosPort->portDefinition.format.video.nFrameHeight;
             pExynosOutputPort->portDefinition.format.video.nStride = width;
             pExynosOutputPort->portDefinition.format.video.nSliceHeight = height;
+            // if resetting the output port size, also reset the crop size for the output port;
+            // otherwise, output crop will not be updated when setting up the output port because
+            // the output size would not have changed after we updated it here
+            if (realWidth != originalWidth || realHeight != originalHeight) {
+                pExynosOutputPort->cropRectangle.nTop = 0;
+                pExynosOutputPort->cropRectangle.nLeft = 0;
+                pExynosOutputPort->cropRectangle.nWidth = realWidth;
+                pExynosOutputPort->cropRectangle.nHeight = realHeight;
+            }
 
             switch (pExynosOutputPort->portDefinition.format.video.eColorFormat) {
             case OMX_COLOR_FormatYUV420Planar:
@@ -1509,7 +1531,7 @@ OMX_ERRORTYPE Exynos_Shared_ANBBufferToData(EXYNOS_OMX_DATABUFFER *pUseBuffer, E
         OMX_U32 stride;
         if ((pUseBuffer->bufferHeader != NULL) && (pUseBuffer->bufferHeader->pBuffer != NULL)) {
             if (pExynosPort->bIsANBEnabled == OMX_TRUE) {
-                Exynos_OSAL_LockANB(pUseBuffer->bufferHeader->pBuffer, width, height, pExynosPort->portDefinition.format.video.eColorFormat, &stride, planes);
+                Exynos_OSAL_LockANBHandle(pUseBuffer->bufferHeader->pBuffer, width, height, pExynosPort->portDefinition.format.video.eColorFormat, &stride, planes);
             } else if (pExynosPort->bStoreMetaData == OMX_TRUE) {
                 Exynos_OSAL_LockMetaData(pUseBuffer->bufferHeader->pBuffer, width, height, pExynosPort->portDefinition.format.video.eColorFormat, &stride, planes);
             }
@@ -1570,7 +1592,7 @@ OMX_ERRORTYPE Exynos_Shared_DataToANBBuffer(EXYNOS_OMX_DATA *pData, EXYNOS_OMX_D
     }
 
     if (pExynosPort->bIsANBEnabled == OMX_TRUE) {
-        Exynos_OSAL_UnlockANB(pUseBuffer->bufferHeader->pBuffer);
+        Exynos_OSAL_UnlockANBHandle(pUseBuffer->bufferHeader->pBuffer);
     } else if (pExynosPort->bStoreMetaData == OMX_TRUE) {
         Exynos_OSAL_UnlockMetaData(pUseBuffer->bufferHeader->pBuffer);
     } else {

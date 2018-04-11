@@ -33,8 +33,8 @@ class DictionaryValue;
 class GoogleServiceAuthError {
  public:
   //
-  // These enumerations are referenced by integer value in HTML login code.
-  // Do not change the numeric values.
+  // These enumerations are referenced by integer value in HTML login code and
+  // in UMA histograms. Do not change the numeric values.
   //
   enum State {
     // The user is authenticated.
@@ -189,19 +189,12 @@ class GoogleServiceAuthError {
   // Construct a GoogleServiceAuthError from |state| and |error_message|.
   GoogleServiceAuthError(State state, const std::string& error_message);
 
-  explicit GoogleServiceAuthError(const std::string& error_message);
-
   GoogleServiceAuthError(State s, const std::string& captcha_token,
                          const GURL& captcha_audio_url,
                          const GURL& captcha_image_url,
                          const GURL& captcha_unlock_url,
                          int image_width,
                          int image_height);
-
-  GoogleServiceAuthError(State s, const std::string& captcha_token,
-                         const std::string& prompt_text,
-                         const std::string& alternate_text,
-                         int field_length);
 
   State state_;
   Captcha captcha_;

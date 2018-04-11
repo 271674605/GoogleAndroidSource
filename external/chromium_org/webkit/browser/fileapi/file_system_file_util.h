@@ -5,9 +5,10 @@
 #ifndef WEBKIT_BROWSER_FILEAPI_FILE_SYSTEM_FILE_UTIL_H_
 #define WEBKIT_BROWSER_FILEAPI_FILE_SYSTEM_FILE_UTIL_H_
 
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/platform_file.h"
+#include "webkit/browser/fileapi/file_system_operation.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
 #include "webkit/common/blob/scoped_file.h"
 
@@ -27,6 +28,8 @@ class FileSystemURL;
 // See http://crbug.com/128136 if you need it.
 class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
  public:
+  typedef FileSystemOperation::CopyOrMoveOption CopyOrMoveOption;
+
   // It will be implemented by each subclass such as FileSystemFileEnumerator.
   class WEBKIT_STORAGE_BROWSER_EXPORT AbstractFileEnumerator {
    public:
@@ -56,30 +59,22 @@ class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
 
   // Creates or opens a file with the given flags.
   // See header comments for AsyncFileUtil::CreateOrOpen() for more details.
-  // This is used only by Pepper/NaCL File API.
-  virtual base::PlatformFileError CreateOrOpen(
+  // This is used only by Pepper/NaCl File API.
+  virtual base::File CreateOrOpen(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
-      int file_flags,
-      base::PlatformFile* file_handle,
-      bool* created) = 0;
-
-  // Closes the given file handle.
-  // This is used only for Pepper/NaCL File API.
-  virtual base::PlatformFileError Close(
-      FileSystemOperationContext* context,
-      base::PlatformFile file) = 0;
+      int file_flags) = 0;
 
   // Ensures that the given |url| exist.  This creates a empty new file
   // at |url| if the |url| does not exist.
   // See header comments for AsyncFileUtil::EnsureFileExists() for more details.
-  virtual base::PlatformFileError EnsureFileExists(
+  virtual base::File::Error EnsureFileExists(
       FileSystemOperationContext* context,
       const FileSystemURL& url, bool* created) = 0;
 
   // Creates directory at given url.
   // See header comments for AsyncFileUtil::CreateDirectory() for more details.
-  virtual base::PlatformFileError CreateDirectory(
+  virtual base::File::Error CreateDirectory(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       bool exclusive,
@@ -87,10 +82,10 @@ class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
 
   // Retrieves the information about a file.
   // See header comments for AsyncFileUtil::GetFileInfo() for more details.
-  virtual base::PlatformFileError GetFileInfo(
+  virtual base::File::Error GetFileInfo(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
-      base::PlatformFileInfo* file_info,
+      base::File::Info* file_info,
       base::FilePath* platform_path) = 0;
 
   // Returns a pointer to a new instance of AbstractFileEnumerator which is
@@ -107,14 +102,14 @@ class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
   // Maps |file_system_url| given |context| into |local_file_path|
   // which represents physical file location on the host OS.
   // This may not always make sense for all subclasses.
-  virtual base::PlatformFileError GetLocalFilePath(
+  virtual base::File::Error GetLocalFilePath(
       FileSystemOperationContext* context,
       const FileSystemURL& file_system_url,
       base::FilePath* local_file_path) = 0;
 
   // Updates the file metadata information.
   // See header comments for AsyncFileUtil::Touch() for more details.
-  virtual base::PlatformFileError Touch(
+  virtual base::File::Error Touch(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       const base::Time& last_access_time,
@@ -122,46 +117,48 @@ class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
 
   // Truncates a file to the given length.
   // See header comments for AsyncFileUtil::Truncate() for more details.
-  virtual base::PlatformFileError Truncate(
+  virtual base::File::Error Truncate(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       int64 length) = 0;
 
   // Copies or moves a single file from |src_url| to |dest_url|.
   // The filesystem type of |src_url| and |dest_url| MUST be same.
+  // For |option|, please see file_system_operation.h
   //
   // This returns:
-  // - PLATFORM_FILE_ERROR_NOT_FOUND if |src_url|
+  // - File::FILE_ERROR_NOT_FOUND if |src_url|
   //   or the parent directory of |dest_url| does not exist.
-  // - PLATFORM_FILE_ERROR_NOT_A_FILE if |src_url| exists but is not a file.
-  // - PLATFORM_FILE_ERROR_INVALID_OPERATION if |dest_url| exists and
+  // - File::FILE_ERROR_NOT_A_FILE if |src_url| exists but is not a file.
+  // - File::FILE_ERROR_INVALID_OPERATION if |dest_url| exists and
   //   is not a file.
-  // - PLATFORM_FILE_ERROR_FAILED if |dest_url| does not exist and
+  // - File::FILE_ERROR_FAILED if |dest_url| does not exist and
   //   its parent path is a file.
   //
-  virtual base::PlatformFileError CopyOrMoveFile(
+  virtual base::File::Error CopyOrMoveFile(
       FileSystemOperationContext* context,
       const FileSystemURL& src_url,
       const FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       bool copy) = 0;
 
   // Copies in a single file from a different filesystem.
   // See header comments for AsyncFileUtil::CopyInForeignFile() for
   // more details.
-  virtual base::PlatformFileError CopyInForeignFile(
+  virtual base::File::Error CopyInForeignFile(
         FileSystemOperationContext* context,
         const base::FilePath& src_file_path,
         const FileSystemURL& dest_url) = 0;
 
   // Deletes a single file.
   // See header comments for AsyncFileUtil::DeleteFile() for more details.
-  virtual base::PlatformFileError DeleteFile(
+  virtual base::File::Error DeleteFile(
       FileSystemOperationContext* context,
       const FileSystemURL& url) = 0;
 
   // Deletes a single empty directory.
   // See header comments for AsyncFileUtil::DeleteDirectory() for more details.
-  virtual base::PlatformFileError DeleteDirectory(
+  virtual base::File::Error DeleteDirectory(
       FileSystemOperationContext* context,
       const FileSystemURL& url) = 0;
 
@@ -173,8 +170,8 @@ class WEBKIT_STORAGE_BROWSER_EXPORT FileSystemFileUtil {
   virtual webkit_blob::ScopedFile CreateSnapshotFile(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
-      base::PlatformFileError* error,
-      base::PlatformFileInfo* file_info,
+      base::File::Error* error,
+      base::File::Info* file_info,
       base::FilePath* platform_path) = 0;
 
  protected:

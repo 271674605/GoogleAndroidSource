@@ -16,14 +16,18 @@
 
 package com.android.launcher3;
 
-import java.util.ArrayList;
-
 import android.content.ContentValues;
+import android.content.Context;
+
+import com.android.launcher3.compat.UserHandleCompat;
+
+import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * Represents a folder containing shortcuts or apps.
  */
-class FolderInfo extends ItemInfo {
+public class FolderInfo extends ItemInfo {
 
     /**
      * Whether this folder has been opened
@@ -39,6 +43,7 @@ class FolderInfo extends ItemInfo {
 
     FolderInfo() {
         itemType = LauncherSettings.Favorites.ITEM_TYPE_FOLDER;
+        user = UserHandleCompat.myUserHandle();
     }
 
     /**
@@ -75,8 +80,8 @@ class FolderInfo extends ItemInfo {
     }
 
     @Override
-    void onAddToDatabase(ContentValues values) {
-        super.onAddToDatabase(values);
+    void onAddToDatabase(Context context, ContentValues values) {
+        super.onAddToDatabase(context, values);
         values.put(LauncherSettings.Favorites.TITLE, title.toString());
     }
 
@@ -114,6 +119,6 @@ class FolderInfo extends ItemInfo {
         return "FolderInfo(id=" + this.id + " type=" + this.itemType
                 + " container=" + this.container + " screen=" + screenId
                 + " cellX=" + cellX + " cellY=" + cellY + " spanX=" + spanX
-                + " spanY=" + spanY + " dropPos=" + dropPos + ")";
+                + " spanY=" + spanY + " dropPos=" + Arrays.toString(dropPos) + ")";
     }
 }

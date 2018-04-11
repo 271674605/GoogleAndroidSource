@@ -34,6 +34,10 @@ public:
     HitTestPathGM () {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("hittestpath");
     }
@@ -42,7 +46,7 @@ protected:
 
     virtual void onDraw(SkCanvas* canvas) {
         SkPath path;
-        SkRandom rand;
+        SkLCGRandom rand;
 
         int scale = 300;
         for (int i = 0; i < 4; ++i) {

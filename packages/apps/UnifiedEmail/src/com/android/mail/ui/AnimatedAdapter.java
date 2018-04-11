@@ -28,23 +28,21 @@ import android.database.Cursor;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.v4.text.BidiFormatter;
 import android.util.SparseArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AbsListView.OnScrollListener;
 import android.widget.SimpleCursorAdapter;
 
-import com.android.bitmap.AltBitmapCache;
 import com.android.bitmap.BitmapCache;
-import com.android.bitmap.DecodeAggregator;
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
+import com.android.mail.bitmap.ContactResolver;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.browse.ConversationItemView;
 import com.android.mail.browse.ConversationItemViewCoordinates.CoordinatesCache;
 import com.android.mail.browse.SwipeableConversationItemView;
-import com.android.mail.preferences.MailPrefs;
 import com.android.mail.providers.Account;
 import com.android.mail.providers.AccountObserver;
 import com.android.mail.providers.Conversation;
@@ -55,6 +53,7 @@ import com.android.mail.ui.SwipeableListView.ListItemsRemovedListener;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.Utils;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
@@ -73,6 +72,7 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     private static final String LEAVE_BEHIND_ITEM_ID = "leave_behind_item_id";
     private final static int TYPE_VIEW_CONVERSATION = 0;
     private final static int TYPE_VIEW_FOOTER = 1;
+    private final static int TYPE_VIEW_HEADER = 2;
     private final static int TYPE_VIEW_DONT_RECYCLE = -1;
     private final HashSet<Long> mDeletingItems = new HashSet<Long>();
     private final ArrayList<Long> mLastDeletingItems = new ArrayList<Long>();
@@ -90,17 +90,6 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     private Runnable mCountDown;
     private final Handler mHandler;
     protected long mLastLeaveBehind = -1;
-
-    private final BitmapCache mBitmapCache;
-    private final DecodeAggregator mDecodeAggregator;
-
-    public interface ConversationListListener {
-        /**
-         * @return <code>true</code> if the list is just exiting selection mode (so animations may
-         * be required), <code>false</code> otherwise
-         */
-        boolean isExitingSelectionMode();
-    }
 
     private final AnimatorListener mAnimatorListener = new AnimatorListenerAdapter() {
 
@@ -175,14 +164,20 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
 
     private View mFooter;
     private boolean mShowFooter;
+    private List<View> mHeaders = Lists.newArrayList();
     private Folder mFolder;
     private final SwipeableListView mListView;
     private boolean mSwipeEnabled;
     private final HashMap<Long, LeaveBehindItem> mLeaveBehindItems = Maps.newHashMap();
-    /** True if priority inbox markers are enabled, false otherwise. */
-    private boolean mPriorityMarkersEnabled;
+    /** True if importance markers are enabled, false otherwise. */
+    private boolean mImportanceMarkersEnabled;
+    /**
+     * True if chevrons (personal level indicators) should be shown:
+     * an arrow ( › ) by messages sent to my address (not a mailing list),
+     * and a double arrow ( » ) by messages sent only to me.
+     */
+    private boolean mShowChevronsEnabled;
     private final ControllableActivity mActivity;
-    private final ConversationListListener mConversationListListener;
     private final AccountObserver mAccountListener = new AccountObserver() {
         @Override
         public void onChanged(Account newAccount) {
@@ -194,7 +189,7 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
 
     /**
      * A list of all views that are not conversations. These include temporary views from
-     * {@link #mFleetingViews} and child folders from {@link #mFolderViews}.
+     * {@link #mFleetingViews}.
      */
     private final SparseArray<ConversationSpecialItemView> mSpecialViews;
 
@@ -207,6 +202,8 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
      */
     private final List<ConversationSpecialItemView> mFleetingViews;
 
+    private final BidiFormatter mBidiFormatter = BidiFormatter.getInstance();
+
     /**
      * @return <code>true</code> if a relevant part of the account has changed, <code>false</code>
      *         otherwise
@@ -214,30 +211,30 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     private boolean setAccount(Account newAccount) {
         final boolean accountChanged;
         if (mAccount != null && mAccount.uri.equals(newAccount.uri)
-                && mAccount.settings.priorityArrowsEnabled ==
-                        newAccount.settings.priorityArrowsEnabled
+                && mAccount.settings.importanceMarkersEnabled ==
+                        newAccount.settings.importanceMarkersEnabled
                 && mAccount.supportsCapability(UIProvider.AccountCapabilities.UNDO) ==
                         newAccount.supportsCapability(UIProvider.AccountCapabilities.UNDO)
-                && mAccount.settings.convListIcon == newAccount.settings.convListIcon
-                && mAccount.settings.convListAttachmentPreviews ==
-                        newAccount.settings.convListAttachmentPreviews) {
+                && mAccount.settings.convListIcon == newAccount.settings.convListIcon) {
             accountChanged = false;
         } else {
             accountChanged = true;
         }
 
         mAccount = newAccount;
-        mPriorityMarkersEnabled = mAccount.settings.priorityArrowsEnabled;
+        mImportanceMarkersEnabled = mAccount.settings.importanceMarkersEnabled;
+        mShowChevronsEnabled = mAccount.settings.showChevronsEnabled;
         mSwipeEnabled = mAccount.supportsCapability(UIProvider.AccountCapabilities.UNDO);
 
         Analytics.getInstance().setCustomDimension(Analytics.CD_INDEX_SENDER_IMAGES_ENABLED, Boolean
                 .toString(newAccount.settings.convListIcon == ConversationListIcon.SENDER_IMAGE));
-        Analytics.getInstance().setCustomDimension(Analytics.CD_INDEX_ATTACHMENT_PREVIEWS_ENABLED,
-                Boolean.toString(newAccount.settings.convListAttachmentPreviews));
         Analytics.getInstance().setCustomDimension(Analytics.CD_INDEX_REPLY_ALL_SETTING,
                 (newAccount.settings.replyBehavior == UIProvider.DefaultReplyBehavior.REPLY)
                 ? "reply"
                 : "reply_all");
+        Analytics.getInstance().setCustomDimension(Analytics.CD_INDEX_AUTO_ADVANCE,
+                UIProvider.AutoAdvance.getAutoAdvanceStr(
+                        newAccount.settings.getAutoAdvanceSetting()));
 
         return accountChanged;
     }
@@ -245,29 +242,24 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     private static final String LOG_TAG = LogTag.getLogTag();
     private static final int INCREASE_WAIT_COUNT = 2;
 
-    private static final int BITMAP_CACHE_TARGET_SIZE_BYTES = 0; // TODO: enable cache
-    /**
-     * This is the fractional portion of the total cache size above that's dedicated to non-pooled
-     * bitmaps. (This is basically the portion of cache dedicated to GIFs.)
-     */
-    private static final float BITMAP_CACHE_NON_POOLED_FRACTION = 0.1f;
+    private final BitmapCache mSendersImagesCache;
+    private final ContactResolver mContactResolver;
 
     public AnimatedAdapter(Context context, ConversationCursor cursor,
             ConversationSelectionSet batch, ControllableActivity activity,
-            final ConversationListListener conversationListListener, SwipeableListView listView,
-            final List<ConversationSpecialItemView> specialViews) {
+            SwipeableListView listView, final List<ConversationSpecialItemView> specialViews) {
         super(context, -1, cursor, UIProvider.CONVERSATION_PROJECTION, null, 0);
         mContext = context;
         mBatchConversations = batch;
         setAccount(mAccountListener.initialize(activity.getAccountController()));
         mActivity = activity;
-        mConversationListListener = conversationListListener;
         mShowFooter = false;
         mListView = listView;
 
-        mBitmapCache = new AltBitmapCache(BITMAP_CACHE_TARGET_SIZE_BYTES,
-                BITMAP_CACHE_NON_POOLED_FRACTION);
-        mDecodeAggregator = new DecodeAggregator();
+        mSendersImagesCache = mActivity.getSenderImageCache();
+
+        mContactResolver =
+                mActivity.getContactResolver(mContext.getContentResolver(), mSendersImagesCache);
 
         mHandler = new Handler();
         if (sDismissAllShortDelay == -1) {
@@ -284,7 +276,7 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         final int size = mFleetingViews.size();
         mSpecialViews = new SparseArray<ConversationSpecialItemView>(size);
 
-        // Only set the adapter in teaser views. Folder views don't care about the adapter.
+        // Set the adapter in teaser views.
         for (final ConversationSpecialItemView view : mFleetingViews) {
             view.setAdapter(this);
         }
@@ -315,8 +307,8 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         // mSpecialViews only contains the views that are currently being displayed
         final int specialViewCount = mSpecialViews.size();
 
-        final int count = super.getCount() + specialViewCount;
-        return mShowFooter ? count + 1 : count;
+        return super.getCount() + specialViewCount +
+                (mShowFooter ? 1 : 0) + mHeaders.size();
     }
 
     /**
@@ -374,12 +366,10 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     public View createConversationItemView(SwipeableConversationItemView view, Context context,
             Conversation conv) {
         if (view == null) {
-            view = new SwipeableConversationItemView(context, mAccount.name);
+            view = new SwipeableConversationItemView(context, mAccount.getEmailAddress());
         }
-        view.bind(conv, mActivity, mConversationListListener, mBatchConversations, mFolder,
-                getCheckboxSetting(), getAttachmentPreviewsSetting(),
-                getParallaxSpeedAlternativeSetting(), getParallaxDirectionAlternativeSetting(),
-                mSwipeEnabled, mPriorityMarkersEnabled, this);
+        view.bind(conv, mActivity, mBatchConversations, mFolder, getCheckboxSetting(),
+                mSwipeEnabled, mImportanceMarkersEnabled, mShowChevronsEnabled, this);
         return view;
     }
 
@@ -398,7 +388,9 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     @Override
     public int getItemViewType(int position) {
         // Try to recycle views.
-        if (mShowFooter && position == getCount() - 1) {
+        if (mHeaders.size() > position) {
+            return TYPE_VIEW_HEADER;
+        } else if (mShowFooter && position == getCount() - 1) {
             return TYPE_VIEW_FOOTER;
         } else if (hasLeaveBehinds() || isAnimating()) {
             // Setting as type -1 means the recycler won't take this view and
@@ -408,7 +400,7 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
             // types. In a future release, use position/id map to try to make
             // this cleaner / faster to determine if the view is animating.
             return TYPE_VIEW_DONT_RECYCLE;
-        } else if (mSpecialViews.get(position) != null) {
+        } else if (mSpecialViews.get(getSpecialViewsPos(position)) != null) {
             // Don't recycle the special views
             return TYPE_VIEW_DONT_RECYCLE;
         }
@@ -468,6 +460,8 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         if (list.isEmpty()) {
             // If we have no deleted items on screen, skip the animation
             listener.onListItemsRemoved();
+            // If we have an action queued up, perform it
+            performAndSetNextAction(null);
         } else {
             performAndSetNextAction(listener);
         }
@@ -476,12 +470,15 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
 
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
-        if (mShowFooter && position == getCount() - 1) {
+        if (mHeaders.size() > position) {
+            return mHeaders.get(position);
+        } else if (mShowFooter && position == getCount() - 1) {
             return mFooter;
         }
 
         // Check if this is a special view
-        final ConversationSpecialItemView specialView = mSpecialViews.get(position);
+        final ConversationSpecialItemView specialView = mSpecialViews.get(
+                getSpecialViewsPos(position));
         if (specialView != null) {
             specialView.onGetView();
             return (View) specialView;
@@ -645,6 +642,10 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         return mCoordinatesCache;
     }
 
+    public BidiFormatter getBidiFormatter() {
+        return mBidiFormatter;
+    }
+
     public SwipeableListView getListView() {
         return mListView;
     }
@@ -676,6 +677,13 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
             mLastDeletingItems.clear();
             changed = true;
         }
+
+        for (final ConversationSpecialItemView view : mFleetingViews) {
+            if (view.commitLeaveBehindItem()) {
+                changed = true;
+            }
+        }
+
         if (changed) {
             notifyDataSetChanged();
         }
@@ -691,11 +699,12 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
 
     @Override
     public long getItemId(int position) {
-        if (mShowFooter && position == getCount() - 1) {
+        if ((mHeaders.size() > position) || (mShowFooter && position == getCount() - 1)) {
             return -1;
         }
 
-        final ConversationSpecialItemView specialView = mSpecialViews.get(position);
+        final ConversationSpecialItemView specialView = mSpecialViews.get(
+                getSpecialViewsPos(position));
         if (specialView != null) {
             // TODO(skennedy) We probably want something better than this
             return specialView.hashCode();
@@ -750,7 +759,7 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
 
     @Override
     public View newView(Context context, Cursor cursor, ViewGroup parent) {
-        return new SwipeableConversationItemView(context, mAccount.name);
+        return new SwipeableConversationItemView(context, mAccount.getEmailAddress());
     }
 
     @Override
@@ -764,10 +773,8 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         SwipeableConversationItemView view = (SwipeableConversationItemView) super.getView(
                 position, null, parent);
         view.reset();
-        view.bind(conversation, mActivity, mConversationListListener, mBatchConversations, mFolder,
-                getCheckboxSetting(), getAttachmentPreviewsSetting(),
-                getParallaxSpeedAlternativeSetting(), getParallaxDirectionAlternativeSetting(),
-                mSwipeEnabled, mPriorityMarkersEnabled, this);
+        view.bind(conversation, mActivity, mBatchConversations, mFolder, getCheckboxSetting(),
+                mSwipeEnabled, mImportanceMarkersEnabled, mShowChevronsEnabled, this);
         mAnimatingViews.put(conversation.id, view);
         return view;
     }
@@ -777,24 +784,16 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
             ConversationListIcon.DEFAULT;
     }
 
-    private boolean getAttachmentPreviewsSetting() {
-        return mAccount == null || mAccount.settings.convListAttachmentPreviews;
-    }
-
-    private boolean getParallaxSpeedAlternativeSetting() {
-        return MailPrefs.get(mContext).getParallaxSpeedAlternative();
-    }
-
-    private boolean getParallaxDirectionAlternativeSetting() {
-        return MailPrefs.get(mContext).getParallaxDirectionAlternative();
-    }
-
     @Override
     public Object getItem(int position) {
-        if (mShowFooter && position == getCount() - 1) {
+        final ConversationSpecialItemView specialView = mSpecialViews.get(
+                getSpecialViewsPos(position));
+        if (mHeaders.size() > position) {
+            return mHeaders.get(position);
+        } else if (mShowFooter && position == getCount() - 1) {
             return mFooter;
-        } else if (mSpecialViews.get(position) != null) {
-            return mSpecialViews.get(position);
+        } else if (specialView != null) {
+            return specialView;
         }
         return super.getItem(position - getPositionOffset(position));
     }
@@ -882,6 +881,10 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         mFooter = footerView;
     }
 
+    public void addHeader(View headerView) {
+        mHeaders.add(headerView);
+    }
+
     public void setFolder(Folder folder) {
         mFolder = folder;
     }
@@ -945,6 +948,25 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
                 || !mSwipeDeletingItems.isEmpty();
     }
 
+    /**
+     * Forcibly clear any internal state that would cause {@link #isAnimating()} to return true.
+     * Call this in times of desperation, when you really, really want to trash state and just
+     * start over.
+     */
+    public void clearAnimationState() {
+        if (!isAnimating()) {
+            return;
+        }
+
+        mUndoingItems.clear();
+        mSwipeUndoingItems.clear();
+        mFadeLeaveBehindItems.clear();
+        mDeletingItems.clear();
+        mSwipeDeletingItems.clear();
+        mAnimatingViews.clear();
+        LogUtils.w(LOG_TAG, "AA.clearAnimationState forcibly cleared state, this=%s", this);
+    }
+
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("{");
@@ -963,6 +985,10 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         sb.append(mFadeLeaveBehindItems);
         sb.append(" mLastDeletingItems=");
         sb.append(mLastDeletingItems);
+        sb.append(" mAnimatingViews=");
+        sb.append(mAnimatingViews);
+        sb.append(" mPendingDestruction=");
+        sb.append(mPendingDestruction);
         sb.append("}");
         return sb.toString();
     }
@@ -996,15 +1022,19 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
     }
 
     /**
-     * Updates special (non-conversation view) when either {@link #mFolderViews} or
-     * {@link #mFleetingViews} changed
+     * Updates special (non-conversation view) when {@link #mFleetingViews} changed
      */
     private void updateSpecialViews() {
-        // We recreate all the special views using mFolderViews and mFleetingViews (in that order).
+        // We recreate all the special views using mFleetingViews.
         mSpecialViews.clear();
 
-        // Fleeting (temporary) views go after this. They specify a position,which is 0-indexed and
-        // has to be adjusted for the number of folders above it.
+        // If the conversation cursor hasn't finished loading, hide all special views
+        if (!ConversationCursor.isCursorReadyToShow(getConversationCursor())) {
+            return;
+        }
+
+        // Fleeting (temporary) views specify a position, which is 0-indexed and
+        // has to be adjusted for the number of fleeting views above it.
         for (final ConversationSpecialItemView specialView : mFleetingViews) {
             specialView.onUpdate(mFolder, getConversationCursor());
 
@@ -1068,21 +1098,22 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         return oldCursor;
     }
 
-    public BitmapCache getBitmapCache() {
-        return mBitmapCache;
+    public BitmapCache getSendersImagesCache() {
+        return mSendersImagesCache;
     }
 
-    public DecodeAggregator getDecodeAggregator() {
-        return mDecodeAggregator;
+    public ContactResolver getContactResolver() {
+        return mContactResolver;
     }
 
     /**
      * Gets the offset for the given position in the underlying cursor, based on any special views
      * that may be above it.
      */
-    public int getPositionOffset(final int position) {
-        int viewsAbove = 0;
+    public int getPositionOffset(int position) {
+        int viewsAbove = mHeaders.size();
 
+        position -= viewsAbove;
         for (int i = 0, size = mSpecialViews.size(); i < size; i++) {
             final int bidPosition = mSpecialViews.keyAt(i);
             // If the view bid for a position above the cursor position,
@@ -1095,15 +1126,22 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         return viewsAbove;
     }
 
+    /**
+     * Gets the correct position for special views given the number of headers we have.
+     */
+    private int getSpecialViewsPos(final int position) {
+        return position - mHeaders.size();
+    }
+
     public void cleanup() {
-        // Only clean up teaser views. Folder views don't care about clean up.
+        // Clean up teaser views.
         for (final ConversationSpecialItemView view : mFleetingViews) {
             view.cleanup();
         }
     }
 
     public void onConversationSelected() {
-        // Only notify teaser views. Folder views don't care about selected conversations.
+        // Notify teaser views.
         for (final ConversationSpecialItemView specialView : mFleetingViews) {
             specialView.onConversationSelected();
         }
@@ -1125,11 +1163,6 @@ public class AnimatedAdapter extends SimpleCursorAdapter {
         for (final ConversationSpecialItemView specialView : mFleetingViews) {
             specialView.onConversationListVisibilityChanged(visible);
         }
-    }
-
-    public void onScrollStateChanged(final int scrollState) {
-        final boolean scrolling = scrollState != OnScrollListener.SCROLL_STATE_IDLE;
-        mBitmapCache.setBlocking(scrolling);
     }
 
     public int getViewMode() {

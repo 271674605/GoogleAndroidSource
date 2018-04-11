@@ -10,10 +10,10 @@ thread_local int &r = f();
 int &g() { return r; }
 
 // CHECK: define {{.*}} @[[R_INIT:.*]]()
-// CHECK: call i32* @_Z1fv()
+// CHECK: call nonnull i32* @_Z1fv()
 // CHECK: store i32* %{{.*}}, i32** @r, align 8
 
-// CHECK: define i32* @_Z1gv()
+// CHECK-LABEL: define nonnull i32* @_Z1gv()
 // CHECK: call i32* @_ZTW1r()
 // CHECK: ret i32* %{{.*}}
 
@@ -22,5 +22,5 @@ int &g() { return r; }
 // CHECK: load i32** @r, align 8
 // CHECK: ret i32* %{{.*}}
 
-// CHECK: define internal void @__tls_init()
+// CHECK-LABEL: define internal void @__tls_init()
 // CHECK: call void @[[R_INIT]]()

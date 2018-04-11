@@ -46,6 +46,7 @@ class MockServerProxy : public ServerProxy {
                void(const std::string&, const DataCallback&));
   MOCK_METHOD2(SendCertificateRequest,
                void(const std::string&, const DataCallback&));
+  MOCK_METHOD0(GetType, PrivacyCAType());
 
  private:
   FakeServerProxy fake_;
@@ -65,7 +66,9 @@ class MockAttestationFlow : public AttestationFlow {
   MockAttestationFlow();
   virtual ~MockAttestationFlow();
 
-  MOCK_METHOD3(GetCertificate, void(AttestationCertificateProfile,
+  MOCK_METHOD5(GetCertificate, void(AttestationCertificateProfile,
+                                    const std::string&,
+                                    const std::string&,
                                     bool,
                                     const CertificateCallback&));
 };

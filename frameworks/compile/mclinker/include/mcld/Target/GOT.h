@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_GLOBAL_OFFSET_TABLE_H
-#define MCLD_GLOBAL_OFFSET_TABLE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_TARGET_GOT_H
+#define MCLD_TARGET_GOT_H
 
 #include <mcld/LD/LDSection.h>
 #include <mcld/LD/SectionData.h>
@@ -67,7 +64,7 @@ public:
 
   // ----- observers -----//
   uint64_t addr() const { return m_Section.addr(); }
-  uint32_t size() const { return m_Section.size(); }
+  uint64_t size() const { return m_Section.size(); }
 
   const_iterator begin() const { return m_SectionData->begin(); }
   iterator       begin()       { return m_SectionData->begin(); }
@@ -79,13 +76,6 @@ public:
 
   // finalizeSectionSize - set LDSection size
   virtual void finalizeSectionSize();
-
-  /// reserve - reseve number of pNum of empty entries
-  /// Before layout, we scan all relocations to determine if GOT entries are
-  /// needed. If an entry is needed, the empty entry is reserved for layout
-  /// to adjust the fragment offset. After that, we fill up the entries when
-  /// applying relocations.
-  virtual void reserve(size_t pNum = 1) = 0;
 
 protected:
   LDSection& m_Section;

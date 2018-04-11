@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_LD_ALIGNFRAGMENT_H
-#define MCLD_LD_ALIGNFRAGMENT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_FRAGMENT_ALIGNFRAGMENT_H
+#define MCLD_FRAGMENT_ALIGNFRAGMENT_H
 
 #include <mcld/Fragment/Fragment.h>
 

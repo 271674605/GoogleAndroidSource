@@ -31,6 +31,7 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Xml;
 
+import com.android.contacts.common.R;
 import com.android.contacts.common.model.dataitem.DataKind;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -47,7 +48,17 @@ import java.util.List;
 public class ExternalAccountType extends BaseAccountType {
     private static final String TAG = "ExternalAccountType";
 
-    private static final String METADATA_CONTACTS = "android.provider.CONTACTS_STRUCTURE";
+    /**
+     * The metadata name for so-called "contacts.xml".
+     *
+     * On LMP and later, we also accept the "alternate" name.
+     * This is to allow sync adapters to have a contacts.xml without making it visible on older
+     * platforms.
+     */
+    private static final String[] METADATA_CONTACTS_NAMES = new String[] {
+            "android.provider.ALTERNATE_CONTACTS_STRUCTURE",
+            "android.provider.CONTACTS_STRUCTURE"
+    };
 
     private static final String TAG_CONTACTS_SOURCE_LEGACY = "ContactsSource";
     private static final String TAG_CONTACTS_ACCOUNT_TYPE = "ContactsAccountType";
@@ -61,9 +72,6 @@ public class ExternalAccountType extends BaseAccountType {
     private static final String ATTR_VIEW_CONTACT_NOTIFY_SERVICE = "viewContactNotifyService";
     private static final String ATTR_VIEW_GROUP_ACTIVITY = "viewGroupActivity";
     private static final String ATTR_VIEW_GROUP_ACTION_LABEL = "viewGroupActionLabel";
-    private static final String ATTR_VIEW_STREAM_ITEM_ACTIVITY = "viewStreamItemActivity";
-    private static final String ATTR_VIEW_STREAM_ITEM_PHOTO_ACTIVITY =
-            "viewStreamItemPhotoActivity";
     private static final String ATTR_DATA_SET = "dataSet";
     private static final String ATTR_EXTENSION_PACKAGE_NAMES = "extensionPackageNames";
 
@@ -84,8 +92,6 @@ public class ExternalAccountType extends BaseAccountType {
     private String mViewGroupActivity;
     private String mViewGroupLabelAttribute;
     private int mViewGroupLabelResId;
-    private String mViewStreamItemActivity;
-    private String mViewStreamItemPhotoActivity;
     private List<String> mExtensionPackageNames;
     private String mAccountTypeLabelAttribute;
     private String mAccountTypeIconAttribute;
@@ -191,10 +197,17 @@ public class ExternalAccountType extends BaseAccountType {
         PackageInfo packageInfo = pm.getPackageInfo(resPackageName,
                 PackageManager.GET_SERVICES|PackageManager.GET_META_DATA);
         for (ServiceInfo serviceInfo : packageInfo.services) {
-            final XmlResourceParser parser = serviceInfo.loadXmlMetaData(pm,
-                    METADATA_CONTACTS);
-            if (parser != null) {
-                return parser;
+            for (String metadataName : METADATA_CONTACTS_NAMES) {
+                final XmlResourceParser parser = serviceInfo.loadXmlMetaData(pm,
+                        metadataName);
+                if (parser != null) {
+                    if (Log.isLoggable(TAG, Log.DEBUG)) {
+                        Log.d(TAG, String.format("Metadata loaded from: %s, %s, %s",
+                                serviceInfo.packageName, serviceInfo.name,
+                                metadataName));
+                    }
+                    return parser;
+                }
             }
         }
         // Package was found, but that doesn't contain the CONTACTS_STRUCTURE metadata.
@@ -265,16 +278,6 @@ public class ExternalAccountType extends BaseAccountType {
     }
 
     @Override
-    public String getViewStreamItemActivity() {
-        return mViewStreamItemActivity;
-    }
-
-    @Override
-    public String getViewStreamItemPhotoActivity() {
-        return mViewStreamItemPhotoActivity;
-    }
-
-    @Override
     public List<String> getExtensionPackageNames() {
         return mExtensionPackageNames;
     }
@@ -327,10 +330,6 @@ public class ExternalAccountType extends BaseAccountType {
                     mViewGroupActivity = value;
                 } else if (ATTR_VIEW_GROUP_ACTION_LABEL.equals(attr)) {
                     mViewGroupLabelAttribute = value;
-                } else if (ATTR_VIEW_STREAM_ITEM_ACTIVITY.equals(attr)) {
-                    mViewStreamItemActivity = value;
-                } else if (ATTR_VIEW_STREAM_ITEM_PHOTO_ACTIVITY.equals(attr)) {
-                    mViewStreamItemPhotoActivity = value;
                 } else if (ATTR_DATA_SET.equals(attr)) {
                     dataSet = value;
                 } else if (ATTR_EXTENSION_PACKAGE_NAMES.equals(attr)) {
@@ -362,22 +361,19 @@ public class ExternalAccountType extends BaseAccountType {
                     parseEditSchema(context, parser, attrs);
                 } else if (TAG_CONTACTS_DATA_KIND.equals(tag)) {
                     final TypedArray a = context.obtainStyledAttributes(attrs,
-                            android.R.styleable.ContactsDataKind);
+                            R.styleable.ContactsDataKind);
                     final DataKind kind = new DataKind();
 
                     kind.mimeType = a
-                            .getString(com.android.internal.R.styleable.ContactsDataKind_mimeType);
-
+                            .getString(R.styleable.ContactsDataKind_android_mimeType);
                     final String summaryColumn = a.getString(
-                            com.android.internal.R.styleable.ContactsDataKind_summaryColumn);
+                            R.styleable.ContactsDataKind_android_summaryColumn);
                     if (summaryColumn != null) {
                         // Inflate a specific column as summary when requested
                         kind.actionHeader = new SimpleInflater(summaryColumn);
                     }
-
                     final String detailColumn = a.getString(
-                            com.android.internal.R.styleable.ContactsDataKind_detailColumn);
-
+                            R.styleable.ContactsDataKind_android_detailColumn);
                     if (detailColumn != null) {
                         // Inflate specific column as summary
                         kind.actionBody = new SimpleInflater(detailColumn);

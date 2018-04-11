@@ -32,6 +32,9 @@ How to examine the output with Audacity:
   Sample rate 22050 Hz
  Click Import button
 
+How to convert with sox:
+ sox -r 22050 -s -2 myrec.raw myrec.wav
+
 */
 
 
@@ -138,7 +141,7 @@ void RecBufferQueueCallback(
 
 //-----------------------------------------------------------------
 
-/* Play an audio path by opening a file descriptor on that path  */
+/* Record to an audio path by opening a file descriptor on that path  */
 void TestRecToBuffQueue( SLObjectItf sl, const char* path, SLAint64 durationInSeconds)
 {
     gFp = fopen(path, "w");

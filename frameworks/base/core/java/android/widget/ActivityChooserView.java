@@ -27,9 +27,9 @@ import android.content.res.TypedArray;
 import android.database.DataSetObserver;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.ActionProvider;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -62,6 +62,8 @@ import android.widget.ListPopupWindow.ForwardingListener;
  * @hide
  */
 public class ActivityChooserView extends ViewGroup implements ActivityChooserModelClient {
+
+    private static final String LOG_TAG = "ActivityChooserView";
 
     /**
      * An adapter for displaying the activities in an {@link AdapterView}.
@@ -200,13 +202,32 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
      *
      * @param context The application environment.
      * @param attrs A collection of attributes.
-     * @param defStyle The default style to apply to this view.
+     * @param defStyleAttr An attribute in the current theme that contains a
+     *        reference to a style resource that supplies default values for
+     *        the view. Can be 0 to not look for defaults.
      */
-    public ActivityChooserView(Context context, AttributeSet attrs, int defStyle) {
-        super(context, attrs, defStyle);
+    public ActivityChooserView(Context context, AttributeSet attrs, int defStyleAttr) {
+        this(context, attrs, defStyleAttr, 0);
+    }
+
+    /**
+     * Create a new instance.
+     *
+     * @param context The application environment.
+     * @param attrs A collection of attributes.
+     * @param defStyleAttr An attribute in the current theme that contains a
+     *        reference to a style resource that supplies default values for
+     *        the view. Can be 0 to not look for defaults.
+     * @param defStyleRes A resource identifier of a style resource that
+     *        supplies default values for the view, used only if
+     *        defStyleAttr is 0 or can not be found in the theme. Can be 0
+     *        to not look for defaults.
+     */
+    public ActivityChooserView(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
+        super(context, attrs, defStyleAttr, defStyleRes);
 
         TypedArray attributesArray = context.obtainStyledAttributes(attrs,
-                R.styleable.ActivityChooserView, defStyle, 0);
+                R.styleable.ActivityChooserView, defStyleAttr, defStyleRes);
 
         mInitialActivityCount = attributesArray.getInt(
                 R.styleable.ActivityChooserView_initialActivityCount,
@@ -543,9 +564,9 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
         }
         // Activity chooser content.
         if (mDefaultActivityButton.getVisibility() == VISIBLE) {
-            mActivityChooserContent.setBackgroundDrawable(mActivityChooserContentBackground);
+            mActivityChooserContent.setBackground(mActivityChooserContentBackground);
         } else {
-            mActivityChooserContent.setBackgroundDrawable(null);
+            mActivityChooserContent.setBackground(null);
         }
     }
 
@@ -577,7 +598,8 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
                         Intent launchIntent = mAdapter.getDataModel().chooseActivity(position);
                         if (launchIntent != null) {
                             launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-                            mContext.startActivity(launchIntent);
+                            ResolveInfo resolveInfo = mAdapter.getDataModel().getActivity(position);
+                            startActivity(launchIntent, resolveInfo);
                         }
                     }
                 } break;
@@ -595,7 +617,7 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
                 Intent launchIntent = mAdapter.getDataModel().chooseActivity(index);
                 if (launchIntent != null) {
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-                    mContext.startActivity(launchIntent);
+                    startActivity(launchIntent, defaultActivity);
                 }
             } else if (view == mExpandActivityOverflowButton) {
                 mIsSelectingDefaultActivity = false;
@@ -630,6 +652,18 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
         private void notifyOnDismissListener() {
             if (mOnDismissListener != null) {
                 mOnDismissListener.onDismiss();
+            }
+        }
+
+        private void startActivity(Intent intent, ResolveInfo resolveInfo) {
+            try {
+                mContext.startActivity(intent);
+            } catch (RuntimeException re) {
+                CharSequence appLabel = resolveInfo.loadLabel(mContext.getPackageManager());
+                String message = mContext.getString(
+                        R.string.activitychooserview_choose_application_error, appLabel);
+                Log.e(LOG_TAG, message);
+                Toast.makeText(mContext, message, Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -803,10 +837,6 @@ public class ActivityChooserView extends ViewGroup implements ActivityChooserMod
 
         public int getHistorySize() {
             return mDataModel.getHistorySize();
-        }
-
-        public int getMaxActivityCount() {
-            return mMaxActivityCount;
         }
 
         public ActivityChooserModel getDataModel() {

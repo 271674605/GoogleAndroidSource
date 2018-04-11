@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 // These functions only support conversion of characters in the BMP
 // (Basic Multilingual Plane).
@@ -27,7 +27,7 @@ bool ConvertKeyCodeToText(ui::KeyboardCode key_code,
 // the character using the current keyboard layout. Returns true on success.
 // If an error occurs |error_msg| will be set to the error message, otherwise
 // it will be set to the empty string.
-bool ConvertCharToKeyCode(char16 key,
+bool ConvertCharToKeyCode(base::char16 key,
                           ui::KeyboardCode* key_code,
                           int *necessary_modifiers,
                           std::string* error_msg);

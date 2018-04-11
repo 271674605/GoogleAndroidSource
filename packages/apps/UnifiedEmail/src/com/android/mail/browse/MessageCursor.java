@@ -73,6 +73,10 @@ public class MessageCursor extends ObjectCursor<ConversationMessage> {
         return m;
     }
 
+    public Conversation getConversation() {
+        return mController != null ? mController.getConversation() : null;
+    }
+
     // Is the conversation starred?
     public boolean isConversationStarred() {
         int pos = -1;
@@ -99,6 +103,21 @@ public class MessageCursor extends ObjectCursor<ConversationMessage> {
         while (moveToPosition(++pos)) {
             getMessage().read = true;
         }
+    }
+
+    public ConversationMessage getMessageForId(long id) {
+        if (isClosed()) {
+            return null;
+        }
+
+        int pos = -1;
+        while (moveToPosition(++pos)) {
+            final ConversationMessage m = getMessage();
+            if (id == m.id) {
+                return m;
+            }
+        }
+        return null;
     }
 
     public int getStateHashCode() {
@@ -160,9 +179,9 @@ public class MessageCursor extends ObjectCursor<ConversationMessage> {
             }
             sb.append(String.format(
                     "[Message #%d hash=%s uri=%s id=%s serverId=%s from='%s' draftType=%d" +
-                    " isSending=%s read=%s starred=%s attUris=%s]\n",
+                    " sendingState=%s read=%s starred=%s attUris=%s]\n",
                     pos, m.getStateHashCode(), m.uri, m.id, m.serverId, m.getFrom(), m.draftType,
-                    m.isSending, m.read, m.starred, attUris));
+                    m.sendingState, m.read, m.starred, attUris));
         }
         return sb.toString();
     }

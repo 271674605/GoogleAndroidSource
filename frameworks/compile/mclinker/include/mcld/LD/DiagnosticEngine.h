@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_DIAGNOSTIC_ENGINE_H
-#define MCLD_DIAGNOSTIC_ENGINE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_DIAGNOSTICENGINE_H
+#define MCLD_LD_DIAGNOSTICENGINE_H
 #include <string>
 #include <llvm/Support/DataTypes.h>
 #include <mcld/LD/DiagnosticInfos.h>

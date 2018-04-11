@@ -1,14 +1,8 @@
 package org.bouncycastle.cms;
 
-import java.io.IOException;
-import java.security.Provider;
-import java.security.cert.CRLException;
-import java.security.cert.CertificateException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -37,16 +31,8 @@ import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
 import org.bouncycastle.cert.X509AttributeCertificateHolder;
 import org.bouncycastle.cert.X509CRLHolder;
 import org.bouncycastle.cert.X509CertificateHolder;
-// BEGIN android-removed
-// import org.bouncycastle.cert.jcajce.JcaX509CRLConverter;
-// import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
-// END android-removed
 import org.bouncycastle.util.CollectionStore;
 import org.bouncycastle.util.Store;
-import org.bouncycastle.x509.NoSuchStoreException;
-import org.bouncycastle.x509.X509CollectionStoreParameters;
-import org.bouncycastle.x509.X509Store;
-import org.bouncycastle.x509.X509V2AttributeCertificate;
 
 class CMSSignedHelper
 {
@@ -64,9 +50,7 @@ class CMSSignedHelper
 
     static
     {
-        // BEGIN android-removed
-        // addEntries(NISTObjectIdentifiers.dsa_with_sha224, "SHA224", "DSA");
-        // END android-removed
+        addEntries(NISTObjectIdentifiers.dsa_with_sha224, "SHA224", "DSA");
         addEntries(NISTObjectIdentifiers.dsa_with_sha256, "SHA256", "DSA");
         addEntries(NISTObjectIdentifiers.dsa_with_sha384, "SHA384", "DSA");
         addEntries(NISTObjectIdentifiers.dsa_with_sha512, "SHA512", "DSA");
@@ -83,24 +67,18 @@ class CMSSignedHelper
         // END android-removed
         addEntries(PKCSObjectIdentifiers.md5WithRSAEncryption, "MD5", "RSA");
         addEntries(PKCSObjectIdentifiers.sha1WithRSAEncryption, "SHA1", "RSA");
-        // BEGIN android-removed
-        // addEntries(PKCSObjectIdentifiers.sha224WithRSAEncryption, "SHA224", "RSA");
-        // END android-removed
+        addEntries(PKCSObjectIdentifiers.sha224WithRSAEncryption, "SHA224", "RSA");
         addEntries(PKCSObjectIdentifiers.sha256WithRSAEncryption, "SHA256", "RSA");
         addEntries(PKCSObjectIdentifiers.sha384WithRSAEncryption, "SHA384", "RSA");
         addEntries(PKCSObjectIdentifiers.sha512WithRSAEncryption, "SHA512", "RSA");
         addEntries(X9ObjectIdentifiers.ecdsa_with_SHA1, "SHA1", "ECDSA");
-        // BEGIN android-removed
-        // addEntries(X9ObjectIdentifiers.ecdsa_with_SHA224, "SHA224", "ECDSA");
-        // END android-removed
+        addEntries(X9ObjectIdentifiers.ecdsa_with_SHA224, "SHA224", "ECDSA");
         addEntries(X9ObjectIdentifiers.ecdsa_with_SHA256, "SHA256", "ECDSA");
         addEntries(X9ObjectIdentifiers.ecdsa_with_SHA384, "SHA384", "ECDSA");
         addEntries(X9ObjectIdentifiers.ecdsa_with_SHA512, "SHA512", "ECDSA");
         addEntries(X9ObjectIdentifiers.id_dsa_with_sha1, "SHA1", "DSA");
         addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_1, "SHA1", "ECDSA");
-        // BEGIN android-removed
-        // addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_224, "SHA224", "ECDSA");
-        // END android-removed
+        addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_224, "SHA224", "ECDSA");
         addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_256, "SHA256", "ECDSA");
         addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_384, "SHA384", "ECDSA");
         addEntries(EACObjectIdentifiers.id_TA_ECDSA_SHA_512, "SHA512", "ECDSA");
@@ -127,9 +105,7 @@ class CMSSignedHelper
         // END android-removed
         digestAlgs.put(PKCSObjectIdentifiers.md5.getId(), "MD5");
         digestAlgs.put(OIWObjectIdentifiers.idSHA1.getId(), "SHA1");
-        // BEGIN android-removed
-        // digestAlgs.put(NISTObjectIdentifiers.id_sha224.getId(), "SHA224");
-        // END android-removed
+        digestAlgs.put(NISTObjectIdentifiers.id_sha224.getId(), "SHA224");
         digestAlgs.put(NISTObjectIdentifiers.id_sha256.getId(), "SHA256");
         digestAlgs.put(NISTObjectIdentifiers.id_sha384.getId(), "SHA384");
         digestAlgs.put(NISTObjectIdentifiers.id_sha512.getId(), "SHA512");
@@ -142,30 +118,12 @@ class CMSSignedHelper
         // END android-removed
 
         digestAliases.put("SHA1", new String[] { "SHA-1" });
-        // BEGIN android-removed
-        // digestAliases.put("SHA224", new String[] { "SHA-224" });
-        // END android-removed
+        digestAliases.put("SHA224", new String[] { "SHA-224" });
         digestAliases.put("SHA256", new String[] { "SHA-256" });
         digestAliases.put("SHA384", new String[] { "SHA-384" });
         digestAliases.put("SHA512", new String[] { "SHA-512" });
     }
-    
-    /**
-     * Return the digest algorithm using one of the standard JCA string
-     * representations rather than the algorithm identifier (if possible).
-     */
-    String getDigestAlgName(
-        String digestAlgOID)
-    {
-        String algName = (String)digestAlgs.get(digestAlgOID);
 
-        if (algName != null)
-        {
-            return algName;
-        }
-
-        return digestAlgOID;
-    }
 
     /**
      * Return the digest encryption algorithm using one of the standard
@@ -184,97 +142,6 @@ class CMSSignedHelper
 
         return encryptionAlgOID;
     }
-
-    X509Store createAttributeStore(
-        String type,
-        Provider provider,
-        Store certStore)
-        throws NoSuchStoreException, CMSException
-    {
-        try
-        {
-            Collection certHldrs = certStore.getMatches(null);
-            List       certs = new ArrayList(certHldrs.size());
-
-            for (Iterator it = certHldrs.iterator(); it.hasNext();)
-            {
-                certs.add(new X509V2AttributeCertificate(((X509AttributeCertificateHolder)it.next()).getEncoded()));
-            }
-
-            return X509Store.getInstance(
-                         "AttributeCertificate/" +type, new X509CollectionStoreParameters(certs), provider);
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new CMSException("can't setup the X509Store", e);
-        }
-        catch (IOException e)
-        {
-            throw new CMSException("can't setup the X509Store", e);
-        }
-    }
-
-    // BEGIN android-removed
-    // X509Store createCertificateStore(
-    //     String type,
-    //     Provider provider,
-    //     Store certStore)
-    //     throws NoSuchStoreException, CMSException
-    // {
-    //     try
-    //     {
-    //         JcaX509CertificateConverter converter = new JcaX509CertificateConverter().setProvider(provider);
-    //         Collection certHldrs = certStore.getMatches(null);
-    //         List       certs = new ArrayList(certHldrs.size());
-    //
-    //         for (Iterator it = certHldrs.iterator(); it.hasNext();)
-    //         {
-    //             certs.add(converter.getCertificate((X509CertificateHolder)it.next()));
-    //         }
-    //
-    //         return X509Store.getInstance(
-    //                      "Certificate/" +type, new X509CollectionStoreParameters(certs), provider);
-    //     }
-    //     catch (IllegalArgumentException e)
-    //     {
-    //         throw new CMSException("can't setup the X509Store", e);
-    //     }
-    //     catch (CertificateException e)
-    //     {
-    //         throw new CMSException("can't setup the X509Store", e);
-    //     }
-    // }
-    //
-    // X509Store createCRLsStore(
-    //     String type,
-    //     Provider provider,
-    //     Store    crlStore)
-    //     throws NoSuchStoreException, CMSException
-    // {
-    //     try
-    //     {
-    //         JcaX509CRLConverter converter = new JcaX509CRLConverter().setProvider(provider);
-    //         Collection crlHldrs = crlStore.getMatches(null);
-    //         List       crls = new ArrayList(crlHldrs.size());
-    //
-    //         for (Iterator it = crlHldrs.iterator(); it.hasNext();)
-    //         {
-    //             crls.add(converter.getCRL((X509CRLHolder)it.next()));
-    //         }
-    //
-    //         return X509Store.getInstance(
-    //                      "CRL/" +type, new X509CollectionStoreParameters(crls), provider);
-    //     }
-    //     catch (IllegalArgumentException e)
-    //     {
-    //         throw new CMSException("can't setup the X509Store", e);
-    //     }
-    //     catch (CRLException e)
-    //     {
-    //         throw new CMSException("can't setup the X509Store", e);
-    //     }
-    // }
-    // END android-removed
 
     AlgorithmIdentifier fixAlgID(AlgorithmIdentifier algId)
     {

@@ -19,9 +19,10 @@
 namespace llvm {
 
 uint8_t *SectionMemoryManager::allocateDataSection(uintptr_t Size,
-                                                    unsigned Alignment,
-                                                    unsigned SectionID,
-                                                    bool IsReadOnly) {
+                                                   unsigned Alignment,
+                                                   unsigned SectionID,
+                                                   StringRef SectionName,
+                                                   bool IsReadOnly) {
   if (IsReadOnly)
     return allocateSection(RODataMem, Size, Alignment);
   return allocateSection(RWDataMem, Size, Alignment);
@@ -29,7 +30,8 @@ uint8_t *SectionMemoryManager::allocateDataSection(uintptr_t Size,
 
 uint8_t *SectionMemoryManager::allocateCodeSection(uintptr_t Size,
                                                    unsigned Alignment,
-                                                   unsigned SectionID) {
+                                                   unsigned SectionID,
+                                                   StringRef SectionName) {
   return allocateSection(CodeMem, Size, Alignment);
 }
 
@@ -69,15 +71,15 @@ uint8_t *SectionMemoryManager::allocateSection(MemoryGroup &MemGroup,
   //
   // FIXME: Initialize the Near member for each memory group to avoid
   // interleaving.
-  error_code ec;
+  std::error_code ec;
   sys::MemoryBlock MB = sys::Memory::allocateMappedMemory(RequiredSize,
                                                           &MemGroup.Near,
                                                           sys::Memory::MF_READ |
                                                             sys::Memory::MF_WRITE,
                                                           ec);
   if (ec) {
-    // FIXME: Add error propogation to the interface.
-    return NULL;
+    // FIXME: Add error propagation to the interface.
+    return nullptr;
   }
 
   // Save this address as the basis for our next request
@@ -103,7 +105,10 @@ uint8_t *SectionMemoryManager::allocateSection(MemoryGroup &MemGroup,
 bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
 {
   // FIXME: Should in-progress permissions be reverted if an error occurs?
-  error_code ec;
+  std::error_code ec;
+
+  // Don't allow free memory blocks to be used after setting protection flags.
+  CodeMem.FreeMem.clear();
 
   // Make code memory executable.
   ec = applyMemoryGroupPermissions(CodeMem,
@@ -114,6 +119,9 @@ bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
     }
     return true;
   }
+
+  // Don't allow free memory blocks to be used after setting protection flags.
+  RODataMem.FreeMem.clear();
 
   // Make read-only data memory read-only.
   ec = applyMemoryGroupPermissions(RODataMem,
@@ -135,19 +143,20 @@ bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
   return false;
 }
 
-error_code SectionMemoryManager::applyMemoryGroupPermissions(MemoryGroup &MemGroup,
-                                                             unsigned Permissions) {
+std::error_code
+SectionMemoryManager::applyMemoryGroupPermissions(MemoryGroup &MemGroup,
+                                                  unsigned Permissions) {
 
   for (int i = 0, e = MemGroup.AllocatedMem.size(); i != e; ++i) {
-      error_code ec;
-      ec = sys::Memory::protectMappedMemory(MemGroup.AllocatedMem[i],
-                                            Permissions);
-      if (ec) {
-        return ec;
-      }
+    std::error_code ec;
+    ec =
+        sys::Memory::protectMappedMemory(MemGroup.AllocatedMem[i], Permissions);
+    if (ec) {
+      return ec;
+    }
   }
 
-  return error_code::success();
+  return std::error_code();
 }
 
 void SectionMemoryManager::invalidateInstructionCache() {

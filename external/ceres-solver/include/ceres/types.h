@@ -40,12 +40,12 @@
 #include <string>
 
 #include "ceres/internal/port.h"
+#include "ceres/internal/disable_warnings.h"
 
 namespace ceres {
 
 // Basic integer types. These typedefs are in the Ceres namespace to avoid
 // conflicts with other packages having similar typedefs.
-typedef short int16;
 typedef int   int32;
 
 // Argument type used in interfaces that can optionally take ownership
@@ -102,19 +102,47 @@ enum PreconditionerType {
   // Block diagonal of the Gauss-Newton Hessian.
   JACOBI,
 
+  // Note: The following three preconditioners can only be used with
+  // the ITERATIVE_SCHUR solver. They are well suited for Structure
+  // from Motion problems.
+
   // Block diagonal of the Schur complement. This preconditioner may
   // only be used with the ITERATIVE_SCHUR solver.
   SCHUR_JACOBI,
 
   // Visibility clustering based preconditioners.
   //
-  // These preconditioners are well suited for Structure from Motion
-  // problems, particularly problems arising from community photo
-  // collections. These preconditioners use the visibility structure
-  // of the scene to determine the sparsity structure of the
-  // preconditioner. Requires SuiteSparse/CHOLMOD.
+  // The following two preconditioners use the visibility structure of
+  // the scene to determine the sparsity structure of the
+  // preconditioner. This is done using a clustering algorithm. The
+  // available visibility clustering algorithms are described below.
+  //
+  // Note: Requires SuiteSparse.
   CLUSTER_JACOBI,
   CLUSTER_TRIDIAGONAL
+};
+
+enum VisibilityClusteringType {
+  // Canonical views algorithm as described in
+  //
+  // "Scene Summarization for Online Image Collections", Ian Simon, Noah
+  // Snavely, Steven M. Seitz, ICCV 2007.
+  //
+  // This clustering algorithm can be quite slow, but gives high
+  // quality clusters. The original visibility based clustering paper
+  // used this algorithm.
+  CANONICAL_VIEWS,
+
+  // The classic single linkage algorithm. It is extremely fast as
+  // compared to CANONICAL_VIEWS, but can give slightly poorer
+  // results. For problems with large number of cameras though, this
+  // is generally a pretty good option.
+  //
+  // If you are using SCHUR_JACOBI preconditioner and have SuiteSparse
+  // available, CLUSTER_JACOBI and CLUSTER_TRIDIAGONAL in combination
+  // with the SINGLE_LINKAGE algorithm will generally give better
+  // results.
+  SINGLE_LINKAGE
 };
 
 enum SparseLinearAlgebraLibraryType {
@@ -122,33 +150,19 @@ enum SparseLinearAlgebraLibraryType {
   // minimum degree ordering.
   SUITE_SPARSE,
 
-  // A lightweight replacment for SuiteSparse.
-  CX_SPARSE
+  // A lightweight replacment for SuiteSparse, which does not require
+  // a LAPACK/BLAS implementation. Consequently, its performance is
+  // also a bit lower than SuiteSparse.
+  CX_SPARSE,
+
+  // Eigen's sparse linear algebra routines. In particular Ceres uses
+  // the Simplicial LDLT routines.
+  EIGEN_SPARSE
 };
 
 enum DenseLinearAlgebraLibraryType {
   EIGEN,
   LAPACK
-};
-
-enum LinearSolverTerminationType {
-  // Termination criterion was met. For factorization based solvers
-  // the tolerance is assumed to be zero. Any user provided values are
-  // ignored.
-  TOLERANCE,
-
-  // Solver ran for max_num_iterations and terminated before the
-  // termination tolerance could be satified.
-  MAX_ITERATIONS,
-
-  // Solver is stuck and further iterations will not result in any
-  // measurable progress.
-  STAGNATION,
-
-  // Solver failed. Solver was terminated due to numerical errors. The
-  // exact cause of failure depends on the particular solver being
-  // used.
-  FAILURE
 };
 
 // Logging options
@@ -239,7 +253,7 @@ enum LineSearchDirectionType {
 // details see Numerical Optimization by Nocedal & Wright.
 enum NonlinearConjugateGradientType {
   FLETCHER_REEVES,
-  POLAK_RIBIRERE,
+  POLAK_RIBIERE,
   HESTENES_STIEFEL,
 };
 
@@ -293,41 +307,42 @@ enum DoglegType {
   SUBSPACE_DOGLEG
 };
 
-enum SolverTerminationType {
-  // The minimizer did not run at all; usually due to errors in the user's
-  // Problem or the solver options.
-  DID_NOT_RUN,
+enum TerminationType {
+  // Minimizer terminated because one of the convergence criterion set
+  // by the user was satisfied.
+  //
+  // 1.  (new_cost - old_cost) < function_tolerance * old_cost;
+  // 2.  max_i |gradient_i| < gradient_tolerance
+  // 3.  |step|_2 <= parameter_tolerance * ( |x|_2 +  parameter_tolerance)
+  //
+  // The user's parameter blocks will be updated with the solution.
+  CONVERGENCE,
 
-  // The solver ran for maximum number of iterations specified by the
-  // user, but none of the convergence criterion specified by the user
-  // were met.
+  // The solver ran for maximum number of iterations or maximum amount
+  // of time specified by the user, but none of the convergence
+  // criterion specified by the user were met. The user's parameter
+  // blocks will be updated with the solution found so far.
   NO_CONVERGENCE,
 
-  // Minimizer terminated because
-  //  (new_cost - old_cost) < function_tolerance * old_cost;
-  FUNCTION_TOLERANCE,
-
-  // Minimizer terminated because
-  // max_i |gradient_i| < gradient_tolerance * max_i|initial_gradient_i|
-  GRADIENT_TOLERANCE,
-
-  // Minimized terminated because
-  //  |step|_2 <= parameter_tolerance * ( |x|_2 +  parameter_tolerance)
-  PARAMETER_TOLERANCE,
-
-  // The minimizer terminated because it encountered a numerical error
-  // that it could not recover from.
-  NUMERICAL_FAILURE,
+  // The minimizer terminated because of an error.  The user's
+  // parameter blocks will not be updated.
+  FAILURE,
 
   // Using an IterationCallback object, user code can control the
   // minimizer. The following enums indicate that the user code was
   // responsible for termination.
+  //
+  // Minimizer terminated successfully because a user
+  // IterationCallback returned SOLVER_TERMINATE_SUCCESSFULLY.
+  //
+  // The user's parameter blocks will be updated with the solution.
+  USER_SUCCESS,
 
-  // User's IterationCallback returned SOLVER_ABORT.
-  USER_ABORT,
-
-  // User's IterationCallback returned SOLVER_TERMINATE_SUCCESSFULLY
-  USER_SUCCESS
+  // Minimizer terminated because because a user IterationCallback
+  // returned SOLVER_ABORT.
+  //
+  // The user's parameter blocks will not be updated.
+  USER_FAILURE
 };
 
 // Enums used by the IterationCallback instances to indicate to the
@@ -370,9 +385,9 @@ enum DumpFormatType {
   TEXTFILE
 };
 
-// For SizedCostFunction and AutoDiffCostFunction, DYNAMIC can be specified for
-// the number of residuals. If specified, then the number of residuas for that
-// cost function can vary at runtime.
+// For SizedCostFunction and AutoDiffCostFunction, DYNAMIC can be
+// specified for the number of residuals. If specified, then the
+// number of residuas for that cost function can vary at runtime.
 enum DimensionType {
   DYNAMIC = -1
 };
@@ -390,74 +405,83 @@ enum LineSearchInterpolationType {
 
 enum CovarianceAlgorithmType {
   DENSE_SVD,
-  SPARSE_CHOLESKY,
-  SPARSE_QR
+  SUITE_SPARSE_QR,
+  EIGEN_SPARSE_QR
 };
 
-const char* LinearSolverTypeToString(LinearSolverType type);
-bool StringToLinearSolverType(string value, LinearSolverType* type);
+CERES_EXPORT const char* LinearSolverTypeToString(
+    LinearSolverType type);
+CERES_EXPORT bool StringToLinearSolverType(string value,
+                                           LinearSolverType* type);
 
-const char* PreconditionerTypeToString(PreconditionerType type);
-bool StringToPreconditionerType(string value, PreconditionerType* type);
+CERES_EXPORT const char* PreconditionerTypeToString(PreconditionerType type);
+CERES_EXPORT bool StringToPreconditionerType(string value,
+                                             PreconditionerType* type);
 
-const char* SparseLinearAlgebraLibraryTypeToString(
+CERES_EXPORT const char* VisibilityClusteringTypeToString(
+    VisibilityClusteringType type);
+CERES_EXPORT bool StringToVisibilityClusteringType(string value,
+                                      VisibilityClusteringType* type);
+
+CERES_EXPORT const char* SparseLinearAlgebraLibraryTypeToString(
     SparseLinearAlgebraLibraryType type);
-bool StringToSparseLinearAlgebraLibraryType(
+CERES_EXPORT bool StringToSparseLinearAlgebraLibraryType(
     string value,
     SparseLinearAlgebraLibraryType* type);
 
-const char* DenseLinearAlgebraLibraryTypeToString(
+CERES_EXPORT const char* DenseLinearAlgebraLibraryTypeToString(
     DenseLinearAlgebraLibraryType type);
-bool StringToDenseLinearAlgebraLibraryType(
+CERES_EXPORT bool StringToDenseLinearAlgebraLibraryType(
     string value,
     DenseLinearAlgebraLibraryType* type);
 
-const char* TrustRegionStrategyTypeToString(TrustRegionStrategyType type);
-bool StringToTrustRegionStrategyType(string value,
+CERES_EXPORT const char* TrustRegionStrategyTypeToString(
+    TrustRegionStrategyType type);
+CERES_EXPORT bool StringToTrustRegionStrategyType(string value,
                                      TrustRegionStrategyType* type);
 
-const char* DoglegTypeToString(DoglegType type);
-bool StringToDoglegType(string value, DoglegType* type);
+CERES_EXPORT const char* DoglegTypeToString(DoglegType type);
+CERES_EXPORT bool StringToDoglegType(string value, DoglegType* type);
 
-const char* MinimizerTypeToString(MinimizerType type);
-bool StringToMinimizerType(string value, MinimizerType* type);
+CERES_EXPORT const char* MinimizerTypeToString(MinimizerType type);
+CERES_EXPORT bool StringToMinimizerType(string value, MinimizerType* type);
 
-const char* LineSearchDirectionTypeToString(LineSearchDirectionType type);
-bool StringToLineSearchDirectionType(string value,
+CERES_EXPORT const char* LineSearchDirectionTypeToString(
+    LineSearchDirectionType type);
+CERES_EXPORT bool StringToLineSearchDirectionType(string value,
                                      LineSearchDirectionType* type);
 
-const char* LineSearchTypeToString(LineSearchType type);
-bool StringToLineSearchType(string value, LineSearchType* type);
+CERES_EXPORT const char* LineSearchTypeToString(LineSearchType type);
+CERES_EXPORT bool StringToLineSearchType(string value, LineSearchType* type);
 
-const char* NonlinearConjugateGradientTypeToString(
+CERES_EXPORT const char* NonlinearConjugateGradientTypeToString(
     NonlinearConjugateGradientType type);
-bool StringToNonlinearConjugateGradientType(
+CERES_EXPORT bool StringToNonlinearConjugateGradientType(
     string value,
     NonlinearConjugateGradientType* type);
 
-const char* LineSearchInterpolationTypeToString(
+CERES_EXPORT const char* LineSearchInterpolationTypeToString(
     LineSearchInterpolationType type);
-bool StringToLineSearchInterpolationType(
+CERES_EXPORT bool StringToLineSearchInterpolationType(
     string value,
     LineSearchInterpolationType* type);
 
-const char* CovarianceAlgorithmTypeToString(
+CERES_EXPORT const char* CovarianceAlgorithmTypeToString(
     CovarianceAlgorithmType type);
-bool StringToCovarianceAlgorithmType(
+CERES_EXPORT bool StringToCovarianceAlgorithmType(
     string value,
     CovarianceAlgorithmType* type);
 
-const char* LinearSolverTerminationTypeToString(
-    LinearSolverTerminationType type);
+CERES_EXPORT const char* TerminationTypeToString(TerminationType type);
 
-const char* SolverTerminationTypeToString(SolverTerminationType type);
-
-bool IsSchurType(LinearSolverType type);
-bool IsSparseLinearAlgebraLibraryTypeAvailable(
+CERES_EXPORT bool IsSchurType(LinearSolverType type);
+CERES_EXPORT bool IsSparseLinearAlgebraLibraryTypeAvailable(
     SparseLinearAlgebraLibraryType type);
-bool IsDenseLinearAlgebraLibraryTypeAvailable(
+CERES_EXPORT bool IsDenseLinearAlgebraLibraryTypeAvailable(
     DenseLinearAlgebraLibraryType type);
 
 }  // namespace ceres
+
+#include "ceres/internal/reenable_warnings.h"
 
 #endif  // CERES_PUBLIC_TYPES_H_

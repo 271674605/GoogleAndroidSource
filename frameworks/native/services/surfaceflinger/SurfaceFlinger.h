@@ -38,6 +38,7 @@
 #include <binder/IMemory.h>
 
 #include <ui/PixelFormat.h>
+#include <ui/mat4.h>
 
 #include <gui/ISurfaceComposer.h>
 #include <gui/ISurfaceComposerClient.h>
@@ -137,7 +138,7 @@ private:
     friend class Client;
     friend class DisplayEventConnection;
     friend class Layer;
-    friend class SurfaceTextureLayer;
+    friend class MonitoredProducer;
 
     // This value is specified in number of frames.  Log frame stats at most
     // every half hour.
@@ -169,6 +170,7 @@ private:
         Rect viewport;
         Rect frame;
         uint8_t orientation;
+        uint32_t width, height;
         String8 displayName;
         bool isSecure;
     };
@@ -201,13 +203,18 @@ private:
     virtual sp<IDisplayEventConnection> createDisplayEventConnection();
     virtual status_t captureScreen(const sp<IBinder>& display,
             const sp<IGraphicBufferProducer>& producer,
-            uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ);
-    // called when screen needs to turn off
-    virtual void blank(const sp<IBinder>& display);
-    // called when screen is turning back on
-    virtual void unblank(const sp<IBinder>& display);
-    virtual status_t getDisplayInfo(const sp<IBinder>& display, DisplayInfo* info);
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform, ISurfaceComposer::Rotation rotation);
+    virtual status_t getDisplayStats(const sp<IBinder>& display,
+            DisplayStatInfo* stats);
+    virtual status_t getDisplayConfigs(const sp<IBinder>& display,
+            Vector<DisplayInfo>* configs);
+    virtual int getActiveConfig(const sp<IBinder>& display);
+    virtual void setPowerMode(const sp<IBinder>& display, int mode);
+    virtual status_t setActiveConfig(const sp<IBinder>& display, int id);
+    virtual status_t clearAnimationFrameStats();
+    virtual status_t getAnimationFrameStats(FrameStats* outStats) const;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -235,10 +242,10 @@ private:
 
     // called on the main thread in response to initializeDisplays()
     void onInitializeDisplays();
-    // called on the main thread in response to blank()
-    void onScreenReleased(const sp<const DisplayDevice>& hw);
-    // called on the main thread in response to unblank()
-    void onScreenAcquired(const sp<const DisplayDevice>& hw);
+    // called on the main thread in response to setActiveConfig()
+    void setActiveConfigInternal(const sp<DisplayDevice>& hw, int mode);
+    // called on the main thread in response to setPowerMode()
+    void setPowerModeInternal(const sp<DisplayDevice>& hw, int mode);
 
     void handleMessageTransaction();
     void handleMessageInvalidate();
@@ -246,6 +253,8 @@ private:
 
     void handleTransaction(uint32_t transactionFlags);
     void handleTransactionLocked(uint32_t transactionFlags);
+
+    void updateCursorAsync();
 
     /* handlePageFilp: this is were we latch a new buffer
      * if available and compute the dirty region.
@@ -304,23 +313,20 @@ private:
 
     void renderScreenImplLocked(
             const sp<const DisplayDevice>& hw,
-            uint32_t reqWidth, uint32_t reqHeight,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
-            bool yswap);
+            bool yswap, bool useIdentityTransform, Transform::orientation_flags rotation);
 
     status_t captureScreenImplLocked(
             const sp<const DisplayDevice>& hw,
             const sp<IGraphicBufferProducer>& producer,
-            uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ);
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform, Transform::orientation_flags rotation);
 
     /* ------------------------------------------------------------------------
      * EGL
      */
-    static status_t selectConfigForAttribute(EGLDisplay dpy,
-        EGLint const* attrs, EGLint attribute, EGLint value, EGLConfig* outConfig);
-    static status_t selectEGLConfig(EGLDisplay disp, EGLint visualId,
-        EGLint renderableType, EGLConfig* config);
     size_t getMaxTextureSize() const;
     size_t getMaxViewportDims() const;
 
@@ -371,7 +377,10 @@ private:
     void doComposition();
     void doDebugFlashRegions();
     void doDisplayComposition(const sp<const DisplayDevice>& hw, const Region& dirtyRegion);
-    void doComposeSurfaces(const sp<const DisplayDevice>& hw, const Region& dirty);
+
+    // compose surfaces for display hw. this fails if using GL and the surface
+    // has been destroyed and is no longer valid.
+    bool doComposeSurfaces(const sp<const DisplayDevice>& hw, const Region& dirty);
 
     void postFramebuffer();
     void drawWormhole(const sp<const DisplayDevice>& hw, const Region& region) const;
@@ -431,9 +440,7 @@ private:
     sp<EventThread> mSFEventThread;
     sp<EventControlThread> mEventControlThread;
     EGLContext mEGLContext;
-    EGLConfig mEGLConfig;
     EGLDisplay mEGLDisplay;
-    EGLint mEGLNativeVisualId;
     sp<IBinder> mBuiltinDisplays[DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES];
 
     // Can only accessed from the main thread, these members
@@ -478,6 +485,9 @@ private:
 
     Daltonizer mDaltonizer;
     bool mDaltonize;
+
+    mat4 mColorMatrix;
+    bool mHasColorMatrix;
 };
 
 }; // namespace android

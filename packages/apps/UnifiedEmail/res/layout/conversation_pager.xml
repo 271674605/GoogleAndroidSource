@@ -17,9 +17,8 @@
 -->
 <com.android.mail.browse.ConversationPager
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/conversation_pane"
+    android:id="@+id/conversation_pager"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:visibility="gone">
+    android:layout_height="match_parent">
 
 </com.android.mail.browse.ConversationPager>

@@ -2,7 +2,7 @@ page.title=Dalvik Executable Format
 @jd:body
 
 <!--
-    Copyright 2010 The Android Open Source Project
+    Copyright 2013 The Android Open Source Project
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@ page.title=Dalvik Executable Format
     See the License for the specific language governing permissions and
     limitations under the License.
 -->
-<p>Copyright &copy; 2007 The Android Open Source Project
-
 <p>This document describes the layout and contents of <code>.dex</code>
 files, which are used to hold a set of class definitions and their associated
 adjunct data.</p>

@@ -3,8 +3,7 @@
 # found in the LICENSE file.
 
 """Base class representing GTest test packages."""
-
-import logging
+# pylint: disable=R0201
 
 
 class TestPackage(object):
@@ -17,55 +16,56 @@ class TestPackage(object):
   def __init__(self, suite_name):
     self.suite_name = suite_name
 
-  def ClearApplicationState(self, adb):
+  def ClearApplicationState(self, device):
     """Clears the application state.
 
     Args:
-      adb: Instance of AndroidCommands.
+      device: Instance of DeviceUtils.
     """
     raise NotImplementedError('Method must be overriden.')
 
-  def CreateCommandLineFileOnDevice(self, adb, test_filter, test_arguments):
+  def CreateCommandLineFileOnDevice(self, device, test_filter, test_arguments):
     """Creates a test runner script and pushes to the device.
 
     Args:
-      adb: Instance of AndroidCommands.
+      device: Instance of DeviceUtils.
       test_filter: A test_filter flag.
       test_arguments: Additional arguments to pass to the test binary.
     """
     raise NotImplementedError('Method must be overriden.')
 
-  def GetAllTests(self, adb):
+  def GetAllTests(self, device):
     """Returns a list of all tests available in the test suite.
 
     Args:
-      adb: Instance of AndroidCommands.
+      device: Instance of DeviceUtils.
     """
     raise NotImplementedError('Method must be overriden.')
 
-  def GetGTestReturnCode(self, adb):
+  def GetGTestReturnCode(self, _device):
     return None
 
-  def SpawnTestProcess(self, adb):
+  def SpawnTestProcess(self, device):
     """Spawn the test process.
 
     Args:
-      adb: Instance of AndroidCommands.
+      device: Instance of DeviceUtils.
 
     Returns:
       An instance of pexpect spawn class.
     """
     raise NotImplementedError('Method must be overriden.')
 
-  def Install(self, adb):
+  def Install(self, device):
     """Install the test package to the device.
 
     Args:
-      adb: Instance of AndroidCommands.
+      device: Instance of DeviceUtils.
     """
     raise NotImplementedError('Method must be overriden.')
 
-  def _ParseGTestListTests(self, raw_list):
+  @staticmethod
+  def _ParseGTestListTests(raw_list):
     """Parses a raw test list as provided by --gtest_list_tests.
 
     Args:

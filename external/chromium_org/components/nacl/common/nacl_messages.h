@@ -66,6 +66,11 @@ IPC_MESSAGE_CONTROL0(NaClProcessMsg_StopBroker)
 IPC_SYNC_MESSAGE_CONTROL1_1(NaClProcessMsg_AttachDebugExceptionHandler,
                             std::string, /* Internal process info */
                             bool /* Result */)
+
+// Notify the browser process that the NaCl process has bound the given
+// TCP port number to use for the GDB debug stub.
+IPC_MESSAGE_CONTROL1(NaClProcessHostMsg_DebugStubPortSelected,
+                     uint16_t /* debug_stub_port */)
 #endif
 
 // Used by the NaCl process to query a database in the browser.  The database
@@ -90,5 +95,8 @@ IPC_SYNC_MESSAGE_CONTROL2_2(NaClProcessMsg_ResolveFileToken,
 
 // Notify the browser process that the server side of the PPAPI channel was
 // created successfully.
-IPC_MESSAGE_CONTROL1(NaClProcessHostMsg_PpapiChannelCreated,
-                     IPC::ChannelHandle /* channel_handle */)
+IPC_MESSAGE_CONTROL4(NaClProcessHostMsg_PpapiChannelsCreated,
+                     IPC::ChannelHandle, /* browser_channel_handle */
+                     IPC::ChannelHandle, /* ppapi_renderer_channel_handle */
+                     IPC::ChannelHandle, /* trusted_renderer_channel_handle */
+                     IPC::ChannelHandle /* manifest_service_channel_handle */)

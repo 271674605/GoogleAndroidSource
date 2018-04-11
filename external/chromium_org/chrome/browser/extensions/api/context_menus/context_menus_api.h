@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 namespace extensions {
 
-class ContextMenusCreateFunction : public SyncExtensionFunction {
+class ContextMenusCreateFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contextMenus.create", CONTEXTMENUS_CREATE)
 
@@ -17,10 +17,10 @@ class ContextMenusCreateFunction : public SyncExtensionFunction {
   virtual ~ContextMenusCreateFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ContextMenusUpdateFunction : public SyncExtensionFunction {
+class ContextMenusUpdateFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contextMenus.update", CONTEXTMENUS_UPDATE)
 
@@ -28,10 +28,10 @@ class ContextMenusUpdateFunction : public SyncExtensionFunction {
   virtual ~ContextMenusUpdateFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ContextMenusRemoveFunction : public SyncExtensionFunction {
+class ContextMenusRemoveFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contextMenus.remove", CONTEXTMENUS_REMOVE)
 
@@ -39,10 +39,10 @@ class ContextMenusRemoveFunction : public SyncExtensionFunction {
   virtual ~ContextMenusRemoveFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ContextMenusRemoveAllFunction : public SyncExtensionFunction {
+class ContextMenusRemoveAllFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contextMenus.removeAll", CONTEXTMENUS_REMOVEALL)
 
@@ -50,7 +50,7 @@ class ContextMenusRemoveAllFunction : public SyncExtensionFunction {
   virtual ~ContextMenusRemoveAllFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

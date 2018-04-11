@@ -19,6 +19,8 @@
 #include "rsdCore.h"
 #include "rsdAllocation.h"
 #include "rsdBcc.h"
+#include "rsdElement.h"
+#include "rsdType.h"
 #ifndef RS_COMPATIBILITY_LIB
     #include "MemChunk.h"
     #include "rsdGL.h"
@@ -79,7 +81,9 @@ static RsdHalFunctions FunctionTable = {
         rsdScriptSetGlobalVarWithElemDims,
         rsdScriptSetGlobalBind,
         rsdScriptSetGlobalObj,
-        rsdScriptDestroy
+        rsdScriptDestroy,
+        rsdScriptInvokeForEachMulti,
+        rsdScriptUpdateCachedObject
     },
 
     {
@@ -105,7 +109,8 @@ static RsdHalFunctions FunctionTable = {
         rsdAllocationData3D_alloc,
         rsdAllocationElementData1D,
         rsdAllocationElementData2D,
-        rsdAllocationGenerateMipmaps
+        rsdAllocationGenerateMipmaps,
+        rsdAllocationUpdateCachedObject
     },
 
 
@@ -148,7 +153,8 @@ static RsdHalFunctions FunctionTable = {
 
     {
         rsdSamplerInit,
-        rsdSamplerDestroy
+        rsdSamplerDestroy,
+        rsdSamplerUpdateCachedObject
     },
 
     {
@@ -162,10 +168,23 @@ static RsdHalFunctions FunctionTable = {
         rsdScriptGroupSetInput,
         rsdScriptGroupSetOutput,
         rsdScriptGroupExecute,
-        rsdScriptGroupDestroy
-    }
+        rsdScriptGroupDestroy,
+        NULL
+    },
 
+    {
+        rsdTypeInit,
+        rsdTypeDestroy,
+        rsdTypeUpdateCachedObject
+    },
 
+    {
+        rsdElementInit,
+        rsdElementDestroy,
+        rsdElementUpdateCachedObject
+    },
+
+    NULL // finish
 };
 
 extern const RsdCpuReference::CpuSymbol * rsdLookupRuntimeStub(Context * pContext, char const* name);
@@ -190,6 +209,7 @@ extern "C" bool rsdHalInit(RsContext c, uint32_t version_major,
                                           &rsdLookupRuntimeStub, &LookupScript);
     if (!dc->mCpuRef) {
         ALOGE("RsdCpuReference::create for driver hal failed.");
+        rsc->mHal.drv = NULL;
         free(dc);
         return false;
     }
@@ -230,6 +250,7 @@ void SetPriority(const Context *rsc, int32_t priority) {
 void Shutdown(Context *rsc) {
     RsdHal *dc = (RsdHal *)rsc->mHal.drv;
     delete dc->mCpuRef;
+    free(dc);
     rsc->mHal.drv = NULL;
 }
 

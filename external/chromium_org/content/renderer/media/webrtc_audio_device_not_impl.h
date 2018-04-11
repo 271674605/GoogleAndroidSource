@@ -58,10 +58,8 @@ class CONTENT_EXPORT WebRtcAudioDeviceNotImpl
                                    uint16_t volume_right) OVERRIDE;
   virtual int32_t WaveOutVolume(uint16_t* volume_left,
                                 uint16_t* volume_right) const OVERRIDE;
-  virtual int32_t SpeakerIsAvailable(bool* available) OVERRIDE;
   virtual int32_t InitSpeaker() OVERRIDE;
   virtual bool SpeakerIsInitialized() const OVERRIDE;
-  virtual int32_t MicrophoneIsAvailable(bool* available) OVERRIDE;
   virtual int32_t InitMicrophone() OVERRIDE;
   virtual bool MicrophoneIsInitialized() const OVERRIDE;
   virtual int32_t SpeakerVolumeIsAvailable(bool* available) OVERRIDE;
@@ -106,6 +104,8 @@ class CONTENT_EXPORT WebRtcAudioDeviceNotImpl
   virtual int32_t ResetAudioDevice() OVERRIDE;
   virtual int32_t SetLoudspeakerStatus(bool enable) OVERRIDE;
   virtual int32_t GetLoudspeakerStatus(bool* enabled) const OVERRIDE;
+  virtual int32_t SetAGC(bool enable) OVERRIDE;
+  virtual bool AGC() const OVERRIDE;
 
  protected:
   virtual ~WebRtcAudioDeviceNotImpl() {};

@@ -13,6 +13,8 @@
 #if defined(__APPLE__)
 #undef FloatToConvolutionFixed
 #undef ConvolutionFixedToFloat
+#undef FloatToFixed
+#undef FixedToFloat
 #endif
 
 // Represents a filter in one dimension. Each output pixel has one entry in this
@@ -197,7 +199,7 @@ SK_API void BGRAConvolve2D(const unsigned char* sourceData,
     const SkConvolutionFilter1D& yfilter,
     int outputByteRowStride,
     unsigned char* output,
-    SkConvolutionProcs* convolveProcs,
+    const SkConvolutionProcs&,
     bool useSimdIfPossible);
 
 #endif  // SK_CONVOLVER_H

@@ -19,10 +19,13 @@ import com.android.cts.tradefed.build.CtsBuildHelper;
 import com.android.ddmlib.Log;
 import com.android.ddmlib.testrunner.TestIdentifier;
 import com.android.tradefed.build.IBuildInfo;
+import com.android.tradefed.config.ConfigurationException;
 import com.android.tradefed.device.DeviceNotAvailableException;
 import com.android.tradefed.device.ITestDevice;
 import com.android.tradefed.result.ITestInvocationListener;
 import com.android.tradefed.testtype.DeviceTestResult.RuntimeDeviceNotAvailableException;
+import com.android.tradefed.testtype.IAbi;
+import com.android.tradefed.testtype.IAbiReceiver;
 import com.android.tradefed.testtype.IBuildReceiver;
 import com.android.tradefed.testtype.IDeviceTest;
 import com.android.tradefed.testtype.IRemoteTest;
@@ -57,8 +60,15 @@ public class JarHostTest implements IDeviceTest, IRemoteTest, IBuildReceiver, Te
     private String mRunName;
     private CtsBuildHelper mCtsBuild = null;
     private IBuildInfo mBuildInfo = null;
-
+    private IAbi mAbi;
     private ClassLoader mClassLoader;
+
+    /**
+     * @param abi the ABI to run the test on
+     */
+    public void setAbi(IAbi abi) {
+        mAbi = abi;
+    }
 
     /**
      * {@inheritDoc}
@@ -131,7 +141,7 @@ public class JarHostTest implements IDeviceTest, IRemoteTest, IBuildReceiver, Te
      * Tests that take longer than this amount will be failed with a {@link TestTimeoutException}
      * as the cause.
      *
-     * @param testTimeout
+     * @param testTimeoutMs
      */
     void setTimeout(long testTimeoutMs) {
         mTimeoutMs = testTimeoutMs;
@@ -199,6 +209,9 @@ public class JarHostTest implements IDeviceTest, IRemoteTest, IBuildReceiver, Te
             com.android.hosttest.DeviceTest deviceTest = (com.android.hosttest.DeviceTest)junitTest;
             deviceTest.setDevice(getDevice().getIDevice());
             deviceTest.setTestAppPath(mCtsBuild.getTestCasesDir().getAbsolutePath());
+        }
+        if (junitTest instanceof IAbiReceiver) {
+            ((IAbiReceiver)junitTest).setAbi(mAbi);
         }
         if (junitTest instanceof IBuildReceiver) {
             ((IBuildReceiver)junitTest).setBuild(mBuildInfo);

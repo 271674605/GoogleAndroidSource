@@ -13,6 +13,7 @@
 #include "extensions/common/user_script.h"
 
 class GURL;
+struct ExtensionMsg_ExecuteCode_Params;
 
 namespace base {
 class ListValue;
@@ -49,10 +50,29 @@ class ScriptExecutor {
     ALL_FRAMES,
   };
 
+  // Whether to insert the script in about: frames when its origin matches
+  // the extension's host permissions.
+  enum MatchAboutBlank {
+    DONT_MATCH_ABOUT_BLANK,
+    MATCH_ABOUT_BLANK,
+  };
+
   // The type of world to inject into (main world, or its own isolated world).
   enum WorldType {
     MAIN_WORLD,
     ISOLATED_WORLD,
+  };
+
+  // The type of process the target is.
+  enum ProcessType {
+    DEFAULT_PROCESS,
+    WEB_VIEW_PROCESS,
+  };
+
+  // The type of result the caller is interested in.
+  enum ResultType {
+    NO_RESULT,
+    JSON_SERIALIZED_RESULT,
   };
 
   // Callback from ExecuteScript. The arguments are (error, on_page_id, on_url,
@@ -71,12 +91,21 @@ class ScriptExecutor {
                      ScriptType script_type,
                      const std::string& code,
                      FrameScope frame_scope,
+                     MatchAboutBlank match_about_blank,
                      UserScript::RunLocation run_at,
                      WorldType world_type,
-                     bool is_web_view,
+                     ProcessType process_type,
+                     const GURL& webview_src,
+                     const GURL& file_url,
+                     bool user_gesture,
+                     ResultType result_type,
                      const ExecuteScriptCallback& callback);
 
  private:
+  // Called upon a request being given to execute the script.
+  void ExecuteScriptHelper(scoped_ptr<ExtensionMsg_ExecuteCode_Params> params,
+                           const ExecuteScriptCallback& callback);
+
   // The next value to use for request_id in ExtensionMsg_ExecuteCode_Params.
   int next_request_id_;
 

@@ -252,6 +252,9 @@ TARGET_ARCH_ABI
        x86
             For i686
 
+       x86_64
+            For x86-64
+
        mips
             For mips32 (r1)
 
@@ -774,8 +777,13 @@ LOCAL_EXPORT_C_INCLUDES
 >    that are provided by module 'foo'.
 
 - - - -
+LOCAL_EXPORT_LDFLAGS
+>    Same as LOCAL_EXPORT_CFLAGS, but for linker flags.
+
+- - - -
 LOCAL_EXPORT_LDLIBS
->    Same as LOCAL_EXPORT_CFLAGS, but for linker flags. Note that the
+>    Same as LOCAL_EXPORT_CFLAGS, but for passing the name of specific
+>    system libraries with the '`-l`' prefix. Note that the
 >    imported linker flags will be appended to your module's LOCAL_LDLIBS
 >    though, due to the way Unix linkers work.
 >

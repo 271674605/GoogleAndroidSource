@@ -13,6 +13,7 @@
 #include "url/gurl.h"
 
 namespace net {
+class HttpResponseHeaders;
 class IOBuffer;
 }
 
@@ -36,6 +37,7 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
     STREAM_HAS_DATA,
     STREAM_COMPLETE,
     STREAM_EMPTY,
+    STREAM_ABORTED,
   };
 
   // Creates a stream.
@@ -57,6 +59,10 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   // Removes the write observer.  |observer| must be the current observer.
   void RemoveWriteObserver(StreamWriteObserver* observer);
 
+  // Stops accepting new data, clears all buffer, unregisters this stream from
+  // |registry_| and make coming ReadRawData() calls return STREAM_ABORTED.
+  void Abort();
+
   // Adds the data in |buffer| to the stream.  Takes ownership of |buffer|.
   void AddData(scoped_refptr<net::IOBuffer> buffer, size_t size);
   // Adds data of |size| at |data| to the stream. This method creates a copy
@@ -72,14 +78,21 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   // and STREAM_COMPLETE if the stream is finalized and all data has been read.
   StreamState ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
 
-  scoped_ptr<StreamHandle> CreateHandle(const GURL& original_url,
-                                        const std::string& mime_type);
+  scoped_ptr<StreamHandle> CreateHandle(
+      const GURL& original_url,
+      const std::string& mime_type,
+      scoped_refptr<net::HttpResponseHeaders> response_headers);
   void CloseHandle();
 
   // Indicates whether there is space in the buffer to add more data.
   bool can_add_data() const { return can_add_data_; }
 
   const GURL& url() const { return url_; }
+
+  // For StreamRegistry to remember the last memory usage reported to it.
+  size_t last_total_buffered_bytes() const {
+    return last_total_buffered_bytes_;
+  }
 
  private:
   friend class base::RefCountedThreadSafe<Stream>;
@@ -89,13 +102,25 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   void OnSpaceAvailable();
   void OnDataAvailable();
 
-  size_t data_bytes_read_;
+  // Clears |data_| and related variables.
+  void ClearBuffer();
+
   bool can_add_data_;
 
   GURL url_;
 
+  // Buffer for storing data read from |reader_| but not yet read out from this
+  // Stream by ReadRawData() method.
   scoped_refptr<net::IOBuffer> data_;
+  // Number of bytes read from |reader_| into |data_| including bytes already
+  // read out.
   size_t data_length_;
+  // Number of bytes in |data_| that are already read out.
+  size_t data_bytes_read_;
+
+  // Last value returned by writer_->TotalBufferedBytes() in AddData(). Stored
+  // in order to check memory usage.
+  size_t last_total_buffered_bytes_;
 
   scoped_ptr<ByteStreamWriter> writer_;
   scoped_ptr<ByteStreamReader> reader_;

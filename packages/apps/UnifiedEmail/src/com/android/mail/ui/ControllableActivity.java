@@ -17,15 +17,20 @@
 
 package com.android.mail.ui;
 
+import android.content.ContentResolver;
+
+import com.android.bitmap.BitmapCache;
+import com.android.mail.bitmap.ContactResolver;
 import com.android.mail.browse.ConversationListFooterView;
+import com.android.mail.providers.Account;
 import com.android.mail.providers.Folder;
 
 /**
  * A controllable activity is an Activity that has a Controller attached. This activity must be
  * able to attach the various view fragments and delegate the method calls between them.
  */
-public interface ControllableActivity extends HelpCallback, RestrictedActivity,
-        FeedbackEnabledActivity, FolderItemView.DropHandler, UndoListener,
+public interface ControllableActivity extends RestrictedActivity,
+        FolderItemView.DropHandler, UndoListener,
         AnimatedAdapter.Listener, ConversationListFooterView.FooterViewClickListener {
     /**
      * Returns the ViewMode the activity is updating.
@@ -94,7 +99,9 @@ public interface ControllableActivity extends HelpCallback, RestrictedActivity,
      */
     RecentFolderController getRecentFolderController();
 
-    UpOrBackController getUpOrBackController();
+    DrawerController getDrawerController();
+
+    KeyboardNavigationController getKeyboardNavigationController();
 
     void startDragMode();
 
@@ -111,4 +118,16 @@ public interface ControllableActivity extends HelpCallback, RestrictedActivity,
      * Returns the {@link FragmentLauncher} object associated with this activity, if any.
      */
     FragmentLauncher getFragmentLauncher();
+
+    ContactLoaderCallbacks getContactLoaderCallbacks();
+
+    ContactResolver getContactResolver(ContentResolver resolver, BitmapCache bitmapCache);
+
+    BitmapCache getSenderImageCache();
+    void resetSenderImageCache();
+
+    /**
+     * Shows help to user, could be in browser or another activity.
+     */
+    void showHelp(Account account, int viewMode);
 }

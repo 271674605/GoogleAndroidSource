@@ -38,6 +38,8 @@ import java.io.IOException;
  * @author wink@google.com Wink Saville
  */
 public abstract class MessageNano {
+    protected volatile int cachedSize = -1;
+
     /**
      * Get the number of bytes required to encode this message.
      * Returns the cached size or calls getSerializedSize which
@@ -45,26 +47,49 @@ public abstract class MessageNano {
      * so the size is only computed once. If a member is modified
      * then this could be stale call getSerializedSize if in doubt.
      */
-    abstract public int getCachedSize();
+    public int getCachedSize() {
+        if (cachedSize < 0) {
+            // getSerializedSize sets cachedSize
+            getSerializedSize();
+        }
+        return cachedSize;
+    }
 
     /**
      * Computes the number of bytes required to encode this message.
      * The size is cached and the cached result can be retrieved
      * using getCachedSize().
      */
-    abstract public int getSerializedSize();
+    public int getSerializedSize() {
+        int size = computeSerializedSize();
+        cachedSize = size;
+        return size;
+    }
 
     /**
-     * Serializes the message and writes it to {@code output}.  This does not
-     * flush or close the stream.
+     * Computes the number of bytes required to encode this message. This does not update the
+     * cached size.
      */
-    abstract public void writeTo(CodedOutputByteBufferNano output) throws java.io.IOException;
+    protected int computeSerializedSize() {
+      // This is overridden if the generated message has serialized fields.
+      return 0;
+    }
+
+    /**
+     * Serializes the message and writes it to {@code output}.
+     *
+     * @param output the output to receive the serialized form.
+     * @throws IOException if an error occurred writing to {@code output}.
+     */
+    public void writeTo(CodedOutputByteBufferNano output) throws IOException {
+        // Does nothing by default. Overridden by subclasses which have data to write.
+    }
 
     /**
      * Parse {@code input} as a message of this type and merge it with the
      * message being built.
      */
-    abstract public MessageNano mergeFrom(final CodedInputByteBufferNano input) throws IOException;
+    public abstract MessageNano mergeFrom(CodedInputByteBufferNano input) throws IOException;
 
     /**
      * Serialize to a byte array.
@@ -83,9 +108,8 @@ public abstract class MessageNano {
      * write more than length bytes OutOfSpaceException will be thrown
      * and if length bytes are not written then IllegalStateException
      * is thrown.
-     * @return byte array with the serialized data.
      */
-    public static final void toByteArray(MessageNano msg, byte [] data, int offset, int length) {
+    public static final void toByteArray(MessageNano msg, byte[] data, int offset, int length) {
         try {
             final CodedOutputByteBufferNano output =
                 CodedOutputByteBufferNano.newInstance(data, offset, length);
@@ -127,7 +151,11 @@ public abstract class MessageNano {
     }
 
     /**
-     * Intended for debugging purposes only. It does not use ASCII protobuf formatting.
+     * Returns a string that is (mostly) compatible with ProtoBuffer's TextFormat. Note that groups
+     * (which are deprecated) are not serialized with the correct field name.
+     *
+     * <p>This is implemented using reflection, so it is not especially fast nor is it guaranteed
+     * to find all fields if you have method removal turned on for proguard.
      */
     @Override
     public String toString() {

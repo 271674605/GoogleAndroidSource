@@ -17,12 +17,14 @@
 package com.android.cts.tradefed.testtype;
 
 import com.android.cts.tradefed.build.CtsBuildHelper;
+import com.android.cts.util.AbiUtils;
 import com.android.ddmlib.testrunner.ITestRunListener;
 import com.android.tradefed.build.IBuildInfo;
 import com.android.tradefed.device.DeviceNotAvailableException;
 import com.android.tradefed.device.ITestDevice;
 import com.android.tradefed.log.LogUtil.CLog;
 import com.android.tradefed.result.ITestInvocationListener;
+import com.android.tradefed.testtype.IAbi;
 import com.android.tradefed.testtype.IBuildReceiver;
 import com.android.tradefed.testtype.IDeviceTest;
 import com.android.tradefed.testtype.IRemoteTest;
@@ -35,22 +37,31 @@ import java.io.FileNotFoundException;
  */
 public class WrappedGTest implements IBuildReceiver, IDeviceTest, IRemoteTest {
 
+    private static final String LOG_TAG = WrappedGTest.class.getSimpleName();
+
     private int mMaxTestTimeMs = 1 * 60 * 1000;
 
     private CtsBuildHelper mCtsBuild;
     private ITestDevice mDevice;
+    private IAbi mAbi;
 
     private final String mAppNameSpace;
-    private final String mRunner;
+    private final String mPackageName;
     private final String mName;
-    private final String mUri;
+    private final String mRunner;
 
-
-    public WrappedGTest(String appNameSpace, String uri, String name, String runner) {
+    public WrappedGTest(String appNameSpace, String packageName, String name, String runner) {
         mAppNameSpace = appNameSpace;
-        mRunner = runner;
+        mPackageName = packageName;
         mName = name;
-        mUri = uri;
+        mRunner = runner;
+    }
+
+    /**
+     * @param abi The ABI to run the test on
+     */
+    public void setAbi(IAbi abi) {
+        mAbi = abi;
     }
 
     @Override
@@ -81,7 +92,8 @@ public class WrappedGTest implements IBuildReceiver, IDeviceTest, IRemoteTest {
     private boolean installTest() throws DeviceNotAvailableException {
         try {
             File testApp = mCtsBuild.getTestApp(String.format("%s.apk", mName));
-            String installCode = mDevice.installPackage(testApp, true);
+            String[] options = {AbiUtils.createAbiFlag(mAbi.getName())};
+            String installCode = mDevice.installPackage(testApp, true, options);
 
             if (installCode != null) {
                 CLog.e("Failed to install %s.apk on %s. Reason: %s", mName,
@@ -97,10 +109,12 @@ public class WrappedGTest implements IBuildReceiver, IDeviceTest, IRemoteTest {
     }
 
     private void runTest(ITestRunListener listener) throws DeviceNotAvailableException {
-        WrappedGTestResultParser resultParser = new WrappedGTestResultParser(mUri, listener);
-        resultParser.setFakePackagePrefix(mUri + ".");
+        String id = AbiUtils.createId(mAbi.getName(), mPackageName);
+        WrappedGTestResultParser resultParser = new WrappedGTestResultParser(id, listener);
+        resultParser.setFakePackagePrefix(mPackageName + ".");
         try {
-            String command = String.format("am instrument -w %s/.%s", mAppNameSpace, mRunner);
+            String options = mAbi == null ? "" : String.format("--abi %s ", mAbi.getName());
+            String command = String.format("am instrument -w %s%s/.%s", options, mAppNameSpace, mRunner);
             mDevice.executeShellCommand(command, resultParser, mMaxTestTimeMs, 0);
         } catch (DeviceNotAvailableException e) {
             resultParser.flush();

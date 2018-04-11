@@ -21,6 +21,7 @@ class LocationIconView : public views::ImageView {
   // views::ImageView:
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
 
   // ui::EventHandler:
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
@@ -28,7 +29,13 @@ class LocationIconView : public views::ImageView {
   // Whether we should show the tooltip for this icon or not.
   void ShowTooltip(bool show);
 
+  PageInfoHelper* page_info_helper() { return &page_info_helper_; }
+
  private:
+  // Handles both click and gesture events by delegating to the page info
+  // helper in the appropriate circumstances.
+  void OnClickOrTap(const ui::LocatedEvent& event);
+
   PageInfoHelper page_info_helper_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(LocationIconView);

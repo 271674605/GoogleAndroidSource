@@ -149,6 +149,7 @@ public class HeadsetService extends ProfileService {
         public boolean disconnect(BluetoothDevice device) {
             HeadsetService service = getService();
             if (service == null) return false;
+            if (DBG) Log.d(TAG, "disconnect in HeadsetService");
             return service.disconnect(device);
         }
 
@@ -277,6 +278,18 @@ public class HeadsetService extends ProfileService {
             }
             return service.sendVendorSpecificResultCode(device, command, arg);
         }
+
+        public boolean enableWBS() {
+            HeadsetService service = getService();
+            if (service == null) return false;
+            return service.enableWBS();
+        }
+
+        public boolean disableWBS() {
+            HeadsetService service = getService();
+            if (service == null) return false;
+            return service.disableWBS();
+        }
     };
 
     //API methods
@@ -323,6 +336,7 @@ public class HeadsetService extends ProfileService {
         }
 
         int connectionState = mStateMachine.getConnectionState(device);
+        Log.d(TAG,"connectionState = " + connectionState);
         if (connectionState == BluetoothProfile.STATE_CONNECTED ||
             connectionState == BluetoothProfile.STATE_CONNECTING) {
             return false;
@@ -507,7 +521,39 @@ public class HeadsetService extends ProfileService {
             return false;
         }
         mStateMachine.sendMessage(HeadsetStateMachine.SEND_VENDOR_SPECIFIC_RESULT_CODE,
-                new HeadsetVendorSpecificResultCode(command, arg));
+                new HeadsetVendorSpecificResultCode(device, command, arg));
+        return true;
+    }
+
+    boolean enableWBS() {
+        // TODO(BT) BLUETOOTH or BLUETOOTH_ADMIN permission
+        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
+        if (!mStateMachine.isConnected()) {
+            return false;
+        }
+        if (mStateMachine.isAudioOn()) {
+            return false;
+        }
+
+        for (BluetoothDevice device: getConnectedDevices()) {
+            mStateMachine.sendMessage(HeadsetStateMachine.ENABLE_WBS,device);
+        }
+
+        return true;
+    }
+
+    boolean disableWBS() {
+        // TODO(BT) BLUETOOTH or BLUETOOTH_ADMIN permission
+        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
+        if (!mStateMachine.isConnected()) {
+            return false;
+        }
+        if (mStateMachine.isAudioOn()) {
+            return false;
+        }
+        for (BluetoothDevice device: getConnectedDevices()) {
+            mStateMachine.sendMessage(HeadsetStateMachine.DISABLE_WBS,device);
+        }
         return true;
     }
 

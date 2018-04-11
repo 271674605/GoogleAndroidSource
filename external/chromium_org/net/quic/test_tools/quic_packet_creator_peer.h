@@ -18,8 +18,11 @@ class QuicPacketCreatorPeer {
 
   static void SetSendVersionInPacket(QuicPacketCreator* creator,
                                      bool send_version_in_packet);
-
-  static void SetIsServer(QuicPacketCreator* creator, bool is_server);
+  static void SetSequenceNumberLength(
+      QuicPacketCreator* creator,
+      QuicSequenceNumberLength sequence_number_length);
+  static QuicSequenceNumberLength GetSequenceNumberLength(
+      QuicPacketCreator* creator);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicPacketCreatorPeer);

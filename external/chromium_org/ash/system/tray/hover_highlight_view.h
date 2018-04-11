@@ -9,14 +9,13 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/text_constants.h"
 
 namespace views {
 class Label;
 }
 
 namespace ash {
-namespace internal {
-
 class ViewClickListener;
 
 // A view that changes background color on hover, and triggers a callback in the
@@ -37,6 +36,7 @@ class HoverHighlightView : public ActionableView {
   // blank icon.  This also sets the accessible name.
   // Returns label after parenting it.
   views::Label* AddLabel(const base::string16& text,
+                         gfx::HorizontalAlignment alignment,
                          gfx::Font::FontStyle style);
 
   // Convenience function for adding an optional check and a label.  In the
@@ -59,13 +59,17 @@ class HoverHighlightView : public ActionableView {
 
   bool hover() const { return hover_; }
 
+ protected:
+  // Overridden from views::View.
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+
  private:
   // Overridden from ActionableView:
   virtual bool PerformAction(const ui::Event& event) OVERRIDE;
 
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual int GetHeightForWidth(int width) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  virtual int GetHeightForWidth(int width) const OVERRIDE;
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
@@ -80,11 +84,12 @@ class HoverHighlightView : public ActionableView {
   SkColor text_default_color_;
   bool hover_;
   bool expandable_;
+  bool checkable_;
+  bool checked_;
 
   DISALLOW_COPY_AND_ASSIGN(HoverHighlightView);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_TRAY_HOVER_HIGHLIGHT_VIEW_H_

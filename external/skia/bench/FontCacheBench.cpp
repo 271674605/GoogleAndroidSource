@@ -5,7 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkCanvas.h"
 #include "SkFontHost.h"
 #include "SkPaint.h"
@@ -20,31 +20,27 @@ static int count_glyphs(const uint16_t start[]) {
     while (*curr != gUniqueGlyphIDs_Sentinel) {
         curr += 1;
     }
-    return curr - start;
+    return static_cast<int>(curr - start);
 }
 
-class FontCacheBench : public SkBenchmark {
-    enum {
-        N = SkBENCHLOOP(50)
-    };
-
+class FontCacheBench : public Benchmark {
 public:
-    FontCacheBench(void* param) : INHERITED(param) {}
+    FontCacheBench()  {}
 
 protected:
     virtual const char* onGetName() SK_OVERRIDE {
         return "fontcache";
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
         SkPaint paint;
         this->setupPaint(&paint);
         paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
 
         const uint16_t* array = gUniqueGlyphIDs;
         while (*array != gUniqueGlyphIDs_Sentinel) {
-            size_t count = count_glyphs(array);
-            for (int i = 0; i < N; ++i) {
+            int count = count_glyphs(array);
+            for (int i = 0; i < loops; ++i) {
                 paint.measureText(array, count * sizeof(uint16_t));
             }
             array += count + 1;    // skip the sentinel
@@ -52,7 +48,7 @@ protected:
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -111,9 +107,9 @@ static void dump_array(const uint16_t array[], int count) {
     SkDebugf("\n");
 }
 
-class FontCacheEfficiency : public SkBenchmark {
+class FontCacheEfficiency : public Benchmark {
 public:
-    FontCacheEfficiency(void* param) : INHERITED(param) {
+    FontCacheEfficiency()  {
         if (false) dump_array(NULL, 0);
         if (false) rotr(0, 0);
     }
@@ -123,7 +119,7 @@ protected:
         return "fontefficiency";
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
         static bool gDone;
         if (gDone) {
             return;
@@ -151,12 +147,12 @@ protected:
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-DEF_BENCH( return new FontCacheBench(p); )
+DEF_BENCH( return new FontCacheBench(); )
 
 // undefine this to run the efficiency test
-//DEF_BENCH( return new FontCacheEfficiency(p); )
+//DEF_BENCH( return new FontCacheEfficiency(); )

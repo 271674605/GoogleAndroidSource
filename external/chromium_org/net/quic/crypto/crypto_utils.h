@@ -55,13 +55,16 @@ class NET_EXPORT_PRIVATE CryptoUtils {
   // controls whether the server's keys are assigned to |encrypter| or
   // |decrypter|. |server_nonce| is optional and, if non-empty, is mixed into
   // the key derivation.
-  static void DeriveKeys(base::StringPiece premaster_secret,
+  static bool DeriveKeys(base::StringPiece premaster_secret,
                          QuicTag aead,
                          base::StringPiece client_nonce,
                          base::StringPiece server_nonce,
                          const std::string& hkdf_input,
                          Perspective perspective,
                          CrypterPair* out);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CryptoUtils);
 };
 
 }  // namespace net

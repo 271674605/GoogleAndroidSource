@@ -17,13 +17,12 @@ class Profile;
 class SearchProviderInstallStateMessageFilter
     : public content::BrowserMessageFilter {
  public:
-  // Unlike the other methods, the constructor is called on the UI thread.
+  // Unlike the other methods, the constructor must be called on the UI thread.
   SearchProviderInstallStateMessageFilter(int render_process_id,
                                           Profile* profile);
 
   // content::BrowserMessageFilter implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   virtual ~SearchProviderInstallStateMessageFilter();
@@ -43,15 +42,15 @@ class SearchProviderInstallStateMessageFilter
                                      const GURL& requested_host,
                                      IPC::Message* reply_msg);
 
-  // Used to schedule invocations of ReplyWithProviderInstallState.
-  base::WeakPtrFactory<SearchProviderInstallStateMessageFilter> weak_factory_;
-
   // Used to do a load and get information about install states.
   SearchProviderInstallData provider_data_;
 
   // Copied from the profile since the profile can't be accessed on the I/O
   // thread.
   const bool is_off_the_record_;
+
+  // Used to schedule invocations of ReplyWithProviderInstallState.
+  base::WeakPtrFactory<SearchProviderInstallStateMessageFilter> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchProviderInstallStateMessageFilter);
 };

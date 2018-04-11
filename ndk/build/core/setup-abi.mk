@@ -26,21 +26,33 @@ endif
 
 TARGET_OUT := $(NDK_APP_OUT)/$(_app)/$(TARGET_ARCH_ABI)
 
-# Special handling for x86: The minimal platform is android-9 here
+# Special handling for x86 and mips: The minimal platform is android-9 here
 # For now, handle this with a simple substitution. We may want to implement
 # more general filtering in the future when introducing other ABIs.
 TARGET_PLATFORM_SAVED := $(TARGET_PLATFORM)
-ifneq ($(filter %x86,$(TARGET_ARCH_ABI)),)
+ifneq ($(filter %x86 %mips,$(TARGET_ARCH_ABI)),)
 $(foreach _plat,3 4 5 8,\
     $(eval TARGET_PLATFORM := $$(subst android-$(_plat),android-9,$$(TARGET_PLATFORM)))\
 )
 endif
 
-# The minimal platform for mips is android-9
-ifneq ($(filter %mips,$(TARGET_ARCH_ABI)),)
-$(foreach _plat,3 4 5 8,\
-    $(eval TARGET_PLATFORM := $$(subst android-$(_plat),android-9,$$(TARGET_PLATFORM)))\
+# The first platform for 64-bit ABIs is android-$(NDK_PREVIEW_LEVEL)
+ifneq ($(filter $(NDK_KNOWN_DEVICE_ABI64S),$(TARGET_ARCH_ABI)),)
+$(foreach _plat,3 4 5 8 9 10 11 12 13 14 15 16 17 18 19 20 21,\
+    $(eval TARGET_PLATFORM := $$(subst android-$(_plat),android-$(NDK_PREVIEW_LEVEL),$$(TARGET_PLATFORM)))\
 )
+endif
+
+TARGET_PLATFORM_LEVEL := $(strip $(subst android-,,$(TARGET_PLATFORM)))
+ifneq ($(TARGET_PLATFORM_LEVEL),$(NDK_PREVIEW_LEVEL))
+    ifneq (,$(call gte,$(TARGET_PLATFORM_LEVEL),$(NDK_PIE_PLATFORM_LEVEL)))
+        TARGET_PIE := true
+        $(call ndk_log,  Enabling -fPIE for TARGET_PLATFORM $(TARGET_PLATFORM))
+    else
+        TARGET_PIE := false
+    endif
+else
+    TARGET_PIE := true
 endif
 
 # Separate the debug and release objects. This prevents rebuilding
@@ -53,6 +65,21 @@ TARGET_OBJS := $(TARGET_OUT)/objs
 endif
 
 TARGET_GDB_SETUP := $(TARGET_OUT)/setup.gdb
+
+# RS triple
+ifneq ($(filter $(TARGET_ARCH_ABI), armeabi-v7a armeabi-v7a-hard),)
+  RS_TRIPLE := armv7-none-linux-gnueabi
+endif
+ifeq ($(TARGET_ARCH_ABI),armeabi)
+  RS_TRIPLE := arm-none-linux-gnueabi
+endif
+ifeq ($(TARGET_ARCH_ABI),mips)
+  RS_TRIPLE := mipsel-unknown-linux
+endif
+ifeq ($(TARGET_ARCH_ABI),x86)
+  RS_TRIPLE := i686-unknown-linux
+endif
+
 
 include $(BUILD_SYSTEM)/setup-toolchain.mk
 

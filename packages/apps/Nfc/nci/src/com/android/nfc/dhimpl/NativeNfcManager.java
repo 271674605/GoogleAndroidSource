@@ -16,10 +16,7 @@
 
 package com.android.nfc.dhimpl;
 
-import android.annotation.SdkConstant;
-import android.annotation.SdkConstant.SdkConstantType;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.nfc.ErrorCodes;
 import android.nfc.tech.Ndef;
 import android.nfc.tech.TagTechnology;
@@ -27,6 +24,7 @@ import android.util.Log;
 
 import com.android.nfc.DeviceHost;
 import com.android.nfc.LlcpException;
+import com.android.nfc.NfcDiscoveryParameters;
 
 /**
  * Native interface to the NFC Manager functions
@@ -40,30 +38,17 @@ public class NativeNfcManager implements DeviceHost {
 
     static final String DRIVER_NAME = "android-nci";
 
-    private static final byte[][] EE_WIPE_APDUS = {
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x07, (byte)0xa0, (byte)0x00,
-                (byte)0x00, (byte)0x04, (byte)0x76, (byte)0x20, (byte)0x10, (byte)0x00},
-        {(byte)0x80, (byte)0xe2, (byte)0x01, (byte)0x03, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x07, (byte)0xa0, (byte)0x00,
-                (byte)0x00, (byte)0x04, (byte)0x76, (byte)0x30, (byte)0x30, (byte)0x00},
-        {(byte)0x80, (byte)0xb4, (byte)0x00, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-    };
-
     static {
         System.loadLibrary("nfc_nci_jni");
     }
 
-    @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
-    public static final String INTERNAL_TARGET_DESELECTED_ACTION = "com.android.nfc.action.INTERNAL_TARGET_DESELECTED";
 
     /* Native structure */
-    private int mNative;
+    private long mNative;
 
     private final DeviceHostListener mListener;
     private final Context mContext;
+
 
     public NativeNfcManager(Context context, DeviceHostListener listener) {
         mListener = listener;
@@ -86,17 +71,6 @@ public class NativeNfcManager implements DeviceHost {
 
     @Override
     public boolean initialize() {
-        SharedPreferences prefs = mContext.getSharedPreferences(PREF, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-
-        if (prefs.getBoolean(NativeNfcSecureElement.PREF_SE_WIRED, false)) {
-            try {
-                Thread.sleep (12000);
-                editor.putBoolean(NativeNfcSecureElement.PREF_SE_WIRED, false);
-                editor.apply();
-            } catch (InterruptedException e) { }
-        }
-
         return doInitialize();
     }
 
@@ -104,12 +78,6 @@ public class NativeNfcManager implements DeviceHost {
 
     @Override
     public boolean deinitialize() {
-        SharedPreferences prefs = mContext.getSharedPreferences(PREF, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-
-        editor.putBoolean(NativeNfcSecureElement.PREF_SE_WIRED, false);
-        editor.apply();
-
         return doDeinitialize();
     }
 
@@ -128,26 +96,21 @@ public class NativeNfcManager implements DeviceHost {
     public native boolean unrouteAid(byte[] aid);
 
     @Override
-    public native void enableDiscovery();
+    public native boolean commitRouting();
+
+    private native void doEnableDiscovery(int techMask,
+                                          boolean enableLowPowerPolling,
+                                          boolean enableReaderMode,
+                                          boolean enableHostRouting,
+                                          boolean restart);
+    @Override
+    public void enableDiscovery(NfcDiscoveryParameters params, boolean restart) {
+        doEnableDiscovery(params.getTechMask(), params.shouldEnableLowPowerDiscovery(),
+                params.shouldEnableReaderMode(), params.shouldEnableHostRouting(), restart);
+    }
 
     @Override
     public native void disableDiscovery();
-
-    @Override
-    public native void enableRoutingToHost();
-
-    @Override
-    public native void disableRoutingToHost();
-
-    @Override
-    public native int[] doGetSecureElementList();
-
-    @Override
-    public native void doSelectSecureElement();
-
-    @Override
-    public native void doDeselectSecureElement();
-
 
     private native NativeLlcpConnectionlessSocket doCreateLlcpConnectionlessSocket(int nSap,
             String sn);
@@ -304,16 +267,6 @@ public class NativeNfcManager implements DeviceHost {
     }
 
     @Override
-    public boolean enablePN544Quirks() {
-        return false;
-    }
-
-    @Override
-    public byte[][] getWipeApdus() {
-        return EE_WIPE_APDUS;
-    }
-
-    @Override
     public int getDefaultLlcpMiu() {
         return DEFAULT_LLCP_MIU;
     }
@@ -329,17 +282,17 @@ public class NativeNfcManager implements DeviceHost {
         return doDump();
     }
 
-    private native void doEnableReaderMode(int technologies);
+    private native void doEnableScreenOffSuspend();
     @Override
-    public boolean enableReaderMode(int technologies) {
-        doEnableReaderMode(technologies);
+    public boolean enableScreenOffSuspend() {
+        doEnableScreenOffSuspend();
         return true;
     }
 
-    private native void doDisableReaderMode();
+    private native void doDisableScreenOffSuspend();
     @Override
-    public boolean disableReaderMode() {
-        doDisableReaderMode();
+    public boolean disableScreenOffSuspend() {
+        doDisableScreenOffSuspend();
         return true;
     }
 
@@ -348,20 +301,6 @@ public class NativeNfcManager implements DeviceHost {
      */
     private void notifyNdefMessageListeners(NativeNfcTag tag) {
         mListener.onRemoteEndpointDiscovered(tag);
-    }
-
-    /**
-     * Notifies transaction
-     */
-    private void notifyTargetDeselected() {
-        mListener.onCardEmulationDeselected();
-    }
-
-    /**
-     * Notifies transaction
-     */
-    private void notifyTransactionListeners(byte[] aid) {
-        mListener.onCardEmulationAidSelected(aid);
     }
 
     /**
@@ -385,34 +324,6 @@ public class NativeNfcManager implements DeviceHost {
         mListener.onLlcpFirstPacketReceived(device);
     }
 
-    private void notifySeFieldActivated() {
-        mListener.onRemoteFieldActivated();
-    }
-
-    private void notifySeFieldDeactivated() {
-        mListener.onRemoteFieldDeactivated();
-    }
-
-    private void notifySeListenActivated() {
-        mListener.onSeListenActivated();
-    }
-
-    private void notifySeListenDeactivated() {
-        mListener.onSeListenDeactivated();
-    }
-
-    private void notifySeApduReceived(byte[] apdu) {
-        mListener.onSeApduReceived(apdu);
-    }
-
-    private void notifySeEmvCardRemoval() {
-        mListener.onSeEmvCardRemoval();
-    }
-
-    private void notifySeMifareAccess(byte[] block) {
-        mListener.onSeMifareAccess(block);
-    }
-
     private void notifyHostEmuActivated() {
         mListener.onHostCardEmulationActivated();
     }
@@ -423,6 +334,14 @@ public class NativeNfcManager implements DeviceHost {
 
     private void notifyHostEmuDeactivated() {
         mListener.onHostCardEmulationDeactivated();
+    }
+
+    private void notifyRfFieldActivated() {
+        mListener.onRemoteFieldActivated();
+    }
+
+    private void notifyRfFieldDeactivated() {
+        mListener.onRemoteFieldDeactivated();
     }
 
 }

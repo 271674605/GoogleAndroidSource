@@ -317,7 +317,13 @@ static size_t AllocationBuildPointerTable(const Context *rsc, const Allocation *
 
     size_t o = alloc->mHal.drvState.lod[0].stride * rsMax(alloc->mHal.drvState.lod[0].dimY, 1u) *
             rsMax(alloc->mHal.drvState.lod[0].dimZ, 1u);
-    if(alloc->mHal.drvState.lodCount > 1) {
+    if (alloc->mHal.state.yuv) {
+        o += DeriveYUVLayout(alloc->mHal.state.yuv, &alloc->mHal.drvState);
+
+        for (uint32_t ct = 1; ct < alloc->mHal.drvState.lodCount; ct++) {
+            offsets[ct] = (size_t)alloc->mHal.drvState.lod[ct].mallocPtr;
+        }
+    } else if(alloc->mHal.drvState.lodCount > 1) {
         uint32_t tx = alloc->mHal.drvState.lod[0].dimX;
         uint32_t ty = alloc->mHal.drvState.lod[0].dimY;
         uint32_t tz = alloc->mHal.drvState.lod[0].dimZ;
@@ -332,12 +338,6 @@ static size_t AllocationBuildPointerTable(const Context *rsc, const Allocation *
             if (tx > 1) tx >>= 1;
             if (ty > 1) ty >>= 1;
             if (tz > 1) tz >>= 1;
-        }
-    } else if (alloc->mHal.state.yuv) {
-        o += DeriveYUVLayout(alloc->mHal.state.yuv, &alloc->mHal.drvState);
-
-        for (uint32_t ct = 1; ct < alloc->mHal.drvState.lodCount; ct++) {
-            offsets[ct] = (size_t)alloc->mHal.drvState.lod[ct].mallocPtr;
         }
     }
 
@@ -463,6 +463,13 @@ bool rsdAllocationInit(const Context *rsc, Allocation *alloc, bool forceZero) {
         rsdAllocationData2D(rsc, alloc, 0, 0, 0, RS_ALLOCATION_CUBEMAP_FACE_POSITIVE_X, alloc->getType()->getDimX(), alloc->getType()->getDimY(), alloc->mHal.state.userProvidedPtr, allocSize, 0);
     }
 
+
+#ifdef RS_FIND_OFFSETS
+    ALOGE("pointer for allocation: %p", alloc);
+    ALOGE("pointer for allocation.drv: %p", &alloc->mHal.drv);
+#endif
+
+
     return true;
 }
 
@@ -511,6 +518,10 @@ void rsdAllocationDestroy(const Context *rsc, Allocation *alloc) {
             GraphicBufferMapper &mapper = GraphicBufferMapper::get();
             mapper.unlock(drv->wndBuffer->handle);
             int32_t r = nw->queueBuffer(nw, drv->wndBuffer, -1);
+
+            drv->wndSurface = NULL;
+            native_window_api_disconnect(nw, NATIVE_WINDOW_API_CPU);
+            nw->decStrong(NULL);
         }
     }
 #endif
@@ -599,7 +610,7 @@ void rsdAllocationSyncAll(const Context *rsc, const Allocation *alloc,
         return;
     }
 
-    rsAssert(src == RS_ALLOCATION_USAGE_SCRIPT);
+    rsAssert(src == RS_ALLOCATION_USAGE_SCRIPT || src == RS_ALLOCATION_USAGE_SHARED);
 
     if (alloc->mHal.state.usageFlags & RS_ALLOCATION_USAGE_GRAPHICS_TEXTURE) {
         UploadToTexture(rsc, alloc);
@@ -614,7 +625,13 @@ void rsdAllocationSyncAll(const Context *rsc, const Allocation *alloc,
     }
 
     if (alloc->mHal.state.usageFlags & RS_ALLOCATION_USAGE_SHARED) {
-        // NOP in CPU driver for now
+
+        if (src == RS_ALLOCATION_USAGE_SHARED) {
+            // just a memory fence for the CPU driver
+            // vendor drivers probably want to flush any dirty cachelines for
+            // this particular Allocation
+            __sync_synchronize();
+        }
     }
 
     drv->uploadDeferred = false;
@@ -1178,4 +1195,23 @@ uint32_t rsdAllocationGrallocBits(const android::renderscript::Context *rsc,
 {
     return 0;
 }
+
+void rsdAllocationUpdateCachedObject(const Context *rsc,
+                                     const Allocation *alloc,
+                                     rs_allocation *obj)
+{
+    obj->p = alloc;
+#ifdef __LP64__
+    if (alloc != NULL) {
+        obj->r = alloc->mHal.drvState.lod[0].mallocPtr;
+        obj->v1 = alloc->mHal.drv;
+        obj->v2 = (void *)alloc->mHal.drvState.lod[0].stride;
+    } else {
+        obj->r = NULL;
+        obj->v1 = NULL;
+        obj->v2 = NULL;
+    }
+#endif
+}
+
 

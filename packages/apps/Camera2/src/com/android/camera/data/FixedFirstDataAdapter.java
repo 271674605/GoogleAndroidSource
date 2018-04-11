@@ -16,13 +16,14 @@
 
 package com.android.camera.data;
 
-import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.view.View;
 
-import com.android.camera.ui.FilmStripView.DataAdapter;
-import com.android.camera.ui.FilmStripView.ImageData;
+import com.android.camera.debug.Log;
+import com.android.camera.filmstrip.DataAdapter;
+import com.android.camera.filmstrip.ImageData;
 
 /**
  * A {@link LocalDataAdapter} which puts a {@link LocalData} fixed at the first
@@ -33,7 +34,7 @@ public class FixedFirstDataAdapter extends AbstractLocalDataAdapterWrapper
         implements DataAdapter.Listener {
 
     @SuppressWarnings("unused")
-    private static final String TAG = "CAM_FixedFirstDataAdapter";
+    private static final Log.Tag TAG = new Log.Tag("FixedFirstDataAdpt");
 
     private LocalData mFirstData;
     private Listener mListener;
@@ -41,14 +42,16 @@ public class FixedFirstDataAdapter extends AbstractLocalDataAdapterWrapper
     /**
      * Constructor.
      *
+     * @param context Valid Android context.
      * @param wrappedAdapter The {@link LocalDataAdapter} to be wrapped.
-     * @param firstData      The {@link LocalData} to be placed at the first
-     *                       position.
+     * @param firstData The {@link LocalData} to be placed at the first
+     *            position.
      */
     public FixedFirstDataAdapter(
+            Context context,
             LocalDataAdapter wrappedAdapter,
             LocalData firstData) {
-        super(wrappedAdapter);
+        super(context, wrappedAdapter);
         if (firstData == null) {
             throw new AssertionError("data is null");
         }
@@ -64,9 +67,9 @@ public class FixedFirstDataAdapter extends AbstractLocalDataAdapterWrapper
     }
 
     @Override
-    public void removeData(Context context, int dataID) {
+    public void removeData(int dataID) {
         if (dataID > 0) {
-            mAdapter.removeData(context, dataID - 1);
+            mAdapter.removeData(dataID - 1);
         }
     }
 
@@ -107,12 +110,25 @@ public class FixedFirstDataAdapter extends AbstractLocalDataAdapterWrapper
     }
 
     @Override
-    public View getView(Activity activity, int dataID) {
+    public View getView(Context context, View recycled, int dataID) {
         if (dataID == 0) {
             return mFirstData.getView(
-                    activity, mSuggestedWidth, mSuggestedHeight, null, null);
+                    context, recycled, mSuggestedWidth, mSuggestedHeight, 0, null, false);
         }
-        return mAdapter.getView(activity, dataID - 1);
+        return mAdapter.getView(context, recycled, dataID - 1);
+    }
+
+    @Override
+    public int getItemViewType(int dataId) {
+        if (dataId == 0) {
+            return mFirstData.getItemViewType().ordinal();
+        }
+        return mAdapter.getItemViewType(dataId);
+    }
+
+    @Override
+    public void resizeView(Context context, int dataID, View view, int w, int h) {
+        // Do nothing.
     }
 
     @Override
@@ -183,5 +199,24 @@ public class FixedFirstDataAdapter extends AbstractLocalDataAdapterWrapper
     @Override
     public void onDataRemoved(int dataID, ImageData data) {
         mListener.onDataRemoved(dataID + 1, data);
+    }
+
+    @Override
+    public AsyncTask updateMetadata(int dataId) {
+        if (dataId > 0) {
+            return mAdapter.updateMetadata(dataId - 1);
+        } else {
+            MetadataLoader.loadMetadata(mContext, mFirstData);
+        }
+        return null;
+    }
+
+    @Override
+    public boolean isMetadataUpdated(int dataId) {
+        if (dataId > 0) {
+        return mAdapter.isMetadataUpdated(dataId - 1);
+        } else {
+            return mFirstData.isMetadataUpdated();
+        }
     }
 }

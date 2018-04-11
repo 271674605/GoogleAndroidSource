@@ -31,11 +31,10 @@ class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
-  virtual Result UpdatePrinterSettings(
-      const base::DictionaryValue& job_settings,
-      const PageRanges& ranges) OVERRIDE;
+  virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
+  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
-  virtual Result NewDocument(const string16& document_name) OVERRIDE;
+  virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;
   virtual Result PageDone() OVERRIDE;
   virtual Result DocumentDone() OVERRIDE;
@@ -48,19 +47,24 @@ class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
   // after changes to |print_info_| in order for the changes to take effect in
   // printing.
   // This function ignores the page range information specified in the print
-  // info object and use |ranges| instead.
-  void InitPrintSettingsFromPrintInfo(const PageRanges& ranges);
+  // info object and use |settings_.ranges| instead.
+  void InitPrintSettingsFromPrintInfo();
 
   // Returns the set of page ranges constructed from |print_info_|.
   PageRanges GetPageRangesFromPrintInfo();
 
   // Updates |print_info_| to use the given printer.
-  // Returns true if the printer was set else returns false.
+  // Returns true if the printer was set.
   bool SetPrinter(const std::string& device_name);
 
-  // Updates |print_info_| page format with user default paper information.
-  // Returns true if the paper was set else returns false.
+  // Updates |print_info_| page format with paper selected by user. If paper was
+  // not selected, default system paper is used.
+  // Returns true if the paper was set.
   bool UpdatePageFormatWithPaperInfo();
+
+  // Updates |print_info_| page format with |paper|.
+  // Returns true if the paper was set.
+  bool UpdatePageFormatWithPaper(PMPaper paper, PMPageFormat page_format);
 
   // Sets the print job destination type as preview job.
   // Returns true if the print job destination type is set.

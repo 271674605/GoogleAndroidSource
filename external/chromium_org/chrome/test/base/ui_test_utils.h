@@ -21,14 +21,14 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 
 class AppModalDialog;
-class BookmarkModel;
 class Browser;
+class DevToolsWindow;
 class LocationBar;
 class Profile;
 class SkBitmap;
@@ -75,7 +75,7 @@ enum BrowserTestWaitFlags {
 };
 
 // Puts the current tab title in |title|. Returns true on success.
-bool GetCurrentTabTitle(const Browser* browser, string16* title);
+bool GetCurrentTabTitle(const Browser* browser, base::string16* title);
 
 // Opens |url| in an incognito browser window with the incognito profile of
 // |profile|, blocking until the navigation finishes. This will create a new
@@ -87,6 +87,10 @@ Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url);
 // finishes. May change the params in some cases (i.e. if the navigation
 // opens a new browser window). Uses chrome::Navigate.
 void NavigateToURL(chrome::NavigateParams* params);
+
+// Navigates the selected tab of |browser| to |url|, blocking until the
+// navigation finishes. Simulates a POST and uses chrome::Navigate.
+void NavigateToURLWithPost(Browser* browser, const GURL& url);
 
 // Navigates the selected tab of |browser| to |url|, blocking until the
 // navigation finishes. Uses Browser::OpenURL --> chrome::Navigate.
@@ -106,6 +110,9 @@ void NavigateToURLWithDisposition(Browser* browser,
 void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
                                                 const GURL& url,
                                                 int number_of_navigations);
+
+// Blocks until DevTools window is loaded.
+void WaitUntilDevToolsWindowLoaded(DevToolsWindow* window);
 
 // Generate the file path for testing a particular test.
 // The file for the tests is all located in
@@ -131,21 +138,11 @@ AppModalDialog* WaitForAppModalDialog();
 // of the current match. |selection_rect| is an optional parameter which is set
 // to the location of the current match.
 int FindInPage(content::WebContents* tab,
-               const string16& search_string,
+               const base::string16& search_string,
                bool forward,
                bool case_sensitive,
                int* ordinal,
                gfx::Rect* selection_rect);
-
-// Register |observer| for the given |type| and |source| and run
-// the message loop until the observer posts a quit task.
-void RegisterAndWait(content::NotificationObserver* observer,
-                     int type,
-                     const content::NotificationSource& source);
-
-// Blocks until |model| finishes loading.
-void WaitForBookmarkModelToLoad(BookmarkModel* model);
-void WaitForBookmarkModelToLoad(Profile* profile);
 
 // Blocks until |service| finishes loading.
 void WaitForTemplateURLServiceToLoad(TemplateURLService* service);
@@ -162,6 +159,13 @@ void SendToOmniboxAndSubmit(LocationBar* location_bar,
 
 // Gets the first browser that is not in the specified set.
 Browser* GetBrowserNotInSet(std::set<Browser*> excluded_browsers);
+
+// Gets the size and value of the cookie string for |url| in the given tab.
+// Can be called from any thread.
+void GetCookies(const GURL& url,
+                content::WebContents* contents,
+                int* value_size,
+                std::string* value);
 
 // A WindowedNotificationObserver hard-wired to observe
 // chrome::NOTIFICATION_TAB_ADDED.
@@ -263,12 +267,6 @@ class BrowserAddedObserver {
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAddedObserver);
 };
-
-// Takes a snapshot of the given render widget, rendered at |page_size|. The
-// snapshot is set to |bitmap|. Returns true on success.
-bool TakeRenderWidgetSnapshot(content::RenderWidgetHost* rwh,
-                              const gfx::Size& page_size,
-                              SkBitmap* bitmap) WARN_UNUSED_RESULT;
 
 // Takes a snapshot of the entire page, according to the width and height
 // properties of the DOM's document. Returns true on success. DOMAutomation

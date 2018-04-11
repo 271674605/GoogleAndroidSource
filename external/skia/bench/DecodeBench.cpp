@@ -5,34 +5,27 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkBitmap.h"
+#include "SkCommandLineFlags.h"
 #include "SkImageDecoder.h"
+#include "SkOSFile.h"
 #include "SkString.h"
+#include "sk_tool_utils.h"
 
-static const char* gConfigName[] = {
-    "ERROR", "a1", "a8", "index8", "565", "4444", "8888"
-};
+DEFINE_string(decodeBenchFilename, "resources/CMYK.jpeg", "Path to image for DecodeBench.");
 
-class DecodeBench : public SkBenchmark {
-    const char* fFilename;
-    SkBitmap::Config fPrefConfig;
-    SkString fName;
-    enum { N = SkBENCHLOOP(10) };
+class DecodeBench : public Benchmark {
+    const SkColorType fPrefColorType;
+    SkString          fName;
 public:
-    DecodeBench(void* param, SkBitmap::Config c) : SkBenchmark(param) {
-        fFilename = this->findDefine("decode-filename");
-        fPrefConfig = c;
+    DecodeBench(SkColorType ct) : fPrefColorType(ct) {
+        SkString fname = SkOSPath::SkBasename(FLAGS_decodeBenchFilename[0]);
+        fName.printf("decode_%s_%s", sk_tool_utils::colortype_name(ct), fname.c_str());
+    }
 
-        const char* fname = NULL;
-        if (fFilename) {
-            fname = strrchr(fFilename, '/');
-            if (fname) {
-                fname += 1; // skip the slash
-            }
-        }
-        fName.printf("decode_%s_%s", gConfigName[c], fname);
-        fIsRendering = false;
+    virtual bool isSuitableFor(Backend backend) SK_OVERRIDE {
+        return backend == kNonRendering_Backend;
     }
 
 protected:
@@ -40,24 +33,18 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onDraw(SkCanvas*) {
-        if (fFilename) {
-            for (int i = 0; i < N; i++) {
-                SkBitmap bm;
-                SkImageDecoder::DecodeFile(fFilename, &bm, fPrefConfig,
-                                           SkImageDecoder::kDecodePixels_Mode);
-            }
+    virtual void onDraw(const int loops, SkCanvas*) {
+        for (int i = 0; i < loops; i++) {
+            SkBitmap bm;
+            SkImageDecoder::DecodeFile(FLAGS_decodeBenchFilename[0], &bm, fPrefColorType,
+                                       SkImageDecoder::kDecodePixels_Mode);
         }
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
-static SkBenchmark* Fact0(void* p) { return new DecodeBench(p, SkBitmap::kARGB_8888_Config); }
-static SkBenchmark* Fact1(void* p) { return new DecodeBench(p, SkBitmap::kRGB_565_Config); }
-static SkBenchmark* Fact2(void* p) { return new DecodeBench(p, SkBitmap::kARGB_4444_Config); }
-
-static BenchRegistry gReg0(Fact0);
-static BenchRegistry gReg1(Fact1);
-static BenchRegistry gReg2(Fact2);
+DEF_BENCH( return new DecodeBench(kN32_SkColorType); )
+DEF_BENCH( return new DecodeBench(kRGB_565_SkColorType); )
+DEF_BENCH( return new DecodeBench(kARGB_4444_SkColorType); )

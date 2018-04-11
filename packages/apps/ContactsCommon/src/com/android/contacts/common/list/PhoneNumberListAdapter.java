@@ -25,18 +25,21 @@ import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Callable;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.CommonDataKinds.SipAddress;
-import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.Directory;
+import android.telephony.PhoneNumberUtils;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 
 import com.android.contacts.common.GeoUtil;
 import com.android.contacts.common.R;
+import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.extensions.ExtendedPhoneDirectoriesManager;
 import com.android.contacts.common.extensions.ExtensionsFactory;
+import com.android.contacts.common.preference.ContactsPreferences;
 import com.android.contacts.common.util.Constants;
 
 import java.util.ArrayList;
@@ -98,7 +101,11 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         public static final int PHOTO_URI               = 8;
     }
 
+    private static final String IGNORE_NUMBER_TOO_LONG_CLAUSE =
+            "length(" + Phone.NUMBER + ") < 1000";
+
     private final CharSequence mUnknownNameText;
+    private final String mCountryIso;
 
     private ContactListItemView.PhotoPosition mPhotoPosition;
 
@@ -108,6 +115,7 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         super(context);
         setDefaultFilterHeaderText(R.string.list_filter_phones);
         mUnknownNameText = context.getText(android.R.string.unknownName);
+        mCountryIso = GeoUtil.getCurrentCountryIso(context);
 
         final ExtendedPhoneDirectoriesManager manager
                 = ExtensionsFactory.getExtendedPhoneDirectoriesManager();
@@ -167,24 +175,34 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
                 builder = baseUri.buildUpon().appendQueryParameter(
                         ContactsContract.DIRECTORY_PARAM_KEY, String.valueOf(Directory.DEFAULT));
                 if (isSectionHeaderDisplayEnabled()) {
-                    builder.appendQueryParameter(ContactCounts.ADDRESS_BOOK_INDEX_EXTRAS, "true");
+                    builder.appendQueryParameter(Phone.EXTRA_ADDRESS_BOOK_INDEX, "true");
                 }
                 applyFilter(loader, builder, directoryId, getFilter());
             }
+
+            // Ignore invalid phone numbers that are too long. These can potentially cause freezes
+            // in the UI and there is no reason to display them.
+            final String prevSelection = loader.getSelection();
+            final String newSelection;
+            if (!TextUtils.isEmpty(prevSelection)) {
+                newSelection = prevSelection + " AND " + IGNORE_NUMBER_TOO_LONG_CLAUSE;
+            } else {
+                newSelection = IGNORE_NUMBER_TOO_LONG_CLAUSE;
+            }
+            loader.setSelection(newSelection);
 
             // Remove duplicates when it is possible.
             builder.appendQueryParameter(ContactsContract.REMOVE_DUPLICATE_ENTRIES, "true");
             loader.setUri(builder.build());
 
             // TODO a projection that includes the search snippet
-            if (getContactNameDisplayOrder() ==
-                    ContactsContract.Preferences.DISPLAY_ORDER_PRIMARY) {
+            if (getContactNameDisplayOrder() == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
                 loader.setProjection(PhoneQuery.PROJECTION_PRIMARY);
             } else {
                 loader.setProjection(PhoneQuery.PROJECTION_ALTERNATIVE);
             }
 
-            if (getSortOrder() == ContactsContract.Preferences.SORT_ORDER_PRIMARY) {
+            if (getSortOrder() == ContactsPreferences.SORT_ORDER_PRIMARY) {
                 loader.setSortOrder(Phone.SORT_KEY_PRIMARY);
             } else {
                 loader.setSortOrder(Phone.SORT_KEY_ALTERNATIVE);
@@ -272,9 +290,9 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
     }
 
     @Override
-    protected View newView(Context context, int partition, Cursor cursor, int position,
-            ViewGroup parent) {
-        final ContactListItemView view = new ContactListItemView(context, null);
+    protected ContactListItemView newView(
+            Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
+        ContactListItemView view = super.newView(context, partition, cursor, position, parent);
         view.setUnknownNameText(mUnknownNameText);
         view.setQuickContactEnabled(isQuickContactEnabled());
         view.setPhotoPosition(mPhotoPosition);
@@ -307,6 +325,7 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
 
     @Override
     protected void bindView(View itemView, int partition, Cursor cursor, int position) {
+        super.bindView(itemView, partition, cursor, position);
         ContactListItemView view = (ContactListItemView)itemView;
 
         setHighlight(view, cursor);
@@ -339,13 +358,15 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         }
         cursor.moveToPosition(position);
 
+        bindViewId(view, cursor, PhoneQuery.PHONE_ID);
+
         bindSectionHeaderAndDivider(view, position);
         if (isFirstEntry) {
             bindName(view, cursor);
             if (isQuickContactEnabled()) {
                 bindQuickContact(view, partition, cursor, PhoneQuery.PHOTO_ID,
                         PhoneQuery.PHOTO_URI, PhoneQuery.CONTACT_ID,
-                        PhoneQuery.LOOKUP_KEY);
+                        PhoneQuery.LOOKUP_KEY, PhoneQuery.DISPLAY_NAME);
             } else {
                 if (getDisplayPhotos()) {
                     bindPhoto(view, partition, cursor);
@@ -359,7 +380,6 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
 
         final DirectoryPartition directory = (DirectoryPartition) getPartition(partition);
         bindPhoneNumber(view, cursor, directory.isDisplayNumber());
-        view.setDividerVisible(showBottomDivider);
     }
 
     protected void bindPhoneNumber(ContactListItemView view, Cursor cursor, boolean displayNumber) {
@@ -385,17 +405,15 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
                 text = GeoUtil.getGeocodedLocationFor(mContext, phoneNumber);
             }
         }
-        view.setPhoneNumber(text);
+        view.setPhoneNumber(text, mCountryIso);
     }
 
     protected void bindSectionHeaderAndDivider(final ContactListItemView view, int position) {
         if (isSectionHeaderDisplayEnabled()) {
             Placement placement = getItemPlacementInSection(position);
             view.setSectionHeader(placement.firstInSection ? placement.sectionHeader : null);
-            view.setDividerVisible(!placement.lastInSection);
         } else {
             view.setSectionHeader(null);
-            view.setDividerVisible(true);
         }
     }
 
@@ -420,11 +438,20 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         }
 
         if (photoId != 0) {
-            getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false);
+            getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false,
+                    getCircularPhotos(), null);
         } else {
             final String photoUriString = cursor.getString(PhoneQuery.PHOTO_URI);
             final Uri photoUri = photoUriString == null ? null : Uri.parse(photoUriString);
-            getPhotoLoader().loadDirectoryPhoto(view.getPhotoView(), photoUri, false);
+
+            DefaultImageRequest request = null;
+            if (photoUri == null) {
+                final String displayName = cursor.getString(PhoneQuery.DISPLAY_NAME);
+                final String lookupKey = cursor.getString(PhoneQuery.LOOKUP_KEY);
+                request = new DefaultImageRequest(displayName, lookupKey, getCircularPhotos());
+            }
+            getPhotoLoader().loadDirectoryPhoto(view.getPhotoView(), photoUri, false,
+                    getCircularPhotos(), request);
         }
     }
 

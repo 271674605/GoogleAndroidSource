@@ -7,6 +7,7 @@
 
 #include "nacl_io/ossocket.h"
 #include "nacl_io/pepper_interface.h"
+#include "sdk_util/simple_lock.h"
 
 #ifdef PROVIDES_SOCKET_API
 
@@ -19,6 +20,11 @@ class HostResolver {
 
   void Init(PepperInterface* ppapi);
 
+  void freeaddrinfo(struct addrinfo* res);
+  int getaddrinfo(const char* node,
+                  const char* service,
+                  const struct addrinfo* hints,
+                  struct addrinfo** res);
   struct hostent* gethostbyname(const char* name);
 
  private:
@@ -26,7 +32,8 @@ class HostResolver {
   void hostent_cleanup();
 
   struct hostent hostent_;
-  PepperInterface *ppapi_;
+  PepperInterface* ppapi_;
+  sdk_util::SimpleLock gethostbyname_lock_;
 };
 
 }  // namespace nacl_io

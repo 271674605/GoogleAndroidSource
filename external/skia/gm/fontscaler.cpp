@@ -19,12 +19,16 @@ public:
     }
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("fontscaler");
     }
 
     virtual SkISize onISize() {
-        return make_isize(1450, 750);
+        return SkISize::Make(1450, 750);
     }
 
     static void rotate_about(SkCanvas* canvas,
@@ -49,7 +53,8 @@ protected:
         const size_t textLen = strlen(text);
 
         for (int j = 0; j < 2; ++j) {
-            for (int i = 0; i < 6; ++i) {
+            // This used to do 6 iterations but it causes the N4 to crash in the MSAA4 config.
+            for (int i = 0; i < 5; ++i) {
                 SkScalar x = SkIntToScalar(10);
                 SkScalar y = SkIntToScalar(20);
 
@@ -79,14 +84,6 @@ protected:
             paint.setSubpixelText(true);
         }
     }
-
-#ifdef SK_BUILD_FOR_ANDROID
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // On android, we fail due to bad gpu drivers (it seems) by adding too
-        // much to our text atlas (texture).
-        return kSkipGPU_Flag;
-    }
-#endif
 
 private:
     typedef GM INHERITED;

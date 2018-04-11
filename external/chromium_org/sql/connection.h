@@ -107,7 +107,7 @@ class SQL_EXPORT Connection {
 
   // Call to put the database in exclusive locking mode. There is no "back to
   // normal" flag because of some additional requirements sqlite puts on this
-  // transaition (requires another access to the DB) and because we don't
+  // transaction (requires another access to the DB) and because we don't
   // actually need it.
   //
   // Exclusive mode means that the database is not unlocked at the end of each
@@ -150,11 +150,16 @@ class SQL_EXPORT Connection {
   // histogram is recorded.
   void AddTaggedHistogram(const std::string& name, size_t sample) const;
 
-  // Run "PRAGMA integrity_check" and post each line of results into
-  // |messages|.  Returns the success of running the statement - per
-  // the SQLite documentation, if no errors are found the call should
-  // succeed, and a single value "ok" should be in messages.
-  bool IntegrityCheck(std::vector<std::string>* messages);
+  // Run "PRAGMA integrity_check" and post each line of
+  // results into |messages|.  Returns the success of running the
+  // statement - per the SQLite documentation, if no errors are found the
+  // call should succeed, and a single value "ok" should be in messages.
+  bool FullIntegrityCheck(std::vector<std::string>* messages);
+
+  // Runs "PRAGMA quick_check" and, unlike the FullIntegrityCheck method,
+  // interprets the results returning true if the the statement executes
+  // without error and results in a single "ok" value.
+  bool QuickIntegrityCheck() WARN_UNUSED_RESULT;
 
   // Initialization ------------------------------------------------------------
 
@@ -182,19 +187,17 @@ class SQL_EXPORT Connection {
   // an uninitialized or already-closed database.
   void Close();
 
-  // Pre-loads the first <cache-size> pages into the cache from the file.
-  // If you expect to soon use a substantial portion of the database, this
-  // is much more efficient than allowing the pages to be populated organically
-  // since there is no per-page hard drive seeking. If the file is larger than
-  // the cache, the last part that doesn't fit in the cache will be brought in
-  // organically.
+  // Reads the first <cache-size>*<page-size> bytes of the file to prime the
+  // filesystem cache.  This can be more efficient than faulting pages
+  // individually.  Since this involves blocking I/O, it should only be used if
+  // the caller will immediately read a substantial amount of data from the
+  // database.
   //
-  // This function assumes your class is using a meta table on the current
-  // database, as it openes a transaction on the meta table to force the
-  // database to be initialized. You should feel free to initialize the meta
-  // table after calling preload since the meta table will already be in the
-  // database if it exists, and if it doesn't exist, the database won't
-  // generally exist either.
+  // TODO(shess): Design a set of histograms or an experiment to inform this
+  // decision.  Preloading should almost always improve later performance
+  // numbers for this database simply because it pulls operations forward, but
+  // if the data isn't actually used soon then preloading just slows down
+  // everything else.
   void Preload();
 
   // Try to trim the cache memory used by the database.  If |aggressively| is
@@ -389,6 +392,17 @@ class SQL_EXPORT Connection {
   // last sqlite operation.
   const char* GetErrorMessage() const;
 
+  // Return a reproducible representation of the schema equivalent to
+  // running the following statement at a sqlite3 command-line:
+  //   SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY 1, 2, 3, 4;
+  std::string GetSchema() const;
+
+  // Clients which provide an error_callback don't see the
+  // error-handling at the end of OnSqliteError().  Expose to allow
+  // those clients to work appropriately with ScopedErrorIgnorer in
+  // tests.
+  static bool ShouldIgnoreSqliteError(int error);
+
  private:
   // For recovery module.
   friend class Recovery;
@@ -431,7 +445,6 @@ class SQL_EXPORT Connection {
   // See test/scoped_error_ignorer.h.
   typedef base::Callback<bool(int)> ErrorIgnorerCallback;
   static ErrorIgnorerCallback* current_ignorer_cb_;
-  static bool ShouldIgnore(int error);
   static void SetErrorIgnorer(ErrorIgnorerCallback* ignorer);
   static void ResetErrorIgnorer();
 
@@ -506,9 +519,17 @@ class SQL_EXPORT Connection {
   void StatementRefCreated(StatementRef* ref);
   void StatementRefDeleted(StatementRef* ref);
 
-  // Called by Statement objects when an sqlite function returns an error.
-  // The return value is the error code reflected back to client code.
-  int OnSqliteError(int err, Statement* stmt);
+  // Called when a sqlite function returns an error, which is passed
+  // as |err|.  The return value is the error code to be reflected
+  // back to client code.  |stmt| is non-NULL if the error relates to
+  // an sql::Statement instance.  |sql| is non-NULL if the error
+  // relates to non-statement sql code (Execute, for instance).  Both
+  // can be NULL, but both should never be set.
+  // NOTE(shess): Originally, the return value was intended to allow
+  // error handlers to transparently convert errors into success.
+  // Unfortunately, transactions are not generally restartable, so
+  // this did not work out.
+  int OnSqliteError(int err, Statement* stmt, const char* sql);
 
   // Like |Execute()|, but retries if the database is locked.
   bool ExecuteWithTimeout(const char* sql, base::TimeDelta ms_timeout)
@@ -521,6 +542,10 @@ class SQL_EXPORT Connection {
   // released before close could be called (which should always be the
   // case for const functions).
   scoped_refptr<StatementRef> GetUntrackedStatement(const char* sql) const;
+
+  bool IntegrityCheckHelper(
+      const char* pragma_sql,
+      std::vector<std::string>* messages) WARN_UNUSED_RESULT;
 
   // The actual sqlite database. Will be NULL before Init has been called or if
   // Init resulted in an error.

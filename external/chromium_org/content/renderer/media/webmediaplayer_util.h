@@ -8,8 +8,9 @@
 #include "base/time/time.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/ranges.h"
-#include "third_party/WebKit/public/web/WebMediaPlayer.h"
-#include "third_party/WebKit/public/web/WebTimeRange.h"
+#include "third_party/WebKit/public/platform/WebMediaPlayer.h"
+#include "third_party/WebKit/public/platform/WebTimeRange.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -19,11 +20,14 @@ namespace content {
 // Refer to https://bugs.webkit.org/show_bug.cgi?id=52697 for details.
 base::TimeDelta ConvertSecondsToTimestamp(double seconds);
 
-WebKit::WebTimeRanges ConvertToWebTimeRanges(
+blink::WebTimeRanges ConvertToWebTimeRanges(
     const media::Ranges<base::TimeDelta>& ranges);
 
-WebKit::WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
+blink::WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
     media::PipelineStatus error);
+
+// Report the scheme of Media URIs.
+void ReportMediaSchemeUma(const GURL& url);
 
 }  // namespace content
 

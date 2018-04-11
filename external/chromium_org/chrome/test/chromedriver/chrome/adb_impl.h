@@ -16,14 +16,13 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-class Log;
 class Status;
 
 class AdbImpl : public Adb {
  public:
   explicit AdbImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& io_message_loop_proxy,
-      Log* log);
+      int port);
   virtual ~AdbImpl();
 
   // Overridden from Adb:
@@ -39,6 +38,8 @@ class AdbImpl : public Adb {
                                    const std::string& package) OVERRIDE;
   virtual Status ClearAppData(const std::string& device_serial,
                               const std::string& package) OVERRIDE;
+  virtual Status SetDebugApp(const std::string& device_serial,
+                             const std::string& package) OVERRIDE;
   virtual Status Launch(const std::string& device_serial,
                         const std::string& package,
                         const std::string& activity) OVERRIDE;
@@ -60,7 +61,7 @@ class AdbImpl : public Adb {
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
-  Log* log_;
+  int port_;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_ADB_IMPL_H_

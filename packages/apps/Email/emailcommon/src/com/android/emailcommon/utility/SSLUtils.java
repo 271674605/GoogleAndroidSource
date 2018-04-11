@@ -54,6 +54,9 @@ public class SSLUtils {
     private static final boolean LOG_ENABLED = false;
     private static final String TAG = "Email.Ssl";
 
+    // A 30 second SSL handshake should be more than enough.
+    private static final int SSL_HANDSHAKE_TIMEOUT = 30000;
+
     /**
      * A trust manager specific to a particular HostAuth.  The first time a server certificate is
      * encountered for the HostAuth, its certificate is saved; subsequent checks determine whether
@@ -71,7 +74,7 @@ public class SSLUtils {
             mHostAuth = hostAuth;
             // We must load the server cert manually (the ContentCache won't handle blobs
             Cursor c = context.getContentResolver().query(HostAuth.CONTENT_URI,
-                    new String[] {HostAuthColumns.SERVER_CERT}, HostAuth.ID + "=?",
+                    new String[] {HostAuthColumns.SERVER_CERT}, HostAuthColumns._ID + "=?",
                     new String[] {Long.toString(hostAuth.mId)}, null);
             if (c != null) {
                 try {
@@ -144,7 +147,7 @@ public class SSLUtils {
             HostAuth hostAuth, boolean insecure) {
         if (insecure) {
             SSLCertificateSocketFactory insecureFactory = (SSLCertificateSocketFactory)
-                    SSLCertificateSocketFactory.getInsecure(0, null);
+                    SSLCertificateSocketFactory.getInsecure(SSL_HANDSHAKE_TIMEOUT, null);
             insecureFactory.setTrustManagers(
                     new TrustManager[] {
                             new SameCertificateCheckingTrustManager(context, hostAuth)});
@@ -152,7 +155,7 @@ public class SSLUtils {
         } else {
             if (sSecureFactory == null) {
                 sSecureFactory = (SSLCertificateSocketFactory)
-                        SSLCertificateSocketFactory.getDefault(0, null);
+                        SSLCertificateSocketFactory.getDefault(SSL_HANDSHAKE_TIMEOUT, null);
             }
             return sSecureFactory;
         }
@@ -175,6 +178,18 @@ public class SSLUtils {
         return wrapped;
     }
 
+    // Character.isLetter() is locale-specific, and will potentially return true for characters
+    // outside of ascii a-z,A-Z
+    private static boolean isAsciiLetter(char c) {
+        return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+    }
+
+    // Character.isDigit() is locale-specific, and will potentially return true for characters
+    // outside of ascii 0-9
+    private static boolean isAsciiNumber(char c) {
+        return ('0' <= c && c <= '9');
+    }
+
     /**
      * Escapes the contents a string to be used as a safe scheme name in the URI according to
      * http://tools.ietf.org/html/rfc3986#section-3.1
@@ -189,7 +204,7 @@ public class SSLUtils {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (Character.isLetter(c) || Character.isDigit(c)
+            if (isAsciiLetter(c) || isAsciiNumber(c)
                     || ('-' == c) || ('.' == c)) {
                 // Safe - use as is.
                 sb.append(c);

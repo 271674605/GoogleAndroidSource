@@ -2,17 +2,38 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
+class RequestHeaders(object):
+  '''A custom dictionary impementation for headers which ignores the case
+  of requests, since different HTTP libraries seem to mangle them.
+  '''
+  def __init__(self, dict_):
+    if isinstance(dict_, RequestHeaders):
+      self._dict = dict_
+    else:
+      self._dict = dict((k.lower(), v) for k, v in dict_.iteritems())
+
+  def get(self, key, default=None):
+    return self._dict.get(key.lower(), default)
+
+  def __repr__(self):
+    return repr(self._dict)
+
+  def __str__(self):
+    return repr(self._dict)
+
+
 class Request(object):
   '''Request data.
   '''
   def __init__(self, path, host, headers):
     self.path = path.lstrip('/')
     self.host = host.rstrip('/')
-    self.headers = headers
+    self.headers = RequestHeaders(headers)
 
   @staticmethod
-  def ForTest(path, host='http://developer.chrome.com', headers=None):
-    return Request(path, host, headers or {})
+  def ForTest(path, host=None, headers=None):
+    return Request(path, host or 'http://developer.chrome.com', headers or {})
 
   def __repr__(self):
     return 'Request(path=%s, host=%s, headers=%s)' % (
@@ -77,6 +98,10 @@ class Response(object):
     return Response(content=content, headers=headers, status=404)
 
   @staticmethod
+  def NotModified(content, headers=None):
+    return Response(content=content, headers=headers, status=304)
+
+  @staticmethod
   def InternalError(content, headers=None):
     '''Returns an internal error (500) response.
     '''
@@ -104,6 +129,9 @@ class Response(object):
     if self.headers.get('Location') is None:
       return (None, None)
     return (self.headers.get('Location'), self.status == 301)
+
+  def IsNotFound(self):
+    return self.status == 404
 
   def __eq__(self, other):
     return (isinstance(other, self.__class__) and

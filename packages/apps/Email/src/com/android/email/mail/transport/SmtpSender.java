@@ -20,6 +20,7 @@ import android.content.Context;
 import android.util.Base64;
 
 import com.android.email.mail.Sender;
+import com.android.email.mail.internet.AuthenticationCache;
 import com.android.email2.ui.MailActivityEmail;
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.internet.Rfc822Output;
@@ -28,6 +29,7 @@ import com.android.emailcommon.mail.AuthenticationFailedException;
 import com.android.emailcommon.mail.CertificateValidationException;
 import com.android.emailcommon.mail.MessagingException;
 import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.provider.Credential;
 import com.android.emailcommon.provider.EmailContent.Message;
 import com.android.emailcommon.provider.HostAuth;
 import com.android.emailcommon.utility.EOLConvertingOutputStream;
@@ -46,8 +48,10 @@ public class SmtpSender extends Sender {
 
     private final Context mContext;
     private MailTransport mTransport;
+    private Account mAccount;
     private String mUsername;
     private String mPassword;
+    private boolean mUseOAuth;
 
     /**
      * Static named constructor.
@@ -61,12 +65,15 @@ public class SmtpSender extends Sender {
      */
     public SmtpSender(Context context, Account account) {
         mContext = context;
+        mAccount = account;
         HostAuth sendAuth = account.getOrCreateHostAuthSend(context);
         mTransport = new MailTransport(context, "SMTP", sendAuth);
         String[] userInfoParts = sendAuth.getLogin();
-        if (userInfoParts != null) {
-            mUsername = userInfoParts[0];
-            mPassword = userInfoParts[1];
+        mUsername = userInfoParts[0];
+        mPassword = userInfoParts[1];
+        Credential cred = sendAuth.getCredential(context);
+        if (cred != null) {
+            mUseOAuth = true;
         }
     }
 
@@ -75,7 +82,7 @@ public class SmtpSender extends Sender {
      * up and ready to use.  Do not use for real code.
      * @param testTransport The Transport to inject and use for all future communication.
      */
-    /* package */ void setTransport(MailTransport testTransport) {
+    public void setTransport(MailTransport testTransport) {
         mTransport = testTransport;
     }
 
@@ -133,8 +140,15 @@ public class SmtpSender extends Sender {
              */
             boolean authLoginSupported = result.matches(".*AUTH.*LOGIN.*$");
             boolean authPlainSupported = result.matches(".*AUTH.*PLAIN.*$");
+            boolean authOAuthSupported = result.matches(".*AUTH.*XOAUTH2.*$");
 
-            if (mUsername != null && mUsername.length() > 0 && mPassword != null
+            if (mUseOAuth) {
+                if (!authOAuthSupported) {
+                    LogUtils.w(Logging.LOG_TAG, "OAuth requested, but not supported.");
+                    throw new MessagingException(MessagingException.OAUTH_NOT_SUPPORTED);
+                }
+                saslAuthOAuth(mUsername);
+            } else if (mUsername != null && mUsername.length() > 0 && mPassword != null
                     && mPassword.length() > 0) {
                 if (authPlainSupported) {
                     saslAuthPlain(mUsername, mPassword);
@@ -143,11 +157,11 @@ public class SmtpSender extends Sender {
                     saslAuthLogin(mUsername, mPassword);
                 }
                 else {
-                    if (MailActivityEmail.DEBUG) {
-                        LogUtils.d(Logging.LOG_TAG, "No valid authentication mechanism found.");
-                    }
+                    LogUtils.w(Logging.LOG_TAG, "No valid authentication mechanism found.");
                     throw new MessagingException(MessagingException.AUTH_REQUIRED);
                 }
+            } else {
+                // It is acceptable to hvae no authentication at all for SMTP.
             }
         } catch (SSLException e) {
             if (MailActivityEmail.DEBUG) {
@@ -172,10 +186,10 @@ public class SmtpSender extends Sender {
             throw new MessagingException("Trying to send non-existent message id="
                     + Long.toString(messageId));
         }
-        Address from = Address.unpackFirst(message.mFrom);
-        Address[] to = Address.unpack(message.mTo);
-        Address[] cc = Address.unpack(message.mCc);
-        Address[] bcc = Address.unpack(message.mBcc);
+        Address from = Address.firstAddress(message.mFrom);
+        Address[] to = Address.fromHeader(message.mTo);
+        Address[] cc = Address.fromHeader(message.mCc);
+        Address[] bcc = Address.fromHeader(message.mBcc);
 
         try {
             executeSimpleCommand("MAIL FROM:" + "<" + from.getAddress() + ">");
@@ -302,6 +316,34 @@ public class SmtpSender extends Sender {
             executeSensitiveCommand("AUTH PLAIN " + new String(data), "AUTH PLAIN /redacted/");
         }
         catch (MessagingException me) {
+            if (me.getMessage().length() > 1 && me.getMessage().charAt(1) == '3') {
+                throw new AuthenticationFailedException(me.getMessage());
+            }
+            throw me;
+        }
+    }
+
+    private void saslAuthOAuth(String username) throws MessagingException,
+            AuthenticationFailedException, IOException {
+        final AuthenticationCache cache = AuthenticationCache.getInstance();
+        String accessToken = cache.retrieveAccessToken(mContext, mAccount);
+        try {
+            saslAuthOAuth(username, accessToken);
+        } catch (AuthenticationFailedException e) {
+            accessToken = cache.refreshAccessToken(mContext, mAccount);
+            saslAuthOAuth(username, accessToken);
+        }
+    }
+
+    private void saslAuthOAuth(final String username, final String accessToken) throws IOException,
+            MessagingException {
+        final String authPhrase = "user=" + username + '\001' + "auth=Bearer " + accessToken +
+                '\001' + '\001';
+        byte[] data = Base64.encode(authPhrase.getBytes(), Base64.NO_WRAP);
+        try {
+            executeSensitiveCommand("AUTH XOAUTH2 " + new String(data),
+                    "AUTH XOAUTH2 /redacted/");
+        } catch (MessagingException me) {
             if (me.getMessage().length() > 1 && me.getMessage().charAt(1) == '3') {
                 throw new AuthenticationFailedException(me.getMessage());
             }

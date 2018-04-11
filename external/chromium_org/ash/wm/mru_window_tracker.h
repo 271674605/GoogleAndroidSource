@@ -11,8 +11,8 @@
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/window_observer.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace aura {
 class RootWindow;
@@ -36,10 +36,6 @@ class ASH_EXPORT MruWindowTracker
       aura::client::ActivationClient* activation_client);
   virtual ~MruWindowTracker();
 
-  // Set up the observers to handle window changes for the containers we care
-  // about.  Called when a new root window is added.
-  void OnRootWindowAdded(aura::RootWindow* root_window);
-
   // Returns the set of windows which can be cycled through. This method creates
   // the vector based on the current set of windows across all valid root
   // windows. As a result it is not necessarily the same as the set of
@@ -60,16 +56,16 @@ class ASH_EXPORT MruWindowTracker
   void SetIgnoreActivations(bool ignore);
 
  private:
-  // Checks if the window represents a container whose children we track.
-  static bool IsTrackedContainer(aura::Window* window);
+  // Updates the mru_windows_ list to insert/move |active_window| at/to the
+  // front.
+  void SetActiveWindow(aura::Window* active_window);
 
   // Overridden from aura::client::ActivationChangeObserver:
   virtual void OnWindowActivated(aura::Window* gained_active,
                                  aura::Window* lost_active) OVERRIDE;
 
   // Overridden from WindowObserver:
-  virtual void OnWillRemoveWindow(aura::Window* window) OVERRIDE;
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
+  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
 
   // List of windows that have been activated in containers that we cycle
   // through, sorted by most recently used.

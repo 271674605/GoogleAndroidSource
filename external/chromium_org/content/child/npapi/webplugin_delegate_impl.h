@@ -15,16 +15,10 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/child/npapi/webplugin_delegate.h"
+#include "content/common/cursors/webcursor.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
-#include "webkit/common/cursors/webcursor.h"
-
-#if defined(USE_X11)
-#include "ui/base/x/x11_util.h"
-
-typedef struct _GdkDrawable GdkPixmap;
-#endif
 
 namespace base {
 class FilePath;
@@ -41,8 +35,8 @@ class CARenderer;
 #endif
 
 namespace content {
-
 class PluginInstance;
+class WebPlugin;
 
 #if defined(OS_MACOSX)
 class WebPluginAcceleratedSurface;
@@ -75,23 +69,25 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
     PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK = 32768,  // Linux
     PLUGIN_QUIRK_IGNORE_FIRST_SETWINDOW_CALL = 65536,  // Windows.
     PLUGIN_QUIRK_EMULATE_IME = 131072,  // Windows.
+    PLUGIN_QUIRK_FAKE_WINDOW_FROM_POINT = 262144,  // Windows.
+    PLUGIN_QUIRK_COPY_STREAM_DATA = 524288,  // All platforms
   };
 
-  static WebPluginDelegateImpl* Create(const base::FilePath& filename,
+  static WebPluginDelegateImpl* Create(WebPlugin* plugin,
+                                       const base::FilePath& filename,
                                        const std::string& mime_type);
 
   // WebPluginDelegate implementation
   virtual bool Initialize(const GURL& url,
                           const std::vector<std::string>& arg_names,
                           const std::vector<std::string>& arg_values,
-                          WebPlugin* plugin,
                           bool load_manually) OVERRIDE;
   virtual void PluginDestroyed() OVERRIDE;
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect) OVERRIDE;
-  virtual void Paint(WebKit::WebCanvas* canvas, const gfx::Rect& rect) OVERRIDE;
+  virtual void Paint(SkCanvas* canvas, const gfx::Rect& rect) OVERRIDE;
   virtual void SetFocus(bool focused) OVERRIDE;
-  virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
+  virtual bool HandleInputEvent(const blink::WebInputEvent& event,
                                 WebCursor::CursorInfo* cursor_info) OVERRIDE;
   virtual NPObject* GetPluginScriptableObject() OVERRIDE;
   virtual NPP GetPluginNPP() OVERRIDE;
@@ -116,6 +112,19 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
       unsigned long resource_id, const GURL& url, int notify_id) OVERRIDE;
   virtual WebPluginResourceClient* CreateSeekableResourceClient(
       unsigned long resource_id, int range_request_id) OVERRIDE;
+  virtual void FetchURL(unsigned long resource_id,
+                        int notify_id,
+                        const GURL& url,
+                        const GURL& first_party_for_cookies,
+                        const std::string& method,
+                        const char* buf,
+                        unsigned int len,
+                        const GURL& referrer,
+                        bool notify_redirects,
+                        bool is_plugin_src_load,
+                        int origin_pid,
+                        int render_frame_id,
+                        int render_view_id) OVERRIDE;
   // End of WebPluginDelegate implementation.
 
   gfx::PluginWindowHandle windowed_handle() const { return windowed_handle_; }
@@ -183,17 +192,11 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   void CGPaint(CGContextRef context, const gfx::Rect& rect);
 #endif  // OS_MACOSX && !USE_AURA
 
-#if defined(USE_X11)
-  void SetWindowlessShmPixmap(XID shm_pixmap) {
-    windowless_shm_pixmap_ = shm_pixmap;
-  }
-#endif
-
  private:
   friend class base::DeleteHelper<WebPluginDelegateImpl>;
   friend class WebPluginDelegate;
 
-  explicit WebPluginDelegateImpl(PluginInstance* instance);
+  WebPluginDelegateImpl(WebPlugin* plugin, PluginInstance* instance);
   virtual ~WebPluginDelegateImpl();
 
   // Called by Initialize() for platform-specific initialization.
@@ -268,7 +271,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // Does platform-specific event handling. Arguments and return are identical
   // to HandleInputEvent.
-  bool PlatformHandleInputEvent(const WebKit::WebInputEvent& event,
+  bool PlatformHandleInputEvent(const blink::WebInputEvent& event,
                                 WebCursor::CursorInfo* cursor_info);
 
   // Closes down and destroys our plugin instance.
@@ -303,27 +306,6 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   // IMM32 functions.
   scoped_ptr<WebPluginIMEWin> plugin_ime_;
 #endif  // defined(OS_WIN)
-
-#if defined(USE_X11)
-  // The SHM pixmap for a windowless plugin.
-  XID windowless_shm_pixmap_;
-#endif
-
-#if defined(TOOLKIT_GTK)
-  // The pixmap we're drawing into, for a windowless plugin.
-  GdkPixmap* pixmap_;
-  double first_event_time_;
-
-  // On Linux some plugins assume that the GtkSocket container is in the same
-  // process. So we create a GtkPlug to plug into the browser's container, and
-  // a GtkSocket to hold the plugin. We then send the GtkPlug to the browser
-  // process.
-  GtkWidget* plug_;
-  GtkWidget* socket_;
-
-  // Ensure pixmap_ exists and is at least width by height pixels.
-  void EnsurePixmapAtLeastSize(int width, int height);
-#endif
 
   NPWindow window_;
   gfx::Rect window_rect_;
@@ -372,6 +354,12 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // GetProcAddress intercepter for windowless plugins.
   static FARPROC WINAPI GetProcAddressPatch(HMODULE module, LPCSTR name);
+
+  // WindowFromPoint patch for Flash windowless plugins. When flash receives
+  // mouse move messages it calls the WindowFromPoint API to eventually convert
+  // the mouse coordinates to screen. We need to return the dummy plugin parent
+  // window for Aura to ensure that these conversions occur correctly.
+  static HWND WINAPI WindowFromPointPatch(POINT point);
 
   // The mouse hook proc which handles mouse capture in windowed plugins.
   static LRESULT CALLBACK MouseHookProc(int code, WPARAM wParam,
@@ -428,7 +416,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   void OnModalLoopEntered();
 
   // Returns true if the message passed in corresponds to a user gesture.
-  static bool IsUserGesture(const WebKit::WebInputEvent& event);
+  static bool IsUserGesture(const blink::WebInputEvent& event);
 
   // The url with which the plugin was instantiated.
   std::string plugin_url_;

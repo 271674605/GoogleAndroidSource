@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -491,13 +491,45 @@ tNFA_STATUS NFA_EeRemoveAidRouting(UINT8     aid_len,
 
 /*******************************************************************************
 **
+** Function         NFA_EeGetLmrtRemainingSize
+**
+** Description      This function is called to get remaining size of the
+**                  Listen Mode Routing Table.
+**                  The remaining size is reported in NFA_EE_REMAINING_SIZE_EVT
+**
+** Returns          NFA_STATUS_OK if successfully initiated
+**                  NFA_STATUS_FAILED otherwise
+**
+*******************************************************************************/
+tNFA_STATUS NFA_EeGetLmrtRemainingSize (void)
+{
+    tNFA_EE_API_LMRT_SIZE *p_msg;
+    tNFA_STATUS status = NFA_STATUS_FAILED;
+
+    NFA_TRACE_API0 ("NFA_EeGetLmrtRemainingSize()");
+    if ((p_msg = (tNFA_EE_API_LMRT_SIZE *) GKI_getbuf (sizeof(tNFA_EE_API_LMRT_SIZE))) != NULL)
+    {
+        p_msg->event    = NFA_EE_API_LMRT_SIZE_EVT;
+        nfa_sys_sendmsg (p_msg);
+        status = NFA_STATUS_OK;
+    }
+
+    return status;
+}
+
+/******************************************************************************
+**
 ** Function         NFA_EeUpdateNow
 **
 ** Description      This function is called to send the current listen mode
 **                  routing table and VS configuration to the NFCC (without waiting
 **                  for NFA_EE_ROUT_TIMEOUT_VAL).
 **
+**                  The status of this operation is
+**                  reported with the NFA_EE_UPDATED_EVT.
+**
 ** Returns          NFA_STATUS_OK if successfully initiated
+**                  NFA_STATUS_SEMANTIC_ERROR is update is currently in progress
 **                  NFA_STATUS_FAILED otherwise
 **
 *******************************************************************************/
@@ -507,7 +539,12 @@ tNFA_STATUS NFA_EeUpdateNow(void)
     tNFA_STATUS status = NFA_STATUS_FAILED;
 
     NFA_TRACE_API0 ("NFA_EeUpdateNow()");
-    if ((p_msg = (BT_HDR *) GKI_getbuf (BT_HDR_SIZE)) != NULL)
+    if (nfa_ee_cb.ee_wait_evt & NFA_EE_WAIT_UPDATE_ALL)
+    {
+        NFA_TRACE_ERROR0 ("update in progress");
+        status = NFA_STATUS_SEMANTIC_ERROR;
+    }
+    else if ((p_msg = (BT_HDR *) GKI_getbuf (BT_HDR_SIZE)) != NULL)
     {
         p_msg->event    = NFA_EE_API_UPDATE_NOW_EVT;
 

@@ -16,12 +16,11 @@
 
 package android.app.cts;
 
-
-import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.cts.util.IBinderParcelable;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -51,9 +50,11 @@ public class ServiceTest extends ActivityTestsBase {
     private IBinder mStateReceiver;
 
     private static class EmptyConnection implements ServiceConnection {
+        @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
         }
 
+        @Override
         public void onServiceDisconnected(ComponentName name) {
         }
     }
@@ -74,6 +75,7 @@ public class ServiceTest extends ActivityTestsBase {
             mMonitor = v;
         }
 
+        @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             if (mSetReporter) {
                 Parcel data = Parcel.obtain();
@@ -109,6 +111,7 @@ public class ServiceTest extends ActivityTestsBase {
             }
         }
 
+        @Override
         public void onServiceDisconnected(ComponentName name) {
             if (mMonitor) {
                 if (mExpectedServiceState == STATE_DESTROY) {
@@ -148,15 +151,6 @@ public class ServiceTest extends ActivityTestsBase {
         mExpectedServiceState = STATE_DESTROY;
         mContext.stopService(service);
         waitForResultOrThrow(DELAY, "service to be destroyed");
-    }
-
-    private void startExpectNoPermission(Intent service) {
-        try {
-            mContext.startService(service);
-            fail("Expected security exception when starting " + service);
-        } catch (SecurityException e) {
-            // expected
-        }
     }
 
     /**
@@ -294,18 +288,6 @@ public class ServiceTest extends ActivityTestsBase {
         waitForResultOrThrow(DELAY, "disconnecting from service");
     }
 
-    private void bindExpectNoPermission(Intent service) {
-        TestConnection conn = new TestConnection(false, false);
-        try {
-            mContext.bindService(service, conn, Context.BIND_AUTO_CREATE);
-            fail("Expected security exception when binding " + service);
-        } catch (SecurityException e) {
-            // expected
-        } finally {
-            mContext.unbindService(conn);
-        }
-    }
-
     @Override
     protected void setUp() throws Exception {
         super.setUp();
@@ -313,8 +295,10 @@ public class ServiceTest extends ActivityTestsBase {
         mLocalService = new Intent(mContext, LocalService.class);
         mLocalDeniedService = new Intent(mContext, LocalDeniedService.class);
         mLocalGrantedService = new Intent(mContext, LocalGrantedService.class);
-        mLocalService_ApplicationHasPermission = new Intent(LocalService.SERVICE_LOCAL_GRANTED);
-        mLocalService_ApplicationDoesNotHavePermission = new Intent(LocalService.SERVICE_LOCAL_DENIED);
+        mLocalService_ApplicationHasPermission = new Intent(
+                LocalService.SERVICE_LOCAL_GRANTED, null /*uri*/, mContext, LocalService.class);
+        mLocalService_ApplicationDoesNotHavePermission = new Intent(
+                LocalService.SERVICE_LOCAL_DENIED, null /*uri*/, mContext, LocalService.class);
         mStateReceiver = new MockBinder();
     }
 
@@ -392,7 +376,8 @@ public class ServiceTest extends ActivityTestsBase {
     }
 
     public void testLocalStartAction() throws Exception {
-        startExpectResult(new Intent(LocalService.SERVICE_LOCAL));
+        startExpectResult(new Intent(
+                LocalService.SERVICE_LOCAL, null /*uri*/, mContext, LocalService.class));
     }
 
     public void testLocalBindClass() throws Exception {
@@ -401,7 +386,8 @@ public class ServiceTest extends ActivityTestsBase {
 
     @MediumTest
     public void testLocalBindAction() throws Exception {
-        bindExpectResult(new Intent(LocalService.SERVICE_LOCAL));
+        bindExpectResult(new Intent(
+                LocalService.SERVICE_LOCAL, null /*uri*/, mContext, LocalService.class));
     }
 
     @MediumTest
@@ -411,7 +397,8 @@ public class ServiceTest extends ActivityTestsBase {
 
     @MediumTest
     public void testLocalBindAutoAction() throws Exception {
-        bindAutoExpectResult(new Intent(LocalService.SERVICE_LOCAL));
+        bindAutoExpectResult(new Intent(
+                LocalService.SERVICE_LOCAL, null /*uri*/, mContext, LocalService.class));
     }
 
     @MediumTest

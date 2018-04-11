@@ -114,6 +114,9 @@ public class SystemFeaturesTest extends InstrumentationTestCase {
             assertNotAvailable(PackageManager.FEATURE_CAMERA_FLASH);
             assertNotAvailable(PackageManager.FEATURE_CAMERA_FRONT);
             assertNotAvailable(PackageManager.FEATURE_CAMERA_ANY);
+            assertFalse("Devices supporting external cameras must have a representative camera " +
+                    "connected for testing",
+                    mPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_EXTERNAL));
         } else {
             assertAvailable(PackageManager.FEATURE_CAMERA_ANY);
             checkFrontCamera();
@@ -133,9 +136,15 @@ public class SystemFeaturesTest extends InstrumentationTestCase {
         }
 
         if (frontCameraId > -1) {
-            assertAvailable(PackageManager.FEATURE_CAMERA_FRONT);
+            assertTrue("Device has front-facing camera but does not report either " +
+                    "the FEATURE_CAMERA_FRONT or FEATURE_CAMERA_EXTERNAL feature",
+                    mPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FRONT) ||
+                    mPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_EXTERNAL));
         } else {
-            assertNotAvailable(PackageManager.FEATURE_CAMERA_FRONT);
+            assertFalse("Device does not have front-facing camera but reports either " +
+                    "the FEATURE_CAMERA_FRONT or FEATURE_CAMERA_EXTERNAL feature",
+                    mPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FRONT) ||
+                    mPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_EXTERNAL));
         }
     }
 
@@ -200,6 +209,7 @@ public class SystemFeaturesTest extends InstrumentationTestCase {
     public void testNfcFeatures() {
         if (NfcAdapter.getDefaultAdapter(mContext) != null) {
             assertAvailable(PackageManager.FEATURE_NFC);
+            assertAvailable(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION);
         } else {
             assertNotAvailable(PackageManager.FEATURE_NFC);
         }
@@ -233,6 +243,14 @@ public class SystemFeaturesTest extends InstrumentationTestCase {
                 Sensor.TYPE_STEP_COUNTER);
         assertFeatureForSensor(featuresLeft, PackageManager.FEATURE_SENSOR_STEP_DETECTOR,
                 Sensor.TYPE_STEP_DETECTOR);
+        assertFeatureForSensor(featuresLeft, PackageManager.FEATURE_SENSOR_HEART_RATE,
+                Sensor.TYPE_HEART_RATE);
+        assertFeatureForSensor(featuresLeft, PackageManager.FEATURE_SENSOR_HEART_RATE_ECG,
+                Sensor.TYPE_HEART_RATE);
+        assertFeatureForSensor(featuresLeft, PackageManager.FEATURE_SENSOR_AMBIENT_TEMPERATURE,
+                Sensor.TYPE_AMBIENT_TEMPERATURE);
+        assertFeatureForSensor(featuresLeft, PackageManager.FEATURE_SENSOR_RELATIVE_HUMIDITY,
+                Sensor.TYPE_RELATIVE_HUMIDITY);
 
         assertTrue("Assertions need to be added to this test for " + featuresLeft,
                 featuresLeft.isEmpty());
@@ -337,6 +355,7 @@ public class SystemFeaturesTest extends InstrumentationTestCase {
         ConfigurationInfo configInfo = mActivityManager.getDeviceConfigurationInfo();
         if (configInfo.reqTouchScreen != Configuration.TOUCHSCREEN_NOTOUCH) {
             assertAvailable(PackageManager.FEATURE_TOUCHSCREEN);
+            assertAvailable(PackageManager.FEATURE_FAKETOUCH);
         } else {
             assertNotAvailable(PackageManager.FEATURE_TOUCHSCREEN);
         }

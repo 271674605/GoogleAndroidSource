@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "ui/views/controls/button/menu_button.h"
 #include "ui/views/view.h"
 
 namespace chrome {
@@ -18,11 +19,12 @@ class ImageSkia;
 }
 
 // A view to display a tab favicon or a throbber.
-class TabIconView : public views::View {
+class TabIconView : public views::MenuButton {
  public:
   static void InitializeIfNeeded();
 
-  explicit TabIconView(chrome::TabIconViewModel* model);
+  TabIconView(chrome::TabIconViewModel* model,
+              views::MenuButtonListener* menu_button_listener);
   virtual ~TabIconView();
 
   // Invoke whenever the tab state changes or the throbber should update.
@@ -33,7 +35,7 @@ class TabIconView : public views::View {
 
   // Overridden from View
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
 
  private:
   void PaintThrobber(gfx::Canvas* canvas);

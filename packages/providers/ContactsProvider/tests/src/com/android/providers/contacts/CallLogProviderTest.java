@@ -18,7 +18,9 @@ package com.android.providers.contacts;
 
 import com.android.internal.telephony.CallerInfo;
 import com.android.internal.telephony.PhoneConstants;
+import com.android.providers.contacts.testutil.CommonDatabaseUtils;
 
+import android.content.ComponentName;
 import android.content.ContentProvider;
 import android.content.ContentUris;
 import android.content.ContentValues;
@@ -27,12 +29,14 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.provider.CallLog;
 import android.provider.CallLog.Calls;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.VoicemailContract.Voicemails;
+import android.telecom.PhoneAccountHandle;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import java.util.Arrays;
@@ -49,11 +53,6 @@ import java.util.List;
  */
 @MediumTest
 public class CallLogProviderTest extends BaseContactsProvider2Test {
-    private static final String READ_WRITE_ALL_PERMISSION =
-            "com.android.voicemail.permission.READ_WRITE_ALL_VOICEMAIL";
-    private static final String ADD_VOICEMAIL_PERMISSION =
-            "com.android.voicemail.permission.ADD_VOICEMAIL";
-
     /** Fields specific to voicemail provider that should not be exposed by call_log*/
     private static final String[] VOICEMAIL_PROVIDER_SPECIFIC_COLUMNS = new String[] {
             Voicemails._DATA,
@@ -63,7 +62,9 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
             Voicemails.SOURCE_DATA,
             Voicemails.STATE};
     /** Total number of columns exposed by call_log provider. */
-    private static final int NUM_CALLLOG_FIELDS = 19;
+    private static final int NUM_CALLLOG_FIELDS = 24;
+
+    private CallLogProvider mCallLogProvider;
 
     @Override
     protected Class<? extends ContentProvider> getProviderClass() {
@@ -78,7 +79,8 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        addProvider(TestCallLogProvider.class, CallLog.AUTHORITY);
+        mCallLogProvider = (CallLogProvider) addProvider(TestCallLogProvider.class,
+                CallLog.AUTHORITY);
     }
 
     @Override
@@ -98,12 +100,8 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
 
     private void setUpWithVoicemailPermissions() {
         mActor.addPermissions(ADD_VOICEMAIL_PERMISSION);
-        mActor.addPermissions(READ_WRITE_ALL_PERMISSION);
-    }
-
-    private void setUpWithNoVoicemailPermissions() {
-        mActor.removePermissions(ADD_VOICEMAIL_PERMISSION);
-        mActor.removePermissions(READ_WRITE_ALL_PERMISSION);
+        mActor.addPermissions(READ_VOICEMAIL_PERMISSION);
+        mActor.addPermissions(WRITE_VOICEMAIL_PERMISSION);
     }
 
     public void testInsert_VoicemailCallRecord() {
@@ -180,11 +178,19 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
         ci.name = "1-800-GOOG-411";
         ci.numberType = Phone.TYPE_CUSTOM;
         ci.numberLabel = "Directory";
+        final ComponentName sComponentName = new ComponentName(
+                "com.android.server.telecom",
+                "TelecomServiceImpl");
+        PhoneAccountHandle subscription = new PhoneAccountHandle(
+                sComponentName, "sub0");
+
         Uri uri = Calls.addCall(ci, getMockContext(), "1-800-263-7643",
-                PhoneConstants.PRESENTATION_ALLOWED, Calls.OUTGOING_TYPE, 2000, 40);
+                PhoneConstants.PRESENTATION_ALLOWED, Calls.OUTGOING_TYPE, 0, subscription, 2000,
+                40, null);
 
         ContentValues values = new ContentValues();
         values.put(Calls.TYPE, Calls.OUTGOING_TYPE);
+        values.put(Calls.FEATURES, 0);
         values.put(Calls.NUMBER, "1-800-263-7643");
         values.put(Calls.NUMBER_PRESENTATION, Calls.PRESENTATION_ALLOWED);
         values.put(Calls.DATE, 2000);
@@ -194,6 +200,12 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
         values.put(Calls.CACHED_NUMBER_LABEL, "Directory");
         values.put(Calls.COUNTRY_ISO, "us");
         values.put(Calls.GEOCODED_LOCATION, "usa");
+        values.put(Calls.PHONE_ACCOUNT_COMPONENT_NAME,
+                "com.android.server.telecom/TelecomServiceImpl");
+        values.put(Calls.PHONE_ACCOUNT_ID, "sub0");
+        // Casting null to Long as there are many forms of "put" which have nullable second
+        // parameters and the compiler needs a hint as to which form is correct.
+        values.put(Calls.DATA_USAGE, (Long) null);
         assertStoredValues(uri, values);
     }
 
@@ -338,7 +350,13 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
                         null, null);
             }
         });
-        // Should now succeed with permissions granted.
+
+        // Should succeed with manage permission granted
+        mActor.addPermissions(WRITE_VOICEMAIL_PERMISSION);
+        mResolver.update(Calls.CONTENT_URI_WITH_VOICEMAIL, getDefaultCallValues(), null, null);
+        mActor.removePermissions(WRITE_VOICEMAIL_PERMISSION);
+
+        // Should also succeed with full permissions granted.
         setUpWithVoicemailPermissions();
         mResolver.update(Calls.CONTENT_URI_WITH_VOICEMAIL, getDefaultCallValues(), null, null);
     }
@@ -350,7 +368,13 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
                 mResolver.query(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null, null, null);
             }
         });
-        // Should now succeed with permissions granted.
+
+        // Should succeed with read_all permission granted
+        mActor.addPermissions(READ_VOICEMAIL_PERMISSION);
+        mResolver.query(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null, null, null);
+        mActor.removePermissions(READ_VOICEMAIL_PERMISSION);
+
+        // Should also succeed with full permissions granted.
         setUpWithVoicemailPermissions();
         mResolver.query(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null, null, null);
     }
@@ -362,9 +386,38 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
                 mResolver.delete(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null);
             }
         });
+
+        // Should succeed with manage permission granted
+        mActor.addPermissions(WRITE_VOICEMAIL_PERMISSION);
+        mResolver.delete(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null);
+        mActor.removePermissions(WRITE_VOICEMAIL_PERMISSION);
+
         // Should now succeed with permissions granted.
         setUpWithVoicemailPermissions();
         mResolver.delete(Calls.CONTENT_URI_WITH_VOICEMAIL, null, null);
+    }
+
+    public void testCopyEntriesFromCursor_ReturnsMostRecentEntryTimestamp() {
+        assertEquals(10, mCallLogProvider.copyEntriesFromCursor(getTestCallLogCursor()));
+    }
+
+    public void testCopyEntriesFromCursor_AllEntriesSyncedWithoutDuplicatesPresent() {
+        assertStoredValues(Calls.CONTENT_URI);
+        mCallLogProvider.copyEntriesFromCursor(getTestCallLogCursor());
+        assertStoredValues(Calls.CONTENT_URI,
+                getTestCallLogValues(2),
+                getTestCallLogValues(1),
+                getTestCallLogValues(0));
+    }
+
+    public void testCopyEntriesFromCursor_DuplicatesIgnoredCorrectly() {
+        mResolver.insert(Calls.CONTENT_URI, getTestCallLogValues(1));
+        assertStoredValues(Calls.CONTENT_URI, getTestCallLogValues(1));
+        mCallLogProvider.copyEntriesFromCursor(getTestCallLogCursor());
+        assertStoredValues(Calls.CONTENT_URI,
+                getTestCallLogValues(2),
+                getTestCallLogValues(1),
+                getTestCallLogValues(0));
     }
 
     private ContentValues getDefaultValues(int callType) {
@@ -435,5 +488,57 @@ public class CallLogProviderTest extends BaseContactsProvider2Test {
                 }
             };
         }
+    }
+
+    private Cursor getTestCallLogCursor() {
+        final MatrixCursor cursor = new MatrixCursor(CallLogProvider.CALL_LOG_SYNC_PROJECTION);
+        for (int i = 2; i >= 0; i--) {
+            cursor.addRow(CommonDatabaseUtils.getArrayFromContentValues(getTestCallLogValues(i),
+                    CallLogProvider.CALL_LOG_SYNC_PROJECTION));
+        }
+        return cursor;
+    }
+
+    /**
+     * Returns a predefined {@link ContentValues} object based on the provided index.
+     */
+    private ContentValues getTestCallLogValues(int i) {
+        ContentValues values = new ContentValues();
+        switch (i) {
+            case 0:
+                values.put(Calls.NUMBER, "123456");
+                values.put(Calls.NUMBER_PRESENTATION, Calls.PRESENTATION_ALLOWED);
+                values.put(Calls.TYPE, Calls.MISSED_TYPE);
+                values.put(Calls.FEATURES, 0);
+                values.put(Calls.DATE, 10);
+                values.put(Calls.DURATION, 100);
+                values.put(Calls.DATA_USAGE, 1000);
+                values.put(Calls.PHONE_ACCOUNT_COMPONENT_NAME, (String) null);
+                values.put(Calls.PHONE_ACCOUNT_ID, (Long) null);
+                break;
+            case 1:
+                values.put(Calls.NUMBER, "654321");
+                values.put(Calls.NUMBER_PRESENTATION, Calls.PRESENTATION_ALLOWED);
+                values.put(Calls.TYPE, Calls.INCOMING_TYPE);
+                values.put(Calls.FEATURES, 0);
+                values.put(Calls.DATE, 5);
+                values.put(Calls.DURATION, 200);
+                values.put(Calls.DATA_USAGE, 0);
+                values.put(Calls.PHONE_ACCOUNT_COMPONENT_NAME, (String) null);
+                values.put(Calls.PHONE_ACCOUNT_ID, (Long) null);
+                break;
+            case 2:
+                values.put(Calls.NUMBER, "123456");
+                values.put(Calls.NUMBER_PRESENTATION, Calls.PRESENTATION_ALLOWED);
+                values.put(Calls.TYPE, Calls.OUTGOING_TYPE);
+                values.put(Calls.FEATURES, Calls.FEATURES_VIDEO);
+                values.put(Calls.DATE, 1);
+                values.put(Calls.DURATION, 50);
+                values.put(Calls.DATA_USAGE, 2000);
+                values.put(Calls.PHONE_ACCOUNT_COMPONENT_NAME, (String) null);
+                values.put(Calls.PHONE_ACCOUNT_ID, (Long) null);
+                break;
+        }
+        return values;
     }
 }

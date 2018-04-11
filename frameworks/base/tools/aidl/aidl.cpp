@@ -16,6 +16,7 @@
 
 #ifdef HAVE_MS_C_RUNTIME
 #include <io.h>
+#include <direct.h>
 #include <sys/stat.h>
 #endif
 
@@ -847,6 +848,7 @@ parse_preprocessed_file(const string& filename)
         else {
             fprintf(stderr, "%s:%d: bad type in line: %s\n",
                     filename.c_str(), lineno, line);
+            fclose(f);
             return 1;
         }
         err = gather_types(filename.c_str(), doc);

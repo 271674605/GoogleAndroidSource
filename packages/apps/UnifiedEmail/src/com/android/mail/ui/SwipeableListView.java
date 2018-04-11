@@ -23,16 +23,16 @@ import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.util.AttributeSet;
-import android.widget.AbsListView;
-import android.widget.AbsListView.OnScrollListener;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.widget.AbsListView;
+import android.widget.AbsListView.OnScrollListener;
+import android.widget.HeaderViewListAdapter;
 import android.widget.ListView;
 
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
-import com.android.mail.analytics.AnalyticsUtils;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.browse.ConversationItemView;
 import com.android.mail.browse.SwipeableConversationItemView;
@@ -54,31 +54,6 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
     private boolean mEnableSwipe = false;
 
     public static final String LOG_TAG = LogTag.getLogTag();
-    /**
-     * Set to false to prevent the FLING scroll state from pausing the photo manager loaders.
-     */
-    private final static boolean SCROLL_PAUSE_ENABLE = true;
-
-    /**
-     * Set to true to enable parallax effect for attachment previews as the scroll position varies.
-     * This effect triggers invalidations on scroll (!) and requires more memory for attachment
-     * preview bitmaps.
-     */
-    public static final boolean ENABLE_ATTACHMENT_PARALLAX = true;
-
-    /**
-     * Set to true to queue finished decodes in an aggregator so that we display decoded attachment
-     * previews in an ordered fashion. This artificially delays updating the UI with decoded images,
-     * since they may have to wait on another image to finish decoding first.
-     */
-    public static final boolean ENABLE_ATTACHMENT_DECODE_AGGREGATOR = true;
-
-    /**
-     * The amount of extra vertical space to decode in attachment previews so we have image data to
-     * pan within. 1.0 implies no parallax effect.
-     */
-    public static final float ATTACHMENT_PARALLAX_MULTIPLIER_NORMAL = 1.5f;
-    public static final float ATTACHMENT_PARALLAX_MULTIPLIER_ALTERNATIVE = 2.0f;
 
     private ConversationSelectionSet mConvSelectionSet;
     private int mSwipeAction;
@@ -139,7 +114,7 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
         mSwipeAction = action;
     }
 
-    public void setSwipedListener(ListItemSwipedListener listener) {
+    public void setListItemSwipedListener(ListItemSwipedListener listener) {
         mSwipedListener = listener;
     }
 
@@ -166,7 +141,7 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
-        if (mScrolling || !mEnableSwipe) {
+        if (mScrolling) {
             return super.onInterceptTouchEvent(ev);
         } else {
             return mSwipeHelper.onInterceptTouchEvent(ev) || super.onInterceptTouchEvent(ev);
@@ -175,11 +150,7 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        if (mEnableSwipe) {
-            return mSwipeHelper.onTouchEvent(ev) || super.onTouchEvent(ev);
-        } else {
-            return super.onTouchEvent(ev);
-        }
+        return mSwipeHelper.onTouchEvent(ev) || super.onTouchEvent(ev);
     }
 
     @Override
@@ -206,7 +177,7 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
 
     @Override
     public boolean canChildBeDismissed(SwipeableItemView v) {
-        return v.canChildBeDismissed();
+        return mEnableSwipe && v.canChildBeDismissed();
     }
 
     @Override
@@ -226,6 +197,11 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
     }
 
     public void dismissChild(final ConversationItemView target) {
+        // Notifies the SwipeListener that a swipe has ended.
+        if (mSwipeListener != null) {
+            mSwipeListener.onEndSwipe();
+        }
+
         final ToastBarOperation undoOp;
 
         undoOp = new ToastBarOperation(1, mSwipeAction, ToastBarOperation.UNDO, false /* batch */,
@@ -263,6 +239,8 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
             cc.mostlyArchive(convList);
         } else if (mSwipeAction == R.id.delete) {
             cc.mostlyDelete(convList);
+        } else if (mSwipeAction == R.id.discard_outbox) {
+            cc.moveFailedIntoDrafts(convList);
         }
         if (mSwipedListener != null) {
             mSwipedListener.onListItemSwiped(convList);
@@ -286,9 +264,7 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
         requestDisallowInterceptTouchEvent(true);
         cancelDismissCounter();
 
-        // Notifies {@link ConversationListView} to disable pull to refresh since once
-        // an item in the list view has been picked up, we don't want any vertical movement
-        // to also trigger refresh.
+        // Notifies the SwipeListener that a swipe has begun.
         if (mSwipeListener != null) {
             mSwipeListener.onBeginSwipe();
         }
@@ -300,6 +276,11 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
         if (adapter != null) {
             adapter.startDismissCounter();
             adapter.cancelFadeOutLastLeaveBehindItemText();
+        }
+
+        // Notifies the SwipeListener that a swipe has ended.
+        if (mSwipeListener != null) {
+            mSwipeListener.onEndSwipe();
         }
     }
 
@@ -389,15 +370,6 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
     @Override
     public final void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount,
             int totalItemCount) {
-        if (ENABLE_ATTACHMENT_PARALLAX) {
-            for (int i = 0, len = getChildCount(); i < len; i++) {
-                final View child = getChildAt(i);
-                if (child instanceof OnScrollListener) {
-                    ((OnScrollListener) child).onScroll(view, firstVisibleItem, visibleItemCount,
-                            totalItemCount);
-                }
-            }
-        }
     }
 
     @Override
@@ -412,14 +384,6 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
             } else {
                 LogUtils.wtf(LOG_TAG, "unexpected context=%s", c);
             }
-        }
-
-        if (SCROLL_PAUSE_ENABLE) {
-            AnimatedAdapter adapter = getAnimatedAdapter();
-            if (adapter != null) {
-                adapter.onScrollStateChanged(scrollState);
-            }
-            ConversationItemView.setScrollStateChanged(scrollState);
         }
     }
 
@@ -450,5 +414,6 @@ public class SwipeableListView extends ListView implements Callback, OnScrollLis
 
     public interface SwipeListener {
         public void onBeginSwipe();
+        public void onEndSwipe();
     }
 }

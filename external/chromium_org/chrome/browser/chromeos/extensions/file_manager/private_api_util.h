@@ -7,15 +7,31 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_UTIL_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_UTIL_H_
 
-#include "base/callback_forward.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
-#include "url/gurl.h"
+#include <vector>
 
-class ExtensionFunctionDispatcher;
+#include "base/callback_forward.h"
+
+class GURL;
 class Profile;
+
+namespace base {
+class FilePath;
+}
 
 namespace content {
 class RenderViewHost;
+}
+
+namespace drive {
+class EventLogger;
+}
+
+namespace extensions {
+namespace api {
+namespace file_browser_private {
+struct VolumeMetadata;
+}
+}
 }
 
 namespace ui {
@@ -23,22 +39,17 @@ struct SelectedFileInfo;
 }
 
 namespace file_manager {
+
+struct VolumeInfo;
+
 namespace util {
 
-// Returns the ID of the tab associated with the dispatcher. Returns 0 on
-// error.
-int32 GetTabId(ExtensionFunctionDispatcher* dispatcher);
-
-// Finds an icon in the list of icons. If unable to find an icon of the exact
-// size requested, returns one with the next larger size. If all icons are
-// smaller than the preferred size, we'll return the largest one available.
-// Icons must be sorted by the icon size, smallest to largest. If there are no
-// icons in the list, returns an empty URL.
-GURL FindPreferredIcon(const google_apis::InstalledApp::IconList& icons,
-                       int preferred_size);
-
-// The preferred icon size, which should usually be used for FindPreferredIcon;
-const int kPreferredIconSize = 16;
+// Converts the |volume_info| to VolumeMetadata to communicate with JavaScript
+// via private API.
+void VolumeInfoToVolumeMetadata(
+    Profile* profile,
+    const VolumeInfo& volume_info,
+    extensions::api::file_browser_private::VolumeMetadata* volume_metadata);
 
 // Returns the local FilePath associated with |url|. If the file isn't of the
 // type FileSystemBackend handles, returns an empty
@@ -47,10 +58,9 @@ const int kPreferredIconSize = 16;
 //
 // Local paths will look like "/home/chronos/user/Downloads/foo/bar.txt" or
 // "/special/drive/foo/bar.txt".
-base::FilePath GetLocalPathFromURL(
-    content::RenderViewHost* render_view_host,
-    Profile* profile,
-    const GURL& url);
+base::FilePath GetLocalPathFromURL(content::RenderViewHost* render_view_host,
+                                   Profile* profile,
+                                   const GURL& url);
 
 // The callback type is used for GetSelectedFileInfo().
 typedef base::Callback<void(const std::vector<ui::SelectedFileInfo>&)>
@@ -77,6 +87,14 @@ void GetSelectedFileInfo(content::RenderViewHost* render_view_host,
                          const std::vector<GURL>& file_urls,
                          GetSelectedFileInfoLocalPathOption local_path_option,
                          GetSelectedFileInfoCallback callback);
+
+// Grants permission to access per-profile folder (Downloads, Drive) of
+// |profile| for the process |render_view_process_id|.
+void SetupProfileFileAccessPermissions(int render_view_process_id,
+                                       Profile* profile);
+
+// Get event logger to chrome://drive-internals page for the |profile|.
+drive::EventLogger* GetLogger(Profile* profile);
 
 }  // namespace util
 }  // namespace file_manager

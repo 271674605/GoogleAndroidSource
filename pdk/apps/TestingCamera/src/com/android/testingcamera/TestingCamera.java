@@ -33,6 +33,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.view.View;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View.OnClickListener;
@@ -43,6 +44,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
+import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.ToggleButton;
@@ -101,8 +103,13 @@ public class TestingCamera extends Activity
     private ToggleButton mRecordToggle;
     private CheckBox mRecordHandoffCheckBox;
     private ToggleButton mRecordStabilizationToggle;
+    private ToggleButton mRecordHintToggle;
+    private ToggleButton mLockCameraToggle;
     private Spinner mCallbackFormatSpinner;
     private ToggleButton mCallbackToggle;
+    private TextView mColorEffectSpinnerLabel;
+    private Spinner mColorEffectSpinner;
+    private SeekBar mZoomSeekBar;
 
     private TextView mLogView;
 
@@ -133,6 +140,9 @@ public class TestingCamera extends Activity
     private int mVideoRecordSize = 0;
     private List<Integer> mVideoFrameRates;
     private int mVideoFrameRate = 0;
+    private List<String> mColorEffects;
+    private int mColorEffect = 0;
+    private int mZoom = 0;
 
     private MediaRecorder mRecorder;
     private File mRecordingFile;
@@ -221,6 +231,9 @@ public class TestingCamera extends Activity
         mExposureLockToggle.setOnClickListener(mExposureLockToggleListener);
         mOpenOnlyControls.add(mExposureLockToggle);
 
+        mZoomSeekBar = (SeekBar) findViewById(R.id.zoom_seekbar);
+        mZoomSeekBar.setOnSeekBarChangeListener(mZoomSeekBarListener);
+
         mSnapshotSizeSpinner = (Spinner) findViewById(R.id.snapshot_size_spinner);
         mSnapshotSizeSpinner.setOnItemSelectedListener(mSnapshotSizeListener);
         mOpenOnlyControls.add(mSnapshotSizeSpinner);
@@ -251,6 +264,15 @@ public class TestingCamera extends Activity
         mRecordStabilizationToggle.setOnClickListener(mRecordStabilizationToggleListener);
         mOpenOnlyControls.add(mRecordStabilizationToggle);
 
+        mRecordHintToggle = (ToggleButton) findViewById(R.id.record_hint);
+        mRecordHintToggle.setOnClickListener(mRecordHintToggleListener);
+        mOpenOnlyControls.add(mRecordHintToggle);
+
+        mLockCameraToggle = (ToggleButton) findViewById(R.id.lock_camera);
+        mLockCameraToggle.setOnClickListener(mLockCameraToggleListener);
+        mLockCameraToggle.setChecked(true); // ON by default
+        mOpenOnlyControls.add(mLockCameraToggle);
+
         mCallbackFormatSpinner = (Spinner) findViewById(R.id.callback_format_spinner);
         mCallbackFormatSpinner.setOnItemSelectedListener(mCallbackFormatListener);
         mOpenOnlyControls.add(mCallbackFormatSpinner);
@@ -258,6 +280,12 @@ public class TestingCamera extends Activity
         mCallbackToggle = (ToggleButton) findViewById(R.id.enable_callbacks);
         mCallbackToggle.setOnClickListener(mCallbackToggleListener);
         mOpenOnlyControls.add(mCallbackToggle);
+
+        mColorEffectSpinnerLabel = (TextView) findViewById(R.id.color_effect_spinner_label);
+
+        mColorEffectSpinner = (Spinner) findViewById(R.id.color_effect_spinner);
+        mColorEffectSpinner.setOnItemSelectedListener(mColorEffectListener);
+        mOpenOnlyControls.add(mColorEffectSpinner);
 
         mLogView = (TextView) findViewById(R.id.log);
         mLogView.setMovementMethod(new ScrollingMovementMethod());
@@ -375,6 +403,35 @@ public class TestingCamera extends Activity
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         mPreviewHolder = null;
+    }
+
+    public void setCameraDisplayOrientation() {
+        android.hardware.Camera.CameraInfo info =
+                new android.hardware.Camera.CameraInfo();
+        android.hardware.Camera.getCameraInfo(mCameraId, info);
+        int rotation = getWindowManager().getDefaultDisplay()
+                .getRotation();
+        int degrees = 0;
+        switch (rotation) {
+            case Surface.ROTATION_0: degrees = 0; break;
+            case Surface.ROTATION_90: degrees = 90; break;
+            case Surface.ROTATION_180: degrees = 180; break;
+            case Surface.ROTATION_270: degrees = 270; break;
+        }
+
+        int result;
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            result = (info.orientation + degrees) % 360;
+            result = (360 - result) % 360;  // compensate the mirror
+        } else {  // back-facing
+            result = (info.orientation - degrees + 360) % 360;
+        }
+        log(String.format(
+            "Camera sensor orientation %d, UI rotation %d, facing %s. Final orientation %d",
+            info.orientation, rotation,
+            info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT ? "FRONT" : "BACK",
+            result));
+        mCamera.setDisplayOrientation(result);
     }
 
     /** UI controls enable/disable for all open-only controls */
@@ -691,6 +748,11 @@ public class TestingCamera extends Activity
             new View.OnClickListener() {
         @Override
         public void onClick(View v) {
+            if (!mLockCameraToggle.isChecked()) {
+                logE("Re-lock camera before recording");
+                return;
+            }
+
             mPreviewToggle.setEnabled(false);
             if (mState == CAMERA_PREVIEW) {
                 startRecording();
@@ -711,6 +773,39 @@ public class TestingCamera extends Activity
             mParams.setVideoStabilization(on);
 
             mCamera.setParameters(mParams);
+        }
+    };
+
+    private View.OnClickListener mRecordHintToggleListener =
+            new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            boolean on = ((ToggleButton) v).isChecked();
+            mParams.setRecordingHint(on);
+
+            mCamera.setParameters(mParams);
+        }
+    };
+
+    private View.OnClickListener mLockCameraToggleListener =
+            new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+
+            if (mState == CAMERA_RECORD) {
+                logE("Stop recording before toggling lock");
+                return;
+            }
+
+            boolean on = ((ToggleButton) v).isChecked();
+
+            if (on) {
+                mCamera.lock();
+                log("Locked camera");
+            } else {
+                mCamera.unlock();
+                log("Unlocked camera");
+            }
         }
     };
 
@@ -838,6 +933,8 @@ public class TestingCamera extends Activity
         }
 
         mCamera.setErrorCallback(this);
+
+        setCameraDisplayOrientation();
         mParams = mCamera.getParameters();
 
         // Set up preview size selection
@@ -854,6 +951,7 @@ public class TestingCamera extends Activity
         updateCamcorderProfile(mCameraId);
         updateVideoRecordSize(mCameraId);
         updateVideoFrameRate(mCameraId);
+        updateColorEffects(mParams);
 
         // Trigger updating video record size to match camcorder profile
         mCamcorderProfileSpinner.setSelection(mCamcorderProfile);
@@ -872,6 +970,16 @@ public class TestingCamera extends Activity
         } else {
             log("Auto-Exposure locking is not supported");
             mExposureLockToggle.setEnabled(false);
+        }
+
+        if (mParams.isZoomSupported()) {
+            int maxZoom = mParams.getMaxZoom();
+            mZoomSeekBar.setMax(maxZoom);
+            log("Zoom is supported, set max to " + maxZoom);
+            mZoomSeekBar.setEnabled(true);
+        } else {
+            log("Zoom is not supported");
+            mZoomSeekBar.setEnabled(false);
         }
 
         // Update parameters based on above updates
@@ -957,6 +1065,24 @@ public class TestingCamera extends Activity
             log("Auto-Exposure was " + mParams.getAutoExposureLock());
             mParams.setAutoExposureLock(on);
             log("Auto-Exposure is now " + mParams.getAutoExposureLock());
+        }
+    };
+
+    private final SeekBar.OnSeekBarChangeListener mZoomSeekBarListener =
+            new SeekBar.OnSeekBarChangeListener() {
+        @Override
+        public void onProgressChanged(SeekBar seekBar, int progress,
+                boolean fromUser) {
+            mZoom = progress;
+            mParams.setZoom(mZoom);
+            mCamera.setParameters(mParams);
+        }
+        @Override
+        public void onStartTrackingTouch(SeekBar seekBar) { }
+        @Override
+        public void onStopTrackingTouch(SeekBar seekBar) {
+            log("Zoom set to " + mZoom + " / " + mParams.getMaxZoom() + " (" +
+                    ((float)(mParams.getZoomRatios().get(mZoom))/100) + "x)");
         }
     };
 
@@ -1058,6 +1184,7 @@ public class TestingCamera extends Activity
     private void updateCamcorderProfile(int cameraId) {
         // Have to query all of these individually,
         final int PROFILES[] = new int[] {
+            CamcorderProfile.QUALITY_2160P,
             CamcorderProfile.QUALITY_1080P,
             CamcorderProfile.QUALITY_480P,
             CamcorderProfile.QUALITY_720P,
@@ -1066,6 +1193,7 @@ public class TestingCamera extends Activity
             CamcorderProfile.QUALITY_LOW,
             CamcorderProfile.QUALITY_QCIF,
             CamcorderProfile.QUALITY_QVGA,
+            CamcorderProfile.QUALITY_TIME_LAPSE_2160P,
             CamcorderProfile.QUALITY_TIME_LAPSE_1080P,
             CamcorderProfile.QUALITY_TIME_LAPSE_480P,
             CamcorderProfile.QUALITY_TIME_LAPSE_720P,
@@ -1077,6 +1205,7 @@ public class TestingCamera extends Activity
         };
 
         final String PROFILE_NAMES[] = new String[] {
+            "2160P",
             "1080P",
             "480P",
             "720P",
@@ -1085,6 +1214,7 @@ public class TestingCamera extends Activity
             "LOW",
             "QCIF",
             "QVGA",
+            "TIME_LAPSE_2160P",
             "TIME_LAPSE_1080P",
             "TIME_LAPSE_480P",
             "TIME_LAPSE_720P",
@@ -1513,6 +1643,42 @@ public class TestingCamera extends Activity
             break;
         }
         return size;
+    }
+
+    private OnItemSelectedListener mColorEffectListener =
+                new OnItemSelectedListener() {
+        @Override
+        public void onItemSelected(AdapterView<?> parent,
+                        View view, int pos, long id) {
+            if (pos == mColorEffect) return;
+
+            mColorEffect = pos;
+            String colorEffect = mColorEffects.get(mColorEffect);
+            log("Setting color effect to " + colorEffect);
+            mParams.setColorEffect(colorEffect);
+            mCamera.setParameters(mParams);
+        }
+
+        @Override
+        public void onNothingSelected(AdapterView<?> arg0) {
+        }
+    };
+
+    private void updateColorEffects(Parameters params) {
+        mColorEffects = params.getSupportedColorEffects();
+        if (mColorEffects != null) {
+            mColorEffectSpinnerLabel.setVisibility(View.VISIBLE);
+            mColorEffectSpinner.setVisibility(View.VISIBLE);
+            mColorEffectSpinner.setAdapter(
+                    new ArrayAdapter<String>(this, R.layout.spinner_item,
+                            mColorEffects.toArray(new String[0])));
+            mColorEffect = 0;
+            params.setColorEffect(mColorEffects.get(mColorEffect));
+            log("Setting Color Effect to " + mColorEffects.get(mColorEffect));
+        } else {
+            mColorEffectSpinnerLabel.setVisibility(View.GONE);
+            mColorEffectSpinner.setVisibility(View.GONE);
+        }
     }
 
     private int mLogIndentLevel = 0;

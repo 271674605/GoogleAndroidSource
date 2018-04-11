@@ -81,6 +81,9 @@ class NET_EXPORT_PRIVATE StrikeRegister {
   // external node. We flag the 24th bit to mark a pointer as external.
   static const uint32 kExternalFlag;
 
+  // Allows early validation before a strike register is created.
+  static void ValidateStrikeRegisterConfig(unsigned max_entries);
+
   // Construct a new set which can hold, at most, |max_entries| (which must be
   // less than 2**23). See the comments around StartupType about initial
   // behaviour. Otherwise, all nonces that are outside +/- |window_secs| from
@@ -129,7 +132,7 @@ class NET_EXPORT_PRIVATE StrikeRegister {
   static uint32 TimeFromBytes(const uint8 d[4]);
 
   // ExternalTimeToInternal converts an external time value into an internal
-  // time value using |creation_time_external_|.
+  // time value using |internal_epoch_|.
   uint32 ExternalTimeToInternal(uint32 external_time);
 
   // BestMatch returns either kNil, or an external node index which could
@@ -164,10 +167,6 @@ class NET_EXPORT_PRIVATE StrikeRegister {
 
   const uint32 max_entries_;
   const uint32 window_secs_;
-  // creation_time_external_ contains the uint32, external time when this
-  // object was created (i.e. the value passed to the constructor). This is
-  // used to translate external times to internal times.
-  const uint32 creation_time_external_;
   // internal_epoch_ contains the external time value of the start of internal
   // time.
   const uint32 internal_epoch_;
@@ -182,6 +181,8 @@ class NET_EXPORT_PRIVATE StrikeRegister {
   // this header.
   InternalNode* internal_nodes_;
   scoped_ptr<uint8[]> external_nodes_;
+
+  DISALLOW_COPY_AND_ASSIGN(StrikeRegister);
 };
 
 }  // namespace net

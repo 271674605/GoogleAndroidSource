@@ -18,7 +18,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/conversation_view_border_color" >
+    android:background="@color/conversation_view_background_color" >
 
     <com.android.mail.browse.MessageScrollView android:id="@+id/scroll_view"
         android:layout_width="match_parent"
@@ -35,74 +35,36 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
 
-            <include layout="@layout/card_border" android:id="@+id/top_border" />
-
-            <LinearLayout
+            <include layout="@layout/conversation_message_header"
+                android:id="@+id/message_header"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                style="@style/ConversationViewSideMarginMinusGradientStyle"
-                android:orientation="horizontal" >
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-                <include layout="@layout/conversation_message_header"
-                    android:id="@+id/message_header"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-            </LinearLayout>
+                android:layout_height="wrap_content" />
 
             <!-- base WebView layer -->
-            <LinearLayout
+            <com.android.mail.browse.MessageWebView
+                android:id="@+id/webview"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                style="@style/ConversationViewSideMarginMinusGradientStyle"
-                android:orientation="horizontal" >
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-                <com.android.mail.browse.MessageWebView
-                    android:id="@+id/webview"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:scrollbars="none"/>
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-            </LinearLayout>
+                android:scrollbars="none"/>
 
-            <LinearLayout
+            <include
+                layout="@layout/conversation_message_footer"
+                android:id="@+id/message_footer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                style="@style/ConversationViewSideMarginMinusGradientStyle"
-                android:orientation="horizontal" >
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-                <include
-                    layout="@layout/conversation_message_footer"
-                    android:id="@+id/message_footer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:visibility="gone" />
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:background="@color/message_border_gradient_color"/>
-            </LinearLayout>
-
-            <include layout="@layout/card_border" android:id="@+id/bottom_border" />
+                android:visibility="gone" />
 
         </LinearLayout>
 
     </com.android.mail.browse.MessageScrollView>
+
+    <include layout="@layout/conversation_message_header"
+         android:id="@+id/snap_header"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         style="@style/ConversationViewPaddingStyle"
+         android:layout_gravity="top"
+         android:visibility="gone"/>
 
     <include layout="@layout/conversation_load_spinner"/>
 

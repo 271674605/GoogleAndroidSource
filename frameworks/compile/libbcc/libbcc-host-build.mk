@@ -14,12 +14,25 @@
 # limitations under the License.
 #
 
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
+
 LOCAL_CFLAGS := \
   -Wall \
   -Wno-unused-parameter \
   -Werror \
   -D__HOST__ \
+  $(RS_VERSION_DEFINE) \
   $(LOCAL_CFLAGS)
+
+ifneq ($(BOARD_OVERRIDE_RS_CPU_VARIANT_32),)
+LOCAL_CFLAGS += -DFORCE_CPU_VARIANT_32=$(BOARD_OVERRIDE_RS_CPU_VARIANT_32)
+endif
+
+ifneq ($(BOARD_OVERRIDE_RS_CPU_VARIANT_64),)
+LOCAL_CFLAGS += -DFORCE_CPU_VARIANT_64=$(BOARD_OVERRIDE_RS_CPU_VARIANT_64)
+endif
 
 ifeq ($(TARGET_BUILD_VARIANT),eng)
 libbcc_CFLAGS += -DANDROID_ENGINEERING_BUILD
@@ -34,3 +47,5 @@ LOCAL_C_INCLUDES := \
   $(LOCAL_C_INCLUDES)
 
 LOCAL_IS_HOST_MODULE := true
+
+LOCAL_32_BIT_ONLY := true

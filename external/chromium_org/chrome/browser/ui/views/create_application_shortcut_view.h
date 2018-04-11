@@ -40,20 +40,31 @@ class Label;
 class CreateApplicationShortcutView : public views::DialogDelegateView,
                                       public views::ButtonListener {
  public:
+  enum DialogLayout {
+    // URL shortcuts have an info frame at the top with a thumbnail, title and
+    // description.
+    DIALOG_LAYOUT_URL_SHORTCUT,
+
+    // App shortcuts don't have an info frame, since they are launched from
+    // places where it's clear what app they are from.
+    DIALOG_LAYOUT_APP_SHORTCUT
+  };
+
   explicit CreateApplicationShortcutView(Profile* profile);
   virtual ~CreateApplicationShortcutView();
 
   // Initialize the controls on the dialog.
-  void InitControls();
+  void InitControls(DialogLayout dialog_layout);
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
 
   // Overridden from views::DialogDelegate:
-  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual base::string16 GetDialogButtonLabel(
+      ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
   // Overridden from views::ButtonListener:
@@ -62,12 +73,13 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
 
  protected:
   // Adds a new check-box as a child to the view.
-  views::Checkbox* AddCheckbox(const string16& text, bool checked);
+  views::Checkbox* AddCheckbox(const base::string16& text, bool checked);
 
   // Profile in which the shortcuts will be created.
   Profile* profile_;
 
   // UI elements on the dialog.
+  // May be NULL if we are not displaying the app's info.
   views::View* app_info_;
   views::Label* create_shortcuts_label_;
   views::Checkbox* desktop_check_box_;
@@ -75,8 +87,9 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
   views::Checkbox* quick_launch_check_box_;
 
   // Target shortcut info.
-  ShellIntegration::ShortcutInfo shortcut_info_;
-  string16 shortcut_menu_subdir_;
+  web_app::ShortcutInfo shortcut_info_;
+  // If false, the shortcut will be created in the root level of the Start Menu.
+  bool create_in_chrome_apps_subdir_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateApplicationShortcutView);
 };
@@ -96,11 +109,12 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
 
   // Favicon download callback.
   void DidDownloadFavicon(
+      int requested_size,
       int id,
       int http_status_code,
       const GURL& image_url,
-      int requested_size,
-      const std::vector<SkBitmap>& bitmaps);
+      const std::vector<SkBitmap>& bitmaps,
+      const std::vector<gfx::Size>& original_bitmap_sizes);
 
   // The tab whose URL is being turned into an app.
   content::WebContents* web_contents_;
@@ -110,6 +124,8 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
 
   // Unprocessed icons from the WebApplicationInfo passed in.
   web_app::IconInfoList unprocessed_icons_;
+
+  base::WeakPtrFactory<CreateUrlApplicationShortcutView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateUrlApplicationShortcutView);
 };
@@ -121,17 +137,15 @@ class CreateChromeApplicationShortcutView
   CreateChromeApplicationShortcutView(
       Profile* profile,
       const extensions::Extension* app,
-      const base::Closure& close_callback);
+      const base::Callback<void(bool)>& close_callback);
   virtual ~CreateChromeApplicationShortcutView();
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
 
  private:
-  void OnShortcutInfoLoaded(
-      const ShellIntegration::ShortcutInfo& shortcut_info);
+  void OnShortcutInfoLoaded(const web_app::ShortcutInfo& shortcut_info);
 
-  const extensions::Extension* app_;
-  base::Closure close_callback_;
+  base::Callback<void(bool)> close_callback_;
 
   base::WeakPtrFactory<CreateChromeApplicationShortcutView> weak_ptr_factory_;
 

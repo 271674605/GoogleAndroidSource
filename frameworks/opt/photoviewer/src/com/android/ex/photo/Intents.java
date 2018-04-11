@@ -21,6 +21,7 @@ import android.app.Activity;
 import android.content.ContentProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 
 import com.android.ex.photo.fragments.PhotoViewFragment;
 
@@ -68,13 +69,32 @@ public class Intents {
      * @return The intent builder
      */
     public static PhotoViewIntentBuilder newPhotoViewFragmentIntentBuilder(Context context) {
-        return new PhotoViewIntentBuilder(context, PhotoViewFragment.class);
+        return newPhotoViewFragmentIntentBuilder(context, PhotoViewFragment.class);
+    }
+
+    /**
+     * Gets a photo view intent builder to display the photo view fragment with a custom fragment
+     * subclass.
+     *
+     * @param context The context
+     * @param clazz Subclass of PhotoViewFragment to use
+     * @return The intent builder
+     */
+    public static PhotoViewIntentBuilder newPhotoViewFragmentIntentBuilder(Context context,
+            Class<? extends PhotoViewFragment> clazz) {
+        return new PhotoViewIntentBuilder(context, clazz);
     }
 
     /** Gets a new photo view intent builder */
     public static PhotoViewIntentBuilder newPhotoViewIntentBuilder(
             Context context, Class<? extends Activity> cls) {
         return new PhotoViewIntentBuilder(context, cls);
+    }
+
+    /** Gets a new photo view intent builder */
+    public static PhotoViewIntentBuilder newPhotoViewIntentBuilder(
+            Context context, String activityName) {
+        return new PhotoViewIntentBuilder(context, activityName);
     }
 
     /** Builder to create a photo view intent */
@@ -118,6 +138,16 @@ public class Intents {
 
         private PhotoViewIntentBuilder(Context context, Class<?> cls) {
             mIntent = new Intent(context, cls);
+            initialize();
+        }
+
+        private PhotoViewIntentBuilder(Context context, String activityName) {
+            mIntent = new Intent();
+            mIntent.setClassName(context, activityName);
+            initialize();
+        }
+
+        private void initialize() {
             mScaleAnimation = false;
             mActionBarHiddenInitially = false;
             mDisplayFullScreenThumbs = false;
@@ -183,6 +213,17 @@ public class Intents {
             return this;
         }
 
+        /**
+         * Enable a scale animation that animates the initial photo URI passed in using
+         * {@link #setInitialPhotoUri}.
+         *
+         * Note: To avoid janky transitions, particularly when exiting the photoviewer, ensure the
+         * following system UI flags are set on the root view of the relying app's activity
+         * (via @{link View.setSystemUiVisibility(int)}):
+         *     {@code View.SYSTEM_UI_FLAG_VISIBLE | View.SYSTEM_UI_FLAG_LAYOUT_STABLE}
+         * As well, client should ensure {@code android:fitsSystemWindows} is set on the root
+         * content view.
+         */
         public PhotoViewIntentBuilder setScaleAnimation(int startX, int startY,
                 int startWidth, int startHeight) {
             mScaleAnimation = true;
@@ -220,7 +261,7 @@ public class Intents {
         public Intent build() {
             mIntent.setAction(Intent.ACTION_VIEW);
 
-            mIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+            mIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
 
             if (mPhotoIndex != null) {
                 mIntent.putExtra(EXTRA_PHOTO_INDEX, (int) mPhotoIndex);
@@ -237,6 +278,7 @@ public class Intents {
 
             if (mPhotosUri != null) {
                 mIntent.putExtra(EXTRA_PHOTOS_URI, mPhotosUri);
+                mIntent.setData(Uri.parse(mPhotosUri));
             }
 
             if (mResolvedPhotoUri != null) {
@@ -255,9 +297,7 @@ public class Intents {
                 mIntent.putExtra(EXTRA_MAX_INITIAL_SCALE, mMaxInitialScale);
             }
 
-            if (mWatchNetwork == true) {
-                mIntent.putExtra(EXTRA_WATCH_NETWORK, true);
-            }
+            mIntent.putExtra(EXTRA_WATCH_NETWORK, mWatchNetwork);
 
             mIntent.putExtra(EXTRA_SCALE_UP_ANIMATION, mScaleAnimation);
             if (mScaleAnimation) {

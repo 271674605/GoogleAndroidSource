@@ -36,9 +36,11 @@ private:
 
 #define kMaxInt32   0x7FFFFFFF
 
+#ifdef SK_DEBUG
 static inline bool x_in_rect(int x, const SkIRect& rect) {
     return (unsigned)(x - rect.fLeft) < (unsigned)rect.width();
 }
+#endif
 
 static inline bool y_in_rect(int y, const SkIRect& rect) {
     return (unsigned)(y - rect.fTop) < (unsigned)rect.height();
@@ -528,7 +530,7 @@ bool SkAAClip::trimTopBottom() {
     do {
         yoff -= 1;
     } while (row_is_all_zeros(base + yoff->fOffset, width));
-    skip = stop - yoff - 1;
+    skip = SkToInt(stop - yoff - 1);
     SkASSERT(skip >= 0 && skip < head->fRowCount);
     if (skip > 0) {
         // removing from the bottom is easier than from the top, as we don't
@@ -1031,7 +1033,7 @@ public:
             SkDEBUGCODE(prevY = row->fY);
 
             yoffset->fY = row->fY - adjustY;
-            yoffset->fOffset = data - baseData;
+            yoffset->fOffset = SkToU32(data - baseData);
             yoffset += 1;
 
             size_t n = row->fData->count();
@@ -1380,17 +1382,6 @@ static AlphaProc find_alpha_proc(SkRegion::Op op) {
             return sectAlphaProc;
     }
 }
-
-static const uint8_t gEmptyRow[] = {
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-    0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
-};
 
 class RowIter {
 public:

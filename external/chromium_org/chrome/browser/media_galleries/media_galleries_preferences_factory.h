@@ -7,13 +7,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
-class Profile;
-
-namespace chrome {
 class MediaGalleriesPreferences;
-}
+class Profile;
 
 // Singleton that owns all MediaGalleriesPreferences and associates them with
 // Profiles.
@@ -22,7 +19,7 @@ class MediaGalleriesPreferencesFactory
  public:
   // Use MediaFileSystemRegistry::GetPreferences() to get
   // MediaGalleriesPreferences.
-  static chrome::MediaGalleriesPreferences* GetForProfile(Profile* profile);
+  static MediaGalleriesPreferences* GetForProfile(Profile* profile);
 
   static MediaGalleriesPreferencesFactory* GetInstance();
 
@@ -33,7 +30,7 @@ class MediaGalleriesPreferencesFactory
   virtual ~MediaGalleriesPreferencesFactory();
 
   // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
+  virtual KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* profile) const OVERRIDE;
   virtual void RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable* registry) OVERRIDE;

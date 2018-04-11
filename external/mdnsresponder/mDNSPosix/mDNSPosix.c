@@ -65,6 +65,13 @@
 #include "mDNSUNP.h"
 #include "GenLinkedList.h"
 
+// Disallow SO_REUSEPORT on Android because we use >3.9 kernel headers to build binaries targeted to 3.4.x.
+#ifdef __ANDROID__
+#undef SO_REUSEPORT
+#endif
+
+// __ANDROID__ : replaced assert(close(..)) at several points in this file.
+
 // ***************************************************************************
 // Structures
 
@@ -516,7 +523,10 @@ mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
 			mDNS_AddDNSServer(m, NULL, mDNSInterface_Any, &DNSAddr, UnicastDNSPort, mDNSfalse, 0);
 			numOfServers++;
 			}
-		}  
+		}
+    //  __ANDROID__ : if fp was opened, it needs to be closed
+	int fp_closed = fclose(fp);
+	assert(fp_closed == 0);
 	return (numOfServers > 0) ? 0 : -1;
 	}
 
@@ -577,9 +587,17 @@ mDNSlocal void FreePosixNetworkInterface(PosixNetworkInterface *intf)
 	{
 	assert(intf != NULL);
 	if (intf->intfName != NULL)        free((void *)intf->intfName);
-	if (intf->multicastSocket4 != -1) assert(close(intf->multicastSocket4) == 0);
+	if (intf->multicastSocket4 != -1)
+		{
+		int ipv4_closed = close(intf->multicastSocket4);
+		assert(ipv4_closed == 0);
+		}
 #if HAVE_IPV6
-	if (intf->multicastSocket6 != -1) assert(close(intf->multicastSocket6) == 0);
+	if (intf->multicastSocket6 != -1)
+		{
+		int ipv6_closed = close(intf->multicastSocket6);
+		assert(ipv6_closed == 0);
+		}
 #endif
 	free(intf);
 	}
@@ -817,7 +835,12 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
 		}
 
 	// Clean up
-	if (err != 0 && *sktPtr != -1) { assert(close(*sktPtr) == 0); *sktPtr = -1; }
+	if (err != 0 && *sktPtr != -1)
+		{
+		int sktClosed = close(*sktPtr);
+		assert(sktClosed == 0);
+		*sktPtr = -1;
+		}
 	assert((err == 0) == (*sktPtr != -1));
 	return err;
 	}
@@ -1279,9 +1302,17 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 	{
 	assert(m != NULL);
 	ClearInterfaceList(m);
-	if (m->p->unicastSocket4 != -1) assert(close(m->p->unicastSocket4) == 0);
+	if (m->p->unicastSocket4 != -1)
+		{
+		int ipv4_closed = close(m->p->unicastSocket4);
+		assert(ipv4_closed == 0);
+		}
 #if HAVE_IPV6
-	if (m->p->unicastSocket6 != -1) assert(close(m->p->unicastSocket6) == 0);
+	if (m->p->unicastSocket6 != -1)
+		{
+		int ipv6_closed = close(m->p->unicastSocket6);
+		assert(ipv6_closed == 0);
+		}
 #endif
 	}
 

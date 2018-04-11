@@ -17,8 +17,7 @@ class MimeRegistryMessageFilter : public BrowserMessageFilter {
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       BrowserThread::ID* thread) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   virtual ~MimeRegistryMessageFilter();
@@ -27,9 +26,6 @@ class MimeRegistryMessageFilter : public BrowserMessageFilter {
                                   std::string* mime_type);
   void OnGetMimeTypeFromFile(const base::FilePath& file_path,
                              std::string* mime_type);
-  void OnGetPreferredExtensionForMimeType(
-      const std::string& mime_type,
-      base::FilePath::StringType* extension);
 };
 
 }  // namespace content

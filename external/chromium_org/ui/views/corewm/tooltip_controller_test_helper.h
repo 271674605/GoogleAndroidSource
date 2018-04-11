@@ -31,17 +31,13 @@ class TooltipControllerTestHelper {
   TooltipController* controller() { return controller_; }
 
   // These are mostly cover methods for TooltipController private methods.
-  string16 GetTooltipText();
+  base::string16 GetTooltipText();
   aura::Window* GetTooltipWindow();
   void FireTooltipTimer();
   bool IsTooltipTimerRunning();
   void FireTooltipShownTimer();
   bool IsTooltipShownTimerRunning();
   bool IsTooltipVisible();
-  static void TrimTooltipToFit(int max_width,
-                               string16* text,
-                               int* width,
-                               int* line_count);
 
  private:
   TooltipController* controller_;
@@ -55,14 +51,16 @@ class TooltipTestView : public views::View {
   TooltipTestView();
   virtual ~TooltipTestView();
 
-  void set_tooltip_text(string16 tooltip_text) { tooltip_text_ = tooltip_text; }
+  void set_tooltip_text(base::string16 tooltip_text) {
+    tooltip_text_ = tooltip_text;
+  }
 
   // Overridden from views::View
   virtual bool GetTooltipText(const gfx::Point& p,
-                              string16* tooltip) const OVERRIDE;
+                              base::string16* tooltip) const OVERRIDE;
 
  private:
-  string16 tooltip_text_;
+  base::string16 tooltip_text_;
 
   DISALLOW_COPY_AND_ASSIGN(TooltipTestView);
 };

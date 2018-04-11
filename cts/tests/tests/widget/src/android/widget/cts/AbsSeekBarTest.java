@@ -16,7 +16,12 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.PorterDuff;
+import android.test.UiThreadTest;
+
+import com.android.cts.widget.R;
 
 
 import android.app.Activity;
@@ -29,16 +34,15 @@ import android.graphics.drawable.Drawable;
 import android.test.ActivityInstrumentationTestCase2;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.widget.AbsSeekBar;
 import android.widget.SeekBar;
 
 /**
  * Test {@link AbsSeekBar}.
  */
-public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBarStubActivity> {
+public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBarCtsActivity> {
     public AbsSeekBarTest() {
-        super("com.android.cts.stub", ProgressBarStubActivity.class);
+        super("com.android.cts.widget", ProgressBarCtsActivity.class);
     }
 
     private Activity mActivity;
@@ -147,7 +151,7 @@ public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBar
         // AbsSeekBar is an abstract class, use its subclass: SeekBar to do this test.
         runTestOnUiThread(new Runnable() {
             public void run() {
-                mActivity.setContentView(R.layout.seekbar);
+                mActivity.setContentView(R.layout.seekbar_layout);
             }
         });
         getInstrumentation().waitForIdleSync();
@@ -207,6 +211,34 @@ public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBar
         assertEquals(keyProgressIncrement + 1, myAbsSeekBar.getKeyProgressIncrement());
     }
 
+    @UiThreadTest
+    public void testThumbTint() {
+        mActivity.setContentView(R.layout.seekbar_layout);
+
+        SeekBar inflatedView = (SeekBar) mActivity.findViewById(R.id.thumb_tint);
+
+        assertEquals("Thumb tint inflated correctly",
+                Color.WHITE, inflatedView.getThumbTintList().getDefaultColor());
+        assertEquals("Thumb tint mode inflated correctly",
+                PorterDuff.Mode.SRC_OVER, inflatedView.getThumbTintMode());
+
+        MockDrawable thumb = new MockDrawable();
+        SeekBar view = new SeekBar(mActivity);
+
+        view.setThumb(thumb);
+        assertFalse("No thumb tint applied by default", thumb.hasCalledSetTint());
+
+        view.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+        assertTrue("Thumb tint applied when setThumbTintList() called after setThumb()",
+                thumb.hasCalledSetTint());
+
+        thumb.reset();
+        view.setThumb(null);
+        view.setThumb(thumb);
+        assertTrue("Thumb tint applied when setThumbTintList() called before setThumb()",
+                thumb.hasCalledSetTint());
+    }
+
     public void testFoo() {
         // Do not test these APIs. They are callbacks which:
         // 1. The callback machanism has been tested in super class
@@ -240,6 +272,7 @@ public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBar
     private static class MockDrawable extends Drawable {
         private int mAlpha;
         private boolean mCalledDraw = false;
+        private boolean mCalledSetTint = false;
 
         @Override
         public void draw(Canvas canvas) {
@@ -252,6 +285,7 @@ public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBar
 
         public void reset() {
             mCalledDraw = false;
+            mCalledSetTint = false;
         }
 
         @Override
@@ -269,7 +303,16 @@ public class AbsSeekBarTest extends ActivityInstrumentationTestCase2<ProgressBar
         }
 
         @Override
-        public void setColorFilter(ColorFilter cf) {
+        public void setColorFilter(ColorFilter cf) { }
+
+        @Override
+        public void setTintList(ColorStateList tint) {
+            super.setTintList(tint);
+            mCalledSetTint = true;
+        }
+
+        public boolean hasCalledSetTint() {
+            return mCalledSetTint;
         }
     }
 }

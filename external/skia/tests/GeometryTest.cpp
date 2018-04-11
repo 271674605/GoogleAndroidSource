@@ -1,12 +1,12 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "Test.h"
+
 #include "SkGeometry.h"
+#include "Test.h"
 
 static bool nearly_equal(const SkPoint& a, const SkPoint& b) {
     return SkScalarNearlyEqual(a.fX, b.fX) && SkScalarNearlyEqual(a.fY, b.fY);
@@ -33,8 +33,7 @@ static void testChopCubic(skiatest::Reporter* reporter) {
     }
 }
 
-
-static void TestGeometry(skiatest::Reporter* reporter) {
+DEF_TEST(Geometry, reporter) {
     SkPoint pts[3], dst[5];
 
     pts[0].set(0, 0);
@@ -60,6 +59,3 @@ static void TestGeometry(skiatest::Reporter* reporter) {
 
     testChopCubic(reporter);
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("Geometry", GeometryTestClass, TestGeometry)

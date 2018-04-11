@@ -6,9 +6,7 @@
 // the shell window.
 [nodoc] namespace app.currentWindowInternal {
 
-  // TODO(asargent) - We need to add support for referencing types in
-  // other namespaces (crbug.com/158654). For now just duplicate this
-  // dictionary from app.window.
+  // Null or undefined indicates that a value should not change.
   dictionary Bounds {
     long? left;
     long? top;
@@ -16,6 +14,25 @@
     long? height;
   };
 
+  // Null or undefined indicates that a value should not change. A value of 0
+  // will clear the constraints.
+  dictionary SizeConstraints {
+    long? minWidth;
+    long? minHeight;
+    long? maxWidth;
+    long? maxHeight;
+  };
+
+  dictionary RegionRect {
+    long left;
+    long top;
+    long width;
+    long height;
+  };
+
+  dictionary Region {
+    RegionRect[]? rects;
+  };
 
   interface Functions {
     static void focus();
@@ -25,10 +42,16 @@
     static void restore();
     static void drawAttention();
     static void clearAttention();
-    static void show();
+    static void show(optional boolean focused);
     static void hide();
-    static void setBounds(Bounds bounds);
+    static void setBounds(DOMString boundsType, Bounds bounds);
+    static void setSizeConstraints(DOMString boundsType,
+                                   SizeConstraints constraints);
     static void setIcon(DOMString icon_url);
+    static void setBadgeIcon(DOMString icon_url);
+    static void clearBadge();
+    static void setShape(Region region);
+    static void setAlwaysOnTop(boolean always_on_top);
   };
 
   interface Events {
@@ -38,5 +61,8 @@
     static void onMinimized();
     static void onMaximized();
     static void onRestored();
+    static void onAlphaEnabledChanged();
+    // Only sent in tests.
+    static void onWindowShownForTests();
   };
 };

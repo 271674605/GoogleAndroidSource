@@ -42,9 +42,10 @@ class CONTENT_EXPORT PepperVideoSourceHost : public ppapi::host::ResourceHost {
     explicit FrameReceiver(const base::WeakPtr<PepperVideoSourceHost>& host);
 
     // FrameReaderInterface implementation.
-    virtual bool GotFrame(cricket::VideoFrame* frame) OVERRIDE;
+    virtual bool GotFrame(const scoped_refptr<media::VideoFrame>& frame)
+        OVERRIDE;
 
-    void OnGotFrame(scoped_ptr<cricket::VideoFrame> frame);
+    void OnGotFrame(const scoped_refptr<media::VideoFrame>& frame);
 
    private:
     friend class base::RefCountedThreadSafe<FrameReceiver>;
@@ -71,15 +72,15 @@ class CONTENT_EXPORT PepperVideoSourceHost : public ppapi::host::ResourceHost {
 
   RendererPpapiHost* renderer_ppapi_host_;
 
-  base::WeakPtrFactory<PepperVideoSourceHost> weak_factory_;
-
   ppapi::host::ReplyMessageContext reply_context_;
 
   scoped_ptr<VideoSourceHandler> source_handler_;
   scoped_refptr<FrameReceiver> frame_receiver_;
   std::string stream_url_;
-  scoped_ptr<cricket::VideoFrame> last_frame_;
+  scoped_refptr<media::VideoFrame> last_frame_;
   bool get_frame_pending_;
+
+  base::WeakPtrFactory<PepperVideoSourceHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperVideoSourceHost);
 };

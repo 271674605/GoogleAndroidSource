@@ -34,10 +34,16 @@ import java.util.List;
 public class GoogleAccountType extends BaseAccountType {
     private static final String TAG = "GoogleAccountType";
 
+    /**
+     * The package name that we should load contacts.xml from and rely on to handle
+     * G+ account actions.
+     */
+    public static final String PLUS_EXTENSION_PACKAGE_NAME = "com.google.android.apps.plus";
+
     public static final String ACCOUNT_TYPE = "com.google";
 
     private static final List<String> mExtensionPackages =
-            Lists.newArrayList("com.google.android.apps.plus");
+            Lists.newArrayList(PLUS_EXTENSION_PACKAGE_NAME);
 
     public GoogleAccountType(Context context, String authenticatorPackageName) {
         this.accountType = ACCOUNT_TYPE;

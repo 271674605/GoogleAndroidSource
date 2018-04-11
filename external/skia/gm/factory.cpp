@@ -6,11 +6,15 @@
  */
 
 #include "gm.h"
-#include "SkBitmapFactory.h"
+
+#include "Resources.h"
 #include "SkCanvas.h"
 #include "SkData.h"
+#include "SkDecodingImageGenerator.h"
+#include "SkDiscardableMemoryPool.h"
+#include "SkDiscardablePixelRef.h"
 #include "SkImageDecoder.h"
-#include "SkLruImageCache.h"
+#include "SkImageGeneratorPriv.h"
 #include "SkOSFile.h"
 #include "SkStream.h"
 
@@ -25,23 +29,19 @@ public:
 
 protected:
     virtual void onOnceBeforeDraw() SK_OVERRIDE {
+        SkString resourcePath = GetResourcePath();
         // Copyright-free file from http://openclipart.org/detail/29213/paper-plane-by-ddoo
-        SkString filename = SkOSPath::SkPathJoin(INHERITED::gResourcePath.c_str(),
-                                                 "plane.png");
-
-        SkAutoTUnref<SkStream> stream(SkStream::NewFromFile(filename.c_str()));
-        if (NULL != stream.get()) {
-            stream->rewind();
-            size_t length = stream->getLength();
-            void* buffer = sk_malloc_throw(length);
-            stream->read(buffer, length);
-            SkAutoDataUnref data(SkData::NewFromMalloc(buffer, length));
-            SkBitmapFactory factory(&SkImageDecoder::DecodeMemoryToTarget);
+        SkString filename = SkOSPath::SkPathJoin(resourcePath.c_str(), "plane.png");
+        SkAutoDataUnref data(SkData::NewFromFileName(filename.c_str()));
+        if (NULL != data.get()) {
             // Create a cache which will boot the pixels out anytime the
             // bitmap is unlocked.
-            SkAutoTUnref<SkLruImageCache> cache(SkNEW_ARGS(SkLruImageCache, (1)));
-            factory.setImageCache(cache);
-            factory.installPixelRef(data, &fBitmap);
+            SkAutoTUnref<SkDiscardableMemoryPool> pool(
+                SkDiscardableMemoryPool::Create(1));
+            SkAssertResult(SkInstallDiscardablePixelRef(
+                SkDecodingImageGenerator::Create(
+                    data, SkDecodingImageGenerator::Options()),
+                &fBitmap, pool));
         }
     }
 
@@ -50,11 +50,16 @@ protected:
     }
 
     virtual SkISize onISize() {
-        return make_isize(640, 480);
+        return SkISize::Make(640, 480);
     }
 
     virtual void onDraw(SkCanvas* canvas) {
         canvas->drawBitmap(fBitmap, 0, 0);
+    }
+
+    // Skip cross process pipe due to https://code.google.com/p/skia/issues/detail?id=1520
+    virtual uint32_t onGetFlags() const {
+        return INHERITED::onGetFlags() | kSkipPipeCrossProcess_Flag;
     }
 
 private:
@@ -68,4 +73,4 @@ private:
 static GM* MyFactory(void*) { return new FactoryGM; }
 static GMRegistry reg(MyFactory);
 
-}
+}  // namespace skiagm

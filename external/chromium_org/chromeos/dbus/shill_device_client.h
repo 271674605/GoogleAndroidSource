@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "chromeos/chromeos_export.h"
-#include "chromeos/dbus/dbus_client_implementation_type.h"
+#include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/shill_client_helper.h"
 
 namespace base {
@@ -22,7 +22,6 @@ class DictionaryValue;
 
 namespace dbus {
 
-class Bus;
 class ObjectPath;
 
 }  // namespace dbus
@@ -34,10 +33,11 @@ class ShillPropertyChangedObserver;
 // ShillDeviceClient is used to communicate with the Shill Device service.
 // All methods should be called from the origin thread which initializes the
 // DBusThreadManager instance.
-class CHROMEOS_EXPORT ShillDeviceClient {
+class CHROMEOS_EXPORT ShillDeviceClient : public DBusClient {
  public:
   typedef ShillClientHelper::PropertyChangedHandler PropertyChangedHandler;
   typedef ShillClientHelper::DictionaryValueCallback DictionaryValueCallback;
+  typedef ShillClientHelper::StringCallback StringCallback;
   typedef ShillClientHelper::ErrorCallback ErrorCallback;
 
   // Interface for setting up devices for testing.
@@ -46,7 +46,7 @@ class CHROMEOS_EXPORT ShillDeviceClient {
    public:
     virtual void AddDevice(const std::string& device_path,
                            const std::string& type,
-                           const std::string& object_path) = 0;
+                           const std::string& name) = 0;
     virtual void RemoveDevice(const std::string& device_path) = 0;
     virtual void ClearDevices() = 0;
     virtual void SetDeviceProperty(const std::string& device_path,
@@ -62,8 +62,7 @@ class CHROMEOS_EXPORT ShillDeviceClient {
 
   // Factory function, creates a new instance which is owned by the caller.
   // For normal usage, access the singleton via DBusThreadManager::Get().
-  static ShillDeviceClient* Create(DBusClientImplementationType type,
-                                      dbus::Bus* bus);
+  static ShillDeviceClient* Create();
 
   // Adds a property changed |observer| for the device at |device_path|.
   virtual void AddPropertyChangedObserver(
@@ -153,13 +152,23 @@ class CHROMEOS_EXPORT ShillDeviceClient {
   // Calls the Reset method.
   // |callback| is called after the method call finishes.
   virtual void Reset(const dbus::ObjectPath& device_path,
-                          const base::Closure& callback,
-                          const ErrorCallback& error_callback) = 0;
+                     const base::Closure& callback,
+                     const ErrorCallback& error_callback) = 0;
+
+  // Calls the PerformTDLSOperation method.
+  // |callback| is called after the method call finishes.
+  virtual void PerformTDLSOperation(const dbus::ObjectPath& device_path,
+                                    const std::string& operation,
+                                    const std::string& peer,
+                                    const StringCallback& callback,
+                                    const ErrorCallback& error_callback) = 0;
 
   // Returns an interface for testing (stub only), or returns NULL.
   virtual TestInterface* GetTestInterface() = 0;
 
  protected:
+  friend class ShillDeviceClientTest;
+
   // Create() should be used instead.
   ShillDeviceClient();
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -176,6 +176,7 @@ typedef struct
     TIMER_LIST_ENT      deactivate_timer;           /* Timer to wait for deactivation */
 
     tNFC_STATE          nfc_state;
+    BOOLEAN             reassembly;         /* Reassemble fragmented data pkt */
     UINT8               trace_level;
     UINT8               last_hdr[NFC_SAVED_HDR_SIZE];/* part of last NCI command header */
     UINT8               last_cmd[NFC_SAVED_CMD_SIZE];/* part of last NCI command payload */

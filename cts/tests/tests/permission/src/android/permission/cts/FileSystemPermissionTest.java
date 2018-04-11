@@ -19,6 +19,7 @@ package android.permission.cts;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Environment;
+import android.system.OsConstants;
 import android.test.AndroidTestCase;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.LargeTest;
@@ -30,7 +31,9 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.InputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -235,6 +238,29 @@ public class FileSystemPermissionTest extends AndroidTestCase {
 
         assertFileOwnedBy(f, "root");
         assertFileOwnedByGroup(f, "net_bw_stats");
+    }
+
+    @MediumTest
+    public void testTcpDefaultRwndSane() throws Exception {
+        File f = new File("/proc/sys/net/ipv4/tcp_default_init_rwnd");
+        assertTrue(f.canRead());
+        assertFalse(f.canWrite());
+        assertFalse(f.canExecute());
+
+        assertFileOwnedBy(f, "root");
+        assertFileOwnedByGroup(f, "root");
+    }
+
+    @MediumTest
+    public void testIdletimerDirectoryExistsAndSane() throws Exception {
+        File dir = new File("/sys/class/xt_idletimer");
+        assertTrue(dir.isDirectory());
+        assertTrue(dir.canRead());
+        assertFalse(dir.canWrite());
+        assertTrue(dir.canExecute());
+
+        assertFileOwnedBy(dir, "root");
+        assertFileOwnedByGroup(dir, "root");
     }
 
     /**
@@ -443,7 +469,10 @@ public class FileSystemPermissionTest extends AndroidTestCase {
                     "/data/local/tmp/com.nuance.android.vsuite.vsuiteapp",
                     "/data/log",
                     "/data/logger",
+                    "/data/logs",
+                    "/data/logs/core",
                     "/data/lost+found",
+                    "/data/mdl",
                     "/data/misc",
                     "/data/misc/bluetooth",
                     "/data/misc/dhcp",
@@ -727,31 +756,63 @@ public class FileSystemPermissionTest extends AndroidTestCase {
     private static final Set<File> CHAR_DEV_EXCEPTIONS = new HashSet<File>(
             Arrays.asList(
                 // All exceptions should be alphabetical and associated with a bug number.
+                new File("/dev/adsprpc-smd"), // b/11710243
                 new File("/dev/alarm"),      // b/9035217
                 new File("/dev/ashmem"),
                 new File("/dev/binder"),
+                new File("/dev/card0"),       // b/13159510
+                new File("/dev/dri/card0"),   // b/13159510
+                new File("/dev/felica"),     // b/11142586
+                new File("/dev/felica_ant"), // b/11142586
+                new File("/dev/felica_cen"), // b/11142586
+                new File("/dev/felica_pon"), // b/11142586
+                new File("/dev/felica_rfs"), // b/11142586
+                new File("/dev/felica_rws"), // b/11142586
+                new File("/dev/felica_uicc"), // b/11142586
                 new File("/dev/full"),
+                new File("/dev/galcore"),
                 new File("/dev/genlock"),    // b/9035217
-                new File("/dev/hw_random"),  // b/9191279
+                new File("/dev/graphics/galcore"),
                 new File("/dev/ion"),
+                new File("/dev/kgsl-2d0"),   // b/11271533
+                new File("/dev/kgsl-2d1"),   // b/11271533
                 new File("/dev/kgsl-3d0"),   // b/9035217
                 new File("/dev/log/events"), // b/9035217
                 new File("/dev/log/main"),   // b/9035217
                 new File("/dev/log/radio"),  // b/9035217
                 new File("/dev/log/system"), // b/9035217
                 new File("/dev/mali0"),       // b/9106968
+                new File("/dev/mali"),        // b/11142586
+                new File("/dev/mm_interlock"), // b/12955573
+                new File("/dev/mm_isp"),      // b/12955573
+                new File("/dev/mm_v3d"),      // b/12955573
                 new File("/dev/msm_rotator"), // b/9035217
                 new File("/dev/null"),
+                new File("/dev/nvhost-as-gpu"),
                 new File("/dev/nvhost-ctrl"), // b/9088251
+                new File("/dev/nvhost-ctrl-gpu"),
+                new File("/dev/nvhost-dbg-gpu"),
+                new File("/dev/nvhost-gpu"),
                 new File("/dev/nvhost-gr2d"), // b/9088251
                 new File("/dev/nvhost-gr3d"), // b/9088251
+                new File("/dev/nvhost-tsec"),
+                new File("/dev/nvhost-prof-gpu"),
+                new File("/dev/nvhost-vic"),
                 new File("/dev/nvmap"),       // b/9088251
                 new File("/dev/ptmx"),        // b/9088251
                 new File("/dev/pvrsrvkm"),    // b/9108170
+                new File("/dev/pvr_sync"),
+                new File("/dev/quadd"),
                 new File("/dev/random"),
+                new File("/dev/snfc_cen"),    // b/11142586
+                new File("/dev/snfc_hsel"),   // b/11142586
+                new File("/dev/snfc_intu_poll"), // b/11142586
+                new File("/dev/snfc_rfs"),    // b/11142586
+                new File("/dev/tegra-throughput"),
                 new File("/dev/tiler"),       // b/9108170
                 new File("/dev/tty"),
                 new File("/dev/urandom"),
+                new File("/dev/ump"),         // b/11142586
                 new File("/dev/xt_qtaguid"),  // b/9088251
                 new File("/dev/zero"),
                 new File("/dev/fimg2d"),      // b/10428016
@@ -768,21 +829,86 @@ public class FileSystemPermissionTest extends AndroidTestCase {
     }
 
     public void testDevRandomWorldReadableAndWritable() throws Exception {
+        File f = new File("/dev/random");
+
+        assertTrue(f + " cannot be opened for reading", canOpenForReading(f));
+        assertTrue(f + " cannot be opened for writing", canOpenForWriting(f));
+
         FileUtils.FileStatus status = new FileUtils.FileStatus();
-        assertTrue(FileUtils.getFileStatus("/dev/random", status, false));
+        assertTrue(FileUtils.getFileStatus(f.getPath(), status, false));
         assertTrue(
-                "/dev/random not world-readable/writable. Actual mode: 0"
+                f + " not world-readable/writable. Actual mode: 0"
                         + Integer.toString(status.mode, 8),
                 (status.mode & 0666) == 0666);
     }
 
     public void testDevUrandomWorldReadableAndWritable() throws Exception {
+        File f = new File("/dev/urandom");
+
+        assertTrue(f + " cannot be opened for reading", canOpenForReading(f));
+        assertTrue(f + " cannot be opened for writing", canOpenForWriting(f));
+
         FileUtils.FileStatus status = new FileUtils.FileStatus();
-        assertTrue(FileUtils.getFileStatus("/dev/urandom", status, false));
+        assertTrue(FileUtils.getFileStatus(f.getPath(), status, false));
         assertTrue(
-                "/dev/urandom not world-readable/writable. Actual mode: 0"
+                f + " not world-readable/writable. Actual mode: 0"
                         + Integer.toString(status.mode, 8),
                 (status.mode & 0666) == 0666);
+    }
+
+    public void testDevHwRandomLockedDown() throws Exception {
+        File f = new File("/dev/hw_random");
+        if (!f.exists()) {
+            // HW RNG is not required to be exposed on all devices.
+            return;
+        }
+
+        assertFalse(f + " can be opened for reading", canOpenForReading(f));
+        assertFalse(f + " can be opened for writing", canOpenForWriting(f));
+
+        FileUtils.FileStatus status = new FileUtils.FileStatus();
+        assertFalse("stat permitted on " + f,
+                FileUtils.getFileStatus(f.getPath(), status, false));
+    }
+
+    private static boolean canOpenForReading(File f) {
+        try (InputStream in = new FileInputStream(f)) {
+            return true;
+        } catch (IOException expected) {
+            return false;
+        }
+    }
+
+    private static boolean canOpenForWriting(File f) {
+        try (OutputStream out = new FileOutputStream(f)) {
+            return true;
+        } catch (IOException expected) {
+            return false;
+        }
+    }
+
+    public void testFileHasOnlyCapsThrowsOnInvalidCaps() throws Exception {
+        try {
+            // Ensure negative cap id fails.
+            new FileUtils.CapabilitySet()
+                    .add(-1)
+                    .fileHasOnly("/system/bin/run-as");
+            fail();
+        }
+        catch (IllegalArgumentException e) {
+            // expected
+        }
+
+        try {
+            // Ensure too-large cap throws.
+            new FileUtils.CapabilitySet()
+                    .add(OsConstants.CAP_LAST_CAP + 1)
+                    .fileHasOnly("/system/bin/run-as");
+            fail();
+        }
+        catch (IllegalArgumentException e) {
+            // expected
+        }
     }
 
     /**
@@ -807,6 +933,12 @@ public class FileSystemPermissionTest extends AndroidTestCase {
         // ensure file has setuid/setgid enabled
         assertTrue(FileUtils.hasSetUidCapability(filename));
         assertTrue(FileUtils.hasSetGidCapability(filename));
+
+        // ensure file has *only* setuid/setgid attributes enabled
+        assertTrue(new FileUtils.CapabilitySet()
+                .add(OsConstants.CAP_SETUID)
+                .add(OsConstants.CAP_SETGID)
+                .fileHasOnly("/system/bin/run-as"));
     }
 
     private static Set<File>

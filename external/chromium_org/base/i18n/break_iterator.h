@@ -36,7 +36,7 @@
 // name (BREAK_SPACE) implied.
 //
 // Under BREAK_NEWLINE mode, all characters are included in the returned
-// string, breking only when a newline-equivalent character is encountered
+// string, breaking only when a newline-equivalent character is encountered
 // (eg. in the UTF-16 equivalent of the string "foo\nbar!\n\n", the line
 // breaks are at the periods in ".foo\n.bar\n.\n.").
 //
@@ -66,10 +66,17 @@ class BASE_I18N_EXPORT BreakIterator {
     BREAK_SPACE = BREAK_LINE,
     BREAK_NEWLINE,
     BREAK_CHARACTER,
+    // But don't remove this one!
+    RULE_BASED,
   };
 
   // Requires |str| to live as long as the BreakIterator does.
   BreakIterator(const string16& str, BreakType break_type);
+  // Make a rule-based iterator. BreakType == RULE_BASED is implied.
+  // TODO(andrewhayden): This signature could easily be misinterpreted as
+  // "(const string16& str, const string16& locale)". We should do something
+  // better.
+  BreakIterator(const string16& str, const string16& rules);
   ~BreakIterator();
 
   // Init() must be called before any of the iterators are valid.
@@ -82,14 +89,19 @@ class BASE_I18N_EXPORT BreakIterator {
   // last time Advance() returns true.)
   bool Advance();
 
+  // Updates the text used by the iterator, resetting the iterator as if
+  // if Init() had been called again. Any old state is lost. Returns true
+  // unless there is an error setting the text.
+  bool SetText(const base::char16* text, const size_t length);
+
   // Under BREAK_WORD mode, returns true if the break we just hit is the
   // end of a word. (Otherwise, the break iterator just skipped over e.g.
   // whitespace or punctuation.)  Under BREAK_LINE and BREAK_NEWLINE modes,
-  // this distinction doesn't apply and it always retuns false.
+  // this distinction doesn't apply and it always returns false.
   bool IsWord() const;
 
   // Under BREAK_WORD mode, returns true if |position| is at the end of word or
-  // at the start of word. It always retuns false under BREAK_LINE and
+  // at the start of word. It always returns false under BREAK_LINE and
   // BREAK_NEWLINE modes.
   bool IsEndOfWord(size_t position) const;
   bool IsStartOfWord(size_t position) const;
@@ -113,10 +125,13 @@ class BASE_I18N_EXPORT BreakIterator {
   // callers from needing access to the ICU public headers directory.
   void* iter_;
 
-  // The string we're iterating over.
+  // The string we're iterating over. Can be changed with SetText(...)
   const string16& string_;
 
-  // The breaking style (word/space/newline).
+  // Rules for our iterator. Mutually exclusive with break_type_.
+  const string16 rules_;
+
+  // The breaking style (word/space/newline). Mutually exclusive with rules_
   BreakType break_type_;
 
   // Previous and current iterator positions.

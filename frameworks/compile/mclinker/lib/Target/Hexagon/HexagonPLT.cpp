@@ -48,8 +48,7 @@ HexagonPLT::HexagonPLT(LDSection& pSection,
   m_PLT0 = hexagon_plt0;
   m_PLT0Size = sizeof (hexagon_plt0);
   // create PLT0
-  new HexagonPLT0(*m_SectionData);
-  m_Last = m_SectionData->begin();
+  new HexagonPLT0(*m_pSectionData);
   pSection.setAlign(16);
 }
 
@@ -59,9 +58,9 @@ HexagonPLT::~HexagonPLT()
 
 PLTEntryBase* HexagonPLT::getPLT0() const
 {
-  iterator first = m_SectionData->getFragmentList().begin();
+  iterator first = m_pSectionData->getFragmentList().begin();
 
-  assert(first != m_SectionData->getFragmentList().end() &&
+  assert(first != m_pSectionData->getFragmentList().end() &&
          "FragmentList is empty, getPLT0 failed!");
 
   PLTEntryBase* plt0 = &(llvm::cast<PLTEntryBase>(*first));
@@ -81,13 +80,13 @@ void HexagonPLT::finalizeSectionSize()
   if (end() != it) {
     // plt1 size
     PLTEntryBase* plt1 = &(llvm::cast<PLTEntryBase>(*it));
-    size += (m_SectionData->size() - 1) * plt1->size();
+    size += (m_pSectionData->size() - 1) * plt1->size();
   }
   m_Section.setSize(size);
 
   uint32_t offset = 0;
-  SectionData::iterator frag, fragEnd = m_SectionData->end();
-  for (frag = m_SectionData->begin(); frag != fragEnd; ++frag) {
+  SectionData::iterator frag, fragEnd = m_pSectionData->end();
+  for (frag = m_pSectionData->begin(); frag != fragEnd; ++frag) {
     frag->setOffset(offset);
     offset += frag->size();
   }
@@ -95,28 +94,12 @@ void HexagonPLT::finalizeSectionSize()
 
 bool HexagonPLT::hasPLT1() const
 {
-  return (m_SectionData->size() > 1);
+  return (m_pSectionData->size() > 1);
 }
 
-void HexagonPLT::reserveEntry(size_t pNum)
+HexagonPLT1* HexagonPLT::create()
 {
-  PLTEntryBase* plt1_entry = NULL;
-
-  for (size_t i = 0; i < pNum; ++i) {
-    plt1_entry = new HexagonPLT1(*m_SectionData);
-
-    if (NULL == plt1_entry)
-      fatal(diag::fail_allocate_memory_plt);
-  }
-}
-
-HexagonPLT1* HexagonPLT::consume()
-{
-  ++m_Last;
-  assert(m_Last != m_SectionData->end() &&
-         "The number of PLT Entries and ResolveInfo doesn't match");
-
-  return llvm::cast<HexagonPLT1>(&(*m_Last));
+  return new HexagonPLT1(*m_pSectionData);
 }
 
 void HexagonPLT::applyPLT0()
@@ -152,8 +135,8 @@ void HexagonPLT::applyPLT1() {
   uint64_t got_base = m_GOTPLT.addr();
   assert(got_base && ".got base address is NULL!");
 
-  HexagonPLT::iterator it = m_SectionData->begin();
-  HexagonPLT::iterator ie = m_SectionData->end();
+  HexagonPLT::iterator it = m_pSectionData->begin();
+  HexagonPLT::iterator ie = m_pSectionData->end();
   assert(it != ie && "FragmentList is empty, applyPLT1 failed!");
 
   uint32_t GOTEntrySize = HexagonGOTEntry::EntrySize;
@@ -200,7 +183,7 @@ uint64_t HexagonPLT::emit(MemoryRegion& pRegion)
   uint64_t result = 0x0;
   iterator it = begin();
 
-  unsigned char* buffer = pRegion.getBuffer();
+  unsigned char* buffer = pRegion.begin();
   memcpy(buffer, llvm::cast<HexagonPLT0>((*it)).getValue(), HexagonPLT0::EntrySize);
   result += HexagonPLT0::EntrySize;
   ++it;

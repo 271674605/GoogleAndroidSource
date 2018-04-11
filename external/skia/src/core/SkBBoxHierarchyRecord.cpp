@@ -9,10 +9,10 @@
 #include "SkBBoxHierarchyRecord.h"
 #include "SkPictureStateTree.h"
 
-SkBBoxHierarchyRecord::SkBBoxHierarchyRecord(uint32_t recordFlags,
-                                             SkBBoxHierarchy* h,
-                                             SkDevice* device)
-    : INHERITED(recordFlags, device) {
+SkBBoxHierarchyRecord::SkBBoxHierarchyRecord(const SkISize& size,
+                                             uint32_t recordFlags,
+                                             SkBBoxHierarchy* h)
+    : INHERITED(size, recordFlags) {
     fStateTree = SkNEW(SkPictureStateTree);
     fBoundingHierarchy = h;
     fBoundingHierarchy->ref();
@@ -22,86 +22,83 @@ SkBBoxHierarchyRecord::SkBBoxHierarchyRecord(uint32_t recordFlags,
 void SkBBoxHierarchyRecord::handleBBox(const SkRect& bounds) {
     SkIRect r;
     bounds.roundOut(&r);
-    SkPictureStateTree::Draw* draw = fStateTree->appendDraw(this->writeStream().size());
+    SkPictureStateTree::Draw* draw = fStateTree->appendDraw(this->writeStream().bytesWritten());
     fBoundingHierarchy->insert(draw, r, true);
 }
 
-int SkBBoxHierarchyRecord::save(SaveFlags flags) {
+void SkBBoxHierarchyRecord::willSave(SaveFlags flags) {
     fStateTree->appendSave();
-    return INHERITED::save(flags);
+    this->INHERITED::willSave(flags);
 }
 
-int SkBBoxHierarchyRecord::saveLayer(const SkRect* bounds, const SkPaint* paint,
-                                     SaveFlags flags) {
-    fStateTree->appendSaveLayer(this->writeStream().size());
-    return INHERITED::saveLayer(bounds, paint, flags);
+SkCanvas::SaveLayerStrategy SkBBoxHierarchyRecord::willSaveLayer(const SkRect* bounds,
+                                                                 const SkPaint* paint,
+                                                                 SaveFlags flags) {
+    // For now, assume all filters affect transparent black.
+    // FIXME: This could be made less conservative as an optimization.
+    bool paintAffectsTransparentBlack = NULL != paint &&
+        ((NULL != paint->getImageFilter()) ||
+         (NULL != paint->getColorFilter()));
+    SkRect drawBounds;
+    if (paintAffectsTransparentBlack) {
+        if (bounds) {
+            drawBounds = *bounds;
+            this->getTotalMatrix().mapRect(&drawBounds);
+        } else {
+            SkIRect deviceBounds;
+            this->getClipDeviceBounds(&deviceBounds);
+            drawBounds.set(deviceBounds);
+        }
+    }
+    fStateTree->appendSaveLayer(this->writeStream().bytesWritten());
+    SkCanvas::SaveLayerStrategy strategy = this->INHERITED::willSaveLayer(bounds, paint, flags);
+    if (paintAffectsTransparentBlack) {
+        this->handleBBox(drawBounds);
+        this->addNoOp();
+    }
+    return strategy;
 }
 
-void SkBBoxHierarchyRecord::restore() {
+void SkBBoxHierarchyRecord::willRestore() {
     fStateTree->appendRestore();
-    INHERITED::restore();
+    this->INHERITED::willRestore();
 }
 
-bool SkBBoxHierarchyRecord::translate(SkScalar dx, SkScalar dy) {
-    bool result = INHERITED::translate(dx, dy);
+void SkBBoxHierarchyRecord::didConcat(const SkMatrix& matrix) {
     fStateTree->appendTransform(getTotalMatrix());
-    return result;
+    INHERITED::didConcat(matrix);
 }
 
-bool SkBBoxHierarchyRecord::scale(SkScalar sx, SkScalar sy) {
-    bool result = INHERITED::scale(sx, sy);
+void SkBBoxHierarchyRecord::didSetMatrix(const SkMatrix& matrix) {
     fStateTree->appendTransform(getTotalMatrix());
-    return result;
+    INHERITED::didSetMatrix(matrix);
 }
 
-bool SkBBoxHierarchyRecord::rotate(SkScalar degrees) {
-    bool result = INHERITED::rotate(degrees);
-    fStateTree->appendTransform(getTotalMatrix());
-    return result;
+void SkBBoxHierarchyRecord::onClipRect(const SkRect& rect,
+                                       SkRegion::Op op,
+                                       ClipEdgeStyle edgeStyle) {
+    fStateTree->appendClip(this->writeStream().bytesWritten());
+    this->INHERITED::onClipRect(rect, op, edgeStyle);
 }
 
-bool SkBBoxHierarchyRecord::skew(SkScalar sx, SkScalar sy) {
-    bool result = INHERITED::skew(sx, sy);
-    fStateTree->appendTransform(getTotalMatrix());
-    return result;
+void SkBBoxHierarchyRecord::onClipRegion(const SkRegion& region,
+                                         SkRegion::Op op) {
+    fStateTree->appendClip(this->writeStream().bytesWritten());
+    this->INHERITED::onClipRegion(region, op);
 }
 
-bool SkBBoxHierarchyRecord::concat(const SkMatrix& matrix) {
-    bool result = INHERITED::concat(matrix);
-    fStateTree->appendTransform(getTotalMatrix());
-    return result;
+void SkBBoxHierarchyRecord::onClipPath(const SkPath& path,
+                                       SkRegion::Op op,
+                                       ClipEdgeStyle edgeStyle) {
+    fStateTree->appendClip(this->writeStream().bytesWritten());
+    this->INHERITED::onClipPath(path, op, edgeStyle);
 }
 
-void SkBBoxHierarchyRecord::setMatrix(const SkMatrix& matrix) {
-    INHERITED::setMatrix(matrix);
-    fStateTree->appendTransform(getTotalMatrix());
-}
-
-bool SkBBoxHierarchyRecord::clipRect(const SkRect& rect,
-                                     SkRegion::Op op,
-                                     bool doAntiAlias) {
-    fStateTree->appendClip(this->writeStream().size());
-    return INHERITED::clipRect(rect, op, doAntiAlias);
-}
-
-bool SkBBoxHierarchyRecord::clipRegion(const SkRegion& region,
-                                       SkRegion::Op op) {
-    fStateTree->appendClip(this->writeStream().size());
-    return INHERITED::clipRegion(region, op);
-}
-
-bool SkBBoxHierarchyRecord::clipPath(const SkPath& path,
-                                     SkRegion::Op op,
-                                     bool doAntiAlias) {
-    fStateTree->appendClip(this->writeStream().size());
-    return INHERITED::clipPath(path, op, doAntiAlias);
-}
-
-bool SkBBoxHierarchyRecord::clipRRect(const SkRRect& rrect,
-                                      SkRegion::Op op,
-                                      bool doAntiAlias) {
-    fStateTree->appendClip(this->writeStream().size());
-    return INHERITED::clipRRect(rrect, op, doAntiAlias);
+void SkBBoxHierarchyRecord::onClipRRect(const SkRRect& rrect,
+                                        SkRegion::Op op,
+                                        ClipEdgeStyle edgeStyle) {
+    fStateTree->appendClip(this->writeStream().bytesWritten());
+    this->INHERITED::onClipRRect(rrect, op, edgeStyle);
 }
 
 bool SkBBoxHierarchyRecord::shouldRewind(void* data) {
@@ -109,7 +106,7 @@ bool SkBBoxHierarchyRecord::shouldRewind(void* data) {
     // SkPicture has rewound its command stream.  To match that rewind in the
     // BBH, we rewind all draws that reference commands that were recorded
     // past the point to which the SkPicture has rewound, which is given by
-    // writeStream().size().
+    // writeStream().bytesWritten().
     SkPictureStateTree::Draw* draw = static_cast<SkPictureStateTree::Draw*>(data);
-    return draw->fOffset >= writeStream().size();
+    return draw->fOffset >= writeStream().bytesWritten();
 }

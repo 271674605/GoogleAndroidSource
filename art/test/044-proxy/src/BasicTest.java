@@ -51,6 +51,8 @@ public class BasicTest {
         colors.blue(777);
         colors.mauve("sorry");
         colors.blob();
+        Trace trace = (Trace) proxy;
+        trace.getTrace();
 
         try {
             shapes.upChuck();
@@ -88,6 +90,7 @@ public class BasicTest {
         Annotation[][] paramAnnos = meth.getParameterAnnotations();
         System.out.println("Param annos (" + paramAnnos.length + ") : "
             + Arrays.deepToString(paramAnnos));
+        System.out.println("Modifiers: " + meth.getModifiers());
     }
 
     static Object createProxy(Object proxyMe) {
@@ -96,7 +99,7 @@ public class BasicTest {
 
         /* create the proxy class */
         Class proxyClass = Proxy.getProxyClass(Shapes.class.getClassLoader(),
-                            new Class[] { Quads.class, Colors.class });
+                            new Class[] { Quads.class, Colors.class, Trace.class });
 
         /* create a proxy object, passing the handler object in */
         Object proxy = null;
@@ -154,6 +157,10 @@ interface Colors {
     public String blob();
 
     public R0aa checkMe();
+}
+
+interface Trace {
+    public void getTrace();
 }
 
 /*
@@ -238,14 +245,43 @@ class MyInvocationHandler implements InvocationHandler {
         // invocation of toString() in the print statements below.
         if (method.getDeclaringClass() == java.lang.Object.class) {
             //System.out.println("!!! object " + method.getName());
-            if (method.getName().equals("toString"))
+            if (method.getName().equals("toString")) {
                 return super.toString();
-            else if (method.getName().equals("hashCode"))
+            } else if (method.getName().equals("hashCode")) {
                 return Integer.valueOf(super.hashCode());
-            else if (method.getName().equals("equals"))
+            } else if (method.getName().equals("equals")) {
                 return Boolean.valueOf(super.equals(args[0]));
-            else
+            } else {
                 throw new RuntimeException("huh?");
+            }
+        }
+
+        if (method.getDeclaringClass() == Trace.class) {
+          if (method.getName().equals("getTrace")) {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            for (int i = 0; i < stackTrace.length; i++) {
+                StackTraceElement ste = stackTrace[i];
+                if (ste.getMethodName().equals("getTrace")) {
+                  System.out.println(ste.getClassName() + "." + ste.getMethodName() + " " +
+                                     ste.getFileName() + ":" + ste.getLineNumber());
+                }
+            }
+            return null;
+          }
+        }
+
+        if (method.getDeclaringClass() == Trace.class) {
+          if (method.getName().equals("getTrace")) {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            for (int i = 0; i < stackTrace.length; i++) {
+                StackTraceElement ste = stackTrace[i];
+                if (ste.getMethodName().equals("getTrace")) {
+                  System.out.println(ste.getClassName() + "." + ste.getMethodName() + " " +
+                                     ste.getFileName() + ":" + ste.getLineNumber());
+                }
+            }
+            return null;
+          }
         }
 
         System.out.println("Invoke " + method);
@@ -257,10 +293,11 @@ class MyInvocationHandler implements InvocationHandler {
         }
 
         try {
-            if (true)
+            if (true) {
                 result = method.invoke(mObj, args);
-            else
+            } else {
                 result = -1;
+            }
             System.out.println("Success: method " + method.getName()
                 + " res=" + result);
         } catch (InvocationTargetException ite) {

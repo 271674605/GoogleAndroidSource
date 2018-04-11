@@ -16,6 +16,7 @@
 
 package com.android.stk;
 
+import com.android.internal.telephony.cat.CatLog;
 import com.android.internal.telephony.cat.TextMessage;
 
 import android.app.Activity;
@@ -38,6 +39,7 @@ public class StkDialogActivity extends Activity implements View.OnClickListener 
     // members
     TextMessage mTextMsg;
 
+    private boolean mIsResponseSent = false;
     Handler mTimeoutHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
@@ -126,6 +128,23 @@ public class StkDialogActivity extends Activity implements View.OnClickListener 
     @Override
     public void onResume() {
         super.onResume();
+
+        /*
+         * The user should be shown the message forever or until some high
+         * priority event occurs (such as incoming call, MMI code execution
+         * etc as mentioned in ETSI 102.223, 6.4.1).
+         *
+         * Since mTextMsg.responseNeeded is false (because the response has
+         * already been sent) and duration of the dialog is zero and userClear
+         * is true, don't set the timeout.
+         */
+        if (!mTextMsg.responseNeeded &&
+                StkApp.calculateDurationInMilis(mTextMsg.duration) == 0 &&
+                mTextMsg.userClear) {
+            CatLog.d(this, "User should clear text..show message forever");
+            return;
+        }
+
         startTimeOut(mTextMsg.userClear);
     }
 
@@ -134,6 +153,20 @@ public class StkDialogActivity extends Activity implements View.OnClickListener 
         super.onPause();
 
         cancelTimeOut();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        mIsResponseSent = false;
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (!mIsResponseSent) {
+            sendResponse(StkAppService.RES_ID_TIMEOUT);
+        }
     }
 
     @Override
@@ -156,6 +189,7 @@ public class StkDialogActivity extends Activity implements View.OnClickListener 
         args.putInt(StkAppService.RES_ID, resId);
         args.putBoolean(StkAppService.CONFIRMATION, confirmed);
         startService(new Intent(this, StkAppService.class).putExtras(args));
+        mIsResponseSent = true;
     }
 
     private void sendResponse(int resId) {

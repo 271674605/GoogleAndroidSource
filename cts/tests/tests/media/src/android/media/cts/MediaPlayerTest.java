@@ -22,6 +22,7 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.media.MediaPlayer.OnErrorListener;
 import android.media.MediaRecorder;
 import android.media.MediaMetadataRetriever;
 import android.media.TimedText;
@@ -30,15 +31,22 @@ import android.media.audiofx.Visualizer;
 import android.media.cts.MediaPlayerTestBase.Monitor;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.ServiceManager;
 import android.os.SystemClock;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.StringTokenizer;
 import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.CountDownLatch;
+
+import junit.framework.AssertionFailedError;
 
 /**
  * Tests for the MediaPlayer API and local video/audio playback.
@@ -76,6 +84,35 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
             mOutFile.delete();
         }
     }
+
+    // Bug 13652927
+    public void testVorbisCrash() throws Exception {
+        MediaPlayer mp = mMediaPlayer;
+        MediaPlayer mp2 = mMediaPlayer2;
+        AssetFileDescriptor afd2 = mResources.openRawResourceFd(R.raw.testmp3_2);
+        mp2.setDataSource(afd2.getFileDescriptor(), afd2.getStartOffset(), afd2.getLength());
+        afd2.close();
+        mp2.prepare();
+        mp2.setLooping(true);
+        mp2.start();
+
+        for (int i = 0; i < 20; i++) {
+            try {
+                AssetFileDescriptor afd = mResources.openRawResourceFd(R.raw.bug13652927);
+                mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                afd.close();
+                mp.prepare();
+                fail("shouldn't be here");
+            } catch (Exception e) {
+                // expected to fail
+                Log.i("@@@", "failed: " + e);
+            }
+            Thread.sleep(500);
+            assertTrue("media server died", mp2.isPlaying());
+            mp.reset();
+        }
+    }
+
     public void testPlayNullSource() throws Exception {
         try {
             mMediaPlayer.setDataSource((String) null);
@@ -85,11 +122,74 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         }
     }
 
-    public void testPlayAudio() throws Exception {
+    public void testPlayAudioFromDataURI() throws Exception {
         final int mp3Duration = 34909;
         final int tolerance = 70;
         final int seekDuration = 100;
+
+        // This is "R.raw.testmp3_2", base64-encoded.
+        final int resid = R.raw.testmp3_3;
+
+        InputStream is = mContext.getResources().openRawResource(resid);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("data:;base64,");
+        builder.append(reader.readLine());
+        Uri uri = Uri.parse(builder.toString());
+
+        MediaPlayer mp = MediaPlayer.create(mContext, uri);
+
+        try {
+            mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            mp.setWakeMode(mContext, PowerManager.PARTIAL_WAKE_LOCK);
+
+            assertFalse(mp.isPlaying());
+            mp.start();
+            assertTrue(mp.isPlaying());
+
+            assertFalse(mp.isLooping());
+            mp.setLooping(true);
+            assertTrue(mp.isLooping());
+
+            assertEquals(mp3Duration, mp.getDuration(), tolerance);
+            int pos = mp.getCurrentPosition();
+            assertTrue(pos >= 0);
+            assertTrue(pos < mp3Duration - seekDuration);
+
+            mp.seekTo(pos + seekDuration);
+            assertEquals(pos + seekDuration, mp.getCurrentPosition(), tolerance);
+
+            // test pause and restart
+            mp.pause();
+            Thread.sleep(SLEEP_TIME);
+            assertFalse(mp.isPlaying());
+            mp.start();
+            assertTrue(mp.isPlaying());
+
+            // test stop and restart
+            mp.stop();
+            mp.reset();
+            mp.setDataSource(mContext, uri);
+            mp.prepare();
+            assertFalse(mp.isPlaying());
+            mp.start();
+            assertTrue(mp.isPlaying());
+
+            // waiting to complete
+            while(mp.isPlaying()) {
+                Thread.sleep(SLEEP_TIME);
+            }
+        } finally {
+            mp.release();
+        }
+    }
+
+    public void testPlayAudio() throws Exception {
         final int resid = R.raw.testmp3_2;
+        final int mp3Duration = 34909;
+        final int tolerance = 70;
+        final int seekDuration = 100;
 
         MediaPlayer mp = MediaPlayer.create(mContext, resid);
         try {
@@ -134,6 +234,98 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
             while(mp.isPlaying()) {
                 Thread.sleep(SLEEP_TIME);
             }
+        } finally {
+            mp.release();
+        }
+    }
+
+    static class OutputListener {
+        int mSession;
+        AudioEffect mVc;
+        Visualizer mVis;
+        byte [] mVisData;
+        boolean mSoundDetected;
+        OutputListener(int session) {
+            mSession = session;
+            // creating a volume controller on output mix ensures that ro.audio.silent mutes
+            // audio after the effects and not before
+            mVc = new AudioEffect(
+                    AudioEffect.EFFECT_TYPE_NULL,
+                    UUID.fromString("119341a0-8469-11df-81f9-0002a5d5c51b"),
+                    0,
+                    session);
+            mVc.setEnabled(true);
+            mVis = new Visualizer(session);
+            int size = 256;
+            int[] range = Visualizer.getCaptureSizeRange();
+            if (size < range[0]) {
+                size = range[0];
+            }
+            if (size > range[1]) {
+                size = range[1];
+            }
+            assertTrue(mVis.setCaptureSize(size) == Visualizer.SUCCESS);
+
+            mVis.setDataCaptureListener(new Visualizer.OnDataCaptureListener() {
+                @Override
+                public void onWaveFormDataCapture(Visualizer visualizer,
+                        byte[] waveform, int samplingRate) {
+                    if (!mSoundDetected) {
+                        for (int i = 0; i < waveform.length; i++) {
+                            // 8 bit unsigned PCM, zero level is at 128, which is -128 when
+                            // seen as a signed byte
+                            if (waveform[i] != -128) {
+                                mSoundDetected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void onFftDataCapture(Visualizer visualizer, byte[] fft, int samplingRate) {
+                }
+            }, 10000 /* milliHertz */, true /* PCM */, false /* FFT */);
+            assertTrue(mVis.setEnabled(true) == Visualizer.SUCCESS);
+        }
+
+        void reset() {
+            mSoundDetected = false;
+        }
+
+        boolean heardSound() {
+            return mSoundDetected;
+        }
+
+        void release() {
+            mVis.release();
+            mVc.release();
+        }
+    }
+
+    public void testPlayAudioTwice() throws Exception {
+        final int resid = R.raw.camera_click;
+
+        MediaPlayer mp = MediaPlayer.create(mContext, resid);
+        try {
+            mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            mp.setWakeMode(mContext, PowerManager.PARTIAL_WAKE_LOCK);
+
+            OutputListener listener = new OutputListener(mp.getAudioSessionId());
+
+            Thread.sleep(SLEEP_TIME);
+            assertFalse("noise heard before test started", listener.heardSound());
+
+            mp.start();
+            Thread.sleep(SLEEP_TIME);
+            assertFalse("player was still playing after " + SLEEP_TIME + " ms", mp.isPlaying());
+            assertTrue("nothing heard while test ran", listener.heardSound());
+            listener.reset();
+            mp.seekTo(0);
+            mp.start();
+            Thread.sleep(SLEEP_TIME);
+            assertTrue("nothing heard when sound was replayed", listener.heardSound());
+            listener.release();
         } finally {
             mp.release();
         }
@@ -401,14 +593,16 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         }
         byte [] vizdata = new byte[size];
         Visualizer vis = new Visualizer(session);
-        assertTrue(vis.setCaptureSize(vizdata.length) == Visualizer.SUCCESS);
-        assertTrue(vis.setEnabled(true) == Visualizer.SUCCESS);
         AudioManager am = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
         int oldRingerMode = am.getRingerMode();
         am.setRingerMode(AudioManager.RINGER_MODE_NORMAL);
         int oldvolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
         am.setStreamVolume(AudioManager.STREAM_MUSIC, 1, 0);
         try {
+            assertEquals("setCaptureSize failed",
+                    Visualizer.SUCCESS, vis.setCaptureSize(vizdata.length));
+            assertEquals("setEnabled failed", Visualizer.SUCCESS, vis.setEnabled(true));
+
             mp1.setNextMediaPlayer(mp2);
             mp1.start();
             assertTrue(mp1.isPlaying());
@@ -625,6 +819,14 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
                 R.raw.video_480x360_mp4_h264_1350kbps_30fps_aac_stereo_128kbps_44100hz, 480, 360);
     }
 
+    public void testLocalVideo_MP4_H264_480x360_1350kbps_30fps_AAC_Stereo_128kbps_44110Hz_frag()
+            throws Exception {
+        playVideoTest(
+                R.raw.video_480x360_mp4_h264_1350kbps_30fps_aac_stereo_128kbps_44100hz_fragmented,
+                480, 360);
+    }
+
+
     public void testLocalVideo_MP4_H264_480x360_1350kbps_30fps_AAC_Stereo_192kbps_44110Hz()
             throws Exception {
         playVideoTest(
@@ -808,11 +1010,18 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         }
     }
 
-    public void testDeselectTrack() throws Exception {
+    public void testDeselectTrack() throws Throwable {
         loadResource(R.raw.testvideo_with_2_subtitles);
-        loadSubtitleSource(R.raw.test_subtitle1_srt);
-        readTimedTextTracks();
-        assertEquals(getTimedTextTrackCount(), 3);
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    loadSubtitleSource(R.raw.test_subtitle1_srt);
+                } catch (Exception e) {
+                    throw new AssertionFailedError(e.getMessage());
+                }
+            }
+        });
+        getInstrumentation().waitForIdleSync();
 
         mMediaPlayer.setDisplay(getActivity().getSurfaceHolder());
         mMediaPlayer.setScreenOnWhilePlaying(true);
@@ -830,6 +1039,9 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
             }
         });
         mMediaPlayer.prepare();
+        readTimedTextTracks();
+        assertEquals(getTimedTextTrackCount(), 3);
+
         mMediaPlayer.start();
         assertTrue(mMediaPlayer.isPlaying());
 
@@ -838,24 +1050,24 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
             // Waits until at least one subtitle is fired. Timeout is 1 sec.
             selectSubtitleTrack(0);
             mOnTimedTextCalled.reset();
-            assertTrue(mOnTimedTextCalled.waitForSignal(1000));
+            assertTrue(mOnTimedTextCalled.waitForSignal(1500));
 
             // Try deselecting track.
             deselectSubtitleTrack(0);
             mOnTimedTextCalled.reset();
-            assertFalse(mOnTimedTextCalled.waitForSignal(1000));
+            assertFalse(mOnTimedTextCalled.waitForSignal(1500));
         }
 
         // Run the same test for external subtitle track.
         for (int i = 0; i < 2; i++) {
             selectSubtitleTrack(2);
             mOnTimedTextCalled.reset();
-            assertTrue(mOnTimedTextCalled.waitForSignal(1000));
+            assertTrue(mOnTimedTextCalled.waitForSignal(1500));
 
             // Try deselecting track.
             deselectSubtitleTrack(2);
             mOnTimedTextCalled.reset();
-            assertFalse(mOnTimedTextCalled.waitForSignal(1000));
+            assertFalse(mOnTimedTextCalled.waitForSignal(1500));
         }
 
         try {
@@ -869,16 +1081,8 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         mMediaPlayer.stop();
     }
 
-    public void testChangeSubtitleTrack() throws Exception {
+    public void testChangeSubtitleTrack() throws Throwable {
         loadResource(R.raw.testvideo_with_2_subtitles);
-        readTimedTextTracks();
-        assertEquals(getTimedTextTrackCount(), 2);
-
-        // Adds two more external subtitle files.
-        loadSubtitleSource(R.raw.test_subtitle1_srt);
-        loadSubtitleSource(R.raw.test_subtitle2_srt);
-        readTimedTextTracks();
-        assertEquals(getTimedTextTrackCount(), 4);
 
         mMediaPlayer.setDisplay(getActivity().getSurfaceHolder());
         mMediaPlayer.setScreenOnWhilePlaying(true);
@@ -886,7 +1090,7 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         mMediaPlayer.setOnTimedTextListener(new MediaPlayer.OnTimedTextListener() {
             @Override
             public void onTimedText(MediaPlayer mp, TimedText text) {
-                final int toleranceMs = 100;
+                final int toleranceMs = 500;
                 final int durationMs = 500;
                 int posMs = mMediaPlayer.getCurrentPosition();
                 if (text != null) {
@@ -913,6 +1117,32 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
 
         mMediaPlayer.prepare();
         assertFalse(mMediaPlayer.isPlaying());
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    readTimedTextTracks();
+                } catch (Exception e) {
+                    throw new AssertionFailedError(e.getMessage());
+                }
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+        assertEquals(getTimedTextTrackCount(), 2);
+
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    // Adds two more external subtitle files.
+                    loadSubtitleSource(R.raw.test_subtitle1_srt);
+                    loadSubtitleSource(R.raw.test_subtitle2_srt);
+                    readTimedTextTracks();
+                } catch (Exception e) {
+                    throw new AssertionFailedError(e.getMessage());
+                }
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+        assertEquals(getTimedTextTrackCount(), 4);
 
         selectSubtitleTrack(0);
         mOnTimedTextCalled.reset();
@@ -923,26 +1153,35 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         // Waits until at least two subtitles are fired. Timeout is 2 sec.
         // Please refer the test srt files:
         // test_subtitle1_srt.3gp and test_subtitle2_srt.3gp
-        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2000) >= 2);
+        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2500) >= 2);
 
         selectSubtitleTrack(1);
         mOnTimedTextCalled.reset();
-        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2000) >= 2);
+        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2500) >= 2);
 
         selectSubtitleTrack(2);
         mOnTimedTextCalled.reset();
-        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2000) >= 2);
+        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2500) >= 2);
 
         selectSubtitleTrack(3);
         mOnTimedTextCalled.reset();
-        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2000) >= 2);
+        assertTrue(mOnTimedTextCalled.waitForCountedSignals(2, 2500) >= 2);
         mMediaPlayer.stop();
     }
 
-    public void testGetTrackInfo() throws Exception {
+    public void testGetTrackInfo() throws Throwable {
         loadResource(R.raw.testvideo_with_2_subtitles);
-        loadSubtitleSource(R.raw.test_subtitle1_srt);
-        loadSubtitleSource(R.raw.test_subtitle2_srt);
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    loadSubtitleSource(R.raw.test_subtitle1_srt);
+                    loadSubtitleSource(R.raw.test_subtitle2_srt);
+                } catch (Exception e) {
+                    throw new AssertionFailedError(e.getMessage());
+                }
+            }
+        });
+        getInstrumentation().waitForIdleSync();
         mMediaPlayer.prepare();
         mMediaPlayer.start();
 
@@ -957,7 +1196,7 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
             if (trackInfos[i].getTrackType() == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_TIMEDTEXT) {
                 String trackLanguage = trackInfos[i].getLanguage();
                 assertTrue(trackLanguage != null);
-                trackLanguage.trim();
+                trackLanguage = trackLanguage.trim();
                 Log.d(LOG_TAG, "track info lang: " + trackLanguage);
                 assertTrue("Should not see empty track language with our test data.",
                            trackLanguage.length() > 0);
@@ -966,6 +1205,41 @@ public class MediaPlayerTest extends MediaPlayerTestBase {
         }
         // There are 4 subtitle tracks in total in our test data.
         assertEquals(4, count);
+    }
+
+    /*
+     *  This test assumes the resources being tested are between 8 and 14 seconds long
+     *  The ones being used here are 10 seconds long.
+     */
+    public void testResumeAtEnd() throws Throwable {
+        testResumeAtEnd(R.raw.loudsoftmp3);
+        testResumeAtEnd(R.raw.loudsoftwav);
+        testResumeAtEnd(R.raw.loudsoftogg);
+        testResumeAtEnd(R.raw.loudsoftitunes);
+        testResumeAtEnd(R.raw.loudsoftfaac);
+        testResumeAtEnd(R.raw.loudsoftaac);
+    }
+
+    private void testResumeAtEnd(int res) throws Throwable {
+
+        loadResource(res);
+        mMediaPlayer.prepare();
+        mOnCompletionCalled.reset();
+        mMediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            @Override
+            public void onCompletion(MediaPlayer mp) {
+                mOnCompletionCalled.signal();
+                mMediaPlayer.start();
+            }
+        });
+        // skip the first part of the file so we reach EOF sooner
+        mMediaPlayer.seekTo(5000);
+        mMediaPlayer.start();
+        // sleep long enough that we restart playback at least once, but no more
+        Thread.sleep(10000);
+        assertTrue("MediaPlayer should still be playing", mMediaPlayer.isPlaying());
+        mMediaPlayer.reset();
+        assertEquals("wrong number of repetitions", 1, mOnCompletionCalled.getNumSignal());
     }
 
     public void testCallback() throws Throwable {

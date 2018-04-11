@@ -27,6 +27,7 @@ import android.provider.BaseColumns;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
@@ -101,6 +102,8 @@ public class UIProvider {
         public static final int STORAGE_ERROR = 4;
         /** The sync wasn't completed due to an internal error/exception */
         public static final int INTERNAL_ERROR = 5;
+        /** The sync wasn't completed due to an error in the mail server */
+        public static final int SERVER_ERROR = 6;
     }
 
     // The actual content provider should define its own authority
@@ -131,7 +134,9 @@ public class UIProvider {
             new ImmutableMap.Builder<String, Class<?>>()
             .put(AccountColumns._ID, Integer.class)
             .put(AccountColumns.NAME, String.class)
+            .put(AccountColumns.SENDER_NAME, String.class)
             .put(AccountColumns.ACCOUNT_MANAGER_NAME, String.class)
+            .put(AccountColumns.ACCOUNT_ID, String.class)
             .put(AccountColumns.TYPE, String.class)
             .put(AccountColumns.PROVIDER_VERSION, Integer.class)
             .put(AccountColumns.URI, String.class)
@@ -157,11 +162,9 @@ public class UIProvider {
             .put(AccountColumns.ACCOUNT_COOKIE_QUERY_URI, String.class)
             .put(AccountColumns.SettingsColumns.SIGNATURE, String.class)
             .put(AccountColumns.SettingsColumns.AUTO_ADVANCE, Integer.class)
-            .put(AccountColumns.SettingsColumns.MESSAGE_TEXT_SIZE, Integer.class)
             .put(AccountColumns.SettingsColumns.SNAP_HEADERS, Integer.class)
             .put(AccountColumns.SettingsColumns.REPLY_BEHAVIOR, Integer.class)
             .put(AccountColumns.SettingsColumns.CONV_LIST_ICON, Integer.class)
-            .put(AccountColumns.SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS, Integer.class)
             .put(AccountColumns.SettingsColumns.CONFIRM_DELETE, Integer.class)
             .put(AccountColumns.SettingsColumns.CONFIRM_ARCHIVE, Integer.class)
             .put(AccountColumns.SettingsColumns.CONFIRM_SEND, Integer.class)
@@ -170,7 +173,8 @@ public class UIProvider {
             .put(AccountColumns.SettingsColumns.FORCE_REPLY_FROM_DEFAULT, Integer.class)
             .put(AccountColumns.SettingsColumns.MAX_ATTACHMENT_SIZE, Integer.class)
             .put(AccountColumns.SettingsColumns.SWIPE, Integer.class)
-            .put(AccountColumns.SettingsColumns.PRIORITY_ARROWS_ENABLED, Integer.class)
+            .put(AccountColumns.SettingsColumns.IMPORTANCE_MARKERS_ENABLED, Integer.class)
+            .put(AccountColumns.SettingsColumns.SHOW_CHEVRONS_ENABLED, Integer.class)
             .put(AccountColumns.SettingsColumns.SETUP_INTENT_URI, String.class)
             .put(AccountColumns.SettingsColumns.CONVERSATION_VIEW_MODE, Integer.class)
             .put(AccountColumns.SettingsColumns.VEILED_ADDRESS_PATTERN, String.class)
@@ -178,7 +182,10 @@ public class UIProvider {
             .put(AccountColumns.ENABLE_MESSAGE_TRANSFORMS, Integer.class)
             .put(AccountColumns.SYNC_AUTHORITY, String.class)
             .put(AccountColumns.QUICK_RESPONSE_URI, String.class)
+            .put(AccountColumns.SETTINGS_FRAGMENT_CLASS, String.class)
             .put(AccountColumns.SettingsColumns.MOVE_TO_INBOX, String.class)
+            .put(AccountColumns.SettingsColumns.SHOW_IMAGES, Integer.class)
+            .put(AccountColumns.SettingsColumns.WELCOME_TOUR_SHOWN_VERSION, Integer.class)
             .build();
 
     public static final Map<String, Class<?>> ACCOUNTS_COLUMNS =
@@ -289,9 +296,9 @@ public class UIProvider {
          */
         public static final int INITIAL_CONVERSATION_LIMIT = 0x40000;
         /**
-         * Whether the account cannot be used for sending
+         * Whether the account is not a real account, i.e. Combined View
          */
-        public static final int SENDING_UNAVAILABLE = 0x80000;
+        public static final int VIRTUAL_ACCOUNT = 0x80000;
         /**
          * Whether the account supports discarding drafts from a conversation.  This should be
          * removed when all providers support this capability
@@ -318,10 +325,19 @@ public class UIProvider {
         public static final String NAME = "name";
 
         /**
+         * This string column contains the real name associated with the account, e.g. "John Doe"
+         */
+        public static final String SENDER_NAME = "senderName";
+
+        /**
          * This string column contains the account manager name of this account.
          */
-
         public static final String ACCOUNT_MANAGER_NAME = "accountManagerName";
+
+        /**
+         * This string column contains the account id of this account.
+         */
+        public static final String ACCOUNT_ID = "accountId";
 
         /**
          * This integer contains the type of the account: Google versus non google. This is not
@@ -490,6 +506,10 @@ public class UIProvider {
          * URI for querying this account's quick responses
          */
         public static final String QUICK_RESPONSE_URI = "quickResponseUri";
+        /**
+         * Fragment class name for account settings
+         */
+        public static final String SETTINGS_FRAGMENT_CLASS = "settingsFragmentClass";
 
         public static final class SettingsColumns {
             /**
@@ -503,12 +523,6 @@ public class UIProvider {
              * be one of the values in {@link UIProvider.AutoAdvance}
              */
             public static final String AUTO_ADVANCE = "auto_advance";
-
-            /**
-             * Integer column containing the user's specified message text size preference.  This
-             * value will be one of the values in {@link UIProvider.MessageTextSize}
-             */
-            public static final String MESSAGE_TEXT_SIZE = "message_text_size";
 
             /**
              * Integer column contaning the user's specified snap header preference.  This value
@@ -528,14 +542,6 @@ public class UIProvider {
              * {@link UIProvider.ConversationListIcon}.
              */
             public static final String CONV_LIST_ICON = "conversation_list_icon";
-
-            /**
-             * Integer column containing the user's preference for whether to show attachment
-             * previews or not in the conversation list view. A non zero value indicates that
-             * attachment previews should be displayed.
-             */
-            public static final String CONV_LIST_ATTACHMENT_PREVIEWS
-                    = "conversation_list_attachment_previews";
 
             /**
              * Integer column containing the user's specified confirm delete preference value.
@@ -579,9 +585,16 @@ public class UIProvider {
              */
             public static final String SWIPE = "swipe";
             /**
-             * Integer column containing whether priority inbox arrows are enabled.
+             * Integer column containing whether importance markers are enabled.
              */
-            public static final String PRIORITY_ARROWS_ENABLED = "priority_inbox_arrows_enabled";
+            public static final String IMPORTANCE_MARKERS_ENABLED = "importance_markers_enabled";
+            /**
+             * Integer column containing whether chevrons should be shown.
+             * Chevrons are personal level indicators:
+             * an arrow ( › ) by messages sent to my address (not a mailing list),
+             * and a double arrow ( » ) by messages sent only to me.
+             */
+            public static final String SHOW_CHEVRONS_ENABLED = "show_chevrons_enabled";
             /**
              * Uri for EDIT intent that will cause account-specific setup UI to be shown. If not
              * null, this intent should be used when an account is "entered" (i.e. viewing a folder
@@ -603,6 +616,15 @@ public class UIProvider {
              * account.
              */
             public static final String MOVE_TO_INBOX = "move_to_inbox";
+            /**
+             * Show images in conversation view.
+             */
+            public static final String SHOW_IMAGES = "show_images";
+
+            /**
+             * The version of the welcome tour that user saw on android device.
+             */
+            public static final String WELCOME_TOUR_SHOWN_VERSION = "welcome_tour_shown_version";
         }
     }
 
@@ -640,6 +662,19 @@ public class UIProvider {
          */
         public static final String QUERY = "query";
 
+        /*
+        * This parameter is set by ACTION_SEARCH to differentiate one ACTION_SEARCH from another.
+        * This is necessary because the Uri we construct for each query is only based on the
+        * search query string. However, subsequent searches with the same string will confuse
+        * the underlying provider into thinking that it's still the same "session", thus it will
+        * keep the data it had before. This is a problem when we do search on some keyword, then
+        * without navigating away we do the same search again (expecting to see new results there
+        * and outdated results gone). By keying the Uri on both search query and a unique id,
+        * we ensure that old data gets properly destroyed.
+        * @see UnifiedGmail, MailEngine#getConversationCursorForQuery.
+        */
+        public static final String QUERY_IDENTIFER = "query_identifier";
+
         private SearchQueryParameters() {}
     }
 
@@ -671,7 +706,7 @@ public class UIProvider {
             "vnd.android.cursor.item/vnd.com.android.mail.folder";
 
     public static final String[] FOLDERS_PROJECTION = {
-        BaseColumns._ID,
+        FolderColumns._ID,
         FolderColumns.PERSISTENT_ID,
         FolderColumns.URI,
         FolderColumns.NAME,
@@ -696,6 +731,12 @@ public class UIProvider {
         FolderColumns.LAST_MESSAGE_TIMESTAMP,
         FolderColumns.PARENT_URI
     };
+
+    public static final String[] FOLDERS_PROJECTION_WITH_UNREAD_SENDERS =
+            (new ImmutableList.Builder<String>()
+                    .addAll(ImmutableList.copyOf(FOLDERS_PROJECTION))
+                    .add(FolderColumns.UNREAD_SENDERS)
+                    .build().toArray(new String[0]));
 
     public static final int FOLDER_ID_COLUMN = 0;
     public static final int FOLDER_PERSISTENT_ID_COLUMN = 1;
@@ -752,11 +793,11 @@ public class UIProvider {
     }
 
     public static final class FolderCapabilities {
-        public static final int SYNCABLE = 0x0001;
-        public static final int PARENT = 0x0002;
-        // FEEL FREE TO USE 0x0004 - was previous CAN_HOLD_MAIL but that was true for all
+        // FEEL FREE TO USE 0x0001, 0x0002, 0x0004
+        // was previously SYNCABLE, PARENT, CAN_HOLD_MAIL
         // folders so we removed that value
         public static final int CAN_ACCEPT_MOVED_MESSAGES = 0x0008;
+
          /**
          * For accounts that support archive, this will indicate that this folder supports
          * the archive functionality.
@@ -790,14 +831,17 @@ public class UIProvider {
          * Indicates that a folder supports settings (sync lookback, etc.)
          */
         public static final int SUPPORTS_SETTINGS = 0x0200;
+
         /**
          * All the messages in this folder are important.
          */
         public static final int ONLY_IMPORTANT = 0x0400;
+
         /**
          * Deletions in this folder can't be undone (could include archive if desirable)
          */
         public static final int DELETE_ACTION_FINAL = 0x0800;
+
         /**
          * This folder is virtual, i.e. contains conversations potentially pulled from other
          * folders, potentially even from different accounts.  Examples might be a "starred"
@@ -829,9 +873,28 @@ public class UIProvider {
          * inbox.
          */
         public static final int ALLOWS_MOVE_TO_INBOX = 0x10000;
+
+        /**
+         * For folders that typically represent outgoing mail, this indicates the client should
+         * display recipients rather than the standard list of senders.
+         */
+        public static final int SHOW_RECIPIENTS = 0x20000;
+
+        /**
+         * We only want the icons of certain folders to be tinted with their
+         * {@link FolderColumns#BG_COLOR}, this indicates when we want that to happen.
+         */
+        public static final int TINT_ICON = 0x40000;
+
+        /**
+         * We want to only show unseen count and never unread count for some folders. This differs
+         * from {@link Folder#isUnreadCountHidden()} where the expected alternative is to show the
+         * total count of messages. Here we wish to show either unseen or nothing at all.
+         */
+        public static final int UNSEEN_COUNT_ONLY = 0x80000;
     }
 
-    public static final class FolderColumns {
+    public static final class FolderColumns implements BaseColumns {
         /**
          * This string column contains an id for the folder that is constant across devices, or
          * null if there is no constant id.
@@ -938,6 +1001,12 @@ public class UIProvider {
          */
         public static final String PARENT_URI = "parentUri";
 
+        /**
+         * A string of unread senders sorted by date, so we don't have to fetch this in multiple
+         * queries
+         */
+        public static final String UNREAD_SENDERS = "unreadSenders";
+
         public FolderColumns() {}
     }
 
@@ -975,10 +1044,7 @@ public class UIProvider {
         ConversationColumns.SENDER_INFO,
         ConversationColumns.CONVERSATION_BASE_URI,
         ConversationColumns.REMOTE,
-        ConversationColumns.ATTACHMENT_PREVIEW_URI0,
-        ConversationColumns.ATTACHMENT_PREVIEW_URI1,
-        ConversationColumns.ATTACHMENT_PREVIEW_STATES,
-        ConversationColumns.ATTACHMENT_PREVIEWS_COUNT,
+        ConversationColumns.ORDER_KEY
     };
 
     /**
@@ -986,7 +1052,7 @@ public class UIProvider {
      * {@link UIProvider#CONVERSATION_PROJECTION} projection will fit in a single
      * {@link android.database.CursorWindow}
      */
-    public static final int CONVERSATION_PROJECTION_QUERY_CURSOR_WINDOW_LIMT = 1500;
+    public static final int CONVERSATION_PROJECTION_QUERY_CURSOR_WINDOW_LIMIT = 1500;
 
     // These column indexes only work when the caller uses the
     // default CONVERSATION_PROJECTION defined above.
@@ -1016,16 +1082,14 @@ public class UIProvider {
     public static final int CONVERSATION_SENDER_INFO_COLUMN = 23;
     public static final int CONVERSATION_BASE_URI_COLUMN = 24;
     public static final int CONVERSATION_REMOTE_COLUMN = 25;
-    public static final int CONVERSATION_ATTACHMENT_PREVIEW_URI0_COLUMN = 26;
-    public static final int CONVERSATION_ATTACHMENT_PREVIEW_URI1_COLUMN = 27;
-    public static final int CONVERSATION_ATTACHMENT_PREVIEW_STATES_COLUMN = 28;
-    public static final int CONVERSATION_ATTACHMENT_PREVIEWS_COUNT_COLUMN = 29;
+    public static final int CONVERSATION_ORDER_KEY_COLUMN = 26;
 
     public static final class ConversationSendingState {
         public static final int OTHER = 0;
         public static final int QUEUED = 1;
         public static final int SENDING = 2;
         public static final int SENT = 3;
+        public static final int RETRYING = 4;
         public static final int SEND_ERROR = -1;
     }
 
@@ -1200,32 +1264,9 @@ public class UIProvider {
         public static final String CONVERSATION_BASE_URI = "conversationBaseUri";
 
         /**
-         * This string column contains the uri of the first attachment preview of the first unread
-         * message, denoted by UNREAD_MESSAGE_ID.
+         * This long column contains the data that is used for ordering the result.
          */
-        public static final String ATTACHMENT_PREVIEW_URI0 = "attachmentPreviewUri0";
-
-        /**
-         * This string column contains the uri of the second attachment preview of the first unread
-         * message, denoted by UNREAD_MESSAGE_ID.
-         */
-        public static final String ATTACHMENT_PREVIEW_URI1 = "attachmentPreviewUri1";
-
-        /**
-         * This int column contains the states of the attachment previews of the first unread
-         * message, the same message used for the snippet. The states is a packed int,
-         * where the first and second bits represent the SIMPLE and BEST state of the first
-         * attachment preview, while the third and fourth bits represent those states for the
-         * second attachment preview. For each bit, a one means that rendition of that attachment
-         * preview is downloaded.
-         */
-        public static final String ATTACHMENT_PREVIEW_STATES = "attachmentPreviewStates";
-
-        /**
-         * This int column contains the total count of images in the first unread message. The
-         * total count may be higher than the number of ATTACHMENT_PREVIEW_URI columns.
-         */
-        public static final String ATTACHMENT_PREVIEWS_COUNT = "attachmentPreviewsCount";
+        public static final String ORDER_KEY = "orderKey";
 
         private ConversationColumns() {
         }
@@ -1368,6 +1409,11 @@ public class UIProvider {
         public static final String DISCARD_DRAFTS = "discard_drafts";
 
         /**
+         * Move all failed messages into drafts operation
+         */
+        public static final String MOVE_FAILED_TO_DRAFTS = "move_failed_to_drafts";
+
+        /**
          * Update conversation folder(s) operation. ContentValues passed as part
          * of this update will be of the format (FOLDERS_UPDATED, csv of updated
          * folders) where the comma separated values of the updated folders will
@@ -1505,6 +1551,7 @@ public class UIProvider {
         MessageColumns.APPEND_REF_MESSAGE_CONTENT,
         MessageColumns.HAS_ATTACHMENTS,
         MessageColumns.ATTACHMENT_LIST_URI,
+        MessageColumns.ATTACHMENT_BY_CID_URI,
         MessageColumns.MESSAGE_FLAGS,
         MessageColumns.ALWAYS_SHOW_IMAGES,
         MessageColumns.READ,
@@ -1519,7 +1566,9 @@ public class UIProvider {
         MessageColumns.SPAM_WARNING_LEVEL,
         MessageColumns.SPAM_WARNING_LINK_TYPE,
         MessageColumns.VIA_DOMAIN,
-        MessageColumns.IS_SENDING
+        MessageColumns.SENDING_STATE,
+        MessageColumns.CLIPPED,
+        MessageColumns.PERMALINK
     };
 
     /** Separates attachment info parts in strings in a message. */
@@ -1550,21 +1599,24 @@ public class UIProvider {
     public static final int MESSAGE_APPEND_REF_MESSAGE_CONTENT_COLUMN = 17;
     public static final int MESSAGE_HAS_ATTACHMENTS_COLUMN = 18;
     public static final int MESSAGE_ATTACHMENT_LIST_URI_COLUMN = 19;
-    public static final int MESSAGE_FLAGS_COLUMN = 20;
-    public static final int MESSAGE_ALWAYS_SHOW_IMAGES_COLUMN = 21;
-    public static final int MESSAGE_READ_COLUMN = 22;
-    public static final int MESSAGE_SEEN_COLUMN = 23;
-    public static final int MESSAGE_STARRED_COLUMN = 24;
-    public static final int QUOTED_TEXT_OFFSET_COLUMN = 25;
-    public static final int MESSAGE_ATTACHMENTS_COLUMN = 26;
-    public static final int MESSAGE_CUSTOM_FROM_ADDRESS_COLUMN = 27;
-    public static final int MESSAGE_ACCOUNT_URI_COLUMN = 28;
-    public static final int MESSAGE_EVENT_INTENT_COLUMN = 29;
-    public static final int MESSAGE_SPAM_WARNING_STRING_ID_COLUMN = 30;
-    public static final int MESSAGE_SPAM_WARNING_LEVEL_COLUMN = 31;
-    public static final int MESSAGE_SPAM_WARNING_LINK_TYPE_COLUMN = 32;
-    public static final int MESSAGE_VIA_DOMAIN_COLUMN = 33;
-    public static final int MESSAGE_IS_SENDING_COLUMN = 34;
+    public static final int MESSAGE_ATTACHMENT_BY_CID_URI_COLUMN = 20;
+    public static final int MESSAGE_FLAGS_COLUMN = 21;
+    public static final int MESSAGE_ALWAYS_SHOW_IMAGES_COLUMN = 22;
+    public static final int MESSAGE_READ_COLUMN = 23;
+    public static final int MESSAGE_SEEN_COLUMN = 24;
+    public static final int MESSAGE_STARRED_COLUMN = 25;
+    public static final int QUOTED_TEXT_OFFSET_COLUMN = 26;
+    public static final int MESSAGE_ATTACHMENTS_COLUMN = 27;
+    public static final int MESSAGE_CUSTOM_FROM_ADDRESS_COLUMN = 28;
+    public static final int MESSAGE_ACCOUNT_URI_COLUMN = 29;
+    public static final int MESSAGE_EVENT_INTENT_COLUMN = 30;
+    public static final int MESSAGE_SPAM_WARNING_STRING_ID_COLUMN = 31;
+    public static final int MESSAGE_SPAM_WARNING_LEVEL_COLUMN = 32;
+    public static final int MESSAGE_SPAM_WARNING_LINK_TYPE_COLUMN = 33;
+    public static final int MESSAGE_VIA_DOMAIN_COLUMN = 34;
+    public static final int MESSAGE_SENDING_STATE_COLUMN = 35;
+    public static final int MESSAGE_CLIPPED_COLUMN = 36;
+    public static final int MESSAGE_PERMALINK_COLUMN = 37;
 
     public static final class CursorStatus {
         // The cursor is actively loading more data
@@ -1698,9 +1750,17 @@ public class UIProvider {
         public static final String HAS_ATTACHMENTS = "hasAttachments";
         /**
          * This string column contains the content provider URI for the list of
-         * attachments associated with this message.
+         * attachments associated with this message.<br>
+         * <br>
+         * The resulting cursor MUST have the columns as defined in
+         * {@link com.android.ex.photo.provider.PhotoContract.PhotoViewColumns}.
          */
         public static final String ATTACHMENT_LIST_URI = "attachmentListUri";
+        /**
+         * This string column contains the content provider URI for the details of an attachment
+         * associated with this message. (CID to be appended at the time the URI is used)
+         */
+        public static final String ATTACHMENT_BY_CID_URI = "attachmentByCidUri";
         /**
          * This long column is a bit field of flags defined in {@link MessageFlags}.
          */
@@ -1773,10 +1833,19 @@ public class UIProvider {
          */
         public static final String VIA_DOMAIN = "viaDomain";
         /**
-         * This boolean column indicates whether the message is an outgoing message in the process
-         * of being sent (will be zero for incoming messages and messages that are already sent).
+         * This int column indicates whether the message is an outgoing message in the process
+         * of being sent. See {@link com.android.mail.providers.UIProvider.ConversationSendingState}
          */
-        public static final String IS_SENDING = "isSending";
+        public static final String SENDING_STATE = "sendingState";
+        /**
+         * This boolean column indicates whether the message body has been clipped.
+         */
+        public static final String CLIPPED = "clipped";
+        /**
+         * This string column contains the permalink value of the conversation
+         * for which this message belongs or null if one does not exist.
+         */
+        public static final String PERMALINK = "permalink";
 
         private MessageColumns() {}
     }
@@ -1831,7 +1900,8 @@ public class UIProvider {
         AttachmentColumns.PROVIDER_DATA,
         AttachmentColumns.SUPPORTS_DOWNLOAD_AGAIN,
         AttachmentColumns.TYPE,
-        AttachmentColumns.FLAGS
+        AttachmentColumns.FLAGS,
+        AttachmentColumns.CONTENT_ID
     };
     public static final int ATTACHMENT_NAME_COLUMN = 0;
     public static final int ATTACHMENT_SIZE_COLUMN = 1;
@@ -1846,6 +1916,7 @@ public class UIProvider {
     public static final int ATTACHMENT_SUPPORTS_DOWNLOAD_AGAIN_COLUMN = 10;
     public static final int ATTACHMENT_TYPE_COLUMN = 11;
     public static final int ATTACHMENT_FLAGS_COLUMN = 12;
+    public static final int ATTACHMENT_CONTENT_ID_COLUMN = 13;
 
     /** Separates attachment info parts in strings in the database. */
     public static final String ATTACHMENT_INFO_SEPARATOR = "\n"; // use to join
@@ -2026,6 +2097,12 @@ public class UIProvider {
          */
         public static final String FLAGS = "flags";
 
+        /**
+         * This column holds the RFC 2392 content id of the email part for this attachment, if
+         * possible; otherwise it holds an identifier unique to the parent message.
+         */
+        public static final String CONTENT_ID = "contentId";
+
         private AttachmentColumns() {}
     }
 
@@ -2135,16 +2212,37 @@ public class UIProvider {
             final int autoAdvance;
 
             if (AUTO_ADVANCE_MODE_NEWER.equals(autoAdvanceSetting)) {
-                autoAdvance = UIProvider.AutoAdvance.NEWER;
+                autoAdvance = NEWER;
             } else if (AUTO_ADVANCE_MODE_OLDER.equals(autoAdvanceSetting)) {
-                autoAdvance = UIProvider.AutoAdvance.OLDER;
+                autoAdvance = OLDER;
             } else if (AUTO_ADVANCE_MODE_LIST.equals(autoAdvanceSetting)) {
-                autoAdvance = UIProvider.AutoAdvance.LIST;
+                autoAdvance = LIST;
             } else {
-                autoAdvance = UIProvider.AutoAdvance.UNSET;
+                autoAdvance = UNSET;
             }
 
             return autoAdvance;
+        }
+
+        public static String getAutoAdvanceStr(int autoAdvance) {
+            final String str;
+
+            switch (autoAdvance) {
+                case OLDER:
+                    str = AUTO_ADVANCE_MODE_OLDER;
+                    break;
+                case NEWER:
+                    str = AUTO_ADVANCE_MODE_NEWER;
+                    break;
+                case LIST:
+                    str = AUTO_ADVANCE_MODE_LIST;
+                    break;
+                default:
+                    str = "unset";
+                    break;
+            }
+
+            return str;
         }
     }
 
@@ -2188,14 +2286,6 @@ public class UIProvider {
         public static final int NEVER = 2;
     }
 
-    public static final class MessageTextSize {
-        public static final int TINY = -2;
-        public static final int SMALL = -1;
-        public static final int NORMAL = 0;
-        public static final int LARGE = 1;
-        public static final int HUGE = 2;
-    }
-
     public static final class DefaultReplyBehavior {
         public static final int REPLY = 0;
         public static final int REPLY_ALL = 1;
@@ -2236,6 +2326,11 @@ public class UIProvider {
          * to run.
          */
         public static final String EXTRA_UPDATED_UNREAD_COUNT = "notification_updated_unread_count";
+
+        /**
+         * Integer extra containing the update unseen count for the account/folder.
+         */
+        public static final String EXTRA_UPDATED_UNSEEN_COUNT = "notification_updated_unseen_count";
     }
 
     public static final class EditSettingsExtras {
@@ -2276,9 +2371,9 @@ public class UIProvider {
          */
         public static final String EXTRA_ORIGINAL_URI = "original_uri";
         /**
-         * Parcelable extra passed to the proxy which indicates the account being viewed from.
+         * String extra passed to the proxy which indicates the account being viewed.
          */
-        public static final String EXTRA_ACCOUNT = "account";
+        public static final String EXTRA_ACCOUNT_NAME = "account_name";
         /**
          * String extra passed from the proxy which indicates the salt used to generate the digest.
          */

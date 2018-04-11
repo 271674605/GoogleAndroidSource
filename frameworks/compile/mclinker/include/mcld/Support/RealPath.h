@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_REAL_PATH_H
-#define MCLD_REAL_PATH_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_REALPATH_H
+#define MCLD_SUPPORT_REALPATH_H
 #include "mcld/Support/Path.h"
 #include <string>
 

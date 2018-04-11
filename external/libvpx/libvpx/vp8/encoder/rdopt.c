@@ -528,18 +528,15 @@ static int cost_coeffs(MACROBLOCK *mb, BLOCKD *b, int type, ENTROPY_CONTEXT *a, 
 
     VP8_COMBINEENTROPYCONTEXTS(pt, *a, *l);
 
-# define QC( I)  ( qcoeff_ptr [vp8_default_zig_zag1d[I]] )
-
+    assert(eob <= 16);
     for (; c < eob; c++)
     {
-        int v = QC(c);
-        int t = vp8_dct_value_tokens_ptr[v].Token;
+        const int v = qcoeff_ptr[vp8_default_zig_zag1d[c]];
+        const int t = vp8_dct_value_tokens_ptr[v].Token;
         cost += mb->token_costs [type] [vp8_coef_bands[c]] [pt] [t];
         cost += vp8_dct_value_cost_ptr[v];
         pt = vp8_prev_token_class[t];
     }
-
-# undef QC
 
     if (c < 16)
         cost += mb->token_costs [type] [vp8_coef_bands[c]] [pt] [DCT_EOB_TOKEN];
@@ -935,7 +932,7 @@ int vp8_cost_mv_ref(MB_PREDICTION_MODE m, const int near_mv_ref_ct[4])
     assert(NEARESTMV <= m  &&  m <= SPLITMV);
     vp8_mv_ref_probs(p, near_mv_ref_ct);
     return vp8_cost_token(vp8_mv_ref_tree, p,
-                          vp8_mv_ref_encoding_array - NEARESTMV + m);
+                          vp8_mv_ref_encoding_array + (m - NEARESTMV));
 }
 
 void vp8_set_mbmode_and_mvs(MACROBLOCK *x, MB_PREDICTION_MODE mb, int_mv *mv)

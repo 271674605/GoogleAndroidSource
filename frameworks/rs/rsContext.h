@@ -80,6 +80,7 @@ public:
         void * drv;
 
         RsdHalFunctions funcs;
+        uint32_t flags;
     };
     Hal mHal;
 
@@ -116,7 +117,6 @@ public:
     TypeState mStateType;
     SamplerState mStateSampler;
 
-    ScriptCState mScriptC;
     bool isSynchronous() {return mSynchronous;}
     bool setupCheck();
 
@@ -151,6 +151,7 @@ public:
     void resume();
     void setSurface(uint32_t w, uint32_t h, RsNativeWindow sur);
 #endif
+    void finish();
 
     void setPriority(int32_t p);
     void destroyWorkerThreadResources();
@@ -310,6 +311,8 @@ private:
     uint64_t mAverageFPSStartTime;
     uint32_t mAverageFPS;
 };
+
+void LF_ObjDestroy_handcode(const Context *rsc, RsAsyncVoidPtr objPtr);
 
 } // renderscript
 } // android

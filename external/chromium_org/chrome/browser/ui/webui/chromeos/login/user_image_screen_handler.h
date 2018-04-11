@@ -47,20 +47,29 @@ class UserImageScreenHandler : public UserImageScreenActor,
 
   virtual void SetCameraPresent(bool enabled) OVERRIDE;
 
+  virtual void HideCurtain() OVERRIDE;
+
  private:
 
   // Sends image data to the page.
   void HandleGetImages();
 
+  // Screen ready to be shown.
+  void HandleScreenReady();
+
   // Handles photo taken with WebRTC UI.
   void HandlePhotoTaken(const std::string& image_url);
 
-  // Handles camera presence check request.
-  void HandleCheckCameraPresence();
+  // Handles 'take-photo' button click.
+  void HandleTakePhoto();
+
+  // Handles 'discard-photo' button click.
+  void HandleDiscardPhoto();
 
   // Handles clicking on default user image.
   void HandleSelectImage(const std::string& image_url,
-                         const std::string& image_type);
+                         const std::string& image_type,
+                         bool is_user_selection);
 
   // Called when user accept the image closing the screen.
   void HandleImageAccepted();
@@ -72,6 +81,9 @@ class UserImageScreenHandler : public UserImageScreenActor,
 
   // Keeps whether screen should be shown right after initialization.
   bool show_on_init_;
+
+  // Keeps whether screen has loaded all default images and redy to be shown.
+  bool is_ready_;
 
   base::Time screen_show_time_;
 

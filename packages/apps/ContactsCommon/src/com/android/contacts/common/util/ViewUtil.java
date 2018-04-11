@@ -16,8 +16,14 @@
 
 package com.android.contacts.common.util;
 
+import android.content.res.Resources;
+import android.graphics.Outline;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.widget.ListView;
+
+import com.android.contacts.common.R;
 
 /**
  * Provides static functions to work with views
@@ -38,5 +44,65 @@ public class ViewUtil {
                     "than a result of the layout pass");
         }
         return p.width;
+    }
+
+    /**
+     * Returns a boolean indicating whether or not the view's layout direction is RTL
+     *
+     * @param view - A valid view
+     * @return True if the view's layout direction is RTL
+     */
+    public static boolean isViewLayoutRtl(View view) {
+        return view.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+    }
+
+    private static final ViewOutlineProvider OVAL_OUTLINE_PROVIDER = new ViewOutlineProvider() {
+        @Override
+        public void getOutline(View view, Outline outline) {
+            outline.setOval(0, 0, view.getWidth(), view.getHeight());
+        }
+    };
+
+    private static final ViewOutlineProvider RECT_OUTLINE_PROVIDER = new ViewOutlineProvider() {
+        @Override
+        public void getOutline(View view, Outline outline) {
+            outline.setRect(0, 0, view.getWidth(), view.getHeight());
+        }
+    };
+
+    /**
+     * Adds a rectangular outline to a view. This can be useful when you want to add a shadow
+     * to a transparent view. See b/16856049.
+     * @param view view that the outline is added to
+     * @param res The resources file.
+     */
+    public static void addRectangularOutlineProvider(View view, Resources res) {
+        view.setOutlineProvider(RECT_OUTLINE_PROVIDER);
+    }
+
+    /**
+     * Configures the floating action button, clipping it to a circle and setting its translation z.
+     * @param view The float action button's view.
+     * @param res The resources file.
+     */
+    public static void setupFloatingActionButton(View view, Resources res) {
+        view.setOutlineProvider(OVAL_OUTLINE_PROVIDER);
+        view.setTranslationZ(
+                res.getDimensionPixelSize(R.dimen.floating_action_button_translation_z));
+    }
+
+    /**
+     * Adds padding to the bottom of the given {@link ListView} so that the floating action button
+     * does not obscure any content.
+     *
+     * @param listView to add the padding to
+     * @param res valid resources object
+     */
+    public static void addBottomPaddingToListViewForFab(ListView listView, Resources res) {
+        final int fabPadding = res.getDimensionPixelSize(
+                R.dimen.floating_action_button_list_bottom_padding);
+        listView.setPaddingRelative(listView.getPaddingStart(), listView.getPaddingTop(),
+                listView.getPaddingEnd(), listView.getPaddingBottom() + fabPadding);
+        listView.setClipToPadding(false);
     }
 }

@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "net/base/ip_endpoint.h"
+#include "net/quic/quic_connection_stats.h"
 #include "net/quic/quic_protocol.h"
-#include "net/quic/quic_stats.h"
 
 namespace net {
 
@@ -18,9 +18,14 @@ class QuicAlarm;
 class QuicConnection;
 class QuicConnectionHelperInterface;
 class QuicConnectionVisitorInterface;
+class QuicEncryptedPacket;
 class QuicFecGroup;
 class QuicFramer;
 class QuicPacketCreator;
+class QuicPacketGenerator;
+class QuicPacketWriter;
+class QuicReceivedPacketManager;
+class QuicSentPacketManager;
 class ReceiveAlgorithmInterface;
 class SendAlgorithmInterface;
 
@@ -44,9 +49,13 @@ class QuicConnectionPeer {
 
   static QuicPacketCreator* GetPacketCreator(QuicConnection* connection);
 
-  static bool GetReceivedTruncatedAck(QuicConnection* connection);
+  static QuicPacketGenerator* GetPacketGenerator(QuicConnection* connection);
 
-  static size_t GetNumRetransmissionTimeouts(QuicConnection* connection);
+  static QuicSentPacketManager* GetSentPacketManager(
+      QuicConnection* connection);
+
+  static QuicReceivedPacketManager* GetReceivedPacketManager(
+      QuicConnection* connection);
 
   static QuicTime::Delta GetNetworkTimeout(QuicConnection* connection);
 
@@ -54,9 +63,8 @@ class QuicConnectionPeer {
       QuicConnection* connection,
       QuicPacketSequenceNumber sequence_number);
 
-  static size_t GetRetransmissionCount(
-      QuicConnection* connection,
-      QuicPacketSequenceNumber sequence_number);
+  static bool IsRetransmission(QuicConnection* connection,
+                               QuicPacketSequenceNumber sequence_number);
 
   static QuicPacketEntropyHash GetSentEntropyHash(
       QuicConnection* connection,
@@ -78,10 +86,10 @@ class QuicConnectionPeer {
   static void SetSelfAddress(QuicConnection* connection,
                              const IPEndPoint& self_address);
 
-  static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
+  static void SetPeerAddress(QuicConnection* connection,
+                             const IPEndPoint& peer_address);
 
-  static void SetMaxPacketsPerRetransmissionAlarm(QuicConnection* connection,
-                                                  int max_packets);
+  static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
 
   static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
 
@@ -91,15 +99,27 @@ class QuicConnectionPeer {
   static QuicFecGroup* GetFecGroup(QuicConnection* connection, int fec_group);
 
   static QuicAlarm* GetAckAlarm(QuicConnection* connection);
+  static QuicAlarm* GetPingAlarm(QuicConnection* connection);
+  static QuicAlarm* GetResumeWritesAlarm(QuicConnection* connection);
   static QuicAlarm* GetRetransmissionAlarm(QuicConnection* connection);
   static QuicAlarm* GetSendAlarm(QuicConnection* connection);
   static QuicAlarm* GetTimeoutAlarm(QuicConnection* connection);
+
+  static QuicPacketWriter* GetWriter(QuicConnection* connection);
+  static void SetWriter(QuicConnection* connection, QuicPacketWriter* writer);
+  static void CloseConnection(QuicConnection* connection);
+  static QuicEncryptedPacket* GetConnectionClosePacket(
+      QuicConnection* connection);
+
+  static void SetSupportedVersions(QuicConnection* connection,
+                                   QuicVersionVector versions);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);
 };
 
 }  // namespace test
+
 }  // namespace net
 
-#endif  // NET_QUIC_TEST_TOOLS_QUIC_TEST_PEER_H_
+#endif  // NET_QUIC_TEST_TOOLS_QUIC_CONNECTION_PEER_H_

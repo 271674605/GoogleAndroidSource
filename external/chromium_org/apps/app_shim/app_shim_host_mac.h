@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_WEB_APPLICATIONS_APP_SHIM_HOST_MAC_H_
-#define CHROME_BROWSER_WEB_APPLICATIONS_APP_SHIM_HOST_MAC_H_
+#ifndef APPS_APP_SHIM_APP_SHIM_HOST_MAC_H_
+#define APPS_APP_SHIM_APP_SHIM_HOST_MAC_H_
 
 #include <string>
+#include <vector>
 
 #include "apps/app_shim/app_shim_handler_mac.h"
 #include "base/files/file_path.h"
@@ -50,12 +51,14 @@ class AppShimHost : public IPC::Listener,
   // and app_id. Once the profile and app_id are stored, and all future
   // messages from the app shim relate to this app. The app is launched
   // immediately if |launch_now| is true.
-  void OnLaunchApp(base::FilePath profile_dir,
-                   std::string app_id,
-                   apps::AppShimLaunchType launch_type);
+  void OnLaunchApp(const base::FilePath& profile_dir,
+                   const std::string& app_id,
+                   apps::AppShimLaunchType launch_type,
+                   const std::vector<base::FilePath>& files);
 
   // Called when the app shim process notifies that the app was focused.
-  void OnFocus(apps::AppShimFocusType focus_type);
+  void OnFocus(apps::AppShimFocusType focus_type,
+               const std::vector<base::FilePath>& files);
 
   void OnSetHidden(bool hidden);
 
@@ -65,6 +68,8 @@ class AppShimHost : public IPC::Listener,
   // apps::AppShimHandler::Host overrides:
   virtual void OnAppLaunchComplete(apps::AppShimLaunchResult result) OVERRIDE;
   virtual void OnAppClosed() OVERRIDE;
+  virtual void OnAppHide() OVERRIDE;
+  virtual void OnAppRequestUserAttention() OVERRIDE;
   virtual base::FilePath GetProfilePath() const OVERRIDE;
   virtual std::string GetAppId() const OVERRIDE;
 
@@ -77,4 +82,4 @@ class AppShimHost : public IPC::Listener,
   bool initial_launch_finished_;
 };
 
-#endif  // CHROME_BROWSER_WEB_APPLICATIONS_APP_SHIM_HOST_MAC_H_
+#endif  // APPS_APP_SHIM_APP_SHIM_HOST_MAC_H_

@@ -18,18 +18,19 @@ package com.android.providers.telephony;
 
 import android.app.AppOpsManager;
 import android.content.ContentProvider;
-import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.UriMatcher;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
 import android.os.FileUtils;
 import android.os.ParcelFileDescriptor;
+import android.os.UserHandle;
 import android.provider.BaseColumns;
 import android.provider.Telephony;
 import android.provider.Telephony.CanonicalAddressesColumns;
@@ -41,13 +42,13 @@ import android.provider.Telephony.Mms.Rate;
 import android.text.TextUtils;
 import android.util.Log;
 
-
 import com.google.android.mms.pdu.PduHeaders;
 import com.google.android.mms.util.DownloadDrmHelper;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+
 import android.provider.Telephony.Threads;
 
 /**
@@ -205,9 +206,15 @@ public class MmsProvider extends ContentProvider {
             finalSortOrder = sortOrder;
         }
 
-        SQLiteDatabase db = mOpenHelper.getReadableDatabase();
-        Cursor ret = qb.query(db, projection, selection,
-                selectionArgs, null, null, finalSortOrder);
+        Cursor ret;
+        try {
+            SQLiteDatabase db = mOpenHelper.getReadableDatabase();
+            ret = qb.query(db, projection, selection,
+                    selectionArgs, null, null, finalSortOrder);
+        } catch (SQLiteException e) {
+            Log.e(TAG, "returning NULL cursor, query: " + uri, e);
+            return null;
+        }
 
         // TODO: Does this need to be a URI for this provider.
         ret.setNotificationUri(getContext().getContentResolver(), uri);
@@ -869,7 +876,7 @@ public class MmsProvider extends ContentProvider {
 
     private void notifyChange() {
         getContext().getContentResolver().notifyChange(
-                MmsSms.CONTENT_URI, null);
+                MmsSms.CONTENT_URI, null, true, UserHandle.USER_ALL);
     }
 
     private final static String TAG = "MmsProvider";

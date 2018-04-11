@@ -64,7 +64,7 @@ public class NavTree {
 
     SortedMap<String, Object> sorted = new TreeMap<String, Object>();
     for (ClassInfo cl : classes) {
-      if (cl.isHidden()) {
+      if (cl.isHiddenOrRemoved()) {
         continue;
       }
       sorted.put(cl.qualifiedName(), cl);
@@ -133,6 +133,7 @@ public class NavTree {
   private static Node makePackageNode(PackageInfo pkg) {
     List<Node> children = new ArrayList<Node>();
 
+    addClassNodes(children, "Annotations", pkg.annotations());
     addClassNodes(children, "Interfaces", pkg.interfaces());
     addClassNodes(children, "Classes", pkg.ordinaryClasses());
     addClassNodes(children, "Enums", pkg.enums());

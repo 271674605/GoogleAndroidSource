@@ -8,13 +8,9 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/observer_list.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
+#include "ui/message_center/message_center_types.h"
 #include "ui/message_center/notification_list.h"
-#include "ui/message_center/notification_types.h"
-
-class TrayViewControllerTest;
 
 namespace base {
 class DictionaryValue;
@@ -24,14 +20,25 @@ class DictionaryValue;
 // [Add|Remove|Update]Notification to create and update notifications in the
 // list. It also sends those changes to its observers when a notification
 // is shown, closed, or clicked on.
-// It can also implement Delegate to ask platform-dependent features like
-// disabling extensions or opening settings.
+//
+// MessageCenter is agnostic of profiles; it uses the string returned by
+// message_center::Notification::id() to uniquely identify a notification. It is
+// the caller's responsibility to formulate the id so that 2 different
+// notification should have different ids. For example, if the caller supports
+// multiple profiles, then caller should encode both profile characteristics and
+// notification front end's notification id into a new id and set it into the
+// notification instance before passing that in. Consequently the id passed to
+// observers will be this unique id, which can be used with MessageCenter
+// interface but probably not higher level interfaces.
 
 namespace message_center {
 
+namespace test {
+class MessagePopupCollectionTest;
+}
+
 class MessageCenterObserver;
-class NotificationList;
-class NotifierSettingsDelegate;
+class NotificationBlocker;
 class NotifierSettingsProvider;
 
 class MESSAGE_CENTER_EXPORT MessageCenter {
@@ -39,32 +46,12 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // Creates the global message center object.
   static void Initialize();
 
-  // Returns the global message center object. Initialize must be called first.
+  // Returns the global message center object. Returns NULL if Initialize is not
+  // called.
   static MessageCenter* Get();
 
   // Destroys the global message_center object.
   static void Shutdown();
-
-  class MESSAGE_CENTER_EXPORT Delegate {
-   public:
-    virtual ~Delegate();
-
-    // Request to disable the extension associated with |notification_id|.
-    virtual void DisableExtension(const std::string& notification_id) = 0;
-
-    // Request to disable notifications from the source of |notification_id|.
-    virtual void DisableNotificationsFromSource(
-        const std::string& notification_id) = 0;
-
-    // Request to show the notification settings (|notification_id| is used
-    // to identify the requesting browser context).
-    virtual void ShowSettings(const std::string& notification_id) = 0;
-  };
-
-  // Called to set the delegate.  Generally called only once, except in tests.
-  // Changing the delegate does not affect notifications in its
-  // NotificationList.
-  virtual void SetDelegate(Delegate* delegate) = 0;
 
   // Management of the observer list.
   virtual void AddObserver(MessageCenterObserver* observer) = 0;
@@ -74,14 +61,27 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   virtual size_t NotificationCount() const = 0;
   virtual size_t UnreadNotificationCount() const = 0;
   virtual bool HasPopupNotifications() const = 0;
-  virtual bool HasNotification(const std::string& id) = 0;
   virtual bool IsQuietMode() const = 0;
   virtual bool HasClickedListener(const std::string& id) = 0;
 
-  // Getters of the current notifications.
-  virtual const NotificationList::Notifications& GetNotifications() = 0;
-  // Gets all notifications being shown as popups.
+  // Find the notification with the corresponding id. Returns NULL if not found.
+  // The returned instance is owned by the message center.
+  virtual message_center::Notification* FindVisibleNotificationById(
+      const std::string& id) = 0;
+
+  // Gets all notifications to be shown to the user in the message center.  Note
+  // that queued changes due to the message center being open are not reflected
+  // in this list.
+  virtual const NotificationList::Notifications& GetVisibleNotifications() = 0;
+
+  // Gets all notifications being shown as popups.  This should not be affected
+  // by the change queue since notifications are not held up while the state is
+  // VISIBILITY_TRANSIENT or VISIBILITY_SETTINGS.
   virtual NotificationList::PopupNotifications GetPopupNotifications() = 0;
+
+  // Management of NotificationBlockers.
+  virtual void AddNotificationBlocker(NotificationBlocker* blocker) = 0;
+  virtual void RemoveNotificationBlocker(NotificationBlocker* blocker) = 0;
 
   // Basic operations of notification: add/remove/update.
 
@@ -96,6 +96,7 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // Removes an existing notification.
   virtual void RemoveNotification(const std::string& id, bool by_user) = 0;
   virtual void RemoveAllNotifications(bool by_user) = 0;
+  virtual void RemoveAllVisibleNotifications(bool by_user) = 0;
 
   // Sets the icon image. Icon appears at the top-left of the notification.
   virtual void SetNotificationIcon(const std::string& notification_id,
@@ -111,24 +112,11 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
                                          int button_index,
                                          const gfx::Image& image) = 0;
 
-  // Operations happening especially from GUIs: click, expand, disable,
-  // and settings.
+  // Operations happening especially from GUIs: click, disable, and settings.
   // Searches through the notifications and disables any that match the
   // extension id given.
-  virtual void DisableNotificationsByExtension(const std::string& id) = 0;
-
-  // Disables all notifications that match the given url by querying the
-  // delegate and also by matching display_source.
-  // TODO(dewittj): Is display_source matching necessary?
-  virtual void DisableNotificationsByUrl(const std::string& url) = 0;
-
-  // TODO(mukai): settings can be in another class?
-  // Shows the settings for a web notification (profile is identified by the
-  // given notification id).
-  virtual void ShowNotificationSettings(const std::string& id) = 0;
-
-  // Reformat a notification to show its entire text content.
-  virtual void ExpandNotification(const std::string& id) = 0;
+  virtual void DisableNotificationsByNotifier(
+      const NotifierId& notifier_id) = 0;
 
   // This should be called by UI classes when a notification is clicked to
   // trigger the notification's delegate callback and also update the message
@@ -151,7 +139,9 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // This should be called by UI classes when a notification is first displayed
   // to the user, in order to decrement the unread_count for the tray, and to
   // notify observers that the notification is visible.
-  virtual void DisplayedNotification(const std::string& id) = 0;
+  virtual void DisplayedNotification(
+      const std::string& id,
+      const DisplaySource source) = 0;
 
   // Setter/getter of notifier settings provider. This will be a weak reference.
   // This should be set at the initialization process. The getter may return
@@ -168,10 +158,10 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
 
   // Informs the notification list whether the message center is visible.
   // This affects whether or not a message has been "read".
-  virtual void SetMessageCenterVisible(bool visible) = 0;
+  virtual void SetVisibility(Visibility visible) = 0;
 
   // Allows querying the visibility of the center.
-  virtual bool IsMessageCenterVisible() = 0;
+  virtual bool IsMessageCenterVisible() const = 0;
 
   // UI classes should call this when there is cause to leave popups visible for
   // longer than the default (for example, when the mouse hovers over a popup).
@@ -182,7 +172,8 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   virtual void RestartPopupTimers() = 0;
 
  protected:
-  friend class ::TrayViewControllerTest;
+  friend class TrayViewControllerTest;
+  friend class test::MessagePopupCollectionTest;
   virtual void DisableTimersForTest() = 0;
 
   MessageCenter();

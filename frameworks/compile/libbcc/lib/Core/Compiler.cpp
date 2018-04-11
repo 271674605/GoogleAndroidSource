@@ -34,6 +34,8 @@
 #include "bcc/Support/Log.h"
 #include "bcc/Support/OutputFile.h"
 
+#include <string>
+
 using namespace bcc;
 
 const char *Compiler::GetErrorString(enum ErrorCode pErrCode) {
@@ -137,9 +139,6 @@ enum Compiler::ErrorCode Compiler::config(const CompilerConfig &pConfig) {
     llvm::RegisterRegAlloc::setDefault(llvm::createGreedyRegisterAllocator);
   }
 
-  // Relax all machine instructions.
-  mTarget->setMCRelaxAll(true);
-
   return kSuccess;
 }
 
@@ -148,19 +147,19 @@ Compiler::~Compiler() {
 }
 
 enum Compiler::ErrorCode Compiler::runLTO(Script &pScript) {
-  llvm::DataLayout *data_layout = NULL;
+  llvm::DataLayoutPass *data_layout_pass = NULL;
 
   // Pass manager for link-time optimization
   llvm::PassManager lto_passes;
 
   // Prepare DataLayout target data from Module
-  data_layout = new (std::nothrow) llvm::DataLayout(*mTarget->getDataLayout());
-  if (data_layout == NULL) {
+  data_layout_pass = new (std::nothrow) llvm::DataLayoutPass(*mTarget->getDataLayout());
+  if (data_layout_pass == NULL) {
     return kErrDataLayoutNoMemory;
   }
 
   // Add DataLayout to the pass manager.
-  lto_passes.add(data_layout);
+  lto_passes.add(data_layout_pass);
 
   // Invoke "beforeAddLTOPasses" before adding the first pass.
   if (!beforeAddLTOPasses(pScript, lto_passes)) {
@@ -195,20 +194,20 @@ enum Compiler::ErrorCode Compiler::runLTO(Script &pScript) {
 
 enum Compiler::ErrorCode Compiler::runCodeGen(Script &pScript,
                                               llvm::raw_ostream &pResult) {
-  llvm::DataLayout *data_layout;
+  llvm::DataLayoutPass *data_layout_pass;
   llvm::MCContext *mc_context = NULL;
 
   // Create pass manager for MC code generation.
   llvm::PassManager codegen_passes;
 
   // Prepare DataLayout target data from Module
-  data_layout = new (std::nothrow) llvm::DataLayout(*mTarget->getDataLayout());
-  if (data_layout == NULL) {
+  data_layout_pass = new (std::nothrow) llvm::DataLayoutPass(*mTarget->getDataLayout());
+  if (data_layout_pass == NULL) {
     return kErrDataLayoutNoMemory;
   }
 
   // Add DataLayout to the pass manager.
-  codegen_passes.add(data_layout);
+  codegen_passes.add(data_layout_pass);
 
   // Invokde "beforeAddCodeGenPasses" before adding the first pass.
   if (!beforeAddCodeGenPasses(pScript, codegen_passes)) {
@@ -253,15 +252,30 @@ enum Compiler::ErrorCode Compiler::compile(Script &pScript,
     return kErrNoTargetMachine;
   }
 
+  const std::string &triple = module.getTargetTriple();
+  const llvm::DataLayout *dl = getTargetMachine().getDataLayout();
+  unsigned int pointerSize = dl->getPointerSizeInBits();
+  if (triple == "armv7-none-linux-gnueabi") {
+    if (pointerSize != 32) {
+      return kErrInvalidSource;
+    }
+  } else if (triple == "aarch64-none-linux-gnueabi") {
+    if (pointerSize != 64) {
+      return kErrInvalidSource;
+    }
+  } else {
+    return kErrInvalidSource;
+  }
+
   // Materialize the bitcode module.
   if (module.getMaterializer() != NULL) {
-    std::string error;
     // A module with non-null materializer means that it is a lazy-load module.
     // Materialize it now via invoking MaterializeAllPermanently(). This
     // function returns false when the materialization is successful.
-    if (module.MaterializeAllPermanently(&error)) {
+    std::error_code ec = module.materializeAllPermanently();
+    if (ec) {
       ALOGE("Failed to materialize the module `%s'! (%s)",
-            module.getModuleIdentifier().c_str(), error.c_str());
+            module.getModuleIdentifier().c_str(), ec.message().c_str());
       return kErrMaterialization;
     }
   }

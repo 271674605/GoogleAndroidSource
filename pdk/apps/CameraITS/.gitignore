@@ -6,4 +6,6 @@
 *.jpeg
 *.png
 *.pyc
+its.target.cfg
+.DS_Store
 

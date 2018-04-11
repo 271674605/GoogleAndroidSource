@@ -20,13 +20,11 @@ LOCAL_MODULE_TAGS := optional
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
-
 LOCAL_SRC_FILES := $(call all-java-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsAccessibilityTestCases
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctsutil ctstestrunner
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil ctstestrunner
 
 # This test runner sets up/cleans up the device before/after running the tests.
 LOCAL_CTS_TEST_RUNNER := com.android.cts.tradefed.testtype.AccessibilityTestRunner

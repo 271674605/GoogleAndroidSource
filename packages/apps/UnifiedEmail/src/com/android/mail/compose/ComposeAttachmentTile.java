@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.widget.ImageButton;
 
 import com.android.mail.R;
+import com.android.mail.providers.Attachment;
 import com.android.mail.ui.AttachmentTile;
 
 public class ComposeAttachmentTile extends AttachmentTile implements AttachmentDeletionInterface {
@@ -18,12 +19,20 @@ public class ComposeAttachmentTile extends AttachmentTile implements AttachmentD
 
     public ComposeAttachmentTile(Context context, AttributeSet attrs) {
         super(context, attrs);
+
+        setAlwaysShowInfoText(true);
     }
 
     public static ComposeAttachmentTile inflate(LayoutInflater inflater, ViewGroup parent) {
         ComposeAttachmentTile view = (ComposeAttachmentTile) inflater.inflate(
                 R.layout.compose_attachment_tile, parent, false);
         return view;
+    }
+
+    @Override
+    public void render(Attachment attachment, AttachmentPreviewCache attachmentPreviewCache) {
+        // the super implementation is good enough. just broaden its access.
+        super.render(attachment, attachmentPreviewCache);
     }
 
     @Override

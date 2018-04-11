@@ -16,7 +16,6 @@
 
 package android.renderscript.cts;
 
-import com.android.cts.stub.R;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.Float3;
@@ -72,10 +71,10 @@ public class RsPackColorTo8888Test extends RSBaseCompute {
         float[] inArray = new float[INPUTSIZE * 4];
         byte[] outArray = new byte[INPUTSIZE * 4];
         byte[] refArray = new byte[INPUTSIZE * 4];
-        RSUtils.genRandom(seed, 1, 0, inArray, 4, 1);
+        RSUtils.genRandomFloats(seed, 0.0f, 1.0f, inArray, false);
         mAllocationIn.copy1DRangeFrom(0, INPUTSIZE, inArray);
         try {
-            RSUtils.forEach(this, testId, mAllocationIn, mAllocationOut);
+            forEach(testId, mAllocationIn, mAllocationOut);
         } catch (RSRuntimeException e) {
         }
         mAllocationOut.copyTo(outArray);
@@ -99,10 +98,10 @@ public class RsPackColorTo8888Test extends RSBaseCompute {
         float[] inArray = new float[INPUTSIZE * 4];
         byte[] outArray = new byte[INPUTSIZE * 4];
         byte[] refArray = new byte[INPUTSIZE * 4];
-        RSUtils.genRandom(seed, 1, 0, inArray);
+        RSUtils.genRandomFloats(seed, 0.0f, 1.0f, inArray, false);
         mAllocationIn.copy1DRangeFrom(0, INPUTSIZE, inArray);
         try {
-            RSUtils.forEach(this, testId, mAllocationIn, mAllocationOut);
+            forEach(testId, mAllocationIn, mAllocationOut);
         } catch (RSRuntimeException e) {
         }
         mAllocationOut.copyTo(outArray);

@@ -16,7 +16,7 @@
       'SQLITE_ENABLE_ICU',
       'SQLITE_ENABLE_MEMORY_MANAGEMENT',
       'SQLITE_SECURE_DELETE',
-      'SQLITE_SEPERATE_CACHE_POOLS',
+      'SQLITE_SEPARATE_CACHE_POOLS',
       'THREADSAFE',
       '_HAS_EXCEPTIONS=0',
     ],
@@ -127,6 +127,13 @@
                 ],
               },
             }],
+            ['OS == "mac" or OS == "ios"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
+                ],
+              },
+            }],
             ['OS == "android"', {
               'defines': [
                 'HAVE_USLEEP=1',
@@ -136,6 +143,7 @@
                 'SQLITE_ENABLE_FTS3_BACKWARDS',
                 'DSQLITE_DEFAULT_FILE_FORMAT=4',
               ],
+              'android_enable_fdo': 1,
             }],
             ['os_posix == 1 and OS != "mac" and OS != "android"', {
               'cflags': [
@@ -178,10 +186,9 @@
           'sources': [
             'src/src/shell.c',
             'src/src/shell_icu_linux.c',
+            # Include a dummy c++ file to force linking of libstdc++.
+            'build_as_cpp.cc',
           ],
-          'link_settings': {
-            'link_languages': ['c++'],
-          },
         },
       ],
     },],

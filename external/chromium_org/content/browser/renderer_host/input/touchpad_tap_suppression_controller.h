@@ -5,22 +5,31 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_INPUT_TOUCHPAD_TAP_SUPPRESSION_CONTROLLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_TOUCHPAD_TAP_SUPPRESSION_CONTROLLER_H_
 
-#include "base/memory/scoped_ptr.h"
+#include "content/browser/renderer_host/event_with_latency_info.h"
+#include "content/browser/renderer_host/input/tap_suppression_controller.h"
 #include "content/browser/renderer_host/input/tap_suppression_controller_client.h"
-#include "content/port/browser/event_with_latency_info.h"
+#include "content/common/content_export.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 
 namespace content {
 
-class InputRouter;
 class TapSuppressionController;
+
+class CONTENT_EXPORT TouchpadTapSuppressionControllerClient {
+ public:
+  virtual ~TouchpadTapSuppressionControllerClient() {}
+  virtual void SendMouseEventImmediately(
+      const MouseEventWithLatencyInfo& event) = 0;
+};
 
 // Controls the suppression of touchpad taps immediately following the dispatch
 // of a GestureFlingCancel event.
 class TouchpadTapSuppressionController : public TapSuppressionControllerClient {
  public:
-  // The |input_router| must outlive the TouchpadTapSupressionController.
-  explicit TouchpadTapSuppressionController(InputRouter* input_router);
+  // The |client| must outlive the TouchpadTapSupressionController.
+  TouchpadTapSuppressionController(
+      TouchpadTapSuppressionControllerClient* client,
+      const TapSuppressionController::Config& config);
   virtual ~TouchpadTapSuppressionController();
 
   // Should be called on arrival of GestureFlingCancel events.
@@ -43,17 +52,14 @@ class TouchpadTapSuppressionController : public TapSuppressionControllerClient {
   friend class MockRenderWidgetHost;
 
   // TapSuppressionControllerClient implementation.
-  virtual int MaxCancelToDownTimeInMs() OVERRIDE;
-  virtual int MaxTapGapTimeInMs() OVERRIDE;
   virtual void DropStashedTapDown() OVERRIDE;
-  virtual void ForwardStashedTapDownForDeferral() OVERRIDE;
-  virtual void ForwardStashedTapDownSkipDeferral() OVERRIDE;
+  virtual void ForwardStashedTapDown() OVERRIDE;
 
-  InputRouter* input_router_;
+  TouchpadTapSuppressionControllerClient* client_;
   MouseEventWithLatencyInfo stashed_mouse_down_;
 
   // The core controller of tap suppression.
-  scoped_ptr<TapSuppressionController> controller_;
+  TapSuppressionController controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchpadTapSuppressionController);
 };

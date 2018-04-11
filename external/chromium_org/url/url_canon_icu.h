@@ -7,12 +7,13 @@
 
 // ICU integration functions.
 
+#include "base/compiler_specific.h"
 #include "url/url_canon.h"
 #include "url/url_export.h"
 
 typedef struct UConverter UConverter;
 
-namespace url_canon {
+namespace url {
 
 // An implementation of CharsetConverter that implementations can use to
 // interface the canonicalizer with ICU's conversion routines.
@@ -27,13 +28,13 @@ class URL_EXPORT ICUCharsetConverter : public CharsetConverter {
 
   virtual void ConvertFromUTF16(const base::char16* input,
                                 int input_len,
-                                CanonOutput* output);
+                                CanonOutput* output) OVERRIDE;
 
  private:
   // The ICU converter, not owned by this class.
   UConverter* converter_;
 };
 
-}  // namespace url_canon
+}  // namespace url
 
 #endif  // URL_URL_CANON_ICU_H_

@@ -20,18 +20,44 @@ import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
 import android.util.Log;
 
+import com.android.launcher3.compat.UserHandleCompat;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * Represents a launchable icon on the workspaces and in folders.
  */
-class ShortcutInfo extends ItemInfo {
+public class ShortcutInfo extends ItemInfo {
+
+    public static final int DEFAULT = 0;
+
+    /**
+     * The shortcut was restored from a backup and it not ready to be used. This is automatically
+     * set during backup/restore
+     */
+    public static final int FLAG_RESTORED_ICON = 1;
+
+    /**
+     * The icon was added as an auto-install app, and is not ready to be used. This flag can't
+     * be present along with {@link #FLAG_RESTORED_ICON}, and is set during default layout
+     * parsing.
+     */
+    public static final int FLAG_AUTOINTALL_ICON = 2;
+
+    /**
+     * The icon is being installed. If {@link FLAG_RESTORED_ICON} or {@link FLAG_AUTOINTALL_ICON}
+     * is set, then the icon is either being installed or is in a broken state.
+     */
+    public static final int FLAG_INSTALL_SESSION_ACTIVE = 4;
+
+    /**
+     * Indicates that the widget restore has started.
+     */
+    public static final int FLAG_RESTORE_STARTED = 8;
 
     /**
      * The intent used to start the application.
@@ -61,17 +87,54 @@ class ShortcutInfo extends ItemInfo {
      */
     private Bitmap mIcon;
 
+    /**
+     * Could be disabled, if the the app is installed but unavailable (eg. in safe mode or when
+     * sd-card is not available).
+     */
+    boolean isDisabled = false;
+
+    int status;
+
+    /**
+     * The installation progress [0-100] of the package that this shortcut represents.
+     */
+    private int mInstallProgress;
+
+    /**
+     * Refer {@link AppInfo#firstInstallTime}.
+     */
     long firstInstallTime;
+
+    /**
+     * TODO move this to {@link status}
+     */
     int flags = 0;
+
+    /**
+     * If this shortcut is a placeholder, then intent will be a market intent for the package, and
+     * this will hold the original intent from the database.  Otherwise, null.
+     * Refer {@link #FLAG_RESTORE_PENDING}, {@link #FLAG_INSTALL_PENDING}
+     */
+    Intent promisedIntent;
 
     ShortcutInfo() {
         itemType = LauncherSettings.BaseLauncherColumns.ITEM_TYPE_SHORTCUT;
     }
 
-    protected Intent getIntent() {
+    public Intent getIntent() {
         return intent;
     }
-    
+
+    ShortcutInfo(Intent intent, CharSequence title, CharSequence contentDescription,
+            Bitmap icon, UserHandleCompat user) {
+        this();
+        this.intent = intent;
+        this.title = title;
+        this.contentDescription = contentDescription;
+        mIcon = icon;
+        this.user = user;
+    }
+
     public ShortcutInfo(Context context, ShortcutInfo info) {
         super(info);
         title = info.title.toString();
@@ -83,8 +146,10 @@ class ShortcutInfo extends ItemInfo {
         }
         mIcon = info.mIcon; // TODO: should make a copy here.  maybe we don't need this ctor at all
         customIcon = info.customIcon;
-        initFlagsAndFirstInstallTime(
-                getPackageInfo(context, intent.getComponent().getPackageName()));
+        flags = info.flags;
+        firstInstallTime = info.firstInstallTime;
+        user = info.user;
+        status = info.status;
     }
 
     /** TODO: Remove this.  It's only called by ApplicationInfo.makeShortcut. */
@@ -95,22 +160,6 @@ class ShortcutInfo extends ItemInfo {
         customIcon = false;
         flags = info.flags;
         firstInstallTime = info.firstInstallTime;
-    }
-
-    public static PackageInfo getPackageInfo(Context context, String packageName) {
-        PackageInfo pi = null;
-        try {
-            PackageManager pm = context.getPackageManager();
-            pi = pm.getPackageInfo(packageName, 0);
-        } catch (NameNotFoundException e) {
-            Log.d("ShortcutInfo", "PackageManager.getPackageInfo failed for " + packageName);
-        }
-        return pi;
-    }
-
-    void initFlagsAndFirstInstallTime(PackageInfo pi) {
-        flags = AppInfo.initFlags(pi);
-        firstInstallTime = AppInfo.initFirstInstallTime(pi);
     }
 
     public void setIcon(Bitmap b) {
@@ -125,35 +174,19 @@ class ShortcutInfo extends ItemInfo {
     }
 
     public void updateIcon(IconCache iconCache) {
-        mIcon = iconCache.getIcon(intent);
-        usingFallbackIcon = iconCache.isDefaultIcon(mIcon);
-    }
-
-    /**
-     * Creates the application intent based on a component name and various launch flags.
-     * Sets {@link #itemType} to {@link LauncherSettings.BaseLauncherColumns#ITEM_TYPE_APPLICATION}.
-     *
-     * @param className the class name of the component representing the intent
-     * @param launchFlags the launch flags
-     */
-    final void setActivity(Context context, ComponentName className, int launchFlags) {
-        intent = new Intent(Intent.ACTION_MAIN);
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
-        intent.setComponent(className);
-        intent.setFlags(launchFlags);
-        itemType = LauncherSettings.BaseLauncherColumns.ITEM_TYPE_APPLICATION;
-        initFlagsAndFirstInstallTime(
-                getPackageInfo(context, intent.getComponent().getPackageName()));
+        mIcon = iconCache.getIcon(promisedIntent != null ? promisedIntent : intent, user);
+        usingFallbackIcon = iconCache.isDefaultIcon(mIcon, user);
     }
 
     @Override
-    void onAddToDatabase(ContentValues values) {
-        super.onAddToDatabase(values);
+    void onAddToDatabase(Context context, ContentValues values) {
+        super.onAddToDatabase(context, values);
 
         String titleStr = title != null ? title.toString() : null;
         values.put(LauncherSettings.BaseLauncherColumns.TITLE, titleStr);
 
-        String uri = intent != null ? intent.toUri(0) : null;
+        String uri = promisedIntent != null ? promisedIntent.toUri(0)
+                : (intent != null ? intent.toUri(0) : null);
         values.put(LauncherSettings.BaseLauncherColumns.INTENT, uri);
 
         if (customIcon) {
@@ -177,10 +210,10 @@ class ShortcutInfo extends ItemInfo {
 
     @Override
     public String toString() {
-        return "ShortcutInfo(title=" + title.toString() + "intent=" + intent + "id=" + this.id
+        return "ShortcutInfo(title=" + title + "intent=" + intent + "id=" + this.id
                 + " type=" + this.itemType + " container=" + this.container + " screen=" + screenId
                 + " cellX=" + cellX + " cellY=" + cellY + " spanX=" + spanX + " spanY=" + spanY
-                + " dropPos=" + dropPos + ")";
+                + " dropPos=" + Arrays.toString(dropPos) + " user=" + user + ")";
     }
 
     public static void dumpShortcutInfoList(String tag, String label,
@@ -190,6 +223,28 @@ class ShortcutInfo extends ItemInfo {
             Log.d(tag, "   title=\"" + info.title + " icon=" + info.mIcon
                     + " customIcon=" + info.customIcon);
         }
+    }
+
+    public ComponentName getTargetComponent() {
+        return promisedIntent != null ? promisedIntent.getComponent() : intent.getComponent();
+    }
+
+    public boolean hasStatusFlag(int flag) {
+        return (status & flag) != 0;
+    }
+
+
+    public final boolean isPromise() {
+        return hasStatusFlag(FLAG_RESTORED_ICON | FLAG_AUTOINTALL_ICON);
+    }
+
+    public int getInstallProgress() {
+        return mInstallProgress;
+    }
+
+    public void setInstallProgress(int progress) {
+        mInstallProgress = progress;
+        status |= FLAG_INSTALL_SESSION_ACTIVE;
     }
 }
 

@@ -19,12 +19,16 @@ class ListValue;
 class Value;
 }
 
+struct BrowserInfo;
+class DebuggerTracker;
+struct DeviceMetrics;
 class DevToolsClient;
 class DomTracker;
 class FrameTracker;
 class GeolocationOverrideManager;
+class MobileEmulationOverrideManager;
+class HeapSnapshotTaker;
 struct KeyEvent;
-class Log;
 struct MouseEvent;
 class NavigationTracker;
 class Status;
@@ -32,13 +36,17 @@ class Status;
 class WebViewImpl : public WebView {
  public:
   WebViewImpl(const std::string& id,
-              int build_no,
+              const BrowserInfo* browser_info,
+              scoped_ptr<DevToolsClient> client);
+  WebViewImpl(const std::string& id,
+              const BrowserInfo* browser_info,
               scoped_ptr<DevToolsClient> client,
-              Log* log);
+              const DeviceMetrics* device_metrics);
   virtual ~WebViewImpl();
 
   // Overridden from WebView:
   virtual std::string GetId() OVERRIDE;
+  virtual bool WasCrashed() OVERRIDE;
   virtual Status ConnectIfNecessary() OVERRIDE;
   virtual Status HandleReceivedEvents() OVERRIDE;
   virtual Status Load(const std::string& url) OVERRIDE;
@@ -67,6 +75,7 @@ class WebViewImpl : public WebView {
                                     std::string* out_frame) OVERRIDE;
   virtual Status DispatchMouseEvents(
       const std::list<MouseEvent>& events, const std::string& frame) OVERRIDE;
+  virtual Status DispatchTouchEvent(const TouchEvent& event) OVERRIDE;
   virtual Status DispatchTouchEvents(
       const std::list<TouchEvent>& events) OVERRIDE;
   virtual Status DispatchKeyEvents(const std::list<KeyEvent>& events) OVERRIDE;
@@ -74,7 +83,8 @@ class WebViewImpl : public WebView {
   virtual Status DeleteCookie(const std::string& name,
                               const std::string& url) OVERRIDE;
   virtual Status WaitForPendingNavigations(const std::string& frame_id,
-                                           int timeout) OVERRIDE;
+                                           const base::TimeDelta& timeout,
+                                           bool stop_load_on_timeout) OVERRIDE;
   virtual Status IsPendingNavigation(
       const std::string& frame_id, bool* is_pending) OVERRIDE;
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager() OVERRIDE;
@@ -84,6 +94,9 @@ class WebViewImpl : public WebView {
       const std::string& frame,
       const base::DictionaryValue& element,
       const std::vector<base::FilePath>& files) OVERRIDE;
+  virtual Status TakeHeapSnapshot(scoped_ptr<base::Value>* snapshot) OVERRIDE;
+  virtual Status StartProfile() OVERRIDE;
+  virtual Status EndProfile(scoped_ptr<base::Value>* profile_data) OVERRIDE;
 
  private:
   Status CallAsyncFunctionInternal(const std::string& frame,
@@ -94,15 +107,21 @@ class WebViewImpl : public WebView {
                                    scoped_ptr<base::Value>* result);
   Status IsNotPendingNavigation(const std::string& frame_id,
                                 bool* is_not_pending);
+
+  Status InitProfileInternal();
+  Status StopProfileInternal();
+
   std::string id_;
-  int build_no_;
+  const BrowserInfo* browser_info_;
   scoped_ptr<DomTracker> dom_tracker_;
   scoped_ptr<FrameTracker> frame_tracker_;
   scoped_ptr<NavigationTracker> navigation_tracker_;
   scoped_ptr<JavaScriptDialogManager> dialog_manager_;
+  scoped_ptr<MobileEmulationOverrideManager> mobile_emulation_override_manager_;
   scoped_ptr<GeolocationOverrideManager> geolocation_override_manager_;
+  scoped_ptr<HeapSnapshotTaker> heap_snapshot_taker_;
+  scoped_ptr<DebuggerTracker> debugger_;
   scoped_ptr<DevToolsClient> client_;
-  Log* log_;
 };
 
 namespace internal {

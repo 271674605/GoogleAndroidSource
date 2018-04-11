@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import org.chromium.content.browser.ContentViewStatics;
+import org.chromium.net.DefaultAndroidKeyStore;
 
 /**
  * Java side of the Browser Context: contains all the java side objects needed to host one
@@ -15,8 +16,6 @@ import org.chromium.content.browser.ContentViewStatics;
  * Note that due to running in single process mode, and limitations on renderer process only
  * being able to use a single browser context, currently there can only be one AwBrowserContext
  * instance, so at this point the class mostly exists for conceptual clarity.
- *
- * Obtain the default (singleton) instance with  AwBrowserProcess.getDefaultBrowserContext().
  */
 public class AwBrowserContext {
 
@@ -28,6 +27,7 @@ public class AwBrowserContext {
     private AwCookieManager mCookieManager;
     private AwFormDatabase mFormDatabase;
     private HttpAuthDatabase mHttpAuthDatabase;
+    private DefaultAndroidKeyStore mLocalKeyStore;
 
     public AwBrowserContext(SharedPreferences sharedPreferences) {
         mSharedPreferences = sharedPreferences;
@@ -57,8 +57,15 @@ public class AwBrowserContext {
     public HttpAuthDatabase getHttpAuthDatabase(Context context) {
         if (mHttpAuthDatabase == null) {
             mHttpAuthDatabase = new HttpAuthDatabase(context, HTTP_AUTH_DATABASE_FILE);
-        };
+        }
         return mHttpAuthDatabase;
+    }
+
+    public DefaultAndroidKeyStore getKeyStore() {
+        if (mLocalKeyStore == null) {
+            mLocalKeyStore = new DefaultAndroidKeyStore();
+        }
+        return mLocalKeyStore;
     }
 
     /**

@@ -22,9 +22,13 @@ using namespace android;
 using namespace android::renderscript;
 
 ScriptIntrinsic::ScriptIntrinsic(Context *rsc) : Script(rsc) {
+    mIntrinsicID = 0;
 }
 
 ScriptIntrinsic::~ScriptIntrinsic() {
+    if (mIntrinsicID != 0) {
+        mRSC->mHal.funcs.script.destroy(mRSC, this);
+    }
 }
 
 bool ScriptIntrinsic::init(Context *rsc, RsScriptIntrinsicID iid, Element *e) {
@@ -61,6 +65,18 @@ void ScriptIntrinsic::runForEach(Context *rsc,
                          const RsScriptCall *sc) {
 
     rsc->mHal.funcs.script.invokeForEach(rsc, this, slot, ain, aout, usr, usrBytes, sc);
+}
+
+void ScriptIntrinsic::runForEach(Context* rsc,
+                         uint32_t slot,
+                         const Allocation** ains,
+                         size_t inLen,
+                         Allocation* aout,
+                         const void* usr,
+                         size_t usrBytes,
+                         const RsScriptCall* sc) {
+
+    rsc->mHal.funcs.script.invokeForEachMulti(rsc, this, slot, ains, inLen, aout, usr, usrBytes, sc);
 }
 
 void ScriptIntrinsic::Invoke(Context *rsc, uint32_t slot, const void *data, size_t len) {

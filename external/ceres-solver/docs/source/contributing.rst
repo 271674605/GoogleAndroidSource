@@ -1,9 +1,8 @@
 .. _chapter-contributing:
 
-=============
-Contributions
-=============
-
+============
+Contributing
+============
 
 We welcome contributions to Ceres, whether they are new features, bug
 fixes or tests. The Ceres `mailing
@@ -27,8 +26,8 @@ no merges.
 We now describe how to set up your development environment and submit
 a change list for review via Gerrit.
 
-Setting up your Development Environment
-=======================================
+Setting up your Environment
+===========================
 
 1. Download and configure ``git``.
 
@@ -98,12 +97,15 @@ Setting up your Development Environment
        name.
 
 
-Submitting a change to Ceres Solver
-===================================
+Submitting a change
+===================
 
 1. Make your changes against master or whatever branch you
    like. Commit your changes as one patch. When you commit, the Gerrit
    hook will add a `Change-Id:` line as the last line of the commit.
+
+   Make sure that your commit message is formatted in the `50/72 style
+   <http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html>`_.
 
 2. Push your changes to the Ceres Gerrit instance:
 
@@ -112,8 +114,8 @@ Submitting a change to Ceres Solver
       git push origin HEAD:refs/for/master
 
    When the push succeeds, the console will display a URL showing the
-   address of the review. Go to the URL and add reviewers; typically
-   this is Sameer or Keir at this point.
+   address of the review. Go to the URL and add atleast one of the
+   maintainers (Sameer Agarwal, Keir Mierle, or Alex Stewart) as reviewers.
 
 3. Wait for a review.
 

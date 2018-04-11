@@ -6,17 +6,14 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_MC_INPUT_BUILDER_H
-#define MCLD_MC_INPUT_BUILDER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_MC_INPUTBUILDER_H
+#define MCLD_MC_INPUTBUILDER_H
 
 #include <string>
 #include <stack>
 
 #include <mcld/InputTree.h>
-#include <mcld/MC/MCLDInput.h>
+#include <mcld/MC/Input.h>
 #include <mcld/Support/FileHandle.h>
 
 namespace mcld {
@@ -26,7 +23,6 @@ class InputFactory;
 class ContextFactory;
 class MemoryAreaFactory;
 class AttrConstraint;
-class raw_mem_ostream;
 
 /** \class InputBuilder
  *  \brief InputBuilder recieves InputActions and build the InputTree.

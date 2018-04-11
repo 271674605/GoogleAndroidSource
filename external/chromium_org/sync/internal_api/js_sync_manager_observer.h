@@ -35,15 +35,16 @@ class SYNC_EXPORT_PRIVATE JsSyncManagerObserver : public SyncManager::Observer {
   virtual void OnSyncCycleCompleted(
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
   virtual void OnConnectionStatusChange(ConnectionStatus status) OVERRIDE;
-  virtual void OnUpdatedToken(const std::string& token) OVERRIDE;
   virtual void OnInitializationComplete(
       const WeakHandle<JsBackend>& js_backend,
       const WeakHandle<DataTypeDebugInfoListener>& debug_info_listener,
       bool success,
       syncer::ModelTypeSet restored_types) OVERRIDE;
-  virtual void OnStopSyncingPermanently() OVERRIDE;
   virtual void OnActionableError(
       const SyncProtocolError& sync_protocol_error) OVERRIDE;
+  virtual void OnProtocolEvent(const ProtocolEvent& event) OVERRIDE;
+  virtual void OnMigrationRequested(
+      syncer::ModelTypeSet types) OVERRIDE;
 
  private:
   void HandleJsEvent(const tracked_objects::Location& from_here,

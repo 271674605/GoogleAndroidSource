@@ -62,10 +62,8 @@ public class FolderPickerDialog implements OnClickListener, OnMultiChoiceClickLi
                 uri, UIProvider.FOLDERS_PROJECTION, null, null, null);
         try {
             mAdapter = new SeparatedFolderListAdapter();
-            String[] headers = context.getResources()
-                    .getStringArray(R.array.moveto_folder_sections);
             mAdapter.addSection(new FolderPickerSelectorAdapter(context, foldersCursor,
-                    new HashSet<String>(), R.layout.radiobutton_single_folders_view, headers[2]));
+                    new HashSet<String>(), R.layout.multi_folders_view));
             builder.setAdapter(mAdapter, this);
         } finally {
             foldersCursor.close();
@@ -100,7 +98,7 @@ public class FolderPickerDialog implements OnClickListener, OnMultiChoiceClickLi
      */
     public void update(FolderSelectorAdapter.FolderRow row) {
         // Update the UI
-        final boolean add = !row.isPresent();
+        final boolean add = !row.isSelected();
         if (!add) {
             // This would remove the check on a single radio button, so just
             // return.
@@ -111,11 +109,11 @@ public class FolderPickerDialog implements OnClickListener, OnMultiChoiceClickLi
         for (int i = 0; i < mAdapter.getCount(); i++) {
             Object item = mAdapter.getItem(i);
             if (item instanceof FolderRow) {
-                ((FolderRow)item).setIsPresent(false);
+                ((FolderRow)item).setIsSelected(false);
             }
         }
         mCheckedState.clear();
-        row.setIsPresent(add);
+        row.setIsSelected(add);
         mAdapter.notifyDataSetChanged();
         mCheckedState.put(row.getFolder(), add);
 

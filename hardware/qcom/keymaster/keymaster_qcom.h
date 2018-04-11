@@ -23,6 +23,12 @@
 
 __BEGIN_DECLS
 
+#ifdef _ION_HEAP_MASK_COMPATIBILITY_WA
+#define ION_HEAP_MASK heap_mask
+#else
+#define ION_HEAP_MASK heap_id_mask
+#endif
+
 /**
  * The id of this module
  */
@@ -38,7 +44,7 @@ __BEGIN_DECLS
  * module to recognize which API level of the client it is dealing with in
  * the case of pre-compiled binary clients.
  */
-#define QCOM_KEYMASTER_API_VERSION 2
+#define QCOM_KEYMASTER_API_VERSION KEYMASTER_MODULE_API_VERSION_0_3
 
 #define KM_MAGIC_NUM     (0x4B4D4B42)    /* "KMKB" Key Master Key Blob in hex */
 #define KM_KEY_SIZE_MAX  (512)           /* 4096 bits */

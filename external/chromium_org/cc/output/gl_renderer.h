@@ -7,6 +7,7 @@
 
 #include "base/cancelable_callback.h"
 #include "cc/base/cc_export.h"
+#include "cc/base/scoped_ptr_deque.h"
 #include "cc/base/scoped_ptr_vector.h"
 #include "cc/output/direct_renderer.h"
 #include "cc/output/gl_renderer_draw_cache.h"
@@ -23,7 +24,11 @@
 
 class SkBitmap;
 
-namespace WebKit { class WebGraphicsContext3D; }
+namespace gpu {
+namespace gles2 {
+class GLES2Interface;
+}
+}
 
 namespace cc {
 
@@ -33,72 +38,62 @@ class PictureDrawQuad;
 class ScopedResource;
 class StreamVideoDrawQuad;
 class TextureDrawQuad;
+class TextureMailboxDeleter;
 class GeometryBinding;
 class ScopedEnsureFramebufferAllocation;
 
 // Class that handles drawing of composited render layers using GL.
 class CC_EXPORT GLRenderer : public DirectRenderer {
  public:
-  static scoped_ptr<GLRenderer> Create(RendererClient* client,
-                                       OutputSurface* output_surface,
-                                       ResourceProvider* resource_provider,
-                                       int highp_threshold_min,
-                                       bool use_skia_gpu_backend);
+  class ScopedUseGrContext;
+
+  static scoped_ptr<GLRenderer> Create(
+      RendererClient* client,
+      const LayerTreeSettings* settings,
+      OutputSurface* output_surface,
+      ResourceProvider* resource_provider,
+      TextureMailboxDeleter* texture_mailbox_deleter,
+      int highp_threshold_min);
 
   virtual ~GLRenderer();
 
-  virtual const RendererCapabilities& Capabilities() const OVERRIDE;
-
-  WebKit::WebGraphicsContext3D* Context();
-
-  virtual void ViewportChanged() OVERRIDE;
+  virtual const RendererCapabilitiesImpl& Capabilities() const OVERRIDE;
 
   // Waits for rendering to finish.
   virtual void Finish() OVERRIDE;
 
   virtual void DoNoOp() OVERRIDE;
-  virtual void SwapBuffers() OVERRIDE;
-
-  virtual void GetFramebufferPixels(void* pixels, gfx::Rect rect) OVERRIDE;
+  virtual void SwapBuffers(const CompositorFrameMetadata& metadata) OVERRIDE;
 
   virtual bool IsContextLost() OVERRIDE;
 
-  virtual void SetVisible(bool visible) OVERRIDE;
-
-  virtual void SendManagedMemoryStats(size_t bytes_visible,
-                                      size_t bytes_visible_and_nearby,
-                                      size_t bytes_allocated) OVERRIDE;
-
-  virtual void SetDiscardBackBufferWhenNotVisible(bool discard) OVERRIDE;
-
-  static void DebugGLCall(WebKit::WebGraphicsContext3D* context,
+  static void DebugGLCall(gpu::gles2::GLES2Interface* gl,
                           const char* command,
                           const char* file,
                           int line);
 
-  bool CanUseSkiaGPUBackend() const;
-  void LazyLabelOffscreenContext();
-
  protected:
   GLRenderer(RendererClient* client,
+             const LayerTreeSettings* settings,
              OutputSurface* output_surface,
              ResourceProvider* resource_provider,
+             TextureMailboxDeleter* texture_mailbox_deleter,
              int highp_threshold_min);
 
+  virtual void DidChangeVisibility() OVERRIDE;
+
   bool IsBackbufferDiscarded() const { return is_backbuffer_discarded_; }
-  bool Initialize();
-  void InitializeGrContext();
 
   const gfx::QuadF& SharedGeometryQuad() const { return shared_geometry_quad_; }
   const GeometryBinding* SharedGeometry() const {
     return shared_geometry_.get();
   }
 
-  void GetFramebufferPixelsAsync(gfx::Rect rect,
+  void GetFramebufferPixelsAsync(const gfx::Rect& rect,
                                  scoped_ptr<CopyOutputRequest> request);
   void GetFramebufferTexture(unsigned texture_id,
-                             unsigned texture_format,
-                             gfx::Rect device_rect);
+                             ResourceFormat texture_format,
+                             const gfx::Rect& device_rect);
   void ReleaseRenderPassTextures();
 
   void SetStencilEnabled(bool enabled);
@@ -109,10 +104,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   virtual void BindFramebufferToOutputSurface(DrawingFrame* frame) OVERRIDE;
   virtual bool BindFramebufferToTexture(DrawingFrame* frame,
                                         const ScopedResource* resource,
-                                        gfx::Rect target_rect) OVERRIDE;
-  virtual void SetDrawViewport(gfx::Rect window_space_viewport) OVERRIDE;
-  virtual void SetScissorTestRect(gfx::Rect scissor_rect) OVERRIDE;
-  virtual void ClearFramebuffer(DrawingFrame* frame) OVERRIDE;
+                                        const gfx::Rect& target_rect) OVERRIDE;
+  virtual void SetDrawViewport(const gfx::Rect& window_space_viewport) OVERRIDE;
+  virtual void SetScissorTestRect(const gfx::Rect& scissor_rect) OVERRIDE;
+  virtual void DiscardPixels(bool has_external_stencil_test,
+                             bool draw_rect_covers_full_surface) OVERRIDE;
+  virtual void ClearFramebuffer(DrawingFrame* frame,
+                                bool has_external_stencil_test) OVERRIDE;
   virtual void DoDrawQuad(DrawingFrame* frame, const class DrawQuad*) OVERRIDE;
   virtual void BeginDrawingFrame(DrawingFrame* frame) OVERRIDE;
   virtual void FinishDrawingFrame(DrawingFrame* frame) OVERRIDE;
@@ -124,6 +122,17 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       scoped_ptr<CopyOutputRequest> request) OVERRIDE;
   virtual void FinishDrawingQuadList() OVERRIDE;
 
+  // Check if quad needs antialiasing and if so, inflate the quad and
+  // fill edge array for fragment shader.  local_quad is set to
+  // inflated quad if antialiasing is required, otherwise it is left
+  // unchanged.  edge array is filled with inflated quad's edge data
+  // if antialiasing is required, otherwise it is left unchanged.
+  // Returns true if quad requires antialiasing and false otherwise.
+  static bool SetupQuadForAntialiasing(const gfx::Transform& device_transform,
+                                       const DrawQuad* quad,
+                                       gfx::QuadF* local_quad,
+                                       float edge[24]);
+
  private:
   friend class GLRendererShaderPixelTest;
   friend class GLRendererShaderTest;
@@ -134,11 +143,12 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                             const CheckerboardDrawQuad* quad);
   void DrawDebugBorderQuad(const DrawingFrame* frame,
                            const DebugBorderDrawQuad* quad);
-  scoped_ptr<ScopedResource> DrawBackgroundFilters(
+  scoped_ptr<ScopedResource> GetBackgroundWithFilters(
       DrawingFrame* frame,
       const RenderPassDrawQuad* quad,
       const gfx::Transform& contents_device_transform,
-      const gfx::Transform& contents_device_transformInverse);
+      const gfx::Transform& contents_device_transformInverse,
+      bool* background_changed);
   void DrawRenderPassQuad(DrawingFrame* frame, const RenderPassDrawQuad* quad);
   void DrawSolidColorQuad(const DrawingFrame* frame,
                           const SolidColorDrawQuad* quad);
@@ -157,8 +167,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                         const YUVVideoDrawQuad* quad);
   void DrawPictureQuad(const DrawingFrame* frame,
                        const PictureDrawQuad* quad);
-  void DrawPictureQuadDirectToBackbuffer(const DrawingFrame* frame,
-                                         const PictureDrawQuad* quad);
 
   void SetShaderOpacity(float opacity, int alpha_location);
   void SetShaderQuadF(const gfx::QuadF& quad, int quad_location);
@@ -170,66 +178,42 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   void CopyTextureToFramebuffer(const DrawingFrame* frame,
                                 int texture_id,
-                                gfx::Rect rect,
+                                const gfx::Rect& rect,
                                 const gfx::Transform& draw_matrix,
                                 bool flip_vertically);
 
-  // Check if quad needs antialiasing and if so, inflate the quad and
-  // fill edge array for fragment shader.  local_quad is set to
-  // inflated quad if antialiasing is required, otherwise it is left
-  // unchanged.  edge array is filled with inflated quad's edge data
-  // if antialiasing is required, otherwise it is left unchanged.
-  // Returns true if quad requires antialiasing and false otherwise.
-  bool SetupQuadForAntialiasing(const gfx::Transform& device_transform,
-                                const DrawQuad* quad,
-                                gfx::QuadF* local_quad,
-                                float edge[24]) const;
-
   bool UseScopedTexture(DrawingFrame* frame,
                         const ScopedResource* resource,
-                        gfx::Rect viewport_rect);
+                        const gfx::Rect& viewport_rect);
 
   bool MakeContextCurrent();
 
-  bool InitializeSharedObjects();
+  void InitializeSharedObjects();
   void CleanupSharedObjects();
 
   typedef base::Callback<void(scoped_ptr<CopyOutputRequest> copy_request,
                               bool success)>
       AsyncGetFramebufferPixelsCleanupCallback;
-  void DoGetFramebufferPixels(
-      uint8* pixels,
-      gfx::Rect window_rect,
-      const AsyncGetFramebufferPixelsCleanupCallback& cleanup_callback);
-  void FinishedReadback(
-      const AsyncGetFramebufferPixelsCleanupCallback& cleanup_callback,
-      unsigned source_buffer,
-      unsigned query,
-      uint8_t* dest_pixels,
-      gfx::Size size);
-  void PassOnSkBitmap(scoped_ptr<SkBitmap> bitmap,
-                      scoped_ptr<SkAutoLockPixels> lock,
-                      scoped_ptr<CopyOutputRequest> request,
-                      bool success);
+  void FinishedReadback(unsigned source_buffer,
+                        unsigned query,
+                        const gfx::Size& size);
 
-  static void DeleteTextureReleaseCallback(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      base::WeakPtr<GLRenderer> gl_renderer,
-      unsigned texture_id,
-      unsigned sync_point,
-      bool lost_resource);
-  void DeleteTextureReleaseCallbackOnImplThread(unsigned texture_id,
-                                                unsigned sync_point,
-                                                bool lost_resource);
-
-  void ReinitializeGrCanvas();
   void ReinitializeGLState();
+  void RestoreGLState();
+  void RestoreFramebuffer(DrawingFrame* frame);
 
   virtual void DiscardBackbuffer() OVERRIDE;
   virtual void EnsureBackbuffer() OVERRIDE;
   void EnforceMemoryPolicy();
 
-  RendererCapabilities capabilities_;
+  void ScheduleOverlays(DrawingFrame* frame);
+
+  typedef ScopedPtrVector<ResourceProvider::ScopedReadLockGL>
+      OverlayResourceLockList;
+  OverlayResourceLockList pending_overlay_resources_;
+  OverlayResourceLockList in_use_overlay_resources_;
+
+  RendererCapabilitiesImpl capabilities_;
 
   unsigned offscreen_framebuffer_id_;
 
@@ -268,9 +252,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   typedef ProgramBinding<VertexShaderPosTexTransform,
                          FragmentShaderTexBackgroundPremultiplyAlpha>
       NonPremultipliedTextureBackgroundProgram;
-  typedef ProgramBinding<VertexShaderPosTexTransform,
-                         FragmentShaderRGBATexRectVaryingAlpha>
-      TextureIOSurfaceProgram;
 
   // Render surface shaders.
   typedef ProgramBinding<VertexShaderPosTexTransform,
@@ -296,13 +277,12 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       RenderPassMaskColorMatrixProgram;
 
   // Video shaders.
-  typedef ProgramBinding<VertexShaderVideoTransform,
-                         FragmentShaderOESImageExternal>
+  typedef ProgramBinding<VertexShaderVideoTransform, FragmentShaderRGBATex>
       VideoStreamTextureProgram;
-  typedef ProgramBinding<VertexShaderPosTexYUVStretch, FragmentShaderYUVVideo>
-      VideoYUVProgram;
-  typedef ProgramBinding<VertexShaderPosTexYUVStretch, FragmentShaderYUVAVideo>
-      VideoYUVAProgram;
+  typedef ProgramBinding<VertexShaderPosTexYUVStretchOffset,
+                         FragmentShaderYUVVideo> VideoYUVProgram;
+  typedef ProgramBinding<VertexShaderPosTexYUVStretchOffset,
+                         FragmentShaderYUVAVideo> VideoYUVAProgram;
 
   // Special purpose / effects shaders.
   typedef ProgramBinding<VertexShaderPos, FragmentShaderColor>
@@ -312,14 +292,19 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   typedef ProgramBinding<VertexShaderQuadAA, FragmentShaderColorAA>
       SolidColorProgramAA;
 
-  const TileProgram* GetTileProgram(TexCoordPrecision precision);
-  const TileProgramOpaque* GetTileProgramOpaque(TexCoordPrecision precision);
-  const TileProgramAA* GetTileProgramAA(TexCoordPrecision precision);
-  const TileProgramSwizzle* GetTileProgramSwizzle(TexCoordPrecision precision);
+  const TileProgram* GetTileProgram(
+      TexCoordPrecision precision, SamplerType sampler);
+  const TileProgramOpaque* GetTileProgramOpaque(
+      TexCoordPrecision precision, SamplerType sampler);
+  const TileProgramAA* GetTileProgramAA(
+      TexCoordPrecision precision, SamplerType sampler);
+  const TileProgramSwizzle* GetTileProgramSwizzle(
+      TexCoordPrecision precision, SamplerType sampler);
   const TileProgramSwizzleOpaque* GetTileProgramSwizzleOpaque(
-      TexCoordPrecision precision);
+      TexCoordPrecision precision, SamplerType sampler);
   const TileProgramSwizzleAA* GetTileProgramSwizzleAA(
-      TexCoordPrecision precision);
+      TexCoordPrecision precision, SamplerType sampler);
+
   const TileCheckerboardProgram* GetTileCheckerboardProgram();
 
   const RenderPassProgram* GetRenderPassProgram(
@@ -347,7 +332,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       TexCoordPrecision precision);
   const NonPremultipliedTextureBackgroundProgram*
       GetNonPremultipliedTextureBackgroundProgram(TexCoordPrecision precision);
-  const TextureIOSurfaceProgram* GetTextureIOSurfaceProgram(
+  const TextureProgram* GetTextureIOSurfaceProgram(
       TexCoordPrecision precision);
 
   const VideoYUVProgram* GetVideoYUVProgram(
@@ -361,105 +346,84 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   const SolidColorProgram* GetSolidColorProgram();
   const SolidColorProgramAA* GetSolidColorProgramAA();
 
-  scoped_ptr<TileProgram> tile_program_;
-  scoped_ptr<TileProgramOpaque> tile_program_opaque_;
-  scoped_ptr<TileProgramAA> tile_program_aa_;
-  scoped_ptr<TileProgramSwizzle> tile_program_swizzle_;
-  scoped_ptr<TileProgramSwizzleOpaque> tile_program_swizzle_opaque_;
-  scoped_ptr<TileProgramSwizzleAA> tile_program_swizzle_aa_;
-  scoped_ptr<TileCheckerboardProgram> tile_checkerboard_program_;
+  TileProgram tile_program_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgramOpaque
+      tile_program_opaque_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgramAA tile_program_aa_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgramSwizzle
+      tile_program_swizzle_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgramSwizzleOpaque
+      tile_program_swizzle_opaque_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgramSwizzleAA
+      tile_program_swizzle_aa_[NumTexCoordPrecisions][NumSamplerTypes];
 
-  scoped_ptr<TileProgram> tile_program_highp_;
-  scoped_ptr<TileProgramOpaque> tile_program_opaque_highp_;
-  scoped_ptr<TileProgramAA> tile_program_aa_highp_;
-  scoped_ptr<TileProgramSwizzle> tile_program_swizzle_highp_;
-  scoped_ptr<TileProgramSwizzleOpaque> tile_program_swizzle_opaque_highp_;
-  scoped_ptr<TileProgramSwizzleAA> tile_program_swizzle_aa_highp_;
+  TileCheckerboardProgram tile_checkerboard_program_;
 
-  scoped_ptr<TextureProgram> texture_program_;
-  scoped_ptr<NonPremultipliedTextureProgram> nonpremultiplied_texture_program_;
-  scoped_ptr<TextureBackgroundProgram> texture_background_program_;
-  scoped_ptr<NonPremultipliedTextureBackgroundProgram>
-      nonpremultiplied_texture_background_program_;
-  scoped_ptr<TextureIOSurfaceProgram> texture_io_surface_program_;
+  TextureProgram texture_program_[NumTexCoordPrecisions];
+  NonPremultipliedTextureProgram
+      nonpremultiplied_texture_program_[NumTexCoordPrecisions];
+  TextureBackgroundProgram texture_background_program_[NumTexCoordPrecisions];
+  NonPremultipliedTextureBackgroundProgram
+      nonpremultiplied_texture_background_program_[NumTexCoordPrecisions];
+  TextureProgram texture_io_surface_program_[NumTexCoordPrecisions];
 
-  scoped_ptr<TextureProgram> texture_program_highp_;
-  scoped_ptr<NonPremultipliedTextureProgram>
-      nonpremultiplied_texture_program_highp_;
-  scoped_ptr<TextureBackgroundProgram> texture_background_program_highp_;
-  scoped_ptr<NonPremultipliedTextureBackgroundProgram>
-      nonpremultiplied_texture_background_program_highp_;
-  scoped_ptr<TextureIOSurfaceProgram> texture_io_surface_program_highp_;
+  RenderPassProgram render_pass_program_[NumTexCoordPrecisions];
+  RenderPassProgramAA render_pass_program_aa_[NumTexCoordPrecisions];
+  RenderPassMaskProgram render_pass_mask_program_[NumTexCoordPrecisions];
+  RenderPassMaskProgramAA render_pass_mask_program_aa_[NumTexCoordPrecisions];
+  RenderPassColorMatrixProgram
+      render_pass_color_matrix_program_[NumTexCoordPrecisions];
+  RenderPassColorMatrixProgramAA
+      render_pass_color_matrix_program_aa_[NumTexCoordPrecisions];
+  RenderPassMaskColorMatrixProgram
+      render_pass_mask_color_matrix_program_[NumTexCoordPrecisions];
+  RenderPassMaskColorMatrixProgramAA
+      render_pass_mask_color_matrix_program_aa_[NumTexCoordPrecisions];
 
-  scoped_ptr<RenderPassProgram> render_pass_program_;
-  scoped_ptr<RenderPassProgramAA> render_pass_program_aa_;
-  scoped_ptr<RenderPassMaskProgram> render_pass_mask_program_;
-  scoped_ptr<RenderPassMaskProgramAA> render_pass_mask_program_aa_;
-  scoped_ptr<RenderPassColorMatrixProgram> render_pass_color_matrix_program_;
-  scoped_ptr<RenderPassColorMatrixProgramAA>
-      render_pass_color_matrix_program_aa_;
-  scoped_ptr<RenderPassMaskColorMatrixProgram>
-      render_pass_mask_color_matrix_program_;
-  scoped_ptr<RenderPassMaskColorMatrixProgramAA>
-      render_pass_mask_color_matrix_program_aa_;
+  VideoYUVProgram video_yuv_program_[NumTexCoordPrecisions];
+  VideoYUVAProgram video_yuva_program_[NumTexCoordPrecisions];
+  VideoStreamTextureProgram
+      video_stream_texture_program_[NumTexCoordPrecisions];
 
-  scoped_ptr<RenderPassProgram> render_pass_program_highp_;
-  scoped_ptr<RenderPassProgramAA> render_pass_program_aa_highp_;
-  scoped_ptr<RenderPassMaskProgram> render_pass_mask_program_highp_;
-  scoped_ptr<RenderPassMaskProgramAA> render_pass_mask_program_aa_highp_;
-  scoped_ptr<RenderPassColorMatrixProgram>
-      render_pass_color_matrix_program_highp_;
-  scoped_ptr<RenderPassColorMatrixProgramAA>
-      render_pass_color_matrix_program_aa_highp_;
-  scoped_ptr<RenderPassMaskColorMatrixProgram>
-      render_pass_mask_color_matrix_program_highp_;
-  scoped_ptr<RenderPassMaskColorMatrixProgramAA>
-      render_pass_mask_color_matrix_program_aa_highp_;
+  DebugBorderProgram debug_border_program_;
+  SolidColorProgram solid_color_program_;
+  SolidColorProgramAA solid_color_program_aa_;
 
-  scoped_ptr<VideoYUVProgram> video_yuv_program_;
-  scoped_ptr<VideoYUVAProgram> video_yuva_program_;
-  scoped_ptr<VideoStreamTextureProgram> video_stream_texture_program_;
-
-  scoped_ptr<VideoYUVProgram> video_yuv_program_highp_;
-  scoped_ptr<VideoYUVAProgram> video_yuva_program_highp_;
-  scoped_ptr<VideoStreamTextureProgram> video_stream_texture_program_highp_;
-
-  scoped_ptr<DebugBorderProgram> debug_border_program_;
-  scoped_ptr<SolidColorProgram> solid_color_program_;
-  scoped_ptr<SolidColorProgramAA> solid_color_program_aa_;
-
-  WebKit::WebGraphicsContext3D* context_;
+  gpu::gles2::GLES2Interface* gl_;
+  gpu::ContextSupport* context_support_;
 
   skia::RefPtr<GrContext> gr_context_;
   skia::RefPtr<SkCanvas> sk_canvas_;
+
+  TextureMailboxDeleter* texture_mailbox_deleter_;
 
   gfx::Rect swap_buffer_rect_;
   gfx::Rect scissor_rect_;
   gfx::Rect viewport_;
   bool is_backbuffer_discarded_;
-  bool discard_backbuffer_when_not_visible_;
   bool is_using_bind_uniform_;
-  bool visible_;
   bool is_scissor_enabled_;
+  bool scissor_rect_needs_reset_;
   bool stencil_shadow_;
   bool blend_shadow_;
   unsigned program_shadow_;
   TexturedQuadDrawCache draw_cache_;
   int highp_threshold_min_;
   int highp_threshold_cache_;
-  bool offscreen_context_labelled_;
 
   struct PendingAsyncReadPixels;
   ScopedPtrVector<PendingAsyncReadPixels> pending_async_read_pixels_;
 
   scoped_ptr<ResourceProvider::ScopedWriteLockGL> current_framebuffer_lock_;
 
-  scoped_refptr<ResourceProvider::Fence> last_swap_fence_;
+  class SyncQuery;
+  ScopedPtrDeque<SyncQuery> pending_sync_queries_;
+  ScopedPtrDeque<SyncQuery> available_sync_queries_;
+  scoped_ptr<SyncQuery> current_sync_query_;
+  bool use_sync_query_;
 
   SkBitmap on_demand_tile_raster_bitmap_;
   ResourceProvider::ResourceId on_demand_tile_raster_resource_id_;
-
-  base::WeakPtrFactory<GLRenderer> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };

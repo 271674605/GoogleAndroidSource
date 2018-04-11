@@ -8,7 +8,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "cc/base/ref_counted_managed.h"
 #include "cc/resources/managed_tile_state.h"
+#include "cc/resources/picture_pile_impl.h"
 #include "cc/resources/raster_mode.h"
 #include "cc/resources/tile_priority.h"
 #include "ui/gfx/rect.h"
@@ -16,21 +18,11 @@
 
 namespace cc {
 
-class PicturePileImpl;
-
-class CC_EXPORT Tile : public base::RefCounted<Tile> {
+class CC_EXPORT Tile : public RefCountedManaged<Tile> {
  public:
-  typedef uint64 Id;
+  enum TileRasterFlags { USE_PICTURE_ANALYSIS = 1 << 0 };
 
-  Tile(TileManager* tile_manager,
-       PicturePileImpl* picture_pile,
-       gfx::Size tile_size,
-       gfx::Rect content_rect,
-       gfx::Rect opaque_rect,
-       float contents_scale,
-       int layer_id,
-       int source_frame_number,
-       bool can_use_lcd_text);
+  typedef uint64 Id;
 
   Id id() const {
     return id_;
@@ -48,34 +40,51 @@ class CC_EXPORT Tile : public base::RefCounted<Tile> {
     return priority_[tree];
   }
 
+  TilePriority priority_for_tree_priority(TreePriority tree_priority) const {
+    switch (tree_priority) {
+      case SMOOTHNESS_TAKES_PRIORITY:
+        return priority_[ACTIVE_TREE];
+      case NEW_CONTENT_TAKES_PRIORITY:
+        return priority_[PENDING_TREE];
+      case SAME_PRIORITY_FOR_BOTH_TREES:
+        return combined_priority();
+    }
+    NOTREACHED();
+    return TilePriority();
+  }
+
   TilePriority combined_priority() const {
     return TilePriority(priority_[ACTIVE_TREE],
                         priority_[PENDING_TREE]);
   }
 
-  void SetPriority(WhichTree tree, const TilePriority& priority) {
-    priority_[tree] = priority;
-  }
+  void SetPriority(WhichTree tree, const TilePriority& priority);
 
-  void mark_required_for_activation() {
-    priority_[PENDING_TREE].required_for_activation = true;
-  }
+  void MarkRequiredForActivation();
 
   bool required_for_activation() const {
     return priority_[PENDING_TREE].required_for_activation;
   }
 
-  void set_can_use_lcd_text(bool can_use_lcd_text) {
-    can_use_lcd_text_ = can_use_lcd_text;
+  bool use_picture_analysis() const {
+    return !!(flags_ & USE_PICTURE_ANALYSIS);
   }
 
-  bool can_use_lcd_text() const {
-    return can_use_lcd_text_;
+  bool NeedsRasterForMode(RasterMode mode) const {
+    return !managed_state_.tile_versions[mode].IsReadyToDraw();
+  }
+
+  bool HasResources() const {
+    for (int mode = 0; mode < NUM_RASTER_MODES; ++mode) {
+      if (managed_state_.tile_versions[mode].has_resource())
+        return true;
+    }
+    return false;
   }
 
   scoped_ptr<base::Value> AsValue() const;
 
-  bool IsReadyToDraw() const {
+  inline bool IsReadyToDraw() const {
     for (int mode = 0; mode < NUM_RASTER_MODES; ++mode) {
       if (managed_state_.tile_versions[mode].IsReadyToDraw())
         return true;
@@ -92,10 +101,6 @@ class CC_EXPORT Tile : public base::RefCounted<Tile> {
   }
 
   gfx::Rect opaque_rect() const { return opaque_rect_; }
-  bool has_text(RasterMode mode) const {
-    return managed_state_.tile_versions[mode].has_text_;
-  }
-
   float contents_scale() const { return contents_scale_; }
   gfx::Rect content_rect() const { return content_rect_; }
 
@@ -110,6 +115,12 @@ class CC_EXPORT Tile : public base::RefCounted<Tile> {
 
   size_t GPUMemoryUsageInBytes() const;
 
+  gfx::Size size() const { return tile_size_.size(); }
+
+  RasterMode DetermineRasterModeForTree(WhichTree tree) const;
+  RasterMode DetermineOverallRasterMode() const;
+
+  // Functionality used in tests.
   RasterMode GetRasterModeForTesting() const {
     return managed_state().raster_mode;
   }
@@ -118,21 +129,27 @@ class CC_EXPORT Tile : public base::RefCounted<Tile> {
   }
 
  private:
-  // Methods called by by tile manager.
   friend class TileManager;
   friend class PrioritizedTileSet;
   friend class FakeTileManager;
   friend class BinComparator;
+  friend class FakePictureLayerImpl;
+
+  // Methods called by by tile manager.
+  Tile(TileManager* tile_manager,
+       PicturePileImpl* picture_pile,
+       const gfx::Size& tile_size,
+       const gfx::Rect& content_rect,
+       const gfx::Rect& opaque_rect,
+       float contents_scale,
+       int layer_id,
+       int source_frame_number,
+       int flags);
+  ~Tile();
+
   ManagedTileState& managed_state() { return managed_state_; }
   const ManagedTileState& managed_state() const { return managed_state_; }
-
-  inline size_t bytes_consumed_if_allocated() const {
-    return 4 * tile_size_.width() * tile_size_.height();
-  }
-
-  // Normal private methods.
-  friend class base::RefCounted<Tile>;
-  ~Tile();
+  RasterMode DetermineRasterModeForResolution(TileResolution resolution) const;
 
   TileManager* tile_manager_;
   scoped_refptr<PicturePileImpl> picture_pile_;
@@ -141,11 +158,11 @@ class CC_EXPORT Tile : public base::RefCounted<Tile> {
   float contents_scale_;
   gfx::Rect opaque_rect_;
 
-  TilePriority priority_[NUM_BIN_PRIORITIES];
+  TilePriority priority_[NUM_TREES];
   ManagedTileState managed_state_;
   int layer_id_;
   int source_frame_number_;
-  bool can_use_lcd_text_;
+  int flags_;
 
   Id id_;
   static Id s_next_id_;

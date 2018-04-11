@@ -36,7 +36,6 @@ OPTION_BUILD_OUT=
 register_var_option "--build-out=<path>" OPTION_BUILD_OUT "Set temporary build directory"
 
 # Note: platform API level 9 or higher is needed for proper C++ support
-PLATFORM=$DEFAULT_PLATFORM
 register_var_option "--platform=<name>"  PLATFORM "Specify platform name"
 
 OPTION_SYSROOT=
@@ -152,6 +151,10 @@ prepare_target_build
 
 parse_toolchain_name $TOOLCHAIN
 
+if [ -z "$PLATFORM" ]; then
+   PLATFORM="android-"$(get_default_api_level_for_arch $ARCH)
+fi
+
 fix_sysroot "$OPTION_SYSROOT"
 
 check_toolchain_src_dir "$SRC_DIR"
@@ -242,7 +245,7 @@ TOOLCHAIN_LICENSES=$ANDROID_NDK_ROOT/build/tools/toolchain-licenses
 TOOLCHAIN_BUILD_PREFIX=$BUILD_OUT/prefix
 TOOLCHAIN_BUILD_SYSROOT=$TOOLCHAIN_BUILD_PREFIX/sysroot
 dump "Sysroot  : Copying: $SYSROOT --> $TOOLCHAIN_BUILD_SYSROOT"
-mkdir -p $TOOLCHAIN_BUILD_SYSROOT && (cd $SYSROOT && tar ch *) | (cd $TOOLCHAIN_BUILD_SYSROOT && tar x)
+mkdir -p $TOOLCHAIN_BUILD_SYSROOT && (cd $SYSROOT && tar chf - *) | (cd $TOOLCHAIN_BUILD_SYSROOT && tar xf -)
 if [ $? != 0 ] ; then
     echo "Error while copying sysroot files. See $TMPLOG"
     exit 1
@@ -312,6 +315,11 @@ case "$TOOLCHAIN" in
     *) EXTRA_CONFIG_FLAGS=$EXTRA_CONFIG_FLAGS" --enable-libgomp" ;;
 esac
 
+# Disable libcilkrts which needs C++ for now, because libstdlibc++ in NDK is built separately...
+case "$TOOLCHAIN" in
+    x86*-4.9) EXTRA_CONFIG_FLAGS=$EXTRA_CONFIG_FLAGS" --disable-libcilkrts"
+esac
+
 # Disable libsanitizer (which depends on libstdc++ built separately) for now
 EXTRA_CONFIG_FLAGS=$EXTRA_CONFIG_FLAGS" --disable-libsanitizer"
 
@@ -341,6 +349,22 @@ esac
 # Enable linker option -eh-frame-hdr also for static executable
 EXTRA_CONFIG_FLAGS=$EXTRA_CONFIG_FLAGS" --enable-eh-frame-hdr-for-static"
 
+MAY_FAIL_DUE_TO_RACE_CONDITION=
+if [ "$MINGW" = "yes" -o "$DARWIN" = "yes" ]; then
+   MAY_FAIL_DUE_TO_RACE_CONDITION=yes
+fi
+
+# hack to use different set of sources
+CONFIGURE_GCC_VERSION=$GCC_VERSION
+case "$TOOLCHAIN" in
+  *4.9l)
+    CONFIGURE_GCC_VERSION=4.9l
+    ;;
+  *4.8l)
+    CONFIGURE_GCC_VERSION=4.8l
+    ;;
+esac
+
 cd $BUILD_OUT && run \
 $BUILD_SRCDIR/configure --target=$ABI_CONFIGURE_TARGET \
                         --enable-initfini-array \
@@ -353,7 +377,7 @@ $BUILD_SRCDIR/configure --target=$ABI_CONFIGURE_TARGET \
                         --with-mpfr-version=$MPFR_VERSION \
                         --with-mpc-version=$MPC_VERSION \
                         --with-gmp-version=$GMP_VERSION \
-                        --with-gcc-version=$GCC_VERSION \
+                        --with-gcc-version=$CONFIGURE_GCC_VERSION \
                         --with-gdb-version=$GDB_VERSION \
                         $WITH_PYTHON \
                         --with-gxx-include-dir=$TOOLCHAIN_BUILD_PREFIX/include/c++/$GCC_VERSION \
@@ -371,24 +395,25 @@ dump "Building : $TOOLCHAIN toolchain [this can take a long time]."
 cd $BUILD_OUT
 export CC CXX
 export ABI=$HOST_GMP_ABI
-JOBS=$NUM_JOBS
+export NUM_JOBS
 
 while [ -n "1" ]; do
-    run make -j$JOBS
+    run make -j$NUM_JOBS
     if [ $? = 0 ] ; then
         break
     else
-        if [ "$MINGW" = "yes" -o "$DARWIN" = "yes" ] ; then
+        if [ "$MAY_FAIL_DUE_TO_RACE_CONDITION" = "yes" ] ; then
             # Unfortunately, there is a bug in the GCC build scripts that prevent
             # parallel mingw/darwin canadian cross builds to work properly on some
             # multi-core machines (but not all, sounds like a race condition). Detect
             # this and restart in less parallelism, until -j1 also fail
-            JOBS=$((JOBS/2))
-            if [ $JOBS -lt 1 ] ; then
+            NUM_JOBS=$((NUM_JOBS/2))
+            export NUM_JOBS
+            if [ $NUM_JOBS -lt 1 ] ; then
                 echo "Error while building mingw/darwin toolchain. See $TMPLOG"
                 exit 1
             fi
-            dump "Parallel canadian build failed - continuing in less parallelism -j$JOBS"
+            dump "Parallel canadian build failed - continuing in less parallelism -j$NUM_JOBS"
         else
             echo "Error while building toolchain. See $TMPLOG"
             exit 1
@@ -398,12 +423,94 @@ done
 
 ABI="$OLD_ABI"
 
-# install the toolchain to its final location
+# install the toolchain to its final location.
 dump "Install  : $TOOLCHAIN toolchain binaries."
 cd $BUILD_OUT && run make install
 if [ $? != 0 ] ; then
-    echo "Error while installing toolchain. See $TMPLOG"
-    exit 1
+    # try "-j1", eg.  for aarch64-linux-android-4.8 with libatomic may fail to install due to race condition (missing prefix/lib/../lib64/./libiberty.an)
+    NUM_JOBS=1
+    export NUM_JOBS
+    run make install -j$NUM_JOBS
+    if [ $? != 0 ] ; then
+        echo "Error while installing toolchain. See $TMPLOG"
+        exit 1
+    fi
+fi
+
+unwind_library_for_abi ()
+{
+    local ABI="$1"
+    local BASE_DIR OBJS UNWIND_OBJS
+
+    case $ABI in
+    armeabi)
+    BASE_DIR="$BUILD_OUT/gcc-$CONFIGURE_GCC_VERSION/$ABI_CONFIGURE_TARGET/libgcc/"
+    OBJS="unwind-arm.o \
+          libunwind.o \
+          pr-support.o \
+          unwind-c.o"
+    ;;
+    armeabi-v7a)
+    BASE_DIR="$BUILD_OUT/gcc-$CONFIGURE_GCC_VERSION/$ABI_CONFIGURE_TARGET/armv7-a/libgcc/"
+    OBJS="unwind-arm.o \
+          libunwind.o \
+          pr-support.o \
+          unwind-c.o"
+    ;;
+    armeabi-v7a-hard)
+    BASE_DIR="$BUILD_OUT/gcc-$CONFIGURE_GCC_VERSION/$ABI_CONFIGURE_TARGET/armv7-a/hard/libgcc/"
+    OBJS="unwind-arm.o \
+          libunwind.o \
+          pr-support.o \
+          unwind-c.o"
+    ;;
+    x86|mips)
+    BASE_DIR="$BUILD_OUT/gcc-$CONFIGURE_GCC_VERSION/$ABI_CONFIGURE_TARGET/libgcc/"
+    if [ "$GCC_VERSION" = "4.6" -o "$GCC_VERSION" = "4.4.3" ]; then
+       OBJS="unwind-c.o \
+          unwind-dw2-fde-glibc.o \
+          unwind-dw2.o"
+    else
+       OBJS="unwind-c.o \
+          unwind-dw2-fde-dip.o \
+          unwind-dw2.o"
+    fi
+    ;;
+    arm64-v8a|x86_64|mips64)
+    BASE_DIR="$BUILD_OUT/gcc-$CONFIGURE_GCC_VERSION/$ABI_CONFIGURE_TARGET/libgcc/"
+    OBJS="unwind-c.o \
+       unwind-dw2-fde-dip.o \
+       unwind-dw2.o"
+    ;;
+    esac
+
+    for OBJ in $OBJS; do
+        UNWIND_OBJS=$UNWIND_OBJS" $BASE_DIR/$OBJ"
+    done
+    echo $UNWIND_OBJS
+}
+
+# Create libgccunwind.a for app linking
+# $1: arch name
+# $2: NDK_DIR
+create_unwind_library ()
+{
+    local ARCH="$1"
+    local NDK_DIR="$2"
+    local ABIS="$(commas_to_spaces $(convert_archs_to_abis $ARCH))"
+    local ABI UNWIND_OBJS UNWIND_LIB
+    for ABI in $ABIS; do
+        UNWIND_OBJS=$(unwind_library_for_abi $ABI)
+        UNWIND_LIB_DIR="$NDK_DIR/$GCCUNWIND_SUBDIR/libs/$ABI/"
+        run mkdir -p $UNWIND_LIB_DIR
+        run ar crsD $UNWIND_LIB_DIR/libgccunwind.a $UNWIND_OBJS
+    done
+}
+
+# Only create libgccunwind.a when building default version of gcc
+DEFAULT_GCC_VERSION=$(get_default_gcc_version_for_arch $ARCH)
+if [ "$HOST_OS" = "linux" -a "$GCC_VERSION" = "$DEFAULT_GCC_VERSION" ]; then
+    run create_unwind_library $ARCH $NDK_DIR
 fi
 
 # copy to toolchain path
@@ -421,7 +528,7 @@ fi
 
 # build the gdb stub and replace gdb with it. This is done post-install
 # so files are in the correct place when determining the relative path.
-if [ "$MINGW" = "yes" ] ; then
+if [ -n "$WITH_PYTHON" -a "$MINGW" = "yes" ] ; then
     WITH_PYTHON_PREFIX=$(dirname $(dirname "$WITH_PYTHON_SCRIPT"))
     dump "Building : $TOOLCHAIN GDB stub. "$TOOLCHAIN_PATH/bin/${ABI_CONFIGURE_TARGET}-gdb.exe", "$WITH_PYTHON_PREFIX", $ABI_CONFIGURE_HOST-gcc"
     GCC_FOR_STUB=$ABI_CONFIGURE_HOST-gcc
@@ -437,6 +544,7 @@ if [ "$MINGW" = "yes" ] ; then
     run $NDK_DIR/build/tools/build-gdb-stub.sh --gdb-executable-path="$TOOLCHAIN_PATH/bin/${ABI_CONFIGURE_TARGET}-gdb.exe" \
                                                --python-prefix-dir=${WITH_PYTHON_PREFIX} \
                                                --mingw-w64-gcc=$GCC_FOR_STUB
+    fail_panic "Could not build gdb-stub"
 fi
 
 # don't forget to copy the GPL and LGPL license files
@@ -458,6 +566,12 @@ run rm -rf $TOOLCHAIN_PATH/$ABI_CONFIGURE_TARGET/lib/libiberty.a
 run rm -rf $TOOLCHAIN_PATH/$ABI_CONFIGURE_TARGET/lib/*/libiberty.a
 run rm -rf $TOOLCHAIN_PATH/$ABI_CONFIGURE_TARGET/lib/*/*/libiberty.a
 find $TOOLCHAIN_PATH -name "*.la" -exec rm -f {} \;
+# Remove host install in cross compilation
+if [ "$ABI_CONFIGURE_HOST" != "$ABI_CONFIGURE_TARGET" ]; then
+    run rm -rf "$TOOLCHAIN_PATH/$ABI_CONFIGURE_HOST"
+fi
+# remove sysroot
+run rm -rf "$TOOLCHAIN_PATH/sysroot"
 
 # Remove libstdc++ for now (will add it differently later)
 # We had to build it to get libsupc++ which we keep.
@@ -467,7 +581,15 @@ run rm -rf $TOOLCHAIN_PATH/$ABI_CONFIGURE_TARGET/include/c++
 
 # strip binaries to reduce final package size
 test -z "$STRIP" && STRIP=strip
-run $STRIP $TOOLCHAIN_PATH/bin/*
+# because libpython is statically linked to GDB, it introduces symbols
+# that are only used by Python modules that must not be stripped. This
+# is not true of Windows which dynamically links to Python.
+if [ "$MINGW" = "yes" ] ; then
+    run $STRIP $TOOLCHAIN_PATH/bin/*
+else
+    find $TOOLCHAIN_PATH/bin -type f -not -name "*gdb" \
+        | while read EXECUTABLE; do run $STRIP "$EXECUTABLE"; done
+fi
 run $STRIP $TOOLCHAIN_PATH/$ABI_CONFIGURE_TARGET/bin/*
 run $STRIP $TOOLCHAIN_PATH/libexec/gcc/*/*/cc1$HOST_EXE
 run $STRIP $TOOLCHAIN_PATH/libexec/gcc/*/*/cc1plus$HOST_EXE
@@ -538,6 +660,18 @@ if [ "$PACKAGE_DIR" ]; then
         EXCLUSIONS=$EXCLUSIONS" --exclude=$SUBDIR/$ABI_CONFIGURE_TARGET/bin/ld.mcld${HOST_EXE}"
     fi
     pack_archive "$PACKAGE_DIR/$ARCHIVE" "$NDK_DIR" "$SUBDIR" $EXCLUSIONS
+    # package libgccunwind.a
+    if [ "$HOST_OS" = "linux" -a "$GCC_VERSION" = "$DEFAULT_GCC_VERSION" ]; then
+        ABIS=$(commas_to_spaces $(convert_archs_to_abis $ARCH))
+        for ABI in $ABIS; do
+            FILES="$GCCUNWIND_SUBDIR/libs/$ABI/libgccunwind.a"
+            PACKAGE="$PACKAGE_DIR/libgccunwind-libs-$ABI.tar.bz2"
+            log "Packaging: $PACKAGE"
+            pack_archive "$PACKAGE" "$NDK_DIR" "$FILES"
+            fail_panic "Could not package $ABI libgccunwind binaries!"
+            dump "Packaging: $PACKAGE"
+        done
+    fi
 fi
 
 dump "Done."

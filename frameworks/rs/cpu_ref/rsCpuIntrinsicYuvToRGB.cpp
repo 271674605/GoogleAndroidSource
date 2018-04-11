@@ -92,23 +92,14 @@ static uchar4 rsYuvToRGBA_uchar4(uchar y, uchar u, uchar v) {
         p.z = 255;
     }
 
-    return (uchar4){p.x, p.y, p.z, p.w};
+    return (uchar4){static_cast<uchar>(p.x), static_cast<uchar>(p.y),
+                    static_cast<uchar>(p.z), static_cast<uchar>(p.w)};
 }
 
 
-static short YuvCoeff[] = {
-    298, 409, -100, 516,   -208, 255, 0, 0,
-    16, 16, 16, 16,        16, 16, 16, 16,
-    128, 128, 128, 128, 128, 128, 128, 128,
-    298, 298, 298, 298, 298, 298, 298, 298,
-    255, 255, 255, 255, 255, 255, 255, 255
-
-
-};
-
-extern "C" void rsdIntrinsicYuv_K(void *dst, const uchar *Y, const uchar *uv, uint32_t count, const short *param);
-extern "C" void rsdIntrinsicYuvR_K(void *dst, const uchar *Y, const uchar *uv, uint32_t count, const short *param);
-extern "C" void rsdIntrinsicYuv2_K(void *dst, const uchar *Y, const uchar *u, const uchar *v, uint32_t count, const short *param);
+extern "C" void rsdIntrinsicYuv_K(void *dst, const uchar *Y, const uchar *uv, uint32_t xstart, size_t xend);
+extern "C" void rsdIntrinsicYuvR_K(void *dst, const uchar *Y, const uchar *uv, uint32_t xstart, size_t xend);
+extern "C" void rsdIntrinsicYuv2_K(void *dst, const uchar *Y, const uchar *u, const uchar *v, size_t xstart, size_t xend);
 
 void RsdCpuScriptIntrinsicYuvToRGB::kernel(const RsForEachStubParamStruct *p,
                                            uint32_t xstart, uint32_t xend,
@@ -132,7 +123,7 @@ void RsdCpuScriptIntrinsicYuvToRGB::kernel(const RsForEachStubParamStruct *p,
     }
     const uchar *Y = pinY + (p->y * strideY);
 
-    uchar4 *out = (uchar4 *)p->out;
+    uchar4 *out = (uchar4 *)p->out + xstart;
     uint32_t x1 = xstart;
     uint32_t x2 = xend;
 
@@ -161,30 +152,36 @@ void RsdCpuScriptIntrinsicYuvToRGB::kernel(const RsForEachStubParamStruct *p,
         cstep = 2;
     }
 
-#if defined(ARCH_ARM_HAVE_VFP)
+    /* If we start on an odd pixel then deal with it here and bump things along
+     * so that subsequent code can carry on with even-odd pairing assumptions.
+     */
+    if((x1 & 1) && (x2 > x1)) {
+        int cx = (x1 >> 1) * cstep;
+        *out = rsYuvToRGBA_uchar4(Y[x1], u[cx], v[cx]);
+        out++;
+        x1++;
+    }
+// reenable for ARM64 when intrinsic is fixed
+#if defined(ARCH_ARM_USE_INTRINSICS) && !defined(ARCH_ARM64_USE_INTRINSICS)
     if((x2 > x1) && gArchUseSIMD) {
-        // The neon paths may over-read by up to 8 bytes
-        int32_t len = (x2 - x1 - 8) >> 3;
-        if(len > 0) {
-            if (cstep == 1) {
-                rsdIntrinsicYuv2_K(out, Y, u, v, len, YuvCoeff);
-                x1 += len << 3;
-                out += len << 3;
-            } else if (cstep == 2) {
-                // Check for proper interleave
-                intptr_t ipu = (intptr_t)u;
-                intptr_t ipv = (intptr_t)v;
+        int32_t len = x2 - x1;
+        if (cstep == 1) {
+            rsdIntrinsicYuv2_K(p->out, Y, u, v, x1, x2);
+            x1 += len;
+            out += len;
+        } else if (cstep == 2) {
+            // Check for proper interleave
+            intptr_t ipu = (intptr_t)u;
+            intptr_t ipv = (intptr_t)v;
 
-                if (ipu == (ipv + 1)) {
-                    rsdIntrinsicYuv_K(out, Y, v, len, YuvCoeff);
-                    x1 += len << 3;
-                    out += len << 3;
-                } else if (ipu == (ipv - 1)) {
-                    rsdIntrinsicYuvR_K(out, Y, u, len, YuvCoeff);
-                    x1 += len << 3;
-                    out += len << 3;
-                }
-
+            if (ipu == (ipv + 1)) {
+                rsdIntrinsicYuv_K(p->out, Y, v, x1, x2);
+                x1 += len;
+                out += len;
+            } else if (ipu == (ipv - 1)) {
+                rsdIntrinsicYuvR_K(p->out, Y, u, x1, x2);
+                x1 += len;
+                out += len;
             }
         }
     }
@@ -228,5 +225,3 @@ RsdCpuScriptImpl * rsdIntrinsic_YuvToRGB(RsdCpuReferenceImpl *ctx,
                                          const Script *s, const Element *e) {
     return new RsdCpuScriptIntrinsicYuvToRGB(ctx, s, e);
 }
-
-

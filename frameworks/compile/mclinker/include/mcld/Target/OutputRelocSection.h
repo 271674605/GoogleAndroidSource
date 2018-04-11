@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_OUTPUT_RELOCATION_SECTION_H
-#define MCLD_OUTPUT_RELOCATION_SECTION_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_TARGET_OUTPUTRELOCSECTION_H
+#define MCLD_TARGET_OUTPUTRELOCSECTION_H
 
 #include <mcld/LD/RelocData.h>
 
@@ -31,6 +28,9 @@ public:
   OutputRelocSection(Module& pModule, LDSection& pSection);
 
   ~OutputRelocSection();
+
+  /// create - create an dynamic relocation entry
+  Relocation* create();
 
   void reserveEntry(size_t pNum=1);
 

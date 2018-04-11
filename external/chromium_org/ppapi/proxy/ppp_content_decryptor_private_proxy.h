@@ -30,16 +30,23 @@ class PPP_ContentDecryptor_Private_Proxy : public InterfaceProxy {
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
   // Message handlers.
-  void OnMsgGenerateKeyRequest(PP_Instance instance,
-                               SerializedVarReceiveInput key_system,
-                               SerializedVarReceiveInput type,
-                               SerializedVarReceiveInput init_data);
-  void OnMsgAddKey(PP_Instance instance,
-                   SerializedVarReceiveInput session_id,
-                   SerializedVarReceiveInput key,
-                   SerializedVarReceiveInput init_data);
-  void OnMsgCancelKeyRequest(PP_Instance instance,
-                             SerializedVarReceiveInput session_id);
+  void OnMsgInitialize(PP_Instance instance,
+                       SerializedVarReceiveInput key_system);
+  void OnMsgCreateSession(PP_Instance instance,
+                          uint32_t promise_id,
+                          SerializedVarReceiveInput init_data_type,
+                          SerializedVarReceiveInput init_data,
+                          PP_SessionType session_type);
+  void OnMsgLoadSession(PP_Instance instance,
+                        uint32_t promise_id,
+                        SerializedVarReceiveInput web_session_id);
+  void OnMsgUpdateSession(PP_Instance instance,
+                          uint32_t promise_id,
+                          SerializedVarReceiveInput web_session_id,
+                          SerializedVarReceiveInput response);
+  void OnMsgReleaseSession(PP_Instance instance,
+                           uint32_t promise_id,
+                           SerializedVarReceiveInput web_session_id);
   void OnMsgDecrypt(PP_Instance instance,
                     const PPPDecryptor_Buffer& encrypted_buffer,
                     const std::string& serialized_encrypted_block_info);

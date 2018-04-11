@@ -14,10 +14,16 @@
  * limitations under the License.
  */
 
-
 package com.android.mail.adapter;
 
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+
+import com.android.bitmap.BitmapCache;
 import com.android.mail.R;
+import com.android.mail.bitmap.ContactResolver;
 import com.android.mail.providers.Account;
 import com.android.mail.providers.Folder;
 import com.android.mail.ui.AccountItemView;
@@ -27,11 +33,6 @@ import com.android.mail.utils.FolderUri;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 
-import android.support.v4.text.BidiFormatter;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.TextView;
 
 /**
  * An element that is shown in the {@link com.android.mail.ui.FolderListFragment}. This class is
@@ -39,9 +40,9 @@ import android.widget.TextView;
  * This class is an enumeration of a few element types: Account, a folder, a recent folder,
  * or a header (a resource string). A {@link DrawerItem} can only be one type and can never
  * switch types. Items are created using methods like
- * {@link DrawerItem#ofAccount(com.android.mail.ui.ControllableActivity,
- com.android.mail.providers.Account, int, boolean, BidiFormatter)},
- * {@link DrawerItem#ofWaitView(com.android.mail.ui.ControllableActivity, BidiFormatter)}, etc.
+ * {@link DrawerItem#ofAccount(ControllableActivity, Account, int, boolean, BitmapCache,
+ * ContactResolver)},
+ * {@link DrawerItem#ofWaitView(ControllableActivity)}, etc.
  *
  * Once created, the item can create a view using
  * {@link #getView(android.view.View, android.view.ViewGroup)}.
@@ -50,19 +51,21 @@ public class DrawerItem {
     private static final String LOG_TAG = LogTag.getLogTag();
     public final Folder mFolder;
     public final Account mAccount;
-    public final int mResource;
+    private final int mResource;
     /** True if the drawer item represents the current account, false otherwise */
-    public boolean mIsSelected;
+    private final boolean mIsSelected;
     /** Either {@link #VIEW_ACCOUNT}, {@link #VIEW_FOLDER} or {@link #VIEW_HEADER} */
     public final int mType;
     /** A normal folder, also a child, if a parent is specified. */
     public static final int VIEW_FOLDER = 0;
     /** A text-label which serves as a header in sectioned lists. */
     public static final int VIEW_HEADER = 1;
+    /** A text-label which serves as a header in sectioned lists. */
+    public static final int VIEW_BLANK_HEADER = 2;
     /** An account object, which allows switching accounts rather than folders. */
-    public static final int VIEW_ACCOUNT = 2;
+    public static final int VIEW_ACCOUNT = 3;
     /** An expandable object for expanding/collapsing more of the list */
-    public static final int VIEW_WAITING_FOR_SYNC = 3;
+    public static final int VIEW_WAITING_FOR_SYNC = 4;
     /** The value (1-indexed) of the last View type.  Useful when returning the number of types. */
     private static final int LAST_FIELD = VIEW_WAITING_FOR_SYNC + 1;
 
@@ -71,7 +74,6 @@ public class DrawerItem {
     /** The parent activity */
     private final ControllableActivity mActivity;
     private final LayoutInflater mInflater;
-    private final BidiFormatter mBidiFormatter;
 
     // TODO(viki): Put all these constants in an interface.
     /**
@@ -96,6 +98,9 @@ public class DrawerItem {
     /** True if this view is enabled, false otherwise. */
     private final boolean mIsEnabled;
 
+    private BitmapCache mImagesCache;
+    private ContactResolver mContactResolver;
+
     @Override
     public String toString() {
         switch(mType) {
@@ -103,6 +108,8 @@ public class DrawerItem {
                 return folderToString();
             case VIEW_HEADER:
                 return headerToString();
+            case VIEW_BLANK_HEADER:
+                return blankHeaderToString();
             case VIEW_ACCOUNT:
                 return accountToString();
             case VIEW_WAITING_FOR_SYNC:
@@ -128,7 +135,8 @@ public class DrawerItem {
      * @param isCurrentAccount true if this item is the current account
      */
     private DrawerItem(int type, ControllableActivity activity, Folder folder, int folderType,
-            Account account, int resource, boolean isCurrentAccount, BidiFormatter bidiFormatter) {
+            Account account, int resource, boolean isCurrentAccount, BitmapCache cache,
+            ContactResolver contactResolver) {
         mActivity = activity;
         mFolder = folder;
         mFolderType = folderType;
@@ -138,7 +146,8 @@ public class DrawerItem {
         mInflater = LayoutInflater.from(activity.getActivityContext());
         mType = type;
         mIsEnabled = calculateEnabled();
-        mBidiFormatter = bidiFormatter;
+        mImagesCache = cache;
+        mContactResolver = contactResolver;
     }
 
     /**
@@ -151,9 +160,9 @@ public class DrawerItem {
      * @return a drawer item for the folder.
      */
     public static DrawerItem ofFolder(ControllableActivity activity, Folder folder,
-            int folderType, BidiFormatter bidiFormatter) {
+            int folderType) {
         return new DrawerItem(VIEW_FOLDER, activity, folder,  folderType, null, -1, false,
-                bidiFormatter);
+                null, null);
     }
 
     private String folderToString() {
@@ -176,9 +185,10 @@ public class DrawerItem {
      * @return a drawer item for the account.
      */
     public static DrawerItem ofAccount(ControllableActivity activity, Account account,
-            int unreadCount, boolean isCurrentAccount, BidiFormatter bidiFormatter) {
+            int unreadCount, boolean isCurrentAccount, BitmapCache cache,
+            ContactResolver contactResolver) {
         return new DrawerItem(VIEW_ACCOUNT, activity, null, ACCOUNT, account, unreadCount,
-                isCurrentAccount, bidiFormatter);
+                isCurrentAccount, cache, contactResolver);
     }
 
     private String accountToString() {
@@ -197,10 +207,9 @@ public class DrawerItem {
      * @param resource the string resource: R.string.all_folders_heading
      * @return a drawer item for the header.
      */
-    public static DrawerItem ofHeader(ControllableActivity activity, int resource,
-            BidiFormatter bidiFormatter) {
+    public static DrawerItem ofHeader(ControllableActivity activity, int resource) {
         return new DrawerItem(VIEW_HEADER, activity, null, INERT_HEADER, null, resource, false,
-                bidiFormatter);
+                null, null);
     }
 
     private String headerToString() {
@@ -212,16 +221,24 @@ public class DrawerItem {
         return sb.toString();
     }
 
+    public static DrawerItem ofBlankHeader(ControllableActivity activity) {
+        return new DrawerItem(VIEW_BLANK_HEADER, activity, null, INERT_HEADER, null, 0, false, null,
+                null);
+    }
+
+    private String blankHeaderToString() {
+        return "[DrawerItem VIEW_BLANK_HEADER]";
+    }
+
     /**
      * Create a "waiting for initialization" item.
      *
      * @param activity the underlying activity
      * @return a drawer item with an indeterminate progress indicator.
      */
-    public static DrawerItem ofWaitView(ControllableActivity activity,
-            BidiFormatter bidiFormatter) {
+    public static DrawerItem ofWaitView(ControllableActivity activity) {
         return new DrawerItem(VIEW_WAITING_FOR_SYNC, activity, null, INERT_HEADER, null, -1, false,
-                bidiFormatter);
+                null, null);
     }
 
     private static String waitToString() {
@@ -240,6 +257,9 @@ public class DrawerItem {
                 break;
             case VIEW_HEADER:
                 result = getHeaderView(convertView, parent);
+                break;
+            case VIEW_BLANK_HEADER:
+                result = getBlankHeaderView(convertView, parent);
                 break;
             case VIEW_ACCOUNT:
                 result = getAccountView(convertView, parent);
@@ -275,10 +295,11 @@ public class DrawerItem {
     /** Calculate whether the item is enabled */
     private boolean calculateEnabled() {
         switch (mType) {
-            case VIEW_HEADER :
+            case VIEW_HEADER:
+            case VIEW_BLANK_HEADER:
                 // Headers are never enabled.
                 return false;
-            case VIEW_FOLDER :
+            case VIEW_FOLDER:
                 // Folders are always enabled.
                 return true;
             case VIEW_ACCOUNT:
@@ -310,7 +331,8 @@ public class DrawerItem {
      */
     public boolean isHighlighted(FolderUri currentFolder, int currentType) {
         switch (mType) {
-            case VIEW_HEADER :
+            case VIEW_HEADER:
+            case VIEW_BLANK_HEADER:
                 // Headers are never highlighted
                 return false;
             case VIEW_FOLDER:
@@ -344,11 +366,10 @@ public class DrawerItem {
             accountItemView = (AccountItemView) convertView;
         } else {
             accountItemView =
-                    (AccountItemView) mInflater.inflate(R.layout.account_item, null, false);
+                    (AccountItemView) mInflater.inflate(R.layout.account_item, parent, false);
         }
-        accountItemView.bind(mAccount, mIsSelected, mResource);
-        View v = accountItemView.findViewById(R.id.account_graphic);
-        v.setBackgroundColor(mAccount.color);
+        accountItemView.bind(mActivity.getActivityContext(), mAccount, mIsSelected, mImagesCache,
+                mContactResolver);
         return accountItemView;
     }
 
@@ -360,15 +381,32 @@ public class DrawerItem {
      * @return a text header at the given position.
      */
     private View getHeaderView(View convertView, ViewGroup parent) {
-        final TextView headerView;
+        final View headerView;
         if (convertView != null) {
-            headerView = (TextView) convertView;
+            headerView = convertView;
         } else {
-            headerView = (TextView) mInflater.inflate(
-                    R.layout.folder_list_header, parent, false);
+            headerView = mInflater.inflate(R.layout.folder_list_header, parent, false);
         }
-        headerView.setText(mResource);
+        final TextView textView = (TextView) headerView.findViewById(R.id.header_text);
+        textView.setText(mResource);
         return headerView;
+    }
+
+    /**
+     * Returns a blank divider
+     *
+     * @param convertView A previous view, perhaps null
+     * @param parent the parent of this view
+     * @return a blank header
+     */
+    private View getBlankHeaderView(View convertView, ViewGroup parent) {
+        final View blankHeaderView;
+        if (convertView != null) {
+            blankHeaderView = convertView;
+        } else {
+            blankHeaderView = mInflater.inflate(R.layout.folder_list_blank_header, parent, false);
+        }
+        return blankHeaderView;
     }
 
     /**
@@ -384,10 +422,9 @@ public class DrawerItem {
             folderItemView = (FolderItemView) convertView;
         } else {
             folderItemView =
-                    (FolderItemView) mInflater.inflate(R.layout.folder_item, null, false);
+                    (FolderItemView) mInflater.inflate(R.layout.folder_item, parent, false);
         }
-        folderItemView.bind(mFolder, mActivity, mBidiFormatter);
-        Folder.setFolderBlockColor(mFolder, folderItemView.findViewById(R.id.color_block));
+        folderItemView.bind(mFolder, mActivity);
         folderItemView.setIcon(mFolder);
         return folderItemView;
     }

@@ -17,9 +17,9 @@ namespace base {
 class FilePath;
 }
 
-class ExtensionSet;
-
 namespace extensions {
+
+class ExtensionSet;
 
 // This class is used by the ExtensionWarningService to represent warnings if
 // extensions misbehave. Note that the ExtensionWarningService deals only with
@@ -44,6 +44,7 @@ class ExtensionWarning {
     // The extension failed to determine the filename of a download because
     // another extension with higher precedence determined a different filename.
     kDownloadFilenameConflict,
+    kReloadTooFrequent,
     kMaxWarningType
   };
 
@@ -81,6 +82,8 @@ class ExtensionWarning {
       const std::string& winning_extension_id,
       const base::FilePath& losing_filename,
       const base::FilePath& winning_filename);
+  static ExtensionWarning CreateReloadTooFrequentWarning(
+      const std::string& extension_id);
 
   // Returns the specific warning type.
   WarningType warning_type() const { return type_; }

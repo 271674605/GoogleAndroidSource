@@ -41,7 +41,7 @@ public:
       TM(tm) {
   }
 
-  SDNode *Select(SDNode *N);
+  SDNode *Select(SDNode *N) override;
 
   // Complex Pattern Selectors.
   bool SelectADDRrr(SDValue N, SDValue &R1, SDValue &R2);
@@ -49,11 +49,11 @@ public:
 
   /// SelectInlineAsmMemoryOperand - Implement addressing mode selection for
   /// inline asm expressions.
-  virtual bool SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                            char ConstraintCode,
-                                            std::vector<SDValue> &OutOps);
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    char ConstraintCode,
+                                    std::vector<SDValue> &OutOps) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "SPARC DAG->DAG Pattern Instruction Selection";
   }
 
@@ -80,7 +80,8 @@ bool SparcDAGToDAGISel::SelectADDRri(SDValue Addr,
     return true;
   }
   if (Addr.getOpcode() == ISD::TargetExternalSymbol ||
-      Addr.getOpcode() == ISD::TargetGlobalAddress)
+      Addr.getOpcode() == ISD::TargetGlobalAddress ||
+      Addr.getOpcode() == ISD::TargetGlobalTLSAddress)
     return false;  // direct calls.
 
   if (Addr.getOpcode() == ISD::ADD) {
@@ -117,7 +118,8 @@ bool SparcDAGToDAGISel::SelectADDRri(SDValue Addr,
 bool SparcDAGToDAGISel::SelectADDRrr(SDValue Addr, SDValue &R1, SDValue &R2) {
   if (Addr.getOpcode() == ISD::FrameIndex) return false;
   if (Addr.getOpcode() == ISD::TargetExternalSymbol ||
-      Addr.getOpcode() == ISD::TargetGlobalAddress)
+      Addr.getOpcode() == ISD::TargetGlobalAddress ||
+      Addr.getOpcode() == ISD::TargetGlobalTLSAddress)
     return false;  // direct calls.
 
   if (Addr.getOpcode() == ISD::ADD) {
@@ -139,8 +141,10 @@ bool SparcDAGToDAGISel::SelectADDRrr(SDValue Addr, SDValue &R1, SDValue &R2) {
 
 SDNode *SparcDAGToDAGISel::Select(SDNode *N) {
   SDLoc dl(N);
-  if (N->isMachineOpcode())
-    return NULL;   // Already selected.
+  if (N->isMachineOpcode()) {
+    N->setNodeId(-1);
+    return nullptr;   // Already selected.
+  }
 
   switch (N->getOpcode()) {
   default: break;

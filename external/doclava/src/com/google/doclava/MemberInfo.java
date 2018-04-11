@@ -38,20 +38,30 @@ public abstract class MemberInfo extends DocInfo implements Comparable, Scoped {
     mIsSynthetic = isSynthetic;
     mKind = kind;
     mAnnotations = annotations;
+    mShowAnnotations = AnnotationInstanceInfo.getShowAnnotationsIntersection(annotations);
   }
 
   public abstract boolean isExecutable();
 
   @Override
   public boolean isHidden() {
-    if (mAnnotations != null) {
-      for (AnnotationInstanceInfo info : mAnnotations) {
-        if (Doclava.showAnnotations.contains(info.type().qualifiedName())) {
-          return false;
-        }
-      }
+    if (mShowAnnotations.size() > 0) {
+      return false;
     }
     return super.isHidden();
+  }
+
+  @Override
+  public boolean isRemoved() {
+    if (mShowAnnotations.size() > 0) {
+      return false;
+    }
+    return super.isRemoved();
+  }
+
+  @Override
+  public boolean isHiddenOrRemoved() {
+    return isHidden() || isRemoved();
   }
 
   public String anchor() {
@@ -101,7 +111,7 @@ public abstract class MemberInfo extends DocInfo implements Comparable, Scoped {
   public boolean isPrivate() {
     return mIsPrivate;
   }
-  
+
   public String scope() {
     if (isPublic()) {
       return "public";
@@ -134,7 +144,8 @@ public abstract class MemberInfo extends DocInfo implements Comparable, Scoped {
   }
 
   public boolean checkLevel() {
-    return Doclava.checkLevel(mIsPublic, mIsProtected, mIsPackagePrivate, mIsPrivate, isHidden());
+    return Doclava.checkLevel(mIsPublic, mIsProtected, mIsPackagePrivate, mIsPrivate,
+        isHiddenOrRemoved());
   }
 
   public String kind() {
@@ -143,6 +154,10 @@ public abstract class MemberInfo extends DocInfo implements Comparable, Scoped {
 
   public ArrayList<AnnotationInstanceInfo> annotations() {
     return mAnnotations;
+  }
+
+  public ArrayList<AnnotationInstanceInfo> showAnnotations() {
+    return mShowAnnotations;
   }
 
   ClassInfo mContainingClass;
@@ -158,5 +173,6 @@ public abstract class MemberInfo extends DocInfo implements Comparable, Scoped {
   boolean mIsSynthetic;
   String mKind;
   private ArrayList<AnnotationInstanceInfo> mAnnotations;
+  private ArrayList<AnnotationInstanceInfo> mShowAnnotations;
 
 }

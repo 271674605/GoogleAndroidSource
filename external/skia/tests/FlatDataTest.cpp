@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2012 Google Inc.
  *
@@ -17,10 +16,11 @@
 #include "SkXfermode.h"
 #include "Test.h"
 
-static void flattenFlattenableProc(SkOrderedWriteBuffer& buffer,
-                                   const void* obj) {
-    buffer.writeFlattenable((SkFlattenable*)obj);
-}
+struct SkFlattenableTraits {
+    static void Flatten(SkWriteBuffer& buffer, const SkFlattenable& flattenable) {
+        buffer.writeFlattenable(&flattenable);
+    }
+};
 
 class Controller : public SkChunkFlatController {
 public:
@@ -38,19 +38,16 @@ private:
  * @param obj Flattenable object to be flattened.
  * @param flattenProc Function that flattens objects with the same type as obj.
  */
-static void testCreate(skiatest::Reporter* reporter, const void* obj,
-                       void (*flattenProc)(SkOrderedWriteBuffer&, const void*)) {
+template <typename Traits, typename T>
+static void testCreate(skiatest::Reporter* reporter, const T& obj) {
     Controller controller;
-    // No need to delete data because that will be taken care of by the
-    // controller.
-    SkFlatData* data1 = SkFlatData::Create(&controller, obj, 0, flattenProc);
-    data1->setSentinelInCache();
-    SkFlatData* data2 = SkFlatData::Create(&controller, obj, 1, flattenProc);
-    data2->setSentinelAsCandidate();
-    REPORTER_ASSERT(reporter, SkFlatData::Compare(*data1, *data2) == 0);
+    // No need to delete data because that will be taken care of by the controller.
+    SkFlatData* data1 = SkFlatData::Create<Traits>(&controller, obj, 0);
+    SkFlatData* data2 = SkFlatData::Create<Traits>(&controller, obj, 1);
+    REPORTER_ASSERT(reporter, *data1 == *data2);
 }
 
-static void Tests(skiatest::Reporter* reporter) {
+DEF_TEST(FlatData, reporter) {
     // Test flattening SkShader
     SkPoint points[2];
     points[0].set(0, 0);
@@ -58,34 +55,16 @@ static void Tests(skiatest::Reporter* reporter) {
     SkColor colors[2];
     colors[0] = SK_ColorRED;
     colors[1] = SK_ColorBLUE;
-    SkShader* shader = SkGradientShader::CreateLinear(points, colors, NULL,
-                                            2, SkShader::kRepeat_TileMode);
-    SkAutoUnref aur(shader);
-    testCreate(reporter, shader, flattenFlattenableProc);
 
-    // Test SkBitmap
-    {
-        SkBitmap bm;
-        bm.setConfig(SkBitmap::kARGB_8888_Config, 50, 50);
-        bm.allocPixels();
-        SkCanvas canvas(bm);
-        SkPaint paint;
-        paint.setShader(shader);
-        canvas.drawPaint(paint);
-        testCreate(reporter, &bm, &SkFlattenObjectProc<SkBitmap>);
-    }
+    SkAutoTUnref<SkShader> shader(SkGradientShader::CreateLinear(points, colors, NULL, 2,
+                                                                 SkShader::kRepeat_TileMode));
+    testCreate<SkFlattenableTraits>(reporter, *shader);
 
     // Test SkColorFilter
-    SkColorFilter* cf = SkColorFilter::CreateLightingFilter(SK_ColorBLUE,
-                                                            SK_ColorRED);
-    SkAutoUnref aurcf(cf);
-    testCreate(reporter, cf, &flattenFlattenableProc);
+    SkAutoTUnref<SkColorFilter> cf(SkColorFilter::CreateLightingFilter(SK_ColorBLUE, SK_ColorRED));
+    testCreate<SkFlattenableTraits>(reporter, *cf);
 
     // Test SkXfermode
-    SkXfermode* xfer = SkXfermode::Create(SkXfermode::kDstOver_Mode);
-    SkAutoUnref aurxf(xfer);
-    testCreate(reporter, xfer, &flattenFlattenableProc);
+    SkAutoTUnref<SkXfermode> xfer(SkXfermode::Create(SkXfermode::kDstOver_Mode));
+    testCreate<SkFlattenableTraits>(reporter, *xfer);
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("FlatData", FlatDataClass, Tests)

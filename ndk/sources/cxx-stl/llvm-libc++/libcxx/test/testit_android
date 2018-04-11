@@ -26,8 +26,6 @@ cd ..
 LIBCXX_ROOT=`pwd`
 cd $origpath
 
-ANDROID_SUPPORT=$(cd "$LIBCXX_ROOT"/../../../android/support && pwd)
-
 VERBOSE=1
 
 run () {
@@ -73,11 +71,25 @@ run2 () {
 # The list of valid target abis supported by this script.
 VALID_ABIS="armeabi armeabi-v7a x86 mips"
 
+HOST_OS=`uname -s`
+if [ "$HOST_OS" = "Darwin" ]; then
+    # darwin doesn't have readelf.  hard-code a known one
+    READELF=../../../../../toolchains/arm-linux-androideabi-4.6/prebuilt/darwin-x86/bin/arm-linux-androideabi-readelf
+else
+    READELF=readelf
+fi
+
 DO_HELP=
 DO_STATIC=
 TARGET_ABI=
 TARGET_ARCH=
+if [ -z "$TARGET_TEST_SUBDIR" ]; then
+    TARGET_TEST_SUBDIR="libcxx"
+fi
+TARGET_PATH=/data/local/tmp/$TARGET_TEST_SUBDIR
 CXX=
+WITH_COMPILER_RT=
+LIBCXX_NEEDS_COMPILER_RT=
 for OPT; do
   case $OPT in
     --help|-?)
@@ -89,11 +101,17 @@ for OPT; do
     --static)
       DO_STATIC=true
       ;;
+    --shared)
+      DO_STATIC=
+      ;;
     --cxx=*)
       CXX=${OPT##--cxx=}
       ;;
     --verbose)
       VERBOSE=$(( $VERBOSE + 1 ))
+      ;;
+    --with-compiler-rt)
+      WITH_COMPILER_RT=yes
       ;;
     -*)
       echo "Unknown option: $OPT. See --help."
@@ -170,19 +188,43 @@ for LIB in libc++_static.a libc++_shared.so; do
   fi
 done
 
+LIBCOMPILER_RT_LIBS=$(cd "$LIBCXX_ROOT"/../../../android/compiler-rt && pwd)/libs/$TARGET_ABI
+$READELF -d "$LIBCXX_LIBS/libc++_shared.so" | grep NEEDED | grep -q compiler_rt
+if [ $? = 0 ]; then
+  LIBCXX_NEEDS_COMPILER_RT=yes
+fi
+
+if [ "$WITH_COMPILER_RT" = "yes" -o "$LIBCXX_NEEDS_COMPILER_RT" = "yes" ]; then
+  for LIB in libcompiler_rt_static.a libcompiler_rt_shared.so; do
+    if [ ! -f "$LIBCOMPILER_RT_LIBS/$LIB" ]; then
+      echo "ERROR: Missing prebuilt library: $LIBCOMPILER_RT_LIBS/$LIB"
+      echo "Please run: build/tools/build-compiler-rt.sh --ndk-dir=$NDK \
+--src-dir=/tmp/ndk-$USER/src/llvm-3.3/compiler-rt --llvm-version=3.3"
+      exit 1
+    fi
+  done
+fi
+
 # Check or detect C++ toolchain.
 TOOLCHAIN_CFLAGS=
 TOOLCHAIN_LDFLAGS=
 if [ -z "$TOOLCHAIN_PREFIX" ]; then
-  # Compute 
+  # Compute
   case $TARGET_ABI in
     armeabi)
       TOOLCHAIN_PREFIX=arm-linux-androideabi
+      TOOLCHAIN_CFLAGS="-mthumb"
+      TOOLCHAIN_LDFLAGS="-mthumb"
       ;;
     armeabi-v7a)
       TOOLCHAIN_PREFIX=arm-linux-androideabi
-      TOOLCHAIN_CFLAGS="-march=armv7-a -mfpu=vfpv3-d16"
-      TOOLCHAIN_LDFLAGS="-march=armv7-a -Wl,--fix-cortex-a8"
+      TOOLCHAIN_CFLAGS="-march=armv7-a -mthumb -mfpu=vfpv3-d16"
+      TOOLCHAIN_LDFLAGS="-march=armv7-a -mthumb -Wl,--fix-cortex-a8"
+      ;;
+    armeabi-v7a-hard)
+      TOOLCHAIN_PREFIX=arm-linux-androideabi
+      TOOLCHAIN_CFLAGS="-march=armv7-a -mthumb -mfpu=vfpv3-d16 -mhard-float -D_NDK_MATH_NO_SOFTFP=1"
+      TOOLCHAIN_LDFLAGS="-march=armv7-a -mthumb -Wl,--fix-cortex-a8 -Wl,--no-warn-mismatch -lm_hard"
       ;;
     x86)
       TOOLCHAIN_PREFIX=i686-linux-android
@@ -195,7 +237,9 @@ if [ -z "$TOOLCHAIN_PREFIX" ]; then
       exit 1
       ;;
   esac
-  CXX=$TOOLCHAIN_PREFIX-g++
+  if [ -z "$CXX" ]; then
+      CXX=$TOOLCHAIN_PREFIX-g++
+  fi
 fi
 
 REAL_CXX=$(which "$CXX" 2>/dev/null)
@@ -207,34 +251,124 @@ CC=$CXX
 
 if [ -z "$OPTIONS" ]
 then
-	OPTIONS="-std=c++11"
+  OPTIONS="--std=c++11 -O2 -g -funwind-tables"
+  # Note that some tests use assert() to check condition but -O2 defines assert() to nothing,
+  # unless we specify -UNDEBUG to bring assert() back.
+  # But currently adding -UNDEBUG crashes both clang3.4 and clang3.3 for test
+  # like libcxx/test/atomics/atomics.types.generic/address.pass.cpp.  Define -UNDEBUG
+  # only when we are not using clang.  ToDo
+  if [ "$CXX" != "${CXX%clang++*}" ] ; then
+    OPTIONS="$OPTIONS -UNDEBUG -mllvm -arm-enable-ehabi-descriptors -mllvm -arm-enable-ehabi"
+  fi
 fi
+
+OPTIONS="$OPTIONS $TOOLCHAIN_CFLAGS $TOOLCHAIN_LDFLAGS"
 OPTIONS="$OPTIONS -I$LIBCXX_ROOT/test/support"
+# llvm-libc++/libcxx/test/lit.cfg line #278 defineds the following for testing only on Linux
+OPTIONS="$OPTIONS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS"
 
-if [ -z "$HEADER_INCLUDE" ]
-then
-       HEADER_INCLUDE="-I$LIBCXX_ROOT/include -I$ANDROID_SUPPORT/include"
-fi
-
-if [ -z "$SOURCE_LIB" ]
-then
-       SOURCE_LIB="-L$LIBCXX_LIBS"
-fi
 if [ -z "$ADB" ]
 then
-       ADB=adb
+  ADB=adb
 fi
+
+# Run a shell command through ADB, return its status.
+# Variable ERR contains output if $RET is non-zero
+adb_shell () {
+  # We need a temporary file to store the output of our command
+  local CMD_OUT RET
+  ERR=
+  CMD_OUT=$(mktemp /tmp/testit_android-cmdout-XXXXXX)
+  # Run the command, while storing the standard output to CMD_OUT
+  # and appending the exit code as the last line.
+  if [ "$VERBOSE" -gt 2 ]; then
+    echo "COMMAND: $ADB shell $@"
+  fi
+  $ADB shell "$@ ; echo \$?" | sed -e 's![[:cntrl:]]!!g' > $CMD_OUT 2>&1
+  # Get last line in log, which contains the exit code from the command
+  RET=$(sed -e '$!d' $CMD_OUT)
+  # Get output, which corresponds to everything except the last line
+  OUT=$(sed -e '$d' $CMD_OUT)
+  if [ "$RET" != "0" ]; then
+    ERR=$OUT
+  fi
+  if [ "$VERBOSE" -gt 2 ]; then
+    printf "%s" "$OUT"
+  fi
+  rm -f $CMD_OUT
+  return $RET
+}
+
+# Push a given file through ADB.
+# $1: File path
+adb_push () {
+  local FILE=$1
+  local FILE_BASENAME=$(basename "$FILE")
+  run2 $ADB push $FILE $TARGET_PATH/$FILE_BASENAME 2>/dev/null
+}
+
+# Run a given executable through ADB.
+# $1: Executable path
+adb_run () {
+  local EXECUTABLE=$1
+  local EXECUTABLE_BASENAME=$(basename "$EXECUTABLE")
+  run2 $ADB push $EXECUTABLE $TARGET_PATH/$EXECUTABLE_BASENAME 2>/dev/null
+  if [ "$?" != 0 ]; then
+    return 1;
+  fi
+  # Retry up to 10 times if fail is due to "Text file busy"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    adb_shell "LD_LIBRARY_PATH=$TARGET_PATH; cd $TARGET_PATH; ./$EXECUTABLE_BASENAME"
+    if [ "$?" = "0" ]; then
+      return 0
+    fi
+    if ! $(echo $ERR | grep -iq "Text file busy"); then
+      if [ "$i" != "1" ]; then
+        # Dump error message to help diagnostics
+        echo "ERR=$ERR"
+      fi
+      break;
+    fi
+    echo "Text file busy.  Re-try $i"
+    sleep 1
+    run2 $ADB push $EXECUTABLE $TARGET_PATH/$EXECUTABLE_BASENAME 2>/dev/null
+    sleep 2  # try again
+  done
+  return 1
+}
+
+adb_shell "rm -rf $TARGET_PATH"
+adb_shell "mkdir -p $TARGET_PATH"
 
 if [ "$DO_STATIC" ]; then
   # Statically link to ensure the executable can be run easily through ADB
-  LIBS=-lc++_static
+  # Note that in standalone toolchain libc++_static is renamed to libstdc++, and
+  # compiler adds -lstdc++ implicitly
+  if [ "$WITH_COMPILER_RT" = "yes" ]; then
+    LIBS="-nodefaultlibs -lstdc++ -latomic -ldl -lm -lc -lcompiler_rt_static"
+  else
+    LIBS="-latomic"
+  fi
 else
-  run2 $ADB push $LIBCXX_LIBS/libc++_shared.so /data/local/tmp 2>/dev/null
+  run2 $ADB push $LIBCXX_LIBS/libc++_shared.so $TARGET_PATH 2>/dev/null
   if [ $? != 0 ]; then
     echo "ERROR: Can't push shared libc++ to target device!"
     exit 1
   fi
-  LIBS=-lc++_shared
+
+  if [ "$WITH_COMPILER_RT" = "yes" -o "$LIBCXX_NEEDS_COMPILER_RT" = "yes" ]; then
+    run2 $ADB push $LIBCOMPILER_RT_LIBS/libcompiler_rt_shared.so $TARGET_PATH 2>/dev/null
+    if [ $? != 0 ]; then
+      echo "ERROR: Can't push shared libcompiler_rt to target device!"
+      exit 1
+    fi
+  fi
+
+  if [ "$WITH_COMPILER_RT" = "yes" ]; then
+    LIBS="-nodefaultlibs -lc++_shared -latomic -ldl -lm -lc -lcompiler_rt_shared"
+  else
+    LIBS="-lc++_shared -latomic"
+  fi
 fi
 
 case $TRIPLE in
@@ -254,47 +388,25 @@ UNIMPLEMENTED=0
 IMPLEMENTED_FAIL=0
 IMPLEMENTED_PASS=0
 
-# Run a shell command through ADB, return its status.
-adb_shell () {
-  # We need a temporary file to store the output of our command
-  local CMD_OUT RET OUTPUT
-  CMD_OUT=$(mktemp /tmp/testit_android-cmdout-XXXXXX)
-  # Run the command, while storing the standard output to CMD_OUT
-  # and appending the exit code as the last line.
-  if [ "$VERBOSE" -gt 2 ]; then
-    echo "COMMAND: $ADB shell $@"
-  fi
-  $ADB shell "$@ ; echo \$?" | sed -e 's![[:cntrl:]]!!g' > $CMD_OUT 2>&1
-  # Get last line in log, which contains the exit code from the command
-  RET=$(sed -e '$!d' $CMD_OUT)
-  # Get output, which corresponds to everything except the last line
-  OUT=$(sed -e '$d' $CMD_OUT)
-  rm -f $CMD_OUT
-  if [ "$VERBOSE" -gt 2 ]; then
-    printf "%s" "$OUT"
-  fi
-  return $RET
-}
-
-# Run a given executable through ADB.
-# $1: Executable path
-# $2+: arguments.
-adb_run () {
-  local EXECUTABLE EXECUTABLE_BASENAME TARGET_PATH
-  EXECUTABLE=$1
-  EXECUTABLE_BASENAME=$(basename "$EXECUTABLE")
-  shift
-  TARGET_PATH=/data/local/tmp
-  run2 $ADB push $EXECUTABLE $TARGET_PATH/$EXECUTABLE_BASENAME 2>/dev/null &&
-  adb_shell "LD_LIBRARY_PATH=$TARGET_PATH; cd $TARGET_PATH; ./$EXECUTABLE_BASENAME"
-}
+# Run tests in current directory, recursively
+#
+# Note that file path containing EQ are symlink to the existing tests whose path contain '=',
+# to workaround an issue in ndk-build which doesn't handle LOCAL_SRC_FILES with '='.
+# See tests/device/test-libc++-static-full/jni/Android.mk  We need to filter out path containing
+# EQ such that we don't run same tests twice
+#
+# An alternative is to do "find . -type f", but this doesn't work in NDK windows package
+# where zip turns symlink into physical file it points to.
+#
+# We also sort the test to make the test report comparable to previous test
+#
 
 afunc() {
 	fail=0
 	pass=0
 	if (ls *.fail.cpp > /dev/null 2>&1)
 	then
-		for FILE in $(ls *.fail.cpp); do
+		for FILE in $(ls *.fail.cpp | tr ' ' '\n' | grep -v EQ | sort); do
 			if run $CC $OPTIONS $HEADER_INCLUDE $SOURCE_LIB $FILE $LIBS -o $TEST_EXE > /dev/null 2>&1
 			then
 				rm $TEST_EXE
@@ -308,10 +420,24 @@ afunc() {
 
 	if (ls *.pass.cpp > /dev/null 2>&1)
 	then
-		for FILE in $(ls *.pass.cpp); do
+		if (ls *.dat > /dev/null 2>&1)
+		then
+			adb_shell "rm -f $TARGET_PATH/*.dat"
+			for FILE in $(ls *.dat | tr ' ' '\n' | grep -v EQ | sort); do
+	                      if [ "$VERBOSE" -gt 1 ]; then
+	                          echo "Pushing data: " $FILE
+			      fi
+			      adb_push $FILE
+			      if [ $? != 0 ]; then
+				  echo "Failed to push file $FILE"
+	                      fi
+			done
+		fi
+		for FILE in $(ls *.pass.cpp | tr ' ' '\n' | grep -v EQ | sort); do
                       if [ "$VERBOSE" -gt 1 ]; then
                           echo "Running test: " $FILE
                       fi
+                        COMMAND="( cd $(pwd) && $CC $OPTIONS $HEADER_INCLUDE $SOURCE_LIB $FILE $LIBS )"
 			if run $CC $OPTIONS $HEADER_INCLUDE $SOURCE_LIB $FILE $LIBS -o $TEST_EXE
 			then
 				if adb_run $TEST_EXE
@@ -320,13 +446,13 @@ afunc() {
 					pass=$(($pass+1))
 				else
 					echo "`pwd`/$FILE failed at run time"
-					echo "Compile line was:" $CC $OPTIONS $HEADER_INCLUDE $SOURCE_LIB $FILE $LIBS
+					echo "Compile line was: $COMMAND # run-time"
 					fail=$(($fail+1))
 					rm $TEST_EXE
 				fi
 			else
 				echo "`pwd`/$FILE failed to compile"
-				echo "Compile line was:" $CC $OPTIONS $HEADER_INCLUDE $SOURCE_LIB $FILE $LIBS
+				echo "Compile line was: $COMMAND # compile-time"
 				fail=$(($fail+1))
 			fi
 		done
@@ -354,7 +480,7 @@ afunc() {
 	FAIL=$(($FAIL+$fail))
 	PASS=$(($PASS+$pass))
 
-	for FILE in *
+	for FILE in $(ls | tr ' ' '\n' | grep -v EQ | sort)
 	do
 		if [ -d "$FILE" ];
 		then

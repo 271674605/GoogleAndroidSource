@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_FLAGS_H
-#define MCLD_FLAGS_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_FLAGS_H
+#define MCLD_ADT_FLAGS_H
 
 namespace mcld
 {
@@ -65,7 +62,7 @@ public:
   Flags& operator^= (Flags pOther) {
     m_Data ^= pOther.m_Data;
     return *this;
-  } 
+  }
 
   Flags& operator^= (Enum pOther) {
     m_Data ^= pOther;

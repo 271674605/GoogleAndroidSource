@@ -9,9 +9,11 @@ TBLGEN_TABLES :=    \
 	AttrList.inc	\
 	Attrs.inc	\
 	AttrParsedAttrKinds.inc    \
+	AttrParsedAttrImpl.inc    \
 	AttrParsedAttrList.inc    \
 	AttrSpellingListIndex.inc \
 	AttrTemplateInstantiate.inc	\
+        AttrVisitor.inc \
 	CommentCommandList.inc \
 	CommentNodes.inc \
 	DeclNodes.inc	\
@@ -68,7 +70,6 @@ clang_sema_SRC_FILES :=	\
 	SemaTemplateInstantiateDecl.cpp	\
 	SemaTemplateVariadic.cpp	\
 	SemaType.cpp	\
-	TargetAttributesSema.cpp	\
 	TypeLocBuilder.cpp
 
 LOCAL_SRC_FILES := $(clang_sema_SRC_FILES)

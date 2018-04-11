@@ -15,10 +15,11 @@
  */
 package android.view.inputmethod.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.view.R;
 
 import android.app.Instrumentation;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.cts.util.PollingCheck;
 import android.os.Handler;
 import android.os.IBinder;
@@ -34,13 +35,13 @@ import android.widget.EditText;
 import java.util.List;
 
 public class InputMethodManagerTest
-                  extends ActivityInstrumentationTestCase2<InputMethodStubActivity> {
+                  extends ActivityInstrumentationTestCase2<InputMethodCtsActivity> {
 
     public InputMethodManagerTest() {
-        super("com.android.cts.stub", InputMethodStubActivity.class);
+        super("com.android.cts.view", InputMethodCtsActivity.class);
     }
 
-    private InputMethodStubActivity mActivity;
+    private InputMethodCtsActivity mActivity;
     private Instrumentation mInstrumentation;
 
     @Override
@@ -58,6 +59,11 @@ public class InputMethodManagerTest
     }
 
     public void testInputMethodManager() throws Throwable {
+        if (!getActivity().getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_INPUT_METHODS)) {
+            return;
+        }
+
         Window window = mActivity.getWindow();
         final EditText view = (EditText) window.findViewById(R.id.entry);
 

@@ -18,20 +18,23 @@
 package com.android.mail.browse;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.util.AttributeSet;
 import android.view.View;
-import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import com.android.mail.R;
 import com.android.mail.browse.ConversationViewAdapter.SuperCollapsedBlockItem;
+
+import java.text.NumberFormat;
 
 /**
  * A header block that expands to a list of collapsed message headers. Will notify a listener on tap
  * so the listener can hide the block and reveal the corresponding collapsed message headers.
  *
  */
-public class SuperCollapsedBlock extends LinearLayout implements View.OnClickListener {
+public class SuperCollapsedBlock extends FrameLayout implements View.OnClickListener {
 
     public interface OnClickListener {
         /**
@@ -41,7 +44,7 @@ public class SuperCollapsedBlock extends LinearLayout implements View.OnClickLis
         void onSuperCollapsedClick(SuperCollapsedBlockItem item);
     }
 
-    private SuperCollapsedBlockItem mModel;
+    private SuperCollapsedBlockItem mSuperCollapsedItem;
     private OnClickListener mClick;
     private TextView mSuperCollapsedText;
 
@@ -66,13 +69,19 @@ public class SuperCollapsedBlock extends LinearLayout implements View.OnClickLis
     }
 
     public void bind(SuperCollapsedBlockItem item) {
-        mModel = item;
+        mSuperCollapsedItem = item;
         setCount(item.getEnd() - item.getStart() + 1);
     }
 
     public void setCount(int count) {
-        mSuperCollapsedText.setText(
-                getResources().getQuantityString(R.plurals.show_messages_read, count, count));
+        final String strCount = NumberFormat.getIntegerInstance().format(count);
+        mSuperCollapsedText.setText(strCount);
+        final Resources res = getResources();
+        final int colorId = mSuperCollapsedItem.hasDraft() ?
+                R.color.text_color_draft_red : R.color.conversation_view_text_color_light;
+        mSuperCollapsedText.setTextColor(res.getColor(colorId));
+        setContentDescription(
+                res.getQuantityString(R.plurals.show_messages_read, count, count));
     }
 
     @Override
@@ -84,7 +93,7 @@ public class SuperCollapsedBlock extends LinearLayout implements View.OnClickLis
             getHandler().post(new Runnable() {
                 @Override
                 public void run() {
-                    mClick.onSuperCollapsedClick(mModel);
+                    mClick.onSuperCollapsedClick(mSuperCollapsedItem);
                 }
             });
         }

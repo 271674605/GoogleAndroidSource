@@ -125,6 +125,13 @@ class CGen(object):
       'return': '%s',
       'store': '%s'
     },
+    'mem_ptr_t': {
+      'in': 'const %s',
+      'inout': '%s',
+      'out': '%s',
+      'return': '%s',
+      'store': '%s'
+    },
     'str_t': {
       'in': 'const %s',
       'inout': '%s',
@@ -161,6 +168,7 @@ class CGen(object):
   'double_t': 'double',
   'handle_t': 'int',
   'mem_t': 'void*',
+  'mem_ptr_t': 'void**',
   'str_t': 'char*',
   'cstr_t': 'const char*',
   'interface_t' : 'const void*'
@@ -530,17 +538,25 @@ class CGen(object):
 
   def DefineStructInternals(self, node, release,
                             include_version=False, comment=True):
+    channel = node.GetProperty('FILE').release_map.GetChannel(release)
+    if channel == 'dev':
+      channel_comment = ' /* dev */'
+    else:
+      channel_comment = ''
     out = ''
     if node.GetProperty('union'):
-      out += 'union %s {\n' % (
-          self.GetStructName(node, release, include_version))
+      out += 'union %s {%s\n' % (
+          self.GetStructName(node, release, include_version), channel_comment)
     else:
-      out += 'struct %s {\n' % (
-          self.GetStructName(node, release, include_version))
+      out += 'struct %s {%s\n' % (
+          self.GetStructName(node, release, include_version), channel_comment)
 
+    channel = node.GetProperty('FILE').release_map.GetChannel(release)
     # Generate Member Functions
     members = []
     for child in node.GetListOf('Member'):
+      if channel == 'stable' and child.NodeIsDevOnly():
+        continue
       member = self.Define(child, [release], tabs=1, comment=comment)
       if not member:
         continue
@@ -555,33 +571,52 @@ class CGen(object):
     out = ''
     build_list = node.GetUniqueReleases(releases)
 
+    newest_stable = None
+    newest_dev = None
+    for rel in build_list:
+      channel = node.GetProperty('FILE').release_map.GetChannel(rel)
+      if channel == 'stable':
+        newest_stable = rel
+      if channel == 'dev':
+        newest_dev = rel
+    last_rel = build_list[-1]
+
     # TODO(noelallen) : Bug 157017 finish multiversion support
     if node.IsA('Struct'):
       if len(build_list) != 1:
         node.Error('Can not support multiple versions of node.')
       assert len(build_list) == 1
-
+      # Build the most recent one versioned, with comments
+      out = self.DefineStructInternals(node, last_rel,
+                                       include_version=False, comment=True)
 
     if node.IsA('Interface'):
       # Build the most recent one versioned, with comments
-      out = self.DefineStructInternals(node, build_list[-1],
+      out = self.DefineStructInternals(node, last_rel,
                                        include_version=True, comment=True)
+      if last_rel == newest_stable:
+        # Define an unversioned typedef for the most recent version
+        out += '\ntypedef struct %s %s;\n' % (
+            self.GetStructName(node, last_rel, include_version=True),
+            self.GetStructName(node, last_rel, include_version=False))
 
-      # Define an unversioned typedef for the most recent version
-      out += '\ntypedef struct %s %s;\n' % (
-          self.GetStructName(node, build_list[-1], include_version=True),
-          self.GetStructName(node, build_list[-1], include_version=False))
-    else:
-      # Build the most recent one versioned, with comments
-      out = self.DefineStructInternals(node, build_list[-1],
-                                       include_version=False, comment=True)
-
-
-    # Build the rest without comments and with the version number appended
-    for rel in build_list[0:-1]:
-      out += '\n' + self.DefineStructInternals(node, rel,
-                                               include_version=True,
-                                               comment=False)
+      # Build the rest without comments and with the version number appended
+      for rel in build_list[0:-1]:
+        channel = node.GetProperty('FILE').release_map.GetChannel(rel)
+        # Skip dev channel interface versions that are
+        #   Not the newest version, and
+        #   Don't have an equivalent stable version.
+        if channel == 'dev' and rel != newest_dev:
+          if not node.DevInterfaceMatchesStable(rel):
+            continue
+        out += '\n' + self.DefineStructInternals(node, rel,
+                                                 include_version=True,
+                                                 comment=False)
+        if rel == newest_stable:
+          # Define an unversioned typedef for the most recent version
+          out += '\ntypedef struct %s %s;\n' % (
+              self.GetStructName(node, rel, include_version=True),
+              self.GetStructName(node, rel, include_version=False))
 
     self.LogExit('Exit DefineStruct')
     return out
@@ -606,8 +641,14 @@ class CGen(object):
     for line in data.split('\n'):
       # Add indentation
       line = tab + line
-      if len(line) <= 80:
+      space_break = line.rfind(' ', 0, 80)
+      if len(line) <= 80 or 'http://' in line:
+        # Ignore normal line and URLs permitted by the style guide.
         lines.append(line.rstrip())
+      elif not '(' in line and space_break >= 0:
+        # Break long typedefs on nearest space.
+        lines.append(line[0:space_break])
+        lines.append('    ' + line[space_break + 1:])
       else:
         left = line.rfind('(') + 1
         args = line[left:].split(',')
@@ -738,7 +779,7 @@ def main(args):
       print 'Skipping %s' % f.GetName()
       continue
     for node in f.GetChildren()[2:]:
-      print cgen.Define(node, comment=True, prefix='tst_')
+      print cgen.Define(node, ast.releases, comment=True, prefix='tst_')
 
 
 if __name__ == '__main__':

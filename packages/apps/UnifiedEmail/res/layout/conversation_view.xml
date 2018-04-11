@@ -18,6 +18,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
+
     <com.android.mail.browse.ConversationContainer
         android:id="@+id/conversation_container"
         android:layout_width="match_parent"
@@ -25,43 +26,25 @@
 
         <!-- base WebView layer -->
         <com.android.mail.browse.ConversationWebView
-            android:id="@+id/webview"
+            android:id="@+id/conversation_webview"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            style="@style/ConversationViewSideMarginStyle"
-            android:scrollbars="none" />
-
-        <include layout="@layout/conversation_side_border_overlay"/>
+            android:focusable="false"
+            android:focusableInTouchMode="false"
+            android:scrollbars="none"
+            style="@style/ConversationViewPaddingStyle" />
 
         <!-- scrolling overlay views go here -->
 
         <!-- topmost layer for floating views (e.g. snap header, New Message bar) -->
         <!-- ConversationContainer draws this child on the very top, above all scrolling views -->
+        <!-- This is also used to highlight the entire conversation on focus -->
         <FrameLayout
             android:id="@+id/conversation_topmost_overlay"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <include layout="@layout/conversation_message_header"
-                android:id="@+id/snap_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                style="@style/ConversationViewSideMarginStyle"
-                android:layout_gravity="top"
-                android:visibility="gone" />
-
-            <Button xmlns:android="http://schemas.android.com/apk/res/android"
-                android:id="@+id/new_message_notification_bar"
-                style="@style/NewMessageButtonStyle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom"
-                android:animateLayoutChanges="true"
-                android:paddingLeft="24dp"
-                android:paddingRight="24dp"
-                android:visibility="gone" />
-
-        </FrameLayout>
+            android:layout_height="match_parent"
+            android:background="?android:attr/selectableItemBackground"
+            android:focusable="true" />
 
     </com.android.mail.browse.ConversationContainer>
 

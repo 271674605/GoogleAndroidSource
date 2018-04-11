@@ -20,7 +20,20 @@ A set of helpers for rendering Mako templates with a Metadata model.
 
 import metadata_model
 import re
+import markdown
+import textwrap
+import sys
+import bs4
+# Monkey-patch BS4. WBR element must not have an end tag.
+bs4.builder.HTMLTreeBuilder.empty_element_tags.add("wbr")
+
 from collections import OrderedDict
+
+# Relative path from HTML file to the base directory used by <img> tags
+IMAGE_SRC_METADATA="images/camera2/metadata/"
+
+# Prepend this path to each <img src="foo"> in javadocs
+JAVADOC_IMAGE_SRC_METADATA="../../../../" + IMAGE_SRC_METADATA
 
 _context_buf = None
 
@@ -369,8 +382,8 @@ def jtype_unboxed(entry):
       java_type = typedef_name # already takes into account arrays
 
   if not java_type:
-    if not java_type and entry.enum:
-      # Always map enums to Java ints, unless there's a typedef override
+    if not java_type and entry.enum and metadata_type == 'byte':
+      # Always map byte enums to Java ints, unless there's a typedef override
       base_type = 'int'
 
     else:
@@ -413,6 +426,27 @@ def jtype_boxed(entry):
   """
   unboxed_type = jtype_unboxed(entry)
   return _jtype_box(unboxed_type)
+
+def _is_jtype_generic(entry):
+  """
+  Determine whether or not the Java type represented by the entry type
+  string and/or typedef is a Java generic.
+
+  For example, "Range<Integer>" would be considered a generic, whereas
+  a "MeteringRectangle" or a plain "Integer" would not be considered a generic.
+
+  Args:
+    entry: An instance of an Entry node
+
+  Returns:
+    True if it's a java generic, False otherwise.
+  """
+  if entry.typedef:
+    local_typedef = _jtypedef_type(entry)
+    if local_typedef:
+      match = re.search(r'<.*>', local_typedef)
+      return bool(match)
+  return False
 
 def _jtype_primitive(what):
   """
@@ -458,6 +492,23 @@ def jclass(entry):
   """
 
   return "%s.class" %jtype_unboxed(entry)
+
+def jkey_type_token(entry):
+  """
+  Calculate the java type token compatible with a Key constructor.
+  This will be the Java Class<T> for non-generic classes, and a
+  TypeReference<T> for generic classes.
+
+  Args:
+    entry: An entry node
+
+  Returns:
+    The ClassName.class string, or 'new TypeReference<ClassName>() {{ }}' string
+  """
+  if _is_jtype_generic(entry):
+    return "new TypeReference<%s>() {{ }}" %(jtype_boxed(entry))
+  else:
+    return jclass(entry)
 
 def jidentifier(what):
   """
@@ -608,18 +659,62 @@ def jenum_value(enum_entry, enum_value):
   cname = csym(enum_entry.name)
   return cname[cname.find('_') + 1:] + '_' + enum_value.name
 
-def javadoc(text, indent = 4):
+def generate_extra_javadoc_detail(entry):
   """
-  Format text block as a javadoc comment section
+  Returns a function to add extra details for an entry into a string for inclusion into
+  javadoc. Adds information about units, the list of enum values for this key, and the valid
+  range.
+  """
+  def inner(text):
+    if entry.units:
+      text += '\n\n<b>Units</b>: %s\n' % (dedent(entry.units))
+    if entry.enum and not (entry.typedef and entry.typedef.languages.get('java')):
+      text += '\n\n<b>Possible values:</b>\n<ul>\n'
+      for value in entry.enum.values:
+        if not value.hidden:
+          text += '  <li>{@link #%s %s}</li>\n' % ( jenum_value(entry, value ), value.name )
+      text += '</ul>\n'
+    if entry.range:
+      if entry.enum and not (entry.typedef and entry.typedef.languages.get('java')):
+        text += '\n\n<b>Available values for this device:</b><br>\n'
+      else:
+        text += '\n\n<b>Range of valid values:</b><br>\n'
+      text += '%s\n' % (dedent(entry.range))
+    if entry.hwlevel != 'legacy': # covers any of (None, 'limited', 'full')
+      text += '\n\n<b>Optional</b> - This value may be {@code null} on some devices.\n'
+    if entry.hwlevel == 'full':
+      text += \
+        '\n<b>Full capability</b> - \n' + \
+        'Present on all camera devices that report being {@link CameraCharacteristics#INFO_SUPPORTED_HARDWARE_LEVEL_FULL HARDWARE_LEVEL_FULL} devices in the\n' + \
+        'android.info.supportedHardwareLevel key\n'
+    if entry.hwlevel == 'limited':
+      text += \
+        '\n<b>Limited capability</b> - \n' + \
+        'Present on all camera devices that report being at least {@link CameraCharacteristics#INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED HARDWARE_LEVEL_LIMITED} devices in the\n' + \
+        'android.info.supportedHardwareLevel key\n'
+    if entry.hwlevel == 'legacy':
+      text += "\nThis key is available on all devices."
+
+    return text
+  return inner
+
+
+def javadoc(metadata, indent = 4):
+  """
+  Returns a function to format a markdown syntax text block as a
+  javadoc comment section, given a set of metadata
 
   Args:
-    text: A multi-line string to format
+    metadata: A Metadata instance, representing the the top-level root
+      of the metadata for cross-referencing
     indent: baseline level of indentation for javadoc block
   Returns:
-    String with:
+    A function that transforms a String text block as follows:
     - Indent and * for insertion into a Javadoc comment block
-    - Leading/trailing whitespace removed
-    - Paragraph tags added on newlines between paragraphs
+    - Trailing whitespace removed
+    - Entire body rendered via markdown to generate HTML
+    - All tag names converted to appropriate Javadoc {@link} with @see
+      for each tag
 
   Example:
     "This is a comment for Javadoc\n" +
@@ -627,40 +722,236 @@ def javadoc(text, indent = 4):
     "     formatted better\n" +
     "\n" +
     "    That covers multiple lines as well\n"
+    "    And references android.control.mode\n"
 
     transforms to
-    "    * <p>\n" +
-    "    * This is a comment for Javadoc\n" +
+    "    * <p>This is a comment for Javadoc\n" +
     "    * with multiple lines, that should be\n" +
-    "    * formatted better\n" +
-    "    * </p><p>\n" +
-    "    * That covers multiple lines as well\n" +
-    "    * </p>\n"
+    "    * formatted better</p>\n" +
+    "    * <p>That covers multiple lines as well</p>\n" +
+    "    * and references {@link CaptureRequest#CONTROL_MODE android.control.mode}\n" +
+    "    *\n" +
+    "    * @see CaptureRequest#CONTROL_MODE\n"
   """
-  comment_prefix = " " * indent + " * ";
-  comment_para = comment_prefix + "</p><p>\n";
-  javatext = comment_prefix + "<p>\n";
+  def javadoc_formatter(text):
+    comment_prefix = " " * indent + " * ";
 
-  in_body = False # Eat empty lines at start
-  first_paragraph = True
-  for line in ( line.strip() for line in text.splitlines() ):
-    if not line:
-      in_body = False # collapse multi-blank lines into one
+    # render with markdown => HTML
+    javatext = md(text, JAVADOC_IMAGE_SRC_METADATA)
+
+    # Crossref tag names
+    kind_mapping = {
+        'static': 'CameraCharacteristics',
+        'dynamic': 'CaptureResult',
+        'controls': 'CaptureRequest' }
+
+    # Convert metadata entry "android.x.y.z" to form
+    # "{@link CaptureRequest#X_Y_Z android.x.y.z}"
+    def javadoc_crossref_filter(node):
+      if node.applied_visibility == 'public':
+        return '{@link %s#%s %s}' % (kind_mapping[node.kind],
+                                     jkey_identifier(node.name),
+                                     node.name)
+      else:
+        return node.name
+
+    # For each public tag "android.x.y.z" referenced, add a
+    # "@see CaptureRequest#X_Y_Z"
+    def javadoc_see_filter(node_set):
+      node_set = (x for x in node_set if x.applied_visibility == 'public')
+
+      text = '\n'
+      for node in node_set:
+        text = text + '\n@see %s#%s' % (kind_mapping[node.kind],
+                                      jkey_identifier(node.name))
+
+      return text if text != '\n' else ''
+
+    javatext = filter_tags(javatext, metadata, javadoc_crossref_filter, javadoc_see_filter)
+
+    def line_filter(line):
+      # Indent each line
+      # Add ' * ' to it for stylistic reasons
+      # Strip right side of trailing whitespace
+      return (comment_prefix + line).rstrip()
+
+    # Process each line with above filter
+    javatext = "\n".join(line_filter(i) for i in javatext.split("\n")) + "\n"
+
+    return javatext
+
+  return javadoc_formatter
+
+def dedent(text):
+  """
+  Remove all common indentation from every line but the 0th.
+  This will avoid getting <code> blocks when rendering text via markdown.
+  Ignoring the 0th line will also allow the 0th line not to be aligned.
+
+  Args:
+    text: A string of text to dedent.
+
+  Returns:
+    String dedented by above rules.
+
+  For example:
+    assertEquals("bar\nline1\nline2",   dedent("bar\n  line1\n  line2"))
+    assertEquals("bar\nline1\nline2",   dedent(" bar\n  line1\n  line2"))
+    assertEquals("bar\n  line1\nline2", dedent(" bar\n    line1\n  line2"))
+  """
+  text = textwrap.dedent(text)
+  text_lines = text.split('\n')
+  text_not_first = "\n".join(text_lines[1:])
+  text_not_first = textwrap.dedent(text_not_first)
+  text = text_lines[0] + "\n" + text_not_first
+
+  return text
+
+def md(text, img_src_prefix=""):
+    """
+    Run text through markdown to produce HTML.
+
+    This also removes all common indentation from every line but the 0th.
+    This will avoid getting <code> blocks in markdown.
+    Ignoring the 0th line will also allow the 0th line not to be aligned.
+
+    Args:
+      text: A markdown-syntax using block of text to format.
+      img_src_prefix: An optional string to prepend to each <img src="target"/>
+
+    Returns:
+      String rendered by markdown and other rules applied (see above).
+
+    For example, this avoids the following situation:
+
+      <!-- Input -->
+
+      <!--- can't use dedent directly since 'foo' has no indent -->
+      <notes>foo
+          bar
+          bar
+      </notes>
+
+      <!-- Bad Output -- >
+      <!-- if no dedent is done generated code looks like -->
+      <p>foo
+        <code><pre>
+          bar
+          bar</pre></code>
+      </p>
+
+    Instead we get the more natural expected result:
+
+      <!-- Good Output -->
+      <p>foo
+      bar
+      bar</p>
+
+    """
+    text = dedent(text)
+
+    # full list of extensions at http://pythonhosted.org/Markdown/extensions/
+    md_extensions = ['tables'] # make <table> with ASCII |_| tables
+    # render with markdown
+    text = markdown.markdown(text, md_extensions)
+
+    # prepend a prefix to each <img src="foo"> -> <img src="${prefix}foo">
+    text = re.sub(r'src="([^"]*)"', 'src="' + img_src_prefix + r'\1"', text)
+    return text
+
+def filter_tags(text, metadata, filter_function, summary_function = None):
+    """
+    Find all references to tags in the form outer_namespace.xxx.yyy[.zzz] in
+    the provided text, and pass them through filter_function and summary_function.
+
+    Used to linkify entry names in HMTL, javadoc output.
+
+    Args:
+      text: A string representing a block of text destined for output
+      metadata: A Metadata instance, the root of the metadata properties tree
+      filter_function: A Node->string function to apply to each node
+        when found in text; the string returned replaces the tag name in text.
+      summary_function: A Node list->string function that is provided the list of
+        unique tag nodes found in text, and which must return a string that is
+        then appended to the end of the text. The list is sorted alphabetically
+        by node name.
+    """
+
+    tag_set = set()
+    def name_match(name):
+      return lambda node: node.name == name
+
+    # Match outer_namespace.x.y or outer_namespace.x.y.z, making sure
+    # to grab .z and not just outer_namespace.x.y.  (sloppy, but since we
+    # check for validity, a few false positives don't hurt)
+    for outer_namespace in metadata.outer_namespaces:
+
+      tag_match = outer_namespace.name + \
+        r"\.([a-zA-Z0-9\n]+)\.([a-zA-Z0-9\n]+)(\.[a-zA-Z0-9\n]+)?([/]?)"
+
+      def filter_sub(match):
+        whole_match = match.group(0)
+        section1 = match.group(1)
+        section2 = match.group(2)
+        section3 = match.group(3)
+        end_slash = match.group(4)
+
+        # Don't linkify things ending in slash (urls, for example)
+        if end_slash:
+          return whole_match
+
+        candidate = ""
+
+        # First try a two-level match
+        candidate2 = "%s.%s.%s" % (outer_namespace.name, section1, section2)
+        got_two_level = False
+
+        node = metadata.find_first(name_match(candidate2.replace('\n','')))
+        if not node and '\n' in section2:
+          # Linefeeds are ambiguous - was the intent to add a space,
+          # or continue a lengthy name? Try the former now.
+          candidate2b = "%s.%s.%s" % (outer_namespace.name, section1, section2[:section2.find('\n')])
+          node = metadata.find_first(name_match(candidate2b))
+          if node:
+            candidate2 = candidate2b
+
+        if node:
+          # Have two-level match
+          got_two_level = True
+          candidate = candidate2
+        elif section3:
+          # Try three-level match
+          candidate3 = "%s%s" % (candidate2, section3)
+          node = metadata.find_first(name_match(candidate3.replace('\n','')))
+
+          if not node and '\n' in section3:
+            # Linefeeds are ambiguous - was the intent to add a space,
+            # or continue a lengthy name? Try the former now.
+            candidate3b = "%s%s" % (candidate2, section3[:section3.find('\n')])
+            node = metadata.find_first(name_match(candidate3b))
+            if node:
+              candidate3 = candidate3b
+
+          if node:
+            # Have 3-level match
+            candidate = candidate3
+
+        # Replace match with crossref or complain if a likely match couldn't be matched
+
+        if node:
+          tag_set.add(node)
+          return whole_match.replace(candidate,filter_function(node))
+        else:
+          print >> sys.stderr,\
+            "  WARNING: Could not crossref likely reference {%s}" % (match.group(0))
+          return whole_match
+
+      text = re.sub(tag_match, filter_sub, text)
+
+    if summary_function is not None:
+      return text + summary_function(sorted(tag_set, key=lambda x: x.name))
     else:
-      # Insert para end/start after a span of blank lines except for
-      # the first paragraph, which got a para start already
-      if not in_body and not first_paragraph:
-        javatext = javatext + comment_para
-
-      in_body = True
-      first_paragraph = False
-
-      javatext = javatext + comment_prefix + line + "\n";
-
-  # Close last para tag
-  javatext = javatext + comment_prefix + "</p>\n";
-
-  return javatext
+      return text
 
 def any_visible(section, kind_name, visibilities):
   """
@@ -698,3 +989,75 @@ def filter_visibility(entries, visibilities):
     An iterable of Entry nodes
   """
   return (e for e in entries if e.applied_visibility in visibilities)
+
+def remove_synthetic(entries):
+  """
+  Filter the given entries by removing those that are synthetic.
+
+  Args:
+    entries: An iterable of Entry nodes
+
+  Yields:
+    An iterable of Entry nodes
+  """
+  return (e for e in entries if not e.synthetic)
+
+def wbr(text):
+  """
+  Insert word break hints for the browser in the form of <wbr> HTML tags.
+
+  Word breaks are inserted inside an HTML node only, so the nodes themselves
+  will not be changed. Attributes are also left unchanged.
+
+  The following rules apply to insert word breaks:
+  - For characters in [ '.', '/', '_' ]
+  - For uppercase letters inside a multi-word X.Y.Z (at least 3 parts)
+
+  Args:
+    text: A string of text containing HTML content.
+
+  Returns:
+    A string with <wbr> inserted by the above rules.
+  """
+  SPLIT_CHARS_LIST = ['.', '_', '/']
+  SPLIT_CHARS = r'([.|/|_/,]+)' # split by these characters
+  CAP_LETTER_MIN = 3 # at least 3 components split by above chars, i.e. x.y.z
+  def wbr_filter(text):
+      new_txt = text
+
+      # for johnyOrange.appleCider.redGuardian also insert wbr before the caps
+      # => johny<wbr>Orange.apple<wbr>Cider.red<wbr>Guardian
+      for words in text.split(" "):
+        for char in SPLIT_CHARS_LIST:
+          # match at least x.y.z, don't match x or x.y
+          if len(words.split(char)) >= CAP_LETTER_MIN:
+            new_word = re.sub(r"([a-z])([A-Z])", r"\1<wbr>\2", words)
+            new_txt = new_txt.replace(words, new_word)
+
+      # e.g. X/Y/Z -> X/<wbr>Y/<wbr>/Z. also for X.Y.Z, X_Y_Z.
+      new_txt = re.sub(SPLIT_CHARS, r"\1<wbr>", new_txt)
+
+      return new_txt
+
+  # Do not mangle HTML when doing the replace by using BeatifulSoup
+  # - Use the 'html.parser' to avoid inserting <html><body> when decoding
+  soup = bs4.BeautifulSoup(text, features='html.parser')
+  wbr_tag = lambda: soup.new_tag('wbr') # must generate new tag every time
+
+  for navigable_string in soup.findAll(text=True):
+      parent = navigable_string.parent
+
+      # Insert each '$text<wbr>$foo' before the old '$text$foo'
+      split_by_wbr_list = wbr_filter(navigable_string).split("<wbr>")
+      for (split_string, last) in enumerate_with_last(split_by_wbr_list):
+          navigable_string.insert_before(split_string)
+
+          if not last:
+            # Note that 'insert' will move existing tags to this spot
+            # so make a new tag instead
+            navigable_string.insert_before(wbr_tag())
+
+      # Remove the old unmodified text
+      navigable_string.extract()
+
+  return soup.decode()

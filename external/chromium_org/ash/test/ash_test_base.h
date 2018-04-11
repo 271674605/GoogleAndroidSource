@@ -13,12 +13,15 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/aura/client/window_types.h"
-#include "ui/views/test/test_views_delegate.h"
+#include "ui/wm/public/window_types.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
+
+namespace gfx {
+class Rect;
+}
 
 namespace aura {
 class RootWindow;
@@ -31,24 +34,16 @@ class EventGenerator;
 }  // namespace aura
 
 namespace ash {
-namespace internal {
 class DisplayManager;
-}  // namespace internal
 
 namespace test {
 
 class AshTestHelper;
+class TestScreenshotDelegate;
+class TestSystemTrayDelegate;
 #if defined(OS_WIN)
 class TestMetroViewerProcessHost;
 #endif
-
-class AshTestViewsDelegate : public views::TestViewsDelegate {
- public:
-  // Overriden from TestViewsDelegate.
-  virtual content::WebContents* CreateWebContents(
-      content::BrowserContext* browser_context,
-      content::SiteInstance* site_instance) OVERRIDE;
-};
 
 class AshTestBase : public testing::Test {
  public:
@@ -63,10 +58,10 @@ class AshTestBase : public testing::Test {
   // See ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
   void UpdateDisplay(const std::string& display_specs);
 
-  // Returns a RootWindow. Usually this is the active RootWindow, but that
+  // Returns a root Window. Usually this is the active root Window, but that
   // method can return NULL sometimes, and in those cases, we fall back on the
-  // primary RootWindow.
-  aura::RootWindow* CurrentContext();
+  // primary root Window.
+  aura::Window* CurrentContext();
 
   // Versions of the functions in aura::test:: that go through our shell
   // StackingController instead of taking a parent.
@@ -81,12 +76,12 @@ class AshTestBase : public testing::Test {
       const gfx::Rect& bounds);
   aura::Window* CreateTestWindowInShellWithDelegateAndType(
       aura::WindowDelegate* delegate,
-      aura::client::WindowType type,
+      ui::wm::WindowType type,
       int id,
       const gfx::Rect& bounds);
 
   // Attach |window| to the current shell's root window.
-  void SetDefaultParentByPrimaryRootWindow(aura::Window* window);
+  void ParentWindowInPrimaryRootWindow(aura::Window* window);
 
   // Returns the EventGenerator that uses screen coordinates and works
   // across multiple displays. It createse a new generator if it
@@ -102,23 +97,27 @@ class AshTestBase : public testing::Test {
     NUMBER_OF_BLOCK_REASONS
   };
 
-  // True if the running environment supports multiple displays,
-  // or false otherwise (e.g. win8 bot).
+  // Proxy to AshTestHelper::SupportsMultipleDisplays().
   static bool SupportsMultipleDisplays();
 
-  // True if the running environment supports host window resize,
-  // or false otherwise (e.g. win8 bot).
+  // Proxy to AshTestHelper::SupportsHostWindowResize().
   static bool SupportsHostWindowResize();
 
   void set_start_session(bool start_session) { start_session_ = start_session; }
 
+  AshTestHelper* ash_test_helper() { return ash_test_helper_.get(); }
+
   void RunAllPendingInMessageLoop();
+
+  TestScreenshotDelegate* GetScreenshotDelegate();
+  TestSystemTrayDelegate* GetSystemTrayDelegate();
 
   // Utility methods to emulate user logged in or not, session started or not
   // and user able to lock screen or not cases.
   void SetSessionStarted(bool session_started);
   void SetUserLoggedIn(bool user_logged_in);
   void SetCanLockScreen(bool can_lock_screen);
+  void SetShouldLockScreenBeforeSuspending(bool should_lock);
   void SetUserAddingScreenRunning(bool user_adding_screen_running);
 
   // Methods to emulate blocking and unblocking user session with given
@@ -131,7 +130,7 @@ class AshTestBase : public testing::Test {
   bool teardown_called_;
   // |SetUp()| doesn't activate session if this is set to false.
   bool start_session_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  scoped_ptr<content::TestBrowserThreadBundle> thread_bundle_;
   scoped_ptr<AshTestHelper> ash_test_helper_;
   scoped_ptr<aura::test::EventGenerator> event_generator_;
 #if defined(OS_WIN)

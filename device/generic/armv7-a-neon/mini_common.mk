@@ -34,55 +34,34 @@ PRODUCT_PACKAGES += \
     Provision \
     Settings \
     SystemUI \
+    TeleService \
     TestingCamera \
     WAPPushManager \
-    apache-xml \
     audio \
     audio_policy.default \
     audio.primary.default \
-    bouncycastle \
-    cacerts \
     com.android.future.usb.accessory \
-    conscrypt \
-    core \
-    core-junit \
-    dalvikvm \
-    dexdeps \
-    dexdump \
-    dexlist \
-    dexopt \
-    dmtracedump \
-    dx \
-    ext \
     hostapd \
-    hprof-conv \
-    libcrypto \
-    libdvm \
-    libexpat \
-    libicui18n \
-    libicuuc \
-    libjavacore \
-    libnativehelper \
     librs_jni \
-    libssl \
     libvideoeditor_core \
     libvideoeditor_jni \
     libvideoeditor_osal \
     libvideoeditorplayer \
     libvideoeditor_videofilters \
-    libz \
     lint \
     local_time.default \
     network \
-    okhttp \
     pand \
     power.default \
     sdptool \
+    vibrator.default \
     wpa_supplicant.conf
 
 # This is not necessary for mini, but is for mini-emulator as it should
 # be included in platform.zip
 PRODUCT_PACKAGES += camera.goldfish.jpeg
+
+PRODUCT_RUNTIMES := runtime_libart_default
 
 PRODUCT_COPY_FILES += \
     frameworks/av/media/libeffects/data/audio_effects.conf:system/etc/audio_effects.conf \

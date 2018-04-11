@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,13 +27,19 @@ public abstract class AwWebContentsDelegate extends WebContentsDelegateAndroid {
     @CalledByNative
     public abstract boolean addNewContents(boolean isDialog, boolean isUserGesture);
 
+    @Override
     @CalledByNative
     public abstract void closeContents();
 
+    @Override
     @CalledByNative
     public abstract void activateContents();
 
+    @Override
+    @CalledByNative
+    public abstract void toggleFullscreenModeForTab(boolean enterFullscreen);
+
     // Call in response to a prior runFileChooser call.
     protected static native void nativeFilesSelectedInChooser(int processId, int renderId,
-            int mode_flags, String[] filePath);
+            int mode_flags, String[] filePath, String[] displayName);
 }

@@ -25,13 +25,13 @@ SkString* SkObjectParser::BitmapToString(const SkBitmap& bitmap) {
     mBitmap->append(" H: ");
     mBitmap->appendS32(bitmap.height());
 
-    const char* gConfigStrings[] = {
-        "None", "A1", "A8", "Index8", "RGB565", "ARGB4444", "ARGB8888"
+    const char* gColorTypeStrings[] = {
+        "None", "A8", "565", "4444", "RGBA", "BGRA", "Index8"
     };
-    SkASSERT(SkBitmap::kConfigCount == 7);
+    SkASSERT(kLastEnum_SkColorType + 1 == SK_ARRAY_COUNT(gColorTypeStrings));
 
-    mBitmap->append(" Config: ");
-    mBitmap->append(gConfigStrings[bitmap.getConfig()]);
+    mBitmap->append(" ColorType: ");
+    mBitmap->append(gColorTypeStrings[bitmap.colorType()]);
 
     if (bitmap.isOpaque()) {
         mBitmap->append(" opaque");
@@ -94,7 +94,7 @@ SkString* SkObjectParser::IRectToString(const SkIRect& rect) {
 
 SkString* SkObjectParser::MatrixToString(const SkMatrix& matrix) {
     SkString* str = new SkString("SkMatrix: ");
-#ifdef SK_DEVELOPER
+#ifndef SK_IGNORE_TO_STRING
     matrix.toString(str);
 #endif
     return str;
@@ -102,7 +102,7 @@ SkString* SkObjectParser::MatrixToString(const SkMatrix& matrix) {
 
 SkString* SkObjectParser::PaintToString(const SkPaint& paint) {
     SkString* str = new SkString;
-#ifdef SK_DEVELOPER
+#ifndef SK_IGNORE_TO_STRING
     paint.toString(str);
 #endif
     return str;
@@ -241,6 +241,8 @@ SkString* SkObjectParser::RRectToString(const SkRRect& rrect, const char* title)
             mRRect->append("oval");
         } else if (rrect.isSimple()) {
             mRRect->append("simple");
+        } else if (rrect.isNinePatch()) {
+            mRRect->append("nine-patch");
         } else {
             SkASSERT(rrect.isComplex());
             mRRect->append("complex");
@@ -335,11 +337,12 @@ SkString* SkObjectParser::TextToString(const void* text, size_t byteLength,
         }
         case SkPaint::kUTF16_TextEncoding: {
             decodedText->append("UTF-16: ");
-            size_t sizeNeeded = SkUTF16_ToUTF8((uint16_t*)text, byteLength / 2, NULL);
-            char* utf8 = new char[sizeNeeded];
-            SkUTF16_ToUTF8((uint16_t*)text, byteLength / 2, utf8);
+            size_t sizeNeeded = SkUTF16_ToUTF8((uint16_t*)text,
+                                                SkToS32(byteLength / 2),
+                                                NULL);
+            SkAutoSTMalloc<0x100, char> utf8(sizeNeeded);
+            SkUTF16_ToUTF8((uint16_t*)text, SkToS32(byteLength / 2), utf8);
             decodedText->append(utf8, sizeNeeded);
-            delete utf8;
             break;
         }
         case SkPaint::kUTF32_TextEncoding: {

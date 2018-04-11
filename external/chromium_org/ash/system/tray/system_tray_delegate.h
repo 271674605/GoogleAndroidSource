@@ -111,7 +111,11 @@ typedef std::vector<IMEInfo> IMEInfoList;
 
 class VolumeControlDelegate;
 
-class SystemTrayDelegate {
+namespace tray {
+class UserAccountsDelegate;
+}  // namespace tray
+
+class ASH_EXPORT SystemTrayDelegate {
  public:
   virtual ~SystemTrayDelegate() {}
 
@@ -126,7 +130,6 @@ class SystemTrayDelegate {
 
   // Gets information about the active user.
   virtual user::LoginStatus GetUserLoginStatus() const = 0;
-  virtual bool IsOobeCompleted() const = 0;
 
   // Shows UI for changing user's profile picture.
   virtual void ChangeProfilePicture() = 0;
@@ -161,6 +164,9 @@ class SystemTrayDelegate {
 
   // Shows the settings related to date, timezone etc.
   virtual void ShowDateSettings() = 0;
+
+  // Shows the dialog to set system time, date, and timezone.
+  virtual void ShowSetTimeDialog() = 0;
 
   // Shows the settings related to network. If |service_path| is not empty,
   // show the settings for that network.
@@ -205,6 +211,16 @@ class SystemTrayDelegate {
 
   // Shows login UI to add other users to this session.
   virtual void ShowUserLogin() = 0;
+
+  // Shows the spring charger replacement dialog if necessary.
+  // Returns true if the dialog is shown by the call.
+  virtual bool ShowSpringChargerReplacementDialog() = 0;
+
+  // True if the spring charger replacement dialog is visible.
+  virtual bool IsSpringChargerReplacementDialogVisible() = 0;
+
+  // True if user has confirmed using safe spring charger.
+  virtual bool HasUserConfirmedSafeSpringCharger() = 0;
 
   // Attempts to shut down the system.
   virtual void ShutDown() = 0;
@@ -255,14 +271,18 @@ class SystemTrayDelegate {
   virtual void GetDriveOperationStatusList(
       DriveOperationStatusList* list) = 0;
 
-  // Shows UI to configure or activate the network specified by |network_id|.
-  virtual void ConfigureNetwork(const std::string& network_id) = 0;
+  // Shows UI to configure or activate the network specified by |network_id|,
+  // which may include showing Payment or Portal UI when appropriate.
+  // |parent_window| is used to parent any configuration UI. If NULL a default
+  // window will be used.
+  virtual void ShowNetworkConfigure(const std::string& network_id,
+                                    gfx::NativeWindow parent_window) = 0;
 
-  // Shows UI to enroll the network specified by |network_id| if appropriate,
-  // otherwise behaves the same as ConfigureNetwork. |parent_window| is used
+  // Shows UI to enroll the network specified by |network_id| if appropriate
+  // and returns true, otherwise returns false. |parent_window| is used
   // to parent any configuration UI. If NULL a default window will be used.
-  virtual void EnrollOrConfigureNetwork(const std::string& network_id,
-                                        gfx::NativeWindow parent_window) = 0;
+  virtual bool EnrollNetwork(const std::string& network_id,
+                             gfx::NativeWindow parent_window) = 0;
 
   // Shows UI to manage bluetooth devices.
   virtual void ManageBluetoothDevices() = 0;
@@ -274,16 +294,11 @@ class SystemTrayDelegate {
   virtual void ShowMobileSimDialog() = 0;
 
   // Shows UI to setup a mobile network.
-  virtual void ShowMobileSetup(const std::string& network_id) = 0;
+  virtual void ShowMobileSetupDialog(const std::string& service_path) = 0;
 
-  // Shows UI to connect to an unlisted wifi network.
-  virtual void ShowOtherWifi() = 0;
-
-  // Shows UI to configure vpn.
-  virtual void ShowOtherVPN() = 0;
-
-  // Shows UI to search for cellular networks.
-  virtual void ShowOtherCellular() = 0;
+  // Shows UI to connect to an unlisted network of type |type|. On Chrome OS
+  // |type| corresponds to a Shill network type.
+  virtual void ShowOtherNetworkDialog(const std::string& type) = 0;
 
   // Returns whether bluetooth capability is available.
   virtual bool GetBluetoothAvailable() = 0;
@@ -291,15 +306,8 @@ class SystemTrayDelegate {
   // Returns whether bluetooth is enabled.
   virtual bool GetBluetoothEnabled() = 0;
 
-  // Retrieves information about the carrier and locale specific |setup_url|.
-  // If none of the carrier info/setup URL cannot be retrieved, returns false.
-  // Note: |setup_url| is returned when carrier is not defined (no SIM card).
-  virtual bool GetCellularCarrierInfo(std::string* carrier_id,
-                                      std::string* topup_url,
-                                      std::string* setup_url) = 0;
-
-  // Opens the cellular network specific URL.
-  virtual void ShowCellularURL(const std::string& url) = 0;
+  // Returns whether the delegate has initiated a bluetooth discovery session.
+  virtual bool GetBluetoothDiscovering() = 0;
 
   // Shows UI for changing proxy settings.
   virtual void ChangeProxySettings() = 0;
@@ -320,17 +328,21 @@ class SystemTrayDelegate {
   // Get the system tray menu size in pixels (dependent on the language).
   virtual int GetSystemTrayMenuWidth() = 0;
 
-  // Returns the duration formatted as a localized string.
-  // TODO(stevenjb): Move TimeFormat from src/chrome to src/ui so that it can be
-  // accessed without going through the delegate. crbug.com/222697
-  virtual base::string16 FormatTimeDuration(
-      const base::TimeDelta& delta) const = 0;
+  // The active user has been changed. This will be called when the UI is ready
+  // to be switched to the new user.
+  // Note: This will happen after SessionStateObserver::ActiveUserChanged fires.
+  virtual void ActiveUserWasChanged() = 0;
 
-  // Speaks the given text if spoken feedback is enabled.
-  virtual void MaybeSpeak(const std::string& utterance) const = 0;
+  // Returns true when |network| is behind captive portal.
+  virtual bool IsNetworkBehindCaptivePortal(
+      const std::string& service_path) const = 0;
 
-  // Creates a dummy delegate for testing.
-  static SystemTrayDelegate* CreateDummyDelegate();
+  // Returns true when the Search key is configured to be treated as Caps Lock.
+  virtual bool IsSearchKeyMappedToCapsLock() = 0;
+
+  // Returns accounts delegate for given user.
+  virtual tray::UserAccountsDelegate* GetUserAccountsDelegate(
+      const std::string& user_id) = 0;
 };
 
 }  // namespace ash

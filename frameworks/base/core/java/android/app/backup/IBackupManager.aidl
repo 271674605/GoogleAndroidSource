@@ -43,14 +43,14 @@ interface IBackupManager {
     void dataChanged(String packageName);
 
     /**
-     * Erase all backed-up data for the given package from the storage
+     * Erase all backed-up data for the given package from the given storage
      * destination.
      *
      * Any application can invoke this method for its own package, but
      * only callers who hold the android.permission.BACKUP permission
      * may invoke it for arbitrary packages.
      */
-    void clearBackupData(String packageName);
+    void clearBackupData(String transportName, String packageName);
 
     /**
      * Notifies the Backup Manager Service that an agent has become available.  This
@@ -167,8 +167,16 @@ interface IBackupManager {
      *     are to be backed up.  The <code>allApps</code> parameter supersedes this.
      */
     void fullBackup(in ParcelFileDescriptor fd, boolean includeApks, boolean includeObbs,
-            boolean includeShared, boolean allApps, boolean allIncludesSystem,
-            in String[] packageNames);
+            boolean includeShared, boolean doWidgets, boolean allApps, boolean allIncludesSystem,
+            boolean doCompress, in String[] packageNames);
+
+    /**
+     * Perform a full-dataset backup of the given applications via the currently active
+     * transport.
+     *
+     * @param packageNames The package names of the apps whose data are to be backed up.
+     */
+    void fullTransportBackup(in String[] packageNames);
 
     /**
      * Restore device content from the data stream passed through the given socket.  The
@@ -240,6 +248,18 @@ interface IBackupManager {
      *   verbatim by the Settings UI as the summary text of the "configure..." item.
      */
     String getDestinationString(String transport);
+
+    /**
+     * Get the manage-data UI intent, if any, from the given transport.  Callers must
+     * hold the android.permission.BACKUP permission in order to use this method.
+     */
+    Intent getDataManagementIntent(String transport);
+
+    /**
+     * Get the manage-data menu label, if any, from the given transport.  Callers must
+     * hold the android.permission.BACKUP permission in order to use this method.
+     */
+    String getDataManagementLabel(String transport);
 
     /**
      * Begin a restore session.  Either or both of packageName and transportID

@@ -11,9 +11,9 @@
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/base/animation/animation_delegate.h"
+#include "ui/gfx/animation/animation_delegate.h"
 
-namespace ui {
+namespace gfx {
 class SlideAnimation;
 }
 
@@ -24,7 +24,7 @@ class PaginationModelObserver;
 // A simple pagination model that consists of two numbers: the total pages and
 // the currently selected page. The model is a single selection model that at
 // the most one page can become selected at any time.
-class APP_LIST_EXPORT PaginationModel : public ui::AnimationDelegate {
+class APP_LIST_EXPORT PaginationModel : public gfx::AnimationDelegate {
  public:
   // Holds info for transition animation and touch scroll.
   struct Transition {
@@ -58,6 +58,10 @@ class APP_LIST_EXPORT PaginationModel : public ui::AnimationDelegate {
 
   // Selects a page by relative |delta|.
   void SelectPageRelative(int delta, bool animate);
+
+  // Immediately completes all queued animations, jumping directly to the final
+  // target page.
+  void FinishAnimation();
 
   void SetTransition(const Transition& transition);
   void SetTransitionDurations(int duration_ms, int overscroll_duration_ms);
@@ -93,6 +97,10 @@ class APP_LIST_EXPORT PaginationModel : public ui::AnimationDelegate {
     return transition_.target_page != -1 || transition_.progress != 0;
   }
 
+  // Gets the page that the animation will eventually land on. If there is no
+  // active animation, just returns selected_page().
+  int SelectedTargetPage() const;
+
  private:
   void NotifySelectedPageChanged(int old_selected, int new_selected);
   void NotifyTransitionStarted();
@@ -113,9 +121,9 @@ class APP_LIST_EXPORT PaginationModel : public ui::AnimationDelegate {
   void StartTransitionAnimation(const Transition& transition);
   void ResetTransitionAnimation();
 
-  // ui::AnimationDelegate overrides:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  // gfx::AnimationDelegate overrides:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
 
   int total_pages_;
   int selected_page_;
@@ -127,7 +135,7 @@ class APP_LIST_EXPORT PaginationModel : public ui::AnimationDelegate {
   // last target page is remembered here.
   int pending_selected_page_;
 
-  scoped_ptr<ui::SlideAnimation> transition_animation_;
+  scoped_ptr<gfx::SlideAnimation> transition_animation_;
   int transition_duration_ms_;  // Transition duration in millisecond.
   int overscroll_transition_duration_ms_;
 

@@ -7,15 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define _LIBCPP_EXTERN_TEMPLATE(...) extern template __VA_ARGS__;
+
 #include "string"
 #include "cstdlib"
 #include "cwchar"
 #include "cerrno"
 #include "limits"
 #include "stdexcept"
-#ifdef _WIN32
+#ifdef _LIBCPP_MSVCRT
 #include "support/win32/support.h"
-#endif // _WIN32
+#endif // _LIBCPP_MSVCRT
+#include <stdio.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -38,6 +41,7 @@ void throw_helper( const string& msg )
 #ifndef _LIBCPP_NO_EXCEPTIONS
     throw T( msg );
 #else
+    printf("%s\n", msg.c_str());
     abort();
 #endif
 }
@@ -87,7 +91,7 @@ inline
 int
 as_integer(const string& func, const string& s, size_t* idx, int base )
 {
-    // Use long as no Stantard string to integer exists.
+    // Use long as no Standard string to integer exists.
     long r = as_integer_helper<long>( func, s, idx, base, strtol );
     if (r < numeric_limits<int>::min() || numeric_limits<int>::max() < r)
         throw_from_string_out_of_range(func);
@@ -182,7 +186,7 @@ as_float_helper(const string& func, const S& str, size_t* idx, F f )
     const typename S::value_type* const p = str.c_str();
     typename remove_reference<decltype(errno)>::type errno_save = errno;
     errno = 0;
-    V r = f(p, &ptr);
+    V r = static_cast<V>(f(p, &ptr));
     swap(errno, errno_save);
     if (errno_save == ERANGE)
         throw_from_string_out_of_range(func);
@@ -202,7 +206,7 @@ inline
 float
 as_float( const string& func, const string& s, size_t* idx )
 {
-    return as_float_helper<float>( func, s, idx, strtof );
+    return as_float_helper<float>( func, s, idx, strtod );
 }
 
 template<>
@@ -226,7 +230,7 @@ inline
 float
 as_float( const string& func, const wstring& s, size_t* idx )
 {
-    return as_float_helper<float>( func, s, idx, wcstof );
+    return as_float_helper<float>( func, s, idx, wcstod );
 }
 
 template<>
@@ -425,7 +429,7 @@ inline
 wide_printf
 get_swprintf()
 {
-#ifndef _WIN32
+#ifndef _LIBCPP_MSVCRT
     return swprintf;
 #else
     return static_cast<int (__cdecl*)(wchar_t* __restrict, size_t, const wchar_t*__restrict, ...)>(swprintf);

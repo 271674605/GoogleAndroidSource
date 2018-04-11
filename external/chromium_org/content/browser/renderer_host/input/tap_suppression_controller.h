@@ -19,7 +19,22 @@ class TapSuppressionControllerClient;
 // GestureFlingCancel are suppressed.
 class CONTENT_EXPORT TapSuppressionController {
  public:
-  explicit TapSuppressionController(TapSuppressionControllerClient* client);
+  struct CONTENT_EXPORT Config {
+    Config();
+
+    // Defaults to false, in which case no suppression is performed.
+    bool enabled;
+
+    // The maximum time allowed between a GestureFlingCancel and its
+    // corresponding tap down.
+    base::TimeDelta max_cancel_to_down_time;
+
+    // The maximum time allowed between a single tap's down and up events.
+    base::TimeDelta max_tap_gap_time;
+  };
+
+  TapSuppressionController(TapSuppressionControllerClient* client,
+                           const Config& config);
   virtual ~TapSuppressionController();
 
   // Should be called whenever a GestureFlingCancel event is received.
@@ -35,13 +50,9 @@ class CONTENT_EXPORT TapSuppressionController {
   // for keeping the event for later release, if needed.
   bool ShouldDeferTapDown();
 
-  // Should be called whenever a tap up (touchpad or touchscreen) is received.
-  // Returns true if the tap up should be suppressed.
-  bool ShouldSuppressTapUp();
-
-  // Should be called whenever a tap cancel is received. Returns true if the tap
-  // cancel should be suppressed.
-  bool ShouldSuppressTapCancel();
+  // Should be called whenever a tap ending event is received. Returns true if
+  // the tap event should be suppressed.
+  bool ShouldSuppressTapEnd();
 
  protected:
   virtual base::TimeTicks Now();
@@ -53,16 +64,19 @@ class CONTENT_EXPORT TapSuppressionController {
   friend class MockTapSuppressionController;
 
   enum State {
+    DISABLED,
     NOTHING,
     GFC_IN_PROGRESS,
     TAP_DOWN_STASHED,
     LAST_CANCEL_STOPPED_FLING,
   };
 
-
   TapSuppressionControllerClient* client_;
   base::OneShotTimer<TapSuppressionController> tap_down_timer_;
   State state_;
+
+  base::TimeDelta max_cancel_to_down_time_;
+  base::TimeDelta max_tap_gap_time_;
 
   // TODO(rjkroege): During debugging, the event times did not prove reliable.
   // Replace the use of base::TimeTicks with an accurate event time when they

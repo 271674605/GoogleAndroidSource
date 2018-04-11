@@ -16,12 +16,23 @@ extern const char kDisabledReasonPermissionsIncrease[];
 // Error messages.
 extern const char kExtensionCreateError[];
 extern const char kGestureNeededForEscalationError[];
+extern const char kGestureNeededForUninstallError[];
 extern const char kManifestParseError[];
 extern const char kNoExtensionError[];
 extern const char kNotAnAppError[];
 extern const char kUserCantModifyError[];
 extern const char kUninstallCanceledError[];
 extern const char kUserDidNotReEnableError[];
+extern const char kGestureNeededForCreateAppShortcutError[];
+extern const char kNoBrowserToCreateShortcut[];
+extern const char kCreateOnlyPackagedAppShortcutMac[];
+extern const char kCreateShortcutCanceledError[];
+extern const char kGestureNeededForSetLaunchTypeError[];
+extern const char kLaunchTypeNotAvailableError[];
+extern const char kGestureNeededForGenerateAppForLinkError[];
+extern const char kInvalidURLError[];
+extern const char kEmptyTitleError[];
+extern const char kGenerateAppForLinkInstallError[];
 
 
 }  // namespace extension_management_api_constants

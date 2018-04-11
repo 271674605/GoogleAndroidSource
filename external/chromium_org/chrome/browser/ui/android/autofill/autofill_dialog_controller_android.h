@@ -12,12 +12,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "components/autofill/core/browser/autofill_client.h"
 
 class Profile;
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
 
 namespace autofill {
 
@@ -30,12 +27,7 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const DialogType dialog_type,
-      const base::Callback<void(const FormStructure*,
-                                const std::string&)>& callback);
-
-  // Registers profile preferences for the AutofillDialogControllerAndroid.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+      const AutofillClient::ResultCallback& callback);
 
   virtual ~AutofillDialogControllerAndroid();
 
@@ -43,13 +35,6 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void TabActivated() OVERRIDE;
-  virtual void AddAutocheckoutStep(AutocheckoutStepType step_type) OVERRIDE;
-  virtual void UpdateAutocheckoutStep(
-      AutocheckoutStepType step_type,
-      AutocheckoutStepStatus step_status) OVERRIDE;
-  virtual void OnAutocheckoutError() OVERRIDE;
-  virtual void OnAutocheckoutSuccess() OVERRIDE;
-  virtual DialogType GetDialogType() const OVERRIDE;
 
   // JNI bindings for Java-side AutofillDialogDelegate:
   void DialogCancel(JNIEnv* env, jobject obj);
@@ -70,9 +55,7 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const DialogType dialog_type,
-      const base::Callback<void(const FormStructure*,
-                                const std::string&)>& callback);
+      const AutofillClient::ResultCallback& callback);
 
   const AutofillMetrics& GetMetricLogger() const {
     return metric_logger_;
@@ -83,11 +66,6 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
 
   // Logs metrics when the dialog is canceled.
   void LogOnCancelMetrics();
-
-  bool RequestingCreditCardInfo() const;
-  bool TransmissionWillBeSecure() const;
-
-  void SetAutocheckoutState(AutocheckoutState autocheckout_state);
 
   // The |profile| for |contents_|.
   Profile* const profile_;
@@ -100,13 +78,6 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
   base::Time dialog_shown_timestamp_;
   AutofillMetrics::DialogInitialUserStateMetric initial_user_state_;
 
-  // The time that Autocheckout started running. Reset on error. While this is
-  // a valid time, |AutocheckoutIsRunning()| will return true.
-  base::Time autocheckout_started_timestamp_;
-
-  // Whether this is an Autocheckout or a requestAutocomplete dialog.
-  const DialogType dialog_type_;
-
   FormStructure form_structure_;
 
   // Whether the URL visible to the user when this dialog was requested to be
@@ -116,9 +87,8 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
   // The URL of the invoking site.
   GURL source_url_;
 
-  // The callback via which we return the collected data and, if Online Wallet
-  // was used, the Google transaction id.
-  base::Callback<void(const FormStructure*, const std::string&)> callback_;
+  // The callback via which we return the collected data.
+  AutofillClient::ResultCallback callback_;
 
   // Whether |form_structure_| has asked for any details that would indicate
   // we should show a shipping section.
@@ -126,9 +96,6 @@ class AutofillDialogControllerAndroid : public AutofillDialogController {
 
   base::WeakPtrFactory<AutofillDialogControllerAndroid>
       weak_ptr_factory_;
-
-  // The current state of the Autocheckout flow.
-  AutocheckoutState autocheckout_state_;
 
   // Whether the latency to display to the UI was logged to UMA yet.
   bool was_ui_latency_logged_;

@@ -78,7 +78,7 @@ static SNDFILE *sf_open_read(const char *path, SF_INFO *info)
     size_t actual;
     actual = fread(wav, sizeof(char), sizeof(wav), stream);
     if (actual < 12) {
-        fprintf(stderr, "actual %u < 44\n", actual);
+        fprintf(stderr, "actual %zu < 44\n", actual);
         goto close;
     }
     if (memcmp(wav, "RIFF", 4)) {
@@ -101,13 +101,13 @@ static SNDFILE *sf_open_read(const char *path, SF_INFO *info)
         unsigned char chunk[8];
         actual = fread(chunk, sizeof(char), sizeof(chunk), stream);
         if (actual != sizeof(chunk)) {
-            fprintf(stderr, "actual %u != %u\n", actual, sizeof(chunk));
+            fprintf(stderr, "actual %zu != %zu\n", actual, sizeof(chunk));
             goto close;
         }
         remaining -= 8;
         unsigned chunkSize = little4u(&chunk[4]);
         if (chunkSize > remaining) {
-            fprintf(stderr, "chunkSize %u > remaining %u\n", chunkSize, remaining);
+            fprintf(stderr, "chunkSize %u > remaining %zu\n", chunkSize, remaining);
             goto close;
         }
         if (!memcmp(&chunk[0], "fmt ", 4)) {
@@ -122,7 +122,7 @@ static SNDFILE *sf_open_read(const char *path, SF_INFO *info)
             unsigned char fmt[40];
             actual = fread(fmt, sizeof(char), 2, stream);
             if (actual != 2) {
-                fprintf(stderr, "actual %u != 2\n", actual);
+                fprintf(stderr, "actual %zu != 2\n", actual);
                 goto close;
             }
             unsigned format = little2u(&fmt[0]);
@@ -140,20 +140,20 @@ static SNDFILE *sf_open_read(const char *path, SF_INFO *info)
                 goto close;
             }
             if (chunkSize < minSize) {
-                fprintf(stderr, "chunkSize %u < minSize %u\n", chunkSize, minSize);
+                fprintf(stderr, "chunkSize %u < minSize %zu\n", chunkSize, minSize);
                 goto close;
             }
             actual = fread(&fmt[2], sizeof(char), minSize - 2, stream);
             if (actual != minSize - 2) {
-                fprintf(stderr, "actual %u != %u\n", actual, minSize - 16);
+                fprintf(stderr, "actual %zu != %zu\n", actual, minSize - 16);
                 goto close;
             }
             if (chunkSize > minSize) {
                 fseek(stream, (long) (chunkSize - minSize), SEEK_CUR);
             }
             unsigned channels = little2u(&fmt[2]);
-            if (channels != 1 && channels != 2) {
-                fprintf(stderr, "channels %u != 1 or 2\n", channels);
+            if (channels != 1 && channels != 2 && channels != 4 && channels != 6 && channels != 8) {
+                fprintf(stderr, "unsupported channels %u\n", channels);
                 goto close;
             }
             unsigned samplerate = little4u(&fmt[4]);
@@ -215,7 +215,7 @@ static SNDFILE *sf_open_read(const char *path, SF_INFO *info)
         remaining -= chunkSize;
     }
     if (remaining > 0) {
-        fprintf(stderr, "partial chunk at end of RIFF, remaining %u\n", remaining);
+        fprintf(stderr, "partial chunk at end of RIFF, remaining %zu\n", remaining);
         goto close;
     }
     if (!hadData) {
@@ -244,13 +244,17 @@ static SNDFILE *sf_open_write(const char *path, SF_INFO *info)
     int sub = info->format & SF_FORMAT_SUBMASK;
     if (!(
             (info->samplerate > 0) &&
-            (info->channels == 1 || info->channels == 2) &&
+            (info->channels > 0 && info->channels <= 8) &&
             ((info->format & SF_FORMAT_TYPEMASK) == SF_FORMAT_WAV) &&
             (sub == SF_FORMAT_PCM_16 || sub == SF_FORMAT_PCM_U8 || sub == SF_FORMAT_FLOAT)
           )) {
         return NULL;
     }
     FILE *stream = fopen(path, "w+b");
+    if (stream == NULL) {
+        fprintf(stderr, "fopen %s failed errno %d\n", path, errno);
+        return NULL;
+    }
     unsigned char wav[58];
     memset(wav, 0, sizeof(wav));
     memcpy(wav, "RIFF", 4);
@@ -286,14 +290,16 @@ static SNDFILE *sf_open_write(const char *path, SF_INFO *info)
     write4u(&wav[28], byteRate);
     wav[32] = blockAlignment;
     wav[34] = bitsPerSample;
+    size_t extra = 0;
     if (sub == SF_FORMAT_FLOAT) {
         memcpy(&wav[38], "fact", 4);
         wav[42] = 4;
         memcpy(&wav[50], "data", 4);
+        extra = 14;
     } else
         memcpy(&wav[36], "data", 4);
     // dataSize is initially zero
-    (void) fwrite(wav, sizeof(wav), 1, stream);
+    (void) fwrite(wav, 44 + extra, 1, stream);
     SNDFILE *handle = (SNDFILE *) malloc(sizeof(SNDFILE));
     handle->mode = SFM_WRITE;
     handle->temp = NULL;
@@ -348,8 +354,9 @@ sf_count_t sf_readf_short(SNDFILE *handle, short *ptr, sf_count_t desiredFrames)
             desiredFrames <= 0) {
         return 0;
     }
-    if (handle->remaining < (size_t) desiredFrames)
+    if (handle->remaining < (size_t) desiredFrames) {
         desiredFrames = handle->remaining;
+    }
     // does not check for numeric overflow
     size_t desiredBytes = desiredFrames * handle->bytesPerFrame;
     size_t actualBytes;
@@ -388,7 +395,96 @@ sf_count_t sf_readf_short(SNDFILE *handle, short *ptr, sf_count_t desiredFrames)
 
 sf_count_t sf_readf_float(SNDFILE *handle, float *ptr, sf_count_t desiredFrames)
 {
-    return 0;
+    if (handle == NULL || handle->mode != SFM_READ || ptr == NULL || !handle->remaining ||
+            desiredFrames <= 0) {
+        return 0;
+    }
+    if (handle->remaining < (size_t) desiredFrames) {
+        desiredFrames = handle->remaining;
+    }
+    // does not check for numeric overflow
+    size_t desiredBytes = desiredFrames * handle->bytesPerFrame;
+    size_t actualBytes;
+    void *temp = NULL;
+    unsigned format = handle->info.format & SF_FORMAT_SUBMASK;
+    if (format == SF_FORMAT_PCM_16 || format == SF_FORMAT_PCM_U8) {
+        temp = malloc(desiredBytes);
+        actualBytes = fread(temp, sizeof(char), desiredBytes, handle->stream);
+    } else {
+        actualBytes = fread(ptr, sizeof(char), desiredBytes, handle->stream);
+    }
+    size_t actualFrames = actualBytes / handle->bytesPerFrame;
+    handle->remaining -= actualFrames;
+    switch (format) {
+    case SF_FORMAT_PCM_U8:
+#if 0
+        // TODO - implement
+        memcpy_to_float_from_u8(ptr, (const unsigned char *) temp,
+                actualFrames * handle->info.channels);
+#endif
+        free(temp);
+        break;
+    case SF_FORMAT_PCM_16:
+        memcpy_to_float_from_i16(ptr, (const short *) temp, actualFrames * handle->info.channels);
+        free(temp);
+        break;
+    case SF_FORMAT_PCM_32:
+        memcpy_to_float_from_i32(ptr, (const int *) ptr, actualFrames * handle->info.channels);
+        break;
+    case SF_FORMAT_FLOAT:
+        break;
+    default:
+        memset(ptr, 0, actualFrames * handle->info.channels * sizeof(float));
+        break;
+    }
+    return actualFrames;
+}
+
+sf_count_t sf_readf_int(SNDFILE *handle, int *ptr, sf_count_t desiredFrames)
+{
+    if (handle == NULL || handle->mode != SFM_READ || ptr == NULL || !handle->remaining ||
+            desiredFrames <= 0) {
+        return 0;
+    }
+    if (handle->remaining < (size_t) desiredFrames) {
+        desiredFrames = handle->remaining;
+    }
+    // does not check for numeric overflow
+    size_t desiredBytes = desiredFrames * handle->bytesPerFrame;
+    void *temp = NULL;
+    unsigned format = handle->info.format & SF_FORMAT_SUBMASK;
+    size_t actualBytes;
+    if (format == SF_FORMAT_PCM_16 || format == SF_FORMAT_PCM_U8) {
+        temp = malloc(desiredBytes);
+        actualBytes = fread(temp, sizeof(char), desiredBytes, handle->stream);
+    } else {
+        actualBytes = fread(ptr, sizeof(char), desiredBytes, handle->stream);
+    }
+    size_t actualFrames = actualBytes / handle->bytesPerFrame;
+    handle->remaining -= actualFrames;
+    switch (format) {
+    case SF_FORMAT_PCM_U8:
+#if 0
+        // TODO - implement
+        memcpy_to_i32_from_u8(ptr, (const unsigned char *) temp,
+                actualFrames * handle->info.channels);
+#endif
+        free(temp);
+        break;
+    case SF_FORMAT_PCM_16:
+        memcpy_to_i32_from_i16(ptr, (const short *) temp, actualFrames * handle->info.channels);
+        free(temp);
+        break;
+    case SF_FORMAT_PCM_32:
+        break;
+    case SF_FORMAT_FLOAT:
+        memcpy_to_i32_from_float(ptr, (const float *) ptr, actualFrames * handle->info.channels);
+        break;
+    default:
+        memset(ptr, 0, actualFrames * handle->info.channels * sizeof(int));
+        break;
+    }
+    return actualFrames;
 }
 
 sf_count_t sf_writef_short(SNDFILE *handle, const short *ptr, sf_count_t desiredFrames)
@@ -414,7 +510,12 @@ sf_count_t sf_writef_short(SNDFILE *handle, const short *ptr, sf_count_t desired
             actualBytes = fwrite(handle->temp, sizeof(char), desiredBytes, handle->stream);
         }
         break;
-    case SF_FORMAT_FLOAT:   // transcoding from short to float not yet implemented
+    case SF_FORMAT_FLOAT:
+        handle->temp = realloc(handle->temp, desiredBytes);
+        memcpy_to_float_from_i16((float *) handle->temp, ptr,
+                desiredFrames * handle->info.channels);
+        actualBytes = fwrite(handle->temp, sizeof(char), desiredBytes, handle->stream);
+        break;
     default:
         break;
     }
@@ -433,8 +534,13 @@ sf_count_t sf_writef_float(SNDFILE *handle, const float *ptr, sf_count_t desired
     case SF_FORMAT_FLOAT:
         actualBytes = fwrite(ptr, sizeof(char), desiredBytes, handle->stream);
         break;
-    case SF_FORMAT_PCM_U8:  // transcoding from float to byte/short not yet implemented
     case SF_FORMAT_PCM_16:
+        handle->temp = realloc(handle->temp, desiredBytes);
+        memcpy_to_i16_from_float((short *) handle->temp, ptr,
+                desiredFrames * handle->info.channels);
+        actualBytes = fwrite(handle->temp, sizeof(char), desiredBytes, handle->stream);
+        break;
+    case SF_FORMAT_PCM_U8:  // transcoding from float to byte not yet implemented
     default:
         break;
     }

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -111,7 +111,6 @@ typedef struct
     UINT8               selected_aid_idx;
 } tCE_T4T_MEM;
 
-#define CE_T4T_WILDCARD_AID_HANDLE  (CE_T4T_MAX_REG_AID)    /* reserved handle for wildcard aid */
 
 /* CE memory control blocks */
 typedef struct

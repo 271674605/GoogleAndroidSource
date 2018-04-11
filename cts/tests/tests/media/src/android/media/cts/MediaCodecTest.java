@@ -16,9 +16,13 @@
 
 package android.media.cts;
 
+import com.android.cts.media.R;
+
+import android.content.res.AssetFileDescriptor;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
+import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaCodecInfo.CodecCapabilities;
 import android.media.MediaCodecInfo.CodecProfileLevel;
@@ -27,13 +31,19 @@ import android.test.AndroidTestCase;
 import android.util.Log;
 import android.view.Surface;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
  * General MediaCodec tests.
  *
  * In particular, check various API edge cases.
+ *
+ * <p>The file in res/raw used by testDecodeShortInput are (c) copyright 2008,
+ * Blender Foundation / www.bigbuckbunny.org, and are licensed under the Creative Commons
+ * Attribution 3.0 License at http://creativecommons.org/licenses/by/3.0/us/.
  */
 public class MediaCodecTest extends AndroidTestCase {
     private static final String TAG = "MediaCodecTest";
@@ -62,6 +72,201 @@ public class MediaCodecTest extends AndroidTestCase {
 
     /**
      * Tests:
+     * <br> Exceptions for MediaCodec factory methods
+     * <br> Exceptions for MediaCodec methods when called in the incorrect state.
+     *
+     * A selective test to ensure proper exceptions are thrown from MediaCodec
+     * methods when called in incorrect operational states.
+     */
+    public void testException() throws Exception {
+        MediaFormat[] formatList = new MediaFormat[2];
+
+        // use audio format
+        formatList[0] = new MediaFormat();
+        formatList[0].setString(MediaFormat.KEY_MIME, "audio/amr-wb");
+        formatList[0].setInteger(MediaFormat.KEY_SAMPLE_RATE, 16000);
+        formatList[0].setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+        formatList[0].setInteger(MediaFormat.KEY_BIT_RATE, 19850);
+
+        // use video format
+        formatList[1] = createMediaFormat();
+
+        for (MediaFormat format : formatList) {
+            verifyIllegalStateException(format, false);
+            verifyIllegalStateException(format, true);
+        }
+    }
+
+    // wrap MediaCodec encoder and decoder creation
+    private static MediaCodec createCodecByType(String type, boolean isEncoder)
+            throws IOException {
+        if (isEncoder) {
+            return MediaCodec.createEncoderByType(type);
+        }
+        return MediaCodec.createDecoderByType(type);
+    }
+
+    private static void logMediaCodecException(MediaCodec.CodecException ex) {
+        if (ex.isRecoverable()) {
+            Log.w(TAG, "CodecException Recoverable: " + ex.getErrorCode());
+        } else if (ex.isTransient()) {
+            Log.w(TAG, "CodecException Transient: " + ex.getErrorCode());
+        } else {
+            Log.w(TAG, "CodecException Fatal: " + ex.getErrorCode());
+        }
+    }
+
+    private static void verifyIllegalStateException(MediaFormat format, boolean isEncoder)
+            throws IOException {
+        MediaCodec codec;
+
+        // create codec (enter Initialized State)
+
+        // create improperly
+        final String methodName = isEncoder ? "createEncoderByType" : "createDecoderByType";
+        try {
+            codec = createCodecByType(null, isEncoder);
+            fail(methodName + " should return NullPointerException on null");
+        } catch (NullPointerException e) { // expected
+        }
+        try {
+            codec = createCodecByType("foobarplan9", isEncoder); // invalid type
+            fail(methodName + " should return IllegalArgumentException on invalid type");
+        } catch (IllegalArgumentException e) { // expected
+        }
+        try {
+            codec = MediaCodec.createByCodecName("foobarplan9"); // invalid name
+            fail(methodName + " should return IllegalArgumentException on invalid name");
+        } catch (IllegalArgumentException e) { // expected
+        }
+        // correct
+        codec = createCodecByType(format.getString(MediaFormat.KEY_MIME), isEncoder);
+
+        // test a few commands
+        try {
+            codec.start();
+            fail("start should return IllegalStateException when in Initialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("start should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+        try {
+            codec.flush();
+            fail("flush should return IllegalStateException when in Initialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("flush should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+        MediaCodecInfo codecInfo = codec.getCodecInfo(); // obtaining the codec info now is fine.
+        try {
+            int bufIndex = codec.dequeueInputBuffer(0);
+            fail("dequeueInputBuffer should return IllegalStateException"
+                    + " when in the Initialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("dequeueInputBuffer should not return MediaCodec.CodecException"
+                    + " on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+        try {
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            int bufIndex = codec.dequeueOutputBuffer(info, 0);
+            fail("dequeueOutputBuffer should return IllegalStateException"
+                    + " when in the Initialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("dequeueOutputBuffer should not return MediaCodec.CodecException"
+                    + " on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+
+        // configure (enter Configured State)
+
+        // configure improperly
+        try {
+            codec.configure(format, null /* surface */, null /* crypto */,
+                    isEncoder ? 0 : MediaCodec.CONFIGURE_FLAG_ENCODE /* flags */);
+            fail("configure needs MediaCodec.CONFIGURE_FLAG_ENCODE for encoders only");
+        } catch (MediaCodec.CodecException e) { // expected
+            logMediaCodecException(e);
+        } catch (IllegalStateException e) {
+            fail("configure should not return IllegalStateException when improperly configured");
+        }
+        // correct
+        codec.configure(format, null /* surface */, null /* crypto */,
+                isEncoder ? MediaCodec.CONFIGURE_FLAG_ENCODE : 0 /* flags */);
+
+        // test a few commands
+        try {
+            codec.flush();
+            fail("flush should return IllegalStateException when in Configured state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("flush should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+        try {
+            Surface surface = codec.createInputSurface();
+            if (!isEncoder) {
+                fail("createInputSurface should not work on a decoder");
+            }
+        } catch (IllegalStateException e) { // expected for decoder and audio encoder
+            if (isEncoder && format.getString(MediaFormat.KEY_MIME).startsWith("video/")) {
+                throw e;
+            }
+        }
+
+        // start codec (enter Executing state)
+        codec.start();
+
+        // test a few commands
+        try {
+            codec.configure(format, null /* surface */, null /* crypto */, 0 /* flags */);
+            fail("configure should return IllegalStateException when in Executing state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            // TODO: consider configuring after a flush.
+            fail("configure should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+
+        // two flushes should be fine.
+        codec.flush();
+        codec.flush();
+
+        // stop codec (enter Initialized state)
+        // two stops should be fine.
+        codec.stop();
+        codec.stop();
+
+        // release codec (enter Uninitialized state)
+        // two releases should be fine.
+        codec.release();
+        codec.release();
+
+        try {
+            codecInfo = codec.getCodecInfo();
+            fail("getCodecInfo should should return IllegalStateException" +
+                    " when in Uninitialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("getCodecInfo should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+        try {
+            codec.stop();
+            fail("stop should return IllegalStateException when in Uninitialized state");
+        } catch (MediaCodec.CodecException e) {
+            logMediaCodecException(e);
+            fail("stop should not return MediaCodec.CodecException on wrong state");
+        } catch (IllegalStateException e) { // expected
+        }
+    }
+
+    /**
+     * Tests:
      * <br> calling createInputSurface() before configure() throws exception
      * <br> calling createInputSurface() after start() throws exception
      * <br> calling createInputSurface() with a non-Surface color format throws exception
@@ -77,7 +282,11 @@ public class MediaCodecTest extends AndroidTestCase {
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat);
 
         try {
-            encoder = MediaCodec.createByCodecName(codecInfo.getName());
+            try {
+                encoder = MediaCodec.createByCodecName(codecInfo.getName());
+            } catch (IOException e) {
+                fail("failed to create codec " + codecInfo.getName());
+            }
             try {
                 surface = encoder.createInputSurface();
                 fail("createInputSurface should not work pre-configure");
@@ -110,7 +319,6 @@ public class MediaCodecTest extends AndroidTestCase {
         assertNull(surface);
     }
 
-
     /**
      * Tests:
      * <br> signaling end-of-stream before any data is sent works
@@ -123,7 +331,11 @@ public class MediaCodecTest extends AndroidTestCase {
         InputSurface inputSurface = null;
 
         try {
-            encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            try {
+                encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE + " encoder");
+            }
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             inputSurface = new InputSurface(encoder.createInputSurface());
             inputSurface.makeCurrent();
@@ -163,6 +375,60 @@ public class MediaCodecTest extends AndroidTestCase {
 
     /**
      * Tests:
+     * <br> stopping with buffers in flight doesn't crash or hang
+     */
+    public void testAbruptStop() {
+        // There appears to be a race, so run it several times with a short delay between runs
+        // to allow any previous activity to shut down.
+        for (int i = 0; i < 50; i++) {
+            Log.d(TAG, "testAbruptStop " + i);
+            doTestAbruptStop();
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
+        }
+    }
+    private void doTestAbruptStop() {
+        MediaFormat format = createMediaFormat();
+        MediaCodec encoder = null;
+        InputSurface inputSurface = null;
+
+        try {
+            try {
+                encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE + " encoder");
+            }
+            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            inputSurface = new InputSurface(encoder.createInputSurface());
+            inputSurface.makeCurrent();
+            encoder.start();
+
+            int totalBuffers = encoder.getOutputBuffers().length;
+            if (VERBOSE) Log.d(TAG, "Total buffers: " + totalBuffers);
+
+            // Submit several frames quickly, without draining the encoder output, to try to
+            // ensure that we've got some queued up when we call stop().  If we do too many
+            // we'll block in swapBuffers().
+            for (int i = 0; i < totalBuffers; i++) {
+                GLES20.glClearColor(0.0f, (i % 8) / 8.0f, 0.0f, 1.0f);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+                inputSurface.swapBuffers();
+            }
+            Log.d(TAG, "stopping");
+            encoder.stop();
+            Log.d(TAG, "stopped");
+        } finally {
+            if (encoder != null) {
+                encoder.stop();
+                encoder.release();
+            }
+            if (inputSurface != null) {
+                inputSurface.release();
+            }
+        }
+    }
+
+    /**
+     * Tests:
      * <br> dequeueInputBuffer() fails when encoder configured with an input Surface
      */
     public void testDequeueSurface() {
@@ -171,7 +437,11 @@ public class MediaCodecTest extends AndroidTestCase {
         Surface surface = null;
 
         try {
-            encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            try {
+                encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE + " encoder");
+            }
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             surface = encoder.createInputSurface();
             encoder.start();
@@ -205,7 +475,11 @@ public class MediaCodecTest extends AndroidTestCase {
         Surface surface = null;
 
         try {
-            encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            try {
+                encoder = MediaCodec.createEncoderByType(MIME_TYPE);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE + " encoder");
+            }
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             surface = encoder.createInputSurface();
             encoder.start();
@@ -235,6 +509,208 @@ public class MediaCodecTest extends AndroidTestCase {
             }
             if (surface != null) {
                 surface.release();
+            }
+        }
+    }
+
+    /**
+     * Tests whether decoding a short group-of-pictures succeeds. The test queues a few video frames
+     * then signals end-of-stream. The test fails if the decoder doesn't output the queued frames.
+     */
+    public void testDecodeShortInput() throws InterruptedException {
+        // Input buffers from this input video are queued up to and including the video frame with
+        // timestamp LAST_BUFFER_TIMESTAMP_US.
+        final int INPUT_RESOURCE_ID =
+                R.raw.video_480x360_mp4_h264_1350kbps_30fps_aac_stereo_192kbps_44100hz;
+        final long LAST_BUFFER_TIMESTAMP_US = 166666;
+
+        // The test should fail if the decoder never produces output frames for the truncated input.
+        // Time out decoding, as we have no way to query whether the decoder will produce output.
+        final int DECODING_TIMEOUT_MS = 2000;
+
+        final AtomicBoolean completed = new AtomicBoolean();
+        Thread videoDecodingThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                completed.set(runDecodeShortInput(INPUT_RESOURCE_ID, LAST_BUFFER_TIMESTAMP_US));
+            }
+        });
+        videoDecodingThread.start();
+        videoDecodingThread.join(DECODING_TIMEOUT_MS);
+        if (!completed.get()) {
+            throw new RuntimeException("timed out decoding to end-of-stream");
+        }
+    }
+
+    private boolean runDecodeShortInput(int inputResourceId, long lastBufferTimestampUs) {
+        final int NO_BUFFER_INDEX = -1;
+
+        OutputSurface outputSurface = null;
+        MediaExtractor mediaExtractor = null;
+        MediaCodec mediaCodec = null;
+        try {
+            outputSurface = new OutputSurface(1, 1);
+            mediaExtractor = getMediaExtractorForMimeType(inputResourceId, "video/");
+            MediaFormat mediaFormat =
+                    mediaExtractor.getTrackFormat(mediaExtractor.getSampleTrackIndex());
+            mediaCodec =
+                    MediaCodec.createDecoderByType(mediaFormat.getString(MediaFormat.KEY_MIME));
+            mediaCodec.configure(mediaFormat, outputSurface.getSurface(), null, 0);
+            mediaCodec.start();
+            boolean eos = false;
+            boolean signaledEos = false;
+            MediaCodec.BufferInfo outputBufferInfo = new MediaCodec.BufferInfo();
+            int outputBufferIndex = NO_BUFFER_INDEX;
+            while (!eos && !Thread.interrupted()) {
+                // Try to feed more data into the codec.
+                if (mediaExtractor.getSampleTrackIndex() != -1 && !signaledEos) {
+                    int bufferIndex = mediaCodec.dequeueInputBuffer(0);
+                    if (bufferIndex != NO_BUFFER_INDEX) {
+                        ByteBuffer buffer = mediaCodec.getInputBuffers()[bufferIndex];
+                        int size = mediaExtractor.readSampleData(buffer, 0);
+                        long timestampUs = mediaExtractor.getSampleTime();
+                        mediaExtractor.advance();
+                        signaledEos = mediaExtractor.getSampleTrackIndex() == -1
+                                || timestampUs == lastBufferTimestampUs;
+                        mediaCodec.queueInputBuffer(bufferIndex,
+                                0,
+                                size,
+                                timestampUs,
+                                signaledEos ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
+                    }
+                }
+
+                // If we don't have an output buffer, try to get one now.
+                if (outputBufferIndex == NO_BUFFER_INDEX) {
+                    outputBufferIndex = mediaCodec.dequeueOutputBuffer(outputBufferInfo, 0);
+                }
+
+                if (outputBufferIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED
+                        || outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED
+                        || outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    outputBufferIndex = NO_BUFFER_INDEX;
+                } else if (outputBufferIndex != NO_BUFFER_INDEX) {
+                    eos = (outputBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+
+                    boolean render = outputBufferInfo.size > 0;
+                    mediaCodec.releaseOutputBuffer(outputBufferIndex, render);
+                    if (render) {
+                        outputSurface.awaitNewImage();
+                    }
+
+                    outputBufferIndex = NO_BUFFER_INDEX;
+                }
+            }
+
+            return eos;
+        } catch (IOException e) {
+            throw new RuntimeException("error reading input resource", e);
+        } finally {
+            if (mediaCodec != null) {
+                mediaCodec.stop();
+                mediaCodec.release();
+            }
+            if (mediaExtractor != null) {
+                mediaExtractor.release();
+            }
+            if (outputSurface != null) {
+                outputSurface.release();
+            }
+        }
+    }
+
+    /**
+     * Tests creating two decoders for {@link #MIME_TYPE_AUDIO} at the same time.
+     */
+    public void testCreateTwoAudioDecoders() {
+        final MediaFormat format = MediaFormat.createAudioFormat(
+                MIME_TYPE_AUDIO, AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_COUNT);
+
+        MediaCodec audioDecoderA = null;
+        MediaCodec audioDecoderB = null;
+        try {
+            try {
+                audioDecoderA = MediaCodec.createDecoderByType(MIME_TYPE_AUDIO);
+            } catch (IOException e) {
+                fail("failed to create first " + MIME_TYPE_AUDIO + " decoder");
+            }
+            audioDecoderA.configure(format, null, null, 0);
+            audioDecoderA.start();
+
+            try {
+                audioDecoderB = MediaCodec.createDecoderByType(MIME_TYPE_AUDIO);
+            } catch (IOException e) {
+                fail("failed to create second " + MIME_TYPE_AUDIO + " decoder");
+            }
+            audioDecoderB.configure(format, null, null, 0);
+            audioDecoderB.start();
+        } finally {
+            if (audioDecoderB != null) {
+                try {
+                    audioDecoderB.stop();
+                    audioDecoderB.release();
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "exception stopping/releasing codec", e);
+                }
+            }
+
+            if (audioDecoderA != null) {
+                try {
+                    audioDecoderA.stop();
+                    audioDecoderA.release();
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "exception stopping/releasing codec", e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Tests creating an encoder and decoder for {@link #MIME_TYPE_AUDIO} at the same time.
+     */
+    public void testCreateAudioDecoderAndEncoder() {
+        final MediaFormat encoderFormat = MediaFormat.createAudioFormat(
+                MIME_TYPE_AUDIO, AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_COUNT);
+        encoderFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, AUDIO_AAC_PROFILE);
+        encoderFormat.setInteger(MediaFormat.KEY_BIT_RATE, AUDIO_BIT_RATE);
+        final MediaFormat decoderFormat = MediaFormat.createAudioFormat(
+                MIME_TYPE_AUDIO, AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_COUNT);
+
+        MediaCodec audioEncoder = null;
+        MediaCodec audioDecoder = null;
+        try {
+            try {
+                audioEncoder = MediaCodec.createEncoderByType(MIME_TYPE_AUDIO);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE_AUDIO + " encoder");
+            }
+            audioEncoder.configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            audioEncoder.start();
+
+            try {
+                audioDecoder = MediaCodec.createDecoderByType(MIME_TYPE_AUDIO);
+            } catch (IOException e) {
+                fail("failed to create " + MIME_TYPE_AUDIO + " decoder");
+            }
+            audioDecoder.configure(decoderFormat, null, null, 0);
+            audioDecoder.start();
+        } finally {
+            if (audioDecoder != null) {
+                try {
+                    audioDecoder.stop();
+                    audioDecoder.release();
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "exception stopping/releasing codec", e);
+                }
+            }
+
+            if (audioEncoder != null) {
+                try {
+                    audioEncoder.stop();
+                    audioEncoder.release();
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "exception stopping/releasing codec", e);
+                }
             }
         }
     }
@@ -504,5 +980,30 @@ public class MediaCodecTest extends AndroidTestCase {
         }
         fail("couldn't find a good color format for " + codecInfo.getName() + " / " + MIME_TYPE);
         return 0;   // not reached
+    }
+
+    private MediaExtractor getMediaExtractorForMimeType(int resourceId, String mimeTypePrefix)
+            throws IOException {
+        MediaExtractor mediaExtractor = new MediaExtractor();
+        AssetFileDescriptor afd = mContext.getResources().openRawResourceFd(resourceId);
+        try {
+            mediaExtractor.setDataSource(
+                    afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+        } finally {
+            afd.close();
+        }
+        int trackIndex;
+        for (trackIndex = 0; trackIndex < mediaExtractor.getTrackCount(); trackIndex++) {
+            MediaFormat trackMediaFormat = mediaExtractor.getTrackFormat(trackIndex);
+            if (trackMediaFormat.getString(MediaFormat.KEY_MIME).startsWith(mimeTypePrefix)) {
+                mediaExtractor.selectTrack(trackIndex);
+                break;
+            }
+        }
+        if (trackIndex == mediaExtractor.getTrackCount()) {
+            throw new IllegalStateException("couldn't get a video track");
+        }
+
+        return mediaExtractor;
     }
 }

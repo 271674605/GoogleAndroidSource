@@ -39,7 +39,6 @@ import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.os.ParcelFileDescriptor.OnCloseListener;
 import android.os.Process;
-import android.os.SELinux;
 import android.provider.BaseColumns;
 import android.provider.Downloads;
 import android.provider.OpenableColumns;
@@ -178,7 +177,6 @@ public final class DownloadProvider extends ContentProvider {
     /** List of uids that can access the downloads */
     private int mSystemUid = -1;
     private int mDefContainerUid = -1;
-    private File mDownloadsDataDir;
 
     @VisibleForTesting
     SystemFacade mSystemFacade;
@@ -416,7 +414,7 @@ public final class DownloadProvider extends ContentProvider {
                         Downloads.Impl.COLUMN_OTHER_UID + " INTEGER, " +
                         Downloads.Impl.COLUMN_TITLE + " TEXT, " +
                         Downloads.Impl.COLUMN_DESCRIPTION + " TEXT, " +
-                        Constants.MEDIA_SCANNED + " BOOLEAN);");
+                        Downloads.Impl.COLUMN_MEDIA_SCANNED + " BOOLEAN);");
             } catch (SQLException ex) {
                 Log.e(Constants.TAG, "couldn't create table in downloads database");
                 throw ex;
@@ -464,12 +462,6 @@ public final class DownloadProvider extends ContentProvider {
         // saves us by getting some initialization code in DownloadService out of the way.
         Context context = getContext();
         context.startService(new Intent(context, DownloadService.class));
-        mDownloadsDataDir = StorageManager.getDownloadDataDirectory(getContext());
-        try {
-            SELinux.restorecon(mDownloadsDataDir.getCanonicalPath());
-        } catch (IOException e) {
-            Log.wtf(Constants.TAG, "Could not get canonical path for download directory", e);
-        }
         return true;
     }
 
@@ -540,7 +532,7 @@ public final class DownloadProvider extends ContentProvider {
         // validate the destination column
         Integer dest = values.getAsInteger(Downloads.Impl.COLUMN_DESTINATION);
         if (dest != null) {
-            if (getContext().checkCallingPermission(Downloads.Impl.PERMISSION_ACCESS_ADVANCED)
+            if (getContext().checkCallingOrSelfPermission(Downloads.Impl.PERMISSION_ACCESS_ADVANCED)
                     != PackageManager.PERMISSION_GRANTED
                     && (dest == Downloads.Impl.DESTINATION_CACHE_PARTITION
                             || dest == Downloads.Impl.DESTINATION_CACHE_PARTITION_NOROAMING
@@ -551,7 +543,7 @@ public final class DownloadProvider extends ContentProvider {
             // for public API behavior, if an app has CACHE_NON_PURGEABLE permission, automatically
             // switch to non-purgeable download
             boolean hasNonPurgeablePermission =
-                    getContext().checkCallingPermission(
+                    getContext().checkCallingOrSelfPermission(
                             Downloads.Impl.PERMISSION_CACHE_NON_PURGEABLE)
                             == PackageManager.PERMISSION_GRANTED;
             if (isPublicApi && dest == Downloads.Impl.DESTINATION_CACHE_PARTITION_PURGEABLE
@@ -638,7 +630,7 @@ public final class DownloadProvider extends ContentProvider {
         copyString(Downloads.Impl.COLUMN_REFERER, values, filteredValues);
 
         // UID, PID columns
-        if (getContext().checkCallingPermission(Downloads.Impl.PERMISSION_ACCESS_ADVANCED)
+        if (getContext().checkCallingOrSelfPermission(Downloads.Impl.PERMISSION_ACCESS_ADVANCED)
                 == PackageManager.PERMISSION_GRANTED) {
             copyInteger(Downloads.Impl.COLUMN_OTHER_UID, values, filteredValues);
         }
@@ -827,6 +819,16 @@ public final class DownloadProvider extends ContentProvider {
             }
         }
         throw new SecurityException("Invalid value for " + column + ": " + value);
+    }
+
+    private Cursor queryCleared(Uri uri, String[] projection, String selection,
+            String[] selectionArgs, String sort) {
+        final long token = Binder.clearCallingIdentity();
+        try {
+            return query(uri, projection, selection, selectionArgs, sort);
+        } finally {
+            Binder.restoreCallingIdentity(token);
+        }
     }
 
     /**
@@ -1051,12 +1053,16 @@ public final class DownloadProvider extends ContentProvider {
             filteredValues = values;
             String filename = values.getAsString(Downloads.Impl._DATA);
             if (filename != null) {
-                Cursor c = query(uri, new String[]
-                        { Downloads.Impl.COLUMN_TITLE }, null, null, null);
-                if (!c.moveToFirst() || c.getString(0).isEmpty()) {
-                    values.put(Downloads.Impl.COLUMN_TITLE, new File(filename).getName());
+                Cursor c = null;
+                try {
+                    c = query(uri, new String[]
+                            { Downloads.Impl.COLUMN_TITLE }, null, null, null);
+                    if (!c.moveToFirst() || c.getString(0).isEmpty()) {
+                        values.put(Downloads.Impl.COLUMN_TITLE, new File(filename).getName());
+                    }
+                } finally {
+                    IoUtils.closeQuietly(c);
                 }
-                c.close();
             }
 
             Integer status = values.getAsInteger(Downloads.Impl.COLUMN_STATUS);
@@ -1123,7 +1129,7 @@ public final class DownloadProvider extends ContentProvider {
             selection.appendClause(Downloads.Impl._ID + " = ?", getDownloadIdFromUri(uri));
         }
         if ((uriMatch == MY_DOWNLOADS || uriMatch == MY_DOWNLOADS_ID)
-                && getContext().checkCallingPermission(Downloads.Impl.PERMISSION_ACCESS_ALL)
+                && getContext().checkCallingOrSelfPermission(Downloads.Impl.PERMISSION_ACCESS_ALL)
                 != PackageManager.PERMISSION_GRANTED) {
             selection.appendClause(
                     Constants.UID + "= ? OR " + Downloads.Impl.COLUMN_OTHER_UID + "= ?",
@@ -1139,7 +1145,9 @@ public final class DownloadProvider extends ContentProvider {
     public int delete(final Uri uri, final String where,
             final String[] whereArgs) {
 
-        Helpers.validateSelection(where, sAppReadableColumnsSet);
+        if (shouldRestrictVisibility()) {
+            Helpers.validateSelection(where, sAppReadableColumnsSet);
+        }
 
         SQLiteDatabase db = mOpenHelper.getWritableDatabase();
         int count;
@@ -1184,8 +1192,12 @@ public final class DownloadProvider extends ContentProvider {
             logVerboseOpenFileInfo(uri, mode);
         }
 
-        final Cursor cursor = query(uri, new String[] { Downloads.Impl._DATA }, null, null, null);
-        String path;
+        final Cursor cursor = queryCleared(uri, new String[] {
+                Downloads.Impl._DATA, Downloads.Impl.COLUMN_STATUS,
+                Downloads.Impl.COLUMN_DESTINATION, Downloads.Impl.COLUMN_MEDIA_SCANNED }, null,
+                null, null);
+        final String path;
+        final boolean shouldScan;
         try {
             int count = (cursor != null) ? cursor.getCount() : 0;
             if (count != 1) {
@@ -1196,8 +1208,20 @@ public final class DownloadProvider extends ContentProvider {
                 throw new FileNotFoundException("Multiple items at " + uri);
             }
 
-            cursor.moveToFirst();
-            path = cursor.getString(0);
+            if (cursor.moveToFirst()) {
+                final int status = cursor.getInt(1);
+                final int destination = cursor.getInt(2);
+                final int mediaScanned = cursor.getInt(3);
+
+                path = cursor.getString(0);
+                shouldScan = Downloads.Impl.isStatusSuccess(status) && (
+                        destination == Downloads.Impl.DESTINATION_EXTERNAL
+                        || destination == Downloads.Impl.DESTINATION_FILE_URI
+                        || destination == Downloads.Impl.DESTINATION_NON_DOWNLOADMANAGER_DOWNLOAD)
+                        && mediaScanned != 2;
+            } else {
+                throw new FileNotFoundException("Failed moveToFirst");
+            }
         } finally {
             IoUtils.closeQuietly(cursor);
         }
@@ -1205,27 +1229,35 @@ public final class DownloadProvider extends ContentProvider {
         if (path == null) {
             throw new FileNotFoundException("No filename found.");
         }
-        if (!Helpers.isFilenameValid(path, mDownloadsDataDir)) {
-            throw new FileNotFoundException("Invalid filename: " + path);
-        }
 
         final File file = new File(path);
-        if ("r".equals(mode)) {
-            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+        if (!Helpers.isFilenameValid(getContext(), file)) {
+            throw new FileNotFoundException("Invalid file: " + file);
+        }
+
+        final int pfdMode = ParcelFileDescriptor.parseMode(mode);
+        if (pfdMode == ParcelFileDescriptor.MODE_READ_ONLY) {
+            return ParcelFileDescriptor.open(file, pfdMode);
         } else {
             try {
                 // When finished writing, update size and timestamp
-                return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode),
-                        mHandler, new OnCloseListener() {
-                            @Override
-                            public void onClose(IOException e) {
-                                final ContentValues values = new ContentValues();
-                                values.put(Downloads.Impl.COLUMN_TOTAL_BYTES, file.length());
-                                values.put(Downloads.Impl.COLUMN_LAST_MODIFICATION,
-                                        System.currentTimeMillis());
-                                update(uri, values, null, null);
-                            }
-                        });
+                return ParcelFileDescriptor.open(file, pfdMode, mHandler, new OnCloseListener() {
+                    @Override
+                    public void onClose(IOException e) {
+                        final ContentValues values = new ContentValues();
+                        values.put(Downloads.Impl.COLUMN_TOTAL_BYTES, file.length());
+                        values.put(Downloads.Impl.COLUMN_LAST_MODIFICATION,
+                                System.currentTimeMillis());
+                        update(uri, values, null, null);
+
+                        if (shouldScan) {
+                            final Intent intent = new Intent(
+                                    Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+                            intent.setData(Uri.fromFile(file));
+                            getContext().sendBroadcast(intent);
+                        }
+                    }
+                });
             } catch (IOException e) {
                 throw new FileNotFoundException("Failed to open for writing: " + e);
             }
@@ -1275,29 +1307,35 @@ public final class DownloadProvider extends ContentProvider {
         if (cursor == null) {
             Log.v(Constants.TAG, "null cursor in openFile");
         } else {
-            if (!cursor.moveToFirst()) {
-                Log.v(Constants.TAG, "empty cursor in openFile");
-            } else {
-                do {
-                    Log.v(Constants.TAG, "row " + cursor.getInt(0) + " available");
-                } while(cursor.moveToNext());
+            try {
+                if (!cursor.moveToFirst()) {
+                    Log.v(Constants.TAG, "empty cursor in openFile");
+                } else {
+                    do {
+                        Log.v(Constants.TAG, "row " + cursor.getInt(0) + " available");
+                    } while(cursor.moveToNext());
+                }
+            } finally {
+                cursor.close();
             }
-            cursor.close();
         }
         cursor = query(uri, new String[] { "_data" }, null, null, null);
         if (cursor == null) {
             Log.v(Constants.TAG, "null cursor in openFile");
         } else {
-            if (!cursor.moveToFirst()) {
-                Log.v(Constants.TAG, "empty cursor in openFile");
-            } else {
-                String filename = cursor.getString(0);
-                Log.v(Constants.TAG, "filename in openFile: " + filename);
-                if (new java.io.File(filename).isFile()) {
-                    Log.v(Constants.TAG, "file exists in openFile");
+            try {
+                if (!cursor.moveToFirst()) {
+                    Log.v(Constants.TAG, "empty cursor in openFile");
+                } else {
+                    String filename = cursor.getString(0);
+                    Log.v(Constants.TAG, "filename in openFile: " + filename);
+                    if (new java.io.File(filename).isFile()) {
+                        Log.v(Constants.TAG, "file exists in openFile");
+                    }
                 }
+            } finally {
+                cursor.close();
             }
-            cursor.close();
         }
     }
 

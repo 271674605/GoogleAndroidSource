@@ -15,8 +15,11 @@
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
+ifeq ($(USE_32_BIT_KEYSTORE), true)
+LOCAL_MULTILIB := 32
+endif
 LOCAL_MODULE := keystore.default
-LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+LOCAL_MODULE_RELATIVE_PATH := hw
 LOCAL_SRC_FILES := module.cpp
 LOCAL_C_INCLUDES := \
 	system/security/keystore \
@@ -28,6 +31,9 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
+ifeq ($(USE_32_BIT_KEYSTORE), true)
+LOCAL_MULTILIB := 32
+endif
 LOCAL_MODULE := libsoftkeymaster
 LOCAL_SRC_FILES := keymaster_openssl.cpp
 LOCAL_C_INCLUDES := \

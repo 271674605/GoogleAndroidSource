@@ -6,15 +6,11 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_HEXAGON_GOTPLT_H
-#define MCLD_HEXAGON_GOTPLT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_HEXAGON_HEXAGONGOTPLT_H
+#define TARGET_HEXAGON_HEXAGONGOTPLT_H
 
 #include <llvm/ADT/DenseMap.h>
 #include "HexagonGOT.h"
-#include <mcld/Support/MemoryRegion.h>
 
 namespace mcld {
 

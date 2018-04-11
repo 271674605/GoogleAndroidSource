@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,17 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
     public void onFindMatchRectsAvailable(FindMatchRectsDetails result) {
     }
 
+    @CalledByNative
+    public boolean addNewContents(long nativeSourceWebContents, long nativeWebContents,
+            int disposition, Rect initialPosition, boolean userGesture) {
+        return false;
+    }
+
+    @CalledByNative
+    public void webContentsCreated(long sourceWebContents, long opener_render_frame_id,
+            String frameName, String targetUrl, long newWebContents) {
+    }
+
     // Helper functions used to create types that are part of the public interface
     @CalledByNative
     private static Rect createRect(int x, int y, int right, int bottom) {
@@ -48,7 +59,7 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
     @CalledByNative
     private static FindMatchRectsDetails createFindMatchRectsDetails(
             int version, int numRects, RectF activeRect) {
-        return new FindMatchRectsDetails(version, new RectF[numRects], activeRect);
+        return new FindMatchRectsDetails(version, numRects, activeRect);
     }
 
     @CalledByNative

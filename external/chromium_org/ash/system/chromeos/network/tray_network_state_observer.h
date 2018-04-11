@@ -11,7 +11,6 @@
 #include "chromeos/network/network_state_handler_observer.h"
 
 namespace ash {
-namespace internal {
 
 class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
  public:
@@ -34,10 +33,11 @@ class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
   virtual ~TrayNetworkStateObserver();
 
   // NetworkStateHandlerObserver overrides.
-  virtual void NetworkManagerChanged() OVERRIDE;
   virtual void NetworkListChanged() OVERRIDE;
   virtual void DeviceListChanged() OVERRIDE;
   virtual void DefaultNetworkChanged(
+      const chromeos::NetworkState* network) OVERRIDE;
+  virtual void NetworkConnectionStateChanged(
       const chromeos::NetworkState* network) OVERRIDE;
   virtual void NetworkPropertiesUpdated(
       const chromeos::NetworkState* network) OVERRIDE;
@@ -49,6 +49,5 @@ class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
 };
 
 }  // namespace ash
-}  // namespace internal
 
 #endif  // ASH_SYSTEM_CHROMEOS_NETWORK_TRAY_NETWORK_STATE_OBSERVER_H

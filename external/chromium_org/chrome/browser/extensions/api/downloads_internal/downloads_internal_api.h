@@ -5,15 +5,17 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_DOWNLOADS_INTERNAL_DOWNLOADS_INTERNAL_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_DOWNLOADS_INTERNAL_DOWNLOADS_INTERNAL_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+
+namespace extensions {
 
 class DownloadsInternalDetermineFilenameFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("downloadsInternal.determineFilename",
                              DOWNLOADSINTERNAL_DETERMINEFILENAME);
   DownloadsInternalDetermineFilenameFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  protected:
   virtual ~DownloadsInternalDetermineFilenameFunction();
@@ -22,4 +24,5 @@ class DownloadsInternalDetermineFilenameFunction
   DISALLOW_COPY_AND_ASSIGN(DownloadsInternalDetermineFilenameFunction);
 };
 
+}  // namespace extensions
 #endif  // CHROME_BROWSER_EXTENSIONS_API_DOWNLOADS_INTERNAL_DOWNLOADS_INTERNAL_API_H_

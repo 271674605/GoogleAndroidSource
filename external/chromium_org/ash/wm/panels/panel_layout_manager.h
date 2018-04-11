@@ -9,21 +9,23 @@
 
 #include "ash/ash_export.h"
 #include "ash/display/display_controller.h"
-#include "ash/launcher/launcher_icon_observer.h"
+#include "ash/shelf/shelf_icon_observer.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
 #include "ash/shell_observer.h"
+#include "ash/wm/window_state_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window_observer.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace aura {
 class Window;
+class WindowTracker;
 }
 
 namespace gfx {
@@ -35,10 +37,8 @@ class Widget;
 }
 
 namespace ash {
-class Launcher;
-
-namespace internal {
 class PanelCalloutWidget;
+class Shelf;
 class ShelfLayoutManager;
 
 // PanelLayoutManager is responsible for organizing panels within the
@@ -52,9 +52,10 @@ class ShelfLayoutManager;
 
 class ASH_EXPORT PanelLayoutManager
     : public aura::LayoutManager,
-      public ash::LauncherIconObserver,
-      public ash::ShellObserver,
+      public ShelfIconObserver,
+      public ShellObserver,
       public aura::WindowObserver,
+      public wm::WindowStateObserver,
       public aura::client::ActivationChangeObserver,
       public keyboard::KeyboardControllerObserver,
       public DisplayController::Observer,
@@ -71,8 +72,14 @@ class ASH_EXPORT PanelLayoutManager
 
   void ToggleMinimize(aura::Window* panel);
 
-  ash::Launcher* launcher() { return launcher_; }
-  void SetLauncher(ash::Launcher* launcher);
+  // Hide / Show the panel callout widgets.
+  void SetShowCalloutWidgets(bool show);
+
+  // Returns the callout widget (arrow) for |panel|.
+  views::Widget* GetCalloutWidgetForPanel(aura::Window* panel);
+
+  Shelf* shelf() { return shelf_; }
+  void SetShelf(Shelf* shelf);
 
   // Overridden from aura::LayoutManager:
   virtual void OnWindowResized() OVERRIDE;
@@ -84,18 +91,21 @@ class ASH_EXPORT PanelLayoutManager
   virtual void SetChildBounds(aura::Window* child,
                               const gfx::Rect& requested_bounds) OVERRIDE;
 
-  // Overridden from ash::LauncherIconObserver
-  virtual void OnLauncherIconPositionsChanged() OVERRIDE;
+  // Overridden from ShelfIconObserver
+  virtual void OnShelfIconPositionsChanged() OVERRIDE;
 
-  // Overridden from ash::ShellObserver
-  virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
+  // Overridden from ShellObserver
+  virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
 
   // Overridden from aura::WindowObserver
   virtual void OnWindowPropertyChanged(aura::Window* window,
                                        const void* key,
                                        intptr_t old) OVERRIDE;
-  virtual void OnWindowVisibilityChanged(aura::Window* window,
-                                         bool visible) OVERRIDE;
+
+  // Overridden from ash::wm::WindowStateObserver
+  virtual void OnPostWindowStateTypeChange(
+      wm::WindowState* window_state,
+      wm::WindowStateType old_type) OVERRIDE;
 
   // Overridden from aura::client::ActivationChangeObserver
   virtual void OnWindowActivated(aura::Window* gained_active,
@@ -113,6 +123,7 @@ class ASH_EXPORT PanelLayoutManager
   friend class PanelWindowResizerTest;
   friend class DockedWindowResizerTest;
   friend class DockedWindowLayoutManagerTest;
+  friend class WorkspaceControllerTest;
 
   views::Widget* CreateCalloutWidget();
 
@@ -131,8 +142,8 @@ class ASH_EXPORT PanelLayoutManager
     PanelCalloutWidget* callout_widget;
 
     // True on new and restored panel windows until the panel has been
-    // positioned. The first time Relayout is called the panel will slide into
-    // position and this will be set to false.
+    // positioned. The first time Relayout is called the panel will be shown,
+    // and slide into position and this will be set to false.
     bool slide_in;
   };
 
@@ -161,17 +172,22 @@ class ASH_EXPORT PanelLayoutManager
   bool in_add_window_;
   // Protect against recursive calls to Relayout().
   bool in_layout_;
+  // Indicates if the panel callout widget should be created.
+  bool show_callout_widgets_;
   // Ordered list of unowned pointers to panel windows.
   PanelList panel_windows_;
   // The panel being dragged.
   aura::Window* dragged_panel_;
-  // The launcher we are observing for launcher icon changes.
-  Launcher* launcher_;
+  // The shelf we are observing for shelf icon changes.
+  Shelf* shelf_;
   // The shelf layout manager being observed for visibility changes.
   ShelfLayoutManager* shelf_layout_manager_;
-  // Tracks the visibility of the shelf. Defaults to false when there is no
-  // shelf.
-  bool shelf_hidden_;
+
+  // When not NULL, the shelf is hidden (i.e. full screen) and this tracks the
+  // set of panel windows which have been temporarily hidden and need to be
+  // restored when the shelf becomes visible again.
+  scoped_ptr<aura::WindowTracker> restore_windows_on_shelf_visible_;
+
   // The last active panel. Used to maintain stacking order even if no panels
   // are currently focused.
   aura::Window* last_active_panel_;
@@ -180,7 +196,6 @@ class ASH_EXPORT PanelLayoutManager
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManager);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_WM_PANELS_PANEL_LAYOUT_MANAGER_H_

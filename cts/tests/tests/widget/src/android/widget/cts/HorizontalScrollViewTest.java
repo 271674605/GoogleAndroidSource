@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParser;
@@ -24,6 +24,7 @@ import org.xmlpull.v1.XmlPullParser;
 import android.app.Activity;
 import android.content.Context;
 import android.cts.util.PollingCheck;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Rect;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.UiThreadTest;
@@ -42,7 +43,7 @@ import android.widget.TextView;
  * Test {@link HorizontalScrollView}.
  */
 public class HorizontalScrollViewTest
-        extends ActivityInstrumentationTestCase2<HorizontalScrollViewStubActivity> {
+        extends ActivityInstrumentationTestCase2<HorizontalScrollViewCtsActivity> {
     private static final int ITEM_WIDTH  = 250;
     private static final int ITEM_HEIGHT = 100;
     private static final int ITEM_COUNT  = 15;
@@ -53,7 +54,7 @@ public class HorizontalScrollViewTest
     private Activity mActivity;
 
     public HorizontalScrollViewTest() {
-        super("com.android.cts.stub", HorizontalScrollViewStubActivity.class);
+        super("com.android.cts.widget", HorizontalScrollViewCtsActivity.class);
     }
 
     @Override

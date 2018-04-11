@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "ui/base/ui_export.h"
+#include "ui/base/ui_base_export.h"
 
 namespace ui {
 
@@ -21,7 +21,7 @@ namespace ui {
 //
 // Typically there is only one selected item, in which case the anchor and
 // active index correspond to the same thing.
-class UI_EXPORT ListSelectionModel {
+class UI_BASE_EXPORT ListSelectionModel {
  public:
   typedef std::vector<int> SelectedIndices;
 
@@ -51,7 +51,7 @@ class UI_EXPORT ListSelectionModel {
   // This is used when a new tab is inserted into the tabstrip.
   void IncrementFrom(int index);
 
-  // Shifts all indices < |index| down by 1. If |index| is selected, it is
+  // Shifts all indices > |index| down by 1. If |index| is selected, it is
   // removed. For example, if the selection consists of [0, 1, 5] and this is
   // invoked with 1, it results in [0, 4]. This is used when a tab is removed
   // from the tabstrip.

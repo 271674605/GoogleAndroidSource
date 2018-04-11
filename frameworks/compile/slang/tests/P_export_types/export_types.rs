@@ -20,13 +20,8 @@ rs_type type;
 rs_allocation allocation;
 rs_sampler sampler;
 rs_script script;
-rs_mesh mesh;
-rs_path path;
-rs_program_fragment program_fragment;
-rs_program_vertex program_vertex;
-rs_program_raster program_raster;
-rs_program_store program_store;
-rs_font font;
+rs_data_kind dk;
+rs_data_type dt;
 
 float *fp;
 int *ip;

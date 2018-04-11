@@ -16,21 +16,24 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "ui/accessibility/ax_enums.h"
 #include "ui/base/accelerators/accelerator.h"
-#include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/drop_target_event.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/base/events/event.h"
-#include "ui/base/events/event_target.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer_delegate.h"
 #include "ui/compositor/layer_owner.h"
+#include "ui/events/event.h"
+#include "ui/events/event_target.h"
+#include "ui/events/event_targeter.h"
+#include "ui/gfx/geometry/r_tree.h"
+#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/vector2d.h"
-#include "ui/views/background.h"
-#include "ui/views/border.h"
-#include "ui/views/focus_border.h"
+#include "ui/views/cull_set.h"
+#include "ui/views/views_export.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_comptr.h"
@@ -46,7 +49,7 @@ class Transform;
 }
 
 namespace ui {
-struct AccessibleViewState;
+struct AXViewState;
 class Compositor;
 class Layer;
 class NativeTheme;
@@ -61,7 +64,6 @@ class Background;
 class Border;
 class ContextMenuController;
 class DragController;
-class FocusBorder;
 class FocusManager;
 class FocusTraversable;
 class InputMethod;
@@ -71,6 +73,7 @@ class ScrollView;
 class Widget;
 
 namespace internal {
+class PreEventDispatchHandler;
 class PostEventDispatchHandler;
 class RootView;
 }
@@ -106,6 +109,19 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
                           public ui::EventTarget {
  public:
   typedef std::vector<View*> Views;
+
+  // TODO(tdanderson): Becomes obsolete with the refactoring of the event
+  //                   targeting logic for views and windows. See
+  //                   crbug.com/355425.
+  // Specifies the source of the region used in a hit test.
+  // HIT_TEST_SOURCE_MOUSE indicates the hit test is being performed with a
+  // single point and HIT_TEST_SOURCE_TOUCH indicates the hit test is being
+  // performed with a rect larger than a single point. This value can be used,
+  // for example, to add extra padding or change the shape of the hit test mask.
+  enum HitTestSource {
+    HIT_TEST_SOURCE_MOUSE,
+    HIT_TEST_SOURCE_TOUCH
+  };
 
   struct ViewHierarchyChangedDetails {
     ViewHierarchyChangedDetails()
@@ -249,24 +265,24 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   virtual int GetBaseline() const;
 
   // Get the size the View would like to be, if enough space were available.
-  virtual gfx::Size GetPreferredSize();
+  virtual gfx::Size GetPreferredSize() const;
 
   // Convenience method that sizes this view to its preferred size.
   void SizeToPreferredSize();
 
   // Gets the minimum size of the view. View's implementation invokes
   // GetPreferredSize.
-  virtual gfx::Size GetMinimumSize();
+  virtual gfx::Size GetMinimumSize() const;
 
   // Gets the maximum size of the view. Currently only used for sizing shell
   // windows.
-  virtual gfx::Size GetMaximumSize();
+  virtual gfx::Size GetMaximumSize() const;
 
   // Return the height necessary to display this view with the provided width.
   // View's implementation returns the value from getPreferredSize.cy.
   // Override if your View's preferred height depends upon the width (such
   // as with Labels).
-  virtual int GetHeightForWidth(int w);
+  virtual int GetHeightForWidth(int w) const;
 
   // Set whether this view is visible. Painting is scheduled as needed.
   virtual void SetVisible(bool visible);
@@ -311,13 +327,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // View creates the Layer only when it exists in a Widget with a non-NULL
   // Compositor.
   void SetPaintToLayer(bool paint_to_layer);
-
-  // Recreates a layer for the view and returns the old layer. After this call,
-  // the View no longer has a pointer to the old layer (so it won't be able to
-  // update the old layer or destroy it). The caller must free the returned
-  // layer.
-  // Returns NULL and does not recreate layer if view does not own its layer.
-  ui::Layer* RecreateLayer() WARN_UNUSED_RESULT;
 
   // RTL positioning -----------------------------------------------------------
 
@@ -397,6 +406,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Returns the first ancestor, starting at this, whose class name is |name|.
   // Returns null if no ancestor has the class name |name|.
+  const View* GetAncestorWithClassName(const std::string& name) const;
   View* GetAncestorWithClassName(const std::string& name);
 
   // Recursively descends the view tree starting at this view, and returns
@@ -443,10 +453,20 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   //
   // |source| and |target| must be in the same widget, but doesn't need to be in
   // the same view hierarchy.
-  // |source| can be NULL in which case it means the screen coordinate system.
+  // Neither |source| nor |target| can be NULL.
   static void ConvertPointToTarget(const View* source,
                                    const View* target,
                                    gfx::Point* point);
+
+  // Convert |rect| from the coordinate system of |source| to the coordinate
+  // system of |target|.
+  //
+  // |source| and |target| must be in the same widget, but doesn't need to be in
+  // the same view hierarchy.
+  // Neither |source| nor |target| can be NULL.
+  static void ConvertRectToTarget(const View* source,
+                                  const View* target,
+                                  gfx::RectF* rect);
 
   // Convert a point from a View's coordinate system to that of its Widget.
   static void ConvertPointToWidget(const View* src, gfx::Point* point);
@@ -484,25 +504,20 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // for View coordinates and language direction as required, allows the View
   // to paint itself via the various OnPaint*() event handlers and then paints
   // the hierarchy beneath it.
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas, const CullSet& cull_set);
 
   // The background object is owned by this object and may be NULL.
-  void set_background(Background* b) { background_.reset(b); }
+  void set_background(Background* b);
   const Background* background() const { return background_.get(); }
   Background* background() { return background_.get(); }
 
   // The border object is owned by this object and may be NULL.
-  void set_border(Border* b) { border_.reset(b); }
+  virtual void SetBorder(scoped_ptr<Border> b);
   const Border* border() const { return border_.get(); }
   Border* border() { return border_.get(); }
 
-  // The focus_border object is owned by this object and may be NULL.
-  void set_focus_border(FocusBorder* b) { focus_border_.reset(b); }
-  const FocusBorder* focus_border() const { return focus_border_.get(); }
-  FocusBorder* focus_border() { return focus_border_.get(); }
-
   // Get the theme provider from the parent widget.
-  virtual ui::ThemeProvider* GetThemeProvider() const;
+  ui::ThemeProvider* GetThemeProvider() const;
 
   // Returns the NativeTheme to use for this View. This calls through to
   // GetNativeTheme() on the Widget this View is in. If this View is not in a
@@ -541,19 +556,27 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
     flip_canvas_on_paint_for_rtl_ui_ = enable;
   }
 
-  // Accelerated painting ------------------------------------------------------
-
-  // Enable/Disable accelerated compositing.
-  static void set_use_acceleration_when_possible(bool use);
-  static bool get_use_acceleration_when_possible();
-
   // Input ---------------------------------------------------------------------
-  // The points (and mouse locations) in the following functions are in the
-  // view's coordinates, except for a RootView.
+  // The points, rects, mouse locations, and touch locations in the following
+  // functions are in the view's coordinates, except for a RootView.
 
-  // Returns the deepest visible descendant that contains the specified point
-  // and supports event handling.
-  virtual View* GetEventHandlerForPoint(const gfx::Point& point);
+  // TODO(tdanderson): GetEventHandlerForPoint() and GetEventHandlerForRect()
+  //                   will be removed once their logic is moved into
+  //                   ViewTargeter and its derived classes. See
+  //                   crbug.com/355425.
+
+  // Convenience functions which calls into GetEventHandler() with
+  // a 1x1 rect centered at |point|.
+  View* GetEventHandlerForPoint(const gfx::Point& point);
+
+  // If point-based targeting should be used, return the deepest visible
+  // descendant that contains the center point of |rect|.
+  // If rect-based targeting (i.e., fuzzing) should be used, return the
+  // closest visible descendant having at least kRectTargetOverlap of
+  // its area covered by |rect|. If no such descendant exists, return the
+  // deepest visible descendant that contains the center point of |rect|.
+  // See http://goo.gl/3Jp2BD for more information about rect-based targeting.
+  virtual View* GetEventHandlerForRect(const gfx::Rect& rect);
 
   // Returns the deepest visible descendant that contains the specified point
   // and supports tooltips. If the view does not contain the point, returns
@@ -567,12 +590,20 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // the cursor is a shared resource.
   virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event);
 
+  // TODO(tdanderson): HitTestPoint() and HitTestRect() will be removed once
+  //                   their logic is moved into ViewTargeter and its
+  //                   derived classes. See crbug.com/355425.
+
   // A convenience function which calls HitTestRect() with a rect of size
   // 1x1 and an origin of |point|.
   bool HitTestPoint(const gfx::Point& point) const;
 
   // Tests whether |rect| intersects this view's bounds.
   virtual bool HitTestRect(const gfx::Rect& rect) const;
+
+  // Returns true if this view or any of its descendants are permitted to
+  // be the target of an event.
+  virtual bool CanProcessEventsWithinSubtree() const;
 
   // Returns true if the mouse cursor is over |view| and mouse events are
   // enabled.
@@ -688,15 +719,26 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   virtual InputMethod* GetInputMethod();
   virtual const InputMethod* GetInputMethod() const;
 
+  // Sets a new event-targeter for the view, and returns the previous
+  // event-targeter.
+  scoped_ptr<ui::EventTargeter> SetEventTargeter(
+      scoped_ptr<ui::EventTargeter> targeter);
+
   // Overridden from ui::EventTarget:
   virtual bool CanAcceptEvent(const ui::Event& event) OVERRIDE;
   virtual ui::EventTarget* GetParentTarget() OVERRIDE;
+  virtual scoped_ptr<ui::EventTargetIterator> GetChildIterator() const OVERRIDE;
+  virtual ui::EventTargeter* GetEventTargeter() OVERRIDE;
+  virtual void ConvertEventToTarget(ui::EventTarget* target,
+                                    ui::LocatedEvent* event) OVERRIDE;
+
+  const ui::EventTargeter* GetEventTargeter() const;
 
   // Overridden from ui::EventHandler:
   virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
   virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE FINAL;
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Accelerators --------------------------------------------------------------
@@ -744,10 +786,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Sets whether this view is capable of taking focus.
   // Note that this is false by default so that a view used as a container does
   // not get the focus.
-  void set_focusable(bool focusable) { focusable_ = focusable; }
-
-  // Returns true if this view is capable of taking focus.
-  bool focusable() const { return focusable_ && enabled_ && visible_; }
+  void SetFocusable(bool focusable);
 
   // Returns true if this view is |focusable_|, |enabled_| and drawn.
   virtual bool IsFocusable() const;
@@ -759,9 +798,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Set whether this view can be made focusable if the user requires
   // full keyboard access, even though it's not normally focusable.
   // Note that this is false by default.
-  void set_accessibility_focusable(bool accessibility_focusable) {
-    accessibility_focusable_ = accessibility_focusable;
-  }
+  void SetAccessibilityFocusable(bool accessibility_focusable);
 
   // Convenience method to retrieve the FocusManager associated with the
   // Widget that contains this view.  This can return NULL if this view is not
@@ -808,7 +845,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Any time the tooltip text that a View is displaying changes, it must
   // invoke TooltipTextChanged.
   // |p| provides the coordinates of the mouse (relative to this view).
-  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) const;
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              base::string16* tooltip) const;
 
   // Returns the location (relative to this View) for the text on the tooltip
   // to display. If false is returned (the default), the tooltip is placed at
@@ -911,7 +949,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Accessibility -------------------------------------------------------------
 
   // Modifies |state| to reflect the current accessible state of this view.
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) { }
+  virtual void GetAccessibleState(ui::AXViewState* state) { }
 
   // Returns an instance of the native accessibility interface for this view.
   virtual gfx::NativeViewAccessible GetNativeViewAccessible();
@@ -922,7 +960,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // cases where the view is a native control that's already sending a
   // native accessibility event and the duplicate event would cause
   // problems.
-  void NotifyAccessibilityEvent(ui::AccessibilityTypes::Event event_type,
+  void NotifyAccessibilityEvent(ui::AXEvent event_type,
                                 bool send_native_event);
 
   // Scrolling -----------------------------------------------------------------
@@ -1011,6 +1049,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // changed. The default implementation calls SchedulePaint() on this View.
   virtual void OnEnabledChanged();
 
+  bool needs_layout() const { return needs_layout_; }
+
   // Tree operations -----------------------------------------------------------
 
   // This method is invoked when the tree changes.
@@ -1032,23 +1072,19 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // invoked for that view as well as all the children recursively.
   virtual void VisibilityChanged(View* starting_from, bool is_visible);
 
-  // Called when the native view hierarchy changed.
-  // |attached| is true if that view has been attached to a new NativeView
-  // hierarchy, false if it has been detached.
-  // |native_view| is the NativeView this view was attached/detached from, and
-  // |root_view| is the root view associated with the NativeView.
-  // Views created without a native view parent don't have a focus manager.
-  // When this function is called they could do the processing that requires
-  // it - like registering accelerators, for example.
-  virtual void NativeViewHierarchyChanged(bool attached,
-                                          gfx::NativeView native_view,
-                                          internal::RootView* root_view);
+  // This method is invoked when the parent NativeView of the widget that the
+  // view is attached to has changed and the view hierarchy has not changed.
+  // ViewHierarchyChanged() is called when the parent NativeView of the widget
+  // that the view is attached to is changed as a result of changing the view
+  // hierarchy. Overriding this method is useful for tracking which
+  // FocusManager manages this view.
+  virtual void NativeViewHierarchyChanged();
 
   // Painting ------------------------------------------------------------------
 
   // Responsible for calling Paint() on child Views. Override to control the
   // order child Views are painted.
-  virtual void PaintChildren(gfx::Canvas* canvas);
+  virtual void PaintChildren(gfx::Canvas* canvas, const CullSet& cull_set);
 
   // Override to provide rendering in any part of the View's bounds. Typically
   // this is the "contents" of the view. If you override this method you will
@@ -1063,20 +1099,12 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Override to paint a border not specified by SetBorder().
   virtual void OnPaintBorder(gfx::Canvas* canvas);
 
-  // Override to paint a focus border not specified by set_focus_border() around
-  // relevant contents.  The focus border is usually a dotted rectangle.
-  virtual void OnPaintFocusBorder(gfx::Canvas* canvas);
+  // Returns true if this View is the root for paint events, and should
+  // therefore maintain a |bounds_tree_| member and use it for paint damage rect
+  // calculations.
+  virtual bool IsPaintRoot();
 
   // Accelerated painting ------------------------------------------------------
-
-  // This creates a layer for the view, if one does not exist. It then
-  // passes the texture to a layer associated with the view. While an external
-  // texture is set, the view will not update the layer contents.
-  //
-  // |texture| cannot be NULL.
-  //
-  // Returns false if it cannot create a layer to which to assign the texture.
-  bool SetExternalTexture(ui::Texture* texture);
 
   // Returns the offset from this view to the nearest ancestor with a layer. If
   // |layer_parent| is non-NULL it is set to the nearest ancestor with a layer.
@@ -1093,12 +1121,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // recurses through all children. This is used when adding a layer to an
   // existing view to make sure all descendants that have layers are parented to
   // the right layer.
-  virtual void MoveLayerToParent(ui::Layer* parent_layer,
-                                 const gfx::Point& point);
+  void MoveLayerToParent(ui::Layer* parent_layer, const gfx::Point& point);
 
   // Called to update the bounds of any child layers within this View's
   // hierarchy when something happens to the hierarchy.
-  virtual void UpdateChildLayerBounds(const gfx::Vector2d& offset);
+  void UpdateChildLayerBounds(const gfx::Vector2d& offset);
 
   // Overridden from ui::LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
@@ -1128,11 +1155,15 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Called by HitTestRect() to retrieve a mask for hit-testing against.
   // Subclasses override to provide custom shaped hit test regions.
-  virtual void GetHitTestMask(gfx::Path* mask) const;
+  virtual void GetHitTestMask(HitTestSource source, gfx::Path* mask) const;
 
   virtual DragInfo* GetDragInfo();
 
   // Focus ---------------------------------------------------------------------
+
+  // Returns last value passed to SetFocusable(). Use IsFocusable() to determine
+  // if a view can take focus right now.
+  bool focusable() const { return focusable_; }
 
   // Override to be notified when focus has changed either to or from this View.
   virtual void OnFocus();
@@ -1211,10 +1242,13 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 #endif
 
  private:
+  friend class internal::PreEventDispatchHandler;
   friend class internal::PostEventDispatchHandler;
   friend class internal::RootView;
   friend class FocusManager;
   friend class Widget;
+
+  typedef gfx::RTree<intptr_t> BoundsTree;
 
   // Painting  -----------------------------------------------------------------
 
@@ -1232,7 +1266,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Common Paint() code shared by accelerated and non-accelerated code paths to
   // invoke OnPaint() on the View.
-  void PaintCommon(gfx::Canvas* canvas);
+  void PaintCommon(gfx::Canvas* canvas, const CullSet& cull_set);
 
   // Tree operations -----------------------------------------------------------
 
@@ -1260,9 +1294,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Propagates NativeViewHierarchyChanged() notification through all the
   // children.
-  void PropagateNativeViewHierarchyChanged(bool attached,
-                                           gfx::NativeView native_view,
-                                           internal::RootView* root_view);
+  void PropagateNativeViewHierarchyChanged();
 
   // Takes care of registering/unregistering accelerators if
   // |register_accelerators| true and calls ViewHierarchyChanged().
@@ -1303,6 +1335,25 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Sets the layer's bounds given in DIP coordinates.
   void SetLayerBounds(const gfx::Rect& bounds_in_dip);
 
+  // Sets the bit indicating that the cached bounds for this object within the
+  // root view bounds tree are no longer valid. If |origin_changed| is true sets
+  // the same bit for all of our children as well.
+  void SetRootBoundsDirty(bool origin_changed);
+
+  // If needed, updates the bounds rectangle in paint root coordinate space
+  // in the supplied RTree. Recurses to children for recomputation as well.
+  void UpdateRootBounds(BoundsTree* bounds_tree, const gfx::Vector2d& offset);
+
+  // Remove self and all children from the supplied bounds tree. This is used,
+  // for example, when a view gets a layer and therefore becomes paint root. It
+  // needs to remove all references to itself and its children from any previous
+  // paint root that may have been tracking it.
+  void RemoveRootBounds(BoundsTree* bounds_tree);
+
+  // Traverse up the View hierarchy to the first ancestor that is a paint root
+  // and return a pointer to its |bounds_tree_| or NULL if no tree is found.
+  BoundsTree* GetBoundsTreeFromPaintRoot();
+
   // Transformations -----------------------------------------------------------
 
   // Returns in |transform| the transform to get from coordinates of |ancestor|
@@ -1320,9 +1371,20 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Convert a point in the ancestor's coordinate system to the view's
   // coordinate system using necessary transformations. Returns whether the
-  // point was successfully from the ancestor's coordinate system to the view's
-  // coordinate system.
+  // point was successfully converted from the ancestor's coordinate system
+  // to the view's coordinate system.
   bool ConvertPointFromAncestor(const View* ancestor, gfx::Point* point) const;
+
+  // Convert a rect in the view's coordinate to an ancestor view's coordinate
+  // system using necessary transformations. Returns whether the rect was
+  // successfully converted to the ancestor's coordinate system.
+  bool ConvertRectForAncestor(const View* ancestor, gfx::RectF* rect) const;
+
+  // Convert a rect in the ancestor's coordinate system to the view's
+  // coordinate system using necessary transformations. Returns whether the
+  // rect was successfully converted from the ancestor's coordinate system
+  // to the view's coordinate system.
+  bool ConvertRectFromAncestor(const View* ancestor, gfx::RectF* rect) const;
 
   // Accelerated painting ------------------------------------------------------
 
@@ -1464,6 +1526,15 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // List of descendants wanting notification when their visible bounds change.
   scoped_ptr<Views> descendants_to_notify_;
 
+  // True if the bounds on this object have changed since the last time the
+  // paint root view constructed the spatial database.
+  bool root_bounds_dirty_;
+
+  // If this View IsPaintRoot() then this will be a pointer to a spatial data
+  // structure where we will keep the bounding boxes of all our children, for
+  // efficient paint damage rectangle intersection.
+  scoped_ptr<BoundsTree> bounds_tree_;
+
   // Transformations -----------------------------------------------------------
 
   // Clipping parameters. skia transformation matrix does not give us clipping.
@@ -1487,9 +1558,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Border.
   scoped_ptr<Border> border_;
 
-  // Focus border.
-  scoped_ptr<FocusBorder> focus_border_;
-
   // RTL painting --------------------------------------------------------------
 
   // Indicates whether or not the gfx::Canvas object passed to View::Paint()
@@ -1502,10 +1570,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   bool paint_to_layer_;
 
   // Accelerators --------------------------------------------------------------
-
-  // true if when we were added to hierarchy we were without focus manager
-  // attempt addition when ancestor chain changed.
-  bool accelerator_registration_delayed_;
 
   // Focus manager accelerators registered on.
   FocusManager* accelerator_focus_manager_;
@@ -1542,7 +1606,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Input  --------------------------------------------------------------------
 
-  scoped_ptr<internal::PostEventDispatchHandler> post_dispatch_handler_;
+  scoped_ptr<ui::EventTargeter> targeter_;
 
   // Accessibility -------------------------------------------------------------
 

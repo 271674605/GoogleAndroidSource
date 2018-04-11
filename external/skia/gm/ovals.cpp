@@ -26,12 +26,16 @@ public:
     }
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() SK_OVERRIDE {
         return SkString("ovals");
     }
 
     virtual SkISize onISize() SK_OVERRIDE {
-        return make_isize(1200, 900);
+        return SkISize::Make(1200, 900);
     }
 
     void makePaints() {
@@ -125,17 +129,17 @@ protected:
         }
     }
 
-    SkColor genColor(SkMWCRandom* rand) {
+    SkColor genColor(SkRandom* rand) {
         SkScalar hsv[3];
-        hsv[0] = SkFloatToScalar(rand->nextRangeF(0.0f, 360.0f));
-        hsv[1] = SkFloatToScalar(rand->nextRangeF(0.75f, 1.0f));
-        hsv[2] = SkFloatToScalar(rand->nextRangeF(0.75f, 1.0f));
+        hsv[0] = rand->nextRangeF(0.0f, 360.0f);
+        hsv[1] = rand->nextRangeF(0.75f, 1.0f);
+        hsv[2] = rand->nextRangeF(0.75f, 1.0f);
 
         return SkHSVToColor(hsv);
     }
 
     virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
-        SkMWCRandom rand(1);
+        SkRandom rand(1);
         canvas->translate(20 * SK_Scalar1, 20 * SK_Scalar1);
         SkRect oval = SkRect::MakeLTRB(-20, -30, 20, 30);
 

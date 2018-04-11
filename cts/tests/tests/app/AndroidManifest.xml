@@ -16,16 +16,20 @@
  -->
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.android.app.cts">
+    package="com.android.cts.app">
 
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+
     <application>
         <uses-library android:name="android.test.runner" />
     </application>
 
-    <instrumentation android:name="android.test.InstrumentationCtsTestRunner"
-                     android:targetPackage="com.android.cts.stub"
-                     android:label="CTS tests of android.app"/>
+    <instrumentation android:name="android.support.test.runner.AndroidJUnitRunner"
+                     android:targetPackage="com.android.cts.app.stub"
+                     android:label="CTS tests of android.app">
+        <meta-data android:name="listener"
+            android:value="com.android.cts.runner.CtsTestRunListener" />
+    </instrumentation>
 
 </manifest>
 

@@ -32,7 +32,7 @@ libbcc_executionengine_SRC_FILES := \
 #=====================================================================
 # Device Static Library: libbccExecutionEngine
 #=====================================================================
-
+ifneq (true,$(DISABLE_LLVM_DEVICE_BUILDS))
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libbccExecutionEngine
@@ -46,15 +46,10 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_SRC_FILES := $(libbcc_executionengine_SRC_FILES)
 
-ifeq ($(strip $(TARGET_CPU_VARIANT)),cortex-a15)
-LOCAL_CFLAGS += -DHAS_HW_DIV
-endif
-
 include $(LIBBCC_DEVICE_BUILD_MK)
-include $(LIBBCC_GEN_CONFIG_MK)
 include $(LLVM_DEVICE_BUILD_MK)
 include $(BUILD_STATIC_LIBRARY)
-
+endif
 
 #=====================================================================
 # Host Static Library: libbccExecutionEngine
@@ -74,6 +69,5 @@ LOCAL_C_INCLUDES := \
 LOCAL_SRC_FILES := $(libbcc_executionengine_SRC_FILES)
 
 include $(LIBBCC_HOST_BUILD_MK)
-include $(LIBBCC_GEN_CONFIG_MK)
 include $(LLVM_HOST_BUILD_MK)
 include $(BUILD_HOST_STATIC_LIBRARY)

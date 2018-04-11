@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -17,25 +18,24 @@ namespace chromeos {
 
 // A fake implementation of session_manager. Accepts policy blobs to be set and
 // returns them unmodified.
-class FakeSessionManagerClient : public chromeos::SessionManagerClient {
+class FakeSessionManagerClient : public SessionManagerClient {
  public:
   FakeSessionManagerClient();
   virtual ~FakeSessionManagerClient();
 
-  // SessionManagerClient:
+  // SessionManagerClient overrides
+  virtual void Init(dbus::Bus* bus) OVERRIDE;
+  virtual void SetStubDelegate(StubDelegate* delegate) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual bool HasObserver(Observer* observer) OVERRIDE;
-  virtual void EmitLoginPromptReady() OVERRIDE;
   virtual void EmitLoginPromptVisible() OVERRIDE;
   virtual void RestartJob(int pid, const std::string& command_line) OVERRIDE;
-  virtual void RestartEntd() OVERRIDE;
   virtual void StartSession(const std::string& user_email) OVERRIDE;
   virtual void StopSession() OVERRIDE;
   virtual void StartDeviceWipe() OVERRIDE;
   virtual void RequestLockScreen() OVERRIDE;
   virtual void NotifyLockScreenShown() OVERRIDE;
-  virtual void RequestUnlockScreen() OVERRIDE;
   virtual void NotifyLockScreenDismissed() OVERRIDE;
   virtual void RetrieveActiveSessions(
       const ActiveSessionsCallback& callback) OVERRIDE;
@@ -53,7 +53,6 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
                                  const StorePolicyCallback& callback) OVERRIDE;
   virtual void StorePolicyForUser(const std::string& username,
                                   const std::string& policy_blob,
-                                  const std::string& policy_key,
                                   const StorePolicyCallback& callback) OVERRIDE;
   virtual void StoreDeviceLocalAccountPolicy(
       const std::string& account_id,
@@ -61,6 +60,8 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
       const StorePolicyCallback& callback) OVERRIDE;
   virtual void SetFlagsForUser(const std::string& username,
                                const std::vector<std::string>& flags) OVERRIDE;
+  virtual void GetServerBackedStateKeys(const StateKeysCallback& callback)
+      OVERRIDE;
 
   const std::string& device_policy() const;
   void set_device_policy(const std::string& policy_blob);
@@ -77,18 +78,24 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
   // Notify observers about a property change completion.
   void OnPropertyChangeComplete(bool success);
 
-  // Returns how many times EmitLoginPromptReady() is called.
-  int emit_login_prompt_ready_call_count() {
-    return emit_login_prompt_ready_call_count_;
+  // Configures the list of state keys used to satisfy
+  // GetServerBackedStateKeys() requests.
+  void set_server_backed_state_keys(
+      const std::vector<std::string>& state_keys) {
+    server_backed_state_keys_ = state_keys;
+  }
+
+  int start_device_wipe_call_count() const {
+    return start_device_wipe_call_count_;
   }
 
   // Returns how many times LockScreenShown() was called.
-  int notify_lock_screen_shown_call_count() {
+  int notify_lock_screen_shown_call_count() const {
     return notify_lock_screen_shown_call_count_;
   }
 
   // Returns how many times LockScreenDismissed() was called.
-  int notify_lock_screen_dismissed_call_count() {
+  int notify_lock_screen_dismissed_call_count() const {
     return notify_lock_screen_dismissed_call_count_;
   }
 
@@ -98,8 +105,9 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
   std::map<std::string, std::string> device_local_account_policy_;
   ObserverList<Observer> observers_;
   SessionManagerClient::ActiveSessionsMap user_sessions_;
+  std::vector<std::string> server_backed_state_keys_;
 
-  int emit_login_prompt_ready_call_count_;
+  int start_device_wipe_call_count_;
   int notify_lock_screen_shown_call_count_;
   int notify_lock_screen_dismissed_call_count_;
 

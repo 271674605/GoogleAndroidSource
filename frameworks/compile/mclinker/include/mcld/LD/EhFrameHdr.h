@@ -6,20 +6,17 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_EHFRAMEHDR_H
-#define MCLD_EHFRAMEHDR_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_EHFRAMEHDR_H
+#define MCLD_LD_EHFRAMEHDR_H
 #include <mcld/ADT/SizeTraits.h>
 #include <cassert>
 
 #include <mcld/LD/EhFrame.h>
+#include <mcld/Support/FileOutputBuffer.h>
 namespace mcld {
 
 class LDSection;
-class MemoryArea;
-class MemoryRegion;
+class FileOutputBuffer;
 
 /** \class EhFrameHdr
  *  \brief EhFrameHdr represents .eh_frame_hdr section.
@@ -47,13 +44,14 @@ public:
 
   /// emitOutput - write out eh_frame_hdr
   template<size_t size>
-  void emitOutput(MemoryArea& pOutput)
+  void emitOutput(FileOutputBuffer& pOutput)
   { assert(false && "Call invalid EhFrameHdr::emitOutput"); }
 
 private:
   /// computePCBegin - return the address of FDE's pc
   /// @ref binutils gold: ehframe.cc:222
-  uint32_t computePCBegin(const EhFrame::FDE& pFDE, const MemoryRegion& pEhFrameRegion);
+  uint32_t computePCBegin(const EhFrame::FDE& pFDE,
+                          const MemoryRegion& pEhFrameRegion);
 
 private:
   /// .eh_frame_hdr section
@@ -68,7 +66,7 @@ private:
 //===----------------------------------------------------------------------===//
 /// emitOutput - write out eh_frame_hdr
 template<>
-void EhFrameHdr::emitOutput<32>(MemoryArea& pOutput);
+void EhFrameHdr::emitOutput<32>(FileOutputBuffer& pOutput);
 
 } // namespace of mcld
 

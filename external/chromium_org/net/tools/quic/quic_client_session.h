@@ -9,40 +9,50 @@
 
 #include <string>
 
+#include "base/basictypes.h"
+#include "net/quic/quic_client_session_base.h"
 #include "net/quic/quic_crypto_client_stream.h"
 #include "net/quic/quic_protocol.h"
-#include "net/quic/quic_session.h"
-#include "net/tools/quic/quic_reliable_client_stream.h"
+#include "net/tools/quic/quic_spdy_client_stream.h"
 
 namespace net {
 
 class QuicConnection;
+class QuicServerId;
 class ReliableQuicStream;
 
 namespace tools {
 
-class QuicReliableClientStream;
-
-class QuicClientSession : public QuicSession {
+class QuicClientSession : public QuicClientSessionBase {
  public:
-  QuicClientSession(const std::string& server_hostname,
+  QuicClientSession(const QuicServerId& server_id,
                     const QuicConfig& config,
                     QuicConnection* connection,
                     QuicCryptoClientConfig* crypto_config);
   virtual ~QuicClientSession();
 
+  // QuicClientSessionBase methods:
+  virtual void OnProofValid(
+      const QuicCryptoClientConfig::CachedState& cached) OVERRIDE;
+  virtual void OnProofVerifyDetailsAvailable(
+      const ProofVerifyDetails& verify_details) OVERRIDE;
+
   // QuicSession methods:
-  virtual QuicReliableClientStream* CreateOutgoingReliableStream() OVERRIDE;
+  virtual QuicSpdyClientStream* CreateOutgoingDataStream() OVERRIDE;
   virtual QuicCryptoClientStream* GetCryptoStream() OVERRIDE;
 
   // Performs a crypto handshake with the server. Returns true if the crypto
   // handshake is started successfully.
   bool CryptoConnect();
 
+  // Returns the number of client hello messages that have been sent on the
+  // crypto stream. If the handshake has completed then this is one greater
+  // than the number of round-trips needed for the handshake.
+  int GetNumSentClientHellos() const;
+
  protected:
   // QuicSession methods:
-  virtual ReliableQuicStream* CreateIncomingReliableStream(
-      QuicStreamId id) OVERRIDE;
+  virtual QuicDataStream* CreateIncomingDataStream(QuicStreamId id) OVERRIDE;
 
  private:
   QuicCryptoClientStream crypto_stream_;

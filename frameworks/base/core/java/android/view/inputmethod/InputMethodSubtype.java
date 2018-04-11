@@ -38,9 +38,22 @@ import java.util.Locale;
  * the specified subtype of the designated IME directly.
  *
  * <p>It should be defined in an XML resource file of the input method with the
- * <code>&lt;subtype&gt;</code> element. For more information, see the guide to
- * <a href="{@docRoot}resources/articles/creating-input-method.html">
+ * <code>&lt;subtype&gt;</code> element, which resides within an {@code &lt;input-method>} element.
+ * For more information, see the guide to
+ * <a href="{@docRoot}guide/topics/text/creating-input-method.html">
  * Creating an Input Method</a>.</p>
+ *
+ * @see InputMethodInfo
+ *
+ * @attr ref android.R.styleable#InputMethod_Subtype_label
+ * @attr ref android.R.styleable#InputMethod_Subtype_icon
+ * @attr ref android.R.styleable#InputMethod_Subtype_imeSubtypeLocale
+ * @attr ref android.R.styleable#InputMethod_Subtype_imeSubtypeMode
+ * @attr ref android.R.styleable#InputMethod_Subtype_imeSubtypeExtraValue
+ * @attr ref android.R.styleable#InputMethod_Subtype_isAuxiliary
+ * @attr ref android.R.styleable#InputMethod_Subtype_overridesImplicitlyEnabledSubtype
+ * @attr ref android.R.styleable#InputMethod_Subtype_subtypeId
+ * @attr ref android.R.styleable#InputMethod_Subtype_isAsciiCapable
  */
 public final class InputMethodSubtype implements Parcelable {
     private static final String TAG = InputMethodSubtype.class.getSimpleName();
@@ -196,18 +209,6 @@ public final class InputMethodSubtype implements Parcelable {
          builder.mIsAsciiCapable = isAsciiCapable;
          return builder;
      }
-
-    /**
-     * Constructor with no subtype ID specified, overridesImplicitlyEnabledSubtype not specified.
-     * Arguments for this constructor have the same meanings as
-     * {@link InputMethodSubtype#InputMethodSubtype(int, int, String, String, String, boolean,
-     * boolean, int)} except "id" and "overridesImplicitlyEnabledSubtype".
-     * @hide
-     */
-    public InputMethodSubtype(int nameId, int iconId, String locale, String mode, String extraValue,
-            boolean isAuxiliary) {
-        this(nameId, iconId, locale, mode, extraValue, isAuxiliary, false);
-    }
 
     /**
      * Constructor with no subtype ID specified.
@@ -459,12 +460,12 @@ public final class InputMethodSubtype implements Parcelable {
                 return (subtype.hashCode() == hashCode());
             }
             return (subtype.hashCode() == hashCode())
-                && (subtype.getNameResId() == getNameResId())
-                && (subtype.getMode().equals(getMode()))
-                && (subtype.getIconResId() == getIconResId())
                 && (subtype.getLocale().equals(getLocale()))
+                && (subtype.getMode().equals(getMode()))
                 && (subtype.getExtraValue().equals(getExtraValue()))
                 && (subtype.isAuxiliary() == isAuxiliary())
+                && (subtype.overridesImplicitlyEnabledSubtype()
+                        == overridesImplicitlyEnabledSubtype())
                 && (subtype.isAsciiCapable() == isAsciiCapable());
         }
         return false;
@@ -521,6 +522,13 @@ public final class InputMethodSubtype implements Parcelable {
     private static int hashCodeInternal(String locale, String mode, String extraValue,
             boolean isAuxiliary, boolean overridesImplicitlyEnabledSubtype,
             boolean isAsciiCapable) {
+        // CAVEAT: Must revisit how to compute needsToCalculateCompatibleHashCode when a new
+        // attribute is added in order to avoid enabled subtypes being unexpectedly disabled.
+        final boolean needsToCalculateCompatibleHashCode = !isAsciiCapable;
+        if (needsToCalculateCompatibleHashCode) {
+            return Arrays.hashCode(new Object[] {locale, mode, extraValue, isAuxiliary,
+                    overridesImplicitlyEnabledSubtype});
+        }
         return Arrays.hashCode(new Object[] {locale, mode, extraValue, isAuxiliary,
                 overridesImplicitlyEnabledSubtype, isAsciiCapable});
     }

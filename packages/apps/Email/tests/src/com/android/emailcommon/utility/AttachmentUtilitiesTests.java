@@ -20,9 +20,11 @@ import com.android.emailcommon.provider.EmailContent;
 
 import android.net.Uri;
 import android.test.AndroidTestCase;
+import android.test.suitebuilder.annotation.SmallTest;
 
 import java.io.File;
 
+@SmallTest
 public class AttachmentUtilitiesTests extends AndroidTestCase {
     /**
      * Test static inferMimeType()
@@ -99,22 +101,6 @@ public class AttachmentUtilitiesTests extends AndroidTestCase {
                 AttachmentUtilities.inferMimeType(FILE_NO_EXT, TEXT_PLAIN));
         assertEquals(TEXT_PLAIN, AttachmentUtilities.inferMimeType(null, TEXT_PLAIN));
         assertEquals(TEXT_PLAIN, AttachmentUtilities.inferMimeType("", TEXT_PLAIN));
-    }
-
-    public void testInferMimeTypeForUri() {
-        String type;
-        // Test for content URI
-        type = AttachmentUtilities.inferMimeTypeForUri(getContext(), EmailContent.Body.CONTENT_URI);
-        assertEquals("vnd.android.cursor.dir/email-body", type);
-
-        // Test for file URI
-        type = AttachmentUtilities.inferMimeTypeForUri(getContext(),
-                Uri.fromFile(new File("a.png")));
-        assertEquals("image/png", type);
-
-        type = AttachmentUtilities.inferMimeTypeForUri(getContext(),
-                Uri.fromFile(new File("/a/b/c/d.png")));
-        assertEquals("image/png", type);
     }
 
     /**

@@ -77,6 +77,20 @@ void rsdScriptInvokeForEach(const Context *rsc,
     cs->invokeForEach(slot, ain, aout, usr, usrLen, sc);
 }
 
+void rsdScriptInvokeForEachMulti(const Context *rsc,
+                                 Script *s,
+                                 uint32_t slot,
+                                 const Allocation ** ains,
+                                 size_t inLen,
+                                 Allocation * aout,
+                                 const void * usr,
+                                 size_t usrLen,
+                                 const RsScriptCall *sc) {
+
+    RsdCpuReference::CpuScript *cs = (RsdCpuReference::CpuScript *)s->mHal.drv;
+    cs->invokeForEachMulti(slot, ains, inLen, aout, usr, usrLen, sc);
+}
+
 
 int rsdScriptInvokeRoot(const Context *dc, Script *s) {
     RsdCpuReference::CpuScript *cs = (RsdCpuReference::CpuScript *)s->mHal.drv;
@@ -117,7 +131,7 @@ void rsdScriptGetGlobalVar(const Context *dc, const Script *s,
 void rsdScriptSetGlobalVarWithElemDims(const Context *dc, const Script *s,
                                        uint32_t slot, void *data, size_t dataLength,
                                        const android::renderscript::Element *elem,
-                                       const size_t *dims, size_t dimLength) {
+                                       const uint32_t *dims, size_t dimLength) {
     RsdCpuReference::CpuScript *cs = (RsdCpuReference::CpuScript *)s->mHal.drv;
     cs->setGlobalVarWithElemDims(slot, data, dataLength, elem, dims, dimLength);
 }
@@ -146,3 +160,18 @@ Allocation * rsdScriptGetAllocationForPointer(const android::renderscript::Conte
     return cs->getAllocationForPointer(ptr);
 }
 
+void rsdScriptUpdateCachedObject(const Context *rsc,
+                                 const Script *script,
+                                 rs_script *obj)
+{
+    obj->p = script;
+#ifdef __LP64__
+    obj->r = NULL;
+    if (script != NULL) {
+        obj->v1 = script->mHal.drv;
+    } else {
+        obj->v1 = NULL;
+    }
+    obj->v2 = NULL;
+#endif
+}

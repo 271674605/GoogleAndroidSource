@@ -19,6 +19,7 @@ class StubWebView : public WebView {
 
   // Overridden from WebView:
   virtual std::string GetId() OVERRIDE;
+  virtual bool WasCrashed() OVERRIDE;
   virtual Status ConnectIfNecessary() OVERRIDE;
   virtual Status HandleReceivedEvents() OVERRIDE;
   virtual Status Load(const std::string& url) OVERRIDE;
@@ -47,6 +48,7 @@ class StubWebView : public WebView {
                                     std::string* out_frame) OVERRIDE;
   virtual Status DispatchMouseEvents(
       const std::list<MouseEvent>& events, const std::string& frame) OVERRIDE;
+  virtual Status DispatchTouchEvent(const TouchEvent& event) OVERRIDE;
   virtual Status DispatchTouchEvents(
       const std::list<TouchEvent>& events) OVERRIDE;
   virtual Status DispatchKeyEvents(const std::list<KeyEvent>& events) OVERRIDE;
@@ -54,7 +56,8 @@ class StubWebView : public WebView {
   virtual Status DeleteCookie(const std::string& name,
                               const std::string& url) OVERRIDE;
   virtual Status WaitForPendingNavigations(const std::string& frame_id,
-                                           int timeout) OVERRIDE;
+                                           const base::TimeDelta& timeout,
+                                           bool stop_load_on_timeout) OVERRIDE;
   virtual Status IsPendingNavigation(
       const std::string& frame_id, bool* is_pending) OVERRIDE;
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager() OVERRIDE;
@@ -64,6 +67,9 @@ class StubWebView : public WebView {
       const std::string& frame,
       const base::DictionaryValue& element,
       const std::vector<base::FilePath>& files) OVERRIDE;
+  virtual Status TakeHeapSnapshot(scoped_ptr<base::Value>* snapshot) OVERRIDE;
+  virtual Status StartProfile() OVERRIDE;
+  virtual Status EndProfile(scoped_ptr<base::Value>* profile_data) OVERRIDE;
 
  private:
   std::string id_;

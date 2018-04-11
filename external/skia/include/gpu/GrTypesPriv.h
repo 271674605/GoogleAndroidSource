@@ -33,7 +33,7 @@ static const int kGrSLTypeCount = kLast_GrSLType + 1;
  * Gets the vector size of the SLType. Returns -1 for void, matrices, and samplers.
  */
 static inline int GrSLTypeVectorCount(GrSLType type) {
-    GrAssert(type >= 0 && type < static_cast<GrSLType>(kGrSLTypeCount));
+    SkASSERT(type >= 0 && type < static_cast<GrSLType>(kGrSLTypeCount));
     static const int kCounts[] = { -1, 1, 2, 3, 4, -1, -1, -1 };
     return kCounts[type];
 
@@ -45,13 +45,13 @@ static inline int GrSLTypeVectorCount(GrSLType type) {
     GR_STATIC_ASSERT(5 == kMat33f_GrSLType);
     GR_STATIC_ASSERT(6 == kMat44f_GrSLType);
     GR_STATIC_ASSERT(7 == kSampler2D_GrSLType);
-    GR_STATIC_ASSERT(GR_ARRAY_COUNT(kCounts) == kGrSLTypeCount);
+    GR_STATIC_ASSERT(SK_ARRAY_COUNT(kCounts) == kGrSLTypeCount);
 }
 
 /** Return the type enum for a vector of floats of length n (1..4),
  e.g. 1 -> kFloat_GrSLType, 2 -> kVec2_GrSLType, ... */
 static inline GrSLType GrSLFloatVectorType(int count) {
-    GrAssert(count > 0 && count <= 4);
+    SkASSERT(count > 0 && count <= 4);
     return (GrSLType)(count);
 
     GR_STATIC_ASSERT(kFloat_GrSLType == 1);
@@ -59,6 +59,8 @@ static inline GrSLType GrSLFloatVectorType(int count) {
     GR_STATIC_ASSERT(kVec3f_GrSLType == 3);
     GR_STATIC_ASSERT(kVec4f_GrSLType == 4);
 }
+
+//////////////////////////////////////////////////////////////////////////////
 
 /**
  * Types used to describe format of vertices in arrays.
@@ -78,7 +80,7 @@ static const int kGrVertexAttribTypeCount = kLast_GrVertexAttribType + 1;
  * Returns the vector size of the type.
  */
 static inline int GrVertexAttribTypeVectorCount(GrVertexAttribType type) {
-    GrAssert(type >= 0 && type < kGrVertexAttribTypeCount);
+    SkASSERT(type >= 0 && type < kGrVertexAttribTypeCount);
     static const int kCounts[] = { 1, 2, 3, 4, 4 };
     return kCounts[type];
 
@@ -87,14 +89,14 @@ static inline int GrVertexAttribTypeVectorCount(GrVertexAttribType type) {
     GR_STATIC_ASSERT(2 == kVec3f_GrVertexAttribType);
     GR_STATIC_ASSERT(3 == kVec4f_GrVertexAttribType);
     GR_STATIC_ASSERT(4 == kVec4ub_GrVertexAttribType);
-    GR_STATIC_ASSERT(GR_ARRAY_COUNT(kCounts) == kGrVertexAttribTypeCount);
+    GR_STATIC_ASSERT(SK_ARRAY_COUNT(kCounts) == kGrVertexAttribTypeCount);
 }
 
 /**
  * Returns the size of the attrib type in bytes.
  */
 static inline size_t GrVertexAttribTypeSize(GrVertexAttribType type) {
-    GrAssert(type >= 0 && type < kGrVertexAttribTypeCount);
+    SkASSERT(type >= 0 && type < kGrVertexAttribTypeCount);
     static const size_t kSizes[] = {
         sizeof(float),          // kFloat_GrVertexAttribType
         2*sizeof(float),        // kVec2f_GrVertexAttribType
@@ -109,7 +111,7 @@ static inline size_t GrVertexAttribTypeSize(GrVertexAttribType type) {
     GR_STATIC_ASSERT(2 == kVec3f_GrVertexAttribType);
     GR_STATIC_ASSERT(3 == kVec4f_GrVertexAttribType);
     GR_STATIC_ASSERT(4 == kVec4ub_GrVertexAttribType);
-    GR_STATIC_ASSERT(GR_ARRAY_COUNT(kSizes) == kGrVertexAttribTypeCount);
+    GR_STATIC_ASSERT(SK_ARRAY_COUNT(kSizes) == kGrVertexAttribTypeCount);
 }
 
 /**
@@ -136,7 +138,7 @@ static const int kGrFixedFunctionVertexAttribBindingCnt =
     kLastFixedFunction_GrVertexAttribBinding + 1;
 
 static inline int GrFixedFunctionVertexAttribVectorCount(GrVertexAttribBinding binding) {
-    GrAssert(binding >= 0 && binding < kGrFixedFunctionVertexAttribBindingCnt);
+    SkASSERT(binding >= 0 && binding < kGrFixedFunctionVertexAttribBindingCnt);
     static const int kVecCounts[] = { 2, 2, 4, 4 };
 
     return kVecCounts[binding];
@@ -165,5 +167,54 @@ struct GrVertexAttrib {
 };
 
 template <int N> class GrVertexAttribArray : public SkSTArray<N, GrVertexAttrib, true> {};
+
+//////////////////////////////////////////////////////////////////////////////
+
+/**
+* We have coverage effects that clip rendering to the edge of some geometric primitive.
+* This enum specifies how that clipping is performed. Not all factories that take a
+* GrEffectEdgeType will succeed with all values and it is up to the caller to check for
+* a NULL return.
+*/
+enum GrEffectEdgeType {
+    kFillBW_GrEffectEdgeType,
+    kFillAA_GrEffectEdgeType,
+    kInverseFillBW_GrEffectEdgeType,
+    kInverseFillAA_GrEffectEdgeType,
+    kHairlineAA_GrEffectEdgeType,
+
+    kLast_GrEffectEdgeType = kHairlineAA_GrEffectEdgeType
+};
+
+static const int kGrEffectEdgeTypeCnt = kLast_GrEffectEdgeType + 1;
+
+static inline bool GrEffectEdgeTypeIsFill(const GrEffectEdgeType edgeType) {
+    return (kFillAA_GrEffectEdgeType == edgeType || kFillBW_GrEffectEdgeType == edgeType);
+}
+
+static inline bool GrEffectEdgeTypeIsInverseFill(const GrEffectEdgeType edgeType) {
+    return (kInverseFillAA_GrEffectEdgeType == edgeType ||
+            kInverseFillBW_GrEffectEdgeType == edgeType);
+}
+
+static inline bool GrEffectEdgeTypeIsAA(const GrEffectEdgeType edgeType) {
+    return (kFillBW_GrEffectEdgeType != edgeType && kInverseFillBW_GrEffectEdgeType != edgeType);
+}
+
+static inline GrEffectEdgeType GrInvertEffectEdgeType(const GrEffectEdgeType edgeType) {
+    switch (edgeType) {
+        case kFillBW_GrEffectEdgeType:
+            return kInverseFillBW_GrEffectEdgeType;
+        case kFillAA_GrEffectEdgeType:
+            return kInverseFillAA_GrEffectEdgeType;
+        case kInverseFillBW_GrEffectEdgeType:
+            return kFillBW_GrEffectEdgeType;
+        case kInverseFillAA_GrEffectEdgeType:
+            return kFillAA_GrEffectEdgeType;
+        case kHairlineAA_GrEffectEdgeType:
+            SkFAIL("Hairline fill isn't invertible.");
+    }
+    return kFillAA_GrEffectEdgeType; // suppress warning.
+}
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ class CertificateViewer implements OnItemSelectedListener {
         mViews = new ArrayList<LinearLayout>();
         mTitles = new ArrayList<String>();
         mPadding = (int) context.getResources().getDimension(
-                R.dimen.certificate_viewer_padding) / 2;
+                R.dimen.certificate_viewer_padding_wide) / 2;
     }
 
     // Show information about an array of DER-encoded data representing a X509 certificate chain.
@@ -196,13 +196,13 @@ class CertificateViewer implements OnItemSelectedListener {
     }
 
     private static byte[] getDigest(byte[] bytes, String algorithm) {
-      try {
-        MessageDigest md = MessageDigest.getInstance(algorithm);
-        md.update(bytes);
-        return md.digest();
-      } catch (java.security.NoSuchAlgorithmException e) {
-        return null;
-      }
+        try {
+            MessageDigest md = MessageDigest.getInstance(algorithm);
+            md.update(bytes);
+            return md.digest();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return null;
+        }
     }
 
     @Override

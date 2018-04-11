@@ -9,20 +9,37 @@
 #include <set>
 #include <string>
 
+#include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/platform_file.h"
+#include "base/move.h"
 #include "ipc/ipc_platform_file.h"
 
 namespace picasa {
 
 struct AlbumInfo;
 
-typedef std::set<base::FilePath> AlbumImages;
+// Map of de-duplicated filenames to the platform paths for a given album.
+// Example:
+//   Bar.jpg -> /path/to/Bar.jpg
+//   Foo.jpg -> /path/to/Foo.jpg
+//   Foo (1).jpg -> /path/to/another/Foo.jpg
+// TODO(tommycli): Rename this type to a more intuitive name.
+typedef std::map<std::string, base::FilePath> AlbumImages;
 typedef std::set<std::string> AlbumUIDSet;
+// Map of album uids to a collection of its images.
 typedef std::map<std::string, AlbumImages> AlbumImagesMap;
 typedef std::map<std::string, AlbumInfo> AlbumMap;
 
-const char kPicasaAlbumTableName[] = "albumdata";
+extern const char kPicasaDatabaseDirName[];
+extern const char kPicasaTempDirName[];
+extern const char kPicasaINIFilename[];
+
+extern const char kPicasaAlbumTableName[];
+extern const char kAlbumTokenPrefix[];
+
+extern const uint32 kAlbumCategoryAlbum;
+extern const uint32 kAlbumCategoryFolder;
+extern const uint32 kAlbumCategoryInvalid;
 
 struct AlbumInfo {
   AlbumInfo();
@@ -38,18 +55,25 @@ struct AlbumInfo {
 };
 
 struct AlbumTableFiles {
+  MOVE_ONLY_TYPE_FOR_CPP_03(AlbumTableFiles, RValue)
+ public:
   AlbumTableFiles();
   explicit AlbumTableFiles(const base::FilePath& directory_path);
+  ~AlbumTableFiles();
+
+  // C++03 move emulation of this type.
+  AlbumTableFiles(RValue other);
+  AlbumTableFiles& operator=(RValue other);
 
   // Special empty file used to confirm existence of table.
-  base::PlatformFile indicator_file;
+  base::File indicator_file;
 
-  base::PlatformFile category_file;
-  base::PlatformFile date_file;
-  base::PlatformFile filename_file;
-  base::PlatformFile name_file;
-  base::PlatformFile token_file;
-  base::PlatformFile uid_file;
+  base::File category_file;
+  base::File date_file;
+  base::File filename_file;
+  base::File name_file;
+  base::File token_file;
+  base::File uid_file;
 };
 
 // A mirror of AlbumTableFiles but for transit.
@@ -68,9 +92,11 @@ struct AlbumTableFilesForTransit {
 struct FolderINIContents {
   base::FilePath folder_path;
   std::string ini_contents;
-};
 
-void CloseAlbumTableFiles(AlbumTableFiles* table_files);
+  bool operator<(const FolderINIContents& that) const {
+    return folder_path < that.folder_path;
+  }
+};
 
 }  // namespace picasa
 

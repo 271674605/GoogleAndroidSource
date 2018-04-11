@@ -16,11 +16,11 @@
 
 package com.android.emailcommon.utility;
 
-import com.android.emailcommon.utility.EmailAsyncTask.Tracker;
-
 import android.test.AndroidTestCase;
 import android.test.MoreAsserts;
+import android.test.suitebuilder.annotation.SmallTest;
 
+@SmallTest
 public class EmailAsyncTaskTests extends AndroidTestCase {
     public void testAll() throws Exception {
         // Because AsyncTask relies on the UI thread and how we use threads in test, we can't
@@ -70,7 +70,7 @@ public class EmailAsyncTaskTests extends AndroidTestCase {
         // Task 2 and 4 are still registered.
 
         // Cancel all left
-        tracker.cancellAllInterrupt();
+        tracker.cancelAllInterrupt();
 
         // Check if they're canceled
         assertEquals(0, tracker.getTaskCountForTest());

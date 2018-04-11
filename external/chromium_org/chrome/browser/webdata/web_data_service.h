@@ -19,8 +19,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/browser/webdata/keyword_table.h"
+#include "components/search_engines/template_url_id.h"
 #include "components/webdata/common/web_data_results.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
@@ -93,6 +93,27 @@ class WebDataServiceConsumer;
 
 class WebDataService : public WebDataServiceBase {
  public:
+  // Instantiate this to turn on keyword batch mode on the provided |service|
+  // until the scoper is destroyed.  When batch mode is on, calls to any of the
+  // three keyword table modification functions below will result in locally
+  // queueing the operation; on setting this back to false, all the
+  // modifications will be performed at once.  This is a performance
+  // optimization; see comments on KeywordTable::PerformOperations().
+  //
+  // If multiple scopers are in-scope simultaneously, batch mode will only be
+  // exited when all are destroyed.  If |service| is NULL, the object will do
+  // nothing.
+  class KeywordBatchModeScoper {
+   public:
+    explicit KeywordBatchModeScoper(WebDataService* service);
+    ~KeywordBatchModeScoper();
+
+   private:
+    WebDataService* service_;
+
+    DISALLOW_COPY_AND_ASSIGN(KeywordBatchModeScoper);
+  };
+
   // Retrieve a WebDataService for the given context.
   static scoped_refptr<WebDataService> FromBrowserContext(
       content::BrowserContext* context);
@@ -121,8 +142,8 @@ class WebDataService : public WebDataServiceBase {
   // On success, consumer is notified with WDResult<KeywordTable::Keywords>.
   Handle GetKeywords(WebDataServiceConsumer* consumer);
 
-  // Sets the keywords used for the default search provider.
-  void SetDefaultSearchProvider(const TemplateURL* url);
+  // Sets the ID of the default search provider.
+  void SetDefaultSearchProviderID(TemplateURLID id);
 
   // Sets the version of the builtin keywords.
   void SetBuiltinKeywordVersion(int version);
@@ -147,53 +168,6 @@ class WebDataService : public WebDataServiceBase {
   // Fetches the images and whether all images have been downloaded for the
   // specified web app.
   Handle GetWebAppImages(const GURL& app_url, WebDataServiceConsumer* consumer);
-
-#if defined(ENABLE_WEB_INTENTS)
-  //////////////////////////////////////////////////////////////////////////////
-  //
-  // Web Intents
-  //
-  //////////////////////////////////////////////////////////////////////////////
-
-  // Adds a web intent service registration.
-  void AddWebIntentService(const webkit_glue::WebIntentServiceData& service);
-
-  // Removes a web intent service registration.
-  void RemoveWebIntentService(const webkit_glue::WebIntentServiceData& service);
-
-  // Get all web intent services registered for the specified |action|.
-  // |consumer| must not be NULL.
-  Handle GetWebIntentServicesForAction(const string16& action,
-                                       WebDataServiceConsumer* consumer);
-
-  // Get all web intent services registered using the specified |service_url|.
-  // |consumer| must not be NULL.
-  Handle GetWebIntentServicesForURL(const string16& service_url,
-                                    WebDataServiceConsumer* consumer);
-
-  // Get all web intent services registered. |consumer| must not be NULL.
-  Handle GetAllWebIntentServices(WebDataServiceConsumer* consumer);
-
-  // Adds a default web intent service entry.
-  void AddDefaultWebIntentService(const DefaultWebIntentService& service);
-
-  // Removes a default web intent service entry. Removes entries matching
-  // the |action|, |type|, and |url_pattern| of |service|.
-  void RemoveDefaultWebIntentService(const DefaultWebIntentService& service);
-
-  // Removes all default web intent service entries associated with
-  // |service_url|
-  void RemoveWebIntentServiceDefaults(const GURL& service_url);
-
-    // Get a list of all web intent service defaults for the given |action|.
-  // |consumer| must not be null.
-  Handle GetDefaultWebIntentServicesForAction(const string16& action,
-                                              WebDataServiceConsumer* consumer);
-
-  // Get a list of all registered web intent service defaults.
-  // |consumer| must not be null.
-  Handle GetAllDefaultWebIntentServices(WebDataServiceConsumer* consumer);
-#endif
 
 #if defined(OS_WIN)
   //////////////////////////////////////////////////////////////////////////////
@@ -223,6 +197,9 @@ class WebDataService : public WebDataServiceBase {
   virtual ~WebDataService();
 
  private:
+  // Called by the KeywordBatchModeScoper (see comments there).
+  void AdjustKeywordBatchModeLevel(bool entering_batch_mode);
+
   //////////////////////////////////////////////////////////////////////////////
   //
   // The following methods are only invoked on the DB thread.
@@ -234,15 +211,12 @@ class WebDataService : public WebDataServiceBase {
   // Keywords.
   //
   //////////////////////////////////////////////////////////////////////////////
-  WebDatabase::State AddKeywordImpl(
-      const TemplateURLData& data, WebDatabase* db);
-  WebDatabase::State RemoveKeywordImpl(
-      TemplateURLID id, WebDatabase* db);
-  WebDatabase::State UpdateKeywordImpl(
-      const TemplateURLData& data, WebDatabase* db);
+  WebDatabase::State PerformKeywordOperationsImpl(
+      const KeywordTable::Operations& operations,
+      WebDatabase* db);
   scoped_ptr<WDTypedResult> GetKeywordsImpl(WebDatabase* db);
-  WebDatabase::State SetDefaultSearchProviderImpl(
-      TemplateURLID r, WebDatabase* db);
+  WebDatabase::State SetDefaultSearchProviderIDImpl(TemplateURLID id,
+                                                    WebDatabase* db);
   WebDatabase::State SetBuiltinKeywordVersionImpl(int version, WebDatabase* db);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -269,9 +243,10 @@ class WebDataService : public WebDataServiceBase {
       const webkit_glue::WebIntentServiceData& service);
   WebDatabase::State RemoveWebIntentServiceImpl(
       const webkit_glue::WebIntentServiceData& service);
-  scoped_ptr<WDTypedResult> GetWebIntentServicesImpl(const string16& action);
+  scoped_ptr<WDTypedResult> GetWebIntentServicesImpl(
+      const base::string16& action);
   scoped_ptr<WDTypedResult> GetWebIntentServicesForURLImpl(
-      const string16& service_url);
+      const base::string16& service_url);
   scoped_ptr<WDTypedResult> GetAllWebIntentServicesImpl();
   WebDatabase::State AddDefaultWebIntentServiceImpl(
       const DefaultWebIntentService& service);
@@ -280,7 +255,7 @@ class WebDataService : public WebDataServiceBase {
   WebDatabase::State RemoveWebIntentServiceDefaultsImpl(
       const GURL& service_url);
   scoped_ptr<WDTypedResult> GetDefaultWebIntentServicesForActionImpl(
-      const string16& action);
+      const base::string16& action);
   scoped_ptr<WDTypedResult> GetAllDefaultWebIntentServicesImpl();
 #endif
 
@@ -297,6 +272,9 @@ class WebDataService : public WebDataServiceBase {
   scoped_ptr<WDTypedResult> GetIE7LoginImpl(
       const IE7PasswordInfo& info, WebDatabase* db);
 #endif  // defined(OS_WIN)
+
+  size_t keyword_batch_mode_level_;
+  KeywordTable::Operations queued_keyword_operations_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDataService);
 };

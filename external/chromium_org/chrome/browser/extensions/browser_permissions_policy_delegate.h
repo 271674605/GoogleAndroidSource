@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_BROWSER_PERMISSIONS_POLICY_DELEGATE_H_
 #define CHROME_BROWSER_EXTENSIONS_BROWSER_PERMISSIONS_POLICY_DELEGATE_H_
 
-#include "chrome/common/extensions/permissions/permissions_data.h"
+#include "extensions/common/permissions/permissions_data.h"
 
 namespace extensions {
 
@@ -20,7 +20,6 @@ class BrowserPermissionsPolicyDelegate
                                       const GURL& document_url,
                                       const GURL& top_document_url,
                                       int tab_id,
-                                      const UserScript* script,
                                       int process_id,
                                       std::string* error) OVERRIDE;
 

@@ -16,8 +16,6 @@
 
 package android.renderscript.cts;
 
-import com.android.cts.stub.R;
-
 import android.renderscript.RenderScript;
 import android.test.AndroidTestCase;
 
@@ -29,8 +27,7 @@ public class RenderScriptTest extends AndroidTestCase {
      */
     public void testRenderScript() {
         RenderScript mRS = RenderScript.create(getContext());
-        ScriptC_passthrough t = new ScriptC_passthrough(mRS,
-            getContext().getResources(), R.raw.passthrough);
+        ScriptC_passthrough t = new ScriptC_passthrough(mRS);
         t.invoke_passthrough(5);
         mRS.destroy();
     }

@@ -39,9 +39,8 @@ public final class PageRange implements Parcelable {
      * @param start The start page index (zero based and inclusive).
      * @param end The end page index (zero based and inclusive).
      *
-     * @throws IllegalArgumentException If start is less than zero.
-     * @throws IllegalArgumentException If end is less than zero.
-     * @throws IllegalArgumentException If start greater than end.
+     * @throws IllegalArgumentException If start is less than zero or end
+     * is less than zero or start greater than end.
      */
     public PageRange(int start, int end) {
         if (start < 0) {
@@ -77,6 +76,30 @@ public final class PageRange implements Parcelable {
      */
     public int getEnd() {
         return mEnd;
+    }
+
+    /**
+     * Gets whether a page range contains a a given page.
+     *
+     * @param pageIndex The page index.
+     * @return True if the page is within this range.
+     *
+     * @hide
+     */
+    public boolean contains(int pageIndex) {
+        return (pageIndex >= mStart) && (pageIndex <= mEnd);
+    }
+
+    /**
+     * Get the size of this range which is the number of
+     * pages it contains.
+     *
+     * @return The size of the range.
+     *
+     * @hide
+     */
+    public int getSize() {
+        return mEnd - mStart + 1;
     }
 
     @Override

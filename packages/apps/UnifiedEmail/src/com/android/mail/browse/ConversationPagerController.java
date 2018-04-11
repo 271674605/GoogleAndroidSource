@@ -64,7 +64,7 @@ public class ConversationPagerController {
     private boolean mShown;
     /**
      * True when the initial conversation passed to show() is busy loading. We assume that the
-     * first {@link #onConversationSeen(Conversation)} callback is triggered by that initial
+     * first {@link #onConversationSeen()} callback is triggered by that initial
      * conversation, and unset this flag when first signaled. Side-to-side paging will not re-enable
      * this flag, since it's only needed for initial conversation load.
      */
@@ -87,7 +87,7 @@ public class ConversationPagerController {
     public ConversationPagerController(RestrictedActivity activity,
             ActivityController controller) {
         mFragmentManager = activity.getFragmentManager();
-        mPager = (ViewPager) activity.findViewById(R.id.conversation_pane);
+        mPager = (ViewPager) activity.findViewById(R.id.conversation_pager);
         mActivityController = controller;
         setupPageMargin(activity.getActivityContext());
     }
@@ -157,6 +157,11 @@ public class ConversationPagerController {
         cleanup();
     }
 
+    // Explicitly set the focus to the conversation pager, specifically the conv overlay.
+    public void focusPager() {
+        mPager.requestFocus();
+    }
+
     public boolean isInitialConversationLoading() {
         return mInitialConversationLoading;
     }
@@ -219,7 +224,7 @@ public class ConversationPagerController {
         final int padding = c.getResources().getDimensionPixelOffset(
                 R.dimen.conversation_page_gutter);
         final Drawable gutterDrawable = new PageMarginDrawable(divider, padding, 0, padding, 0,
-                c.getResources().getColor(R.color.conversation_view_border_color));
+                c.getResources().getColor(R.color.conversation_view_background_color));
         mPager.setPageMargin(gutterDrawable.getIntrinsicWidth() + 2 * padding);
         mPager.setPageMarginDrawable(gutterDrawable);
     }

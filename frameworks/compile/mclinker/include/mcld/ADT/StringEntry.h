@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_STRING_ENTRY_H
-#define MCLD_STRING_ENTRY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_STRINGENTRY_H
+#define MCLD_ADT_STRINGENTRY_H
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/DataTypes.h>
 #include <cstdlib>

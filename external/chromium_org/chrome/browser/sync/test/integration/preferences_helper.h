@@ -67,7 +67,7 @@ void ChangeFilePathPref(int index,
 // |verifier| if DisableVerifier() hasn't been called.
 void ChangeListPref(int index,
                     const char* pref_name,
-                    const ListValue& new_value);
+                    const base::ListValue& new_value);
 
 // Used to verify that the boolean preference with name |pref_name| has the
 // same value across all profiles. Also checks |verifier| if DisableVerifier()
@@ -103,6 +103,10 @@ bool FilePathPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
 // same value across all profiles. Also checks |verifier| if DisableVerifier()
 // hasn't been called.
 bool ListPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
+
+// This is the version of ListPrefMatches that waits for the preference list
+// to match in all profiles. Returns false if this operation times out.
+bool AwaitListPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
 
 }  // namespace preferences_helper
 

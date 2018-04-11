@@ -51,27 +51,64 @@ public class DocFile {
     }
   }
 
-  public static String[] DEVSITE_VALID_LANGS = {"en", "es","ja", "ko", "ru", "zh-cn"};
+  public static String[] DEVSITE_VALID_LANGS = {"en", "es","ja", "ko",
+      "ru", "zh-cn", "zh-tw", "pt-br"};
 
   public static String getPathRoot(String filename) {
-    String[] stripStr = filename.split("\\/");
-    String outFrag = stripStr[0];
-    if (stripStr.length > 0) {
-      for (String t : DEVSITE_VALID_LANGS) {
-        if (stripStr[0].equals("intl")) {
-          if (stripStr[1].equals(t)) {
-            outFrag = stripStr[2];
-            break;
-          }
-        } else if (stripStr[0].equals(t)) {
-            outFrag = stripStr[1];
-            break;
-        }
+    //look for a valid lang string in the file path. If found,
+    //snip the intl/lang from the path.
+    for (String t : DEVSITE_VALID_LANGS) {
+      int langStart = filename.indexOf("/" + t + "/");
+      if (langStart > -1) {
+        int langEnd = filename.indexOf("/", langStart + 1);
+        filename = filename.substring(langEnd + 1);
+        break;
       }
     }
-    return outFrag;
+    return filename;
   }
-  
+
+  public static Data getPageMetadata (String docfile, Data hdf) {
+    //utility method for extracting metadata without generating file output.
+    if (hdf == null) {
+      hdf = Doclava.makeHDF();
+    }
+    String filedata = readFile(docfile);
+
+    // The document is properties up until the line "@jd:body".
+    // Any blank lines are ignored.
+    int start = -1;
+    int lineno = 1;
+    Matcher lines = LINE.matcher(filedata);
+    String line = null;
+    while (lines.find()) {
+      line = lines.group(1);
+      if (line.length() > 0) {
+        if (line.equals("@jd:body")) {
+          start = lines.end();
+          break;
+        }
+        Matcher prop = PROP.matcher(line);
+        if (prop.matches()) {
+          String key = prop.group(1);
+          String value = prop.group(2);
+          hdf.setValue(key, value);
+        } else {
+          break;
+        }
+      }
+      lineno++;
+    }
+    if (start < 0) {
+      System.err.println(docfile + ":" + lineno + ": error parsing docfile");
+      if (line != null) {
+        System.err.println(docfile + ":" + lineno + ":" + line);
+      }
+      System.exit(1);
+    }
+    return hdf;
+  }
+
   public static void writePage(String docfile, String relative, String outfile, Data hdf) {
 
     /*
@@ -148,34 +185,73 @@ public class DocFile {
       filename = getPathRoot(filename);
       if (filename.indexOf("design") == 0) {
         hdf.setValue("design", "true");
+        hdf.setValue("page.type", "design");
       } else if (filename.indexOf("develop") == 0) {
         hdf.setValue("develop", "true");
+        hdf.setValue("page.type", "develop");
       } else if (filename.indexOf("guide") == 0) {
         hdf.setValue("guide", "true");
+        hdf.setValue("page.type", "guide");
       } else if (filename.indexOf("training") == 0) {
         hdf.setValue("training", "true");
+        hdf.setValue("page.type", "training");
       } else if (filename.indexOf("more") == 0) {
         hdf.setValue("more", "true");
       } else if (filename.indexOf("google") == 0) {
         hdf.setValue("google", "true");
+        hdf.setValue("page.type", "google");
       } else if (filename.indexOf("samples") == 0) {
         hdf.setValue("samples", "true");
+        hdf.setValue("page.type", "samples");
+        if (Doclava.samplesNavTree != null) {
+          hdf.setValue("samples_toc_tree", Doclava.samplesNavTree.getValue("samples_toc_tree", ""));
+        }
       } else if (filename.indexOf("distribute") == 0) {
         hdf.setValue("distribute", "true");
+        hdf.setValue("page.type", "distribute");
+        if (filename.indexOf("distribute/googleplay") == 0) {
+          hdf.setValue("googleplay", "true");
+        } else if (filename.indexOf("distribute/essentials") == 0) {
+          hdf.setValue("essentials", "true");
+        } else if (filename.indexOf("distribute/users") == 0) {
+          hdf.setValue("users", "true");
+        } else if (filename.indexOf("distribute/engage") == 0) {
+          hdf.setValue("engage", "true");
+        } else if (filename.indexOf("distribute/monetize") == 0) {
+          hdf.setValue("monetize", "true");
+        } else if (filename.indexOf("distribute/tools") == 0) {
+          hdf.setValue("disttools", "true");
+        } else if (filename.indexOf("distribute/stories") == 0) {
+          hdf.setValue("stories", "true");
+        }
       } else if (filename.indexOf("about") == 0) {
         hdf.setValue("about", "true");
+        hdf.setValue("page.type", "about");
       } else if ((filename.indexOf("tools") == 0) || (filename.indexOf("sdk") == 0)) {
         hdf.setValue("tools", "true");
+        hdf.setValue("page.type", "tools");
         fromTemplate = hdf.getValue("page.template", "");
       } else if (filename.indexOf("devices") == 0) {
         hdf.setValue("devices", "true");
+        hdf.setValue("page.type", "devices");
       } else if (filename.indexOf("source") == 0) {
         hdf.setValue("source", "true");
       } else if (filename.indexOf("accessories") == 0) {
         hdf.setValue("accessories", "true");
       } else if (filename.indexOf("compatibility") == 0) {
         hdf.setValue("compatibility", "true");
+      } else if (filename.indexOf("wear") == 0) {
+        hdf.setValue("wear", "true");
+      } else if (filename.indexOf("preview") == 0) {
+        hdf.setValue("preview", "true");
+      } else if (filename.indexOf("auto") == 0) {
+        hdf.setValue("auto", "true");
+      } else if (filename.indexOf("tv") == 0) {
+        hdf.setValue("tv", "true");
       }
+      //set metadata for this file in jd_lists_unified
+      PageMetadata.setPageMetadata(docfile, relative, outfile, hdf, Doclava.sTaglist);
+
       if (fromTemplate.equals("sdk")) {
         ClearPage.write(hdf, "sdkpage.cs", outfile);
       } else {

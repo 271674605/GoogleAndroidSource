@@ -1,1 +1,1 @@
-include ':CustomNotifications'
+include 'Application'

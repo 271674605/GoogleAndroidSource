@@ -5,11 +5,11 @@
  * found in the LICENSE file.
  */
 
-#include "Test.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkRect.h"
 #include "SkStroke.h"
+#include "Test.h"
 
 static bool equal(const SkRect& a, const SkRect& b) {
     return  SkScalarNearlyEqual(a.left(), b.left()) &&
@@ -55,9 +55,6 @@ static void test_strokerect(skiatest::Reporter* reporter) {
     }
 }
 
-static void TestStroke(skiatest::Reporter* reporter) {
+DEF_TEST(Stroke, reporter) {
     test_strokerect(reporter);
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("Stroke", TestStrokeClass, TestStroke)

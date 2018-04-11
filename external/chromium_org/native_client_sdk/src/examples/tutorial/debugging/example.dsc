@@ -1,10 +1,6 @@
 {
   'DISABLE_PACKAGE': True,  # Doesn't work in packaged apps yet.
   'TOOLS': ['newlib'],
-  'SEARCH': [
-    '.',
-    '../..',
-  ],
   'TARGETS': [
     {
       'NAME' : 'debugging',
@@ -14,16 +10,9 @@
       ],
       'CFLAGS': ['-fno-omit-frame-pointer'],
       'DEPS' : ['error_handling'],
-      'LIBS' : ['ppapi', 'pthread']
+      'LIBS' : ['error_handling', 'ppapi', 'pthread']
     }
   ],
-
-  'POST': """
-
-#
-# Specify the MAP files to be created.
-#
-$(eval $(call MAP_RULE,$(TARGET),$(TARGET)))""",
   'DATA': [
     'example.js',
   ],

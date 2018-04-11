@@ -22,6 +22,8 @@ import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.util.Log;
+import android.bluetooth.BluetoothDevice;
+
 
 // Note:
 // All methods in this class are not thread safe, donot call them from
@@ -161,13 +163,17 @@ class HeadsetPhoneState {
 
     void sendDeviceStateChanged()
     {
+        // When out of service, send signal strength as 0. Some devices don't
+        // use the service indicator, but only the signal indicator
+        int signal = mService == HeadsetHalConstants.NETWORK_STATE_AVAILABLE ? mSignal : 0;
+
         Log.d(TAG, "sendDeviceStateChanged. mService="+ mService +
-                   " mSignal="+mSignal +" mRoam="+mRoam +
+                   " mSignal=" + signal +" mRoam="+ mRoam +
                    " mBatteryCharge=" + mBatteryCharge);
         HeadsetStateMachine sm = mStateMachine;
         if (sm != null) {
             sm.sendMessage(HeadsetStateMachine.DEVICE_STATE_CHANGED,
-                new HeadsetDeviceState(mService, mRoam, mSignal, mBatteryCharge));
+                new HeadsetDeviceState(mService, mRoam, signal, mBatteryCharge));
         }
     }
 
@@ -186,7 +192,9 @@ class HeadsetPhoneState {
         @Override
         public void onSignalStrengthsChanged(SignalStrength signalStrength) {
             int prevSignal = mSignal;
-            if (signalStrength.isGsm()) {
+            if (mService == HeadsetHalConstants.NETWORK_STATE_NOT_AVAILABLE)
+                mSignal = 0;
+            else if (signalStrength.isGsm()) {
                 mSignal = gsmAsuToSignal(signalStrength);
             } else {
                 mSignal = cdmaDbmEcioToSignal(signalStrength);
@@ -325,10 +333,12 @@ class HeadsetClccResponse {
 }
 
 class HeadsetVendorSpecificResultCode {
+    BluetoothDevice mDevice;
     String mCommand;
     String mArg;
 
-    public HeadsetVendorSpecificResultCode(String command, String arg) {
+    public HeadsetVendorSpecificResultCode(BluetoothDevice device, String command, String arg) {
+        mDevice = device;
         mCommand = command;
         mArg = arg;
     }

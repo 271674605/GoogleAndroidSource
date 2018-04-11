@@ -6,8 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef X86_LDBACKEND_H
-#define X86_LDBACKEND_H
+#ifndef TARGET_X86_X86LDBACKEND_H
+#define TARGET_X86_X86LDBACKEND_H
 
 #include "X86ELFDynamic.h"
 #include "X86GOT.h"
@@ -29,8 +29,8 @@ class X86GNULDBackend : public GNULDBackend
 {
 public:
   X86GNULDBackend(const LinkerConfig& pConfig,
-		  GNUInfo* pInfo,
-		  Relocation::Type pCopyRel);
+                  GNUInfo* pInfo,
+                  Relocation::Type pCopyRel);
 
   ~X86GNULDBackend();
 
@@ -76,6 +76,7 @@ public:
   virtual bool initRelocator() = 0;
 
   /// getRelocator - return relocator.
+  const Relocator* getRelocator() const;
   Relocator* getRelocator();
 
   virtual void initTargetSections(Module& pModule, ObjectBuilder& pBuilder) = 0;
@@ -124,11 +125,16 @@ private:
 
   virtual uint64_t emitGOTSectionData(MemoryRegion& pRegion) const = 0;
 
-  virtual uint64_t emitGOTPLTSectionData(MemoryRegion& pRegion,
-					 const ELFFileFormat* FileFormat) const = 0;
+  virtual uint64_t
+  emitGOTPLTSectionData(MemoryRegion& pRegion,
+                        const ELFFileFormat* FileFormat) const = 0;
 
   virtual void setRelDynSize() = 0;
   virtual void setRelPLTSize() = 0;
+
+  void addEhFrameForPLT(Module& pModule);
+  virtual llvm::StringRef createCIERegionForPLT() = 0;
+  virtual llvm::StringRef createFDERegionForPLT() = 0;
 
 protected:
   Relocator* m_pRelocator;
@@ -178,10 +184,13 @@ private:
   uint64_t emitGOTSectionData(MemoryRegion& pRegion) const;
 
   uint64_t emitGOTPLTSectionData(MemoryRegion& pRegion,
-				 const ELFFileFormat* FileFormat) const;
+                                 const ELFFileFormat* FileFormat) const;
 
   void setRelDynSize();
   void setRelPLTSize();
+
+  llvm::StringRef createCIERegionForPLT();
+  llvm::StringRef createFDERegionForPLT();
 
 private:
   X86_32GOT* m_pGOT;
@@ -218,10 +227,13 @@ private:
   uint64_t emitGOTSectionData(MemoryRegion& pRegion) const;
 
   uint64_t emitGOTPLTSectionData(MemoryRegion& pRegion,
-				 const ELFFileFormat* FileFormat) const;
+                                 const ELFFileFormat* FileFormat) const;
 
   void setRelDynSize();
   void setRelPLTSize();
+
+  llvm::StringRef createCIERegionForPLT();
+  llvm::StringRef createFDERegionForPLT();
 
 private:
   X86_64GOT* m_pGOT;

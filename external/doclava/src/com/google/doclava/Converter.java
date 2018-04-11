@@ -16,12 +16,32 @@
 
 package com.google.doclava;
 
-import com.sun.javadoc.*;
+
+import com.sun.javadoc.AnnotationDesc;
+import com.sun.javadoc.AnnotationTypeDoc;
+import com.sun.javadoc.AnnotationTypeElementDoc;
+import com.sun.javadoc.AnnotationValue;
+import com.sun.javadoc.ClassDoc;
+import com.sun.javadoc.ConstructorDoc;
+import com.sun.javadoc.ExecutableMemberDoc;
+import com.sun.javadoc.FieldDoc;
+import com.sun.javadoc.MemberDoc;
+import com.sun.javadoc.MethodDoc;
+import com.sun.javadoc.PackageDoc;
+import com.sun.javadoc.ParamTag;
+import com.sun.javadoc.Parameter;
+import com.sun.javadoc.RootDoc;
+import com.sun.javadoc.SeeTag;
+import com.sun.javadoc.SourcePosition;
+import com.sun.javadoc.Tag;
+import com.sun.javadoc.ThrowsTag;
+import com.sun.javadoc.Type;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.ArrayList;
+import java.util.List;
 
 public class Converter {
   private static RootDoc root;
@@ -29,15 +49,15 @@ public class Converter {
   public static void makeInfo(RootDoc r) {
     root = r;
 
-    int N, i;
-
     // create the objects
-    ClassDoc[] classDocs = r.classes();
-    N = classDocs.length;
-    for (i = 0; i < N; i++) {
-      Converter.obtainClass(classDocs[i]);
+    ClassDoc[] classes = getClasses(r);
+    for (ClassDoc c : classes) {
+      Converter.obtainClass(c);
     }
+
     ArrayList<ClassInfo> classesNeedingInit2 = new ArrayList<ClassInfo>();
+
+    int i;
     // fill in the fields that reference other classes
     while (mClassesNeedingInit.size() > 0) {
       i = mClassesNeedingInit.size() - 1;
@@ -55,7 +75,26 @@ public class Converter {
     finishAnnotationValueInit();
 
     // fill in the "root" stuff
-    mRootClasses = Converter.convertClasses(r.classes());
+    mRootClasses = Converter.convertClasses(classes);
+  }
+
+  private static ClassDoc[] getClasses(RootDoc r) {
+    ClassDoc[] classDocs = r.classes();
+    ArrayList<ClassDoc> filtered = new ArrayList<ClassDoc>(classDocs.length);
+    for (ClassDoc c : classDocs) {
+      if (c.position() != null) {
+        // Work around a javadoc bug in Java 7: We sometimes spuriously
+        // receive duplicate top level ClassDocs with null positions and no type
+        // information. Ignore them, since every ClassDoc must have a non null
+        // position.
+
+        filtered.add(c);
+      }
+    }
+
+    ClassDoc[] filteredArray = new ClassDoc[filtered.size()];
+    filtered.toArray(filteredArray);
+    return filteredArray;
   }
 
   private static ClassInfo[] mRootClasses;
@@ -93,6 +132,18 @@ public class Converter {
 
     cl.setHiddenMethods(
             new ArrayList<MethodInfo>(Arrays.asList(Converter.getHiddenMethods(c.methods(false)))));
+    cl.setRemovedMethods(
+            new ArrayList<MethodInfo>(Arrays.asList(Converter.getRemovedMethods(c.methods(false)))));
+
+    cl.setRemovedSelfMethods(
+        new ArrayList<MethodInfo>(Converter.convertAllMethods(c.methods(false))));
+    cl.setRemovedConstructors(
+        new ArrayList<MethodInfo>(Converter.convertAllMethods(c.constructors(false))));
+    cl.setRemovedSelfFields(
+        new ArrayList<FieldInfo>(Converter.convertAllFields(c.fields(false))));
+    cl.setRemovedEnumConstants(
+        new ArrayList<FieldInfo>(Converter.convertAllFields(c.enumConstants())));
+
     cl.setNonWrittenConstructors(
             new ArrayList<MethodInfo>(Arrays.asList(Converter.convertNonWrittenConstructors(
                     c.constructors(false)))));
@@ -250,81 +301,91 @@ public class Converter {
 
   private static MethodInfo[] getHiddenMethods(MethodDoc[] methods) {
     if (methods == null) return null;
-    ArrayList<MethodInfo> out = new ArrayList<MethodInfo>();
-    int N = methods.length;
-    for (int i = 0; i < N; i++) {
-      MethodInfo m = Converter.obtainMethod(methods[i]);
-      // System.out.println(m.toString() + ": ");
-      // for (TypeInfo ti : m.getTypeParameters()){
-      // if (ti.asClassInfo() != null){
-      // System.out.println(" " +ti.asClassInfo().toString());
-      // } else {
-      // System.out.println(" null");
-      // }
-      // }
-      if (m.isHidden()) {
-        out.add(m);
+    ArrayList<MethodInfo> hiddenMethods = new ArrayList<MethodInfo>();
+    for (MethodDoc method : methods) {
+      MethodInfo methodInfo = Converter.obtainMethod(method);
+      if (methodInfo.isHidden()) {
+        hiddenMethods.add(methodInfo);
       }
     }
-    return out.toArray(new MethodInfo[out.size()]);
+
+    return hiddenMethods.toArray(new MethodInfo[hiddenMethods.size()]);
+  }
+
+  // Gets the removed methods regardless of access levels
+  private static MethodInfo[] getRemovedMethods(MethodDoc[] methods) {
+    if (methods == null) return null;
+    ArrayList<MethodInfo> removedMethods = new ArrayList<MethodInfo>();
+    for (MethodDoc method : methods) {
+      MethodInfo methodInfo = Converter.obtainMethod(method);
+      if (methodInfo.isRemoved()) {
+        removedMethods.add(methodInfo);
+      }
+    }
+
+    return removedMethods.toArray(new MethodInfo[removedMethods.size()]);
   }
 
   /**
-   * Convert MethodDoc[] into MethodInfo[]. Also filters according to the -private, -public option,
-   * because the filtering doesn't seem to be working in the ClassDoc.constructors(boolean) call.
+   * Converts FieldDoc[] into List<FieldInfo>. No filtering is done.
    */
-  private static MethodInfo[] convertMethods(MethodDoc[] methods) {
-    if (methods == null) return null;
-    ArrayList<MethodInfo> out = new ArrayList<MethodInfo>();
-    int N = methods.length;
-    for (int i = 0; i < N; i++) {
-      MethodInfo m = Converter.obtainMethod(methods[i]);
-      // System.out.println(m.toString() + ": ");
-      // for (TypeInfo ti : m.getTypeParameters()){
-      // if (ti.asClassInfo() != null){
-      // System.out.println(" " +ti.asClassInfo().toString());
-      // } else {
-      // System.out.println(" null");
-      // }
-      // }
-      if (m.checkLevel()) {
-        out.add(m);
-      }
+  private static List<FieldInfo> convertAllFields(FieldDoc[] fields) {
+    if (fields == null) return null;
+    List<FieldInfo> allFields = new ArrayList<FieldInfo>();
+
+    for (FieldDoc field : fields) {
+      FieldInfo fieldInfo = Converter.obtainField(field);
+      allFields.add(fieldInfo);
     }
-    return out.toArray(new MethodInfo[out.size()]);
+
+    return allFields;
   }
 
-  private static MethodInfo[] convertMethods(ConstructorDoc[] methods) {
+  /**
+   * Converts ExecutableMemberDoc[] into List<MethodInfo>. No filtering is done.
+   */
+  private static List<MethodInfo> convertAllMethods(ExecutableMemberDoc[] methods) {
     if (methods == null) return null;
-    ArrayList<MethodInfo> out = new ArrayList<MethodInfo>();
-    int N = methods.length;
-    for (int i = 0; i < N; i++) {
-      MethodInfo m = Converter.obtainMethod(methods[i]);
-      if (m.checkLevel()) {
-        out.add(m);
+    List<MethodInfo> allMethods = new ArrayList<MethodInfo>();
+    for (ExecutableMemberDoc method : methods) {
+      MethodInfo methodInfo = Converter.obtainMethod(method);
+      allMethods.add(methodInfo);
+    }
+    return allMethods;
+  }
+
+  /**
+   * Convert MethodDoc[] or ConstructorDoc[] into MethodInfo[].
+   * Also filters according to the -private, -public option,
+   * because the filtering doesn't seem to be working in the ClassDoc.constructors(boolean) call.
+   */
+  private static MethodInfo[] convertMethods(ExecutableMemberDoc[] methods) {
+    if (methods == null) return null;
+    List<MethodInfo> filteredMethods = new ArrayList<MethodInfo>();
+    for (ExecutableMemberDoc method : methods) {
+      MethodInfo methodInfo = Converter.obtainMethod(method);
+      if (methodInfo.checkLevel()) {
+        filteredMethods.add(methodInfo);
       }
     }
-    return out.toArray(new MethodInfo[out.size()]);
+
+    return filteredMethods.toArray(new MethodInfo[filteredMethods.size()]);
   }
 
   private static MethodInfo[] convertNonWrittenConstructors(ConstructorDoc[] methods) {
     if (methods == null) return null;
-    ArrayList<MethodInfo> out = new ArrayList<MethodInfo>();
-    int N = methods.length;
-    for (int i = 0; i < N; i++) {
-      MethodInfo m = Converter.obtainMethod(methods[i]);
-      if (!m.checkLevel()) {
-        out.add(m);
+    ArrayList<MethodInfo> ctors = new ArrayList<MethodInfo>();
+    for (ConstructorDoc method : methods) {
+      MethodInfo methodInfo = Converter.obtainMethod(method);
+      if (!methodInfo.checkLevel()) {
+        ctors.add(methodInfo);
       }
     }
-    return out.toArray(new MethodInfo[out.size()]);
+
+    return ctors.toArray(new MethodInfo[ctors.size()]);
   }
 
-  private static MethodInfo obtainMethod(MethodDoc o) {
-    return (MethodInfo) mMethods.obtain(o);
-  }
-
-  private static MethodInfo obtainMethod(ConstructorDoc o) {
+  private static <E extends ExecutableMemberDoc> MethodInfo obtainMethod(E o) {
     return (MethodInfo) mMethods.obtain(o);
   }
 
@@ -521,11 +582,11 @@ public class Converter {
       return keyString;
     }
   };
-  
+
   public static TypeInfo obtainTypeFromString(String type) {
     return (TypeInfo) mTypesFromString.obtain(type);
   }
-  
+
   private static final Cache mTypesFromString = new Cache() {
     @Override
     protected Object make(Object o) {
@@ -535,7 +596,7 @@ public class Converter {
 
     @Override
     protected void made(Object o, Object r) {
-      
+
     }
 
     @Override

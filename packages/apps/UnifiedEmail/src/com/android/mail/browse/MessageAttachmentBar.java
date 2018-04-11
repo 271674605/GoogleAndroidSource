@@ -22,7 +22,7 @@ import android.app.FragmentManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
+import android.support.v4.text.BidiFormatter;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
@@ -41,9 +41,11 @@ import android.widget.TextView;
 
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
+import com.android.mail.providers.Account;
 import com.android.mail.providers.Attachment;
 import com.android.mail.providers.UIProvider.AttachmentDestination;
 import com.android.mail.providers.UIProvider.AttachmentState;
+import com.android.mail.ui.AccountFeedbackActivity;
 import com.android.mail.utils.AttachmentUtils;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
@@ -70,7 +72,7 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
 
     private final AttachmentActionHandler mActionHandler;
     private boolean mSaveClicked;
-    private Uri mAccountUri;
+    private Account mAccount;
 
     private final Runnable mUpdateRunnable = new Runnable() {
             @Override
@@ -80,6 +82,13 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
     };
 
     private static final String LOG_TAG = LogTag.getLogTag();
+
+    /**
+     * Boolean used to tell whether extra option 1 should always be hidden.
+     * Currently makes sure that there is no conversation because that state
+     * means that we're in the EML viewer.
+     */
+    private boolean mHideExtraOptionOne;
 
 
     public MessageAttachmentBar(Context context) {
@@ -107,13 +116,19 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
      * repeatedly as status updates stream in, so only properties with new or changed values will
      * cause sub-views to update.
      */
-    public void render(Attachment attachment, Uri accountUri, boolean loaderResult) {
+    public void render(Attachment attachment, Account account, ConversationMessage message,
+            boolean loaderResult, BidiFormatter bidiFormatter) {
         // get account uri for potential eml viewer usage
-        mAccountUri = accountUri;
+        mAccount = account;
 
         final Attachment prevAttachment = mAttachment;
         mAttachment = attachment;
+        if (mAccount != null) {
+            mActionHandler.setAccount(mAccount.getEmailAddress());
+        }
+        mActionHandler.setMessage(message);
         mActionHandler.setAttachment(mAttachment);
+        mHideExtraOptionOne = message.getConversation() == null;
 
         // reset mSaveClicked if we are not currently downloading
         // So if the download fails or the download completes, we stop
@@ -125,17 +140,19 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
                 attachment.destination, attachment.downloadedSize, attachment.contentUri,
                 attachment.getContentType(), attachment.flags);
 
+        final String attachmentName = attachment.getName();
         if ((attachment.flags & Attachment.FLAG_DUMMY_ATTACHMENT) != 0) {
             mTitle.setText(R.string.load_attachment);
         } else if (prevAttachment == null
-                || !TextUtils.equals(attachment.getName(), prevAttachment.getName())) {
-            mTitle.setText(attachment.getName());
+                || !TextUtils.equals(attachmentName, prevAttachment.getName())) {
+            mTitle.setText(attachmentName);
         }
 
         if (prevAttachment == null || attachment.size != prevAttachment.size) {
-            mAttachmentSizeText = AttachmentUtils.convertToHumanReadableSize(getContext(),
-                    attachment.size);
-            mDisplayType = AttachmentUtils.getDisplayType(getContext(), attachment);
+            mAttachmentSizeText = bidiFormatter.unicodeWrap(
+                    AttachmentUtils.convertToHumanReadableSize(getContext(), attachment.size));
+            mDisplayType = bidiFormatter.unicodeWrap(
+                    AttachmentUtils.getDisplayType(getContext(), attachment));
             updateSubtitleText();
         }
 
@@ -197,6 +214,8 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
             Analytics.getInstance().sendEvent(
                     "cancel_attachment", Utils.normalizeMimeType(mAttachment.getContentType()),
                     "attachment_bar", mAttachment.size);
+        } else if (res == R.id.attachment_extra_option1) {
+            mActionHandler.handleOption1();
         } else if (res == R.id.overflow) {
             // If no overflow items are visible, just bail out.
             // We shouldn't be able to get here anyhow since the overflow
@@ -213,6 +232,7 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
                 menu.findItem(R.id.preview_attachment).setVisible(shouldShowPreview());
                 menu.findItem(R.id.save_attachment).setVisible(shouldShowSave());
                 menu.findItem(R.id.download_again).setVisible(shouldShowDownloadAgain());
+                menu.findItem(R.id.attachment_extra_option1).setVisible(shouldShowExtraOption1());
 
                 mPopup.show();
             }
@@ -231,16 +251,6 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
                 mActionHandler.startDownloadingAttachment(AttachmentDestination.CACHE);
 
                 action = null;
-            }
-            // If the mimetype is blocked, show the info dialog
-            else if (MimeType.isBlocked(mAttachment.getContentType())) {
-                AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-                int dialogMessage = R.string.attachment_type_blocked;
-                builder.setTitle(R.string.more_info_attachment)
-                       .setMessage(dialogMessage)
-                       .show();
-
-                action = "attachment_bar_blocked";
             }
             // If we can install, install.
             else if (MimeType.isInstallable(mAttachment.getContentType())) {
@@ -301,9 +311,14 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
         return mAttachment.supportsDownloadAgain() && mAttachment.isDownloadFinishedOrFailed();
     }
 
+    private boolean shouldShowExtraOption1() {
+        return !mHideExtraOptionOne &&
+                mActionHandler.shouldShowExtraOption1(mAttachment.getContentType());
+    }
+
     private boolean shouldShowOverflow() {
-        return (shouldShowPreview() || shouldShowSave() || shouldShowDownloadAgain())
-                && !shouldShowCancel();
+        return (shouldShowPreview() || shouldShowSave() || shouldShowDownloadAgain() ||
+                shouldShowExtraOption1()) && !shouldShowCancel();
     }
 
     private boolean shouldShowCancel() {
@@ -328,8 +343,9 @@ public class MessageAttachmentBar extends FrameLayout implements OnClickListener
         // For EML files, we want to open our dedicated
         // viewer rather than let any activity open it.
         if (MimeType.isEmlMimeType(contentType)) {
-            intent.setClass(getContext(), EmlViewerActivity.class);
-            intent.putExtra(EmlViewerActivity.EXTRA_ACCOUNT_URI, mAccountUri);
+            intent.setPackage(getContext().getPackageName());
+            intent.putExtra(AccountFeedbackActivity.EXTRA_ACCOUNT_URI,
+                    mAccount != null ? mAccount.uri : null);
         }
 
         try {

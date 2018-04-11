@@ -8,16 +8,16 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/extensions/api/api_function.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/notifications.h"
+#include "extensions/browser/extension_function.h"
 #include "ui/message_center/notification_types.h"
 
 class Notification;
 
 namespace extensions {
 
-class NotificationsApiFunction : public ApiFunction {
+class NotificationsApiFunction : public ChromeAsyncExtensionFunction {
  public:
   // Whether the current extension and channel allow the API. Public for
   // testing.
@@ -33,13 +33,19 @@ class NotificationsApiFunction : public ApiFunction {
                           api::notifications::NotificationOptions* options,
                           Notification* notification);
 
-  bool IsNotificationsApiEnabled();
+  bool IsNotificationsApiEnabled() const;
 
-  // Called inside of RunImpl.
+  bool AreExtensionNotificationsAllowed() const;
+
+  // Returns true if the API function is still allowed to run even when the
+  // notifications for a notifier have been disabled.
+  virtual bool CanRunWhileDisabled() const;
+
+  // Called inside of RunAsync.
   virtual bool RunNotificationsApi() = 0;
 
   // UITHreadExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   message_center::NotificationType MapApiTemplateTypeToType(
       api::notifications::TemplateType type);
@@ -49,7 +55,7 @@ class NotificationsCreateFunction : public NotificationsApiFunction {
  public:
   NotificationsCreateFunction();
 
-  // UIThreadExtensionFunction:
+  // NotificationsApiFunction:
   virtual bool RunNotificationsApi() OVERRIDE;
 
  protected:
@@ -65,7 +71,7 @@ class NotificationsUpdateFunction : public NotificationsApiFunction {
  public:
   NotificationsUpdateFunction();
 
-  // UIThreadExtensionFunction:
+  // NotificationsApiFunction:
   virtual bool RunNotificationsApi() OVERRIDE;
 
  protected:
@@ -81,7 +87,7 @@ class NotificationsClearFunction : public NotificationsApiFunction {
  public:
   NotificationsClearFunction();
 
-  // UIThreadExtensionFunction:
+  // NotificationsApiFunction:
   virtual bool RunNotificationsApi() OVERRIDE;
 
  protected:
@@ -97,7 +103,7 @@ class NotificationsGetAllFunction : public NotificationsApiFunction {
  public:
   NotificationsGetAllFunction();
 
-  // UIThreadExtensionFunction:
+  // NotificationsApiFunction:
   virtual bool RunNotificationsApi() OVERRIDE;
 
  protected:
@@ -105,6 +111,23 @@ class NotificationsGetAllFunction : public NotificationsApiFunction {
 
  private:
   DECLARE_EXTENSION_FUNCTION("notifications.getAll", NOTIFICATIONS_GET_ALL)
+};
+
+class NotificationsGetPermissionLevelFunction
+    : public NotificationsApiFunction {
+ public:
+  NotificationsGetPermissionLevelFunction();
+
+  // NotificationsApiFunction:
+  virtual bool CanRunWhileDisabled() const OVERRIDE;
+  virtual bool RunNotificationsApi() OVERRIDE;
+
+ protected:
+  virtual ~NotificationsGetPermissionLevelFunction();
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("notifications.getPermissionLevel",
+                             NOTIFICATIONS_GET_ALL)
 };
 
 }  // namespace extensions

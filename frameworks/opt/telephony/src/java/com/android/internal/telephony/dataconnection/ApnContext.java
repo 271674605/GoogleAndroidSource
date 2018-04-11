@@ -18,6 +18,7 @@ package com.android.internal.telephony.dataconnection;
 
 import android.app.PendingIntent;
 import android.content.Context;
+import android.net.NetworkConfig;
 import android.telephony.Rlog;
 
 import com.android.internal.R;
@@ -47,6 +48,8 @@ public class ApnContext {
 
     private ArrayList<ApnSetting> mWaitingApns = null;
 
+    public final int priority;
+
     /** A zero indicates that all waiting APNs had a permanent error */
     private AtomicInteger mWaitingApnsPermanentFailureCountDown;
 
@@ -63,20 +66,28 @@ public class ApnContext {
      */
     AtomicBoolean mDataEnabled;
 
+    private final Object mRefCountLock = new Object();
+    private int mRefCount = 0;
+
     /**
      * carrier requirements met
      */
     AtomicBoolean mDependencyMet;
 
-    public ApnContext(Context context, String apnType, String logTag) {
+    private final DcTrackerBase mDcTracker;
+
+    public ApnContext(Context context, String apnType, String logTag, NetworkConfig config,
+            DcTrackerBase tracker) {
         mContext = context;
         mApnType = apnType;
         mState = DctConstants.State.IDLE;
         setReason(Phone.REASON_DATA_ENABLED);
         mDataEnabled = new AtomicBoolean(false);
-        mDependencyMet = new AtomicBoolean(true);
+        mDependencyMet = new AtomicBoolean(config.dependencyMet);
         mWaitingApnsPermanentFailureCountDown = new AtomicInteger(0);
+        priority = config.priority;
         LOG_TAG = logTag;
+        mDcTracker = tracker;
     }
 
     public String getApnType() {
@@ -230,6 +241,22 @@ public class ApnContext {
             return (mApnSetting.apn.equals(provisioningApn));
         } else {
             return false;
+        }
+    }
+
+    public void incRefCount() {
+        synchronized (mRefCountLock) {
+            if (mRefCount++ == 0) {
+                mDcTracker.setEnabled(mDcTracker.apnTypeToId(mApnType), true);
+            }
+        }
+    }
+
+    public void decRefCount() {
+        synchronized (mRefCountLock) {
+            if (mRefCount-- == 1) {
+                mDcTracker.setEnabled(mDcTracker.apnTypeToId(mApnType), false);
+            }
         }
     }
 

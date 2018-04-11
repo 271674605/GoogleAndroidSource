@@ -9,13 +9,11 @@
 //
 /// \file
 /// \brief R600 Machine Scheduler interface
-// TODO: Scheduling is optimised for VLIW4 arch, modify it to support TRANS slot
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "misched"
-
 #include "R600MachineScheduler.h"
+#include "AMDGPUSubtarget.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Pass.h"
@@ -24,11 +22,14 @@
 
 using namespace llvm;
 
-void R600SchedStrategy::initialize(ScheduleDAGMI *dag) {
+#define DEBUG_TYPE "misched"
 
-  DAG = dag;
+void R600SchedStrategy::initialize(ScheduleDAGMI *dag) {
+  assert(dag->hasVRegLiveness() && "R600SchedStrategy needs vreg liveness");
+  DAG = static_cast<ScheduleDAGMILive*>(dag);
   TII = static_cast<const R600InstrInfo*>(DAG->TII);
   TRI = static_cast<const R600RegisterInfo*>(DAG->TRI);
+  VLIW5 = !DAG->MF.getTarget().getSubtarget<AMDGPUSubtarget>().hasCaymanISA();
   MRI = &DAG->MRI;
   CurInstKind = IDOther;
   CurEmitted = 0;
@@ -56,7 +57,7 @@ unsigned getWFCountLimitedByGPR(unsigned GPRCount) {
 }
 
 SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
-  SUnit *SU = 0;
+  SUnit *SU = nullptr;
   NextInstKind = IDOther;
 
   IsTopNode = false;
@@ -72,7 +73,7 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     // OpenCL Programming Guide :
     // The approx. number of WF that allows TEX inst to hide ALU inst is :
     // 500 (cycles for TEX) / (AluFetchRatio * 8 (cycles for ALU))
-    float ALUFetchRationEstimate = 
+    float ALUFetchRationEstimate =
         (AluInstCount + AvailablesAluCount() + Pending[IDAlu].size()) /
         (FetchInstCount + Available[IDFetch].size());
     unsigned NeededWF = 62.5f / ALUFetchRationEstimate;
@@ -90,15 +91,6 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     unsigned NearRegisterRequirement = 2 * Available[IDFetch].size();
     if (NeededWF > getWFCountLimitedByGPR(NearRegisterRequirement))
       AllowSwitchFromAlu = true;
-  }
-
-
-  // We want to scheduled AR defs as soon as possible to make sure they aren't
-  // put in a different ALU clause from their uses.
-  if (!SU && !UnscheduledARDefs.empty()) {
-      SU = UnscheduledARDefs[0];
-      UnscheduledARDefs.erase(UnscheduledARDefs.begin());
-      NextInstKind = IDAlu;
   }
 
   if (!SU && ((AllowSwitchToAlu && CurInstKind != IDAlu) ||
@@ -129,15 +121,6 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     if (SU)
       NextInstKind = IDOther;
   }
-
-  // We want to schedule the AR uses as late as possible to make sure that
-  // the AR defs have been released.
-  if (!SU && !UnscheduledARUses.empty()) {
-      SU = UnscheduledARUses[0];
-      UnscheduledARUses.erase(UnscheduledARUses.begin());
-      NextInstKind = IDAlu;
-  }
-
 
   DEBUG(
       if (SU) {
@@ -216,20 +199,6 @@ void R600SchedStrategy::releaseBottomNode(SUnit *SU) {
   }
 
   int IK = getInstKind(SU);
-
-  // Check for AR register defines
-  for (MachineInstr::const_mop_iterator I = SU->getInstr()->operands_begin(),
-                                        E = SU->getInstr()->operands_end();
-                                        I != E; ++I) {
-    if (I->isReg() && I->getReg() == AMDGPU::AR_X) {
-      if (I->isDef()) {
-        UnscheduledARDefs.push_back(SU);
-      } else {
-        UnscheduledARUses.push_back(SU);
-      }
-      return;
-    }
-  }
 
   // There is no export clause, we can schedule one as soon as its ready
   if (IK == IDOther)
@@ -314,6 +283,10 @@ R600SchedStrategy::AluKind R600SchedStrategy::getAluKind(SUnit *SU) const {
     if (regBelongsToClass(DestReg, &AMDGPU::R600_Reg128RegClass))
       return AluT_XYZW;
 
+    // LDS src registers cannot be used in the Trans slot.
+    if (TII->readsLDSSrcReg(MI))
+      return AluT_XYZW;
+
     return AluAny;
 
 }
@@ -342,14 +315,16 @@ int R600SchedStrategy::getInstKind(SUnit* SU) {
   }
 }
 
-SUnit *R600SchedStrategy::PopInst(std::vector<SUnit *> &Q) {
+SUnit *R600SchedStrategy::PopInst(std::vector<SUnit *> &Q, bool AnyALU) {
   if (Q.empty())
-    return NULL;
+    return nullptr;
   for (std::vector<SUnit *>::reverse_iterator It = Q.rbegin(), E = Q.rend();
       It != E; ++It) {
     SUnit *SU = *It;
     InstructionsGroupCandidate.push_back(SU->getInstr());
-    if (TII->fitsConstReadLimitations(InstructionsGroupCandidate)) {
+    if (TII->fitsConstReadLimitations(InstructionsGroupCandidate)
+        && (!AnyALU || !TII->isVectorOnly(SU->getInstr()))
+    ) {
       InstructionsGroupCandidate.pop_back();
       Q.erase((It + 1).base());
       return SU;
@@ -357,7 +332,7 @@ SUnit *R600SchedStrategy::PopInst(std::vector<SUnit *> &Q) {
       InstructionsGroupCandidate.pop_back();
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 void R600SchedStrategy::LoadAlu() {
@@ -373,6 +348,8 @@ void R600SchedStrategy::PrepareNextSlot() {
   DEBUG(dbgs() << "New Slot\n");
   assert (OccupedSlotsMask && "Slot wasn't filled");
   OccupedSlotsMask = 0;
+//  if (HwGen == AMDGPUSubtarget::NORTHERN_ISLANDS)
+//    OccupedSlotsMask |= 16;
   InstructionsGroupCandidate.clear();
   LoadAlu();
 }
@@ -409,12 +386,12 @@ void R600SchedStrategy::AssignSlot(MachineInstr* MI, unsigned Slot) {
   }
 }
 
-SUnit *R600SchedStrategy::AttemptFillSlot(unsigned Slot) {
+SUnit *R600SchedStrategy::AttemptFillSlot(unsigned Slot, bool AnyAlu) {
   static const AluKind IndexToID[] = {AluT_X, AluT_Y, AluT_Z, AluT_W};
-  SUnit *SlotedSU = PopInst(AvailableAlus[IndexToID[Slot]]);
+  SUnit *SlotedSU = PopInst(AvailableAlus[IndexToID[Slot]], AnyAlu);
   if (SlotedSU)
     return SlotedSU;
-  SUnit *UnslotedSU = PopInst(AvailableAlus[AluAny]);
+  SUnit *UnslotedSU = PopInst(AvailableAlus[AluAny], AnyAlu);
   if (UnslotedSU)
     AssignSlot(UnslotedSU->getInstr(), Slot);
   return UnslotedSU;
@@ -434,30 +411,35 @@ SUnit* R600SchedStrategy::pickAlu() {
       // Bottom up scheduling : predX must comes first
       if (!AvailableAlus[AluPredX].empty()) {
         OccupedSlotsMask |= 31;
-        return PopInst(AvailableAlus[AluPredX]);
+        return PopInst(AvailableAlus[AluPredX], false);
       }
       // Flush physical reg copies (RA will discard them)
       if (!AvailableAlus[AluDiscarded].empty()) {
         OccupedSlotsMask |= 31;
-        return PopInst(AvailableAlus[AluDiscarded]);
+        return PopInst(AvailableAlus[AluDiscarded], false);
       }
       // If there is a T_XYZW alu available, use it
       if (!AvailableAlus[AluT_XYZW].empty()) {
         OccupedSlotsMask |= 15;
-        return PopInst(AvailableAlus[AluT_XYZW]);
+        return PopInst(AvailableAlus[AluT_XYZW], false);
       }
     }
     bool TransSlotOccuped = OccupedSlotsMask & 16;
-    if (!TransSlotOccuped) {
+    if (!TransSlotOccuped && VLIW5) {
       if (!AvailableAlus[AluTrans].empty()) {
         OccupedSlotsMask |= 16;
-        return PopInst(AvailableAlus[AluTrans]);
+        return PopInst(AvailableAlus[AluTrans], false);
+      }
+      SUnit *SU = AttemptFillSlot(3, true);
+      if (SU) {
+        OccupedSlotsMask |= 16;
+        return SU;
       }
     }
     for (int Chan = 3; Chan > -1; --Chan) {
       bool isOccupied = OccupedSlotsMask & (1 << Chan);
       if (!isOccupied) {
-        SUnit *SU = AttemptFillSlot(Chan);
+        SUnit *SU = AttemptFillSlot(Chan, false);
         if (SU) {
           OccupedSlotsMask |= (1 << Chan);
           InstructionsGroupCandidate.push_back(SU->getInstr());
@@ -467,11 +449,11 @@ SUnit* R600SchedStrategy::pickAlu() {
     }
     PrepareNextSlot();
   }
-  return NULL;
+  return nullptr;
 }
 
 SUnit* R600SchedStrategy::pickOther(int QID) {
-  SUnit *SU = 0;
+  SUnit *SU = nullptr;
   std::vector<SUnit *> &AQ = Available[QID];
 
   if (AQ.empty()) {
@@ -483,4 +465,3 @@ SUnit* R600SchedStrategy::pickOther(int QID) {
   }
   return SU;
 }
-

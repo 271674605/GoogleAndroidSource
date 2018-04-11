@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PPAPI_PROXY_PPB_FILE_REF_PROXY_H_
-#define PPAPI_PROXY_PPB_FILE_REF_PROXY_H_
+#ifndef PPAPI_PROXY_FILE_REF_RESOURCE_H_
+#define PPAPI_PROXY_FILE_REF_RESOURCE_H_
 
 #include <string>
 
@@ -29,7 +29,7 @@ class PPAPI_PROXY_EXPORT FileRefResource
  public:
   static PP_Resource CreateFileRef(Connection connection,
                                    PP_Instance instance,
-                                   const FileRef_CreateInfo& info);
+                                   const FileRefCreateInfo& info);
 
   virtual ~FileRefResource();
 
@@ -42,8 +42,8 @@ class PPAPI_PROXY_EXPORT FileRefResource
   virtual PP_Var GetPath() const OVERRIDE;
   virtual PP_Resource GetParent() OVERRIDE;
   virtual int32_t MakeDirectory(
-     PP_Bool make_ancestors,
-     scoped_refptr<TrackedCallback> callback) OVERRIDE;
+      int32_t make_directory_flags,
+      scoped_refptr<TrackedCallback> callback) OVERRIDE;
   virtual int32_t Touch(PP_Time last_access_time,
                         PP_Time last_modified_time,
                         scoped_refptr<TrackedCallback> callback) OVERRIDE;
@@ -55,13 +55,7 @@ class PPAPI_PROXY_EXPORT FileRefResource
   virtual int32_t ReadDirectoryEntries(
       const PP_ArrayOutput& output,
       scoped_refptr<TrackedCallback> callback) OVERRIDE;
-  virtual const PPB_FileRef_CreateInfo& GetCreateInfo() const OVERRIDE;
-  virtual int32_t QueryInHost(linked_ptr<PP_FileInfo> info,
-                              scoped_refptr<TrackedCallback> callback) OVERRIDE;
-  virtual int32_t ReadDirectoryEntriesInHost(
-      linked_ptr<std::vector<ppapi::PPB_FileRef_CreateInfo> > files,
-      linked_ptr<std::vector<PP_FileType> > file_types,
-      scoped_refptr<TrackedCallback> callback) OVERRIDE;
+  virtual const FileRefCreateInfo& GetCreateInfo() const OVERRIDE;
 
   // Private API
   virtual PP_Var GetAbsolutePath() OVERRIDE;
@@ -69,7 +63,7 @@ class PPAPI_PROXY_EXPORT FileRefResource
  private:
   FileRefResource(Connection connection,
                   PP_Instance instance,
-                  const FileRef_CreateInfo& info);
+                  const FileRefCreateInfo& info);
 
   void RunTrackedCallback(scoped_refptr<TrackedCallback> callback,
                           const ResourceMessageReplyParams& params);
@@ -83,11 +77,13 @@ class PPAPI_PROXY_EXPORT FileRefResource
       const PP_ArrayOutput& output,
       scoped_refptr<TrackedCallback> callback,
       const ResourceMessageReplyParams& params,
-      const std::vector<ppapi::FileRef_CreateInfo>& infos,
+      const std::vector<ppapi::FileRefCreateInfo>& infos,
       const std::vector<PP_FileType>& file_types);
 
+  bool uses_internal_paths() const;
+
   // Populated after creation.
-  FileRef_CreateInfo create_info_;
+  FileRefCreateInfo create_info_;
 
   // Some file ref operations may fail if the the file system resource inside
   // create_info_ is destroyed. Therefore, we explicitly hold a reference to
@@ -104,4 +100,4 @@ class PPAPI_PROXY_EXPORT FileRefResource
 }  // namespace proxy
 }  // namespace ppapi
 
-#endif  // PPAPI_PROXY_PPB_FILE_REF_PROXY_H_
+#endif  // PPAPI_PROXY_FILE_REF_RESOURCE_H_

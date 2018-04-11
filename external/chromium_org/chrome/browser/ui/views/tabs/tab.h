@@ -10,10 +10,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/tabs/tab_audio_indicator.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
-#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/layout.h"
+#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/point.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
@@ -23,25 +22,23 @@
 class TabController;
 
 namespace gfx {
-class Font;
-}
-namespace ui {
 class Animation;
 class AnimationContainer;
 class LinearAnimation;
 class MultiAnimation;
+class ThrobAnimation;
 }
 namespace views {
 class ImageButton;
+class Label;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 //
-//  A View that renders a Tab, either in a TabStrip or in a DraggedTabView.
+//  A View that renders a Tab in a TabStrip.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class Tab : public TabAudioIndicator::Delegate,
-            public ui::AnimationDelegate,
+class Tab : public gfx::AnimationDelegate,
             public views::ButtonListener,
             public views::ContextMenuController,
             public views::View {
@@ -52,8 +49,6 @@ class Tab : public TabAudioIndicator::Delegate,
   explicit Tab(TabController* controller);
   virtual ~Tab();
 
-  TabController* controller() const { return controller_; }
-
   // Used to set/check whether this Tab is being animated closed.
   void set_closing(bool closing) { closing_ = closing; }
   bool closing() const { return closing_; }
@@ -62,15 +57,13 @@ class Tab : public TabAudioIndicator::Delegate,
   void set_dragging(bool dragging) { dragging_ = dragging; }
   bool dragging() const { return dragging_; }
 
-  // Sets the container all animations run from.
-  void set_animation_container(ui::AnimationContainer* container);
+  // Used to mark the tab as having been detached.  Once this has happened, the
+  // tab should be invisibly closed.  This is irreversible.
+  void set_detached() { detached_ = true; }
+  bool detached() const { return detached_; }
 
-  // Set the theme provider - because we get detached, we are frequently
-  // outside of a hierarchy with a theme provider at the top. This should be
-  // called whenever we're detached or attached to a hierarchy.
-  void set_theme_provider(ui::ThemeProvider* provider) {
-    theme_provider_ = provider;
-  }
+  // Sets the container all animations run from.
+  void set_animation_container(gfx::AnimationContainer* container);
 
   // Returns true if this tab is the active tab.
   bool IsActive() const;
@@ -112,6 +105,17 @@ class Tab : public TabAudioIndicator::Delegate,
     return &hover_controller_;
   }
 
+  // Returns the inset within the first dragged tab to use when calculating the
+  // "drag insertion point".  If we simply used the x-coordinate of the tab,
+  // we'd be calculating based on a point well before where the user considers
+  // the tab to "be".  The value here is chosen to "feel good" based on the
+  // widths of the tab images and the tab overlap.
+  //
+  // Note that this must return a value smaller than the midpoint of any tab's
+  // width, or else the user won't be able to drag a tab to the left of the
+  // first tab in the strip.
+  static int leading_width_for_drag() { return 16; }
+
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
   // Returns the minimum possible size of a selected Tab. Selected tabs must
@@ -134,6 +138,11 @@ class Tab : public TabAudioIndicator::Delegate,
  private:
   friend class TabTest;
   FRIEND_TEST_ALL_PREFIXES(TabTest, CloseButtonLayout);
+
+  friend class TabStripTest;
+  FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
+  FRIEND_TEST_ALL_PREFIXES(TabStripTest, ClippedTabCloseButton);
+
   // The animation object used to swap the favicon with the sad tab icon.
   class FaviconCrashAnimation;
   class TabCloseButton;
@@ -155,13 +164,10 @@ class Tab : public TabAudioIndicator::Delegate,
 
   typedef std::list<ImageCacheEntry> ImageCache;
 
-  // Overridden from TabAudioIndicator::Delegate:
-  virtual void ScheduleAudioIndicatorPaint() OVERRIDE;
-
-  // Overridden from ui::AnimationDelegate:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  // Overridden from gfx::AnimationDelegate:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -178,12 +184,12 @@ class Tab : public TabAudioIndicator::Delegate,
   virtual void OnThemeChanged() OVERRIDE;
   virtual const char* GetClassName() const OVERRIDE;
   virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* path) const OVERRIDE;
+  virtual void GetHitTestMask(HitTestSource source,
+                              gfx::Path* path) const OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
-                              string16* tooltip) const OVERRIDE;
+                              base::string16* tooltip) const OVERRIDE;
   virtual bool GetTooltipTextOrigin(const gfx::Point& p,
                                     gfx::Point* origin) const OVERRIDE;
-  virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
@@ -191,14 +197,14 @@ class Tab : public TabAudioIndicator::Delegate,
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
 
   // Overridden from ui::EventHandler:
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
-  // Returns the bounds of the title and icon.
-  const gfx::Rect& GetTitleBounds() const;
-  const gfx::Rect& GetIconBounds() const;
+  // Invoked from Layout to adjust the position of the favicon or media
+  // indicator for mini tabs.
+  void MaybeAdjustLeftForMiniTab(gfx::Rect* bounds) const;
 
   // Invoked from SetData after |data_| has been updated to the new data.
   void DataChanged(const TabRendererData& old);
@@ -211,17 +217,15 @@ class Tab : public TabAudioIndicator::Delegate,
 
   // Paint various portions of the Tab
   void PaintTabBackground(gfx::Canvas* canvas);
-  void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas,
-                                                 ui::MultiAnimation* animation);
+  void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundUsingResourceId(gfx::Canvas* canvas,
                                                  int tab_id);
   void PaintActiveTabBackground(gfx::Canvas* canvas);
 
-  // Paints the icon at the specified coordinates, mirrored for RTL if needed.
+  // Paints the favicon and media indicator icon, mirrored for RTL if needed.
   void PaintIcon(gfx::Canvas* canvas);
-  void PaintCaptureState(gfx::Canvas* canvas, gfx::Rect bounds);
-  void PaintTitle(gfx::Canvas* canvas, SkColor title_color);
+  void PaintMediaIndicator(gfx::Canvas* canvas);
 
   // Invoked if data_.network_state changes, or the network_state is not none.
   void AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
@@ -233,6 +237,9 @@ class Tab : public TabAudioIndicator::Delegate,
 
   // Returns whether the Tab should display a favicon.
   bool ShouldShowIcon() const;
+
+  // Returns whether the Tab should display the media indicator.
+  bool ShouldShowMediaIndicator() const;
 
   // Returns whether the Tab should display a close button.
   bool ShouldShowCloseBox() const;
@@ -249,12 +256,15 @@ class Tab : public TabAudioIndicator::Delegate,
   void DisplayCrashedFavicon();
   void ResetCrashedFavicon();
 
-  void StopIconAnimation();
+  void StopCrashAnimation();
   void StartCrashAnimation();
-  void StartRecordingAnimation();
 
   // Returns true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
+
+  // Starts the media indicator fade-in/out animation. There's no stop method
+  // because this is not a continuous animation.
+  void StartMediaIndicatorAnimation();
 
   // Schedules repaint task for icon.
   void ScheduleIconPaint();
@@ -288,8 +298,7 @@ class Tab : public TabAudioIndicator::Delegate,
                              ui::ScaleFactor scale_factor,
                              const gfx::ImageSkia& image);
 
-  // The controller.
-  // WARNING: this is null during detached tab dragging.
+  // The controller, never NULL.
   TabController* controller_;
 
   TabRendererData data_;
@@ -299,6 +308,9 @@ class Tab : public TabAudioIndicator::Delegate,
 
   // True if the tab is being dragged.
   bool dragging_;
+
+  // True if the tab has been detached.
+  bool detached_;
 
   // The offset used to animate the favicon location. This is used when the tab
   // crashes.
@@ -313,20 +325,23 @@ class Tab : public TabAudioIndicator::Delegate,
 
   bool should_display_crashed_favicon_;
 
-  // The tab and the icon can both be animating. The tab 'throbs' by changing
-  // color. The icon can have one of several of animations like crashing,
-  // recording, projecting, etc. Note that the icon animation related to network
-  // state does not have an animation associated with it.
-  scoped_ptr<ui::Animation> tab_animation_;
-  scoped_ptr<ui::LinearAnimation> icon_animation_;
+  // Whole-tab throbbing "pulse" animation.
+  scoped_ptr<gfx::ThrobAnimation> pulse_animation_;
 
-  scoped_refptr<ui::AnimationContainer> animation_container_;
+  scoped_ptr<gfx::MultiAnimation> mini_title_change_animation_;
 
-  scoped_ptr<TabAudioIndicator> tab_audio_indicator_;
+  // Crash icon animation (in place of favicon).
+  scoped_ptr<gfx::LinearAnimation> crash_icon_animation_;
+
+  // Media indicator fade-in/out animation (i.e., only on show/hide, not a
+  // continuous animation).
+  scoped_ptr<gfx::Animation> media_indicator_animation_;
+  TabMediaState animating_media_state_;
+
+  scoped_refptr<gfx::AnimationContainer> animation_container_;
 
   views::ImageButton* close_button_;
-
-  ui::ThemeProvider* theme_provider_;
+  views::Label* title_;
 
   bool tab_activated_with_last_gesture_begin_;
 
@@ -334,7 +349,7 @@ class Tab : public TabAudioIndicator::Delegate,
 
   // The bounds of various sections of the display.
   gfx::Rect favicon_bounds_;
-  gfx::Rect title_bounds_;
+  gfx::Rect media_indicator_bounds_;
 
   // The offset used to paint the inactive background image.
   gfx::Point background_offset_;
@@ -354,15 +369,16 @@ class Tab : public TabAudioIndicator::Delegate,
   // changes and layout appropriately.
   bool showing_icon_;
 
+  // Whether we're showing the media indicator. It is cached so that we can
+  // detect when it changes and layout appropriately.
+  bool showing_media_indicator_;
+
   // Whether we are showing the close button. It is cached so that we can
   // detect when it changes and layout appropriately.
   bool showing_close_button_;
 
   // The current color of the close button.
   SkColor close_button_color_;
-
-  static gfx::Font* font_;
-  static int font_height_;
 
   // As the majority of the tabs are inactive, and painting tabs is slowish,
   // we cache a handful of the inactive tab backgrounds here.

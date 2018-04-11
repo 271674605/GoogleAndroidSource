@@ -21,15 +21,13 @@ class DownloadManager;
 namespace drive {
 
 class FileSystemInterface;
-class FileWriteHelper;
 class ResourceEntry;
 
 // Observes downloads to temporary local drive folder. Schedules these
 // downloads for upload to drive service.
 class DownloadHandler : public AllDownloadItemNotifier::Observer {
  public:
-  DownloadHandler(FileWriteHelper* file_write_helper,
-                  FileSystemInterface* file_system);
+  explicit DownloadHandler(FileSystemInterface* file_system);
   virtual ~DownloadHandler();
 
   // Utility method to get DownloadHandler with profile.
@@ -38,6 +36,12 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
   // Become an observer of DownloadManager.
   void Initialize(content::DownloadManager* download_manager,
                   const base::FilePath& drive_tmp_download_path);
+
+  // In addition to the DownloadManager passed to Initialize(), observe another
+  // download manager. This should be called only for the DownloadManager of the
+  // incognito version of the profile where |file_system_| resides.
+  void ObserveIncognitoDownloadManager(
+      content::DownloadManager* download_manager);
 
   // Callback used to return results from SubstituteDriveDownloadPath.
   // TODO(hashimoto): Report error with a FileError. crbug.com/171345
@@ -58,6 +62,9 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
   // Gets the target drive path from external data in |download|.
   base::FilePath GetTargetPath(const content::DownloadItem* download);
 
+  // Gets the downloaded drive cache file path from external data in |download|.
+  base::FilePath GetCacheFilePath(const content::DownloadItem* download);
+
   // Checks if there is a Drive upload associated with |download|
   bool IsDriveDownload(const content::DownloadItem* download);
 
@@ -74,14 +81,7 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
                                  content::DownloadItem* download) OVERRIDE;
 
   // Removes the download.
-  void RemoveDownload(int id);
-
-  // Callback for FileSystem::GetResourceEntryByPath().
-  // Used to implement SubstituteDriveDownloadPath().
-  void OnEntryFound(const base::FilePath& drive_dir_path,
-                    const SubstituteDriveDownloadPathCallback& callback,
-                    FileError error,
-                    scoped_ptr<ResourceEntry> entry);
+  void RemoveDownload(void* manager_id, int id);
 
   // Callback for FileSystem::CreateDirectory().
   // Used to implement SubstituteDriveDownloadPath().
@@ -89,12 +89,24 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
                          FileError error);
 
   // Starts the upload of a downloaded/downloading file.
-  void UploadDownloadItem(content::DownloadItem* download);
+  void UploadDownloadItem(content::DownloadManager* manager,
+                          content::DownloadItem* download);
 
-  FileWriteHelper* file_write_helper_;
+  // Sets |cache_file_path| as user data of the download item specified by |id|.
+  void SetCacheFilePath(void* manager_id,
+                        int id,
+                        const base::FilePath* cache_file_path,
+                        FileError error);
+
+  // Gets a download manager, given a |manager_id| casted from the pointer to
+  // the manager. This is used to validate the manager that may be deleted while
+  // asynchronous task posting. Returns NULL if the manager is already gone.
+  content::DownloadManager* GetDownloadManager(void* manager_id);
+
   FileSystemInterface* file_system_;  // Owned by DriveIntegrationService.
   // Observe the DownloadManager for new downloads.
   scoped_ptr<AllDownloadItemNotifier> notifier_;
+  scoped_ptr<AllDownloadItemNotifier> notifier_incognito_;
 
   // Temporary download location directory.
   base::FilePath drive_tmp_download_path_;

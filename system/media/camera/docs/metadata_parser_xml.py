@@ -53,7 +53,7 @@ import metadata_helpers
 
 class MetadataParserXml:
   """
-  A class to parse any XML file that passes validation with metadata-validate.
+  A class to parse any XML block that passes validation with metadata-validate.
   It builds a metadata_model.Metadata graph and then renders it over a
   Mako template.
 
@@ -61,25 +61,42 @@ class MetadataParserXml:
     soup: an instance of BeautifulSoup corresponding to the XML contents
     metadata: a constructed instance of metadata_model.Metadata
   """
-  def __init__(self, file_name):
+  def __init__(self, xml, file_name):
     """
     Construct a new MetadataParserXml, immediately try to parse it into a
     metadata model.
 
     Args:
-      file_name: path to an XML file that passes metadata-validate
+      xml: The XML block to use for the metadata
+      file_name: Source of the XML block, only for debugging/errors
 
     Raises:
-      ValueError: if the XML file failed to pass metadata_validate.py
+      ValueError: if the XML block failed to pass metadata_validate.py
     """
-    self._soup = validate_xml(file_name)
+    self._soup = validate_xml(xml)
 
     if self._soup is None:
-      raise ValueError("%s has an invalid XML file" %(file_name))
+      raise ValueError("%s has an invalid XML file" % (file_name))
 
     self._metadata = Metadata()
     self._parse()
     self._metadata.construct_graph()
+
+  @staticmethod
+  def create_from_file(file_name):
+    """
+    Construct a new MetadataParserXml by loading and parsing an XML file.
+
+    Args:
+      file_name: Name of the XML file to load and parse.
+
+    Raises:
+      ValueError: if the XML file failed to pass metadata_validate.py
+
+    Returns:
+      MetadataParserXml instance representing the XML file.
+    """
+    return MetadataParserXml(file(file_name).read(), file_name)
 
   @property
   def soup(self):
@@ -158,6 +175,21 @@ class MetadataParserXml:
     d['visibility'] = entry.get('visibility')
 
     #
+    # Synthetic ?
+    #
+    d['synthetic'] = entry.get('synthetic') == 'true'
+
+    #
+    # Hardware Level (one of limited, legacy, full)
+    #
+    d['hwlevel'] = entry.get('hwlevel')
+
+    #
+    # Deprecated ?
+    #
+    d['deprecated'] = entry.get('deprecated') == 'true'
+
+    #
     # Optional for non-full hardware level devices
     #
     d['optional'] = entry.get('optional') == 'true'
@@ -174,6 +206,7 @@ class MetadataParserXml:
 
       enum_values = []
       enum_optionals = []
+      enum_hiddens = []
       enum_notes = {}
       enum_ids = {}
       for value in entry.enum.find_all('value'):
@@ -184,6 +217,9 @@ class MetadataParserXml:
         if value.attrs.get('optional', 'false') == 'true':
           enum_optionals.append(value_body)
 
+        if value.attrs.get('hidden', 'false') == 'true':
+          enum_hiddens.append(value_body)
+
         notes = value.find('notes')
         if notes is not None:
           enum_notes[value_body] = notes.string
@@ -193,6 +229,7 @@ class MetadataParserXml:
 
       d['enum_values'] = enum_values
       d['enum_optionals'] = enum_optionals
+      d['enum_hiddens'] = enum_hiddens
       d['enum_notes'] = enum_notes
       d['enum_ids'] = enum_ids
       d['enum'] = True
@@ -225,7 +262,7 @@ class MetadataParserXml:
   def _parse_entry_optional(self, entry):
     d = {}
 
-    optional_elements = ['description', 'range', 'units', 'notes']
+    optional_elements = ['description', 'range', 'units', 'details', 'hal_details']
     for i in optional_elements:
       prop = find_child_tag(entry, i)
 
@@ -246,6 +283,8 @@ class MetadataParserXml:
 
     The template gets the metadata as an argument, as well as all
     public attributes from the metadata_helpers module.
+
+    The output file is encoded with UTF-8.
 
     Args:
       template: path to a Mako template file
@@ -271,7 +310,7 @@ class MetadataParserXml:
     if output_name is None:
       print tpl_data
     else:
-      file(output_name, "w").write(tpl_data)
+      file(output_name, "w").write(tpl_data.encode('utf-8'))
 
 #####################
 #####################
@@ -286,7 +325,7 @@ if __name__ == "__main__":
   file_name = sys.argv[1]
   template_name = sys.argv[2]
   output_name = sys.argv[3] if len(sys.argv) > 3 else None
-  parser = MetadataParserXml(file_name)
+  parser = MetadataParserXml.create_from_file(file_name)
   parser.render(template_name, output_name)
 
   sys.exit(0)

@@ -17,12 +17,13 @@ package com.android.contacts.common.list;
 
 import android.content.Context;
 import android.content.CursorLoader;
+import android.content.res.Resources;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.ContactsContract;
-import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Contacts;
+import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.Directory;
 import android.text.TextUtils;
 import android.util.Log;
@@ -34,6 +35,7 @@ import android.widget.SectionIndexer;
 import android.widget.TextView;
 
 import com.android.contacts.common.ContactPhotoManager;
+import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.R;
 import com.android.contacts.common.util.SearchUtil;
 
@@ -57,7 +59,9 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
     private int mSortOrder;
 
     private boolean mDisplayPhotos;
+    private boolean mCircularPhotos = true;
     private boolean mQuickContactEnabled;
+    private boolean mAdjustSelectionBoundsEnabled;
 
     /**
      * indicates if contact queries include profile
@@ -68,6 +72,11 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
      * indicates if query results includes a profile
      */
     private boolean mProfileExists;
+
+    /**
+     * The root view of the fragment that this adapter is associated with.
+     */
+    private View mFragmentRootView;
 
     private ContactPhotoManager mPhotoLoader;
 
@@ -82,7 +91,6 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
     private boolean mSelectionVisible;
 
     private ContactListFilter mFilter;
-    private String mContactsCount = "";
     private boolean mDarkTheme = false;
 
     /** Resource used to provide header-text for default filter. */
@@ -94,34 +102,41 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
         addPartitions();
     }
 
+    /**
+     * @param fragmentRootView Root view of the fragment. This is used to restrict the scope of
+     * image loading requests that get cancelled on cursor changes.
+     */
+    protected void setFragmentRootView(View fragmentRootView) {
+        mFragmentRootView = fragmentRootView;
+    }
+
     protected void setDefaultFilterHeaderText(int resourceId) {
         mDefaultFilterHeaderText = getContext().getResources().getText(resourceId);
     }
 
     @Override
+    protected ContactListItemView newView(
+            Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
+        final ContactListItemView view = new ContactListItemView(context, null);
+        view.setIsSectionHeaderEnabled(isSectionHeaderDisplayEnabled());
+        view.setAdjustSelectionBoundsEnabled(isAdjustSelectionBoundsEnabled());
+        return view;
+    }
+
+    @Override
+    protected void bindView(View itemView, int partition, Cursor cursor, int position) {
+        final ContactListItemView view = (ContactListItemView) itemView;
+        view.setIsSectionHeaderEnabled(isSectionHeaderDisplayEnabled());
+    }
+
+    @Override
     protected View createPinnedSectionHeaderView(Context context, ViewGroup parent) {
-        return new ContactListPinnedHeaderView(context, null);
+        return new ContactListPinnedHeaderView(context, null, parent);
     }
 
     @Override
     protected void setPinnedSectionTitle(View pinnedHeaderView, String title) {
-        ((ContactListPinnedHeaderView)pinnedHeaderView).setSectionHeader(title);
-    }
-
-    @Override
-    protected void setPinnedHeaderContactsCount(View header) {
-        // Update the header with the contacts count only if a profile header exists
-        // otherwise, the contacts count are shown in the empty profile header view
-        if (mProfileExists) {
-            ((ContactListPinnedHeaderView)header).setCountView(mContactsCount);
-        } else {
-            clearPinnedHeaderContactsCount(header);
-        }
-    }
-
-    @Override
-    protected void clearPinnedHeaderContactsCount(View header) {
-        ((ContactListPinnedHeaderView)header).setCountView(null);
+        ((ContactListPinnedHeaderView) pinnedHeaderView).setSectionHeaderTitle(title);
     }
 
     protected void addPartitions() {
@@ -303,6 +318,14 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
         mDisplayPhotos = displayPhotos;
     }
 
+    public boolean getCircularPhotos() {
+        return mCircularPhotos;
+    }
+
+    public void setCircularPhotos(boolean circularPhotos) {
+        mCircularPhotos = circularPhotos;
+    }
+
     public boolean isEmptyListEnabled() {
         return mEmptyListEnabled;
     }
@@ -325,6 +348,14 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
 
     public void setQuickContactEnabled(boolean quickContactEnabled) {
         mQuickContactEnabled = quickContactEnabled;
+    }
+
+    public boolean isAdjustSelectionBoundsEnabled() {
+        return mAdjustSelectionBoundsEnabled;
+    }
+
+    public void setAdjustSelectionBoundsEnabled(boolean enabled) {
+        mAdjustSelectionBoundsEnabled = enabled;
     }
 
     public boolean shouldIncludeProfile() {
@@ -434,6 +465,9 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
         if (isSectionHeaderDisplayEnabled() && partitionIndex == getIndexedPartition()) {
             updateIndexer(cursor);
         }
+
+        // When the cursor changes, cancel any pending asynchronous photo loads.
+        mPhotoLoader.cancelPendingRequests(mFragmentRootView);
     }
 
     public void changeCursor(Cursor cursor) {
@@ -450,14 +484,34 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
         }
 
         Bundle bundle = cursor.getExtras();
-        if (bundle.containsKey(ContactCounts.EXTRA_ADDRESS_BOOK_INDEX_TITLES)) {
+        if (bundle.containsKey(Contacts.EXTRA_ADDRESS_BOOK_INDEX_TITLES) &&
+                bundle.containsKey(Contacts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS)) {
             String sections[] =
-                    bundle.getStringArray(ContactCounts.EXTRA_ADDRESS_BOOK_INDEX_TITLES);
-            int counts[] = bundle.getIntArray(ContactCounts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS);
-            setIndexer(new ContactsSectionIndexer(sections, counts));
+                    bundle.getStringArray(Contacts.EXTRA_ADDRESS_BOOK_INDEX_TITLES);
+            int counts[] = bundle.getIntArray(
+                    Contacts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS);
+
+            if (getExtraStartingSection()) {
+                // Insert an additional unnamed section at the top of the list.
+                String allSections[] = new String[sections.length + 1];
+                int allCounts[] = new int[counts.length + 1];
+                for (int i = 0; i < sections.length; i++) {
+                    allSections[i + 1] = sections[i];
+                    allCounts[i + 1] = counts[i];
+                }
+                allCounts[0] = 1;
+                allSections[0] = "";
+                setIndexer(new ContactsSectionIndexer(allSections, allCounts));
+            } else {
+                setIndexer(new ContactsSectionIndexer(sections, counts));
+            }
         } else {
             setIndexer(null);
         }
+    }
+
+    protected boolean getExtraStartingSection() {
+        return false;
     }
 
     @Override
@@ -542,7 +596,15 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
     protected View newHeaderView(Context context, int partition, Cursor cursor,
             ViewGroup parent) {
         LayoutInflater inflater = LayoutInflater.from(context);
-        return inflater.inflate(R.layout.directory_header, parent, false);
+        View view = inflater.inflate(R.layout.directory_header, parent, false);
+        if (!getPinnedPartitionHeadersEnabled()) {
+            // If the headers are unpinned, there is no need for their background
+            // color to be non-transparent. Setting this transparent reduces maintenance for
+            // non-pinned headers. We don't need to bother synchronizing the activity's
+            // background color with the header background color.
+            view.setBackground(null);
+        }
+        return view;
     }
 
     @Override
@@ -566,6 +628,13 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
                     : directoryPartition.getDirectoryType();
             displayNameTextView.setText(displayName);
         }
+
+        final Resources res = getContext().getResources();
+        final int headerPaddingTop = partitionIndex == 1 && getPartition(0).isEmpty()?
+                0 : res.getDimensionPixelOffset(R.dimen.directory_header_extra_top_padding);
+        // There should be no extra padding at the top of the first directory header
+        view.setPaddingRelative(view.getPaddingStart(), headerPaddingTop, view.getPaddingEnd(),
+                view.getPaddingBottom());
     }
 
     // Default implementation simply returns number of rows in the cursor.
@@ -640,10 +709,11 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
      * @param photoUriColumn Index of the photo uri column. Optional: Can be -1
      * @param contactIdColumn Index of the contact id column
      * @param lookUpKeyColumn Index of the lookup key column
+     * @param displayNameColumn Index of the display name column
      */
     protected void bindQuickContact(final ContactListItemView view, int partitionIndex,
             Cursor cursor, int photoIdColumn, int photoUriColumn, int contactIdColumn,
-            int lookUpKeyColumn) {
+            int lookUpKeyColumn, int displayNameColumn) {
         long photoId = 0;
         if (!cursor.isNull(photoIdColumn)) {
             photoId = cursor.getLong(photoIdColumn);
@@ -654,12 +724,35 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
                 getContactUri(partitionIndex, cursor, contactIdColumn, lookUpKeyColumn));
 
         if (photoId != 0 || photoUriColumn == -1) {
-            getPhotoLoader().loadThumbnail(quickContact, photoId, mDarkTheme);
+            getPhotoLoader().loadThumbnail(quickContact, photoId, mDarkTheme, mCircularPhotos,
+                    null);
         } else {
             final String photoUriString = cursor.getString(photoUriColumn);
             final Uri photoUri = photoUriString == null ? null : Uri.parse(photoUriString);
-            getPhotoLoader().loadPhoto(quickContact, photoUri, -1, mDarkTheme);
+            DefaultImageRequest request = null;
+            if (photoUri == null) {
+                request = getDefaultImageRequestFromCursor(cursor, displayNameColumn,
+                        lookUpKeyColumn);
+            }
+            getPhotoLoader().loadPhoto(quickContact, photoUri, -1, mDarkTheme, mCircularPhotos,
+                    request);
         }
+
+    }
+
+    @Override
+    public boolean hasStableIds() {
+        // Whenever bindViewId() is called, the values passed into setId() are stable or
+        // stable-ish. For example, when one contact is modified we don't expect a second
+        // contact's Contact._ID values to change.
+        return true;
+    }
+
+    protected void bindViewId(final ContactListItemView view, Cursor cursor, int idColumn) {
+        // Set a semi-stable id, so that talkback won't get confused when the list gets
+        // refreshed. There is little harm in inserting the same ID twice.
+        long contactId = cursor.getLong(idColumn);
+        view.setId((int) (contactId % Integer.MAX_VALUE));
 
     }
 
@@ -667,8 +760,13 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
             int contactIdColumn, int lookUpKeyColumn) {
         long contactId = cursor.getLong(contactIdColumn);
         String lookupKey = cursor.getString(lookUpKeyColumn);
-        Uri uri = Contacts.getLookupUri(contactId, lookupKey);
         long directoryId = ((DirectoryPartition)getPartition(partitionIndex)).getDirectoryId();
+        // Remote directories must have a lookup key or we don't have
+        // a working contact URI
+        if (TextUtils.isEmpty(lookupKey) && isRemoteDirectory(directoryId)) {
+            return null;
+        }
+        Uri uri = Contacts.getLookupUri(contactId, lookupKey);
         if (directoryId != Directory.DEFAULT) {
             uri = uri.buildUpon().appendQueryParameter(
                     ContactsContract.DIRECTORY_PARAM_KEY, String.valueOf(directoryId)).build();
@@ -676,16 +774,25 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
         return uri;
     }
 
-    public void setContactsCount(String count) {
-        mContactsCount = count;
-    }
-
-    public String getContactsCount() {
-        return mContactsCount;
-    }
-
     public static boolean isRemoteDirectory(long directoryId) {
         return directoryId != Directory.DEFAULT
                 && directoryId != Directory.LOCAL_INVISIBLE;
+    }
+
+    /**
+     * Retrieves the lookup key and display name from a cursor, and returns a
+     * {@link DefaultImageRequest} containing these contact details
+     *
+     * @param cursor Contacts cursor positioned at the current row to retrieve contact details for
+     * @param displayNameColumn Column index of the display name
+     * @param lookupKeyColumn Column index of the lookup key
+     * @return {@link DefaultImageRequest} with the displayName and identifier fields set to the
+     * display name and lookup key of the contact.
+     */
+    public DefaultImageRequest getDefaultImageRequestFromCursor(Cursor cursor,
+            int displayNameColumn, int lookupKeyColumn) {
+        final String displayName = cursor.getString(displayNameColumn);
+        final String lookupKey = cursor.getString(lookupKeyColumn);
+        return new DefaultImageRequest(displayName, lookupKey, mCircularPhotos);
     }
 }

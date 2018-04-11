@@ -20,22 +20,22 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.ComponentInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Parcel;
 import android.test.AndroidTestCase;
 import android.util.Printer;
 import android.util.StringBuilderPrinter;
-import android.widget.cts.WidgetTestUtils;
 
-import com.android.cts.stub.R;
+import com.android.cts.content.R;
 
 
 /**
  * Test {@link ComponentInfo}.
  */
 public class ComponentInfoTest extends AndroidTestCase {
-    private final String PACKAGE_NAME = "com.android.cts.stub";
+    private final String PACKAGE_NAME = "com.android.cts.content";
     private ComponentInfo mComponentInfo;
 
     public void testConstructor() {

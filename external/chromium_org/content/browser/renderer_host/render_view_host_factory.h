@@ -9,6 +9,7 @@
 #include "content/common/content_export.h"
 
 namespace content {
+class RenderFrameHostDelegate;
 class RenderViewHost;
 class RenderViewHostDelegate;
 class RenderWidgetHostDelegate;
@@ -29,7 +30,8 @@ class RenderViewHostFactory {
       RenderWidgetHostDelegate* widget_delegate,
       int routing_id,
       int main_frame_routing_id,
-      bool swapped_out);
+      bool swapped_out,
+      bool hidden);
 
   // Returns true if there is currently a globally-registered factory.
   static bool has_factory() {

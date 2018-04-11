@@ -27,7 +27,6 @@
 #include <openssl/err.h>
 #include <openssl/x509.h>
 
-#include <utils/UniquePtr.h>
 #include <linux/ioctl.h>
 #include <linux/msm_ion.h>
 #include <sys/mman.h>
@@ -42,6 +41,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dlfcn.h>
+
+#include <UniquePtr.h>
 
 #include "QSEEComAPI.h"
 #include "keymaster_qcom.h"
@@ -223,7 +224,7 @@ static int32_t qcom_km_ION_memalloc(struct qcom_km_ion_info_t *handle,
     ion_alloc_data.align = 4096;
 
     /* memory is allocated from EBI heap */
-   ion_alloc_data.heap_mask= ION_HEAP(ION_QSECOM_HEAP_ID);
+   ion_alloc_data.ION_HEAP_MASK = ION_HEAP(ION_QSECOM_HEAP_ID);
 
     /* Set the memory to be uncached */
     ion_alloc_data.flags = 0;
@@ -676,7 +677,7 @@ static int qcom_km_close(hw_device_t *dev)
 
 static int qcom_km_get_lib_sym(qcom_keymaster_handle_t* km_handle)
 {
-    km_handle->libhandle = dlopen("/system/lib/libQSEEComAPI.so", RTLD_NOW);
+    km_handle->libhandle = dlopen("libQSEEComAPI.so", RTLD_NOW);
     if (  km_handle->libhandle  ) {
         *(void **)(&km_handle->QSEECom_start_app) =
                                dlsym(km_handle->libhandle,"QSEECom_start_app");
@@ -758,7 +759,7 @@ static int qcom_km_open(const hw_module_t* module, const char* name,
     ret = (*km_handle->QSEECom_start_app)((struct QSEECom_handle **)&km_handle->qseecom,
                          "/vendor/firmware/keymaster", "keymaster", 4096*2);
     if (ret) {
-        ALOGE("Loading keymaster app failied");
+        ALOGE("Loading keymaster app failed");
         free(km_handle);
         return -1;
     }
@@ -766,7 +767,7 @@ static int qcom_km_open(const hw_module_t* module, const char* name,
     dev->common.version = 1;
     dev->common.module = (struct hw_module_t*) module;
     dev->common.close = qcom_km_close;
-    dev->flags = 0;
+    dev->flags = KEYMASTER_BLOBS_ARE_STANDALONE;
 
     dev->generate_keypair = qcom_km_generate_keypair;
     dev->import_keypair = qcom_km_import_keypair;
@@ -782,20 +783,20 @@ static int qcom_km_open(const hw_module_t* module, const char* name,
 }
 
 static struct hw_module_methods_t keystore_module_methods = {
-    open: qcom_km_open,
+    .open = qcom_km_open,
 };
 
 struct keystore_module HAL_MODULE_INFO_SYM
 __attribute__ ((visibility ("default"))) = {
-    common: {
-        tag: HARDWARE_MODULE_TAG,
-        version_major: 1,
-        version_minor: 0,
-        id: KEYSTORE_HARDWARE_MODULE_ID,
-        name: "Keymaster QCOM HAL",
-        author: "The Android Open Source Project",
-        methods: &keystore_module_methods,
-        dso: 0,
-        reserved: {},
+    .common = {
+        .tag = HARDWARE_MODULE_TAG,
+        .module_api_version = QCOM_KEYMASTER_API_VERSION,
+        .hal_api_version = HARDWARE_HAL_API_VERSION,
+        .id = KEYSTORE_HARDWARE_MODULE_ID,
+        .name = "Keymaster QCOM HAL",
+        .author = "The Android Open Source Project",
+        .methods = &keystore_module_methods,
+        .dso = 0,
+        .reserved = {},
     },
 };

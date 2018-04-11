@@ -14,6 +14,7 @@
 #include <mcld/IRBuilder.h>
 #include <mcld/Linker.h>
 #include <mcld/LinkerConfig.h>
+#include <mcld/LinkerScript.h>
 
 #include <mcld/Support/Path.h>
 
@@ -63,7 +64,7 @@ TEST_F( LinkerTest, set_up_n_clean_up) {
   //   builder.CreateInput("./test.o");
 
   if (linker.link(module, builder))
-    linker.emit("./test.so");
+    linker.emit(module, "./test.so");
 
   Finalize();
 }
@@ -123,7 +124,7 @@ TEST_F( LinkerTest, plasma) {
   builder.ReadInput("crtend", crtend);
 
   if (linker.link(module, builder)) {
-    linker.emit("libplasma.so"); ///< -o libplasma.so
+    linker.emit(module, "libplasma.so"); ///< -o libplasma.so
   }
 
   Finalize();
@@ -181,7 +182,7 @@ TEST_F( LinkerTest, plasma_twice) {
   builder1.ReadInput("crtend", crtend);
 
   if (linker.link(module1, builder1)) {
-    linker.emit("libplasma.once.so"); ///< -o libplasma.so
+    linker.emit(module1, "libplasma.once.so"); ///< -o libplasma.so
   }
 
   Finalize();
@@ -224,7 +225,7 @@ TEST_F( LinkerTest, plasma_twice) {
   builder2.ReadInput("crtend", crtend);
 
   if (linker.link(module2, builder2)) {
-    linker.emit("libplasma.twice.so"); ///< -o libplasma.exe
+    linker.emit(module2, "libplasma.twice.so"); ///< -o libplasma.exe
   }
 
   Finalize();
@@ -278,7 +279,7 @@ TEST_F( LinkerTest, plasma_twice_irbuilder_heap) {
   builder1->ReadInput("crtend", crtend);
 
   if (linker.link(module1, *builder1)) {
-    linker.emit("libplasma.once.so"); ///< -o libplasma.so
+    linker.emit(module1, "libplasma.once.so"); ///< -o libplasma.so
   }
 
   // Can not delete builder until emit the output. Dynamic string table
@@ -326,7 +327,7 @@ TEST_F( LinkerTest, plasma_twice_irbuilder_heap) {
   builder2->ReadInput("crtend", crtend);
 
   if (linker.link(module2, *builder2)) {
-    linker.emit("libplasma.twice.so"); ///< -o libplasma.exe
+    linker.emit(module2, "libplasma.twice.so"); ///< -o libplasma.exe
   }
 
   delete builder2;
@@ -429,7 +430,7 @@ TEST_F( LinkerTest, plasma_object) {
   builder.AddSymbol(*input,
                     "Output/gotplt.bc", ResolveInfo::File,
                     ResolveInfo::Define, ResolveInfo::Local, 0);
-  /// 2: 00000000     0 SECTION LOCAL  DEFAULT    1 
+  /// 2: 00000000     0 SECTION LOCAL  DEFAULT    1
   builder.AddSymbol(*input,
                     ".text", ResolveInfo::Section,
                     ResolveInfo::Define, ResolveInfo::Local, 0, 0x0, text);
@@ -437,11 +438,11 @@ TEST_F( LinkerTest, plasma_object) {
   builder.AddSymbol(*input,
                     ".data", ResolveInfo::Section,
                     ResolveInfo::Define, ResolveInfo::Local, 0, 0x0, data);
-  /// 4: 00000000     0 SECTION LOCAL  DEFAULT    4 
+  /// 4: 00000000     0 SECTION LOCAL  DEFAULT    4
   builder.AddSymbol(*input,
                     ".bss", ResolveInfo::Section,
                     ResolveInfo::Define, ResolveInfo::Local, 0, 0x0, bss);
-  /// 5: 00000000     0 SECTION LOCAL  DEFAULT    5 
+  /// 5: 00000000     0 SECTION LOCAL  DEFAULT    5
   builder.AddSymbol(*input,
                     ".ARM.attributes", ResolveInfo::Section,
                     ResolveInfo::Define, ResolveInfo::Local, 0, 0x0, attr);
@@ -467,7 +468,7 @@ TEST_F( LinkerTest, plasma_object) {
  builder.AddRelocation(*rel_text, llvm::ELF::R_ARM_PLT32, *z1gv, 0x4);
 
   if (linker.link(module, builder)) {
-    linker.emit("libgotplt.so"); ///< -o libgotplt.so
+    linker.emit(module, "libgotplt.so"); ///< -o libgotplt.so
   }
 
   Finalize();

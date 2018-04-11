@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_LD_NULL_FRAGMENT_H
-#define MCLD_LD_NULL_FRAGMENT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_FRAGMENT_NULLFRAGMENT_H
+#define MCLD_FRAGMENT_NULLFRAGMENT_H
 
 #include <mcld/Fragment/Fragment.h>
 

@@ -2,21 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
+def IsDeadlineExceededError(error):
+  '''A general way of determining whether |error| is a DeadlineExceededError,
+  since there are 3 different types thrown by AppEngine and we might as well
+  handle them all the same way. For more info see:
+  https://developers.google.com/appengine/articles/deadlineexceedederrors
+  '''
+  return type(error).__name__ == 'DeadlineExceededError'
 
-from app_yaml_helper import AppYamlHelper
 
-def GetAppVersion():
-  if 'CURRENT_VERSION_ID' in os.environ:
-    # The version ID looks like 2-0-25.36712548, we only want the 2-0-25.
-    return os.environ['CURRENT_VERSION_ID'].split('.', 1)[0]
-  # Not running on appengine, get it from the app.yaml file ourselves.
-  app_yaml_path = os.path.join(os.path.split(__file__)[0], 'app.yaml')
-  with open(app_yaml_path, 'r') as app_yaml:
-    return AppYamlHelper.ExtractVersion(app_yaml.read())
+def IsDownloadError(error):
+  return type(error).__name__ == 'DownloadError'
 
-def IsDevServer():
-  return os.environ.get('SERVER_SOFTWARE', '').find('Development') == 0
 
 # This will attempt to import the actual App Engine modules, and if it fails,
 # they will be replaced with fake modules. This is useful during testing.
@@ -28,8 +25,7 @@ try:
   import google.appengine.ext.blobstore as blobstore
   from google.appengine.ext.blobstore.blobstore import BlobReferenceProperty
   import google.appengine.ext.db as db
-  import google.appengine.ext.webapp as webapp
-  from google.appengine.runtime import DeadlineExceededError
+  import webapp2
 except ImportError:
   import re
   from StringIO import StringIO
@@ -53,7 +49,7 @@ except ImportError:
     for k, v in FAKE_URL_FETCHER_CONFIGURATION.iteritems():
       if k.match(key):
         return v
-    return None
+    raise ValueError('No configuration found for %s' % key)
 
   class _RPC(object):
     def __init__(self, result=None):
@@ -65,9 +61,6 @@ except ImportError:
     def wait(self):
       pass
 
-  class DeadlineExceededError(Exception):
-    pass
-
   class FakeUrlFetch(object):
     """A fake urlfetch module that uses the current
     |FAKE_URL_FETCHER_CONFIGURATION| to map urls to fake fetchers.
@@ -78,10 +71,11 @@ except ImportError:
     class _Response(object):
       def __init__(self, content):
         self.content = content
-        self.headers = { 'content-type': 'none' }
+        self.headers = {'Content-Type': 'none'}
         self.status_code = 200
 
     def fetch(self, url, **kwargs):
+      url = url.split('?', 1)[0]
       response = self._Response(_GetConfiguration(url).fetch(url))
       if response.content is None:
         response.status_code = 404
@@ -96,6 +90,9 @@ except ImportError:
 
   _BLOBS = {}
   class FakeBlobstore(object):
+    class BlobNotFoundError(Exception):
+      pass
+
     class BlobReader(object):
       def __init__(self, blob_key):
         self._data = _BLOBS[blob_key].getvalue()
@@ -188,9 +185,9 @@ except ImportError:
 
   memcache = InMemoryMemcache()
 
-  class webapp(object):
+  class webapp2(object):
     class RequestHandler(object):
-      """A fake webapp.RequestHandler class for Handler to extend.
+      """A fake webapp2.RequestHandler class for Handler to extend.
       """
       def __init__(self, request, response):
         self.request = request

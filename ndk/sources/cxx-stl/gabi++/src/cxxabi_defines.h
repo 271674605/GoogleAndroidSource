@@ -26,7 +26,7 @@
 // SUCH DAMAGE.
 
 #ifndef _GABIXX_CXXABI_DEFINES_H
-#define _GABIXX_CXXABI_DEIFNES_H
+#define _GABIXX_CXXABI_DEFINES_H
 
 #include <cxxabi.h>
 #include <stdint.h>
@@ -315,6 +315,9 @@ struct __cxa_eh_globals {
 }  // namespace __cxxabiv1
 
 namespace __gabixx {
+
+// Default unexpected handler.
+_GABIXX_NORETURN void __default_unexpected(void) _GABIXX_HIDDEN;
 
 // Default terminate handler.
 _GABIXX_NORETURN void __default_terminate(void) _GABIXX_HIDDEN;

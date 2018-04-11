@@ -20,8 +20,6 @@ class View;
 }
 
 namespace ash {
-namespace internal {
-
 class ScreenTrayItem;
 
 namespace tray {
@@ -129,6 +127,8 @@ class ASH_EXPORT ScreenTrayItem : public SystemTrayItem {
   virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE = 0;
   virtual void DestroyTrayView() OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
+  virtual void UpdateAfterShelfAlignmentChange(
+      ShelfAlignment alignment) OVERRIDE;
 
  private:
   tray::ScreenTrayView* tray_view_;
@@ -139,7 +139,6 @@ class ASH_EXPORT ScreenTrayItem : public SystemTrayItem {
   DISALLOW_COPY_AND_ASSIGN(ScreenTrayItem);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_CHROMEOS_SCREEN_TRAY_ITEM_H_

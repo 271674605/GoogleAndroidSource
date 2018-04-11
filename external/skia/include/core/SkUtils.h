@@ -17,7 +17,7 @@
     @param value    The 16bit value to be copied into buffer
     @param count    The number of times value should be copied into the buffer.
 */
-void sk_memset16_portable(uint16_t dst[], uint16_t value, int count);
+void sk_memset16(uint16_t dst[], uint16_t value, int count);
 typedef void (*SkMemset16Proc)(uint16_t dst[], uint16_t value, int count);
 SkMemset16Proc SkMemset16GetPlatformProc();
 
@@ -26,17 +26,18 @@ SkMemset16Proc SkMemset16GetPlatformProc();
     @param value    The 32bit value to be copied into buffer
     @param count    The number of times value should be copied into the buffer.
 */
-void sk_memset32_portable(uint32_t dst[], uint32_t value, int count);
+void sk_memset32(uint32_t dst[], uint32_t value, int count);
 typedef void (*SkMemset32Proc)(uint32_t dst[], uint32_t value, int count);
 SkMemset32Proc SkMemset32GetPlatformProc();
 
-#ifndef sk_memset16
-extern SkMemset16Proc sk_memset16;
-#endif
-
-#ifndef sk_memset32
-extern SkMemset32Proc sk_memset32;
-#endif
+/** Similar to memcpy(), but it copies count 32bit values from src to dst.
+    @param dst      The memory to have value copied into it
+    @param src      The memory to have value copied from it
+    @param count    The number of values should be copied.
+*/
+void sk_memcpy32(uint32_t dst[], const uint32_t src[], int count);
+typedef void (*SkMemcpy32Proc)(uint32_t dst[], const uint32_t src[], int count);
+SkMemcpy32Proc SkMemcpy32GetPlatformProc();
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -71,8 +72,7 @@ size_t      SkUTF8_FromUnichar(SkUnichar uni, char utf8[] = NULL);
 #define SkUTF16_IsLowSurrogate(c)   (((c) & 0xFC00) == 0xDC00)
 
 int SkUTF16_CountUnichars(const uint16_t utf16[]);
-int SkUTF16_CountUnichars(const uint16_t utf16[],
-                                  int numberOf16BitValues);
+int SkUTF16_CountUnichars(const uint16_t utf16[], int numberOf16BitValues);
 // returns the current unichar and then moves past it (*p++)
 SkUnichar SkUTF16_NextUnichar(const uint16_t**);
 // this guy backs up to the previus unichar value, and returns it (*--p)
@@ -80,7 +80,7 @@ SkUnichar SkUTF16_PrevUnichar(const uint16_t**);
 size_t SkUTF16_FromUnichar(SkUnichar uni, uint16_t utf16[] = NULL);
 
 size_t SkUTF16_ToUTF8(const uint16_t utf16[], int numberOf16BitValues,
-                           char utf8[] = NULL);
+                      char utf8[] = NULL);
 
 inline bool SkUnichar_IsVariationSelector(SkUnichar uni) {
 /*  The 'true' ranges are:
@@ -113,5 +113,6 @@ public:
 private:
     const char* fLabel;
 };
+#define SkAutoTrace(...) SK_REQUIRE_LOCAL_VAR(SkAutoTrace)
 
 #endif

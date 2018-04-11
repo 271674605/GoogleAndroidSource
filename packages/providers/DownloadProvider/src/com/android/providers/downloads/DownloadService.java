@@ -23,6 +23,9 @@ import android.app.AlarmManager;
 import android.app.DownloadManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
+import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -54,7 +57,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -78,13 +84,21 @@ public class DownloadService extends Service {
     SystemFacade mSystemFacade;
 
     private AlarmManager mAlarmManager;
-    private StorageManager mStorageManager;
 
     /** Observer to get notified when the content observer's data changes */
     private DownloadManagerContentObserver mObserver;
 
     /** Class to handle Notification Manager updates */
     private DownloadNotifier mNotifier;
+
+    /** Scheduling of the periodic cleanup job */
+    private JobInfo mCleanupJob;
+
+    private static final int CLEANUP_JOB_ID = 1;
+    private static final long CLEANUP_JOB_PERIOD = 1000 * 60 * 60 * 24; // one day
+    private static ComponentName sCleanupServiceName = new ComponentName(
+            DownloadIdleService.class.getPackage().getName(),
+            DownloadIdleService.class.getName());
 
     /**
      * The Service's view of the list of downloads, mapping download IDs to the corresponding info
@@ -105,7 +119,28 @@ public class DownloadService extends Service {
         // threads as needed (up to maximum) and reclaims them when finished.
         final ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 maxConcurrent, maxConcurrent, 10, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>());
+                new LinkedBlockingQueue<Runnable>()) {
+            @Override
+            protected void afterExecute(Runnable r, Throwable t) {
+                super.afterExecute(r, t);
+
+                if (t == null && r instanceof Future<?>) {
+                    try {
+                        ((Future<?>) r).get();
+                    } catch (CancellationException ce) {
+                        t = ce;
+                    } catch (ExecutionException ee) {
+                        t = ee.getCause();
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                if (t != null) {
+                    Log.w(TAG, "Uncaught exception", t);
+                }
+            }
+        };
         executor.allowCoreThreadTimeOut(true);
         return executor;
     }
@@ -157,7 +192,6 @@ public class DownloadService extends Service {
         }
 
         mAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
-        mStorageManager = new StorageManager(this);
 
         mUpdateThread = new HandlerThread(TAG + "-UpdateThread");
         mUpdateThread.start();
@@ -171,6 +205,28 @@ public class DownloadService extends Service {
         mObserver = new DownloadManagerContentObserver();
         getContentResolver().registerContentObserver(Downloads.Impl.ALL_DOWNLOADS_CONTENT_URI,
                 true, mObserver);
+
+        JobScheduler js = (JobScheduler) getSystemService(Context.JOB_SCHEDULER_SERVICE);
+        if (needToScheduleCleanup(js)) {
+            final JobInfo job = new JobInfo.Builder(CLEANUP_JOB_ID, sCleanupServiceName)
+                    .setPeriodic(CLEANUP_JOB_PERIOD)
+                    .setRequiresCharging(true)
+                    .setRequiresDeviceIdle(true)
+                    .build();
+            js.schedule(job);
+        }
+    }
+
+    private boolean needToScheduleCleanup(JobScheduler js) {
+        List<JobInfo> myJobs = js.getAllPendingJobs();
+        final int N = myJobs.size();
+        for (int i = 0; i < N; i++) {
+            if (myJobs.get(i).getId() == CLEANUP_JOB_ID) {
+                // It's already been (persistently) scheduled; no need to do it again
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -198,9 +254,11 @@ public class DownloadService extends Service {
     /**
      * Enqueue an {@link #updateLocked()} pass to occur in future.
      */
-    private void enqueueUpdate() {
-        mUpdateHandler.removeMessages(MSG_UPDATE);
-        mUpdateHandler.obtainMessage(MSG_UPDATE, mLastStartId, -1).sendToTarget();
+    public void enqueueUpdate() {
+        if (mUpdateHandler != null) {
+            mUpdateHandler.removeMessages(MSG_UPDATE);
+            mUpdateHandler.obtainMessage(MSG_UPDATE, mLastStartId, -1).sendToTarget();
+        }
     }
 
     /**
@@ -376,8 +434,7 @@ public class DownloadService extends Service {
      * download if appropriate.
      */
     private DownloadInfo insertDownloadLocked(DownloadInfo.Reader reader, long now) {
-        final DownloadInfo info = reader.newDownloadInfo(
-                this, mSystemFacade, mStorageManager, mNotifier);
+        final DownloadInfo info = reader.newDownloadInfo(this, mSystemFacade, mNotifier);
         mDownloads.put(info.mId, info);
 
         if (Constants.LOGVV) {

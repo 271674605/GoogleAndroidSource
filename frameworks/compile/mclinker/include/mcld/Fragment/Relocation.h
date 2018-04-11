@@ -8,9 +8,6 @@
 //===----------------------------------------------------------------------===//
 #ifndef MCLD_FRAGMENT_RELOCATION_H
 #define MCLD_FRAGMENT_RELOCATION_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
 #include <mcld/Config/Config.h>
 #include <mcld/Fragment/FragmentRef.h>
 #include <mcld/Support/GCFactoryListTraits.h>
@@ -34,7 +31,7 @@ public:
   typedef uint64_t Address; // FIXME: use SizeTrait<T>::Address instead
   typedef uint64_t DWord;   // FIXME: use SizeTrait<T>::Word instead
   typedef int64_t  SWord;   // FIXME: use SizeTrait<T>::SWord instead
-  typedef uint8_t  Type;
+  typedef uint32_t Type;
   typedef uint32_t Size;
 
 private:

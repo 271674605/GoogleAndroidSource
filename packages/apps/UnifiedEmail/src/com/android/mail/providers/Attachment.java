@@ -38,7 +38,6 @@ import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.MimeType;
 import com.android.mail.utils.Utils;
-import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 
 import org.apache.commons.io.IOUtils;
@@ -234,7 +233,8 @@ public class Attachment implements Parcelable {
     /**
      * Constructor for use when creating attachments in eml files.
      */
-    public Attachment(Context context, Part part, Uri emlFileUri, String messageId, String partId) {
+    public Attachment(Context context, Part part, Uri emlFileUri, String messageId, String cid,
+                      boolean inline) {
         try {
             // Transfer fields from mime format to provider format
             final String contentTypeHeader = MimeUtility.unfoldAndDecode(part.getContentType());
@@ -246,7 +246,7 @@ public class Attachment implements Parcelable {
             }
 
             contentType = MimeType.inferMimeType(name, part.getMimeType());
-            uri = EmlAttachmentProvider.getAttachmentUri(emlFileUri, messageId, partId);
+            uri = EmlAttachmentProvider.getAttachmentUri(emlFileUri, messageId, cid);
             contentUri = uri;
             thumbnailUri = uri;
             previewIntentUri = null;
@@ -254,7 +254,8 @@ public class Attachment implements Parcelable {
             providerData = null;
             supportsDownloadAgain = false;
             destination = AttachmentDestination.CACHE;
-            type = AttachmentType.STANDARD;
+            type = inline ? AttachmentType.INLINE_CURRENT_MESSAGE : AttachmentType.STANDARD;
+            partId = cid;
             flags = 0;
 
             // insert attachment into content provider so that we can open the file
@@ -301,6 +302,7 @@ public class Attachment implements Parcelable {
         supportsDownloadAgain = values.getAsBoolean(AttachmentColumns.SUPPORTS_DOWNLOAD_AGAIN);
         type = values.getAsInteger(AttachmentColumns.TYPE);
         flags = values.getAsInteger(AttachmentColumns.FLAGS);
+        partId = values.getAsString(AttachmentColumns.CONTENT_ID);
     }
 
     /**
@@ -325,6 +327,7 @@ public class Attachment implements Parcelable {
         values.put(AttachmentColumns.SUPPORTS_DOWNLOAD_AGAIN, supportsDownloadAgain);
         values.put(AttachmentColumns.TYPE, type);
         values.put(AttachmentColumns.FLAGS, flags);
+        values.put(AttachmentColumns.CONTENT_ID, partId);
 
         return values;
     }
@@ -412,7 +415,7 @@ public class Attachment implements Parcelable {
     }
 
     public boolean canSave() {
-        return !isSavedToExternal() && !isInstallable() && !MimeType.isBlocked(getContentType());
+        return !isSavedToExternal() && !isInstallable();
     }
 
     public boolean canShare() {
@@ -515,6 +518,15 @@ public class Attachment implements Parcelable {
         if (state == AttachmentState.FAILED || state == AttachmentState.NOT_SAVED) {
             this.downloadedSize = 0;
         }
+    }
+
+    /**
+     * @return {@code true} if the attachment is an inline attachment
+     * that appears in the body of the message content (including possibly
+     * quoted text).
+     */
+    public boolean isInlineAttachment() {
+        return type != UIProvider.AttachmentType.STANDARD;
     }
 
     @Override

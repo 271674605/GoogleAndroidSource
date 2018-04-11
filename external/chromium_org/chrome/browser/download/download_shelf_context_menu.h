@@ -28,6 +28,7 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
     SHOW_IN_FOLDER = 1,    // Open a folder view window with the item selected.
     OPEN_WHEN_COMPLETE,    // Open the download when it's finished.
     ALWAYS_OPEN_TYPE,      // Default this file extension to always open.
+    PLATFORM_OPEN,         // Open using platform handler.
     CANCEL,                // Cancel the download.
     TOGGLE_PAUSE,          // Pause or resume a download.
     DISCARD,               // Discard the malicious download.
@@ -51,12 +52,13 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   // ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
+  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
 
  private:
   // Detaches self from |download_item_|. Called when the DownloadItem is
@@ -69,13 +71,22 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   ui::SimpleMenuModel* GetInProgressMenuModel();
   ui::SimpleMenuModel* GetFinishedMenuModel();
   ui::SimpleMenuModel* GetInterruptedMenuModel();
+  ui::SimpleMenuModel* GetMaybeMaliciousMenuModel();
   ui::SimpleMenuModel* GetMaliciousMenuModel();
+
+  int GetAlwaysOpenStringId() const;
+
+#if defined(OS_WIN)
+  bool IsDownloadPdf() const;
+  bool CanOpenPdfInReader() const;
+#endif
 
   // We show slightly different menus if the download is in progress vs. if the
   // download has finished.
   scoped_ptr<ui::SimpleMenuModel> in_progress_download_menu_model_;
   scoped_ptr<ui::SimpleMenuModel> finished_download_menu_model_;
   scoped_ptr<ui::SimpleMenuModel> interrupted_download_menu_model_;
+  scoped_ptr<ui::SimpleMenuModel> maybe_malicious_download_menu_model_;
   scoped_ptr<ui::SimpleMenuModel> malicious_download_menu_model_;
 
   // Information source.
@@ -83,6 +94,10 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
 
   // Used to open tabs.
   content::PageNavigator* navigator_;
+
+#if defined(OS_WIN)
+  bool is_pdf_reader_up_to_date_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfContextMenu);
 };

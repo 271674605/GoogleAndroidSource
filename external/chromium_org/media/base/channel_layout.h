@@ -99,8 +99,14 @@ enum ChannelLayout {
   // Channels are not explicitly mapped to speakers.
   CHANNEL_LAYOUT_DISCRETE = 29,
 
-  // Total number of layouts.
-  CHANNEL_LAYOUT_MAX  // Must always be last!
+  // Front L, Front R, Front C. Front C contains the keyboard mic audio. This
+  // layout is only intended for input for WebRTC. The Front C channel
+  // is stripped away in the WebRTC audio input pipeline and never seen outside
+  // of that.
+  CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC = 30,
+
+  // Max value, must always equal the largest entry ever logged.
+  CHANNEL_LAYOUT_MAX = CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC
 };
 
 enum Channels {
@@ -115,7 +121,7 @@ enum Channels {
   BACK_CENTER,
   SIDE_LEFT,
   SIDE_RIGHT,
-  CHANNELS_MAX
+  CHANNELS_MAX = SIDE_RIGHT, // Must always equal the largest value ever logged.
 };
 
 // Returns the expected channel position in an interleaved stream.  Values of -1
@@ -129,6 +135,9 @@ MEDIA_EXPORT int ChannelLayoutToChannelCount(ChannelLayout layout);
 // Given the number of channels, return the best layout,
 // or return CHANNEL_LAYOUT_UNSUPPORTED if there is no good match.
 MEDIA_EXPORT ChannelLayout GuessChannelLayout(int channels);
+
+// Returns a string representation of the channel layout.
+MEDIA_EXPORT const char* ChannelLayoutToString(ChannelLayout layout);
 
 }  // namespace media
 

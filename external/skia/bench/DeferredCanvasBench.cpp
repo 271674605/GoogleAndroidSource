@@ -4,19 +4,18 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkDeferredCanvas.h"
 #include "SkDevice.h"
 #include "SkString.h"
 
-class DeferredCanvasBench : public SkBenchmark {
+class DeferredCanvasBench : public Benchmark {
 public:
-    DeferredCanvasBench(void* param, const char name[]) : INHERITED(param) {
+    DeferredCanvasBench(const char name[])  {
         fName.printf("deferred_canvas_%s", name);
     }
 
     enum {
-        N = SkBENCHLOOP(25), // number of times to create the picture
         CANVAS_WIDTH = 200,
         CANVAS_HEIGHT = 200,
     };
@@ -25,31 +24,29 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onDraw(SkCanvas* canvas) {
-        SkDevice *device = canvas->getDevice()->createCompatibleDevice(
+    virtual void onDraw(const int loops, SkCanvas* canvas) {
+#if 0   // what specifically are we interested in timing here?
+        SkBaseDevice *device = canvas->getDevice()->createCompatibleDevice(
             SkBitmap::kARGB_8888_Config, CANVAS_WIDTH, CANVAS_HEIGHT, false);
 
         SkAutoTUnref<SkDeferredCanvas> deferredCanvas(SkDeferredCanvas::Create(device));
         device->unref();
 
         initDeferredCanvas(deferredCanvas);
-
-        for (int i = 0; i < N; i++) {
-            drawInDeferredCanvas(deferredCanvas);
-        }
-
+        drawInDeferredCanvas(loops, deferredCanvas);
         finalizeDeferredCanvas(deferredCanvas);
         deferredCanvas->flush();
+#endif
     }
 
     virtual void initDeferredCanvas(SkDeferredCanvas* canvas) = 0;
-    virtual void drawInDeferredCanvas(SkDeferredCanvas* canvas) = 0;
+    virtual void drawInDeferredCanvas(const int loops, SkDeferredCanvas* canvas) = 0;
     virtual void finalizeDeferredCanvas(SkDeferredCanvas* canvas) = 0;
 
     SkString fName;
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
 class SimpleNotificationClient : public SkDeferredCanvas::NotificationClient {
@@ -71,25 +68,22 @@ private:
 // overhead of SkDeferredCanvas
 class DeferredRecordBench : public DeferredCanvasBench {
 public:
-    DeferredRecordBench(void* param)
-        : INHERITED(param, "record") {
+    DeferredRecordBench()
+        : INHERITED("record") {
     }
 
-    enum {
-        M = SkBENCHLOOP(700),   // number of individual draws in each loop
-    };
 protected:
 
     virtual void initDeferredCanvas(SkDeferredCanvas* canvas) SK_OVERRIDE {
         canvas->setNotificationClient(&fNotificationClient);
     }
 
-    virtual void drawInDeferredCanvas(SkDeferredCanvas* canvas) SK_OVERRIDE {
+    virtual void drawInDeferredCanvas(const int loops, SkDeferredCanvas* canvas) SK_OVERRIDE {
         SkRect rect;
         rect.setXYWH(0, 0, 10, 10);
         SkPaint paint;
-        for (int i = 0; i < M; i++) {
-            canvas->save(SkCanvas::kMatrixClip_SaveFlag);
+        for (int i = 0; i < loops; i++) {
+            canvas->save();
             canvas->translate(SkIntToScalar(i * 27 % CANVAS_WIDTH), SkIntToScalar(i * 13 % CANVAS_HEIGHT));
             canvas->drawRect(rect, paint);
             canvas->restore();
@@ -109,6 +103,4 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static SkBenchmark* Fact0(void* p) { return new DeferredRecordBench(p); }
-
-static BenchRegistry gReg0(Fact0);
+DEF_BENCH( return new DeferredRecordBench(); )

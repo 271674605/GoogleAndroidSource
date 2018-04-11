@@ -16,90 +16,102 @@
 
 package com.google.android.droiddriver.instrumentation;
 
-import android.app.Activity;
 import android.app.Instrumentation;
-import android.graphics.Bitmap;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
 
-import com.google.android.droiddriver.base.AbstractDroidDriver;
+import com.google.android.droiddriver.actions.InputInjector;
+import com.google.android.droiddriver.base.BaseDroidDriver;
+import com.google.android.droiddriver.base.DroidDriverContext;
+import com.google.android.droiddriver.exceptions.DroidDriverException;
 import com.google.android.droiddriver.exceptions.TimeoutException;
 import com.google.android.droiddriver.util.ActivityUtils;
-import com.google.common.primitives.Longs;
+import com.google.android.droiddriver.util.Logs;
 
 /**
- * Implementation of a UiDriver that is driven via instrumentation.
+ * Implementation of DroidDriver that is driven via instrumentation.
  */
-public class InstrumentationDriver extends AbstractDroidDriver {
-  private final InstrumentationContext context;
+public class InstrumentationDriver extends BaseDroidDriver<View, ViewElement> {
+  private final DroidDriverContext<View, ViewElement> context;
+  private final InputInjector injector;
+  private final InstrumentationUiDevice uiDevice;
 
   public InstrumentationDriver(Instrumentation instrumentation) {
-    super(instrumentation);
-    this.context = new InstrumentationContext(instrumentation);
+    context = new DroidDriverContext<View, ViewElement>(instrumentation, this);
+    injector = new InstrumentationInputInjector(instrumentation);
+    uiDevice = new InstrumentationUiDevice(context);
   }
 
   @Override
-  protected ViewElement getNewRootElement() {
-    return context.getUiElement(findRootView());
+  public InputInjector getInjector() {
+    return injector;
   }
 
   @Override
-  protected InstrumentationContext getContext() {
-    return context;
+  protected ViewElement newRootElement() {
+    return context.newRootElement(findRootView());
+  }
+
+  @Override
+  protected ViewElement newUiElement(View rawElement, ViewElement parent) {
+    return new ViewElement(context, rawElement, parent);
+  }
+
+  private static class FindRootViewRunnable implements Runnable {
+    View rootView;
+    Throwable exception;
+
+    @Override
+    public void run() {
+      try {
+        View[] views = RootFinder.getRootViews();
+        if (views.length > 1) {
+          Logs.log(Log.VERBOSE, "views.length=" + views.length);
+          for (View view : views) {
+            if (view.hasWindowFocus()) {
+              rootView = view;
+              return;
+            }
+          }
+        }
+        // Fall back to DecorView.
+        rootView = ActivityUtils.getRunningActivity().getWindow().getDecorView();
+      } catch (Throwable e) {
+        exception = e;
+        Logs.log(Log.ERROR, e);
+      }
+    }
   }
 
   private View findRootView() {
-    Activity runningActivity = getRunningActivity();
-    View[] views = RootFinder.getRootViews();
-    if (views.length > 1) {
-      for (View view : views) {
-        if (view.hasWindowFocus()) {
-          return view;
-        }
-      }
+    waitForRunningActivity();
+    FindRootViewRunnable findRootViewRunnable = new FindRootViewRunnable();
+    context.runOnMainSync(findRootViewRunnable);
+    if (findRootViewRunnable.exception != null) {
+      throw new DroidDriverException(findRootViewRunnable.exception);
     }
-    return runningActivity.getWindow().getDecorView();
+    return findRootViewRunnable.rootView;
   }
 
-  private Activity getRunningActivity() {
+  private void waitForRunningActivity() {
     long timeoutMillis = getPoller().getTimeoutMillis();
     long end = SystemClock.uptimeMillis() + timeoutMillis;
     while (true) {
-      instrumentation.waitForIdleSync();
-      Activity runningActivity = ActivityUtils.getRunningActivity();
-      if (runningActivity != null) {
-        return runningActivity;
+      if (ActivityUtils.getRunningActivity() != null) {
+        return;
       }
       long remainingMillis = end - SystemClock.uptimeMillis();
       if (remainingMillis < 0) {
         throw new TimeoutException(String.format(
             "Timed out after %d milliseconds waiting for foreground activity", timeoutMillis));
       }
-      SystemClock.sleep(Longs.min(250, remainingMillis));
-    }
-  }
-
-  private static class ScreenshotRunnable implements Runnable {
-    private final View rootView;
-    private Bitmap screenshot;
-
-    private ScreenshotRunnable(View rootView) {
-      this.rootView = rootView;
-    }
-
-    @Override
-    public void run() {
-      rootView.destroyDrawingCache();
-      rootView.buildDrawingCache(false);
-      screenshot = Bitmap.createBitmap(rootView.getDrawingCache());
-      rootView.destroyDrawingCache();
+      SystemClock.sleep(Math.min(250, remainingMillis));
     }
   }
 
   @Override
-  protected Bitmap takeScreenshot() {
-    ScreenshotRunnable screenshotRunnable = new ScreenshotRunnable(findRootView());
-    instrumentation.runOnMainSync(screenshotRunnable);
-    return screenshotRunnable.screenshot;
+  public InstrumentationUiDevice getUiDevice() {
+    return uiDevice;
   }
 }

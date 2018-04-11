@@ -66,6 +66,10 @@ public class MessagingException extends Exception {
     public static final int CLIENT_CERTIFICATE_REQUIRED = 16;
     /** The client SSL certificate specified is invalid */
     public static final int CLIENT_CERTIFICATE_ERROR = 17;
+    /** The server indicates it does not support OAuth authentication */
+    public static final int OAUTH_NOT_SUPPORTED = 18;
+    /** The server indicates it experienced an internal error */
+    public static final int SERVER_ERROR = 19;
 
     protected int mExceptionType;
     // Exception type-specific data

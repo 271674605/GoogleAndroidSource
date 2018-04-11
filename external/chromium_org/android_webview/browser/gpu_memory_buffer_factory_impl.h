@@ -19,12 +19,14 @@ class GpuMemoryBufferFactoryImpl : public gpu::GpuMemoryBufferFactory {
   virtual ~GpuMemoryBufferFactoryImpl();
 
   static void SetAwDrawGLFunctionTable(AwDrawGLFunctionTable* table);
+  bool Initialize();
 
   // Overridden from gpu::GpuMemoryBufferFactory:
   virtual gfx::GpuMemoryBuffer* CreateGpuMemoryBuffer(
       size_t width,
       size_t height,
-      unsigned internalformat) OVERRIDE;
+      unsigned internalformat,
+      unsigned usage) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferFactoryImpl);

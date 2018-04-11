@@ -7,6 +7,8 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
 
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -37,6 +39,15 @@ namespace login {
 // displayed under all possible DPI values.
 const int kMaxUserImageSize = 512;
 
+// Canonicalizes a GAIA user ID, accounting for the legacy guest mode user ID
+// which does trips up gaia::CanonicalizeEmail() because it does not contain an
+// @ symbol.
+std::string CanonicalizeUserID(const std::string& user_id);
+
+// Returns true if lock/login should scroll user pods into view itself when
+// virtual keyboard is shown and disable vk overscroll.
+bool LoginScrollIntoViewEnabled();
+
 // A helper class for easily mocking out Network*Handler calls for tests.
 class NetworkStateHelper {
  public:
@@ -48,7 +59,7 @@ class NetworkStateHelper {
   // that is in the "connecting" state. Otherwise empty string is returned.
   // If there are multiple connected networks, network priority:
   // Ethernet > WiFi > Cellular. Same for connecting network.
-  virtual string16 GetCurrentNetworkName() const;
+  virtual base::string16 GetCurrentNetworkName() const;
 
   // Returns true if the default network is in connected state.
   virtual bool IsConnected() const;

@@ -22,15 +22,18 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.LauncherApps;
 import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.os.Handler;
+import android.util.Log;
 
 import com.android.launcher.R;
 
 import java.lang.ref.WeakReference;
 
 public class LauncherApplication extends Application {
+    static final String TAG = "LauncherApplication";
     private LauncherModel mModel;
     private IconCache mIconCache;
     private WidgetPreviewLoader.CacheDb mWidgetPreviewCacheDb;
@@ -48,19 +51,15 @@ public class LauncherApplication extends Application {
         sIsScreenLarge = getResources().getBoolean(R.bool.is_large_screen);
         sScreenDensity = getResources().getDisplayMetrics().density;
 
-        mWidgetPreviewCacheDb = new WidgetPreviewLoader.CacheDb(this);
+        recreateWidgetPreviewDb();
         mIconCache = new IconCache(this);
         mModel = new LauncherModel(this, mIconCache);
+        LauncherApps launcherApps = (LauncherApps)
+                getSystemService(Context.LAUNCHER_APPS_SERVICE);
+        launcherApps.registerCallback(mModel.getLauncherAppsCallback());
 
         // Register intent receivers
-        IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
-        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
-        filter.addDataScheme("package");
-        registerReceiver(mModel, filter);
-        filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
-        filter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
+        IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_LOCALE_CHANGED);
         filter.addAction(Intent.ACTION_CONFIGURATION_CHANGED);
         registerReceiver(mModel, filter);
@@ -75,6 +74,10 @@ public class LauncherApplication extends Application {
         ContentResolver resolver = getContentResolver();
         resolver.registerContentObserver(LauncherSettings.Favorites.CONTENT_URI, true,
                 mFavoritesObserver);
+    }
+
+    public void recreateWidgetPreviewDb() {
+        mWidgetPreviewCacheDb = new WidgetPreviewLoader.CacheDb(this);
     }
 
     /**
@@ -120,7 +123,7 @@ public class LauncherApplication extends Application {
         return mWidgetPreviewCacheDb;
     }
 
-   void setLauncherProvider(LauncherProvider provider) {
+    void setLauncherProvider(LauncherProvider provider) {
         mLauncherProvider = new WeakReference<LauncherProvider>(provider);
     }
 

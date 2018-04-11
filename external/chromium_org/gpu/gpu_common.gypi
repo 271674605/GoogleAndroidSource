@@ -31,7 +31,6 @@
       'command_buffer/client/gles2_implementation.h',
       'command_buffer/client/gles2_implementation_impl_autogen.h',
       'command_buffer/client/gles2_interface.h',
-      'command_buffer/client/gles2_interface.cc',
       'command_buffer/client/gles2_trace_implementation_autogen.h',
       'command_buffer/client/gles2_trace_implementation.cc',
       'command_buffer/client/gles2_trace_implementation.h',
@@ -39,7 +38,6 @@
       'command_buffer/client/gpu_memory_buffer_factory.h',
       'command_buffer/client/gpu_memory_buffer_tracker.cc',
       'command_buffer/client/gpu_memory_buffer_tracker.h',
-      'command_buffer/client/image_factory.h',
       'command_buffer/client/program_info_manager.cc',
       'command_buffer/client/program_info_manager.h',
       'command_buffer/client/query_tracker.cc',
@@ -50,24 +48,4 @@
       'command_buffer/client/vertex_array_object_manager.h',
     ]
   },
-  'conditions': [
-    # Special target to wrap a gtest_target_type==shared_library
-    # gpu_unittests into an android apk for execution.
-    ['OS == "android" and gtest_target_type == "shared_library"', {
-      'targets': [
-        {
-          'target_name': 'gpu_unittests_apk',
-          'type': 'none',
-          'dependencies': [
-            'gpu_unittests',
-          ],
-          'variables': {
-            'test_suite_name': 'gpu_unittests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)gpu_unittests<(SHARED_LIB_SUFFIX)',
-          },
-          'includes': [ '../build/apk_test.gypi' ],
-        },
-      ],
-    }],
-  ],
 }

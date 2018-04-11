@@ -10,16 +10,18 @@ import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.res.Resources;
 import android.os.Handler;
 import android.util.Log;
 
+import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CalledByNative;
+import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
-import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.invalidation.InvalidationController;
+import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.sync.internal_api.pub.base.ModelType;
-import org.chromium.sync.notifier.InvalidationController;
 import org.chromium.sync.notifier.SyncStatusHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 
@@ -42,7 +44,16 @@ public class SigninManager {
     private static SigninManager sSigninManager;
 
     private final Context mContext;
-    private final int mNativeSigninManagerAndroid;
+    private final long mNativeSigninManagerAndroid;
+
+    /** Tracks whether the First Run check has been completed.
+     *
+     * A new sign-in can not be started while this is pending, to prevent the
+     * pending check from eventually starting a 2nd sign-in.
+     */
+    private boolean mFirstRunCheckIsPending = true;
+    private final ObserverList<SignInAllowedObserver> mSignInAllowedObservers =
+            new ObserverList<SignInAllowedObserver>();
 
     private Activity mSignInActivity;
     private Account mSignInAccount;
@@ -53,6 +64,16 @@ public class SigninManager {
     private Runnable mSignOutCallback;
 
     private AlertDialog mPolicyConfirmationDialog;
+
+    /**
+     * SignInAllowedObservers will be notified once signing-in becomes allowed or disallowed.
+     */
+    public static interface SignInAllowedObserver {
+        /**
+         * Invoked once all startup checks are done and signing-in becomes allowed, or disallowed.
+         */
+        public void onSignInAllowedChanged();
+    }
 
     /**
      * The Observer of startSignIn() will be notified when sign-in completes.
@@ -95,6 +116,47 @@ public class SigninManager {
     }
 
     /**
+     * Notifies the SigninManager that the First Run check has completed.
+     *
+     * The user will be allowed to sign-in once this is signaled.
+     */
+    public void onFirstRunCheckDone() {
+        mFirstRunCheckIsPending = false;
+
+        if (isSignInAllowed()) {
+            notifySignInAllowedChanged();
+        }
+    }
+
+    /**
+     * Returns true if signin can be started now.
+     */
+    public boolean isSignInAllowed() {
+        return !mFirstRunCheckIsPending &&
+                mSignInAccount == null &&
+                ChromeSigninController.get(mContext).getSignedInUser() == null;
+    }
+
+    public void addSignInAllowedObserver(SignInAllowedObserver observer) {
+        mSignInAllowedObservers.addObserver(observer);
+    }
+
+    public void removeSignInAllowedObserver(SignInAllowedObserver observer) {
+        mSignInAllowedObservers.removeObserver(observer);
+    }
+
+    private void notifySignInAllowedChanged() {
+        new Handler().post(new Runnable() {
+            @Override
+            public void run() {
+                for (SignInAllowedObserver observer : mSignInAllowedObservers) {
+                    observer.onSignInAllowedChanged();
+                }
+            }
+        });
+    }
+
+    /**
      * Starts the sign-in flow, and executes the callback when ready to proceed.
      * <p/>
      * This method checks with the native side whether the account has management enabled, and may
@@ -104,17 +166,25 @@ public class SigninManager {
      * @param activity The context to use for the operation.
      * @param account The account to sign in to.
      * @param passive If passive is true then this operation should not interact with the user.
-     * @param callback The Observer to notify when the sign-in process is finished.
+     * @param observer The Observer to notify when the sign-in process is finished.
      */
     public void startSignIn(
             Activity activity, final Account account, boolean passive, final Observer observer) {
         assert mSignInActivity == null;
         assert mSignInAccount == null;
         assert mSignInObserver == null;
+
+        if (mFirstRunCheckIsPending) {
+            Log.w(TAG, "Ignoring sign-in request until the First Run check completes.");
+            return;
+        }
+
         mSignInActivity = activity;
         mSignInAccount = account;
         mSignInObserver = observer;
         mPassive = passive;
+
+        notifySignInAllowedChanged();
 
         if (!nativeShouldLoadPolicyForUser(account.name)) {
             // Proceed with the sign-in flow without checking for policy if it can be determined
@@ -136,17 +206,16 @@ public class SigninManager {
             return;
         }
 
-        if (mPassive) {
-            // The account has policy management, but the user should be asked before signing-in
-            // to an account with management enabled. Don't show the policy dialog since this is a
-            // passive interaction (e.g. auto signing-in), and just don't auto-signin in this case.
+        if (ApplicationStatus.getStateForActivity(mSignInActivity) == ActivityState.DESTROYED) {
+            // The activity is no longer running, cancel sign in.
             cancelSignIn();
             return;
         }
 
-        if (mSignInActivity.isDestroyed()) {
-            // The activity is no longer running, cancel sign in.
-            cancelSignIn();
+        if (mPassive) {
+            // If this is a passive interaction (e.g. auto signin) then don't show the confirmation
+            // dialog.
+            nativeFetchPolicyBeforeSignIn(mNativeSigninManagerAndroid);
             return;
         }
 
@@ -176,7 +245,8 @@ public class SigninManager {
                         mPolicyConfirmationDialog = null;
                     }
                 });
-        builder.setOnDismissListener(
+        mPolicyConfirmationDialog = builder.create();
+        mPolicyConfirmationDialog.setOnDismissListener(
                 new DialogInterface.OnDismissListener() {
                     @Override
                     public void onDismiss(DialogInterface dialog) {
@@ -187,7 +257,6 @@ public class SigninManager {
                         }
                     }
                 });
-        mPolicyConfirmationDialog = builder.create();
         mPolicyConfirmationDialog.show();
     }
 
@@ -206,7 +275,6 @@ public class SigninManager {
         ChromeSigninController.get(mContext).setSignedInAccountName(mSignInAccount.name);
 
         // Tell the native side that sign-in has completed.
-        // This will trigger NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL.
         nativeOnSignInCompleted(mNativeSigninManagerAndroid, mSignInAccount.name);
 
         // Register for invalidations.
@@ -229,6 +297,7 @@ public class SigninManager {
         mSignInActivity = null;
         mSignInAccount = null;
         mSignInObserver = null;
+        notifySignInAllowedChanged();
     }
 
     /**
@@ -266,12 +335,21 @@ public class SigninManager {
         return nativeGetManagementDomain(mNativeSigninManagerAndroid);
     }
 
+    public void logInSignedInUser() {
+        nativeLogInSignedInUser(mNativeSigninManagerAndroid);
+    }
+
+    public void clearLastSignedInUser() {
+        nativeClearLastSignedInUser(mNativeSigninManagerAndroid);
+    }
+
     private void cancelSignIn() {
         if (mSignInObserver != null)
             mSignInObserver.onSigninCancelled();
         mSignInActivity = null;
         mSignInObserver = null;
         mSignInAccount = null;
+        notifySignInAllowedChanged();
     }
 
     private void wipeProfileData(Activity activity) {
@@ -304,14 +382,24 @@ public class SigninManager {
         }
     }
 
+    /**
+     * @return True if the new profile management is enabled.
+     */
+    public static boolean isNewProfileManagementEnabled() {
+        return nativeIsNewProfileManagementEnabled();
+    }
+
     // Native methods.
-    private native int nativeInit();
+    private native long nativeInit();
     private native boolean nativeShouldLoadPolicyForUser(String username);
     private native void nativeCheckPolicyBeforeSignIn(
-            int nativeSigninManagerAndroid, String username);
-    private native void nativeFetchPolicyBeforeSignIn(int nativeSigninManagerAndroid);
-    private native void nativeOnSignInCompleted(int nativeSigninManagerAndroid, String username);
-    private native void nativeSignOut(int nativeSigninManagerAndroid);
-    private native String nativeGetManagementDomain(int nativeSigninManagerAndroid);
-    private native void nativeWipeProfileData(int nativeSigninManagerAndroid);
+            long nativeSigninManagerAndroid, String username);
+    private native void nativeFetchPolicyBeforeSignIn(long nativeSigninManagerAndroid);
+    private native void nativeOnSignInCompleted(long nativeSigninManagerAndroid, String username);
+    private native void nativeSignOut(long nativeSigninManagerAndroid);
+    private native String nativeGetManagementDomain(long nativeSigninManagerAndroid);
+    private native void nativeWipeProfileData(long nativeSigninManagerAndroid);
+    private native void nativeClearLastSignedInUser(long nativeSigninManagerAndroid);
+    private native void nativeLogInSignedInUser(long nativeSigninManagerAndroid);
+    private static native boolean nativeIsNewProfileManagementEnabled();
 }

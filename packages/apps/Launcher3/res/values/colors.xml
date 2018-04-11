@@ -22,8 +22,10 @@
          over the delete target or the info target -->
     <color name="delete_target_hover_tint">#DAFF0000</color>
     <color name="info_target_hover_tint">#DA0099CC</color>
+    <color name="cling_scrim_background">#80000000</color>
 
     <color name="bubble_dark_background">#20000000</color>
+    <color name="focused_background">#80c6c5c5</color>
 
     <color name="appwidget_error_color">#FCCC</color>
 
@@ -31,10 +33,9 @@
     <color name="workspace_all_apps_and_delete_zone_text_shadow_color">#A0000000</color>
     <color name="workspace_icon_text_color">#FFF</color>
 
-    <color name="apps_customize_icon_text_color">#FFF</color>
-    <color name="wallpaper_picker_translucent_gray">#66000000</color>
-    <color name="folder_items_text_color">#FF333333</color>
+    <color name="quantum_panel_text_color">#FF666666</color>
+    <color name="quantum_panel_text_shadow_color">#FFC4C4C4</color>
     <color name="outline_color">#FFFFFFFF</color>
-    
-    <color name="first_run_cling_circle_background_color">#64b1ea</color>
+    <color name="widget_text_panel">#FF374248</color>
+
 </resources>

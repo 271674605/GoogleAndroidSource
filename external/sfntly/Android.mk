@@ -133,8 +133,8 @@ MY_DEFS_Debug := \
 LOCAL_C_INCLUDES_Debug := \
 	$(LOCAL_PATH)/cpp/src \
 	$(LOCAL_PATH) \
-	external/icu4c/common \
-	external/icu4c/i18n \
+	external/icu/icu4c/source/common \
+	external/icu/icu4c/source/i18n \
 	frameworks/wilhelm/include \
 
 
@@ -216,8 +216,8 @@ MY_DEFS_Release := \
 LOCAL_C_INCLUDES_Release := \
 	$(LOCAL_PATH)/cpp/src \
 	$(LOCAL_PATH) \
-	external/icu4c/common \
-	external/icu4c/i18n \
+	external/icu/icu4c/source/common \
+	external/icu/icu4c/source/i18n \
 	frameworks/wilhelm/include \
 
 

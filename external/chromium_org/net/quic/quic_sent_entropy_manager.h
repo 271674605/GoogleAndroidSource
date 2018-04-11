@@ -40,10 +40,6 @@ class NET_EXPORT_PRIVATE QuicSentEntropyManager {
   // |sequence_number|.
   void ClearEntropyBefore(QuicPacketSequenceNumber sequence_number);
 
-  QuicPacketEntropyHash packets_entropy_hash() const {
-    return packets_entropy_hash_;
-  }
-
  private:
   typedef linked_hash_map<QuicPacketSequenceNumber,
                           std::pair<QuicPacketEntropyHash,
@@ -55,6 +51,8 @@ class NET_EXPORT_PRIVATE QuicSentEntropyManager {
 
   // Cumulative hash of entropy of all sent packets.
   QuicPacketEntropyHash packets_entropy_hash_;
+
+  DISALLOW_COPY_AND_ASSIGN(QuicSentEntropyManager);
 };
 
 }  // namespace net

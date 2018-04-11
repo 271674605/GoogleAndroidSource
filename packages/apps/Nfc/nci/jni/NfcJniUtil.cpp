@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <JNIHelp.h>
 #include <ScopedLocalRef.h>
+#include "RoutingManager.h"
 
 
 /*******************************************************************************
@@ -55,7 +56,7 @@ jint JNI_OnLoad (JavaVM* jvm, void*)
         return JNI_ERR;
     if (android::register_com_android_nfc_NativeP2pDevice (e) == -1)
         return JNI_ERR;
-    if (android::register_com_android_nfc_NativeNfcSecureElement (e) == -1)
+    if (RoutingManager::getInstance().registerJniFunctions (e) == -1)
         return JNI_ERR;
     ALOGD ("%s: exit", __FUNCTION__);
     return JNI_VERSION_1_6;
@@ -135,9 +136,45 @@ int nfc_jni_get_nfc_socket_handle (JNIEnv *e, jobject o)
 struct nfc_jni_native_data* nfc_jni_get_nat(JNIEnv *e, jobject o)
 {
    ScopedLocalRef<jclass> c(e, e->GetObjectClass(o));
-   jfieldID f = e->GetFieldID(c.get(), "mNative", "I");
+   jfieldID f = e->GetFieldID(c.get(), "mNative", "J");
    /* Retrieve native structure address */
-   return (struct nfc_jni_native_data*) e->GetIntField(o, f);
+   return (struct nfc_jni_native_data*) e->GetLongField(o, f);
+}
+
+
+/*******************************************************************************
+**
+** Function         nfc_jni_cache_object_local
+**
+** Description      Allocates a java object and calls it's constructor
+**
+** Returns          -1 on failure, 0 on success
+**
+*******************************************************************************/
+int nfc_jni_cache_object_local (JNIEnv *e, const char *className, jobject *cachedObj)
+{
+    ScopedLocalRef<jclass> cls(e, e->FindClass(className));
+    if(cls.get() == NULL)
+    {
+        ALOGE ("%s: find class error", __FUNCTION__);
+        return -1;
+    }
+
+    jmethodID ctor = e->GetMethodID(cls.get(), "<init>", "()V");
+    jobject obj = e->NewObject(cls.get(), ctor);
+    if (obj == NULL)
+    {
+       ALOGE ("%s: create object error", __FUNCTION__);
+       return -1;
+    }
+
+    *cachedObj = obj;
+    if (*cachedObj == NULL)
+    {
+        ALOGE ("%s: global ref error", __FUNCTION__);
+        return -1;
+    }
+    return 0;
 }
 
 

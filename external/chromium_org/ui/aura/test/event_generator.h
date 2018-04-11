@@ -11,16 +11,18 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/base/events/event_constants.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "base/time/time.h"
+#include "ui/events/event_constants.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/point.h"
 
 namespace base {
-class TimeDelta;
+class TickClock;
 }
 
 namespace ui {
 class Event;
+class EventProcessor;
 class KeyEvent;
 class MouseEvent;
 class ScrollEvent;
@@ -28,8 +30,8 @@ class TouchEvent;
 }
 
 namespace aura {
-class RootWindow;
 class Window;
+class WindowTreeHost;
 
 namespace client {
 class ScreenPositionClient;
@@ -46,37 +48,32 @@ class EventGeneratorDelegate {
  public:
   virtual ~EventGeneratorDelegate() {}
 
-  // Returns a root window for given point.
-  virtual RootWindow* GetRootWindowAt(const gfx::Point& point) const = 0;
+  // Returns the host for given point.
+  virtual WindowTreeHost* GetHostAt(const gfx::Point& point) const = 0;
 
   // Returns the screen position client that determines the
   // coordinates used in EventGenerator. EventGenerator uses
-  // RootWindow's coordinate if this retruns NULL.
+  // root Window's coordinate if this returns NULL.
   virtual client::ScreenPositionClient* GetScreenPositionClient(
       const aura::Window* window) const = 0;
 };
 
 // EventGenerator is a tool that generates and dispatch events.
-// Unlike |ui_controls| package in ui/base/test, this does not
-// generate platform native events. Insetad, it directly posts event
-// to |aura::RootWindow| synchronously.
-
-// Advantage of using this class, compared to |ui_controls| is that
-// you can write the tests that involves events in synchronus
-// way. There is no need to wait for native
+// Unlike |ui_controls| package in ui/base/test, this does not generate platform
+// native events. Instead, it sends events to |aura::WindowEventDispatcher|
+// synchronously.
 //
-// On the other hand, this class is not suited for the following
-// cases:
+// This class is not suited for the following cases:
 //
 // 1) If your test depends on native events (ui::Event::native_event()).
 //   This return is empty/NULL event with EventGenerator.
 // 2) If your test involves nested message loop, such as
 //    menu or drag & drop. Because this class directly
-//    post an event to RootWindow, this event will not be
+//    post an event to WindowEventDispatcher, this event will not be
 //    handled in the nested message loop.
 // 3) Similarly, |base::MessagePumpObserver| will not be invoked.
 // 4) Any other code that requires native events, such as
-//    tests for RootWindowHostWin/RootWindowHostX11.
+//    tests for WindowTreeHostWin/WindowTreeHostX11.
 //
 // If one of these applies to your test, please use |ui_controls|
 // package instead.
@@ -87,7 +84,7 @@ class EventGenerator {
  public:
   // Creates an EventGenerator with the mouse/touch location (0,0),
   // which uses the |root_window|'s coordinates.
-  explicit EventGenerator(RootWindow* root_window);
+  explicit EventGenerator(Window* root_window);
 
   // Create an EventGenerator with EventGeneratorDelegate,
   // which uses the coordinates used by |delegate|.
@@ -95,11 +92,11 @@ class EventGenerator {
 
   // Creates an EventGenerator with the mouse/touch location
   // at |initial_location|, which uses the |root_window|'s coordinates.
-  EventGenerator(RootWindow* root_window, const gfx::Point& initial_location);
+  EventGenerator(Window* root_window, const gfx::Point& initial_location);
 
   // Creates an EventGenerator with the mouse/touch location
   // centered over |window|, which uses the |root_window|'s coordinates.
-  EventGenerator(RootWindow* root_window, Window* window);
+  EventGenerator(Window* root_window, Window* window);
 
   virtual ~EventGenerator();
 
@@ -134,6 +131,12 @@ class EventGenerator {
 
   // Generates a right button release event.
   void ReleaseRightButton();
+
+  // Moves the mouse wheel by |delta_x|, |delta_y|.
+  void MoveMouseWheel(int delta_x, int delta_y);
+
+  // Generates a mouse exit.
+  void SendMouseExit();
 
   // Generates events to move mouse to be the given |point| in the
   // |current_root_window_|'s host window coordinates.
@@ -180,11 +183,20 @@ class EventGenerator {
   // Generates a touch press event.
   void PressTouch();
 
+  // Generates a touch press event with |touch_id|.
+  void PressTouchId(int touch_id);
+
   // Generates a ET_TOUCH_MOVED event to |point|.
   void MoveTouch(const gfx::Point& point);
 
+  // Generates a ET_TOUCH_MOVED event to |point| with |touch_id|.
+  void MoveTouchId(const gfx::Point& point, int touch_id);
+
   // Generates a touch release event.
   void ReleaseTouch();
+
+  // Generates a touch release event with |touch_id|.
+  void ReleaseTouchId(int touch_id);
 
   // Generates press, move and release event to move touch
   // to be the given |point|.
@@ -201,6 +213,11 @@ class EventGenerator {
   // Generates press, move and release events to move touch
   // to the center of the window.
   void PressMoveAndReleaseTouchToCenterOf(Window* window);
+
+  // Generates and dispatches a Win8 edge-swipe event (swipe up from bottom or
+  // swipe down from top).  Note that it is not possible to distinguish between
+  // the two edges with this event.
+  void GestureEdgeSwipe();
 
   // Generates and dispatches touch-events required to generate a TAP gesture.
   // Note that this can generate a number of other gesture events at the same
@@ -238,13 +255,33 @@ class EventGenerator {
   // of all the touch points. |steps| and |event_separation_time_ms| are
   // relevant when testing velocity/fling/swipe, otherwise these can be any
   // non-zero value. |delta_x| and |delta_y| are the amount that each finger
-  // should be moved.
+  // should be moved. Internally calls GestureMultiFingerScrollWithDelays
+  // with zeros as |delay_adding_finger_ms| forcing all touch down events to be
+  // immediate.
   void GestureMultiFingerScroll(int count,
-                                const gfx::Point* start,
+                                const gfx::Point start[],
                                 int event_separation_time_ms,
                                 int steps,
                                 int move_x,
                                 int move_y);
+
+  // Generates press, move, release touch-events to generate a sequence of
+  // multi-finger scroll events. |count| specifies the number of touch-points
+  // that should generate the scroll events. |start| are the starting positions
+  // of all the touch points. |delay_adding_finger_ms| are delays in ms from the
+  // starting time till touching down of each finger. |delay_adding_finger_ms|
+  // is useful when testing complex gestures that start with 1 or 2 fingers and
+  // add fingers with a delay. |steps| and |event_separation_time_ms| are
+  // relevant when testing velocity/fling/swipe, otherwise these can be any
+  // non-zero value. |delta_x| and |delta_y| are the amount that each finger
+  // should be moved.
+  void GestureMultiFingerScrollWithDelays(int count,
+                                          const gfx::Point start[],
+                                          const int delay_adding_finger_ms[],
+                                          int event_separation_time_ms,
+                                          int steps,
+                                          int move_x,
+                                          int move_y);
 
   // Generates scroll sequences of a FlingCancel, Scrolls, FlingStart, with
   // constant deltas to |x_offset| and |y_offset| in |steps|.
@@ -274,18 +311,24 @@ class EventGenerator {
   // TODO(yusukes): Support native_event() on all platforms.
   void ReleaseKey(ui::KeyboardCode key_code, int flags);
 
-  // Dispatch the event to the RootWindow.
+  // Dispatch the event to the WindowEventDispatcher.
   void Dispatch(ui::Event* event);
 
-  void set_current_root_window(RootWindow* root_window) {
-    current_root_window_ = root_window;
+  void set_current_host(WindowTreeHost* host) {
+    current_host_ = host;
   }
 
+  // Specify an alternative tick clock to be used for simulating time in tests.
+  void SetTickClock(scoped_ptr<base::TickClock> tick_clock);
+
+  // Get the current time from the tick clock.
+  base::TimeDelta Now();
+
  private:
-  // Dispatch a key event to the RootWindow.
+  // Dispatch a key event to the WindowEventDispatcher.
   void DispatchKeyEvent(bool is_press, ui::KeyboardCode key_code, int flags);
 
-  void UpdateCurrentRootWindow(const gfx::Point& point);
+  void UpdateCurrentDispatcher(const gfx::Point& point);
   void PressButton(int flag);
   void ReleaseButton(int flag);
 
@@ -304,12 +347,13 @@ class EventGenerator {
 
   scoped_ptr<EventGeneratorDelegate> delegate_;
   gfx::Point current_location_;
-  RootWindow* current_root_window_;
+  WindowTreeHost* current_host_;
   int flags_;
   bool grab_;
   std::list<ui::Event*> pending_events_;
   // Set to true to cause events to be posted asynchronously.
   bool async_;
+  scoped_ptr<base::TickClock> tick_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(EventGenerator);
 };

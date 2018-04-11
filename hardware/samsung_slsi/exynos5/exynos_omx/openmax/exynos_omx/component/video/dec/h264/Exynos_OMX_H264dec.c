@@ -461,11 +461,15 @@ OMX_ERRORTYPE H264CodecStop(OMX_COMPONENTTYPE *pOMXComponent, OMX_U32 nPortIndex
     pInbufOps  = pH264Dec->hMFCH264Handle.pInbufOps;
     pOutbufOps = pH264Dec->hMFCH264Handle.pOutbufOps;
 
-    if ((nPortIndex == INPUT_PORT_INDEX) && (pInbufOps != NULL))
+    if ((nPortIndex == INPUT_PORT_INDEX) && (pInbufOps != NULL)) {
         pInbufOps->Stop(hMFCHandle);
-    else if ((nPortIndex == OUTPUT_PORT_INDEX) && (pOutbufOps != NULL))
+    } else if ((nPortIndex == OUTPUT_PORT_INDEX) && (pOutbufOps != NULL)) {
+        EXYNOS_OMX_BASECOMPONENT *pExynosComponent = (EXYNOS_OMX_BASECOMPONENT *)pOMXComponent->pComponentPrivate;
+        EXYNOS_OMX_BASEPORT *pExynosOutputPort = &pExynosComponent->pExynosPort[OUTPUT_PORT_INDEX];
         pOutbufOps->Stop(hMFCHandle);
-
+        if (pExynosOutputPort->bufferProcessType == BUFFER_SHARE)
+            pOutbufOps->Clear_RegisteredBuffer(hMFCHandle);
+    }
     ret = OMX_ErrorNone;
 
 EXIT:
@@ -620,13 +624,6 @@ OMX_ERRORTYPE H264CodecReconfigAllBuffers(
             Exynos_CodecBufferReset(pExynosComponent, OUTPUT_PORT_INDEX);
             pBufferOps->Clear_RegisteredBuffer(hMFCHandle);
             pBufferOps->Cleanup_Buffer(hMFCHandle);
-
-            /******************************************************/
-            /* V4L2 Destnation Setup for DPB Buffer Number Change */
-            /******************************************************/
-            H264CodecDstSetup(pOMXComponent);
-
-            pVideoDec->bReconfigDPB = OMX_FALSE;
         } else if (pExynosPort->bufferProcessType & BUFFER_SHARE) {
             /**********************************/
             /* Codec Buffer Unregister */
@@ -634,6 +631,11 @@ OMX_ERRORTYPE H264CodecReconfigAllBuffers(
             pBufferOps->Clear_RegisteredBuffer(hMFCHandle);
             pBufferOps->Cleanup_Buffer(hMFCHandle);
         }
+        /******************************************************/
+        /* V4L2 Destnation Setup for DPB Buffer Number Change */
+        /******************************************************/
+        H264CodecDstSetup(pOMXComponent);
+        pVideoDec->bReconfigDPB = OMX_FALSE;
 
         Exynos_ResolutionUpdate(pOMXComponent);
     } else {
@@ -1854,15 +1856,6 @@ OMX_ERRORTYPE Exynos_H264Dec_DstIn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX_
                                         pDstInputData->buffer.multiPlaneBuffer.fd[0],
                                         pDstInputData->buffer.multiPlaneBuffer.fd[1]);
 
-    if ((pVideoDec->bReconfigDPB == OMX_TRUE) &&
-        (pExynosOutputPort->bufferProcessType & BUFFER_SHARE) &&
-        (pExynosOutputPort->exceptionFlag == GENERAL_STATE)) {
-        ret = H264CodecDstSetup(pOMXComponent);
-        if (ret != OMX_ErrorNone)
-            goto EXIT;
-        pVideoDec->bReconfigDPB = OMX_FALSE;
-    }
-
     OMX_U32 nAllocLen[VIDEO_BUFFER_MAX_PLANES] = {0, 0, 0};
     nAllocLen[0] = pExynosOutputPort->portDefinition.format.video.nFrameWidth * pExynosOutputPort->portDefinition.format.video.nFrameHeight;
     nAllocLen[1] = pExynosOutputPort->portDefinition.format.video.nFrameWidth * pExynosOutputPort->portDefinition.format.video.nFrameHeight / 2;
@@ -2017,6 +2010,7 @@ OMX_ERRORTYPE Exynos_H264Dec_DstOut(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX
             (pExynosComponent->checkTimeStamp.needCheckStartTimeStamp != OMX_TRUE)) {
             pDstOutputData->timeStamp = pExynosComponent->timeStamp[pH264Dec->hMFCH264Handle.outputIndexTimestamp];
             pDstOutputData->nFlags = pExynosComponent->nFlags[pH264Dec->hMFCH264Handle.outputIndexTimestamp];
+            pExynosComponent->nFlags[pH264Dec->hMFCH264Handle.outputIndexTimestamp] = 0x00;
             Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "missing out indexTimestamp: %d", indexTimestamp);
         } else {
             pDstOutputData->timeStamp = 0x00;
@@ -2029,14 +2023,17 @@ OMX_ERRORTYPE Exynos_H264Dec_DstOut(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX
         if ((pVideoBuffer->frameType == VIDEO_FRAME_I)) {
             pDstOutputData->timeStamp = pExynosComponent->timeStamp[indexTimestamp];
             pDstOutputData->nFlags = pExynosComponent->nFlags[indexTimestamp];
+            pExynosComponent->nFlags[indexTimestamp] = 0x00;
             pH264Dec->hMFCH264Handle.outputIndexTimestamp = indexTimestamp;
         } else {
             pDstOutputData->timeStamp = pExynosComponent->timeStamp[pH264Dec->hMFCH264Handle.outputIndexTimestamp];
             pDstOutputData->nFlags = pExynosComponent->nFlags[pH264Dec->hMFCH264Handle.outputIndexTimestamp];
+            pExynosComponent->nFlags[pH264Dec->hMFCH264Handle.outputIndexTimestamp] = 0x00;
         }
 #else
         pDstOutputData->timeStamp = pExynosComponent->timeStamp[indexTimestamp];
         pDstOutputData->nFlags = pExynosComponent->nFlags[indexTimestamp];
+        pExynosComponent->nFlags[indexTimestamp] = 0x00;
 #endif
         Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "timestamp %lld us (%.2f secs), indexTimestamp: %d, nFlags: 0x%x", pDstOutputData->timeStamp, pDstOutputData->timeStamp / 1E6, indexTimestamp, pDstOutputData->nFlags);
     }

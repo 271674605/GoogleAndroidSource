@@ -29,6 +29,14 @@ common_sqlite_flags := \
 	-DSQLITE_OMIT_LOAD_EXTENSION \
 	-DSQLITE_DEFAULT_FILE_PERMISSIONS=0600
 
+device_sqlite_flags := $(common_sqlite_flags) \
+    -DSQLITE_ENABLE_ICU \
+    -DUSE_PREAD64 \
+    -Dfdatasync=fdatasync \
+    -DHAVE_MALLOC_USABLE_SIZE
+
+host_sqlite_flags := $(common_sqlite_flags)
+
 common_src_files := sqlite3.c
 
 # the device library
@@ -36,17 +44,17 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := $(common_src_files)
 
-ifneq ($(TARGET_ARCH),arm)
-LOCAL_LDLIBS += -lpthread -ldl
-endif
-
-LOCAL_CFLAGS += $(common_sqlite_flags) -DUSE_PREAD64 -Dfdatasync=fdatasync \
-				-DHAVE_MALLOC_USABLE_SIZE
+LOCAL_CFLAGS += $(device_sqlite_flags)
 
 LOCAL_SHARED_LIBRARIES := libdl
 
 LOCAL_MODULE:= libsqlite
-LOCAL_C_INCLUDES += $(call include-path-for, system-core)/cutils
+
+LOCAL_C_INCLUDES += \
+    $(call include-path-for, system-core)/cutils \
+    external/icu/icu4c/source/i18n \
+    external/icu/icu4c/source/common
+
 LOCAL_SHARED_LIBRARIES += liblog \
             libicuuc \
             libicui18n \
@@ -56,23 +64,20 @@ LOCAL_SHARED_LIBRARIES += liblog \
 # include android specific methods
 LOCAL_WHOLE_STATIC_LIBRARIES := libsqlite3_android
 
-
 include $(BUILD_SHARED_LIBRARY)
 
 
-ifeq ($(WITH_HOST_DALVIK),true)
-    include $(CLEAR_VARS)
-    LOCAL_SRC_FILES := $(common_src_files)
-    LOCAL_LDLIBS += -lpthread -ldl
-    LOCAL_CFLAGS += $(common_sqlite_flags)
-    LOCAL_MODULE:= libsqlite
-    LOCAL_SHARED_LIBRARIES += libicuuc-host libicui18n-host
-    LOCAL_STATIC_LIBRARIES := liblog libutils libcutils
+include $(CLEAR_VARS)
+LOCAL_SRC_FILES := $(common_src_files)
+LOCAL_LDLIBS += -lpthread -ldl
+LOCAL_CFLAGS += $(host_sqlite_flags)
+LOCAL_MODULE:= libsqlite
+LOCAL_SHARED_LIBRARIES += libicuuc-host libicui18n-host
+LOCAL_STATIC_LIBRARIES := liblog libutils libcutils
 
-    # include android specific methods
-    LOCAL_WHOLE_STATIC_LIBRARIES := libsqlite3_android
-    include $(BUILD_HOST_SHARED_LIBRARY)
-endif
+# include android specific methods
+LOCAL_WHOLE_STATIC_LIBRARIES := libsqlite3_android
+include $(BUILD_HOST_SHARED_LIBRARY)
 
 ##
 ##
@@ -85,18 +90,18 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := shell.c
 
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/../android $(call include-path-for, system-core)/cutils
+LOCAL_C_INCLUDES := \
+    $(LOCAL_PATH)/../android \
+    $(call include-path-for, system-core)/cutils \
+    external/icu4c/i18n \
+    external/icu4c/common
 
 LOCAL_SHARED_LIBRARIES := libsqlite \
             libicuuc \
             libicui18n \
             libutils
 
-ifneq ($(TARGET_ARCH),arm)
-LOCAL_LDLIBS += -lpthread -ldl
-endif
-
-LOCAL_CFLAGS += $(common_sqlite_flags) -DUSE_PREAD64
+LOCAL_CFLAGS += $(device_sqlite_flags)
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 
@@ -119,7 +124,8 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := $(common_src_files) shell.c
 
-LOCAL_CFLAGS += $(common_sqlite_flags) -DNO_ANDROID_FUNCS=1
+LOCAL_CFLAGS += $(host_sqlite_flags) \
+    -DNO_ANDROID_FUNCS=1
 
 # sqlite3MemsysAlarm uses LOG()
 LOCAL_STATIC_LIBRARIES += liblog

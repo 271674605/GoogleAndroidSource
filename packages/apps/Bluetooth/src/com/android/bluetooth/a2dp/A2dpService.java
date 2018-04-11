@@ -23,6 +23,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
 import android.util.Log;
+import com.android.bluetooth.avrcp.Avrcp;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.bluetooth.Utils;
 import java.util.ArrayList;
@@ -51,15 +52,19 @@ public class A2dpService extends ProfileService {
     }
 
     protected boolean start() {
-        mStateMachine = A2dpStateMachine.make(this, this);
         mAvrcp = Avrcp.make(this);
+        mStateMachine = A2dpStateMachine.make(this, this);
         setA2dpService(this);
         return true;
     }
 
     protected boolean stop() {
-        mStateMachine.doQuit();
-        mAvrcp.doQuit();
+        if (mStateMachine != null) {
+            mStateMachine.doQuit();
+        }
+        if (mAvrcp != null) {
+            mAvrcp.doQuit();
+        }
         return true;
     }
 
@@ -187,6 +192,10 @@ public class A2dpService extends ProfileService {
 
     public void setAvrcpAbsoluteVolume(int volume) {
         mAvrcp.setAbsoluteVolume(volume);
+    }
+
+    public void setAvrcpAudioState(int state) {
+        mAvrcp.setA2dpAudioState(state);
     }
 
     synchronized boolean isA2dpPlaying(BluetoothDevice device) {

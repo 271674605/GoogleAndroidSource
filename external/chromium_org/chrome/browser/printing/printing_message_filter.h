@@ -30,6 +30,7 @@ class WebContents;
 namespace printing {
 class PrinterQuery;
 class PrintJobManager;
+class PrintQueriesQueue;
 }
 
 // This class filters out incoming printing related IPC messages for the
@@ -42,8 +43,7 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       content::BrowserThread::ID* thread) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   virtual ~PrintingMessageFilter();
@@ -91,6 +91,10 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
       const base::Closure& callback,
       scoped_refptr<printing::PrinterQuery> printer_query);
 
+  void OnGetPrintSettingsFailed(
+      const base::Closure& callback,
+      scoped_refptr<printing::PrinterQuery> printer_query);
+
   // Checks if printing is enabled.
   void OnIsPrintingEnabled(bool* is_enabled);
 
@@ -126,11 +130,11 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
                         bool* cancel);
 #endif
 
-  printing::PrintJobManager* print_job_manager_;
-
   ProfileIOData* profile_io_data_;
 
   const int render_process_id_;
+
+  scoped_refptr<printing::PrintQueriesQueue> queue_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintingMessageFilter);
 };

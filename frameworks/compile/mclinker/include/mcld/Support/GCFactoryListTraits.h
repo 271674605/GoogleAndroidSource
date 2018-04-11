@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_GC_FACTORY_LIST_TRAITS_H
-#define MCLD_GC_FACTORY_LIST_TRAITS_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_GCFACTORYLISTTRAITS_H
+#define MCLD_SUPPORT_GCFACTORYLISTTRAITS_H
 
 #include <llvm/ADT/ilist_node.h>
 #include <llvm/ADT/ilist.h>

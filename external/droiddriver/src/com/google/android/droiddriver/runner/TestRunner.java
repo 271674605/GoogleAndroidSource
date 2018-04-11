@@ -25,28 +25,30 @@ import android.test.suitebuilder.TestMethod;
 import android.util.Log;
 
 import com.android.internal.util.Predicate;
+import com.google.android.droiddriver.helpers.DroidDrivers;
 import com.google.android.droiddriver.util.ActivityUtils;
+import com.google.android.droiddriver.util.ActivityUtils.Supplier;
 import com.google.android.droiddriver.util.Logs;
-import com.google.common.base.Supplier;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 
 import junit.framework.AssertionFailedError;
 import junit.framework.Test;
 import junit.framework.TestListener;
 
 import java.lang.annotation.Annotation;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Adds activity watcher to InstrumentationTestRunner.
  */
 public class TestRunner extends InstrumentationTestRunner {
-  private final Set<Activity> activities = Sets.newIdentityHashSet();
+  private final Set<Activity> activities = new HashSet<Activity>();
   private final AndroidTestRunner androidTestRunner = new AndroidTestRunner();
-  private Activity runningActivity;
+  private volatile Activity runningActivity;
 
   /**
    * Returns an {@link AndroidTestRunner} that is shared by this and super, such
@@ -64,27 +66,42 @@ public class TestRunner extends InstrumentationTestRunner {
    */
   @Override
   public void onStart() {
+    DroidDrivers.initInstrumentation(this, getArguments());
+
     getAndroidTestRunner().addTestListener(new TestListener() {
       @Override
       public void endTest(Test test) {
-        runOnMainSync(new Runnable() {
+        // Try to finish activity on best-effort basis - TestListener should
+        // not throw.
+        final Activity[] activitiesCopy;
+        synchronized (activities) {
+          if (activities.isEmpty()) {
+            return;
+          }
+          activitiesCopy = activities.toArray(new Activity[activities.size()]);
+        }
+
+        runOnMainSyncWithTimeLimit(new Runnable() {
           @Override
           public void run() {
-            Iterator<Activity> iterator = activities.iterator();
-            while (iterator.hasNext()) {
-              Activity activity = iterator.next();
-              iterator.remove();
+            for (Activity activity : activitiesCopy) {
               if (!activity.isFinishing()) {
                 try {
                   Logs.log(Log.INFO, "Stopping activity: " + activity);
                   activity.finish();
-                } catch (RuntimeException e) {
+                } catch (Throwable e) {
                   Logs.log(Log.ERROR, e, "Failed to stop activity");
                 }
               }
             }
           }
         });
+
+        // We've done what we can. Clear activities if any are left.
+        synchronized (activities) {
+          activities.clear();
+          runningActivity = null;
+        }
       }
 
       @Override
@@ -109,7 +126,7 @@ public class TestRunner extends InstrumentationTestRunner {
 
   // Overrides InstrumentationTestRunner
   List<Predicate<TestMethod>> getBuilderRequirements() {
-    List<Predicate<TestMethod>> requirements = Lists.newArrayList();
+    List<Predicate<TestMethod>> requirements = new ArrayList<Predicate<TestMethod>>();
     requirements.add(new Predicate<TestMethod>() {
       @Override
       public boolean apply(TestMethod arg0) {
@@ -121,7 +138,7 @@ public class TestRunner extends InstrumentationTestRunner {
         }
 
         UseUiAutomation useUiAutomation = getAnnotation(arg0, UseUiAutomation.class);
-        if (useUiAutomation != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
+        if (useUiAutomation != null && !DroidDrivers.hasUiAutomation()) {
           Logs.logfmt(Log.INFO,
               "filtered %s#%s: Has @UseUiAutomation, but ro.build.version.sdk=%d",
               arg0.getEnclosingClassname(), arg0.getName(), Build.VERSION.SDK_INT);
@@ -144,13 +161,17 @@ public class TestRunner extends InstrumentationTestRunner {
   @Override
   public void callActivityOnDestroy(Activity activity) {
     super.callActivityOnDestroy(activity);
-    activities.remove(activity);
+    synchronized (activities) {
+      activities.remove(activity);
+    }
   }
 
   @Override
   public void callActivityOnCreate(Activity activity, Bundle bundle) {
     super.callActivityOnCreate(activity, bundle);
-    activities.add(activity);
+    synchronized (activities) {
+      activities.add(activity);
+    }
   }
 
   @Override
@@ -162,8 +183,31 @@ public class TestRunner extends InstrumentationTestRunner {
   @Override
   public void callActivityOnPause(Activity activity) {
     super.callActivityOnPause(activity);
-    if (activity == ActivityUtils.getRunningActivity()) {
+    if (activity == runningActivity) {
       runningActivity = null;
+    }
+  }
+
+  private boolean runOnMainSyncWithTimeLimit(Runnable runnable) {
+    // Do we need it configurable? Now only used in endTest.
+    long timeoutMillis = 10000L;
+    final FutureTask<?> futureTask = new FutureTask<Void>(runnable, null);
+    new Thread(new Runnable() {
+      @Override
+      public void run() {
+        runOnMainSync(futureTask);
+      }
+    }).start();
+
+    try {
+      futureTask.get(timeoutMillis, TimeUnit.MILLISECONDS);
+      return true;
+    } catch (Throwable e) {
+      Logs.log(Log.WARN, e, String.format(
+          "Timed out after %d milliseconds waiting for Instrumentation.runOnMainSync",
+          timeoutMillis));
+      futureTask.cancel(false);
+      return false;
     }
   }
 }

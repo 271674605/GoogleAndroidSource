@@ -38,6 +38,21 @@
 
 namespace android {
 
+int32_t SUPPORT_THUMBNAIL_REAR_SIZE[3][2] =
+{
+    {160, 120},
+    {160, 90},
+    {144, 96}
+};
+
+int32_t SUPPORT_THUMBNAIL_FRONT_SIZE[4][2] =
+{
+    {160, 120},
+    {160, 160},
+    {160, 90},
+    {144, 96}
+};
+
 class Sensor {
 public:
     /**
@@ -527,13 +542,23 @@ status_t ExynosCamera2::constructStaticInfo(camera_metadata_t **info,
 
     // android.jpeg
 
-    static const int32_t jpegThumbnailSizes[] = {
-            160, 120,
-            160, 160,
-            160, 90,
-            144, 96,
-              0, 0
-    };
+    size_t sizeOfThumbnailList = (cameraId) ? sizeof(SUPPORT_THUMBNAIL_FRONT_SIZE) /
+            sizeof(int32_t) : sizeof(SUPPORT_THUMBNAIL_REAR_SIZE) / sizeof(int32_t);
+
+    // Copy sizes from front or back camera
+    int32_t jpegThumbnailSizes[sizeOfThumbnailList + 2];
+
+    if (cameraId) {
+        memcpy(jpegThumbnailSizes, SUPPORT_THUMBNAIL_FRONT_SIZE,
+                sizeof(int32_t) * sizeOfThumbnailList);
+    } else {
+        memcpy(jpegThumbnailSizes, SUPPORT_THUMBNAIL_REAR_SIZE,
+                sizeof(int32_t) * sizeOfThumbnailList);
+    }
+
+    // Always include 0,0 size in list
+    jpegThumbnailSizes[sizeOfThumbnailList] = 0;
+    jpegThumbnailSizes[sizeOfThumbnailList + 1] = 0;
 
     ADD_OR_SIZE(ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES,
             jpegThumbnailSizes, sizeof(jpegThumbnailSizes)/sizeof(int32_t));
@@ -588,9 +613,9 @@ status_t ExynosCamera2::constructStaticInfo(camera_metadata_t **info,
     ADD_OR_SIZE(ANDROID_CONTROL_AVAILABLE_EFFECTS,
             availableEffects, sizeof(availableEffects));
 
-    int32_t max3aRegions = 1;
+    static const int32_t max3aRegions[] = {/*AE*/ 1,/*AWB*/ 1,/*AF*/ 1};
     ADD_OR_SIZE(ANDROID_CONTROL_MAX_REGIONS,
-            &max3aRegions, 1);
+            max3aRegions, sizeof(max3aRegions)/sizeof(max3aRegions[0]));
 
     ADD_OR_SIZE(ANDROID_CONTROL_AE_AVAILABLE_MODES,
             m_curCameraInfo->availableAeModes, m_curCameraInfo->numAvailableAeModes);
@@ -749,7 +774,6 @@ status_t ExynosCamera2::constructDefaultRequest(
     uint8_t demosaicMode = 0;
     uint8_t noiseMode = 0;
     uint8_t shadingMode = 0;
-    uint8_t geometricMode = 0;
     uint8_t colorMode = 0;
     uint8_t tonemapMode = 0;
     uint8_t edgeMode = 0;
@@ -766,7 +790,6 @@ status_t ExynosCamera2::constructDefaultRequest(
         demosaicMode = ANDROID_DEMOSAIC_MODE_HIGH_QUALITY;
         noiseMode = ANDROID_NOISE_REDUCTION_MODE_HIGH_QUALITY;
         shadingMode = ANDROID_SHADING_MODE_HIGH_QUALITY;
-        geometricMode = ANDROID_GEOMETRIC_MODE_HIGH_QUALITY;
         colorMode = ANDROID_COLOR_CORRECTION_MODE_HIGH_QUALITY;
         tonemapMode = ANDROID_TONEMAP_MODE_HIGH_QUALITY;
         edgeMode = ANDROID_EDGE_MODE_HIGH_QUALITY;
@@ -781,7 +804,6 @@ status_t ExynosCamera2::constructDefaultRequest(
         demosaicMode = ANDROID_DEMOSAIC_MODE_FAST;
         noiseMode = ANDROID_NOISE_REDUCTION_MODE_FAST;
         shadingMode = ANDROID_SHADING_MODE_FAST;
-        geometricMode = ANDROID_GEOMETRIC_MODE_FAST;
         colorMode = ANDROID_COLOR_CORRECTION_MODE_FAST;
         tonemapMode = ANDROID_TONEMAP_MODE_FAST;
         edgeMode = ANDROID_EDGE_MODE_FAST;
@@ -791,7 +813,6 @@ status_t ExynosCamera2::constructDefaultRequest(
     ADD_OR_SIZE(ANDROID_DEMOSAIC_MODE, &demosaicMode, 1);
     ADD_OR_SIZE(ANDROID_NOISE_REDUCTION_MODE, &noiseMode, 1);
     ADD_OR_SIZE(ANDROID_SHADING_MODE, &shadingMode, 1);
-    ADD_OR_SIZE(ANDROID_GEOMETRIC_MODE, &geometricMode, 1);
     ADD_OR_SIZE(ANDROID_COLOR_CORRECTION_MODE, &colorMode, 1);
     ADD_OR_SIZE(ANDROID_TONEMAP_MODE, &tonemapMode, 1);
     ADD_OR_SIZE(ANDROID_EDGE_MODE, &edgeMode, 1);
@@ -897,7 +918,7 @@ status_t ExynosCamera2::constructDefaultRequest(
     static const uint8_t effectMode = ANDROID_CONTROL_EFFECT_MODE_OFF;
     ADD_OR_SIZE(ANDROID_CONTROL_EFFECT_MODE, &effectMode, 1);
 
-    static const uint8_t sceneMode = ANDROID_CONTROL_SCENE_MODE_UNSUPPORTED;
+    static const uint8_t sceneMode = ANDROID_CONTROL_SCENE_MODE_DISABLED;
     ADD_OR_SIZE(ANDROID_CONTROL_SCENE_MODE, &sceneMode, 1);
 
     static const uint8_t aeMode = ANDROID_CONTROL_AE_MODE_ON;

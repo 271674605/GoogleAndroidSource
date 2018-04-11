@@ -22,10 +22,6 @@
     <string name="details_hms" msgid="4842276230698703554">"%1$d:%2$02d:%3$02d"</string>
     <string name="set_image" msgid="3969690281401045698">"Resmi ayarlayın"</string>
     <string name="delete" msgid="2714492172818940424">"Sil"</string>
-  <plurals name="delete_selection">
-    <item quantity="one" msgid="8811352590292754044">"Seçilen öğe silinsin mi?"</item>
-    <item quantity="other" msgid="5075283252850066610">"Seçilen öğeler silinsin mi?"</item>
-  </plurals>
     <string name="share" msgid="8581089487762243115">"Paylaş"</string>
     <string name="share_panorama" msgid="3558466186935359444">"Panoramayı paylaş"</string>
     <string name="share_as_photo" msgid="4831213580709167218">"Fotoğraf olarak paylaş"</string>
@@ -33,21 +29,6 @@
     <string name="undo" msgid="5110048345890050107">"GERİ AL"</string>
     <string name="details" msgid="4404020741542549488">"Ayrıntılar"</string>
     <string name="close" msgid="4826166926297479820">"Kapat"</string>
-  <plurals name="number_of_items_selected">
-    <item quantity="zero" msgid="9217673864242686656">"%1$d tane seçildi"</item>
-    <item quantity="one" msgid="5806616411905812727">"%1$d tane seçildi"</item>
-    <item quantity="other" msgid="3767743589502328221">"%1$d tane seçildi"</item>
-  </plurals>
-  <plurals name="number_of_albums_selected">
-    <item quantity="zero" msgid="8095100906728830821">"%1$d tane seçildi"</item>
-    <item quantity="one" msgid="9063509704521984072">"%1$d tane seçildi"</item>
-    <item quantity="other" msgid="135044054552480485">"%1$d tane seçildi"</item>
-  </plurals>
-  <plurals name="number_of_groups_selected">
-    <item quantity="zero" msgid="1942343672734097509">"%1$d tane seçildi"</item>
-    <item quantity="one" msgid="1456436514367094505">"%1$d tane seçildi"</item>
-    <item quantity="other" msgid="1511467088339194694">"%1$d tane seçildi"</item>
-  </plurals>
     <string name="show_on_map" msgid="8542853913632649160">"Haritada göster"</string>
     <string name="rotate_left" msgid="2618440058490662604">"Sola döndür"</string>
     <string name="rotate_right" msgid="4896096424267838355">"Sağa döndür"</string>
@@ -56,7 +37,6 @@
     <string name="trim_action" msgid="4736803320203951827">"Kırp"</string>
     <string name="set_as" msgid="5469055085024870081">"Şu şekilde ayarla"</string>
     <string name="video_err" msgid="1562566029875081552">"Video oynatılamıyor."</string>
-    <string name="crop_saved" msgid="4465794038855602739">"Kırpılan resim <xliff:g id="FOLDER_NAME">%s</xliff:g> klasörüne kaydedildi."</string>
     <string name="title" msgid="8061744305671964703">"Başlık"</string>
     <string name="description" msgid="8193138501982849808">"Açıklama"</string>
     <string name="time" msgid="5248213506417024287">"Saat"</string>
@@ -84,7 +64,6 @@
     <string name="unknown" msgid="564184550182858146">"Bilinmiyor"</string>
     <string name="try_to_set_local_album_available_offline" msgid="3363125545009254117">"Bu öğe yerel olarak depolandı ve çevrimdışı kullanılabilir."</string>
     <string name="please_wait" msgid="1416313324505140068">"Lütfen bekleyin"</string>
-    <string name="rendering_photo_sphere" msgid="3032858512989313215">"Fotoğraf küresi oluşturuluyor"</string>
     <string name="camera_error_title" msgid="6200558085072670067">"Kamera hatası"</string>
     <string name="cannot_connect_camera" msgid="4311259792784598381">"Kameraya bağlanılamıyor."</string>
     <string name="camera_disabled" msgid="6963443549010040595">"Güvenlik politikaları nedeniyle kamera devre dışı bırakıldı."</string>
@@ -93,39 +72,26 @@
     <string name="preparing_sd" product="default" msgid="7435693655017362767">"SD kart hazırlanıyor..."</string>
     <string name="access_sd_fail" product="default" msgid="2634861611082499811">"SD karta erişilemedi."</string>
     <string name="time_lapse_title" msgid="3267978566401228497">"Zaman atlamalı kayıt"</string>
+    <string name="capturing" msgid="5255164204641920893">"Fotoğraf çekiliyor"</string>
     <string name="pref_camera_id_title" msgid="4680648115225411185">"Kamera seçin"</string>
     <string name="pref_camera_id_entry_back" msgid="6386943973628160510">"Arka"</string>
     <string name="pref_camera_id_entry_front" msgid="6233067010315787044">"Ön"</string>
-    <string name="pref_camera_recordlocation_title" msgid="3354956161456185749">"Konumu kaydet"</string>
+    <string name="pref_camera_save_location_title" msgid="2344235620113384017">"Konumu kaydet"</string>
     <string name="pref_camera_location_label" msgid="8695441802378057719">"KONUM"</string>
     <string name="pref_camera_timer_title" msgid="4728838281741571323">"Geri sayım zamanlayıcısı"</string>
-  <plurals name="pref_camera_timer_entry">
-    <item quantity="one" msgid="8919878087230098328">"1 saniye"</item>
-    <item quantity="other" msgid="5782794798884172289">"%d saniye"</item>
-  </plurals>
     <!-- no translation found for pref_camera_timer_sound_default (6225207881203007747) -->
     <skip />
     <string name="pref_camera_timer_sound_title" msgid="9036987234878551217">"Geri sayımda bip sesi çıkar"</string>
     <string name="setting_off" msgid="6782191065550276632">"Kapalı"</string>
     <string name="setting_on" msgid="9086728135773197891">"Açık"</string>
     <string name="pref_video_quality_title" msgid="5887153490982738588">"Video kalitesi"</string>
-    <string name="pref_video_quality_entry_high" msgid="1613578418842803393">"Yüksek"</string>
-    <string name="pref_video_quality_entry_low" msgid="737962621299050603">"Düşük"</string>
     <string name="pref_video_time_lapse_frame_interval_title" msgid="4975260837607993569">"Zaman atlama"</string>
     <string name="pref_camera_settings_category" msgid="4274141528139077830">"Kamera ayarları"</string>
     <string name="pref_camcorder_settings_category" msgid="3553148484755353397">"Video kamera ayarları"</string>
     <string name="pref_camera_picturesize_title" msgid="686045304547541815">"Resim boyutu"</string>
-    <string name="pref_camera_picturesize_entry_13mp" msgid="6728485576074234195">"13 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_8mp" msgid="7088352012301633667">"8 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_5mp" msgid="1501745661448065284">"5 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_4mp" msgid="4786178543089540678">"4 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_3mp" msgid="140799231761236311">"3 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_2mp" msgid="450006451326859328">"2 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_2mp_wide" msgid="1877997036497332813">"2 megapiksel (16:9)"</string>
-    <string name="pref_camera_picturesize_entry_1_3mp" msgid="3451742533756821502">"1,3 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_1mp" msgid="5043732005295894167">"1 megapiksel"</string>
-    <string name="pref_camera_picturesize_entry_vga" msgid="7387786033708903628">"VGA"</string>
-    <string name="pref_camera_picturesize_entry_qvga" msgid="6134562622041084167">"QVGA"</string>
+    <string name="pref_camera_picturesize_entry_large" msgid="9014447075089601575">"Büyük"</string>
+    <string name="pref_camera_picturesize_entry_medium" msgid="7708839551627003154">"Orta"</string>
+    <string name="pref_camera_picturesize_entry_small" msgid="2991239656622539068">"Küçük"</string>
     <string name="pref_camera_focusmode_title" msgid="3637702747984180030">"Odak modu"</string>
     <string name="pref_camera_focusmode_entry_auto" msgid="8977409813328199501">"Otomatik"</string>
     <string name="pref_camera_focusmode_entry_infinity" msgid="3887667853236656322">"Sonsuz"</string>
@@ -157,10 +123,10 @@
     <string name="pref_camera_scenemode_entry_auto" msgid="9205644316260850379">"Otomatik"</string>
     <string name="pref_camera_scenemode_entry_hdr_plus" msgid="6759085555519758794">"HDR+"</string>
     <string name="pref_camera_scenemode_entry_hdr" msgid="3098836808080630955">"HDR"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_plus_on" msgid="4762986338359862238">"HDR+\'yı Aç"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_plus_off" msgid="8027383906480914303">"HDR+\'yı Kapat"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_on" msgid="8567522693524539332">"HDR\'yi Aç"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_off" msgid="1121637502250585531">"HDR\'yi Kapat"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_plus_on" msgid="1096746750342289067">"HDR+ AÇIK"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_plus_off" msgid="2668770361856397834">"HDR+ KAPALI"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_on" msgid="5232394324298489502">"HDR AÇIK"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_off" msgid="7694606461440250206">"HDR KAPALI"</string>
     <string name="pref_camera_scenemode_entry_action" msgid="5753183620959062015">"Hareket"</string>
     <string name="pref_camera_scenemode_entry_night" msgid="3468037364159759991">"Gece"</string>
     <string name="pref_camera_scenemode_entry_sunset" msgid="5884302914893488509">"Gün batımı"</string>
@@ -186,6 +152,7 @@
     <string name="pref_camera_id_label_back" msgid="1645608049757733858">"ÖN KAMERA"</string>
     <string name="pref_camera_id_label_front" msgid="349308803062874842">"ARKA KAMERA"</string>
     <string name="dialog_ok" msgid="774141340500181131">"Tamam"</string>
+    <string name="dialog_cancel" msgid="692365061128351656">"İptal"</string>
     <string name="spaceIsLow_content" product="default" msgid="4522771065344332702">"SD kartınızda boş alan azaldı. Kalite ayarını değiştirin veya bazı resimleri ya da diğer dosyaları silin."</string>
     <string name="video_reach_size_limit" msgid="9196836111505731836">"Boyut sınırına ulaşıldı."</string>
     <string name="pano_too_fast_prompt" msgid="2503148095578052177">"Çok hızlı"</string>
@@ -215,19 +182,39 @@
     <string name="effect_silly_faces" msgid="7952713419757286453">"KOMİK SURATLAR"</string>
     <string name="effect_background" msgid="1358432220077975015">"ARKA PLAN"</string>
     <string name="accessibility_shutter_button" msgid="6040483605347230438">"Deklanşör"</string>
+    <string name="accessibility_cancel_button" msgid="5679989494636116448">"İptal"</string>
     <string name="accessibility_menu_button" msgid="7692103503958544723">"Menü düğmesi"</string>
-    <string name="accessibility_mode_picker" msgid="5107120667206453381">"Kamera, video veya panorama seçici"</string>
     <string name="accessibility_check_box" msgid="1084094675439953723">"%1$s onay kutusu"</string>
     <string name="accessibility_switch_to_camera" msgid="4518394037216725274">"Fotoğraf moduna geç"</string>
     <string name="accessibility_switch_to_video" msgid="8174781871592793967">"Video moduna geç"</string>
     <string name="accessibility_switch_to_panorama" msgid="8322228859117808037">"Panorama moduna geç"</string>
     <string name="accessibility_switch_to_photo_sphere" msgid="5803217570370854725">"Photo Sphere moduna geç"</string>
     <string name="accessibility_switch_to_gcam" msgid="7562625440767034695">"Yüksek kaliteye geç"</string>
+    <string name="accessibility_switch_to_refocus" msgid="6796169367953860106">"Yeniden odaklamaya geç"</string>
     <string name="accessibility_review_cancel" msgid="5462850829869569629">"İnceleme modu iptal"</string>
     <string name="accessibility_review_ok" msgid="3486465319880320270">"İnceleme modu tamam"</string>
     <string name="accessibility_review_retake" msgid="2547112860787022130">"İnceleme modu tekrar çek"</string>
+    <string name="accessibility_mode_options" msgid="6376831760155403217">"Seçenekler"</string>
+    <string name="accessibility_mode_list_hidden" msgid="3743267380450401866">"Mod listesi kapatıldı"</string>
+    <string name="accessibility_mode_list_shown" msgid="5284322142734069179">"Mod listesi açık"</string>
+    <string name="media_accessibility_peek" msgid="234540330161031946">"Fotoğraf çekildi"</string>
+    <string name="photo_accessibility_peek" msgid="5934133371001677250">"Fotoğraf çekildi"</string>
+    <string name="video_accessibility_peek" msgid="7845916149291383132">"Video çekildi"</string>
+    <string name="accessibility_unlock_to_camera" msgid="1251880974313179442">"Kameranın Kilidini Açın"</string>
+    <string name="media_date_content_description" msgid="2155634843596817141">"Medya %s tarihinde kaydedildi"</string>
+    <string name="photo_date_content_description" msgid="5705865897898465619">"Fotoğraf %s tarihinde çekildi"</string>
+    <string name="video_date_content_description" msgid="2151884014634284456">"Video %s tarihinde kaydedildi"</string>
+    <string name="panorama_date_content_description" msgid="990703578639006144">"Panorama %s tarihinde çekildi"</string>
+    <string name="photosphere_date_content_description" msgid="4183741743409007876">"Fotoğraf küresi %s tarihinde kaydedildi"</string>
+    <string name="refocus_date_content_description" msgid="5630960320424345547">"Lens bulanıklığı %s tarihinde kaydedildi"</string>
+    <string name="media_processing_content_description" msgid="8138587719107183754">"Medya işleniyor"</string>
+    <string name="accessibility_mode_list_toggle" msgid="4784230103566918645">"Mod listesini aç/kapat"</string>
+    <string name="btn_mode_list_toggle" msgid="3986242443098400164">"Mod listesi"</string>
+    <string name="accessibility_filmstrip_toggle" msgid="6966978483643396442">"Film şeridini aç/kapat"</string>
+    <string name="btn_filmstrip_toggle" msgid="3666693972882351490">"Film şeridi"</string>
     <string name="capital_on" msgid="1118214824959797269">"AÇ"</string>
     <string name="capital_off" msgid="3020696135020167263">"KAPAT"</string>
+    <string name="video_control_play" msgid="6895236811408921715">"Videoyu Oynat"</string>
     <string name="pref_video_time_lapse_frame_interval_off" msgid="3909611941842585497">"Kapalı"</string>
     <string name="pref_video_time_lapse_frame_interval_500" msgid="1425296755074319221">"0,5 saniye"</string>
     <string name="pref_video_time_lapse_frame_interval_1000" msgid="9126255690984179200">"1 saniye"</string>
@@ -286,8 +273,96 @@
     <string name="saving_tiny_planet" msgid="8828265180177375494">"Minik Gezegen kaydediliyor…"</string>
     <string name="tiny_planet_zoom" msgid="2985522360577158474">"Zum"</string>
     <string name="tiny_planet_rotate" msgid="5445336705705350004">"Döndürme"</string>
+    <string name="photo_editor" msgid="1521994560971367225">"Fotoğraf Düzenleyici"</string>
     <string name="crop_save" msgid="2841974981340098579">"Kaydet"</string>
     <string name="cannot_load_image" msgid="4100136187076585580">"Resim yüklenemiyor!"</string>
     <string name="switch_photo_filmstrip" msgid="1448511001008888767">"Film şeridi görünümü"</string>
     <string name="setting_wallpaper" msgid="2397759659347872725">"Duvar kağıdı ayarlanıyor"</string>
+    <string name="mode_settings" msgid="2021937261522670921">"Ayarlar"</string>
+    <string name="mode_camera" msgid="279763925715250603">"Kamera"</string>
+    <string name="mode_video" msgid="8633929034048169139">"Video"</string>
+    <string name="mode_photosphere" msgid="5082338476237291833">"Photo Sphere"</string>
+    <string name="mode_timelapse" msgid="1517168724627815453">"Zaman Atlama"</string>
+    <string name="mode_wideangle" msgid="1099640345041696830">"Geniş Açı"</string>
+    <string name="mode_panorama" msgid="6882648621305828861">"Panorama"</string>
+    <string name="mode_refocus" msgid="172192967119469061">"Lens Bulanıklığı"</string>
+    <string name="mode_camera_desc" msgid="3670807361165657278">"Kamera Modu\'na geç"</string>
+    <string name="mode_video_desc" msgid="4058407412929464689">"Video Kamera\'ya geç"</string>
+    <string name="mode_photosphere_desc" msgid="2403816283825579161">"Photo Sphere Modu\'na geç"</string>
+    <string name="mode_panorama_desc" msgid="6023020404237519590">"Panorama Modu\'na geç"</string>
+    <string name="mode_refocus_desc" msgid="6171183297515508465">"Lens Bulanıklığı Moduna Geç"</string>
+    <string name="settings_open_desc" msgid="6914471293841793766">"Ayarları aç"</string>
+    <string name="settings_close_desc" msgid="3095831199632813127">"Ayarları kapat"</string>
+    <string name="hdr_plus_off_desc" msgid="5301287296717144319">"HDR Plus kapalı"</string>
+    <string name="hdr_plus_on_desc" msgid="8204780034508139909">"HDR Plus açık"</string>
+    <string name="hdr_off_desc" msgid="7921924739852874675">"HDR kapalı"</string>
+    <string name="hdr_on_desc" msgid="4591284110249047558">"HDR açık"</string>
+    <string name="flash_off_desc" msgid="7151559466286106797">"Flaş kapalı"</string>
+    <string name="flash_auto_desc" msgid="3009043125539675717">"Otomatik flaş"</string>
+    <string name="flash_on_desc" msgid="930372145324854699">"Flaş açık"</string>
+    <string name="hdr_plus_flash_off_desc" msgid="5335888906983788789">"HDR+ flaş kapalı"</string>
+    <string name="hdr_plus_flash_auto_desc" msgid="4812200236263011537">"HDR+ flaş otomatik"</string>
+    <string name="hdr_plus_flash_on_desc" msgid="8323389161987561284">"HDR+ flaş açık"</string>
+    <string name="torch_on_desc" msgid="3069836196559213365">"Işık açık"</string>
+    <string name="torch_off_desc" msgid="8304675202998742618">"Işık kapalı"</string>
+    <string name="camera_id_back_desc" msgid="3566327490758890635">"Arka kamera"</string>
+    <string name="camera_id_front_desc" msgid="7497517948130254220">"Ön kamera"</string>
+    <string name="grid_lines_off_desc" msgid="2022385817190451353">"Kılavuz çizgileri kapalı"</string>
+    <string name="grid_lines_on_desc" msgid="4601540461914364817">"Kılavuz çizgileri açık"</string>
+    <string name="countdown_timer_off" msgid="1663008439564495948">"Geri sayım kronometresi kapalı"</string>
+    <string name="countdown_timer_duration_3s" msgid="7435393834886072664">"Geri sayım kronometresinin süresi 3 saniyeye ayarlandı"</string>
+    <string name="countdown_timer_duration_10s" msgid="9085308782250002795">"Geri sayım kronometresinin süresi 10 saniyeye ayarlandı"</string>
+    <string name="more_options_desc" msgid="4628738800610478353">"Diğer Seçenekler"</string>
+    <string name="cancel_button_description" msgid="3801167024006905033">"İptal"</string>
+    <string name="done_button_description" msgid="1334963435441544592">"Bitti"</string>
+    <string name="retake_button_description" msgid="4234613030674787714">"Tekrar çek"</string>
+    <string name="share_button_description" msgid="5108508790540832053">"Paylaş"</string>
+    <string name="view_button_description" msgid="4985768837891362075">"Görüntüle"</string>
+    <string name="edit_button_description" msgid="98550816724901925">"Düzenle"</string>
+    <string name="delete_button_description" msgid="2251065309677200911">"Sil"</string>
+    <string name="manual_exposure_compensation_desc" msgid="5595219532556566042">"Manuel Pozlama Telafisi"</string>
+    <string name="exposure_compensation_desc_n2" msgid="8957966533506294324">"Pozlama Telafisi -2"</string>
+    <string name="exposure_compensation_desc_n1" msgid="3035027224866688267">"Pozlama Telafisi -1"</string>
+    <string name="exposure_compensation_desc_0" msgid="2820273752287040523">"Pozlama Telafisi 0"</string>
+    <string name="exposure_compensation_desc_p1" msgid="2328275401634452554">"Pozlama Telafisi +1"</string>
+    <string name="exposure_compensation_desc_p2" msgid="4555277824096107142">"Pozlama Telafisi +2"</string>
+    <string name="button_change_announcement" msgid="3759686152778772111">"Düğme artık %s oldu"</string>
+    <string name="setting_location" msgid="4459859689227893838">"Konum"</string>
+    <string name="setting_back_camera_photo" msgid="256738900473265017">"Arka kamera fotoğraf"</string>
+    <string name="setting_back_camera_video" msgid="5220819479408164689">"Arka kamera video"</string>
+    <string name="setting_front_camera_photo" msgid="4131886734622868637">"Ön kamera fotoğraf"</string>
+    <string name="setting_front_camera_video" msgid="2178799452805359752">"Ön kamera video"</string>
+    <string name="setting_default_camera" msgid="6954076799301004779">"Varsayılan Kamera"</string>
+    <string name="setting_google_help_and_feedback" msgid="2079580537079242775">"Yardım ve geri bildirim"</string>
+    <string name="processing_hdr_plus" msgid="9160093263037540304">"HDR+ işleniyor…"</string>
+    <string name="open_source_licenses" msgid="2169711954264883060">"Açık kaynak lisansları"</string>
+    <string name="pref_category_general" msgid="6737748849700581019">"Genel Ayarlar"</string>
+    <string name="pref_category_resolution_quality" msgid="6641462402321962896">"Çözünürlük ve kalite"</string>
+    <string name="pref_category_about" msgid="1966255405679342337">"Hakkında"</string>
+    <string name="pref_title_build_version" msgid="481489988124832651">"Derleme sürümü"</string>
+    <string name="pref_video_quality_entry_low" msgid="737962621299050603">"Düşük"</string>
+    <string name="pref_video_quality_entry_high" msgid="1613578418842803393">"Yüksek"</string>
+    <string name="pref_video_quality_entry_qcif" msgid="1717816794399266216">"QCIF"</string>
+    <string name="pref_video_quality_entry_cif" msgid="645414019445016434">"CIF"</string>
+    <string name="pref_video_quality_entry_480p" msgid="5880250731066854583">"SD 480p"</string>
+    <string name="pref_video_quality_entry_720p" msgid="4076146428148167262">"HD 720p"</string>
+    <string name="pref_video_quality_entry_1080p" msgid="4539958891524211120">"HD 1080p"</string>
+    <string name="pref_video_quality_entry_qvga" msgid="342600517453781430">"QVGA"</string>
+    <string name="pref_video_quality_entry_2160p" msgid="4522927631413184505">"UHD 4K"</string>
+    <string name="setting_summary_x_megapixels" msgid="6533463462760866830">"%1$s megapiksel"</string>
+    <string name="setting_summary_aspect_ratio_and_megapixels" msgid="5828440902461064821">"(%1$d:%2$d) %3$s megapiksel"</string>
+    <string name="cling_text_for_refocus_editor_button" msgid="4785017397116829802">"Yeniden odaklamak için buraya dokunun"</string>
+    <string name="pref_category_advanced" msgid="5921085080077574872">"Gelişmiş"</string>
+    <string name="pref_camera_exposure_compensation" msgid="4143245817259719147">"Manuel pozlama"</string>
+    <string name="settings_cling_text" msgid="5368054627268181292">"Ayarlar\'da, çözünürlük ve kaliteyi değiştirin veya gelişmiş özellikleri deneyin."</string>
+    <string name="photo_size_selection_title" msgid="2789753590719172645">"Fotoğraf boyutu seçin"</string>
+    <string name="photo_aspect_ratio_selection_content" msgid="6668224437962196229">"Bunu daha sonra Ayarlar\'da değiştirebilirsiniz."</string>
+    <string name="share_to" msgid="5144911209144798122">"Paylaş"</string>
+    <string name="edit_with" msgid="615569327230783971">"Şununla düzenle:"</string>
+    <string name="startup_dialog_button_next" msgid="1011831256978228993">"İLERİ"</string>
+    <string name="confirm_button_text" msgid="7389949384482206814">"TAMAM"</string>
+    <string name="full_sensor_4x3_aspect_ratio" msgid="1270461419743888925">"Tam görüntüleme sensörü \n(4:3)"</string>
+    <string name="cropped_sensor_16x9_aspect_ratio" msgid="4742161537633251795">"Kırpılmış sensör \n(16:9)"</string>
+    <string name="pref_boolean_false" msgid="461317129020087333">"0"</string>
+    <string name="pref_boolean_true" msgid="4131945223998878009">"1"</string>
 </resources>

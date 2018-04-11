@@ -1,36 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview;
 
-import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Picture;
-import android.graphics.Rect;
-import android.graphics.RectF;
 import android.net.http.SslError;
-import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.util.Log;
+import android.util.ArrayMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.ConsoleMessage;
 import android.webkit.GeolocationPermissions;
-import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 
-import org.chromium.base.ThreadUtils;
-import org.chromium.content.browser.ContentVideoView;
-import org.chromium.content.browser.ContentVideoViewClient;
-import org.chromium.content.browser.ContentVideoViewControls;
-import org.chromium.content.browser.ContentViewClient;
+import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.net.NetError;
+
+import java.security.Principal;
 
 /**
  * Base-class that an AwContents embedder derives from to receive callbacks.
@@ -43,13 +36,9 @@ import org.chromium.net.NetError;
  */
 public abstract class AwContentsClient {
 
-    private static final String TAG = "AwContentsClient";
-    private final AwContentsClientCallbackHelper mCallbackHelper =
-        new AwContentsClientCallbackHelper(this);
+    private final AwContentsClientCallbackHelper mCallbackHelper;
 
     private AwWebContentsObserver mWebContentsObserver;
-
-    private AwContentViewClient mContentViewClient = new AwContentViewClient();
 
     // Last background color reported from the renderer. Holds the sentinal value INVALID_COLOR
     // if not valid.
@@ -57,39 +46,59 @@ public abstract class AwContentsClient {
 
     private static final int INVALID_COLOR = 0;
 
+    public AwContentsClient() {
+        this(Looper.myLooper());
+    }
+
+    // Alllow injection of the callback thread, for testing.
+    public AwContentsClient(Looper looper) {
+        mCallbackHelper = new AwContentsClientCallbackHelper(looper, this);
+    }
+
     class AwWebContentsObserver extends WebContentsObserverAndroid {
         public AwWebContentsObserver(ContentViewCore contentViewCore) {
             super(contentViewCore);
         }
 
         @Override
-        public void didStopLoading(final String url) {
-            ThreadUtils.postOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    AwContentsClient.this.onPageFinished(url);
-                }
-            });
+        public void didFinishLoad(long frameId, String validatedUrl, boolean isMainFrame) {
+            String unreachableWebDataUrl = AwContentsStatics.getUnreachableWebDataUrl();
+            boolean isErrorUrl =
+                    unreachableWebDataUrl != null && unreachableWebDataUrl.equals(validatedUrl);
+            if (isMainFrame && !isErrorUrl) {
+                AwContentsClient.this.onPageFinished(validatedUrl);
+            }
         }
 
         @Override
         public void didFailLoad(boolean isProvisionalLoad,
                 boolean isMainFrame, int errorCode, String description, String failingUrl) {
-            if (errorCode == NetError.ERR_ABORTED) {
-                // This error code is generated for the following reasons:
-                // - WebView.stopLoading is called,
-                // - the navigation is intercepted by the embedder via shouldOverrideNavigation.
-                //
-                // The Android WebView does not notify the embedder of these situations using this
-                // error code with the WebViewClient.onReceivedError callback.
-                return;
+            if (isMainFrame) {
+                if (errorCode != NetError.ERR_ABORTED) {
+                    // This error code is generated for the following reasons:
+                    // - WebView.stopLoading is called,
+                    // - the navigation is intercepted by the embedder via shouldOverrideNavigation.
+                    //
+                    // The Android WebView does not notify the embedder of these situations using
+                    // this error code with the WebViewClient.onReceivedError callback.
+                    AwContentsClient.this.onReceivedError(
+                            ErrorCodeConversionHelper.convertErrorCode(errorCode), description,
+                                    failingUrl);
+                }
+                // Need to call onPageFinished after onReceivedError (if there is an error) for
+                // backwards compatibility with the classic webview.
+                AwContentsClient.this.onPageFinished(failingUrl);
             }
-            if (!isMainFrame) {
-                // The Android WebView does not notify the embedder of sub-frame failures.
-                return;
+        }
+
+        @Override
+        public void didNavigateMainFrame(String url, String baseUrl,
+                boolean isNavigationToDifferentPage, boolean isFragmentNavigation) {
+            // This is here to emulate the Classic WebView firing onPageFinished for main frame
+            // navigations where only the hash fragment changes.
+            if (isFragmentNavigation) {
+                AwContentsClient.this.onPageFinished(url);
             }
-            AwContentsClient.this.onReceivedError(
-                    ErrorCodeConversionHelper.convertErrorCode(errorCode), description, failingUrl);
         }
 
         @Override
@@ -99,42 +108,6 @@ public abstract class AwContentsClient {
 
     }
 
-    private class AwContentViewClient extends ContentViewClient {
-        @Override
-        public void onBackgroundColorChanged(int color) {
-            // Avoid storing the sentinal INVALID_COLOR (note that both 0 and 1 are both
-            // fully transparent so this transpose makes no visible difference).
-            mCachedRendererBackgroundColor = color == INVALID_COLOR ? 1 : color;
-        }
-
-        @Override
-        public void onStartContentIntent(Context context, String contentUrl) {
-            //  Callback when detecting a click on a content link.
-            AwContentsClient.this.shouldOverrideUrlLoading(contentUrl);
-        }
-
-        @Override
-        public void onRendererCrash(boolean crashedWhileOomProtected) {
-            // This is not possible so long as the webview is run single process!
-            throw new RuntimeException("Renderer crash reported.");
-        }
-
-        @Override
-        public void onUpdateTitle(String title) {
-            AwContentsClient.this.onReceivedTitle(title);
-        }
-
-        @Override
-        public boolean shouldOverrideKeyEvent(KeyEvent event) {
-            return AwContentsClient.this.shouldOverrideKeyEvent(event);
-        }
-
-        @Override
-        final public ContentVideoViewClient getContentVideoViewClient() {
-            return new AwContentVideoViewClient();
-        }
-    }
-
     final void installWebContentsObserver(ContentViewCore contentViewCore) {
         if (mWebContentsObserver != null) {
             mWebContentsObserver.detachFromWebContents();
@@ -142,42 +115,8 @@ public abstract class AwContentsClient {
         mWebContentsObserver = new AwWebContentsObserver(contentViewCore);
     }
 
-    private class AwContentVideoViewClient implements ContentVideoViewClient {
-        @Override
-        public void onShowCustomView(View view) {
-            WebChromeClient.CustomViewCallback cb = new WebChromeClient.CustomViewCallback() {
-                @Override
-                public void onCustomViewHidden() {
-                    ContentVideoView contentVideoView = ContentVideoView.getContentVideoView();
-                    if (contentVideoView != null)
-                        contentVideoView.exitFullscreen(false);
-                }
-            };
-            AwContentsClient.this.onShowCustomView(view, cb);
-        }
-
-        @Override
-        public void onDestroyContentVideoView() {
-            AwContentsClient.this.onHideCustomView();
-        }
-
-        @Override
-        public View getVideoLoadingProgressView() {
-            return AwContentsClient.this.getVideoLoadingProgressView();
-        }
-
-        @Override
-        public ContentVideoViewControls createControls() {
-            return null;
-        }
-    }
-
     final AwContentsClientCallbackHelper getCallbackHelper() {
         return mCallbackHelper;
-    }
-
-    final ContentViewClient getContentViewClient() {
-        return mContentViewClient;
     }
 
     final int getCachedRendererBackgroundColor() {
@@ -189,10 +128,19 @@ public abstract class AwContentsClient {
         return mCachedRendererBackgroundColor != INVALID_COLOR;
     }
 
+    final void onBackgroundColorChanged(int color) {
+        // Avoid storing the sentinal INVALID_COLOR (note that both 0 and 1 are both
+        // fully transparent so this transpose makes no visible difference).
+        mCachedRendererBackgroundColor = color == INVALID_COLOR ? 1 : color;
+    }
+
     //--------------------------------------------------------------------------------------------
     //             WebView specific methods that map directly to WebViewClient / WebChromeClient
     //--------------------------------------------------------------------------------------------
 
+    /**
+     * Parameters for the {@link AwContentsClient#showFileChooser} method.
+     */
     public static class FileChooserParams {
         public int mode;
         public String acceptTypes;
@@ -201,13 +149,30 @@ public abstract class AwContentsClient {
         public boolean capture;
     }
 
+    /**
+     * Parameters for the {@link AwContentsClient#shouldInterceptRequest} method.
+     */
+    public static class ShouldInterceptRequestParams {
+        // Url of the request.
+        public String url;
+        // Is this for the main frame or a child iframe?
+        public boolean isMainFrame;
+        // Was a gesture associated with the request? Don't trust can easily be spoofed.
+        public boolean hasUserGesture;
+        // Method used (GET/POST/OPTIONS)
+        public String method;
+        // Headers that would have been sent to server.
+        public ArrayMap<String, String> requestHeaders;
+    }
+
     public abstract void getVisitedHistory(ValueCallback<String[]> callback);
 
     public abstract void doUpdateVisitedHistory(String url, boolean isReload);
 
     public abstract void onProgressChanged(int progress);
 
-    public abstract InterceptedRequestData shouldInterceptRequest(String url);
+    public abstract AwWebResourceResponse shouldInterceptRequest(
+            ShouldInterceptRequestParams params);
 
     public abstract boolean shouldOverrideKeyEvent(KeyEvent event);
 
@@ -224,6 +189,12 @@ public abstract class AwContentsClient {
 
     public abstract void onReceivedSslError(ValueCallback<Boolean> callback, SslError error);
 
+    // TODO(sgurun): Make abstract once this has rolled in downstream.
+    public void onReceivedClientCertRequest(
+            final AwContentsClientBridge.ClientCertificateRequestCallback callback,
+            final String[] keyTypes, final Principal[] principals, final String host,
+            final int port) { }
+
     public abstract void onReceivedLoginRequest(String realm, String account, String args);
 
     public abstract void onFormResubmission(Message dontResend, Message resend);
@@ -239,6 +210,13 @@ public abstract class AwContentsClient {
             GeolocationPermissions.Callback callback);
 
     public abstract void onGeolocationPermissionsHidePrompt();
+
+    // TODO(michaelbai): Change the abstract once merged
+    public /*abstract*/ void onPermissionRequest(AwPermissionRequest awPermissionRequest) {}
+
+    // TODO(michaelbai): Change the abstract once merged
+    public /*abstract*/ void onPermissionRequestCanceled(
+            AwPermissionRequest awPermissionRequest) {}
 
     public abstract void onScaleChangedScaled(float oldScale, float newScale);
 

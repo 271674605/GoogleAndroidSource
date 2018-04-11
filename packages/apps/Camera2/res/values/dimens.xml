@@ -74,6 +74,8 @@
     <dimen name="effect_setting_type_text_left_padding_xlarge">26dp</dimen>
     <dimen name="onscreen_indicators_height_xlarge">36dp</dimen>
     <dimen name="onscreen_exposure_indicator_text_size_xlarge">18dp</dimen>
+    <dimen name="pie_progress_radius">25dp</dimen>
+    <dimen name="pie_progress_width">3dp</dimen>
     <dimen name="pie_radius_start">80dp</dimen>
     <dimen name="pie_radius_increment">48dp</dimen>
     <dimen name="pie_touch_slop">12dp</dimen>
@@ -86,12 +88,12 @@
     <dimen name="pie_anglezone_width">92dp</dimen>
     <dimen name="focus_radius_offset">8dp</dimen>
     <dimen name="focus_inner_offset">24dp</dimen>
+    <dimen name="zoom_stroke">3dp</dimen>
     <dimen name="focus_outer_stroke">3dp</dimen>
     <dimen name="focus_inner_stroke">2dp</dimen>
-    <dimen name="zoom_ring_min">48dp</dimen>
     <dimen name="switcher_size">72dp</dimen>
-    <dimen name="face_circle_stroke">2dip</dimen>
-    <dimen name="zoom_font_size">14pt</dimen>
+    <dimen name="face_circle_stroke">1dip</dimen>
+    <dimen name="focus_debug_stroke">1dip</dimen>
     <dimen name="shutter_offset">-22dp</dimen>
     <dimen name="size_thumbnail">200dip</dimen>
     <dimen name="size_preview">400dip</dimen>
@@ -151,4 +153,58 @@
     <dimen name="photoeditor_text_padding">10dp</dimen>
     <dimen name="photoeditor_original_text_size">18dp</dimen>
     <dimen name="photoeditor_original_text_margin">4dp</dimen>
+
+    <!-- Mode selector text size -->
+    <dimen name="mode_selector_text_size">16sp</dimen>
+
+    <!-- Mode selector icon width -->
+    <dimen name="mode_selector_icon_block_width">56dp</dimen>
+    <dimen name="mode_selector_icon_drawable_size">48dp</dimen>
+    <dimen name="mode_selector_item_height">60dp</dimen>
+
+    <dimen name="mode_list_settings_icon_size">48dp</dimen>
+    <dimen name="mode_list_settings_icon_margin">12dp</dimen>
+
+    <!-- Filmstrip bottom controls -->
+    <dimen name="filmstrip_bottom_control_button_size">48dp</dimen>
+    <dimen name="filmstrip_bottom_control_spacing">16dp</dimen>
+    <dimen name="filmstrip_bottom_control_middle_two_buttons_layout_size">144dp</dimen>
+    <dimen name="filmstrip_bottom_control_layout_size">240dp</dimen>
+
+    <!-- Bottom bar ui -->
+    <dimen name="bottom_bar_height_min">84dp</dimen>
+    <dimen name="bottom_bar_height_max">120dp</dimen>
+    <dimen name="bottom_bar_height_optimal">96dp</dimen>
+    <dimen name="bottom_bar_button_spacing">48dp</dimen>
+
+    <dimen name="camera_controls_padding_start">36dp</dimen>
+    <dimen name="camera_controls_padding_end">36dp</dimen>
+
+    <dimen name="mode_transition_view_icon_size">144dp</dimen>
+    <dimen name="flash_circle_size_after_shrink">36dp</dimen>
+
+    <dimen name="mode_options_height">72dp</dimen>
+    <dimen name="indicator_overlay_padding">20dp</dimen>
+    <dimen name="indicator_icon_width">24dp</dimen>
+    <dimen name="indicator_icon_height">24dp</dimen>
+    <dimen name="mode_option_width">48dp</dimen>
+    <dimen name="mode_option_height">48dp</dimen>
+
+    <dimen name="video_capture_circle_diameter">64dp</dimen>
+
+    <dimen name="grid_line_width">1dp</dimen>
+    <dimen name="focus_outer_ring_size">104dp</dimen>
+    <dimen name="focus_inner_ring_size">38dp</dimen>
+
+    <dimen name="option_button_circle_size">48dp</dimen>
+    <dimen name="mode_options_toggle_padding">12dp</dimen>
+    <dimen name="mode_options_buttons_anim_delta_x">20dp</dimen>
+
+    <dimen name="video_hint_arrow_size">118dp</dimen>
+    <dimen name="video_hint_phone_graphic_height">66dp</dimen>
+    <dimen name="video_hint_phone_graphic_width">36dp</dimen>
+    <dimen name="default_cling_width">120dp</dimen>
+    <dimen name="settings_cling_width">160dp</dimen>
+    <dimen name="settings_cling_triangle_height">15dp</dimen>
+    <dimen name="settings_cling_triangle_width">20dp</dimen>
 </resources>

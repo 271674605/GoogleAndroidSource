@@ -34,10 +34,6 @@ class MEDIA_EXPORT SincResampler {
     kKernelStorageSize = kKernelSize * (kKernelOffsetCount + 1),
   };
 
-  // Selects runtime specific CPU features like SSE.  Must be called before
-  // using SincResampler.
-  static void InitializeCPUSpecificFeatures();
-
   // Callback type for providing more data into the resampler.  Expects |frames|
   // of data to be rendered into |destination|; zero padded if not enough frames
   // are available to satisfy the request.
@@ -74,7 +70,7 @@ class MEDIA_EXPORT SincResampler {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SincResamplerTest, Convolve);
-  FRIEND_TEST_ALL_PREFIXES(SincResamplerTest, ConvolveBenchmark);
+  FRIEND_TEST_ALL_PREFIXES(SincResamplerPerfTest, Convolve);
 
   void InitializeKernel();
   void UpdateRegions(bool second_load);
@@ -120,12 +116,12 @@ class MEDIA_EXPORT SincResampler {
   // Contains kKernelOffsetCount kernels back-to-back, each of size kKernelSize.
   // The kernel offsets are sub-sample shifts of a windowed sinc shifted from
   // 0.0 to 1.0 sample.
-  scoped_ptr<float[], base::ScopedPtrAlignedFree> kernel_storage_;
-  scoped_ptr<float[], base::ScopedPtrAlignedFree> kernel_pre_sinc_storage_;
-  scoped_ptr<float[], base::ScopedPtrAlignedFree> kernel_window_storage_;
+  scoped_ptr<float[], base::AlignedFreeDeleter> kernel_storage_;
+  scoped_ptr<float[], base::AlignedFreeDeleter> kernel_pre_sinc_storage_;
+  scoped_ptr<float[], base::AlignedFreeDeleter> kernel_window_storage_;
 
   // Data from the source is copied into this buffer for each processing pass.
-  scoped_ptr<float[], base::ScopedPtrAlignedFree> input_buffer_;
+  scoped_ptr<float[], base::AlignedFreeDeleter> input_buffer_;
 
   // Pointers to the various regions inside |input_buffer_|.  See the diagram at
   // the top of the .cc file for more information.

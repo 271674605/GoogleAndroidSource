@@ -8,7 +8,9 @@
 #include <string>
 #include "base/time/time.h"
 
+namespace base {
 class CommandLine;
+}
 
 namespace diagnostics {
 
@@ -54,8 +56,11 @@ class DiagnosticsModel {
   class TestInfo {
    public:
     virtual ~TestInfo() {}
+    // A numerical id for this test. Must be a unique number among all the
+    // tests.
+    virtual int GetId() const = 0;
     // A parse-able ASCII string that indicates what is being tested.
-    virtual std::string GetId() const = 0;
+    virtual std::string GetName() const = 0;
     // A human readable string that tells you what is being tested.
     // This is not localized: it is only meant for developer consumption.
     virtual std::string GetTitle() const = 0;
@@ -89,16 +94,15 @@ class DiagnosticsModel {
   // Get the information for a particular test. Lifetime of returned object is
   // limited to the lifetime of this model.
   virtual const TestInfo& GetTest(size_t index) const = 0;
-  // Get the information for a test with given |id|. Lifetime of returned object
-  // is limited to the lifetime of this model. Returns false if there is no such
-  // id. |result| may not be NULL.
-  virtual bool GetTestInfo(const std::string& id,
-                           const TestInfo** result) const = 0;
+  // Get the information for a test with given numerical |id|. Lifetime of
+  // returned object is limited to the lifetime of this model. Returns false if
+  // there is no such id. |result| may not be NULL.
+  virtual bool GetTestInfo(int id, const TestInfo** result) const = 0;
 };
 
 // The factory for the model. The main purpose is to hide the creation of
 // different models for different platforms.
-DiagnosticsModel* MakeDiagnosticsModel(const CommandLine& cmdline);
+DiagnosticsModel* MakeDiagnosticsModel(const base::CommandLine& cmdline);
 
 }  // namespace diagnostics
 

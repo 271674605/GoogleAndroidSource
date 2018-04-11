@@ -46,10 +46,23 @@ common_SRC_FILES := \
 	xmlsave.c \
 	xmlmodule.c \
 	xmlwriter.c \
-	schematron.c
+	schematron.c \
+	buf.c \
 
 common_C_INCLUDES += \
-	$(LOCAL_PATH)/include
+	$(LOCAL_PATH)/include \
+	external/icu/icu4c/source/common \
+
+# Turn off warnings to prevent log message spam
+# These warnings are not disabled because they are not supported by gcc 4.2.1
+# which is used by darwin.
+# -Wno-enum-compare
+# -Wno-array-bounds
+
+DISABLED_WARNING_FLAGS := \
+	-Wno-format \
+	-Wno-pointer-sign \
+	-Wno-sign-compare
 
 # For the device
 # =====================================================
@@ -57,9 +70,17 @@ common_C_INCLUDES += \
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := $(common_SRC_FILES)
-LOCAL_C_INCLUDES += $(common_C_INCLUDES) external/icu4c/common
+LOCAL_C_INCLUDES += $(common_C_INCLUDES)
 LOCAL_SHARED_LIBRARIES += $(common_SHARED_LIBRARIES)
 LOCAL_CFLAGS += -fvisibility=hidden
+LOCAL_CFLAGS += $(DISABLED_WARNING_FLAGS)
+
+LOCAL_CFLAGS += -DLIBXML_SCHEMAS_ENABLED
+LOCAL_CFLAGS += -DLIBXML_REGEXP_ENABLED
+LOCAL_CFLAGS += -DLIBXML_AUTOMATA_ENABLED
+LOCAL_CFLAGS += -DLIBXML_PATTERN_ENABLED
+LOCAL_CFLAGS += -DLIBXML_UNICODE_ENABLED
+LOCAL_CFLAGS += -DLIBXML_VALID_ENABLED
 
 LOCAL_MODULE:= libxml2
 
@@ -71,7 +92,8 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES := $(common_SRC_FILES)
-LOCAL_C_INCLUDES += $(common_C_INCLUDES) external/icu4c/common
+LOCAL_C_INCLUDES += $(common_C_INCLUDES)
+LOCAL_CFLAGS += $(DISABLED_WARNING_FLAGS)
 LOCAL_SHARED_LIBRARIES += $(common_SHARED_LIBRARIES)
 LOCAL_MODULE:= libxml2
 include $(BUILD_HOST_STATIC_LIBRARY)

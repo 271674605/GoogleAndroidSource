@@ -39,8 +39,8 @@ struct selabel_sub {
 };
 
 struct selabel_lookup_rec {
-	security_context_t ctx_raw;
-	security_context_t ctx_trans;
+	char * ctx_raw;
+	char * ctx_trans;
 	int validated;
 };
 
@@ -54,6 +54,11 @@ struct selabel_handle {
 						   const char *key, int type);
 	void (*func_close) (struct selabel_handle *h);
 	void (*func_stats) (struct selabel_handle *h);
+	bool (*func_partial_match) (struct selabel_handle *h, const char *key);
+	struct selabel_lookup_rec *(*func_lookup_best_match) (struct selabel_handle *h,
+							 const char *key,
+							 const char **aliases,
+							 int type);
 
 	/* supports backend-specific state information */
 	void *data;

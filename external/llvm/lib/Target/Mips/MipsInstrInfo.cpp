@@ -22,10 +22,13 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define GET_INSTRINFO_CTOR
+using namespace llvm;
+
+#define GET_INSTRINFO_CTOR_DTOR
 #include "MipsGenInstrInfo.inc"
 
-using namespace llvm;
+// Pin the vtable to this file.
+void MipsInstrInfo::anchor() {}
 
 MipsInstrInfo::MipsInstrInfo(MipsTargetMachine &tm, unsigned UncondBr)
   : MipsGenInstrInfo(Mips::ADJCALLSTACKDOWN, Mips::ADJCALLSTACKUP),
@@ -192,7 +195,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
   if (I == REnd || !isUnpredicatedTerminator(&*I)) {
     // This block ends with no branches (it just falls through to its succ).
     // Leave TBB/FBB null.
-    TBB = FBB = NULL;
+    TBB = FBB = nullptr;
     return BT_NoBranch;
   }
 
@@ -206,7 +209,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
 
   // Get the second to last instruction in the block.
   unsigned SecondLastOpc = 0;
-  MachineInstr *SecondLastInst = NULL;
+  MachineInstr *SecondLastInst = nullptr;
 
   if (++I != REnd) {
     SecondLastInst = &*I;
@@ -219,7 +222,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
 
   // If there is only one terminator instruction, process it.
   if (!SecondLastOpc) {
-    // Unconditional branch
+    // Unconditional branch.
     if (LastOpc == UncondBrOpc) {
       TBB = LastInst->getOperand(0).getMBB();
       return BT_Uncond;
@@ -271,6 +274,10 @@ unsigned MipsInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
     const char *AsmStr = MI->getOperand(0).getSymbolName();
     return getInlineAsmLength(AsmStr, *MF->getTarget().getMCAsmInfo());
   }
+  case Mips::CONSTPOOL_ENTRY:
+    // If this machine instr is a constant pool entry, its size is recorded as
+    // operand #2.
+    return MI->getOperand(2).getImm();
   }
 }
 

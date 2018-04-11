@@ -11,21 +11,23 @@
 #include "content/browser/browser_process_sub_thread.h"
 #include "content/public/browser/browser_main_runner.h"
 
-class CommandLine;
-
 namespace base {
+class CommandLine;
+class FilePath;
 class HighResolutionTimerManager;
 class MessageLoop;
 class PowerMonitor;
 class SystemMonitor;
 namespace debug {
 class TraceMemoryController;
+class TraceEventSystemStatsMonitor;
 }  // namespace debug
 }  // namespace base
 
 namespace media {
 class AudioManager;
-class MIDIManager;
+class MidiManager;
+class UserInputMonitor;
 }  // namespace media
 
 namespace net {
@@ -41,13 +43,16 @@ class BrowserThreadImpl;
 class MediaStreamManager;
 class ResourceDispatcherHostImpl;
 class SpeechRecognitionManagerImpl;
-class SystemMessageWindowWin;
+class StartupTaskRunner;
+class TimeZoneMonitor;
 struct MainFunctionParams;
 
 #if defined(OS_LINUX)
 class DeviceMonitorLinux;
 #elif defined(OS_MACOSX)
 class DeviceMonitorMac;
+#elif defined(OS_WIN)
+class SystemMessageWindowWin;
 #endif
 
 // Implements the main browser loop stages called from BrowserMainRunner.
@@ -64,10 +69,15 @@ class CONTENT_EXPORT BrowserMainLoop {
   void Init();
 
   void EarlyInitialization();
-  void InitializeToolkit();
+  // Initializes the toolkit. Returns whether the toolkit initialization was
+  // successful or not.
+  bool InitializeToolkit();
   void MainMessageLoopStart();
 
-  // Create the tasks we need to complete startup.
+  // Create and start running the tasks we need to complete startup. Note that
+  // this can be called more than once (currently only on Android) if we get a
+  // request for synchronous startup while the tasks created by asynchronous
+  // startup are still running.
   void CreateStartupTasks();
 
   // Perform the default message loop run logic.
@@ -86,8 +96,19 @@ class CONTENT_EXPORT BrowserMainLoop {
   MediaStreamManager* media_stream_manager() const {
     return media_stream_manager_.get();
   }
-  media::MIDIManager* midi_manager() const { return midi_manager_.get(); }
+  media::UserInputMonitor* user_input_monitor() const {
+    return user_input_monitor_.get();
+  }
+  media::MidiManager* midi_manager() const { return midi_manager_.get(); }
   base::Thread* indexed_db_thread() const { return indexed_db_thread_.get(); }
+
+  bool is_tracing_startup() const { return is_tracing_startup_; }
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  DeviceMonitorMac* device_monitor_mac() const {
+    return device_monitor_mac_.get();
+  }
+#endif
 
  private:
   class MemoryObserver;
@@ -109,9 +130,12 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   void MainMessageLoopRun();
 
+  void InitStartupTracing(const base::CommandLine& command_line);
+  void EndStartupTracing(const base::FilePath& trace_file);
+
   // Members initialized on construction ---------------------------------------
   const MainFunctionParams& parameters_;
-  const CommandLine& parsed_command_line_;
+  const base::CommandLine& parsed_command_line_;
   int result_code_;
   // True if the non-UI threads were created.
   bool created_threads_;
@@ -122,19 +146,23 @@ class CONTENT_EXPORT BrowserMainLoop {
   scoped_ptr<base::PowerMonitor> power_monitor_;
   scoped_ptr<base::HighResolutionTimerManager> hi_res_timer_manager_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
+  // user_input_monitor_ has to outlive audio_manager_, so declared first.
+  scoped_ptr<media::UserInputMonitor> user_input_monitor_;
   scoped_ptr<media::AudioManager> audio_manager_;
-  scoped_ptr<media::MIDIManager> midi_manager_;
+  scoped_ptr<media::MidiManager> midi_manager_;
   scoped_ptr<AudioMirroringManager> audio_mirroring_manager_;
   scoped_ptr<MediaStreamManager> media_stream_manager_;
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
 #if defined(OS_WIN)
   scoped_ptr<SystemMessageWindowWin> system_message_window_;
-#elif defined(OS_LINUX)
+#elif defined(USE_UDEV)
   scoped_ptr<DeviceMonitorLinux> device_monitor_linux_;
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
   scoped_ptr<DeviceMonitorMac> device_monitor_mac_;
 #endif
+  // The startup task runner is created by CreateStartupTasks()
+  scoped_ptr<StartupTaskRunner> startup_task_runner_;
 
   // Destroy parts_ before main_message_loop_ (required) and before other
   // classes constructed in content (but after main_thread_).
@@ -147,6 +175,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   // Members initialized in |BrowserThreadsStarted()| --------------------------
   scoped_ptr<ResourceDispatcherHostImpl> resource_dispatcher_host_;
   scoped_ptr<SpeechRecognitionManagerImpl> speech_recognition_manager_;
+  scoped_ptr<TimeZoneMonitor> time_zone_monitor_;
 
   // Members initialized in |RunMainMessageLoopParts()| ------------------------
   scoped_ptr<BrowserProcessSubThread> db_thread_;
@@ -158,6 +187,9 @@ class CONTENT_EXPORT BrowserMainLoop {
   scoped_ptr<base::Thread> indexed_db_thread_;
   scoped_ptr<MemoryObserver> memory_observer_;
   scoped_ptr<base::debug::TraceMemoryController> trace_memory_controller_;
+  scoped_ptr<base::debug::TraceEventSystemStatsMonitor> system_stats_monitor_;
+
+  bool is_tracing_startup_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserMainLoop);
 };

@@ -55,6 +55,7 @@ import com.android.dx.rop.cst.CstType;
 import com.android.dx.rop.type.StdTypeList;
 import com.android.dx.rop.type.Type;
 import com.android.dx.rop.type.TypeList;
+import com.android.dx.rop.type.Prototype;
 import com.android.dx.util.IntList;
 
 import java.io.FileWriter;
@@ -84,7 +85,6 @@ public class DAsm {
 
     // options for dex output
     DexOptions dexOptions = new DexOptions();
-
     // file being processed
     DexFile dexFile;
     int line_num;
@@ -403,8 +403,11 @@ public class DAsm {
         regs_count = 1;
 
         method_nat = new CstNat(new CstString(name), new CstString(descriptor));
-        if (method_nat.isClassInit()) access |= AccessFlags.ACC_STATIC;
-        if (method_nat.isInstanceInit()) access |= AccessFlags.ACC_CONSTRUCTOR;
+        if (method_nat.isClassInit()) {
+            access |= (AccessFlags.ACC_CONSTRUCTOR | AccessFlags.ACC_STATIC);
+        } else if (method_nat.isInstanceInit()) {
+            access |= AccessFlags.ACC_CONSTRUCTOR;
+        }
 
         method_acc = access;
     }
@@ -1519,8 +1522,12 @@ public class DAsm {
      * Creates processor of instruction list.
      */
     private void createOutputFinisher() {
-        if (output_finisher == null)
-            output_finisher = new OutputFinisher(dexOptions, 5, regs_count);
+        if (output_finisher == null) {
+            dexOptions.ALIGN_64BIT_REGS_IN_OUTPUT_FINISHER = false;
+            int paramSize = Prototype.intern(method_nat.getDescriptor()
+                .getString()).getParameterTypes().getWordCount();
+            output_finisher = new OutputFinisher(dexOptions, 5, regs_count, paramSize);
+        }
     }
 
     /**

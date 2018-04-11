@@ -17,11 +17,7 @@
 
 package com.squareup.okhttp;
 
-import java.io.IOException;
 import java.net.Proxy;
-import java.net.URL;
-import java.net.URLConnection;
-import java.net.URLStreamHandler;
 import java.util.Arrays;
 import java.util.List;
 
@@ -30,7 +26,9 @@ import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 
 public final class HttpsHandler extends HttpHandler {
-    private static final List<String> ENABLED_TRANSPORTS = Arrays.asList("http/1.1");
+    private static final List<Protocol> ENABLED_PROTOCOLS = Arrays.asList(Protocol.HTTP_11);
+    private final ConfigAwareConnectionPool configAwareConnectionPool =
+            ConfigAwareConnectionPool.getInstance();
 
     @Override protected int getDefaultPort() {
         return 443;
@@ -38,8 +36,20 @@ public final class HttpsHandler extends HttpHandler {
 
     @Override
     protected OkHttpClient newOkHttpClient(Proxy proxy) {
-        OkHttpClient client = super.newOkHttpClient(proxy);
-        client.setTransports(ENABLED_TRANSPORTS);
+        OkHttpClient okHttpClient = createHttpsOkHttpClient(proxy);
+        okHttpClient.setConnectionPool(configAwareConnectionPool.get());
+        return okHttpClient;
+    }
+
+    /**
+     * Creates an OkHttpClient suitable for creating {@link HttpsURLConnection} instances on
+     * Android.
+     */
+    public static OkHttpClient createHttpsOkHttpClient(Proxy proxy) {
+        // The HTTPS OkHttpClient is an HTTP OkHttpClient with extra configuration.
+        OkHttpClient client = HttpHandler.createHttpOkHttpClient(proxy);
+
+        client.setProtocols(ENABLED_PROTOCOLS);
 
         HostnameVerifier verifier = HttpsURLConnection.getDefaultHostnameVerifier();
         // Assume that the internal verifier is better than the
@@ -47,6 +57,10 @@ public final class HttpsHandler extends HttpHandler {
         if (!(verifier instanceof DefaultHostnameVerifier)) {
             client.setHostnameVerifier(verifier);
         }
+        // OkHttp does not automatically honor the system-wide SSLSocketFactory set with
+        // HttpsURLConnection.setDefaultSSLSocketFactory().
+        // See https://github.com/square/okhttp/issues/184 for details.
+        client.setSslSocketFactory(HttpsURLConnection.getDefaultSSLSocketFactory());
 
         return client;
     }

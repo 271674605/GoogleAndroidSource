@@ -10,6 +10,8 @@
 
 #include "tools/gn/value.h"
 
+extern const char kPattern_Help[];
+
 class Pattern {
  public:
   struct Subrange {
@@ -71,6 +73,8 @@ class PatternList {
   ~PatternList();
 
   bool is_empty() const { return patterns_.empty(); }
+
+  void Append(const Pattern& pattern);
 
   // Initializes the pattern list from a give list of pattern strings. Sets
   // |*err| on failure.

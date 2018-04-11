@@ -9,94 +9,170 @@
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MISC_H_
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
-#include "chrome/browser/chromeos/extensions/file_manager/zip_file_creator.h"
+#include "google_apis/drive/gdata_errorcode.h"
 
-namespace file_manager {
+namespace google_apis {
+class AuthServiceInterface;
+}
 
-// Implements the chrome.fileBrowserPrivate.logoutUser method.
-class LogoutUserFunction : public SyncExtensionFunction {
+namespace extensions {
+
+// Implements the chrome.fileBrowserPrivate.logoutUserForReauthentication
+// method.
+class FileBrowserPrivateLogoutUserForReauthenticationFunction
+    : public ChromeSyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.logoutUser",
-                             FILEBROWSERPRIVATE_LOGOUTUSER)
-
-  LogoutUserFunction();
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.logoutUserForReauthentication",
+                             FILEBROWSERPRIVATE_LOGOUTUSERFORREAUTHENTICATION)
 
  protected:
-  virtual ~LogoutUserFunction();
+  virtual ~FileBrowserPrivateLogoutUserForReauthenticationFunction() {}
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.getPreferences method.
 // Gets settings for Files.app.
-class GetPreferencesFunction : public SyncExtensionFunction {
+class FileBrowserPrivateGetPreferencesFunction
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getPreferences",
                              FILEBROWSERPRIVATE_GETPREFERENCES)
 
-  GetPreferencesFunction();
-
  protected:
-  virtual ~GetPreferencesFunction();
+  virtual ~FileBrowserPrivateGetPreferencesFunction() {}
 
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.setPreferences method.
 // Sets settings for Files.app.
-class SetPreferencesFunction : public SyncExtensionFunction {
+class FileBrowserPrivateSetPreferencesFunction
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.setPreferences",
                              FILEBROWSERPRIVATE_SETPREFERENCES)
 
-  SetPreferencesFunction();
-
  protected:
-  virtual ~SetPreferencesFunction();
+  virtual ~FileBrowserPrivateSetPreferencesFunction() {}
 
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.zipSelection method.
 // Creates a zip file for the selected files.
-class ZipSelectionFunction : public LoggedAsyncExtensionFunction,
-                             public ZipFileCreator::Observer {
+class FileBrowserPrivateZipSelectionFunction
+    : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.zipSelection",
                              FILEBROWSERPRIVATE_ZIPSELECTION)
 
-  ZipSelectionFunction();
+  FileBrowserPrivateZipSelectionFunction();
 
  protected:
-  virtual ~ZipSelectionFunction();
+  virtual ~FileBrowserPrivateZipSelectionFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
-  // extensions::ZipFileCreator::Delegate overrides.
-  virtual void OnZipDone(bool success) OVERRIDE;
-
- private:
-  scoped_refptr<ZipFileCreator> zip_file_creator_;
+  // Receives the result from ZipFileCreator.
+  void OnZipDone(bool success);
 };
 
 // Implements the chrome.fileBrowserPrivate.zoom method.
 // Changes the zoom level of the file manager by internally calling
 // RenderViewHost::Zoom(). TODO(hirono): Remove this function once the zoom
 // level change is supported for all apps. crbug.com/227175.
-class ZoomFunction : public SyncExtensionFunction {
+class FileBrowserPrivateZoomFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.zoom",
                              FILEBROWSERPRIVATE_ZOOM);
 
-  ZoomFunction();
-
  protected:
-  virtual ~ZoomFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual ~FileBrowserPrivateZoomFunction() {}
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunSync() OVERRIDE;
 };
 
-}  // namespace file_manager
+// Implements the chrome.fileBrowserPrivate.installWebstoreItem method.
+class FileBrowserPrivateInstallWebstoreItemFunction
+    : public LoggedAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.installWebstoreItem",
+                             FILEBROWSERPRIVATE_INSTALLWEBSTOREITEM);
+
+ protected:
+  virtual ~FileBrowserPrivateInstallWebstoreItemFunction() {}
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunAsync() OVERRIDE;
+  void OnInstallComplete(bool success, const std::string& error);
+
+ private:
+  std::string webstore_item_id_;
+};
+
+class FileBrowserPrivateRequestWebStoreAccessTokenFunction
+    : public LoggedAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.requestWebStoreAccessToken",
+                             FILEBROWSERPRIVATE_REQUESTWEBSTOREACCESSTOKEN);
+
+  FileBrowserPrivateRequestWebStoreAccessTokenFunction();
+
+ protected:
+  virtual ~FileBrowserPrivateRequestWebStoreAccessTokenFunction();
+  virtual bool RunAsync() OVERRIDE;
+
+ private:
+  scoped_ptr<google_apis::AuthServiceInterface> auth_service_;
+
+  void OnAccessTokenFetched(google_apis::GDataErrorCode code,
+                            const std::string& access_token);
+
+};
+
+class FileBrowserPrivateGetProfilesFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getProfiles",
+                             FILEBROWSERPRIVATE_GETPROFILES);
+
+ protected:
+  virtual ~FileBrowserPrivateGetProfilesFunction() {}
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunSync() OVERRIDE;
+};
+
+class FileBrowserPrivateVisitDesktopFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.visitDesktop",
+                             FILEBROWSERPRIVATE_VISITDESKTOP);
+
+ protected:
+  virtual ~FileBrowserPrivateVisitDesktopFunction() {}
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunSync() OVERRIDE;
+};
+
+// Implements the chrome.fileBrowserPrivate.openInspector method.
+class FileBrowserPrivateOpenInspectorFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.openInspector",
+                             FILEBROWSERPRIVATE_OPENINSPECTOR);
+
+ protected:
+  virtual ~FileBrowserPrivateOpenInspectorFunction() {}
+
+  virtual bool RunSync() OVERRIDE;
+};
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MISC_H_

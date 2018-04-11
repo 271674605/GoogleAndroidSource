@@ -51,6 +51,7 @@ import com.android.io.StreamException;
 import com.android.resources.ResourceFolderType;
 import com.android.sdklib.IAndroidTarget;
 import com.android.utils.ILogger;
+import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
 
 import org.eclipse.core.commands.Command;
@@ -123,6 +124,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The activator class controls the plug-in life cycle
@@ -153,8 +155,7 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
     private LoadStatus mSdkLoadedStatus = LoadStatus.LOADING;
     /** Project to update once the SDK is loaded.
      * Any access MUST be in a synchronized(mPostLoadProjectsToResolve) block */
-    private final ArrayList<IJavaProject> mPostLoadProjectsToResolve =
-            new ArrayList<IJavaProject>();
+    private final Set<IJavaProject> mPostLoadProjectsToResolve = Sets.newHashSet();
     /** Project to check validity of cache vs actual once the SDK is loaded.
      * Any access MUST be in a synchronized(mPostLoadProjectsToResolve) block */
     private final ArrayList<IJavaProject> mPostLoadProjectsToCheck = new ArrayList<IJavaProject>();
@@ -377,11 +378,6 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
         return SdkConstants.OS_SDK_PLATFORM_TOOLS_FOLDER + SdkConstants.FN_ADB;
     }
 
-    /** Returns the zipalign path relative to the sdk folder */
-    public static String getOsRelativeZipAlign() {
-        return SdkConstants.OS_SDK_TOOLS_FOLDER + SdkConstants.FN_ZIPALIGN;
-    }
-
     /** Returns the emulator path relative to the sdk folder */
     public static String getOsRelativeEmulator() {
         return SdkConstants.OS_SDK_TOOLS_FOLDER + SdkConstants.FN_EMULATOR;
@@ -397,11 +393,6 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
         return getOsSdkFolder() + getOsRelativeAdb();
     }
 
-    /** Returns the absolute zipalign path */
-    public static String getOsAbsoluteZipAlign() {
-        return getOsSdkFolder() + getOsRelativeZipAlign();
-    }
-
     /** Returns the absolute traceview path */
     public static String getOsAbsoluteTraceview() {
         return getOsSdkFolder() + SdkConstants.OS_SDK_TOOLS_FOLDER +
@@ -414,7 +405,7 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
     }
 
     public static String getOsAbsoluteHprofConv() {
-        return getOsSdkFolder() + SdkConstants.OS_SDK_TOOLS_FOLDER +
+        return getOsSdkFolder() + SdkConstants.OS_SDK_PLATFORM_TOOLS_FOLDER +
                 AdtConstants.FN_HPROF_CONV;
     }
 
@@ -1809,6 +1800,12 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
      * and updates opened projects.
      * <p/>
      * The operation is asynchronous and happens in a background eclipse job.
+     * <p/>
+     * This operation is called in multiple places and should be reasonably
+     * cheap and conservative. The goal is to automatically refresh the SDK
+     * when it is obvious it has changed so when not sure the code should
+     * tend to not reload and avoid reloading too often (which is an expensive
+     * operation that has a lot of user impact.)
      */
     public void refreshSdk() {
         // SDK can't have changed if we haven't loaded it yet.
@@ -1821,8 +1818,29 @@ public class AdtPlugin extends AbstractUIPlugin implements ILogger {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
                 // SDK has changed if its location path is different.
-                boolean changed = sdk.getSdkLocation() == null ||
-                                 !sdk.getSdkLocation().equals(AdtPrefs.getPrefs().getOsSdkFolder());
+                File location = sdk.getSdkFileLocation();
+                boolean changed = location == null || !location.isDirectory();
+
+                if (!changed) {
+                    assert location != null;
+                    File prefLocation = new File(AdtPrefs.getPrefs().getOsSdkFolder());
+                    changed = !location.equals(prefLocation);
+
+                    if (changed) {
+                        // Basic file path comparison indicates they are not the same.
+                        // Let's dig a bit deeper.
+                        try {
+                            location     = location.getCanonicalFile();
+                            prefLocation = prefLocation.getCanonicalFile();
+                            changed = !location.equals(prefLocation);
+                        } catch (IOException ignore) {
+                            // There's no real reason for the canonicalization to fail
+                            // if the paths map to actual directories. And if they don't
+                            // this should have been caught above.
+                        }
+                    }
+                }
+
                 if (!changed) {
                     // Check whether the target directories has potentially changed.
                     changed = sdk.haveTargetsChanged();

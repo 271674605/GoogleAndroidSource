@@ -33,6 +33,7 @@ typedef struct spec {
 	int matches;		/* number of matching pathnames */
 	int hasMetaChars;	/* regular expression has meta-chars */
 	int stem_id;		/* indicates which stem-compression item */
+	size_t prefix_len;      /* length of fixed path prefix */
 } spec_t;
 
 /* A regular expression stem */
@@ -104,14 +105,14 @@ static int find_stem_from_spec(struct saved_data *data, const char *buf)
 	if (data->alloc_stems == num) {
 		stem_t *tmp_arr;
 		data->alloc_stems = data->alloc_stems * 2 + 16;
-		tmp_arr = realloc(data->stem_arr,
+		tmp_arr = (stem_t *) realloc(data->stem_arr,
 				  sizeof(stem_t) * data->alloc_stems);
 		if (!tmp_arr)
 			return -1;
 		data->stem_arr = tmp_arr;
 	}
 	data->stem_arr[num].len = stem_len;
-	data->stem_arr[num].buf = malloc(stem_len + 1);
+	data->stem_arr[num].buf = (char *) malloc(stem_len + 1);
 	if (!data->stem_arr[num].buf)
 		return -1;
 	memcpy(data->stem_arr[num].buf, buf, stem_len);
@@ -184,7 +185,7 @@ static int nodups_specs(struct saved_data *data, const char *path)
 static void spec_hasMetaChars(struct spec *spec)
 {
 	char *c;
-	int len;
+	size_t len;
 	char *end;
 
 	c = spec->regex_str;
@@ -192,6 +193,7 @@ static void spec_hasMetaChars(struct spec *spec)
 	end = c + len;
 
 	spec->hasMetaChars = 0;
+	spec->prefix_len = len;
 
 	/* Look at each character in the RE specification string for a 
 	 * meta character. Return when any meta character reached. */
@@ -208,6 +210,7 @@ static void spec_hasMetaChars(struct spec *spec)
 		case '(':
 		case '{':
 			spec->hasMetaChars = 1;
+			spec->prefix_len = c - spec->regex_str;
 			return;
 		case '\\':	/* skip the next character */
 			c++;
@@ -240,7 +243,7 @@ static int compile_regex(struct saved_data *data, spec_t *spec, char **errbuf)
 
 	/* Anchor the regular expression. */
 	len = strlen(reg_buf);
-	cp = anchored_regex = malloc(len + 3);
+	cp = anchored_regex = (char *) malloc(len + 3);
 	if (!anchored_regex)
 		return -1;
 	/* Create ^...$ regexp.  */
@@ -257,7 +260,7 @@ static int compile_regex(struct saved_data *data, spec_t *spec, char **errbuf)
 		size_t errsz = 0;
 		errsz = regerror(regerr, &spec->regex, NULL, 0);
 		if (errsz && errbuf)
-			*errbuf = malloc(errsz);
+			*errbuf = (char *) malloc(errsz);
 		if (errbuf && *errbuf)
 			(void)regerror(regerr, &spec->regex,
 				       *errbuf, errsz);
@@ -493,7 +496,7 @@ static int init(struct selabel_handle *rec, const struct selinux_opt *opts,
 				goto finish;
 			}
 			if (NULL == (data->spec_arr =
-				     malloc(sizeof(spec_t) * data->nspec)))
+				     (spec_t *) malloc(sizeof(spec_t) * data->nspec)))
 				goto finish;
 			memset(data->spec_arr, 0, sizeof(spec_t)*data->nspec);
 			maxnspec = data->nspec;
@@ -506,7 +509,7 @@ static int init(struct selabel_handle *rec, const struct selinux_opt *opts,
 	}
 
 	/* Move exact pathname specifications to the end. */
-	spec_copy = malloc(sizeof(spec_t) * data->nspec);
+	spec_copy = (spec_t *) malloc(sizeof(spec_t) * data->nspec);
 	if (!spec_copy)
 		goto finish;
 	j = 0;
@@ -566,18 +569,21 @@ static void closef(struct selabel_handle *rec)
 	free(data);
 }
 
-static struct selabel_lookup_rec *lookup(struct selabel_handle *rec,
-					 const char *key, int type)
+static spec_t *lookup_common(struct selabel_handle *rec,
+			     const char *key,
+			     int type,
+			     bool partial)
 {
 	struct saved_data *data = (struct saved_data *)rec->data;
 	spec_t *spec_arr = data->spec_arr;
 	int i, rc, file_stem;
 	mode_t mode = (mode_t)type;
 	const char *buf;
-	struct selabel_lookup_rec *ret = NULL;
+	spec_t *ret = NULL;
 	char *clean_key = NULL;
 	const char *prev_slash, *next_slash;
 	unsigned int sofar = 0;
+	size_t keylen = strlen(key);
 
 	if (!data->nspec) {
 		errno = ENOENT;
@@ -586,7 +592,7 @@ static struct selabel_lookup_rec *lookup(struct selabel_handle *rec,
 
 	/* Remove duplicate slashes */
 	if ((next_slash = strstr(key, "//"))) {
-		clean_key = malloc(strlen(key) + 1);
+		clean_key = (char *) malloc(strlen(key) + 1);
 		if (!clean_key)
 			goto finish;
 		prev_slash = key;
@@ -628,6 +634,29 @@ static struct selabel_lookup_rec *lookup(struct selabel_handle *rec,
 				spec_arr[i].matches++;
 				break;
 			}
+
+			if (partial) {
+				/*
+				 * We already checked above to see if the
+				 * key has any direct match.  Now we just need
+				 * to check for partial matches.
+				 * Since POSIX regex functions do not support
+				 * partial match, we crudely approximate it
+				 * via a prefix match.
+				 * This is imprecise and could yield
+				 * false positives or negatives but
+				 * appears to work with our current set of
+				 * regex strings.
+				 * Convert to using pcre partial match
+				 * if/when pcre becomes available in Android.
+				 */
+				if (spec_arr[i].prefix_len > 1 &&
+				    !strncmp(key, spec_arr[i].regex_str,
+					     keylen < spec_arr[i].prefix_len ?
+					     keylen : spec_arr[i].prefix_len))
+					break;
+			}
+
 			if (rc == REG_NOMATCH)
 				continue;
 			/* else it's an error */
@@ -641,11 +670,81 @@ static struct selabel_lookup_rec *lookup(struct selabel_handle *rec,
 		goto finish;
 	}
 
-	ret = &spec_arr[i].lr;
+	ret = &spec_arr[i];
 
 finish:
 	free(clean_key);
 	return ret;
+}
+
+static struct selabel_lookup_rec *lookup(struct selabel_handle *rec,
+					 const char *key, int type)
+{
+	spec_t *spec;
+	spec = lookup_common(rec, key, type, false);
+	if (spec)
+		return &spec->lr;
+	return NULL;
+}
+
+static bool partial_match(struct selabel_handle *rec, const char *key)
+{
+	return lookup_common(rec, key, 0, true) ? true : false;
+}
+
+static struct selabel_lookup_rec *lookup_best_match(struct selabel_handle *rec,
+						    const char *key,
+						    const char **aliases,
+						    int type)
+{
+	size_t n, i;
+	int best = -1;
+	spec_t **specs;
+	size_t prefix_len = 0;
+	struct selabel_lookup_rec *lr = NULL;
+
+	if (!aliases || !aliases[0])
+		return lookup(rec, key, type);
+
+	for (n = 0; aliases[n]; n++)
+		;
+
+	specs = calloc(n+1, sizeof(spec_t *));
+	if (!specs)
+		return NULL;
+	specs[0] = lookup_common(rec, key, type, false);
+	if (specs[0]) {
+		if (!specs[0]->hasMetaChars) {
+			/* exact match on key */
+			lr = &specs[0]->lr;
+			goto out;
+		}
+		best = 0;
+		prefix_len = specs[0]->prefix_len;
+	}
+	for (i = 1; i <= n; i++) {
+		specs[i] = lookup_common(rec, aliases[i-1], type, false);
+		if (specs[i]) {
+			if (!specs[i]->hasMetaChars) {
+				/* exact match on alias */
+				lr = &specs[i]->lr;
+				goto out;
+			}
+			if (specs[i]->prefix_len > prefix_len) {
+				best = i;
+				prefix_len = specs[i]->prefix_len;
+			}
+		}
+	}
+
+	if (best >= 0) {
+		/* longest fixed prefix match on key or alias */
+		lr = &specs[best]->lr;
+	}
+
+out:
+	free(specs);
+	return lr;
 }
 
 static void stats(struct selabel_handle *rec)
@@ -686,6 +785,8 @@ int selabel_file_init(struct selabel_handle *rec, const struct selinux_opt *opts
 	rec->func_close = &closef;
 	rec->func_stats = &stats;
 	rec->func_lookup = &lookup;
+	rec->func_partial_match = &partial_match;
+	rec->func_lookup_best_match = &lookup_best_match;
 
 	return init(rec, opts, nopts);
 }

@@ -26,6 +26,7 @@ import android.content.res.Resources;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.drawable.TransitionDrawable;
+import android.os.UserManager;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -151,6 +152,14 @@ public class DeleteDropTarget extends ButtonDropTarget {
             } else {
                 isVisible = false;
             }
+            // If the user is not allowed to access the app details page or uninstall, then don't
+            // let them uninstall from here either.
+            UserManager userManager = (UserManager)
+                    getContext().getSystemService(Context.USER_SERVICE);
+            if (userManager.hasUserRestriction(UserManager.DISALLOW_APPS_CONTROL)
+                    || userManager.hasUserRestriction(UserManager.DISALLOW_UNINSTALL_APPS)) {
+                isVisible = false;
+            }
         }
 
         if (isUninstall) {
@@ -220,7 +229,7 @@ public class DeleteDropTarget extends ButtonDropTarget {
 
         if (isAllAppsApplication(d.dragSource, item)) {
             // Uninstall the application if it is being dragged from AppsCustomize
-            mLauncher.startApplicationUninstallActivity((ApplicationInfo) item);
+            mLauncher.startApplicationUninstallActivity((ApplicationInfo) item, item.user);
         } else if (isWorkspaceOrFolderApplication(d)) {
             LauncherModel.deleteItemFromDatabase(mLauncher, item);
         } else if (isWorkspaceFolder(d)) {
@@ -420,8 +429,6 @@ public class DeleteDropTarget extends ButtonDropTarget {
         Runnable onAnimationEndRunnable = new Runnable() {
             @Override
             public void run() {
-                mSearchDropTargetBar.onDragEnd();
-
                 // If we are dragging from AllApps, then we allow AppsCustomizePagedView to clean up
                 // itself, otherwise, complete the drop to initiate the deletion process
                 if (!isAllApps) {

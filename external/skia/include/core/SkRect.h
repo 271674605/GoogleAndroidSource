@@ -157,6 +157,20 @@ struct SK_API SkIRect {
         fRight = fBottom = SK_MinS32;
     }
 
+    /**
+     *  Return a new IRect, built as an offset of this rect.
+     */
+    SkIRect makeOffset(int dx, int dy) const {
+        return MakeLTRB(fLeft + dx, fTop + dy, fRight + dx, fBottom + dy);
+    }
+
+    /**
+     *  Return a new IRect, built as an inset of this rect.
+     */
+    SkIRect makeInset(int dx, int dy) const {
+        return MakeLTRB(fLeft + dx, fTop + dy, fRight - dx, fBottom - dy);
+    }
+
     /** Offset set the rectangle by adding dx to its left and right,
         and adding dy to its top and bottom.
     */
@@ -371,6 +385,12 @@ struct SK_API SkRect {
         return r;
     }
 
+    static SkRect SK_WARN_UNUSED_RESULT MakeLargest() {
+        SkRect r;
+        r.setLargest();
+        return r;
+    }
+
     static SkRect SK_WARN_UNUSED_RESULT MakeWH(SkScalar w, SkScalar h) {
         SkRect r;
         r.set(0, 0, w, h);
@@ -395,7 +415,7 @@ struct SK_API SkRect {
         return r;
     }
 
-    // DEPRECATED: call Make(r)
+    SK_ATTR_DEPRECATED("use Make()")
     static SkRect SK_WARN_UNUSED_RESULT MakeFromIRect(const SkIRect& irect) {
         SkRect r;
         r.set(SkIntToScalar(irect.fLeft),
@@ -419,13 +439,17 @@ struct SK_API SkRect {
      */
     bool isEmpty() const { return fLeft >= fRight || fTop >= fBottom; }
 
+    bool isLargest() const { return SK_ScalarMin == fLeft &&
+                                    SK_ScalarMin == fTop &&
+                                    SK_ScalarMax == fRight &&
+                                    SK_ScalarMax == fBottom; }
+
     /**
      *  Returns true iff all values in the rect are finite. If any are
      *  infinite or NaN (or SK_FixedNaN when SkScalar is fixed) then this
      *  returns false.
      */
     bool isFinite() const {
-#ifdef SK_SCALAR_IS_FLOAT
         float accum = 0;
         accum *= fLeft;
         accum *= fTop;
@@ -438,13 +462,6 @@ struct SK_API SkRect {
         // value==value will be true iff value is not NaN
         // TODO: is it faster to say !accum or accum==accum?
         return accum == accum;
-#else
-        // use bit-or for speed, since we don't care about short-circuting the
-        // tests, and we expect the common case will be that we need to check all.
-        int isNaN = (SK_FixedNaN == fLeft)  | (SK_FixedNaN == fTop) |
-                    (SK_FixedNaN == fRight) | (SK_FixedNaN == fBottom);
-        return !isNaN;
-#endif
     }
 
     SkScalar    x() const { return fLeft; }
@@ -466,8 +483,9 @@ struct SK_API SkRect {
         return !SkScalarsEqual((SkScalar*)&a, (SkScalar*)&b, 4);
     }
 
-    /** return the 4 points that enclose the rectangle
-    */
+    /** return the 4 points that enclose the rectangle (top-left, top-right, bottom-right,
+        bottom-left). TODO: Consider adding param to control whether quad is CW or CCW.
+     */
     void toQuad(SkPoint quad[4]) const;
 
     /** Set this rectangle to the empty rectangle (0,0,0,0)
@@ -573,6 +591,20 @@ struct SK_API SkRect {
         fRight = fBottom = SK_ScalarMin;
     }
 
+    /**
+     *  Return a new Rect, built as an offset of this rect.
+     */
+    SkRect makeOffset(SkScalar dx, SkScalar dy) const {
+        return MakeLTRB(fLeft + dx, fTop + dy, fRight + dx, fBottom + dy);
+    }
+
+    /**
+     *  Return a new Rect, built as an inset of this rect.
+     */
+    SkRect makeInset(SkScalar dx, SkScalar dy) const {
+        return MakeLTRB(fLeft + dx, fTop + dy, fRight - dx, fBottom - dy);
+    }
+
     /** Offset set the rectangle by adding dx to its left and right,
         and adding dy to its top and bottom.
     */
@@ -621,6 +653,7 @@ struct SK_API SkRect {
         If either rectangle is empty, do nothing and return false.
     */
     bool intersect(const SkRect& r);
+    bool intersect2(const SkRect& r);
 
     /** If this rectangle intersects the rectangle specified by left, top, right, bottom,
         return true and set this rectangle to that intersection, otherwise return false
@@ -690,32 +723,19 @@ struct SK_API SkRect {
         fBottom = SkMaxScalar(y, fBottom);
     }
 
-    /**
-     *  Returns true if (p.fX,p.fY) is inside the rectangle, and the rectangle
-     *  is not empty.
-     *
-     *  Contains treats the left and top differently from the right and bottom.
-     *  The left and top coordinates of the rectangle are themselves considered
-     *  to be inside, while the right and bottom are not. Thus for the rectangle
-     *  {0, 0, 5, 10}, (0,0) is contained, but (0,10), (5,0) and (5,10) are not.
-     */
-    bool contains(const SkPoint& p) const {
-        return !this->isEmpty() &&
-               fLeft <= p.fX && p.fX < fRight && fTop <= p.fY && p.fY < fBottom;
+    /** Bulk version of growToInclude */
+    void growToInclude(const SkPoint pts[], int count) {
+        this->growToInclude(pts, sizeof(SkPoint), count);
     }
 
-    /**
-     *  Returns true if (x,y) is inside the rectangle, and the rectangle
-     *  is not empty.
-     *
-     *  Contains treats the left and top differently from the right and bottom.
-     *  The left and top coordinates of the rectangle are themselves considered
-     *  to be inside, while the right and bottom are not. Thus for the rectangle
-     *  {0, 0, 5, 10}, (0,0) is contained, but (0,10), (5,0) and (5,10) are not.
-     */
-    bool contains(SkScalar x, SkScalar y) const {
-        return  !this->isEmpty() &&
-                fLeft <= x && x < fRight && fTop <= y && y < fBottom;
+    /** Bulk version of growToInclude with stride. */
+    void growToInclude(const SkPoint pts[], size_t stride, int count) {
+        SkASSERT(count >= 0);
+        SkASSERT(stride >= sizeof(SkPoint));
+        const SkPoint* end = (const SkPoint*)((intptr_t)pts + count * stride);
+        for (; pts < end; pts = (const SkPoint*)((intptr_t)pts + stride)) {
+            this->growToInclude(pts->fX, pts->fY);
+        }
     }
 
     /**
@@ -723,6 +743,7 @@ struct SK_API SkRect {
      *  not empty.
      */
     bool contains(const SkRect& r) const {
+        // todo: can we eliminate the this->isEmpty check?
         return  !r.isEmpty() && !this->isEmpty() &&
                 fLeft <= r.fLeft && fTop <= r.fTop &&
                 fRight >= r.fRight && fBottom >= r.fBottom;
@@ -730,12 +751,30 @@ struct SK_API SkRect {
 
     /**
      *  Set the dst rectangle by rounding this rectangle's coordinates to their
-     *  nearest integer values using SkScalarRound.
+     *  nearest integer values using SkScalarRoundToInt.
      */
     void round(SkIRect* dst) const {
         SkASSERT(dst);
         dst->set(SkScalarRoundToInt(fLeft), SkScalarRoundToInt(fTop),
                  SkScalarRoundToInt(fRight), SkScalarRoundToInt(fBottom));
+    }
+
+    /**
+     *  Variant of round() that explicitly performs the rounding step (i.e. floor(x + 0.5)) using
+     *  double instead of SkScalar (float). It does this by calling SkDScalarRoundToInt(), which
+     *  may be slower than calling SkScalarRountToInt(), but gives slightly more accurate results.
+     *
+     *  e.g.
+     *      SkScalar x = 0.49999997f;
+     *      int ix = SkScalarRoundToInt(x);
+     *      SkASSERT(0 == ix);  // <--- fails
+     *      ix = SkDScalarRoundToInt(x);
+     *      SkASSERT(0 == ix);  // <--- succeeds
+     */
+    void dround(SkIRect* dst) const {
+        SkASSERT(dst);
+        dst->set(SkDScalarRoundToInt(fLeft), SkDScalarRoundToInt(fTop),
+                 SkDScalarRoundToInt(fRight), SkDScalarRoundToInt(fBottom));
     }
 
     /**
@@ -772,6 +811,15 @@ struct SK_API SkRect {
                  SkScalarFloorToInt(fRight), SkScalarFloorToInt(fBottom));
     }
 
+    /**
+     *  Return a new SkIRect which is contains the rounded coordinates of this
+     *  rect using SkScalarRoundToInt.
+     */
+    SkIRect round() const {
+        SkIRect ir;
+        this->round(&ir);
+        return ir;
+    }
 
     /**
      *  Swap top/bottom or left/right if there are flipped (i.e. if width()
@@ -785,6 +833,17 @@ struct SK_API SkRect {
      *  cast-safe way to treat the rect as an array of (4) SkScalars.
      */
     const SkScalar* asScalars() const { return &fLeft; }
+
+#ifdef SK_DEVELOPER
+    /**
+     * Dumps the rect using SkDebugf. This is intended for Skia development debugging. Don't
+     * rely on the existence of this function or the formatting of its output.
+     */
+    void dump() const {
+        SkDebugf("{ l: %f, t: %f, r: %f, b: %f }", fLeft, fTop, fRight, fBottom);
+    }
+#endif
+
 };
 
 #endif

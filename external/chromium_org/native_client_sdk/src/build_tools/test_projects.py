@@ -9,11 +9,12 @@ import subprocess
 import sys
 import time
 
-import buildbot_common
+import build_projects
 import build_version
+import buildbot_common
 import parse_dsc
 
-from build_paths import OUT_DIR, SRC_DIR, SDK_SRC_DIR
+from build_paths import OUT_DIR, SRC_DIR, SDK_SRC_DIR, SCRIPT_DIR
 
 sys.path.append(os.path.join(SDK_SRC_DIR, 'tools'))
 import getos
@@ -56,13 +57,22 @@ ALL_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
 #   input_event.glibc_debug_test
 #   input_event.glibc_release_test
 DISABLED_TESTS = [
-    # TODO(binji): Disable 3D examples on linux/win. See
+    # TODO(binji): Disable 3D examples on linux/win/mac. See
     # http://crbug.com/262379.
-    {'name': 'graphics_3d', 'platform': ('win', 'linux')},
+    {'name': 'graphics_3d', 'platform': ('win', 'linux', 'mac')},
+    # media_stream_audio uses audio input devices which are not supported.
+    {'name': 'media_stream_audio', 'platform': ('win', 'linux', 'mac')},
+    # media_stream_video uses 3D and webcam which are not supported.
+    {'name': 'media_stream_video', 'platform': ('win', 'linux', 'mac')},
+    # TODO(binji): These tests timeout on the trybots because the NEXEs take
+    # more than 40 seconds to load (!). See http://crbug.com/280753
+    {'name': 'nacl_io_test', 'platform': 'win', 'toolchain': 'glibc'},
+    # We don't test "getting_started/part1" because it would complicate the
+    # example.
+    # TODO(binji): figure out a way to inject the testing code without
+    # modifying the example; maybe an extension?
+    {'name': 'part1'},
 ]
-
-DEFAULT_RETRY_ON_FAILURE_TIMES = 3
-
 
 def ValidateToolchains(toolchains):
   invalid_toolchains = set(toolchains) - set(ALL_TOOLCHAINS)
@@ -77,11 +87,20 @@ def GetServingDirForProject(desc):
   return os.path.join(path, desc['NAME'])
 
 
+def GetRepoServingDirForProject(desc):
+  # This differs from GetServingDirForProject, because it returns the location
+  # within the Chrome repository of the project, not the "pepperdir".
+  return os.path.dirname(desc['FILEPATH'])
+
+
 def GetExecutableDirForProject(desc, toolchain, config):
   return os.path.join(GetServingDirForProject(desc), toolchain, config)
 
 
 def GetBrowserTesterCommand(desc, toolchain, config):
+  if browser_path is None:
+    buildbot_common.ErrorExit('Failed to find chrome browser using FindChrome.')
+
   args = [
     sys.executable,
     browser_tester_py,
@@ -89,21 +108,28 @@ def GetBrowserTesterCommand(desc, toolchain, config):
     '--timeout', '30.0',  # seconds
     # Prevent the infobar that shows up when requesting filesystem quota.
     '--browser_flag', '--unlimited-storage',
-    # Some samples need the use the socket API.  Enabling this for all
-    # tests should be harmless.
-    '--browser_flag', '--allow-nacl-socket-api=localhost',
+    '--enable_sockets',
+    # Prevent installing a new copy of PNaCl.
+    '--browser_flag', '--disable-component-update',
   ]
 
   args.extend(['--serving_dir', GetServingDirForProject(desc)])
-  exe_dir = GetExecutableDirForProject(desc, toolchain, config)
+  # Fall back on the example directory in the Chromium repo, to find test.js.
+  args.extend(['--serving_dir', GetRepoServingDirForProject(desc)])
+  # If it is not found there, fall back on the dummy one (in this directory.)
+  args.extend(['--serving_dir', SCRIPT_DIR])
 
   if toolchain == platform:
+    exe_dir = GetExecutableDirForProject(desc, toolchain, config)
     ppapi_plugin = os.path.join(exe_dir, desc['NAME'])
     if platform == 'win':
       ppapi_plugin += '.dll'
     else:
       ppapi_plugin += '.so'
     args.extend(['--ppapi_plugin', ppapi_plugin])
+
+    ppapi_plugin_mimetype = 'application/x-ppapi-%s' % config.lower()
+    args.extend(['--ppapi_plugin_mimetype', ppapi_plugin_mimetype])
 
   if toolchain == 'pnacl':
     args.extend(['--browser_flag', '--enable-pnacl'])
@@ -181,9 +207,16 @@ def GetTestName(desc, toolchain, config):
 
 def IsTestDisabled(desc, toolchain, config):
   def AsList(value):
-    if type(value) in (list, tuple):
-      return (value,)
+    if type(value) not in (list, tuple):
+      return [value]
     return value
+
+  def TestMatchesDisabled(test_values, disabled_test):
+    for key in test_values:
+      if key in disabled_test:
+        if test_values[key] not in AsList(disabled_test[key]):
+          return False
+    return True
 
   test_values = {
       'name': desc['NAME'],
@@ -193,10 +226,8 @@ def IsTestDisabled(desc, toolchain, config):
   }
 
   for disabled_test in DISABLED_TESTS:
-    for key in test_values:
-      if key in disabled_test:
-        if test_values[key] in AsList(disabled_test[key]):
-          return True
+    if TestMatchesDisabled(test_values, disabled_test):
+      return True
   return False
 
 
@@ -253,6 +284,19 @@ def RunAllTestsInTree(tree, toolchains, configs, retry_on_failure_times):
   return success
 
 
+def BuildAllTestsInTree(tree, toolchains, configs):
+  for branch, desc in parse_dsc.GenerateProjects(tree):
+    desc_configs = desc.get('CONFIGS', ALL_CONFIGS)
+    valid_toolchains = set(toolchains) & set(desc['TOOLS'])
+    valid_configs = set(configs) & set(desc_configs)
+    for toolchain in sorted(valid_toolchains):
+      for config in sorted(valid_configs):
+        name = '%s/%s' % (branch, desc['NAME'])
+        build_projects.BuildProjectsBranch(pepperdir, name, deps=False,
+                                           clean=False, config=config,
+                                           args=['TOOLCHAIN=%s' % toolchain])
+
+
 def GetProjectTree(include):
   # Everything in src is a library, and cannot be run.
   exclude = {'DEST': 'src'}
@@ -265,7 +309,7 @@ def GetProjectTree(include):
 
 def main(args):
   parser = optparse.OptionParser()
-  parser.add_option('--config',
+  parser.add_option('-c', '--config',
       help='Choose configuration to run (Debug or Release).  Runs both '
            'by default', action='append')
   parser.add_option('-x', '--experimental',
@@ -276,16 +320,13 @@ def main(args):
   parser.add_option('-d', '--dest',
       help='Select which destinations (project types) are valid.',
       action='append')
-  parser.add_option('-p', '--project',
-      help='Select which projects are valid.',
-      action='append')
+  parser.add_option('-b', '--build',
+      help='Build each project before testing.', action='store_true')
   parser.add_option('--retry-times',
       help='Number of types to retry on failure (Default: %default)',
-          type='int', default=DEFAULT_RETRY_ON_FAILURE_TIMES)
+          type='int', default=1)
 
   options, args = parser.parse_args(args[1:])
-  if args:
-    parser.error('Not expecting any arguments.')
 
   if not options.toolchain:
     options.toolchain = ['newlib', 'glibc', 'pnacl', 'host']
@@ -306,13 +347,16 @@ def main(args):
   if options.dest:
     include['DEST'] = options.dest
     print 'Filter by type: ' + str(options.dest)
-  if options.project:
-    include['NAME'] = options.project
-    print 'Filter by name: ' + str(options.project)
+  if args:
+    include['NAME'] = args
+    print 'Filter by name: ' + str(args)
   if not options.config:
     options.config = ALL_CONFIGS
 
   project_tree = GetProjectTree(include)
+  if options.build:
+    BuildAllTestsInTree(project_tree, options.toolchain, options.config)
+
   return RunAllTestsInTree(project_tree, options.toolchain, options.config,
                            options.retry_times)
 

@@ -22,16 +22,20 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.ComponentName;
 import android.content.ContentProvider;
+import android.content.ContentProviderOperation;
+import android.content.ContentProviderResult;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.OperationApplicationException;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
-import android.content.res.TypedArray;
 import android.content.res.XmlResourceParser;
 import android.database.Cursor;
 import android.database.SQLException;
@@ -45,19 +49,24 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
-import android.util.AttributeSet;
 import android.util.Log;
-import android.util.Xml;
+import android.util.SparseArray;
 
+import com.android.launcher3.AutoInstallsLayout.LayoutParserCallback;
 import com.android.launcher3.LauncherSettings.Favorites;
+import com.android.launcher3.compat.UserHandleCompat;
+import com.android.launcher3.compat.UserManagerCompat;
 import com.android.launcher3.config.ProviderConfig;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 
 public class LauncherProvider extends ContentProvider {
@@ -66,10 +75,13 @@ public class LauncherProvider extends ContentProvider {
 
     private static final String DATABASE_NAME = "launcher.db";
 
-    private static final int DATABASE_VERSION = 15;
+    private static final int DATABASE_VERSION = 20;
 
     static final String OLD_AUTHORITY = "com.android.launcher2.settings";
     static final String AUTHORITY = ProviderConfig.AUTHORITY;
+
+    // Should we attempt to load anything from the com.android.launcher2 provider?
+    static final boolean IMPORT_LAUNCHER2_DATABASE = false;
 
     static final String TABLE_FAVORITES = "favorites";
     static final String TABLE_WORKSPACE_SCREENS = "workspaceScreens";
@@ -78,11 +90,13 @@ public class LauncherProvider extends ContentProvider {
             "UPGRADED_FROM_OLD_DATABASE";
     static final String EMPTY_DATABASE_CREATED =
             "EMPTY_DATABASE_CREATED";
-    static final String DEFAULT_WORKSPACE_RESOURCE_ID =
-            "DEFAULT_WORKSPACE_RESOURCE_ID";
 
     private static final String ACTION_APPWIDGET_DEFAULT_WORKSPACE_CONFIGURE =
             "com.android.launcher.action.APPWIDGET_DEFAULT_WORKSPACE_CONFIGURE";
+
+    private static final String URI_PARAM_IS_EXTERNAL_ADD = "isExternalAdd";
+
+    private LauncherProviderChangeListener mListener;
 
     /**
      * {@link Uri} triggered at any registered {@link android.database.ContentObserver} when
@@ -101,6 +115,14 @@ public class LauncherProvider extends ContentProvider {
         mOpenHelper = new DatabaseHelper(context);
         LauncherAppState.setLauncherProvider(this);
         return true;
+    }
+
+    public boolean wasNewDbCreated() {
+        return mOpenHelper.wasNewDbCreated();
+    }
+
+    public void setLauncherProviderChangeListener(LauncherProviderChangeListener listener) {
+        mListener = listener;
     }
 
     @Override
@@ -130,9 +152,13 @@ public class LauncherProvider extends ContentProvider {
 
     private static long dbInsertAndCheck(DatabaseHelper helper,
             SQLiteDatabase db, String table, String nullColumnHack, ContentValues values) {
-        if (!values.containsKey(LauncherSettings.Favorites._ID)) {
+        if (values == null) {
+            throw new RuntimeException("Error: attempting to insert null values");
+        }
+        if (!values.containsKey(LauncherSettings.ChangeLogColumns._ID)) {
             throw new RuntimeException("Error: attempting to add item without specifying an id");
         }
+        helper.checkId(table, values);
         return db.insert(table, nullColumnHack, values);
     }
 
@@ -146,6 +172,14 @@ public class LauncherProvider extends ContentProvider {
     public Uri insert(Uri uri, ContentValues initialValues) {
         SqlArguments args = new SqlArguments(uri);
 
+        // In very limited cases, we support system|signature permission apps to add to the db
+        String externalAdd = uri.getQueryParameter(URI_PARAM_IS_EXTERNAL_ADD);
+        if (externalAdd != null && "true".equals(externalAdd)) {
+            if (!mOpenHelper.initializeExternalAdd(initialValues)) {
+                return null;
+            }
+        }
+
         SQLiteDatabase db = mOpenHelper.getWritableDatabase();
         addModifiedTime(initialValues);
         final long rowId = dbInsertAndCheck(mOpenHelper, db, args.table, null, initialValues);
@@ -156,6 +190,7 @@ public class LauncherProvider extends ContentProvider {
 
         return uri;
     }
+
 
     @Override
     public int bulkInsert(Uri uri, ContentValues[] values) {
@@ -178,6 +213,20 @@ public class LauncherProvider extends ContentProvider {
 
         sendNotify(uri);
         return values.length;
+    }
+
+    @Override
+    public ContentProviderResult[] applyBatch(ArrayList<ContentProviderOperation> operations)
+            throws OperationApplicationException {
+        SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            ContentProviderResult[] result =  super.applyBatch(operations);
+            db.setTransactionSuccessful();
+            return result;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     @Override
@@ -211,6 +260,9 @@ public class LauncherProvider extends ContentProvider {
 
         // always notify the backup agent
         LauncherBackupAgentHelper.dataChanged(getContext());
+        if (mListener != null) {
+            mListener.onLauncherProviderChange();
+        }
     }
 
     private void addModifiedTime(ContentValues values) {
@@ -256,30 +308,64 @@ public class LauncherProvider extends ContentProvider {
     }
 
     /**
-     * @param workspaceResId that can be 0 to use default or non-zero for specific resource
+     * Clears all the data for a fresh start.
      */
-    synchronized public void loadDefaultFavoritesIfNecessary(int origWorkspaceResId) {
+    synchronized public void createEmptyDB() {
+        mOpenHelper.createEmptyDB(mOpenHelper.getWritableDatabase());
+    }
+
+    /**
+     * Loads the default workspace based on the following priority scheme:
+     *   1) From a package provided by play store
+     *   2) From a partner configuration APK, already in the system image
+     *   3) The default configuration for the particular device
+     */
+    synchronized public void loadDefaultFavoritesIfNecessary() {
         String spKey = LauncherAppState.getSharedPreferencesKey();
         SharedPreferences sp = getContext().getSharedPreferences(spKey, Context.MODE_PRIVATE);
 
         if (sp.getBoolean(EMPTY_DATABASE_CREATED, false)) {
-            int workspaceResId = origWorkspaceResId;
+            Log.d(TAG, "loading default workspace");
 
-            // Use default workspace resource if none provided
-            if (workspaceResId == 0) {
-                workspaceResId = sp.getInt(DEFAULT_WORKSPACE_RESOURCE_ID, R.xml.default_workspace);
+            WorkspaceLoader loader = AutoInstallsLayout.get(getContext(),
+                    mOpenHelper.mAppWidgetHost, mOpenHelper);
+
+            if (loader == null) {
+                final Partner partner = Partner.get(getContext().getPackageManager());
+                if (partner != null && partner.hasDefaultLayout()) {
+                    final Resources partnerRes = partner.getResources();
+                    int workspaceResId = partnerRes.getIdentifier(Partner.RES_DEFAULT_LAYOUT,
+                            "xml", partner.getPackageName());
+                    if (workspaceResId != 0) {
+                        loader = new SimpleWorkspaceLoader(mOpenHelper, partnerRes, workspaceResId);
+                    }
+                }
+            }
+
+            if (loader == null) {
+                loader = new SimpleWorkspaceLoader(mOpenHelper, getContext().getResources(),
+                        getDefaultWorkspaceResourceId());
             }
 
             // Populate favorites table with initial favorites
-            SharedPreferences.Editor editor = sp.edit();
-            editor.remove(EMPTY_DATABASE_CREATED);
-            if (origWorkspaceResId != 0) {
-                editor.putInt(DEFAULT_WORKSPACE_RESOURCE_ID, origWorkspaceResId);
-            }
-
-            mOpenHelper.loadFavorites(mOpenHelper.getWritableDatabase(), workspaceResId);
-            mOpenHelper.setFlagJustLoadedOldDb();
+            SharedPreferences.Editor editor = sp.edit().remove(EMPTY_DATABASE_CREATED);
+            mOpenHelper.loadFavorites(mOpenHelper.getWritableDatabase(), loader);
             editor.commit();
+        }
+    }
+
+    public void migrateLauncher2Shortcuts() {
+        mOpenHelper.migrateLauncher2Shortcuts(mOpenHelper.getWritableDatabase(),
+                Uri.parse(getContext().getString(R.string.old_launcher_provider_uri)));
+    }
+
+    private static int getDefaultWorkspaceResourceId() {
+        LauncherAppState app = LauncherAppState.getInstance();
+        DeviceProfile grid = app.getDynamicGrid().getDeviceProfile();
+        if (LauncherAppState.isDisableAllApps()) {
+            return grid.defaultNoAllAppsLayoutId;
+        } else {
+            return grid.defaultLayoutId;
         }
     }
 
@@ -287,25 +373,67 @@ public class LauncherProvider extends ContentProvider {
         public void onRow(ContentValues values);
     }
 
-    private static class DatabaseHelper extends SQLiteOpenHelper {
+    private static boolean shouldImportLauncher2Database(Context context) {
+        boolean isTablet = context.getResources().getBoolean(R.bool.is_tablet);
+
+        // We don't import the old databse for tablets, as the grid size has changed.
+        return !isTablet && IMPORT_LAUNCHER2_DATABASE;
+    }
+
+    public void deleteDatabase() {
+        // Are you sure? (y/n)
+        final SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        final File dbFile = new File(db.getPath());
+        mOpenHelper.close();
+        if (dbFile.exists()) {
+            SQLiteDatabase.deleteDatabase(dbFile);
+        }
+        mOpenHelper = new DatabaseHelper(getContext());
+    }
+
+    private static class DatabaseHelper extends SQLiteOpenHelper implements LayoutParserCallback {
+        private static final String TAG_RESOLVE = "resolve";
         private static final String TAG_FAVORITES = "favorites";
         private static final String TAG_FAVORITE = "favorite";
-        private static final String TAG_CLOCK = "clock";
-        private static final String TAG_SEARCH = "search";
         private static final String TAG_APPWIDGET = "appwidget";
         private static final String TAG_SHORTCUT = "shortcut";
         private static final String TAG_FOLDER = "folder";
+        private static final String TAG_PARTNER_FOLDER = "partner-folder";
         private static final String TAG_EXTRA = "extra";
         private static final String TAG_INCLUDE = "include";
 
+        // Style attrs -- "Favorite"
+        private static final String ATTR_CLASS_NAME = "className";
+        private static final String ATTR_PACKAGE_NAME = "packageName";
+        private static final String ATTR_CONTAINER = "container";
+        private static final String ATTR_SCREEN = "screen";
+        private static final String ATTR_X = "x";
+        private static final String ATTR_Y = "y";
+        private static final String ATTR_SPAN_X = "spanX";
+        private static final String ATTR_SPAN_Y = "spanY";
+        private static final String ATTR_ICON = "icon";
+        private static final String ATTR_TITLE = "title";
+        private static final String ATTR_URI = "uri";
+
+        // Style attrs -- "Include"
+        private static final String ATTR_WORKSPACE = "workspace";
+
+        // Style attrs -- "Extra"
+        private static final String ATTR_KEY = "key";
+        private static final String ATTR_VALUE = "value";
+
         private final Context mContext;
+        private final PackageManager mPackageManager;
         private final AppWidgetHost mAppWidgetHost;
         private long mMaxItemId = -1;
         private long mMaxScreenId = -1;
 
+        private boolean mNewDbCreated = false;
+
         DatabaseHelper(Context context) {
             super(context, DATABASE_NAME, null, DATABASE_VERSION);
             mContext = context;
+            mPackageManager = context.getPackageManager();
             mAppWidgetHost = new AppWidgetHost(context, Launcher.APPWIDGET_HOST_ID);
 
             // In the case where neither onCreate nor onUpgrade gets called, we read the maxId from
@@ -316,6 +444,10 @@ public class LauncherProvider extends ContentProvider {
             if (mMaxScreenId == -1) {
                 mMaxScreenId = initializeMaxScreenId(getWritableDatabase());
             }
+        }
+
+        public boolean wasNewDbCreated() {
+            return mNewDbCreated;
         }
 
         /**
@@ -335,6 +467,11 @@ public class LauncherProvider extends ContentProvider {
 
             mMaxItemId = 1;
             mMaxScreenId = 0;
+            mNewDbCreated = true;
+
+            UserManagerCompat userManager = UserManagerCompat.getInstance(mContext);
+            long userSerialNumber = userManager.getSerialNumberForUser(
+                    UserHandleCompat.myUserHandle());
 
             db.execSQL("CREATE TABLE favorites (" +
                     "_id INTEGER PRIMARY KEY," +
@@ -356,7 +493,9 @@ public class LauncherProvider extends ContentProvider {
                     "uri TEXT," +
                     "displayMode INTEGER," +
                     "appWidgetProvider TEXT," +
-                    "modified INTEGER NOT NULL DEFAULT 0" +
+                    "modified INTEGER NOT NULL DEFAULT 0," +
+                    "restored INTEGER NOT NULL DEFAULT 0," +
+                    "profileId INTEGER DEFAULT " + userSerialNumber +
                     ");");
             addWorkspacesTable(db);
 
@@ -366,32 +505,38 @@ public class LauncherProvider extends ContentProvider {
                 sendAppWidgetResetNotify();
             }
 
-            // Try converting the old database
-            ContentValuesCallback permuteScreensCb = new ContentValuesCallback() {
-                public void onRow(ContentValues values) {
-                    int container = values.getAsInteger(LauncherSettings.Favorites.CONTAINER);
-                    if (container == Favorites.CONTAINER_DESKTOP) {
-                        int screen = values.getAsInteger(LauncherSettings.Favorites.SCREEN);
-                        screen = (int) upgradeLauncherDb_permuteScreens(screen);
-                        values.put(LauncherSettings.Favorites.SCREEN, screen);
+            if (shouldImportLauncher2Database(mContext)) {
+                // Try converting the old database
+                ContentValuesCallback permuteScreensCb = new ContentValuesCallback() {
+                    public void onRow(ContentValues values) {
+                        int container = values.getAsInteger(LauncherSettings.Favorites.CONTAINER);
+                        if (container == Favorites.CONTAINER_DESKTOP) {
+                            int screen = values.getAsInteger(LauncherSettings.Favorites.SCREEN);
+                            screen = (int) upgradeLauncherDb_permuteScreens(screen);
+                            values.put(LauncherSettings.Favorites.SCREEN, screen);
+                        }
+                    }
+                };
+                Uri uri = Uri.parse("content://" + Settings.AUTHORITY +
+                        "/old_favorites?notify=true");
+                if (!convertDatabase(db, uri, permuteScreensCb, true)) {
+                    // Try and upgrade from the Launcher2 db
+                    uri = Uri.parse(mContext.getString(R.string.old_launcher_provider_uri));
+                    if (!convertDatabase(db, uri, permuteScreensCb, false)) {
+                        // If we fail, then set a flag to load the default workspace
+                        setFlagEmptyDbCreated();
+                        return;
                     }
                 }
-            };
-            Uri uri = Uri.parse("content://" + Settings.AUTHORITY +
-                    "/old_favorites?notify=true");
-            if (!convertDatabase(db, uri, permuteScreensCb, true)) {
-                // Try and upgrade from the Launcher2 db
-                uri = LauncherSettings.Favorites.OLD_CONTENT_URI;
-                if (!convertDatabase(db, uri, permuteScreensCb, false)) {
-                    // If we fail, then set a flag to load the default workspace
-                    setFlagEmptyDbCreated();
-                    return;
-                }
+                // Right now, in non-default workspace cases, we want to run the final
+                // upgrade code (ie. to fix workspace screen indices -> ids, etc.), so
+                // set that flag too.
+                setFlagJustLoadedOldDb();
+            } else {
+                // Fresh and clean launcher DB.
+                mMaxItemId = initializeMaxItemId(db);
+                setFlagEmptyDbCreated();
             }
-            // Right now, in non-default workspace cases, we want to run the final
-            // upgrade code (ie. to fix workspace screen indices -> ids, etc.), so
-            // set that flag too.
-            setFlagJustLoadedOldDb();
         }
 
         private void addWorkspacesTable(SQLiteDatabase db) {
@@ -400,6 +545,37 @@ public class LauncherProvider extends ContentProvider {
                     LauncherSettings.WorkspaceScreens.SCREEN_RANK + " INTEGER," +
                     LauncherSettings.ChangeLogColumns.MODIFIED + " INTEGER NOT NULL DEFAULT 0" +
                     ");");
+        }
+
+        private void removeOrphanedItems(SQLiteDatabase db) {
+            // Delete items directly on the workspace who's screen id doesn't exist
+            //  "DELETE FROM favorites WHERE screen NOT IN (SELECT _id FROM workspaceScreens)
+            //   AND container = -100"
+            String removeOrphanedDesktopItems = "DELETE FROM " + TABLE_FAVORITES +
+                    " WHERE " +
+                    LauncherSettings.Favorites.SCREEN + " NOT IN (SELECT " +
+                    LauncherSettings.WorkspaceScreens._ID + " FROM " + TABLE_WORKSPACE_SCREENS + ")" +
+                    " AND " +
+                    LauncherSettings.Favorites.CONTAINER + " = " +
+                    LauncherSettings.Favorites.CONTAINER_DESKTOP;
+            db.execSQL(removeOrphanedDesktopItems);
+
+            // Delete items contained in folders which no longer exist (after above statement)
+            //  "DELETE FROM favorites  WHERE container <> -100 AND container <> -101 AND container
+            //   NOT IN (SELECT _id FROM favorites WHERE itemType = 2)"
+            String removeOrphanedFolderItems = "DELETE FROM " + TABLE_FAVORITES +
+                    " WHERE " +
+                    LauncherSettings.Favorites.CONTAINER + " <> " +
+                    LauncherSettings.Favorites.CONTAINER_DESKTOP +
+                    " AND "
+                    + LauncherSettings.Favorites.CONTAINER + " <> " +
+                    LauncherSettings.Favorites.CONTAINER_HOTSEAT +
+                    " AND "
+                    + LauncherSettings.Favorites.CONTAINER + " NOT IN (SELECT " +
+                    LauncherSettings.Favorites._ID + " FROM " + TABLE_FAVORITES +
+                    " WHERE " + LauncherSettings.Favorites.ITEM_TYPE + " = " +
+                    LauncherSettings.Favorites.ITEM_TYPE_FOLDER + ")";
+            db.execSQL(removeOrphanedFolderItems);
         }
 
         private void setFlagJustLoadedOldDb() {
@@ -613,7 +789,8 @@ public class LauncherProvider extends ContentProvider {
                 }
 
                 // Add default hotseat icons
-                loadFavorites(db, R.xml.update_workspace);
+                loadFavorites(db, new SimpleWorkspaceLoader(this, mContext.getResources(),
+                        R.xml.update_workspace));
                 version = 9;
             }
 
@@ -657,7 +834,6 @@ public class LauncherProvider extends ContentProvider {
                 }
             }
 
-
             if (version < 15) {
                 db.beginTransaction();
                 try {
@@ -676,6 +852,55 @@ public class LauncherProvider extends ContentProvider {
                 }
             }
 
+
+            if (version < 16) {
+                db.beginTransaction();
+                try {
+                    // Insert new column for holding restore status
+                    db.execSQL("ALTER TABLE favorites " +
+                            "ADD COLUMN restored INTEGER NOT NULL DEFAULT 0;");
+                    db.setTransactionSuccessful();
+                    version = 16;
+                } catch (SQLException ex) {
+                    // Old version remains, which means we wipe old data
+                    Log.e(TAG, ex.getMessage(), ex);
+                } finally {
+                    db.endTransaction();
+                }
+            }
+
+            if (version < 17) {
+                // We use the db version upgrade here to identify users who may not have seen
+                // clings yet (because they weren't available), but for whom the clings are now
+                // available (tablet users). Because one of the possible cling flows (migration)
+                // is very destructive (wipes out workspaces), we want to prevent this from showing
+                // until clear data. We do so by marking that the clings have been shown.
+                LauncherClings.synchonouslyMarkFirstRunClingDismissed(mContext);
+                version = 17;
+            }
+
+            if (version < 18) {
+                // No-op
+                version = 18;
+            }
+
+            if (version < 19) {
+                // Due to a data loss bug, some users may have items associated with screen ids
+                // which no longer exist. Since this can cause other problems, and since the user
+                // will never see these items anyway, we use database upgrade as an opportunity to
+                // clean things up.
+                removeOrphanedItems(db);
+                version = 19;
+            }
+
+            if (version < 20) {
+                // Add userId column
+                if (addProfileColumn(db)) {
+                    version = 20;
+                }
+                // else old version remains, which means we wipe old data
+            }
+
             if (version != DATABASE_VERSION) {
                 Log.w(TAG, "Destroying all old data.");
                 db.execSQL("DROP TABLE IF EXISTS " + TABLE_FAVORITES);
@@ -683,6 +908,47 @@ public class LauncherProvider extends ContentProvider {
 
                 onCreate(db);
             }
+        }
+
+        @Override
+        public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+            // This shouldn't happen -- throw our hands up in the air and start over.
+            Log.w(TAG, "Database version downgrade from: " + oldVersion + " to " + newVersion +
+                    ". Wiping databse.");
+            createEmptyDB(db);
+        }
+
+
+        /**
+         * Clears all the data for a fresh start.
+         */
+        public void createEmptyDB(SQLiteDatabase db) {
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_FAVORITES);
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_WORKSPACE_SCREENS);
+            onCreate(db);
+        }
+
+        private boolean addProfileColumn(SQLiteDatabase db) {
+            db.beginTransaction();
+            try {
+                UserManagerCompat userManager = UserManagerCompat.getInstance(mContext);
+                // Default to the serial number of this user, for older
+                // shortcuts.
+                long userSerialNumber = userManager.getSerialNumberForUser(
+                        UserHandleCompat.myUserHandle());
+                // Insert new column for holding user serial number
+                db.execSQL("ALTER TABLE favorites " +
+                        "ADD COLUMN profileId INTEGER DEFAULT "
+                                        + userSerialNumber + ";");
+                db.setTransactionSuccessful();
+            } catch (SQLException ex) {
+                // Old version remains, which means we wipe old data
+                Log.e(TAG, ex.getMessage(), ex);
+                return false;
+            } finally {
+                db.endTransaction();
+            }
+            return true;
         }
 
         private boolean updateContactsShortcuts(SQLiteDatabase db) {
@@ -826,6 +1092,7 @@ public class LauncherProvider extends ContentProvider {
         // constructor from the worker thread; however, this doesn't extend until after the
         // constructor is called, and we only pass a reference to LauncherProvider to LauncherApp
         // after that point
+        @Override
         public long generateNewItemId() {
             if (mMaxItemId < 0) {
                 throw new RuntimeException("Error: max item id was not initialized");
@@ -834,8 +1101,22 @@ public class LauncherProvider extends ContentProvider {
             return mMaxItemId;
         }
 
+        @Override
+        public long insertAndCheck(SQLiteDatabase db, ContentValues values) {
+            return dbInsertAndCheck(this, db, TABLE_FAVORITES, null, values);
+        }
+
         public void updateMaxItemId(long id) {
             mMaxItemId = id + 1;
+        }
+
+        public void checkId(String table, ContentValues values) {
+            long id = values.getAsLong(LauncherSettings.BaseLauncherColumns._ID);
+            if (table == LauncherProvider.TABLE_WORKSPACE_SCREENS) {
+                mMaxScreenId = Math.max(id, mMaxScreenId);
+            }  else {
+                mMaxItemId = Math.max(id, mMaxItemId);
+            }
         }
 
         private long initializeMaxItemId(SQLiteDatabase db) {
@@ -868,10 +1149,14 @@ public class LauncherProvider extends ContentProvider {
                 throw new RuntimeException("Error: max screen id was not initialized");
             }
             mMaxScreenId += 1;
+            // Log to disk
+            Launcher.addDumpLog(TAG, "11683562 - generateNewScreenId(): " + mMaxScreenId, true);
             return mMaxScreenId;
         }
 
         public void updateMaxScreenId(long maxScreenId) {
+            // Log to disk
+            Launcher.addDumpLog(TAG, "11683562 - updateMaxScreenId(): " + maxScreenId, true);
             mMaxScreenId = maxScreenId;
         }
 
@@ -892,6 +1177,8 @@ public class LauncherProvider extends ContentProvider {
                 throw new RuntimeException("Error: could not query max screen id");
             }
 
+            // Log to disk
+            Launcher.addDumpLog(TAG, "11683562 - initializeMaxScreenId(): " + id, true);
             return id;
         }
 
@@ -983,6 +1270,93 @@ public class LauncherProvider extends ContentProvider {
             if (LOGD) Log.d(TAG, "mMaxItemId: " + mMaxItemId);
         }
 
+        private boolean initializeExternalAdd(ContentValues values) {
+            // 1. Ensure that externally added items have a valid item id
+            long id = generateNewItemId();
+            values.put(LauncherSettings.Favorites._ID, id);
+
+            // 2. In the case of an app widget, and if no app widget id is specified, we
+            // attempt allocate and bind the widget.
+            Integer itemType = values.getAsInteger(LauncherSettings.Favorites.ITEM_TYPE);
+            if (itemType != null &&
+                    itemType.intValue() == LauncherSettings.Favorites.ITEM_TYPE_APPWIDGET &&
+                    !values.containsKey(LauncherSettings.Favorites.APPWIDGET_ID)) {
+
+                final AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(mContext);
+                ComponentName cn = ComponentName.unflattenFromString(
+                        values.getAsString(Favorites.APPWIDGET_PROVIDER));
+
+                if (cn != null) {
+                    try {
+                        int appWidgetId = mAppWidgetHost.allocateAppWidgetId();
+                        values.put(LauncherSettings.Favorites.APPWIDGET_ID, appWidgetId);
+                        if (!appWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId,cn)) {
+                            return false;
+                        }
+                    } catch (RuntimeException e) {
+                        Log.e(TAG, "Failed to initialize external widget", e);
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+
+            // Add screen id if not present
+            long screenId = values.getAsLong(LauncherSettings.Favorites.SCREEN);
+            if (!addScreenIdIfNecessary(screenId)) {
+                return false;
+            }
+            return true;
+        }
+
+        // Returns true of screen id exists, or if successfully added
+        private boolean addScreenIdIfNecessary(long screenId) {
+            if (!hasScreenId(screenId)) {
+                int rank = getMaxScreenRank() + 1;
+
+                ContentValues v = new ContentValues();
+                v.put(LauncherSettings.WorkspaceScreens._ID, screenId);
+                v.put(LauncherSettings.WorkspaceScreens.SCREEN_RANK, rank);
+                if (dbInsertAndCheck(this, getWritableDatabase(),
+                        TABLE_WORKSPACE_SCREENS, null, v) < 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean hasScreenId(long screenId) {
+            SQLiteDatabase db = getWritableDatabase();
+            Cursor c = db.rawQuery("SELECT * FROM " + TABLE_WORKSPACE_SCREENS + " WHERE "
+                    + LauncherSettings.WorkspaceScreens._ID + " = " + screenId, null);
+            if (c != null) {
+                int count = c.getCount();
+                c.close();
+                return count > 0;
+            } else {
+                return false;
+            }
+        }
+
+        private int getMaxScreenRank() {
+            SQLiteDatabase db = getWritableDatabase();
+            Cursor c = db.rawQuery("SELECT MAX(" + LauncherSettings.WorkspaceScreens.SCREEN_RANK
+                    + ") FROM " + TABLE_WORKSPACE_SCREENS, null);
+
+            // get the result
+            final int maxRankIndex = 0;
+            int rank = -1;
+            if (c != null && c.moveToNext()) {
+                rank = c.getInt(maxRankIndex);
+            }
+            if (c != null) {
+                c.close();
+            }
+
+            return rank;
+        }
+
         private static final void beginDocument(XmlPullParser parser, String firstElementName)
                 throws XmlPullParserException, IOException {
             int type;
@@ -1001,24 +1375,55 @@ public class LauncherProvider extends ContentProvider {
             }
         }
 
+        private static Intent buildMainIntent() {
+            Intent intent = new Intent(Intent.ACTION_MAIN, null);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            return intent;
+        }
+
+        private int loadFavorites(SQLiteDatabase db, WorkspaceLoader loader) {
+            ArrayList<Long> screenIds = new ArrayList<Long>();
+            // TODO: Use multiple loaders with fall-back and transaction.
+            int count = loader.loadLayout(db, screenIds);
+
+            // Add the screens specified by the items above
+            Collections.sort(screenIds);
+            int rank = 0;
+            ContentValues values = new ContentValues();
+            for (Long id : screenIds) {
+                values.clear();
+                values.put(LauncherSettings.WorkspaceScreens._ID, id);
+                values.put(LauncherSettings.WorkspaceScreens.SCREEN_RANK, rank);
+                if (dbInsertAndCheck(this, db, TABLE_WORKSPACE_SCREENS, null, values) < 0) {
+                    throw new RuntimeException("Failed initialize screen table"
+                            + "from default layout");
+                }
+                rank++;
+            }
+
+            // Ensure that the max ids are initialized
+            mMaxItemId = initializeMaxItemId(db);
+            mMaxScreenId = initializeMaxScreenId(db);
+
+            return count;
+        }
+
         /**
          * Loads the default set of favorite packages from an xml file.
          *
          * @param db The database to write the values into
          * @param filterContainerId The specific container id of items to load
+         * @param the set of screenIds which are used by the favorites
          */
-        private int loadFavorites(SQLiteDatabase db, int workspaceResourceId) {
-            Intent intent = new Intent(Intent.ACTION_MAIN, null);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            ContentValues values = new ContentValues();
+        private int loadFavoritesRecursive(SQLiteDatabase db, Resources res, int workspaceResourceId,
+                ArrayList<Long> screenIds) {
 
+            ContentValues values = new ContentValues();
             if (LOGD) Log.v(TAG, String.format("Loading favorites from resid=0x%08x", workspaceResourceId));
 
-            PackageManager packageManager = mContext.getPackageManager();
-            int i = 0;
+            int count = 0;
             try {
-                XmlResourceParser parser = mContext.getResources().getXml(workspaceResourceId);
-                AttributeSet attrs = Xml.asAttributeSet(parser);
+                XmlResourceParser parser = res.getXml(workspaceResourceId);
                 beginDocument(parser, TAG_FAVORITES);
 
                 final int depth = parser.getDepth();
@@ -1035,39 +1440,34 @@ public class LauncherProvider extends ContentProvider {
                     final String name = parser.getName();
 
                     if (TAG_INCLUDE.equals(name)) {
-                        final TypedArray a = mContext.obtainStyledAttributes(attrs, R.styleable.Include);
 
-                        final int resId = a.getResourceId(R.styleable.Include_workspace, 0);
+                        final int resId = getAttributeResourceValue(parser, ATTR_WORKSPACE, 0);
 
                         if (LOGD) Log.v(TAG, String.format(("%" + (2*(depth+1)) + "s<include workspace=%08x>"),
                                 "", resId));
 
                         if (resId != 0 && resId != workspaceResourceId) {
                             // recursively load some more favorites, why not?
-                            i += loadFavorites(db, resId);
+                            count += loadFavoritesRecursive(db, res, resId, screenIds);
                             added = false;
-                            mMaxItemId = -1;
                         } else {
                             Log.w(TAG, String.format("Skipping <include workspace=0x%08x>", resId));
                         }
-
-                        a.recycle();
 
                         if (LOGD) Log.v(TAG, String.format(("%" + (2*(depth+1)) + "s</include>"), ""));
                         continue;
                     }
 
                     // Assuming it's a <favorite> at this point
-                    TypedArray a = mContext.obtainStyledAttributes(attrs, R.styleable.Favorite);
-
                     long container = LauncherSettings.Favorites.CONTAINER_DESKTOP;
-                    if (a.hasValue(R.styleable.Favorite_container)) {
-                        container = Long.valueOf(a.getString(R.styleable.Favorite_container));
+                    String strContainer = getAttributeValue(parser, ATTR_CONTAINER);
+                    if (strContainer != null) {
+                        container = Long.valueOf(strContainer);
                     }
 
-                    String screen = a.getString(R.styleable.Favorite_screen);
-                    String x = a.getString(R.styleable.Favorite_x);
-                    String y = a.getString(R.styleable.Favorite_y);
+                    String screen = getAttributeValue(parser, ATTR_SCREEN);
+                    String x = getAttributeValue(parser, ATTR_X);
+                    String y = getAttributeValue(parser, ATTR_Y);
 
                     values.clear();
                     values.put(LauncherSettings.Favorites.CONTAINER, container);
@@ -1076,8 +1476,8 @@ public class LauncherProvider extends ContentProvider {
                     values.put(LauncherSettings.Favorites.CELLY, y);
 
                     if (LOGD) {
-                        final String title = a.getString(R.styleable.Favorite_title);
-                        final String pkg = a.getString(R.styleable.Favorite_packageName);
+                        final String title = getAttributeValue(parser, ATTR_TITLE);
+                        final String pkg = getAttributeValue(parser, ATTR_PACKAGE_NAME);
                         final String something = title != null ? title : pkg;
                         Log.v(TAG, String.format(
                                 ("%" + (2*(depth+1)) + "s<%s%s c=%d s=%s x=%s y=%s>"),
@@ -1087,82 +1487,62 @@ public class LauncherProvider extends ContentProvider {
                     }
 
                     if (TAG_FAVORITE.equals(name)) {
-                        long id = addAppShortcut(db, values, a, packageManager, intent);
+                        long id = addAppShortcut(db, values, parser);
                         added = id >= 0;
-                    } else if (TAG_SEARCH.equals(name)) {
-                        added = addSearchWidget(db, values);
-                    } else if (TAG_CLOCK.equals(name)) {
-                        added = addClockWidget(db, values);
                     } else if (TAG_APPWIDGET.equals(name)) {
-                        added = addAppWidget(parser, attrs, type, db, values, a, packageManager);
+                        added = addAppWidget(parser, type, db, values);
                     } else if (TAG_SHORTCUT.equals(name)) {
-                        long id = addUriShortcut(db, values, a);
+                        long id = addUriShortcut(db, values, res, parser);
                         added = id >= 0;
-                    } else if (TAG_FOLDER.equals(name)) {
-                        String title;
-                        int titleResId =  a.getResourceId(R.styleable.Favorite_title, -1);
-                        if (titleResId != -1) {
-                            title = mContext.getResources().getString(titleResId);
-                        } else {
-                            title = mContext.getResources().getString(R.string.folder_name);
-                        }
-                        values.put(LauncherSettings.Favorites.TITLE, title);
-                        long folderId = addFolder(db, values);
-                        added = folderId >= 0;
-
-                        ArrayList<Long> folderItems = new ArrayList<Long>();
-
-                        int folderDepth = parser.getDepth();
+                    } else if (TAG_RESOLVE.equals(name)) {
+                        // This looks through the contained favorites (or meta-favorites) and
+                        // attempts to add them as shortcuts in the fallback group's location
+                        // until one is added successfully.
+                        added = false;
+                        final int groupDepth = parser.getDepth();
                         while ((type = parser.next()) != XmlPullParser.END_TAG ||
-                                parser.getDepth() > folderDepth) {
+                                parser.getDepth() > groupDepth) {
                             if (type != XmlPullParser.START_TAG) {
                                 continue;
                             }
-                            final String folder_item_name = parser.getName();
-
-                            TypedArray ar = mContext.obtainStyledAttributes(attrs,
-                                    R.styleable.Favorite);
-                            values.clear();
-                            values.put(LauncherSettings.Favorites.CONTAINER, folderId);
-
-                            if (LOGD) {
-                                final String pkg = ar.getString(R.styleable.Favorite_packageName);
-                                final String uri = ar.getString(R.styleable.Favorite_uri);
-                                Log.v(TAG, String.format(("%" + (2*(folderDepth+1)) + "s<%s \"%s\">"), "",
-                                        folder_item_name, uri != null ? uri : pkg));
-                            }
-
-                            if (TAG_FAVORITE.equals(folder_item_name) && folderId >= 0) {
-                                long id =
-                                    addAppShortcut(db, values, ar, packageManager, intent);
-                                if (id >= 0) {
-                                    folderItems.add(id);
+                            final String fallback_item_name = parser.getName();
+                            if (!added) {
+                                if (TAG_FAVORITE.equals(fallback_item_name)) {
+                                    final long id = addAppShortcut(db, values, parser);
+                                    added = id >= 0;
+                                } else {
+                                    Log.e(TAG, "Fallback groups can contain only favorites, found "
+                                            + fallback_item_name);
                                 }
-                            } else if (TAG_SHORTCUT.equals(folder_item_name) && folderId >= 0) {
-                                long id = addUriShortcut(db, values, ar);
-                                if (id >= 0) {
-                                    folderItems.add(id);
-                                }
-                            } else {
-                                throw new RuntimeException("Folders can " +
-                                        "contain only shortcuts");
                             }
-                            ar.recycle();
                         }
-                        // We can only have folders with >= 2 items, so we need to remove the
-                        // folder and clean up if less than 2 items were included, or some
-                        // failed to add, and less than 2 were actually added
-                        if (folderItems.size() < 2 && folderId >= 0) {
-                            // We just delete the folder and any items that made it
-                            deleteId(db, folderId);
-                            if (folderItems.size() > 0) {
-                                deleteId(db, folderItems.get(0));
+                    } else if (TAG_FOLDER.equals(name)) {
+                        // Folder contents are nested in this XML file
+                        added = loadFolder(db, values, res, parser);
+
+                    } else if (TAG_PARTNER_FOLDER.equals(name)) {
+                        // Folder contents come from an external XML resource
+                        final Partner partner = Partner.get(mPackageManager);
+                        if (partner != null) {
+                            final Resources partnerRes = partner.getResources();
+                            final int resId = partnerRes.getIdentifier(Partner.RES_FOLDER,
+                                    "xml", partner.getPackageName());
+                            if (resId != 0) {
+                                final XmlResourceParser partnerParser = partnerRes.getXml(resId);
+                                beginDocument(partnerParser, TAG_FOLDER);
+                                added = loadFolder(db, values, partnerRes, partnerParser);
                             }
-                            added = false;
                         }
                     }
-                    if (added) i++;
-                    a.recycle();
+                    if (added) {
+                        long screenId = Long.parseLong(screen);
+                        // Keep track of the set of screens which need to be added to the db.
+                        if (!screenIds.contains(screenId) &&
+                                container == LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+                            screenIds.add(screenId);
+                        }
+                        count++;
+                    }
                 }
             } catch (XmlPullParserException e) {
                 Log.w(TAG, "Got exception parsing favorites.", e);
@@ -1171,50 +1551,231 @@ public class LauncherProvider extends ContentProvider {
             } catch (RuntimeException e) {
                 Log.w(TAG, "Got exception parsing favorites.", e);
             }
-
-            // Update the max item id after we have loaded the database
-            if (mMaxItemId == -1) {
-                mMaxItemId = initializeMaxItemId(db);
-            }
-
-            return i;
+            return count;
         }
 
-        private long addAppShortcut(SQLiteDatabase db, ContentValues values, TypedArray a,
-                PackageManager packageManager, Intent intent) {
-            long id = -1;
-            ActivityInfo info;
-            String packageName = a.getString(R.styleable.Favorite_packageName);
-            String className = a.getString(R.styleable.Favorite_className);
-            try {
-                ComponentName cn;
-                try {
-                    cn = new ComponentName(packageName, className);
-                    info = packageManager.getActivityInfo(cn, 0);
-                } catch (PackageManager.NameNotFoundException nnfe) {
-                    String[] packages = packageManager.currentToCanonicalPackageNames(
-                        new String[] { packageName });
-                    cn = new ComponentName(packages[0], className);
-                    info = packageManager.getActivityInfo(cn, 0);
+        /**
+         * Parse folder items starting at {@link XmlPullParser} location. Allow recursive
+         * includes of items.
+         */
+        private void addToFolder(SQLiteDatabase db, Resources res, XmlResourceParser parser,
+                ArrayList<Long> folderItems, long folderId) throws IOException, XmlPullParserException {
+            int type;
+            int folderDepth = parser.getDepth();
+            while ((type = parser.next()) != XmlPullParser.END_TAG ||
+                    parser.getDepth() > folderDepth) {
+                if (type != XmlPullParser.START_TAG) {
+                    continue;
                 }
-                id = generateNewItemId();
-                intent.setComponent(cn);
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
-                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                values.put(Favorites.INTENT, intent.toUri(0));
-                values.put(Favorites.TITLE, info.loadLabel(packageManager).toString());
-                values.put(Favorites.ITEM_TYPE, Favorites.ITEM_TYPE_APPLICATION);
-                values.put(Favorites.SPANX, 1);
-                values.put(Favorites.SPANY, 1);
-                values.put(Favorites._ID, generateNewItemId());
-                if (dbInsertAndCheck(this, db, TABLE_FAVORITES, null, values) < 0) {
+                final String tag = parser.getName();
+
+                final ContentValues childValues = new ContentValues();
+                childValues.put(LauncherSettings.Favorites.CONTAINER, folderId);
+
+                if (LOGD) {
+                    final String pkg = getAttributeValue(parser, ATTR_PACKAGE_NAME);
+                    final String uri = getAttributeValue(parser, ATTR_URI);
+                    Log.v(TAG, String.format(("%" + (2*(folderDepth+1)) + "s<%s \"%s\">"), "",
+                            tag, uri != null ? uri : pkg));
+                }
+
+                if (TAG_FAVORITE.equals(tag) && folderId >= 0) {
+                    final long id = addAppShortcut(db, childValues, parser);
+                    if (id >= 0) {
+                        folderItems.add(id);
+                    }
+                } else if (TAG_SHORTCUT.equals(tag) && folderId >= 0) {
+                    final long id = addUriShortcut(db, childValues, res, parser);
+                    if (id >= 0) {
+                        folderItems.add(id);
+                    }
+                } else if (TAG_INCLUDE.equals(tag) && folderId >= 0) {
+                    addToFolder(db, res, parser, folderItems, folderId);
+                } else {
+                    throw new RuntimeException("Folders can contain only shortcuts");
+                }
+            }
+        }
+
+        /**
+         * Parse folder starting at current {@link XmlPullParser} location.
+         */
+        private boolean loadFolder(SQLiteDatabase db, ContentValues values, Resources res,
+                XmlResourceParser parser) throws IOException, XmlPullParserException {
+            final String title;
+            final int titleResId = getAttributeResourceValue(parser, ATTR_TITLE, 0);
+            if (titleResId != 0) {
+                title = res.getString(titleResId);
+            } else {
+                title = mContext.getResources().getString(R.string.folder_name);
+            }
+
+            values.put(LauncherSettings.Favorites.TITLE, title);
+            long folderId = addFolder(db, values);
+            boolean added = folderId >= 0;
+
+            ArrayList<Long> folderItems = new ArrayList<Long>();
+            addToFolder(db, res, parser, folderItems, folderId);
+
+            // We can only have folders with >= 2 items, so we need to remove the
+            // folder and clean up if less than 2 items were included, or some
+            // failed to add, and less than 2 were actually added
+            if (folderItems.size() < 2 && folderId >= 0) {
+                // Delete the folder
+                deleteId(db, folderId);
+
+                // If we have a single item, promote it to where the folder
+                // would have been.
+                if (folderItems.size() == 1) {
+                    final ContentValues childValues = new ContentValues();
+                    copyInteger(values, childValues, LauncherSettings.Favorites.CONTAINER);
+                    copyInteger(values, childValues, LauncherSettings.Favorites.SCREEN);
+                    copyInteger(values, childValues, LauncherSettings.Favorites.CELLX);
+                    copyInteger(values, childValues, LauncherSettings.Favorites.CELLY);
+
+                    final long id = folderItems.get(0);
+                    db.update(TABLE_FAVORITES, childValues,
+                            LauncherSettings.Favorites._ID + "=" + id, null);
+                } else {
+                    added = false;
+                }
+            }
+            return added;
+        }
+
+        // A meta shortcut attempts to resolve an intent specified as a URI in the XML, if a
+        // logical choice for what shortcut should be used for that intent exists, then it is
+        // added. Otherwise add nothing.
+        private long addAppShortcutByUri(SQLiteDatabase db, ContentValues values,
+                String intentUri) {
+            Intent metaIntent;
+            try {
+                metaIntent = Intent.parseUri(intentUri, 0);
+            } catch (URISyntaxException e) {
+                Log.e(TAG, "Unable to add meta-favorite: " + intentUri, e);
+                return -1;
+            }
+
+            ResolveInfo resolved = mPackageManager.resolveActivity(metaIntent,
+                    PackageManager.MATCH_DEFAULT_ONLY);
+            final List<ResolveInfo> appList = mPackageManager.queryIntentActivities(
+                    metaIntent, PackageManager.MATCH_DEFAULT_ONLY);
+
+            // Verify that the result is an app and not just the resolver dialog asking which
+            // app to use.
+            if (wouldLaunchResolverActivity(resolved, appList)) {
+                // If only one of the results is a system app then choose that as the default.
+                final ResolveInfo systemApp = getSingleSystemActivity(appList);
+                if (systemApp == null) {
+                    // There is no logical choice for this meta-favorite, so rather than making
+                    // a bad choice just add nothing.
+                    Log.w(TAG, "No preference or single system activity found for "
+                            + metaIntent.toString());
                     return -1;
                 }
-            } catch (PackageManager.NameNotFoundException e) {
-                Log.w(TAG, "Unable to add favorite: " + packageName +
-                        "/" + className, e);
+                resolved = systemApp;
             }
-            return id;
+            final ActivityInfo info = resolved.activityInfo;
+            final Intent intent = mPackageManager.getLaunchIntentForPackage(info.packageName);
+            if (intent == null) {
+                return -1;
+            }
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+            return addAppShortcut(db, values, info.loadLabel(mPackageManager).toString(), intent);
+        }
+
+        private ResolveInfo getSingleSystemActivity(List<ResolveInfo> appList) {
+            ResolveInfo systemResolve = null;
+            final int N = appList.size();
+            for (int i = 0; i < N; ++i) {
+                try {
+                    ApplicationInfo info = mPackageManager.getApplicationInfo(
+                            appList.get(i).activityInfo.packageName, 0);
+                    if ((info.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                        if (systemResolve != null) {
+                            return null;
+                        } else {
+                            systemResolve = appList.get(i);
+                        }
+                    }
+                } catch (PackageManager.NameNotFoundException e) {
+                    Log.w(TAG, "Unable to get info about resolve results", e);
+                    return null;
+                }
+            }
+            return systemResolve;
+        }
+
+        private boolean wouldLaunchResolverActivity(ResolveInfo resolved,
+                List<ResolveInfo> appList) {
+            // If the list contains the above resolved activity, then it can't be
+            // ResolverActivity itself.
+            for (int i = 0; i < appList.size(); ++i) {
+                ResolveInfo tmp = appList.get(i);
+                if (tmp.activityInfo.name.equals(resolved.activityInfo.name)
+                        && tmp.activityInfo.packageName.equals(resolved.activityInfo.packageName)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private long addAppShortcut(SQLiteDatabase db, ContentValues values,
+                XmlResourceParser parser) {
+            final String packageName = getAttributeValue(parser, ATTR_PACKAGE_NAME);
+            final String className = getAttributeValue(parser, ATTR_CLASS_NAME);
+            final String uri = getAttributeValue(parser, ATTR_URI);
+
+            if (!TextUtils.isEmpty(packageName) && !TextUtils.isEmpty(className)) {
+                ActivityInfo info;
+                try {
+                    ComponentName cn;
+                    try {
+                        cn = new ComponentName(packageName, className);
+                        info = mPackageManager.getActivityInfo(cn, 0);
+                    } catch (PackageManager.NameNotFoundException nnfe) {
+                        String[] packages = mPackageManager.currentToCanonicalPackageNames(
+                                new String[] { packageName });
+                        cn = new ComponentName(packages[0], className);
+                        info = mPackageManager.getActivityInfo(cn, 0);
+                    }
+                    final Intent intent = buildMainIntent();
+                    intent.setComponent(cn);
+                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+                    return addAppShortcut(db, values, info.loadLabel(mPackageManager).toString(),
+                            intent);
+                } catch (PackageManager.NameNotFoundException e) {
+                    Log.w(TAG, "Unable to add favorite: " + packageName +
+                            "/" + className, e);
+                }
+                return -1;
+            } else if (!TextUtils.isEmpty(uri)) {
+                // If no component specified try to find a shortcut to add from the URI.
+                return addAppShortcutByUri(db, values, uri);
+            } else {
+                Log.e(TAG, "Skipping invalid <favorite> with no component or uri");
+                return -1;
+            }
+        }
+
+        private long addAppShortcut(SQLiteDatabase db, ContentValues values, String title,
+                Intent intent) {
+            long id = generateNewItemId();
+            values.put(Favorites.INTENT, intent.toUri(0));
+            values.put(Favorites.TITLE, title);
+            values.put(Favorites.ITEM_TYPE, Favorites.ITEM_TYPE_APPLICATION);
+            values.put(Favorites.SPANX, 1);
+            values.put(Favorites.SPANY, 1);
+            values.put(Favorites._ID, id);
+            if (dbInsertAndCheck(this, db, TABLE_FAVORITES, null, values) < 0) {
+                return -1;
+            } else {
+                return id;
+            }
         }
 
         private long addFolder(SQLiteDatabase db, ContentValues values) {
@@ -1256,23 +1817,12 @@ public class LauncherProvider extends ContentProvider {
             return null;
         }
 
-        private boolean addSearchWidget(SQLiteDatabase db, ContentValues values) {
-            ComponentName cn = getSearchWidgetProvider();
-            return addAppWidget(db, values, cn, 4, 1, null);
-        }
+        private boolean addAppWidget(XmlResourceParser parser, int type,
+                SQLiteDatabase db, ContentValues values)
+                throws XmlPullParserException, IOException {
 
-        private boolean addClockWidget(SQLiteDatabase db, ContentValues values) {
-            ComponentName cn = new ComponentName("com.android.alarmclock",
-                    "com.android.alarmclock.AnalogAppWidgetProvider");
-            return addAppWidget(db, values, cn, 2, 2, null);
-        }
-
-        private boolean addAppWidget(XmlResourceParser parser, AttributeSet attrs, int type,
-                SQLiteDatabase db, ContentValues values, TypedArray a,
-                PackageManager packageManager) throws XmlPullParserException, IOException {
-
-            String packageName = a.getString(R.styleable.Favorite_packageName);
-            String className = a.getString(R.styleable.Favorite_className);
+            String packageName = getAttributeValue(parser, ATTR_PACKAGE_NAME);
+            String className = getAttributeValue(parser, ATTR_CLASS_NAME);
 
             if (packageName == null || className == null) {
                 return false;
@@ -1281,21 +1831,25 @@ public class LauncherProvider extends ContentProvider {
             boolean hasPackage = true;
             ComponentName cn = new ComponentName(packageName, className);
             try {
-                packageManager.getReceiverInfo(cn, 0);
+                mPackageManager.getReceiverInfo(cn, 0);
             } catch (Exception e) {
-                String[] packages = packageManager.currentToCanonicalPackageNames(
+                String[] packages = mPackageManager.currentToCanonicalPackageNames(
                         new String[] { packageName });
                 cn = new ComponentName(packages[0], className);
                 try {
-                    packageManager.getReceiverInfo(cn, 0);
+                    mPackageManager.getReceiverInfo(cn, 0);
                 } catch (Exception e1) {
+                    System.out.println("Can't find widget provider: " + className);
                     hasPackage = false;
                 }
             }
 
             if (hasPackage) {
-                int spanX = a.getInt(R.styleable.Favorite_spanX, 0);
-                int spanY = a.getInt(R.styleable.Favorite_spanY, 0);
+                String spanX = getAttributeValue(parser, ATTR_SPAN_X);
+                String spanY = getAttributeValue(parser, ATTR_SPAN_Y);
+
+                values.put(Favorites.SPANX, spanX);
+                values.put(Favorites.SPANY, spanY);
 
                 // Read the extras
                 Bundle extras = new Bundle();
@@ -1306,10 +1860,9 @@ public class LauncherProvider extends ContentProvider {
                         continue;
                     }
 
-                    TypedArray ar = mContext.obtainStyledAttributes(attrs, R.styleable.Extra);
                     if (TAG_EXTRA.equals(parser.getName())) {
-                        String key = ar.getString(R.styleable.Extra_key);
-                        String value = ar.getString(R.styleable.Extra_value);
+                        String key = getAttributeValue(parser, ATTR_KEY);
+                        String value = getAttributeValue(parser, ATTR_VALUE);
                         if (key != null && value != null) {
                             extras.putString(key, value);
                         } else {
@@ -1318,16 +1871,16 @@ public class LauncherProvider extends ContentProvider {
                     } else {
                         throw new RuntimeException("Widgets can contain only extras");
                     }
-                    ar.recycle();
                 }
 
-                return addAppWidget(db, values, cn, spanX, spanY, extras);
+                return addAppWidget(db, values, cn, extras);
             }
 
             return false;
         }
+
         private boolean addAppWidget(SQLiteDatabase db, ContentValues values, ComponentName cn,
-                int spanX, int spanY, Bundle extras) {
+               Bundle extras) {
             boolean allocatedAppWidgets = false;
             final AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(mContext);
 
@@ -1335,8 +1888,6 @@ public class LauncherProvider extends ContentProvider {
                 int appWidgetId = mAppWidgetHost.allocateAppWidgetId();
 
                 values.put(Favorites.ITEM_TYPE, Favorites.ITEM_TYPE_APPWIDGET);
-                values.put(Favorites.SPANX, spanX);
-                values.put(Favorites.SPANY, spanY);
                 values.put(Favorites.APPWIDGET_ID, appWidgetId);
                 values.put(Favorites.APPWIDGET_PROVIDER, cn.flattenToString());
                 values.put(Favorites._ID, generateNewItemId());
@@ -1362,17 +1913,15 @@ public class LauncherProvider extends ContentProvider {
             return allocatedAppWidgets;
         }
 
-        private long addUriShortcut(SQLiteDatabase db, ContentValues values,
-                TypedArray a) {
-            Resources r = mContext.getResources();
-
-            final int iconResId = a.getResourceId(R.styleable.Favorite_icon, 0);
-            final int titleResId = a.getResourceId(R.styleable.Favorite_title, 0);
+        private long addUriShortcut(SQLiteDatabase db, ContentValues values, Resources res,
+                XmlResourceParser parser) {
+            final int iconResId = getAttributeResourceValue(parser, ATTR_ICON, 0);
+            final int titleResId = getAttributeResourceValue(parser, ATTR_TITLE, 0);
 
             Intent intent;
             String uri = null;
             try {
-                uri = a.getString(R.styleable.Favorite_uri);
+                uri = getAttributeValue(parser, ATTR_URI);
                 intent = Intent.parseUri(uri, 0);
             } catch (URISyntaxException e) {
                 Log.w(TAG, "Shortcut has malformed uri: " + uri);
@@ -1387,13 +1936,13 @@ public class LauncherProvider extends ContentProvider {
             long id = generateNewItemId();
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             values.put(Favorites.INTENT, intent.toUri(0));
-            values.put(Favorites.TITLE, r.getString(titleResId));
+            values.put(Favorites.TITLE, res.getString(titleResId));
             values.put(Favorites.ITEM_TYPE, Favorites.ITEM_TYPE_SHORTCUT);
             values.put(Favorites.SPANX, 1);
             values.put(Favorites.SPANY, 1);
             values.put(Favorites.ICON_TYPE, Favorites.ICON_TYPE_RESOURCE);
-            values.put(Favorites.ICON_PACKAGE, mContext.getPackageName());
-            values.put(Favorites.ICON_RESOURCE, r.getResourceName(iconResId));
+            values.put(Favorites.ICON_PACKAGE, res.getResourcePackageName(iconResId));
+            values.put(Favorites.ICON_RESOURCE, res.getResourceName(iconResId));
             values.put(Favorites._ID, id);
 
             if (dbInsertAndCheck(this, db, TABLE_FAVORITES, null, values) < 0) {
@@ -1401,13 +1950,296 @@ public class LauncherProvider extends ContentProvider {
             }
             return id;
         }
+
+        private void migrateLauncher2Shortcuts(SQLiteDatabase db, Uri uri) {
+            final ContentResolver resolver = mContext.getContentResolver();
+            Cursor c = null;
+            int count = 0;
+            int curScreen = 0;
+
+            try {
+                c = resolver.query(uri, null, null, null, "title ASC");
+            } catch (Exception e) {
+                // Ignore
+            }
+
+            // We already have a favorites database in the old provider
+            if (c != null) {
+                try {
+                    if (c.getCount() > 0) {
+                        final int idIndex = c.getColumnIndexOrThrow(LauncherSettings.Favorites._ID);
+                        final int intentIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.INTENT);
+                        final int titleIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.TITLE);
+                        final int iconTypeIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.ICON_TYPE);
+                        final int iconIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.ICON);
+                        final int iconPackageIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.ICON_PACKAGE);
+                        final int iconResourceIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.ICON_RESOURCE);
+                        final int containerIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.CONTAINER);
+                        final int itemTypeIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.ITEM_TYPE);
+                        final int screenIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.SCREEN);
+                        final int cellXIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.CELLX);
+                        final int cellYIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.CELLY);
+                        final int uriIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.URI);
+                        final int displayModeIndex
+                                = c.getColumnIndexOrThrow(LauncherSettings.Favorites.DISPLAY_MODE);
+                        final int profileIndex
+                                = c.getColumnIndex(LauncherSettings.Favorites.PROFILE_ID);
+
+                        int i = 0;
+                        int curX = 0;
+                        int curY = 0;
+
+                        final LauncherAppState app = LauncherAppState.getInstance();
+                        final DeviceProfile grid = app.getDynamicGrid().getDeviceProfile();
+                        final int width = (int) grid.numColumns;
+                        final int height = (int) grid.numRows;
+                        final int hotseatWidth = (int) grid.numHotseatIcons;
+
+                        final HashSet<String> seenIntents = new HashSet<String>(c.getCount());
+
+                        final ArrayList<ContentValues> shortcuts = new ArrayList<ContentValues>();
+                        final ArrayList<ContentValues> folders = new ArrayList<ContentValues>();
+                        final SparseArray<ContentValues> hotseat = new SparseArray<ContentValues>();
+
+                        while (c.moveToNext()) {
+                            final int itemType = c.getInt(itemTypeIndex);
+                            if (itemType != Favorites.ITEM_TYPE_APPLICATION
+                                    && itemType != Favorites.ITEM_TYPE_SHORTCUT
+                                    && itemType != Favorites.ITEM_TYPE_FOLDER) {
+                                continue;
+                            }
+
+                            final int cellX = c.getInt(cellXIndex);
+                            final int cellY = c.getInt(cellYIndex);
+                            final int screen = c.getInt(screenIndex);
+                            int container = c.getInt(containerIndex);
+                            final String intentStr = c.getString(intentIndex);
+
+                            UserManagerCompat userManager = UserManagerCompat.getInstance(mContext);
+                            UserHandleCompat userHandle;
+                            final long userSerialNumber;
+                            if (profileIndex != -1 && !c.isNull(profileIndex)) {
+                                userSerialNumber = c.getInt(profileIndex);
+                                userHandle = userManager.getUserForSerialNumber(userSerialNumber);
+                            } else {
+                                // Default to the serial number of this user, for older
+                                // shortcuts.
+                                userHandle = UserHandleCompat.myUserHandle();
+                                userSerialNumber = userManager.getSerialNumberForUser(userHandle);
+                            }
+                            Launcher.addDumpLog(TAG, "migrating \""
+                                + c.getString(titleIndex) + "\" ("
+                                + cellX + "," + cellY + "@"
+                                + LauncherSettings.Favorites.containerToString(container)
+                                + "/" + screen
+                                + "): " + intentStr, true);
+
+                            if (itemType != Favorites.ITEM_TYPE_FOLDER) {
+
+                                final Intent intent;
+                                final ComponentName cn;
+                                try {
+                                    intent = Intent.parseUri(intentStr, 0);
+                                } catch (URISyntaxException e) {
+                                    // bogus intent?
+                                    Launcher.addDumpLog(TAG,
+                                            "skipping invalid intent uri", true);
+                                    continue;
+                                }
+
+                                cn = intent.getComponent();
+                                if (TextUtils.isEmpty(intentStr)) {
+                                    // no intent? no icon
+                                    Launcher.addDumpLog(TAG, "skipping empty intent", true);
+                                    continue;
+                                } else if (cn != null &&
+                                        !LauncherModel.isValidPackageActivity(mContext, cn,
+                                                userHandle)) {
+                                    // component no longer exists.
+                                    Launcher.addDumpLog(TAG, "skipping item whose component " +
+                                            "no longer exists.", true);
+                                    continue;
+                                } else if (container ==
+                                        LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+                                    // Dedupe icons directly on the workspace
+
+                                    // Canonicalize
+                                    // the Play Store sets the package parameter, but Launcher
+                                    // does not, so we clear that out to keep them the same
+                                    intent.setPackage(null);
+                                    final String key = intent.toUri(0);
+                                    if (seenIntents.contains(key)) {
+                                        Launcher.addDumpLog(TAG, "skipping duplicate", true);
+                                        continue;
+                                    } else {
+                                        seenIntents.add(key);
+                                    }
+                                }
+                            }
+
+                            ContentValues values = new ContentValues(c.getColumnCount());
+                            values.put(LauncherSettings.Favorites._ID, c.getInt(idIndex));
+                            values.put(LauncherSettings.Favorites.INTENT, intentStr);
+                            values.put(LauncherSettings.Favorites.TITLE, c.getString(titleIndex));
+                            values.put(LauncherSettings.Favorites.ICON_TYPE,
+                                    c.getInt(iconTypeIndex));
+                            values.put(LauncherSettings.Favorites.ICON, c.getBlob(iconIndex));
+                            values.put(LauncherSettings.Favorites.ICON_PACKAGE,
+                                    c.getString(iconPackageIndex));
+                            values.put(LauncherSettings.Favorites.ICON_RESOURCE,
+                                    c.getString(iconResourceIndex));
+                            values.put(LauncherSettings.Favorites.ITEM_TYPE, itemType);
+                            values.put(LauncherSettings.Favorites.APPWIDGET_ID, -1);
+                            values.put(LauncherSettings.Favorites.URI, c.getString(uriIndex));
+                            values.put(LauncherSettings.Favorites.DISPLAY_MODE,
+                                    c.getInt(displayModeIndex));
+                            values.put(LauncherSettings.Favorites.PROFILE_ID, userSerialNumber);
+
+                            if (container == LauncherSettings.Favorites.CONTAINER_HOTSEAT) {
+                                hotseat.put(screen, values);
+                            }
+
+                            if (container != LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+                                // In a folder or in the hotseat, preserve position
+                                values.put(LauncherSettings.Favorites.SCREEN, screen);
+                                values.put(LauncherSettings.Favorites.CELLX, cellX);
+                                values.put(LauncherSettings.Favorites.CELLY, cellY);
+                            } else {
+                                // For items contained directly on one of the workspace screen,
+                                // we'll determine their location (screen, x, y) in a second pass.
+                            }
+
+                            values.put(LauncherSettings.Favorites.CONTAINER, container);
+
+                            if (itemType != Favorites.ITEM_TYPE_FOLDER) {
+                                shortcuts.add(values);
+                            } else {
+                                folders.add(values);
+                            }
+                        }
+
+                        // Now that we have all the hotseat icons, let's go through them left-right
+                        // and assign valid locations for them in the new hotseat
+                        final int N = hotseat.size();
+                        for (int idx=0; idx<N; idx++) {
+                            int hotseatX = hotseat.keyAt(idx);
+                            ContentValues values = hotseat.valueAt(idx);
+
+                            if (hotseatX == grid.hotseatAllAppsRank) {
+                                // let's drop this in the next available hole in the hotseat
+                                while (++hotseatX < hotseatWidth) {
+                                    if (hotseat.get(hotseatX) == null) {
+                                        // found a spot! move it here
+                                        values.put(LauncherSettings.Favorites.SCREEN,
+                                                hotseatX);
+                                        break;
+                                    }
+                                }
+                            }
+                            if (hotseatX >= hotseatWidth) {
+                                // no room for you in the hotseat? it's off to the desktop with you
+                                values.put(LauncherSettings.Favorites.CONTAINER,
+                                           Favorites.CONTAINER_DESKTOP);
+                            }
+                        }
+
+                        final ArrayList<ContentValues> allItems = new ArrayList<ContentValues>();
+                        // Folders first
+                        allItems.addAll(folders);
+                        // Then shortcuts
+                        allItems.addAll(shortcuts);
+
+                        // Layout all the folders
+                        for (ContentValues values: allItems) {
+                            if (values.getAsInteger(LauncherSettings.Favorites.CONTAINER) !=
+                                    LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+                                // Hotseat items and folder items have already had their
+                                // location information set. Nothing to be done here.
+                                continue;
+                            }
+                            values.put(LauncherSettings.Favorites.SCREEN, curScreen);
+                            values.put(LauncherSettings.Favorites.CELLX, curX);
+                            values.put(LauncherSettings.Favorites.CELLY, curY);
+                            curX = (curX + 1) % width;
+                            if (curX == 0) {
+                                curY = (curY + 1);
+                            }
+                            // Leave the last row of icons blank on every screen
+                            if (curY == height - 1) {
+                                curScreen = (int) generateNewScreenId();
+                                curY = 0;
+                            }
+                        }
+
+                        if (allItems.size() > 0) {
+                            db.beginTransaction();
+                            try {
+                                for (ContentValues row: allItems) {
+                                    if (row == null) continue;
+                                    if (dbInsertAndCheck(this, db, TABLE_FAVORITES, null, row)
+                                            < 0) {
+                                        return;
+                                    } else {
+                                        count++;
+                                    }
+                                }
+                                db.setTransactionSuccessful();
+                            } finally {
+                                db.endTransaction();
+                            }
+                        }
+
+                        db.beginTransaction();
+                        try {
+                            for (i=0; i<=curScreen; i++) {
+                                final ContentValues values = new ContentValues();
+                                values.put(LauncherSettings.WorkspaceScreens._ID, i);
+                                values.put(LauncherSettings.WorkspaceScreens.SCREEN_RANK, i);
+                                if (dbInsertAndCheck(this, db, TABLE_WORKSPACE_SCREENS, null, values)
+                                        < 0) {
+                                    return;
+                                }
+                            }
+                            db.setTransactionSuccessful();
+                        } finally {
+                            db.endTransaction();
+                        }
+                    }
+                } finally {
+                    c.close();
+                }
+            }
+
+            Launcher.addDumpLog(TAG, "migrated " + count + " icons from Launcher2 into "
+                    + (curScreen+1) + " screens", true);
+
+            // ensure that new screens are created to hold these icons
+            setFlagJustLoadedOldDb();
+
+            // Update max IDs; very important since we just grabbed IDs from another database
+            mMaxItemId = initializeMaxItemId(db);
+            mMaxScreenId = initializeMaxScreenId(db);
+            if (LOGD) Log.d(TAG, "mMaxItemId: " + mMaxItemId + " mMaxScreenId: " + mMaxScreenId);
+        }
     }
 
     /**
      * Build a query string that will match any row where the column matches
      * anything in the values list.
      */
-    static String buildOrWhereString(String column, int[] values) {
+    private static String buildOrWhereString(String column, int[] values) {
         StringBuilder selectWhere = new StringBuilder();
         for (int i = values.length - 1; i >= 0; i--) {
             selectWhere.append(column).append("=").append(values[i]);
@@ -1416,6 +2248,38 @@ public class LauncherProvider extends ContentProvider {
             }
         }
         return selectWhere.toString();
+    }
+
+    /**
+     * Return attribute value, attempting launcher-specific namespace first
+     * before falling back to anonymous attribute.
+     */
+    private static String getAttributeValue(XmlResourceParser parser, String attribute) {
+        String value = parser.getAttributeValue(
+                "http://schemas.android.com/apk/res-auto/com.android.launcher3", attribute);
+        if (value == null) {
+            value = parser.getAttributeValue(null, attribute);
+        }
+        return value;
+    }
+
+    /**
+     * Return attribute resource value, attempting launcher-specific namespace
+     * first before falling back to anonymous attribute.
+     */
+    private static int getAttributeResourceValue(XmlResourceParser parser, String attribute,
+            int defaultValue) {
+        int value = parser.getAttributeResourceValue(
+                "http://schemas.android.com/apk/res-auto/com.android.launcher3", attribute,
+                defaultValue);
+        if (value == defaultValue) {
+            value = parser.getAttributeResourceValue(null, attribute, defaultValue);
+        }
+        return value;
+    }
+
+    private static void copyInteger(ContentValues from, ContentValues to, String key) {
+        to.put(key, from.getAsInteger(key));
     }
 
     static class SqlArguments {
@@ -1447,6 +2311,31 @@ public class LauncherProvider extends ContentProvider {
             } else {
                 throw new IllegalArgumentException("Invalid URI: " + url);
             }
+        }
+    }
+
+    static interface WorkspaceLoader {
+        /**
+         * @param screenIds A mutable list of screen its
+         * @return the number of workspace items added.
+         */
+        int loadLayout(SQLiteDatabase db, ArrayList<Long> screenIds);
+    }
+
+    private static class SimpleWorkspaceLoader implements WorkspaceLoader {
+        private final Resources mRes;
+        private final int mWorkspaceId;
+        private final DatabaseHelper mHelper;
+
+        SimpleWorkspaceLoader(DatabaseHelper helper, Resources res, int workspaceId) {
+            mHelper = helper;
+            mRes = res;
+            mWorkspaceId = workspaceId;
+        }
+
+        @Override
+        public int loadLayout(SQLiteDatabase db, ArrayList<Long> screenIds) {
+            return mHelper.loadFavoritesRecursive(db, mRes, mWorkspaceId, screenIds);
         }
     }
 }

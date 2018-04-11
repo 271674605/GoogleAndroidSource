@@ -18,6 +18,7 @@ package android.graphics.pdf;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.Rect;
 
 import dalvik.system.CloseGuard;
@@ -31,7 +32,7 @@ import java.util.List;
 /**
  * <p>
  * This class enables generating a PDF document from native Android content. You
- * open a new document and then for every page you want to add you start a page,
+ * create a new document and then for every page you want to add you start a page,
  * write content to the page, and finish the page. After you are done with all
  * pages, you write the document to an output stream and close the document.
  * After a document is closed you should not use it anymore. Note that pages are
@@ -63,11 +64,17 @@ import java.util.List;
  * // write the document content
  * document.writeTo(getOutputStream());
  *
- * //close the document
+ * // close the document
  * document.close();
  * </pre>
  */
 public class PdfDocument {
+
+    // TODO: We need a constructor that will take an OutputStream to
+    // support online data serialization as opposed to the current
+    // on demand one. The current approach is fine until Skia starts
+    // to support online PDF generation at which point we need to
+    // handle this.
 
     private final byte[] mChunk = new byte[4096];
 
@@ -75,7 +82,7 @@ public class PdfDocument {
 
     private final List<PageInfo> mPages = new ArrayList<PageInfo>();
 
-    private int mNativeDocument;
+    private long mNativeDocument;
 
     private Page mCurrentPage;
 
@@ -111,7 +118,7 @@ public class PdfDocument {
         if (pageInfo == null) {
             throw new IllegalArgumentException("page cannot be null");
         }
-        Canvas canvas = new PdfCanvas(nativeCreatePage(pageInfo.mPageWidth,
+        Canvas canvas = new PdfCanvas(nativeStartPage(mNativeDocument, pageInfo.mPageWidth,
                 pageInfo.mPageHeight, pageInfo.mContentRect.left, pageInfo.mContentRect.top,
                 pageInfo.mContentRect.right, pageInfo.mContentRect.bottom));
         mCurrentPage = new Page(canvas, pageInfo);
@@ -142,7 +149,7 @@ public class PdfDocument {
         }
         mPages.add(page.getInfo());
         mCurrentPage = null;
-        nativeAppendPage(mNativeDocument, page.mCanvas.mNativeCanvas);
+        nativeFinishPage(mNativeDocument);
         page.finish();
     }
 
@@ -204,7 +211,7 @@ public class PdfDocument {
 
     private void dispose() {
         if (mNativeDocument != 0) {
-            nativeFinalize(mNativeDocument);
+            nativeClose(mNativeDocument);
             mCloseGuard.close();
             mNativeDocument = 0;
         }
@@ -228,20 +235,20 @@ public class PdfDocument {
         }
     }
 
-    private native int nativeCreateDocument();
+    private native long nativeCreateDocument();
 
-    private native void nativeFinalize(int document);
+    private native void nativeClose(long nativeDocument);
 
-    private native void nativeAppendPage(int document, int page);
+    private native void nativeFinishPage(long nativeDocument);
 
-    private native void nativeWriteTo(int document, OutputStream out, byte[] chunk);
+    private native void nativeWriteTo(long nativeDocument, OutputStream out, byte[] chunk);
 
-    private static native int nativeCreatePage(int pageWidth, int pageHeight, int contentLeft,
-            int contentTop, int contentRight, int contentBottom);
+    private static native long nativeStartPage(long nativeDocument, int pageWidth, int pageHeight,
+            int contentLeft, int contentTop, int contentRight, int contentBottom);
 
     private final class PdfCanvas extends Canvas {
 
-        public PdfCanvas(int nativeCanvas) {
+        public PdfCanvas(long nativeCanvas) {
             super(nativeCanvas);
         }
 
@@ -390,6 +397,31 @@ public class PdfDocument {
 
         /**
          * Gets the {@link Canvas} of the page.
+         *
+         * <p>
+         * <strong>Note: </strong> There are some draw operations that are not yet
+         * supported by the canvas returned by this method. More specifically:
+         * <ul>
+         * <li>Inverse path clipping performed via {@link Canvas#clipPath(android.graphics.Path,
+         *     android.graphics.Region.Op) Canvas.clipPath(android.graphics.Path,
+         *     android.graphics.Region.Op)} for {@link
+         *     android.graphics.Region.Op#REVERSE_DIFFERENCE
+         *     Region.Op#REVERSE_DIFFERENCE} operations.</li>
+         * <li>{@link Canvas#drawVertices(android.graphics.Canvas.VertexMode, int,
+         *     float[], int, float[], int, int[], int, short[], int, int,
+         *     android.graphics.Paint) Canvas.drawVertices(
+         *     android.graphics.Canvas.VertexMode, int, float[], int, float[],
+         *     int, int[], int, short[], int, int, android.graphics.Paint)}</li>
+         * <li>Color filters set via {@link Paint#setColorFilter(
+         *     android.graphics.ColorFilter)}</li>
+         * <li>Mask filters set via {@link Paint#setMaskFilter(
+         *     android.graphics.MaskFilter)}</li>
+         * <li>Some XFER modes such as
+         *     {@link android.graphics.PorterDuff.Mode#SRC_ATOP PorterDuff.Mode SRC},
+         *     {@link android.graphics.PorterDuff.Mode#DST_ATOP PorterDuff.DST_ATOP},
+         *     {@link android.graphics.PorterDuff.Mode#XOR PorterDuff.XOR},
+         *     {@link android.graphics.PorterDuff.Mode#ADD PorterDuff.ADD}</li>
+         * </ul>
          *
          * @return The canvas if the page is not finished, null otherwise.
          *

@@ -204,7 +204,6 @@ class Metadata(Node):
     Initialize with no children. Use insert_* functions and then
     construct_graph() to build up the Metadata from some source.
     """
-
 # Private
     self._entries = []
     # kind => { name => entry }
@@ -213,6 +212,7 @@ class Metadata(Node):
     self._clones = []
 
 # Public (Read Only)
+    self._name = None
     self._parent = None
     self._outer_namespaces = None
     self._tags = []
@@ -944,13 +944,15 @@ class EnumValue(Node):
     name: A string,                 e.g. 'ON' or 'OFF'
     id: An optional numeric string, e.g. '0' or '0xFF'
     optional: A boolean
+    hidden: A boolean, True if the enum should be hidden.
     notes: A string describing the notes, or None.
     parent: An edge to the parent, always an Enum instance.
   """
-  def __init__(self, name, parent, id=None, optional=False, notes=None):
+  def __init__(self, name, parent, id=None, optional=False, hidden=False, notes=None):
     self._name = name                    # str, e.g. 'ON' or 'OFF'
     self._id = id                        # int, e.g. '0'
     self._optional = optional            # bool
+    self._hidden = hidden                # bool
     self._notes = notes                  # None or str
     self._parent = parent
 
@@ -961,6 +963,10 @@ class EnumValue(Node):
   @property
   def optional(self):
     return self._optional
+
+  @property
+  def hidden(self):
+    return self._hidden
 
   @property
   def notes(self):
@@ -979,9 +985,10 @@ class Enum(Node):
     has_values_with_id: A boolean representing if any of the children have a
         non-empty id property.
   """
-  def __init__(self, parent, values, ids={}, optionals=[], notes={}):
+  def __init__(self, parent, values, ids={}, optionals=[], hiddens=[], notes={}):
     self._values =                                                             \
-      [ EnumValue(val, self, ids.get(val), val in optionals, notes.get(val))   \
+      [ EnumValue(val, self, ids.get(val), val in optionals, val in hiddens,   \
+                  notes.get(val))                                              \
         for val in values ]
 
     self._parent = parent
@@ -1018,6 +1025,19 @@ class Entry(Node):
                 public entries are visible in the Android SDK.
     applied_visibility: As visibility, but always valid, defaulting to 'system'
                         if no visibility is given for an entry.
+    synthetic: The C-level visibility of this entry ('false', 'true').
+               Synthetic entries will not be generated into the native metadata
+               list of entries (in C code). In general a synthetic entry is
+               glued together at the Java layer from multiple visibiltity=hidden
+               entries.
+    hwlevel: The lowest hardware level at which the entry is guaranteed
+             to be supported by the camera device. All devices with higher
+             hwlevels will also include this entry. None means that the
+             entry is optional on any hardware level.
+    deprecated: Marks an entry as @Deprecated in the Java layer; if within an
+               unreleased version this needs to be removed altogether. If applied
+               to an entry from an older release, then this means the entry
+               should be ignored by newer code.
     optional: a bool representing the optional attribute, which denotes the entry
               is required for hardware level full devices, but optional for other
               hardware levels.  None if not present.
@@ -1066,11 +1086,17 @@ class Entry(Node):
       description: A string with a description of the entry.
       range: A string with the range of the values of the entry, e.g. '>= 0'
       units: A string with the units of the values, e.g. 'inches'
-      notes: A string with the notes for the entry
+      details: A string with the detailed documentation for the entry
+      hal_details: A string with the HAL implementation details for the entry
       tag_ids: A list of tag ID strings, e.g. ['BC', 'V1']
       type_notes: A string with the notes for the type
       visibility: A string describing the visibility, eg 'system', 'hidden',
                   'public'
+      synthetic: A bool to mark whether this entry is visible only at the Java
+                 layer (True), or at both layers (False = default).
+      hwlevel: A string of the HW level (one of 'legacy', 'limited', 'full')
+      deprecated: A bool to mark whether this is @Deprecated at the Java layer
+                 (default = False).
       optional: A bool to mark whether optional for non-full hardware devices
       typedef: A string corresponding to a typedef's name attribute.
     """
@@ -1104,6 +1130,19 @@ class Entry(Node):
   def applied_visibility(self):
     return self._visibility or 'system'
 
+  @property
+  def synthetic(self):
+    return self._synthetic
+
+  @property
+  def hwlevel(self):
+    return self._hwlevel
+
+  @property
+  def deprecated(self):
+    return self._deprecated
+
+  # TODO: optional should just return hwlevel is None
   @property
   def optional(self):
     return self._optional
@@ -1147,8 +1186,12 @@ class Entry(Node):
     return self._units
 
   @property
-  def notes(self):
-    return self._notes
+  def details(self):
+    return self._details
+
+  @property
+  def hal_details(self):
+    return self._hal_details
 
   @property
   def tags(self):
@@ -1195,6 +1238,7 @@ class Entry(Node):
     # access these via the 'enum' prop
     enum_values = kwargs.get('enum_values')
     enum_optionals = kwargs.get('enum_optionals')
+    enum_hiddens = kwargs.get('enum_hiddens')
     enum_notes = kwargs.get('enum_notes')  # { value => notes }
     enum_ids = kwargs.get('enum_ids')  # { value => notes }
     self._tuple_values = kwargs.get('tuple_values')
@@ -1202,7 +1246,8 @@ class Entry(Node):
     self._description = kwargs.get('description')
     self._range = kwargs.get('range')
     self._units = kwargs.get('units')
-    self._notes = kwargs.get('notes')
+    self._details = kwargs.get('details')
+    self._hal_details = kwargs.get('hal_details')
 
     self._tag_ids = kwargs.get('tag_ids', [])
     self._tags = None  # Filled in by Metadata::_construct_tags
@@ -1212,11 +1257,15 @@ class Entry(Node):
     self._typedef = None # Filled in by Metadata::_construct_types
 
     if kwargs.get('enum', False):
-      self._enum = Enum(self, enum_values, enum_ids, enum_optionals, enum_notes)
+      self._enum = Enum(self, enum_values, enum_ids, enum_optionals,
+                        enum_hiddens, enum_notes)
     else:
       self._enum = None
 
     self._visibility = kwargs.get('visibility')
+    self._synthetic = kwargs.get('synthetic', False)
+    self._hwlevel = kwargs.get('hwlevel')
+    self._deprecated = kwargs.get('deprecated', False)
     self._optional = kwargs.get('optional')
 
     self._property_keys = kwargs
@@ -1344,7 +1393,8 @@ class Clone(Entry):
       description: A string with a description of the entry.
       range: A string with the range of the values of the entry, e.g. '>= 0'
       units: A string with the units of the values, e.g. 'inches'
-      notes: A string with the notes for the entry
+      details: A string with the detailed documentation for the entry
+      hal_details: A string with the HAL implementation details for the entry
       tag_ids: A list of tag ID strings, e.g. ['BC', 'V1']
       type_notes: A string with the notes for the type
 
@@ -1397,7 +1447,8 @@ class MergedEntry(Entry):
     Args:
       entry: An Entry or Clone instance
     """
-    props_distinct = ['description', 'units', 'range', 'notes', 'tags', 'kind']
+    props_distinct = ['description', 'units', 'range', 'details',
+                      'hal_details', 'tags', 'kind']
 
     for p in props_distinct:
       p = '_' + p
@@ -1412,6 +1463,9 @@ class MergedEntry(Entry):
                     'type',
                     'type_notes',
                     'visibility',
+                    'synthetic',
+                    'hwlevel',
+                    'deprecated',
                     'optional',
                     'typedef'
                    ]

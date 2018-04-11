@@ -6,9 +6,8 @@
 
 import os
 
+from pylib.instrumentation import test_jar
 from pylib.utils import apk_helper
-
-import test_jar
 
 
 class TestPackage(test_jar.TestJar):
@@ -34,5 +33,6 @@ class TestPackage(test_jar.TestJar):
     return self._package_name
 
   # Override.
-  def Install(self, adb):
-    adb.ManagedInstall(self.GetApkPath(), package_name=self.GetPackageName())
+  def Install(self, device):
+    device.Install(self.GetApkPath())
+

@@ -33,7 +33,7 @@ namespace slang {
 class DiagnosticBuffer : public clang::DiagnosticConsumer {
  private:
   std::string mDiags;
-  llvm::OwningPtr<llvm::raw_string_ostream> mSOS;
+  std::unique_ptr<llvm::raw_string_ostream> mSOS;
 
  public:
   DiagnosticBuffer();

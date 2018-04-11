@@ -7,7 +7,19 @@
 
 #include <string>
 
-extern const char kChromeDriverVersion[];
+struct BrowserInfo {
+  BrowserInfo();
+  BrowserInfo(std::string browser_name_,
+              std::string browser_version_,
+              int build_no_,
+              int blink_revision_);
+
+  std::string browser_name;
+  std::string browser_version;
+  int build_no;
+  int blink_revision;
+};
+
 extern const int kMinimumSupportedChromeBuildNo;
 
 std::string GetMinimumSupportedChromeVersion();

@@ -29,7 +29,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.IPackageManager;
@@ -44,14 +43,12 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserHandle;
-import android.preference.PreferenceActivity;
+import android.os.UserManager;
 import android.preference.PreferenceFrameLayout;
 import android.provider.Settings;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.PagerTabStrip;
 import android.support.v4.view.ViewPager;
-import android.text.BidiFormatter;
-import android.text.format.Formatter;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -63,15 +60,18 @@ import android.view.animation.AnimationUtils;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
+import android.widget.AdapterView.OnItemSelectedListener;
 import android.widget.BaseAdapter;
 import android.widget.Filter;
 import android.widget.Filterable;
 import android.widget.ListView;
-import android.widget.TextView;
+import android.widget.Spinner;
 
 import com.android.internal.app.IMediaContainerService;
 import com.android.internal.content.PackageHelper;
 import com.android.settings.R;
+import com.android.settings.SettingsActivity;
+import com.android.settings.UserSpinnerAdapter;
 import com.android.settings.Settings.RunningServicesActivity;
 import com.android.settings.Settings.StorageUseActivity;
 import com.android.settings.applications.ApplicationsState.AppEntry;
@@ -136,11 +136,12 @@ interface AppClickListener {
  */
 public class ManageApplications extends Fragment implements
         AppClickListener, DialogInterface.OnClickListener,
-        DialogInterface.OnDismissListener {
+        DialogInterface.OnDismissListener, OnItemSelectedListener  {
 
     static final String TAG = "ManageApplications";
     static final boolean DEBUG = false;
 
+    private static final String EXTRA_LIST_TYPE = "currentListType";
     private static final String EXTRA_SORT_ORDER = "sortOrder";
     private static final String EXTRA_SHOW_BACKGROUND = "showBackground";
     private static final String EXTRA_DEFAULT_LIST_TYPE = "defaultListType";
@@ -196,15 +197,17 @@ public class ManageApplications extends Fragment implements
 
         private View mListContainer;
 
+        private ViewGroup mPinnedHeader;
+
         // ListView used to display list
         private ListView mListView;
         // Custom view used to display running processes
         private RunningProcessesView mRunningProcessesView;
         
-        private LinearColorBar mColorBar;
-        private TextView mStorageChartLabel;
-        private TextView mUsedStorageText;
-        private TextView mFreeStorageText;
+        //private LinearColorBar mColorBar;
+        //private TextView mStorageChartLabel;
+        //private TextView mUsedStorageText;
+        //private TextView mFreeStorageText;
         private long mFreeStorage = 0, mAppStorage = 0, mTotalStorage = 0;
         private long mLastUsedStorage, mLastAppStorage, mLastFreeStorage;
 
@@ -247,6 +250,14 @@ public class ManageApplications extends Fragment implements
             mRootView = inflater.inflate(mListType == LIST_TYPE_RUNNING
                     ? R.layout.manage_applications_running
                     : R.layout.manage_applications_apps, null);
+            mPinnedHeader = (ViewGroup) mRootView.findViewById(R.id.pinned_header);
+            if (mOwner.mProfileSpinnerAdapter != null) {
+                Spinner spinner = (Spinner) inflater.inflate(R.layout.spinner_view, null);
+                spinner.setAdapter(mOwner.mProfileSpinnerAdapter);
+                spinner.setOnItemSelectedListener(mOwner);
+                mPinnedHeader.addView(spinner);
+                mPinnedHeader.setVisibility(View.VISIBLE);
+            }
             mLoadingContainer = mRootView.findViewById(R.id.loading_container);
             mLoadingContainer.setVisibility(View.VISIBLE);
             mListContainer = mRootView.findViewById(R.id.list_container);
@@ -265,17 +276,17 @@ public class ManageApplications extends Fragment implements
                 mApplications = new ApplicationsAdapter(mApplicationsState, this, mFilter);
                 mListView.setAdapter(mApplications);
                 mListView.setRecyclerListener(mApplications);
-                mColorBar = (LinearColorBar)mListContainer.findViewById(R.id.storage_color_bar);
-                mStorageChartLabel = (TextView)mListContainer.findViewById(R.id.storageChartLabel);
-                mUsedStorageText = (TextView)mListContainer.findViewById(R.id.usedStorageText);
-                mFreeStorageText = (TextView)mListContainer.findViewById(R.id.freeStorageText);
+                //mColorBar = (LinearColorBar)mListContainer.findViewById(R.id.storage_color_bar);
+                //mStorageChartLabel = (TextView)mListContainer.findViewById(R.id.storageChartLabel);
+                //mUsedStorageText = (TextView)mListContainer.findViewById(R.id.usedStorageText);
+                //mFreeStorageText = (TextView)mListContainer.findViewById(R.id.freeStorageText);
                 Utils.prepareCustomPreferencesList(contentParent, contentChild, mListView, false);
                 if (mFilter == FILTER_APPS_SDCARD) {
-                    mStorageChartLabel.setText(mOwner.getActivity().getText(
-                            R.string.sd_card_storage));
+                    //mStorageChartLabel.setText(mOwner.getActivity().getText(
+                    //        R.string.sd_card_storage));
                 } else {
-                    mStorageChartLabel.setText(mOwner.getActivity().getText(
-                            R.string.internal_storage));
+                    //mStorageChartLabel.setText(mOwner.getActivity().getText(
+                    //        R.string.internal_storage));
                 }
                 applyCurrentStorage();
             }
@@ -318,6 +329,12 @@ public class ManageApplications extends Fragment implements
             }
             if (mRunningProcessesView != null) {
                 mRunningProcessesView.doPause();
+            }
+        }
+
+        public void release() {
+            if (mApplications != null) {
+                mApplications.release();
             }
         }
 
@@ -385,6 +402,7 @@ public class ManageApplications extends Fragment implements
             if (mRootView == null) {
                 return;
             }
+            /*
             if (mTotalStorage > 0) {
                 BidiFormatter bidiFormatter = BidiFormatter.getInstance();
                 mColorBar.setRatios((mTotalStorage-mFreeStorage-mAppStorage)/(float)mTotalStorage,
@@ -415,6 +433,7 @@ public class ManageApplications extends Fragment implements
                     mFreeStorageText.setText("");
                 }
             }
+            */
         }
 
         @Override
@@ -448,7 +467,8 @@ public class ManageApplications extends Fragment implements
 
     // These are for keeping track of activity and spinner switch state.
     private boolean mActivityResumed;
-    
+
+    private static final int LIST_TYPE_MISSING = -1;
     static final int LIST_TYPE_DOWNLOADED = 0;
     static final int LIST_TYPE_RUNNING = 1;
     static final int LIST_TYPE_SDCARD = 2;
@@ -462,6 +482,8 @@ public class ManageApplications extends Fragment implements
     private ViewGroup mContentContainer;
     private View mRootView;
     private ViewPager mViewPager;
+    private UserSpinnerAdapter mProfileSpinnerAdapter;
+    private Context mContext;
 
     AlertDialog mResetDialog;
 
@@ -591,6 +613,10 @@ public class ManageApplications extends Fragment implements
                 mResumed = false;
                 mSession.pause();
             }
+        }
+
+        public void release() {
+            mSession.release();
         }
 
         public void rebuild(int sort) {
@@ -820,13 +846,14 @@ public class ManageApplications extends Fragment implements
             mActive.remove(view);
         }
     }
-    
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         setHasOptionsMenu(true);
 
+        mContext = getActivity();
         mApplicationsState = ApplicationsState.getInstance(getActivity().getApplication());
         Intent intent = getActivity().getIntent();
         String action = intent.getAction();
@@ -844,7 +871,7 @@ public class ManageApplications extends Fragment implements
                 || className.endsWith(".StorageUse")) {
             mSortOrder = SORT_ORDER_SIZE;
             defaultListType = LIST_TYPE_ALL;
-        } else if (Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS.equals(action)) {
+        } else if (android.provider.Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS.equals(action)) {
             // Select the all-apps list, with the default sorting
             defaultListType = LIST_TYPE_ALL;
         }
@@ -893,6 +920,9 @@ public class ManageApplications extends Fragment implements
         mTabs.add(tab);
 
         mNumTabs = mTabs.size();
+
+        final UserManager um = (UserManager) mContext.getSystemService(Context.USER_SERVICE);
+        mProfileSpinnerAdapter = Utils.createUserSpinnerAdapter(um, mContext);
     }
 
 
@@ -911,7 +941,7 @@ public class ManageApplications extends Fragment implements
         mViewPager.setAdapter(adapter);
         mViewPager.setOnPageChangeListener(adapter);
         PagerTabStrip tabs = (PagerTabStrip) rootView.findViewById(R.id.tabs);
-        tabs.setTabIndicatorColorResource(android.R.color.holo_blue_light);
+        tabs.setTabIndicatorColorResource(R.color.theme_accent);
 
         // We have to do this now because PreferenceFrameLayout looks at it
         // only when the view is added.
@@ -925,9 +955,13 @@ public class ManageApplications extends Fragment implements
 
         if (savedInstanceState == null) {
             // First time init: make sure view pager is showing the correct tab.
-            for (int i = 0; i < mTabs.size(); i++) {
+            int extraCurrentListType = getActivity().getIntent().getIntExtra(EXTRA_LIST_TYPE,
+                    LIST_TYPE_MISSING);
+            int currentListType = (extraCurrentListType != LIST_TYPE_MISSING)
+                    ? extraCurrentListType : mDefaultListType;
+            for (int i = 0; i < mNumTabs; i++) {
                 TabInfo tab = mTabs.get(i);
-                if (tab.mListType == mDefaultListType) {
+                if (tab.mListType == currentListType) {
                     mViewPager.setCurrentItem(i);
                     break;
                 }
@@ -990,6 +1024,7 @@ public class ManageApplications extends Fragment implements
         // are no longer attached to their view hierarchy.
         for (int i=0; i<mTabs.size(); i++) {
             mTabs.get(i).detachView();
+            mTabs.get(i).release();
         }
     }
 
@@ -998,6 +1033,24 @@ public class ManageApplications extends Fragment implements
         if (requestCode == INSTALLED_APP_DETAILS && mCurrentPkgName != null) {
             mApplicationsState.requestSize(mCurrentPkgName);
         }
+    }
+
+    @Override
+    public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+        UserHandle selectedUser = mProfileSpinnerAdapter.getUserHandle(position);
+        if (selectedUser.getIdentifier() != UserHandle.myUserId()) {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            int currentTab = mViewPager.getCurrentItem();
+            intent.putExtra(EXTRA_LIST_TYPE, mTabs.get(currentTab).mListType);
+            mContext.startActivityAsUser(intent, selectedUser);
+        }
+    }
+
+    @Override
+    public void onNothingSelected(AdapterView<?> parent) {
+        // Nothing to do
     }
 
     private void updateNumTabs() {
@@ -1026,8 +1079,8 @@ public class ManageApplications extends Fragment implements
         Bundle args = new Bundle();
         args.putString(InstalledAppDetails.ARG_PACKAGE_NAME, mCurrentPkgName);
 
-        PreferenceActivity pa = (PreferenceActivity)getActivity();
-        pa.startPreferencePanel(InstalledAppDetails.class.getName(), args,
+        SettingsActivity sa = (SettingsActivity) getActivity();
+        sa.startPreferencePanel(InstalledAppDetails.class.getName(), args,
                 R.string.application_info_label, null, this, INSTALLED_APP_DETAILS);
     }
     
@@ -1085,6 +1138,7 @@ public class ManageApplications extends Fragment implements
             mOptionsMenu.findItem(SHOW_RUNNING_SERVICES).setVisible(showingBackground);
             mOptionsMenu.findItem(SHOW_BACKGROUND_PROCESSES).setVisible(!showingBackground);
             mOptionsMenu.findItem(RESET_APP_PREFERENCES).setVisible(false);
+            mShowBackground = showingBackground;
         } else {
             mOptionsMenu.findItem(SORT_ORDER_ALPHA).setVisible(mSortOrder != SORT_ORDER_ALPHA);
             mOptionsMenu.findItem(SORT_ORDER_SIZE).setVisible(mSortOrder != SORT_ORDER_SIZE);

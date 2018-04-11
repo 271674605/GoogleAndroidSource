@@ -6,17 +6,14 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef HEXAGON_ELFSECTLINKER_H
-#define HEXAGON_ELFSECTLINKER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_HEXAGON_HEXAGONELFMCLINKER_H
+#define TARGET_HEXAGON_HEXAGONELFMCLINKER_H
 #include <mcld/Target/ELFMCLinker.h>
 
 namespace mcld {
 
 class Module;
-class MemoryArea;
+class FileHandle;
 
 /** \class HexagonELFMCLinker
  *  \brief HexagonELFMCLinker sets up the environment for linking.
@@ -28,7 +25,7 @@ class HexagonELFMCLinker : public ELFMCLinker
 public:
   HexagonELFMCLinker(LinkerConfig& pConfig,
                      mcld::Module& pModule,
-                     MemoryArea& pOutput);
+                     FileHandle& pFileHandle);
 
   ~HexagonELFMCLinker();
 };

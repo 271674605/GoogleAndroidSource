@@ -1,15 +1,15 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "Test.h"
-#include "SkRandom.h"
-#include "SkOSFile.h"
-#include "SkStream.h"
+
 #include "SkData.h"
+#include "SkOSFile.h"
+#include "SkRandom.h"
+#include "SkStream.h"
+#include "Test.h"
 
 #ifndef SK_BUILD_FOR_WIN
 #include <unistd.h>
@@ -44,9 +44,7 @@ static void test_filestreams(skiatest::Reporter* reporter, const char* tmpDir) {
     {
         SkFILEWStream writer(path.c_str());
         if (!writer.isValid()) {
-            SkString msg;
-            msg.printf("Failed to create tmp file %s\n", path.c_str());
-            reporter->reportFailed(msg);
+            ERRORF(reporter, "Failed to create tmp file %s\n", path.c_str());
             return;
         }
 
@@ -187,11 +185,8 @@ static void TestNullData() {
 
 }
 
-static void TestStreams(skiatest::Reporter* reporter) {
+DEF_TEST(Stream, reporter) {
     TestWStream(reporter);
     TestPackedUInt(reporter);
     TestNullData();
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("Stream", StreamTestClass, TestStreams)

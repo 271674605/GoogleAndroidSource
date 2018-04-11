@@ -25,14 +25,17 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
 
-import com.android.emailcommon.provider.EmailContent.HostAuthColumns;
 import com.android.emailcommon.utility.SSLUtils;
-import com.android.emailcommon.utility.Utility;
+import com.android.mail.utils.LogUtils;
+import com.google.common.annotations.VisibleForTesting;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 
-public final class HostAuth extends EmailContent implements HostAuthColumns, Parcelable {
+public class HostAuth extends EmailContent implements Parcelable {
     public static final String TABLE_NAME = "HostAuth";
     public static Uri CONTENT_URI;
 
@@ -52,8 +55,10 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
     public static final int FLAG_TLS          = 0x02;    // Use TLS
     public static final int FLAG_AUTHENTICATE = 0x04;    // Use name/password for authentication
     public static final int FLAG_TRUST_ALL    = 0x08;    // Trust all certificates
+    public static final int FLAG_OAUTH        = 0x10;    // Use OAuth for authentication
     // Mask of settings directly configurable by the user
-    public static final int USER_CONFIG_MASK  = 0x0b;
+    public static final int USER_CONFIG_MASK  = 0x1b;
+    public static final int FLAG_TRANSPORTSECURITY_MASK = FLAG_SSL | FLAG_TLS | FLAG_TRUST_ALL;
 
     public String mProtocol;
     public String mAddress;
@@ -65,6 +70,11 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
     public String mClientCertAlias = null;
     // NOTE: The server certificate is NEVER automatically retrieved from EmailProvider
     public byte[] mServerCert = null;
+    public long mCredentialKey;
+
+    @VisibleForTesting
+    static final String JSON_TAG_CREDENTIAL = "credential";
+    public transient Credential mCredential;
 
     public static final int CONTENT_ID_COLUMN = 0;
     public static final int CONTENT_PROTOCOL_COLUMN = 1;
@@ -75,27 +85,25 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
     public static final int CONTENT_PASSWORD_COLUMN = 6;
     public static final int CONTENT_DOMAIN_COLUMN = 7;
     public static final int CONTENT_CLIENT_CERT_ALIAS_COLUMN = 8;
+    public static final int CONTENT_CREDENTIAL_KEY_COLUMN = 9;
 
     public static final String[] CONTENT_PROJECTION = new String[] {
-        RECORD_ID, HostAuthColumns.PROTOCOL, HostAuthColumns.ADDRESS, HostAuthColumns.PORT,
-        HostAuthColumns.FLAGS, HostAuthColumns.LOGIN,
-        HostAuthColumns.PASSWORD, HostAuthColumns.DOMAIN, HostAuthColumns.CLIENT_CERT_ALIAS
+            HostAuthColumns._ID, HostAuthColumns.PROTOCOL, HostAuthColumns.ADDRESS,
+            HostAuthColumns.PORT, HostAuthColumns.FLAGS, HostAuthColumns.LOGIN,
+            HostAuthColumns.PASSWORD, HostAuthColumns.DOMAIN, HostAuthColumns.CLIENT_CERT_ALIAS,
+            HostAuthColumns.CREDENTIAL_KEY
     };
 
-    /**
-     * no public constructor since this is a utility class
-     */
     public HostAuth() {
         mBaseUri = CONTENT_URI;
-
-        // other defaults policy)
         mPort = PORT_UNKNOWN;
+        mCredentialKey = -1;
     }
 
      /**
      * Restore a HostAuth from the database, given its unique id
-     * @param context
-     * @param id
+     * @param context for provider loads
+     * @param id corresponds to rowid
      * @return the instantiated HostAuth
      */
     public static HostAuth restoreHostAuthWithId(Context context, long id) {
@@ -103,18 +111,59 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
                 HostAuth.CONTENT_URI, HostAuth.CONTENT_PROJECTION, id);
     }
 
-
     /**
-     * Returns the scheme for the specified flags.
+     * Returns the credential object for this HostAuth. This will load from the
+     * database if the HosAuth has a valid credential key, or return null if not.
      */
-    public static String getSchemeString(String protocol, int flags) {
-        return getSchemeString(protocol, flags, null);
+    public Credential getCredential(Context context) {
+        if (mCredential == null) {
+            if (mCredentialKey >= 0) {
+                mCredential = Credential.restoreCredentialsWithId(context, mCredentialKey);
+            }
+        }
+        return mCredential;
     }
 
     /**
-     * Builds a URI scheme name given the parameters for a {@code HostAuth}.
-     * If a {@code clientAlias} is provided, this indicates that a secure connection must be used.
+     * getOrCreateCredential Return the credential object for this HostAuth,
+     * creating it if it does not yet exist. This should not be called on the
+     * main thread.
+     *
+     * As a side-effect, it also ensures FLAG_OAUTH is set. Use {@link #removeCredential()} to clear
+     *
+     * @param context for provider loads
+     * @return the credential object for this HostAuth
      */
+    public Credential getOrCreateCredential(Context context) {
+        mFlags |= FLAG_OAUTH;
+        if (mCredential == null) {
+            if (mCredentialKey >= 0) {
+                mCredential = Credential.restoreCredentialsWithId(context, mCredentialKey);
+            } else {
+                mCredential = new Credential();
+            }
+        }
+        return mCredential;
+    }
+
+    /**
+     * Clear the credential object.
+     */
+    public void removeCredential() {
+        mCredential = null;
+        mCredentialKey = -1;
+        mFlags &= ~FLAG_OAUTH;
+    }
+
+    /**
+     * Builds a URI scheme name given the parameters for a {@code HostAuth}. If
+     * a {@code clientAlias} is provided, this indicates that a secure
+     * connection must be used.
+     *
+     * This is not used in live code, but is kept here for reference when creating providers.xml
+     * entries
+     */
+    @SuppressWarnings("unused")
     public static String getSchemeString(String protocol, int flags, String clientAlias) {
         String security = "";
         switch (flags & USER_CONFIG_MASK) {
@@ -181,6 +230,10 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         mPassword = cursor.getString(CONTENT_PASSWORD_COLUMN);
         mDomain = cursor.getString(CONTENT_DOMAIN_COLUMN);
         mClientCertAlias = cursor.getString(CONTENT_CLIENT_CERT_ALIAS_COLUMN);
+        mCredentialKey = cursor.getLong(CONTENT_CREDENTIAL_KEY_COLUMN);
+        if (mCredentialKey != -1) {
+            mFlags |= FLAG_OAUTH;
+        }
     }
 
     @Override
@@ -194,8 +247,61 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         values.put(HostAuthColumns.PASSWORD, mPassword);
         values.put(HostAuthColumns.DOMAIN, mDomain);
         values.put(HostAuthColumns.CLIENT_CERT_ALIAS, mClientCertAlias);
+        values.put(HostAuthColumns.CREDENTIAL_KEY, mCredentialKey);
         values.put(HostAuthColumns.ACCOUNT_KEY, 0); // Need something to satisfy the DB
+
         return values;
+    }
+
+    protected JSONObject toJson() {
+        try {
+            final JSONObject json = new JSONObject();
+            json.put(HostAuthColumns.PROTOCOL, mProtocol);
+            json.put(HostAuthColumns.ADDRESS, mAddress);
+            json.put(HostAuthColumns.PORT, mPort);
+            json.put(HostAuthColumns.FLAGS, mFlags);
+            json.put(HostAuthColumns.LOGIN, mLogin);
+            json.putOpt(HostAuthColumns.PASSWORD, mPassword);
+            json.putOpt(HostAuthColumns.DOMAIN, mDomain);
+            json.putOpt(HostAuthColumns.CLIENT_CERT_ALIAS, mClientCertAlias);
+            if (mCredential != null) {
+                json.putOpt(JSON_TAG_CREDENTIAL, mCredential.toJson());
+            }
+            return json;
+        } catch (final JSONException e) {
+            LogUtils.d(LogUtils.TAG, e, "Exception while serializing HostAuth");
+        }
+        return null;
+    }
+
+    protected static HostAuth fromJson(final JSONObject json) {
+        try {
+            final HostAuth h = new HostAuth();
+            h.mProtocol = json.getString(HostAuthColumns.PROTOCOL);
+            h.mAddress = json.getString(HostAuthColumns.ADDRESS);
+            h.mPort = json.getInt(HostAuthColumns.PORT);
+            h.mFlags = json.getInt(HostAuthColumns.FLAGS);
+            h.mLogin = json.getString(HostAuthColumns.LOGIN);
+            h.mPassword = json.optString(HostAuthColumns.PASSWORD);
+            h.mDomain = json.optString(HostAuthColumns.DOMAIN);
+            h.mClientCertAlias = json.optString(HostAuthColumns.CLIENT_CERT_ALIAS);
+            final JSONObject credJson = json.optJSONObject(JSON_TAG_CREDENTIAL);
+            if (credJson != null) {
+                h.mCredential = Credential.fromJson(credJson);
+            }
+            return h;
+        } catch (final JSONException e) {
+            LogUtils.d(LogUtils.TAG, e, "Exception while deserializing HostAuth");
+        }
+        return null;
+    }
+
+    /**
+     * Ensure that all optionally-loaded fields are populated from the provider.
+     * @param context for provider loads
+     */
+    public void ensureLoaded(final Context context) {
+        getCredential(context);
     }
 
     /**
@@ -214,14 +320,9 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         setLogin(userName, userPassword);
     }
 
-    /**
-     * Sets the user name and password
-     */
-    public void setLogin(String userName, String userPassword) {
+    public void setUserName(final String userName) {
         mLogin = userName;
-        mPassword = userPassword;
-
-        if (mLogin == null) {
+        if (TextUtils.isEmpty(mLogin)) {
             mFlags &= ~FLAG_AUTHENTICATE;
         } else {
             mFlags |= FLAG_AUTHENTICATE;
@@ -229,16 +330,25 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
     }
 
     /**
-     * Returns the login information. [0] is the username and [1] is the password. If
-     * {@link #FLAG_AUTHENTICATE} is not set, {@code null} is returned.
+     * Sets the user name and password
+     */
+    public void setLogin(String userName, String userPassword) {
+        mLogin = userName;
+        mPassword = userPassword;
+
+        if (TextUtils.isEmpty(mLogin)) {
+            mFlags &= ~FLAG_AUTHENTICATE;
+        } else {
+            mFlags |= FLAG_AUTHENTICATE;
+        }
+    }
+
+    /**
+     * Returns the login information. [0] is the username and [1] is the password.
      */
     public String[] getLogin() {
-        if ((mFlags & FLAG_AUTHENTICATE) != 0) {
-            String trimUser = (mLogin != null) ? mLogin.trim() : "";
-            String password = (mPassword != null) ? mPassword : "";
-            return new String[] { trimUser, password };
-        }
-        return null;
+        String trimUser = (mLogin != null) ? mLogin.trim() : null;
+        return new String[] { trimUser, mPassword };
     }
 
     public void setConnection(String protocol, String address, int port, int flags) {
@@ -330,6 +440,18 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         dest.writeString(mPassword);
         dest.writeString(mDomain);
         dest.writeString(mClientCertAlias);
+        if ((mFlags & FLAG_OAUTH) != 0) {
+            // TODO: This is nasty, but to be compatible with backward Exchange, we can't make any
+            // change to the parcelable format. But we need Credential objects to be here.
+            // So... only parcel or unparcel Credentials if the OAUTH flag is set. This will never
+            // be set on HostAuth going to or coming from Exchange.
+            dest.writeLong(mCredentialKey);
+            if (mCredential == null) {
+                Credential.EMPTY.writeToParcel(dest, flags);
+            } else {
+                mCredential.writeToParcel(dest, flags);
+            }
+        }
     }
 
     /**
@@ -346,6 +468,19 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         mPassword = in.readString();
         mDomain = in.readString();
         mClientCertAlias = in.readString();
+        if ((mFlags & FLAG_OAUTH) != 0) {
+            // TODO: This is nasty, but to be compatible with backward Exchange, we can't make any
+            // change to the parcelable format. But we need Credential objects to be here.
+            // So... only parcel or unparcel Credentials if the OAUTH flag is set. This will never
+            // be set on HostAuth going to or coming from Exchange.
+            mCredentialKey = in.readLong();
+            mCredential = new Credential(in);
+            if (mCredential.equals(Credential.EMPTY)) {
+                mCredential = null;
+            }
+        } else {
+            mCredentialKey = -1;
+        }
     }
 
     @Override
@@ -357,12 +492,12 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         return mPort == that.mPort
                 && mId == that.mId
                 && mFlags == that.mFlags
-                && Utility.areStringsEqual(mProtocol, that.mProtocol)
-                && Utility.areStringsEqual(mAddress, that.mAddress)
-                && Utility.areStringsEqual(mLogin, that.mLogin)
-                && Utility.areStringsEqual(mPassword, that.mPassword)
-                && Utility.areStringsEqual(mDomain, that.mDomain)
-                && Utility.areStringsEqual(mClientCertAlias, that.mClientCertAlias);
+                && TextUtils.equals(mProtocol, that.mProtocol)
+                && TextUtils.equals(mAddress, that.mAddress)
+                && TextUtils.equals(mLogin, that.mLogin)
+                && TextUtils.equals(mPassword, that.mPassword)
+                && TextUtils.equals(mDomain, that.mDomain)
+                && TextUtils.equals(mClientCertAlias, that.mClientCertAlias);
                 // We don't care about the server certificate for equals
     }
 
@@ -390,7 +525,7 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
      * Note that the use of client certificate is specified in the URI, a secure connection type
      * must be used.
      */
-    public static void setHostAuthFromString(HostAuth auth, String uriString)
+    public void setHostAuthFromString(String uriString)
             throws URISyntaxException {
         URI uri = new URI(uriString);
         String path = uri.getPath();
@@ -399,11 +534,11 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
             // Strip off the leading slash that begins the path.
             domain = path.substring(1);
         }
-        auth.mDomain = domain;
-        auth.setLogin(uri.getUserInfo());
+        mDomain = domain;
+        setLogin(uri.getUserInfo());
 
         String scheme = uri.getScheme();
-        auth.setConnection(scheme, uri.getHost(), uri.getPort());
+        setConnection(scheme, uri.getHost(), uri.getPort());
     }
 
     /**
@@ -427,9 +562,15 @@ public final class HostAuth extends EmailContent implements HostAuthColumns, Par
         setConnection(protocol, host, port, flags, clientCertAlias);
     }
 
+    public static String getProtocolFromString(String uriString) {
+        final Uri uri = Uri.parse(uriString);
+        final String scheme = uri.getScheme();
+        final String[] schemeParts = scheme.split("\\+");
+        return schemeParts[0];
+    }
+
     @Override
     public String toString() {
         return "[protocol " + mProtocol + "]";
     }
-
 }

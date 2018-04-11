@@ -60,7 +60,7 @@ static PrintfSpecifierResult ParsePrintfSpecifier(FormatStringHandler &H,
   using namespace clang::analyze_printf;
 
   const char *I = Beg;
-  const char *Start = 0;
+  const char *Start = nullptr;
   UpdateOnReturn <const char*> UpdateBeg(Beg, I);
 
   // Look for a '%' character that indicates the start of a format specifier.
@@ -124,7 +124,7 @@ static PrintfSpecifierResult ParsePrintfSpecifier(FormatStringHandler &H,
 
   // Look for the field width (if any).
   if (ParseFieldWidth(H, FS, Start, I, E,
-                      FS.usesPositionalArg() ? 0 : &argIndex))
+                      FS.usesPositionalArg() ? nullptr : &argIndex))
     return true;
 
   if (I == E) {
@@ -142,7 +142,7 @@ static PrintfSpecifierResult ParsePrintfSpecifier(FormatStringHandler &H,
     }
 
     if (ParsePrecision(H, FS, Start, I, E,
-                       FS.usesPositionalArg() ? 0 : &argIndex))
+                       FS.usesPositionalArg() ? nullptr : &argIndex))
       return true;
 
     if (I == E) {
@@ -187,8 +187,8 @@ static PrintfSpecifierResult ParsePrintfSpecifier(FormatStringHandler &H,
     case 'i': k = ConversionSpecifier::iArg; break;
     case 'n': k = ConversionSpecifier::nArg; break;
     case 'o': k = ConversionSpecifier::oArg; break;
-    case 'p': k = ConversionSpecifier::pArg;   break;
-    case 's': k = ConversionSpecifier::sArg;      break;
+    case 'p': k = ConversionSpecifier::pArg; break;
+    case 's': k = ConversionSpecifier::sArg; break;
     case 'u': k = ConversionSpecifier::uArg; break;
     case 'x': k = ConversionSpecifier::xArg; break;
     // POSIX specific.
@@ -278,18 +278,27 @@ ArgType PrintfSpecifier::getArgType(ASTContext &Ctx,
       case LengthModifier::AsLongDouble:
         // GNU extension.
         return Ctx.LongLongTy;
-      case LengthModifier::None: return Ctx.IntTy;
+      case LengthModifier::None:
+        return Ctx.IntTy;
+      case LengthModifier::AsInt32:
+        return ArgType(Ctx.IntTy, "__int32");
       case LengthModifier::AsChar: return ArgType::AnyCharTy;
       case LengthModifier::AsShort: return Ctx.ShortTy;
       case LengthModifier::AsLong: return Ctx.LongTy;
       case LengthModifier::AsLongLong:
       case LengthModifier::AsQuad:
         return Ctx.LongLongTy;
+      case LengthModifier::AsInt64:
+        return ArgType(Ctx.LongLongTy, "__int64");
       case LengthModifier::AsIntMax:
         return ArgType(Ctx.getIntMaxType(), "intmax_t");
       case LengthModifier::AsSizeT:
         // FIXME: How to get the corresponding signed version of size_t?
         return ArgType();
+      case LengthModifier::AsInt3264:
+        return Ctx.getTargetInfo().getTriple().isArch64Bit()
+                   ? ArgType(Ctx.LongLongTy, "__int64")
+                   : ArgType(Ctx.IntTy, "__int32");
       case LengthModifier::AsPtrDiff:
         return ArgType(Ctx.getPointerDiffType(), "ptrdiff_t");
       case LengthModifier::AsAllocate:
@@ -302,17 +311,26 @@ ArgType PrintfSpecifier::getArgType(ASTContext &Ctx,
       case LengthModifier::AsLongDouble:
         // GNU extension.
         return Ctx.UnsignedLongLongTy;
-      case LengthModifier::None: return Ctx.UnsignedIntTy;
+      case LengthModifier::None:
+        return Ctx.UnsignedIntTy;
+      case LengthModifier::AsInt32:
+        return ArgType(Ctx.UnsignedIntTy, "unsigned __int32");
       case LengthModifier::AsChar: return Ctx.UnsignedCharTy;
       case LengthModifier::AsShort: return Ctx.UnsignedShortTy;
       case LengthModifier::AsLong: return Ctx.UnsignedLongTy;
       case LengthModifier::AsLongLong:
       case LengthModifier::AsQuad:
         return Ctx.UnsignedLongLongTy;
+      case LengthModifier::AsInt64:
+        return ArgType(Ctx.UnsignedLongLongTy, "unsigned __int64");
       case LengthModifier::AsIntMax:
         return ArgType(Ctx.getUIntMaxType(), "uintmax_t");
       case LengthModifier::AsSizeT:
         return ArgType(Ctx.getSizeType(), "size_t");
+      case LengthModifier::AsInt3264:
+        return Ctx.getTargetInfo().getTriple().isArch64Bit()
+                   ? ArgType(Ctx.UnsignedLongLongTy, "unsigned __int64")
+                   : ArgType(Ctx.UnsignedIntTy, "unsigned __int32");
       case LengthModifier::AsPtrDiff:
         // FIXME: How to get the corresponding unsigned
         // version of ptrdiff_t?
@@ -351,6 +369,9 @@ ArgType PrintfSpecifier::getArgType(ASTContext &Ctx,
         return ArgType(); // FIXME: Is this a known extension?
       case LengthModifier::AsAllocate:
       case LengthModifier::AsMAllocate:
+      case LengthModifier::AsInt32:
+      case LengthModifier::AsInt3264:
+      case LengthModifier::AsInt64:
         return ArgType::Invalid();
     }
   }

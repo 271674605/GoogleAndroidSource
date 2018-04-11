@@ -52,8 +52,8 @@ class ProxyResolvingClientSocket : public net::StreamSocket {
                    const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
                     const net::CompletionCallback& callback) OVERRIDE;
-  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
-  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+  virtual int SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual int SetSendBufferSize(int32 size) OVERRIDE;
   virtual int Connect(const net::CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
@@ -95,10 +95,13 @@ class ProxyResolvingClientSocket : public net::StreamSocket {
   const GURL proxy_url_;
   bool tried_direct_connect_fallback_;
   net::BoundNetLog bound_net_log_;
-  base::WeakPtrFactory<ProxyResolvingClientSocket> weak_factory_;
 
   // The callback passed to Connect().
   net::CompletionCallback user_connect_callback_;
+
+  base::WeakPtrFactory<ProxyResolvingClientSocket> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(ProxyResolvingClientSocket);
 };
 
 }  // namespace jingle_glue

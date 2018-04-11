@@ -18,6 +18,7 @@ package android.os.cts;
 
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.Parcel;
 import android.test.AndroidTestCase;
@@ -33,7 +34,7 @@ public class MessageTest extends AndroidTestCase {
     private Message mMessage;
     private boolean mMessageHandlerCalled;
 
-    private Handler mHandler = new Handler() {
+    private Handler mHandler = new Handler(Looper.getMainLooper()) {
         public void handleMessage(Message msg) {
             mMessageHandlerCalled = true;
         }
@@ -229,6 +230,70 @@ public class MessageTest extends AndroidTestCase {
 
         message.setAsynchronous(false);
         assertFalse(message.isAsynchronous());
+    }
+
+    public void testRecycleThrowsIfMessageAlreadyRecycled() {
+        Message message = Message.obtain();
+        message.recycle();
+
+        try {
+            message.recycle();
+            fail("should throw IllegalStateException");
+        } catch (IllegalStateException ex) {
+            // expected
+        }
+    }
+
+    public void testSendMessageThrowsIfMessageAlreadyRecycled() {
+        Message message = Message.obtain();
+        message.recycle();
+
+        try {
+            mHandler.sendMessage(message);
+            fail("should throw IllegalStateException");
+        } catch (IllegalStateException ex) {
+            // expected
+        }
+    }
+
+    public void testRecycleThrowsIfMessageIsBeingDelivered() {
+        final Exception[] caught = new Exception[1];
+        Handler handler = new Handler(mHandler.getLooper()) {
+            @Override
+            public void handleMessage(Message msg) {
+                try {
+                    msg.recycle();
+                } catch (IllegalStateException ex) {
+                    caught[0] = ex; // expected
+                }
+            }
+        };
+        handler.sendEmptyMessage(WHAT);
+        sleep(SLEEP_TIME);
+
+        if (caught[0] == null) {
+            fail("should throw IllegalStateException");
+        }
+    }
+
+    public void testSendMessageThrowsIfMessageIsBeingDelivered() {
+        final Exception[] caught = new Exception[1];
+        Handler handler = new Handler(mHandler.getLooper()) {
+            @Override
+            public void handleMessage(Message msg) {
+                try {
+                    mHandler.sendMessage(msg);
+                } catch (IllegalStateException ex) {
+                    caught[0] = ex; // expected
+                }
+            }
+        };
+        handler.sendEmptyMessage(WHAT);
+        sleep(SLEEP_TIME);
+
+        if (caught[0] == null) {
+            fail("should throw IllegalStateException");
+        }
     }
 
     private void sleep(long time) {

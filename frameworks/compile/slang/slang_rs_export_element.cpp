@@ -31,29 +31,41 @@ namespace slang {
 bool RSExportElement::Initialized = false;
 RSExportElement::ElementInfoMapTy RSExportElement::ElementInfoMap;
 
+struct DataElementInfo {
+  const char *name;
+  DataType dataType;
+  bool normalized;
+  int vsize;
+};
+
+static DataElementInfo DataElementInfoTable[] = {
+    {"rs_pixel_l", DataTypeUnsigned8, true, 1},
+    {"rs_pixel_a", DataTypeUnsigned8, true, 1},
+    {"rs_pixel_la", DataTypeUnsigned8, true, 2},
+    {"rs_pixel_rgb", DataTypeUnsigned8, true, 3},
+    {"rs_pixel_rgba", DataTypeUnsigned8, true, 4},
+    {"rs_pixel_rgb565", DataTypeUnsigned8, true, 3},
+    {"rs_pixel_rgb5551", DataTypeUnsigned8, true, 4},
+    {"rs_pixel_rgb4444", DataTypeUnsigned8, true, 4},
+};
+
+const int DataElementInfoTableCount = sizeof(DataElementInfoTable) / sizeof(DataElementInfoTable[0]);
+
+// TODO Rename RSExportElement to RSExportDataElement
 void RSExportElement::Init() {
   if (!Initialized) {
     // Initialize ElementInfoMap
-#define ENUM_RS_DATA_ELEMENT(_name, _dt, _norm, _vsize)  \
-    {                                                         \
-      ElementInfo *EI = new ElementInfo;                      \
-      EI->type = RSExportPrimitiveType::DataType ## _dt;      \
-      EI->normalized = _norm;                                 \
-      EI->vsize = _vsize;                                     \
-                                                              \
-      llvm::StringRef Name(_name);                            \
-      ElementInfoMap.insert(                                  \
-          ElementInfoMapTy::value_type::Create(               \
-              Name.begin(),                                   \
-              Name.end(),                                     \
-              ElementInfoMap.getAllocator(),                  \
-              EI));                                           \
+    for (int i = 0; i < DataElementInfoTableCount; i++) {
+      ElementInfo *EI = new ElementInfo;
+      EI->type = DataElementInfoTable[i].dataType;
+      EI->normalized = DataElementInfoTable[i].normalized;
+      EI->vsize = DataElementInfoTable[i].vsize;
+      llvm::StringRef Name(DataElementInfoTable[i].name);
+      ElementInfoMap.insert(ElementInfoMapTy::value_type::Create(
+          Name, ElementInfoMap.getAllocator(), EI));
     }
-#include "RSDataElementEnums.inc"
-
     Initialized = true;
   }
-  return;
 }
 
 RSExportType *RSExportElement::Create(RSContext *Context,
@@ -69,8 +81,7 @@ RSExportType *RSExportElement::Create(RSContext *Context,
 
   slangAssert(EI != NULL && "Element info not found");
 
-  if (!RSExportType::NormalizeType(T, TypeName, Context->getDiagnostics(),
-                                   NULL))
+  if (!RSExportType::NormalizeType(T, TypeName, Context, NULL))
     return NULL;
 
   switch (T->getTypeClass()) {
@@ -119,7 +130,7 @@ RSExportType *RSExportElement::Create(RSContext *Context,
 RSExportType *RSExportElement::CreateFromDecl(RSContext *Context,
                                               const clang::DeclaratorDecl *DD) {
   const clang::Type* T = RSExportType::GetTypeOfDecl(DD);
-  const clang::Type* CT = GET_CANONICAL_TYPE(T);
+  const clang::Type* CT = GetCanonicalType(T);
   const ElementInfo* EI = NULL;
 
   // Note: RS element like rs_pixel_rgb elements are either in the type of

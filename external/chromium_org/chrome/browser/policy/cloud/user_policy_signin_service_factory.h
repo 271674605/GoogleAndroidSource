@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_POLICY_CLOUD_USER_POLICY_SIGNIN_SERVICE_FACTORY_H_
 
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 class Profile;
 
@@ -16,6 +16,7 @@ class PrefRegistrySyncable;
 
 namespace policy {
 
+class DeviceManagementService;
 class UserPolicySigninService;
 
 // Singleton that owns all UserPolicySigninServices and creates/deletes them as
@@ -30,9 +31,15 @@ class UserPolicySigninServiceFactory
   // Used primarily for testing.
   static UserPolicySigninService* GetForProfile(Profile* profile);
 
+  // Allows setting a mock DeviceManagementService for tests. Does not take
+  // ownership, and should be reset to NULL at the end of the test.
+  // Set this before an instance is built for a Profile.
+  static void SetDeviceManagementServiceForTesting(
+      DeviceManagementService* device_management_service);
+
  protected:
   // BrowserContextKeyedServiceFactory implementation.
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
+  virtual KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* profile) const OVERRIDE;
 
   // Overridden to cause this object to be created when the profile is created.

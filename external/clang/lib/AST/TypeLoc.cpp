@@ -55,7 +55,7 @@ namespace {
 /// \brief Returns the alignment of the type source info data block.
 unsigned TypeLoc::getLocalAlignmentForType(QualType Ty) {
   if (Ty.isNull()) return 1;
-  return TypeAligner().Visit(TypeLoc(Ty, 0));
+  return TypeAligner().Visit(TypeLoc(Ty, nullptr));
 }
 
 namespace {
@@ -73,7 +73,7 @@ namespace {
 /// \brief Returns the size of the type source info data block.
 unsigned TypeLoc::getFullDataSizeForType(QualType Ty) {
   unsigned Total = 0;
-  TypeLoc TyLoc(Ty, 0);
+  TypeLoc TyLoc(Ty, nullptr);
   unsigned MaxAlign = 1;
   while (!TyLoc.isNull()) {
     unsigned Align = getLocalAlignmentForType(TyLoc.getType());
@@ -378,18 +378,16 @@ void TemplateSpecializationTypeLoc::initializeArgLocs(ASTContext &Context,
     case TemplateArgument::Template:
     case TemplateArgument::TemplateExpansion: {
       NestedNameSpecifierLocBuilder Builder;
-      TemplateName Template = Args[i].getAsTemplate();
+      TemplateName Template = Args[i].getAsTemplateOrTemplatePattern();
       if (DependentTemplateName *DTN = Template.getAsDependentTemplateName())
         Builder.MakeTrivial(Context, DTN->getQualifier(), Loc);
       else if (QualifiedTemplateName *QTN = Template.getAsQualifiedTemplateName())
         Builder.MakeTrivial(Context, QTN->getQualifier(), Loc);
-      
+
       ArgInfos[i] = TemplateArgumentLocInfo(
-                                           Builder.getWithLocInContext(Context),
-                                            Loc, 
-                                Args[i].getKind() == TemplateArgument::Template
-                                            ? SourceLocation()
-                                            : Loc);
+          Builder.getWithLocInContext(Context), Loc,
+          Args[i].getKind() == TemplateArgument::Template ? SourceLocation()
+                                                          : Loc);
       break;
     }
 

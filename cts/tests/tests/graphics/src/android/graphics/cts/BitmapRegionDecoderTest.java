@@ -29,7 +29,7 @@ import android.os.ParcelFileDescriptor;
 import android.test.InstrumentationTestCase;
 import android.util.Log;
 
-import com.android.cts.stub.R;
+import com.android.cts.graphics.R;
 
 
 import java.io.ByteArrayOutputStream;
@@ -88,7 +88,7 @@ public class BitmapRegionDecoderTest extends InstrumentationTestCase {
     private int mMseMargin = 3 * (1 * 1);
 
     // MSE margin for WebP Region-Decoding for 'Config.RGB_565' is little bigger.
-    private int mMseMarginWebPConfigRgb565 = 5;
+    private int mMseMarginWebPConfigRgb565 = 8;
 
 
     @Override

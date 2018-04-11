@@ -18,6 +18,7 @@ package com.android.cts.verifier.sensors;
 
 import com.android.cts.verifier.PassFailButtons;
 import com.android.cts.verifier.R;
+import com.android.cts.verifier.sensors.renderers.GLArrowSensorTestRenderer;
 
 import android.content.Context;
 import android.hardware.Sensor;
@@ -30,7 +31,10 @@ import android.os.Bundle;
  * CTS Verifier case for verifying correct integration of accelerometer.
  * Displays a wedge using OpenGL that, on a correctly-integrated device, always
  * points down.
+ *
+ * @deprecated It has been replaced by {@link AccelerometerMeasurementTestActivity}
  */
+@Deprecated
 public class AccelerometerTestActivity extends PassFailButtons.Activity {
     private GLSurfaceView mGLSurfaceView;
 
@@ -44,7 +48,8 @@ public class AccelerometerTestActivity extends PassFailButtons.Activity {
 
         mSensorManager = (SensorManager) getApplicationContext().getSystemService(
                 Context.SENSOR_SERVICE);
-        AccelerometerTestRenderer renderer = new AccelerometerTestRenderer(this);
+        GLArrowSensorTestRenderer renderer =
+                new GLArrowSensorTestRenderer(this, Sensor.TYPE_ACCELEROMETER);
         mListener = renderer;
 
         setContentView(R.layout.pass_fail_gl);

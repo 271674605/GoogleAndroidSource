@@ -4,7 +4,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
-# This script takes libcmt.lib for VS2005/08/10 and removes the allocation
+# This script takes libcmt.lib for VS2005/08/10/12/13 and removes the allocation
 # related functions from it.
 #
 # Usage: prep_libc.py <VCLibDir> <OutputDir> <arch>
@@ -12,7 +12,7 @@
 # VCLibDir is the path where VC is installed, something like:
 #    C:\Program Files\Microsoft Visual Studio 8\VC\lib
 # OutputDir is the directory where the modified libcmt file should be stored.
-# arch is either 'ia32' or 'x64'
+# arch is one of: 'ia32', 'x86' or 'x64'. ia32 and x86 are synonyms.
 
 import os
 import shutil
@@ -51,7 +51,10 @@ def main():
     'F:\\dd\\vctools\\crt_bld\\' + bindir + \
       '\\crt\\src\\build\\' + objdir + '\\mt_obj\\nativec\\\\',
     'F:\\dd\\vctools\\crt_bld\\' + bindir + \
-      '\\crt\\src\\build\\' + objdir + '\\mt_obj\\nativecpp\\\\' ]
+      '\\crt\\src\\build\\' + objdir + '\\mt_obj\\nativecpp\\\\',
+    'f:\\binaries\\Intermediate\\vctools\\crt_bld\\' + bindir + \
+      '\\crt\\prebuild\\build\\INTEL\\mt_obj\\cpp_obj\\\\',
+    ]
 
   objfiles = ['malloc', 'free', 'realloc', 'new', 'delete', 'new2', 'delete2',
               'align', 'msize', 'heapinit', 'expand', 'heapchk', 'heapwalk',

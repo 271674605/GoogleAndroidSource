@@ -9,12 +9,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "cc/scheduler/delay_based_time_source.h"
-#include "cc/scheduler/frame_rate_controller.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
 
-class FakeTimeSourceClient : public cc::TimeSourceClient {
+class FakeTimeSourceClient : public TimeSourceClient {
  public:
   FakeTimeSourceClient() { Reset(); }
   void Reset() { tick_called_ = false; }
@@ -27,7 +26,7 @@ class FakeTimeSourceClient : public cc::TimeSourceClient {
   bool tick_called_;
 };
 
-class FakeDelayBasedTimeSource : public cc::DelayBasedTimeSource {
+class FakeDelayBasedTimeSource : public DelayBasedTimeSource {
  public:
   static scoped_refptr<FakeDelayBasedTimeSource> Create(
       base::TimeDelta interval, base::SingleThreadTaskRunner* task_runner) {
@@ -45,14 +44,6 @@ class FakeDelayBasedTimeSource : public cc::DelayBasedTimeSource {
   virtual ~FakeDelayBasedTimeSource() {}
 
   base::TimeTicks now_;
-};
-
-class FakeFrameRateController : public cc::FrameRateController {
- public:
-  explicit FakeFrameRateController(scoped_refptr<cc::TimeSource> timer)
-      : cc::FrameRateController(timer) {}
-
-  int NumFramesPending() const { return num_frames_pending_; }
 };
 
 }  // namespace cc

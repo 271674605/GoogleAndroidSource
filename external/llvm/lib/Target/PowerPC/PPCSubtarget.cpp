@@ -15,28 +15,73 @@
 #include "PPC.h"
 #include "PPCRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cstdlib>
 
+using namespace llvm;
+
+#define DEBUG_TYPE "ppc-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "PPCGenSubtargetInfo.inc"
 
-using namespace llvm;
+/// Return the datalayout string of a subtarget.
+static std::string getDataLayoutString(const PPCSubtarget &ST) {
+  const Triple &T = ST.getTargetTriple();
 
-PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, bool is64Bit)
-  : PPCGenSubtargetInfo(TT, CPU, FS)
-  , IsPPC64(is64Bit)
-  , TargetTriple(TT) {
+  std::string Ret;
+
+  // Most PPC* platforms are big endian, PPC64LE is little endian.
+  if (ST.isLittleEndian())
+    Ret = "e";
+  else
+    Ret = "E";
+
+  Ret += DataLayout::getManglingComponent(T);
+
+  // PPC32 has 32 bit pointers. The PS3 (OS Lv2) is a PPC64 machine with 32 bit
+  // pointers.
+  if (!ST.isPPC64() || T.getOS() == Triple::Lv2)
+    Ret += "-p:32:32";
+
+  // Note, the alignment values for f64 and i64 on ppc64 in Darwin
+  // documentation are wrong; these are correct (i.e. "what gcc does").
+  if (ST.isPPC64() || ST.isSVR4ABI())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // PPC64 has 32 and 64 bit registers, PPC32 has only 32 bit ones.
+  if (ST.isPPC64())
+    Ret += "-n32:64";
+  else
+    Ret += "-n32";
+
+  return Ret;
+}
+
+PPCSubtarget &PPCSubtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                            StringRef FS) {
   initializeEnvironment();
   resetSubtargetFeatures(CPU, FS);
+  return *this;
 }
+
+PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
+                           const std::string &FS, PPCTargetMachine &TM,
+                           bool is64Bit, CodeGenOpt::Level OptLevel)
+    : PPCGenSubtargetInfo(TT, CPU, FS), IsPPC64(is64Bit), TargetTriple(TT),
+      OptLevel(OptLevel),
+      FrameLowering(initializeSubtargetDependencies(CPU, FS)),
+      DL(getDataLayoutString(*this)), InstrInfo(*this), JITInfo(*this),
+      TLInfo(TM), TSInfo(&DL) {}
 
 /// SetJITMode - This is called to inform the subtarget info that we are
 /// producing code for the JIT.
@@ -72,8 +117,11 @@ void PPCSubtarget::initializeEnvironment() {
   HasMFOCRF = false;
   Has64BitSupport = false;
   Use64BitRegs = false;
+  UseCRBits = false;
   HasAltivec = false;
   HasQPX = false;
+  HasVSX = false;
+  HasFCPSGN = false;
   HasFSQRT = false;
   HasFRE = false;
   HasFRES = false;
@@ -88,6 +136,8 @@ void PPCSubtarget::initializeEnvironment() {
   HasPOPCNTD = false;
   HasLDBRX = false;
   IsBookE = false;
+  DeprecatedMFTB = false;
+  DeprecatedDST = false;
   HasLazyResolverStubs = false;
   IsJITCodeModel = false;
 }
@@ -120,6 +170,14 @@ void PPCSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
       FullFS = "+64bit";
   }
 
+  // At -O2 and above, track CR bits as individual registers.
+  if (OptLevel >= CodeGenOpt::Default) {
+    if (!FullFS.empty())
+      FullFS = "+crbits," + FullFS;
+    else
+      FullFS = "+crbits";
+  }
+
   // Parse features string.
   ParseSubtargetFeatures(CPUName, FullFS);
 
@@ -140,6 +198,11 @@ void PPCSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
 
   // Determine endianness.
   IsLittleEndian = (TargetTriple.getArch() == Triple::ppc64le);
+
+  // FIXME: For now, we disable VSX in little-endian mode until endian
+  // issues in those instructions can be addressed.
+  if (IsLittleEndian)
+    HasVSX = false;
 }
 
 /// hasLazyResolverStub - Return true if accesses to the specified global have
@@ -163,14 +226,7 @@ bool PPCSubtarget::enablePostRAScheduler(
            CodeGenOpt::Level OptLevel,
            TargetSubtargetInfo::AntiDepBreakMode& Mode,
            RegClassVector& CriticalPathRCs) const {
-  // FIXME: It would be best to use TargetSubtargetInfo::ANTIDEP_ALL here,
-  // but we can't because we can't reassign the cr registers. There is a
-  // dependence between the cr register and the RLWINM instruction used
-  // to extract its value which the anti-dependency breaker can't currently
-  // see. Maybe we should make a late-expanded pseudo to encode this dependency.
-  // (the relevant code is in PPCDAGToDAGISel::SelectSETCC)
-
-  Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
+  Mode = TargetSubtargetInfo::ANTIDEP_ALL;
 
   CriticalPathRCs.clear();
 
@@ -179,9 +235,46 @@ bool PPCSubtarget::enablePostRAScheduler(
   else
     CriticalPathRCs.push_back(&PPC::GPRCRegClass);
     
-  CriticalPathRCs.push_back(&PPC::F8RCRegClass);
-  CriticalPathRCs.push_back(&PPC::VRRCRegClass);
-
   return OptLevel >= CodeGenOpt::Default;
+}
+
+// Embedded cores need aggressive scheduling (and some others also benefit).
+static bool needsAggressiveScheduling(unsigned Directive) {
+  switch (Directive) {
+  default: return false;
+  case PPC::DIR_440:
+  case PPC::DIR_A2:
+  case PPC::DIR_E500mc:
+  case PPC::DIR_E5500:
+  case PPC::DIR_PWR7:
+  case PPC::DIR_PWR8:
+    return true;
+  }
+}
+
+bool PPCSubtarget::enableMachineScheduler() const {
+  // Enable MI scheduling for the embedded cores.
+  // FIXME: Enable this for all cores (some additional modeling
+  // may be necessary).
+  return needsAggressiveScheduling(DarwinDirective);
+}
+
+void PPCSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
+                                       MachineInstr *begin,
+                                       MachineInstr *end,
+                                       unsigned NumRegionInstrs) const {
+  if (needsAggressiveScheduling(DarwinDirective)) {
+    Policy.OnlyTopDown = false;
+    Policy.OnlyBottomUp = false;
+  }
+
+  // Spilling is generally expensive on all PPC cores, so always enable
+  // register-pressure tracking.
+  Policy.ShouldTrackPressure = true;
+}
+
+bool PPCSubtarget::useAA() const {
+  // Use AA during code generation for the embedded cores.
+  return needsAggressiveScheduling(DarwinDirective);
 }
 

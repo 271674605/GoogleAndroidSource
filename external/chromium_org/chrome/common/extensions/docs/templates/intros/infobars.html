@@ -6,7 +6,7 @@ as the following screenshot shows.
 
 <p>
 <img src="{{static}}/images/infobar.png"
-  width="566" height="150"
+  width="722" height="150"
   alt="An infobar asking whether the user wants to translate the current page" />
 </p>
 
@@ -21,7 +21,7 @@ Google Chrome automatically closes the infobar.
 You implement the content of your
 infobar using HTML. Because infobars are ordinary pages inside an extension,
 they can
-<a href="overview.html#pageComm">communicate with other extension pages</a>.
+<a href="overview#pageComm">communicate with other extension pages</a>.
 </p>
 
 
@@ -34,7 +34,8 @@ a 16x16-pixel icon for display next to your infobar.
 For example:
 </p>
 
-<pre>{
+<pre data-filename="manifest.json">
+{
   "name": "Andy's infobar extension",
   "version": "1.0",
   <b>"permissions": ["infobars"],</b>
@@ -44,4 +45,5 @@ For example:
   "background": {
     "scripts": ["background.js"]
   }
-}</pre>
+}
+</pre>

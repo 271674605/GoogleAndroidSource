@@ -18,8 +18,6 @@ class View;
 }
 
 namespace ash {
-namespace internal {
-
 class TouchHudCanvas;
 class TouchLog;
 
@@ -34,11 +32,11 @@ class ASH_EXPORT TouchHudDebug : public TouchObserverHUD {
     INVISIBLE,
   };
 
-  explicit TouchHudDebug(aura::RootWindow* initial_root);
+  explicit TouchHudDebug(aura::Window* initial_root);
 
   // Returns the log of touch events for all displays as a dictionary mapping id
   // of each display to its touch log.
-  static scoped_ptr<DictionaryValue> GetAllAsDictionary();
+  static scoped_ptr<base::DictionaryValue> GetAllAsDictionary();
 
   // Changes the display mode (e.g. scale, visibility). Calling this repeatedly
   // cycles between a fixed number of display modes.
@@ -46,7 +44,7 @@ class ASH_EXPORT TouchHudDebug : public TouchObserverHUD {
 
   // Returns log of touch events as a list value. Each item in the list is a
   // trace of one touch point.
-  scoped_ptr<ListValue> GetLogAsList() const;
+  scoped_ptr<base::ListValue> GetLogAsList() const;
 
   Mode mode() const { return mode_; }
 
@@ -62,7 +60,8 @@ class ASH_EXPORT TouchHudDebug : public TouchObserverHUD {
 
   // Overriden from TouchObserverHUD.
   virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
-  virtual void OnDisplayBoundsChanged(const gfx::Display& display) OVERRIDE;
+  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
+                                       uint32_t metrics) OVERRIDE;
   virtual void SetHudForRootWindowController(
       RootWindowController* controller) OVERRIDE;
   virtual void UnsetHudForRootWindowController(
@@ -81,7 +80,6 @@ class ASH_EXPORT TouchHudDebug : public TouchObserverHUD {
   DISALLOW_COPY_AND_ASSIGN(TouchHudDebug);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_TOUCH_TOUCH_HUD_DEBUG_H_

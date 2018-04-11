@@ -10,6 +10,7 @@
 class SafeBrowsingService;
 
 namespace content {
+class ResourceContext;
 class ResourceThrottle;
 }
 
@@ -23,7 +24,7 @@ class URLRequest;
 // therefore, a factory has to be registered before using this.
 class SafeBrowsingResourceThrottleFactory {
  public:
-#if defined(MOBILE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
   // Registers a factory. Does not take the ownership of the factory. The
   // caller has to make sure the factory stays alive and properly destroyed.
   static void RegisterFactory(SafeBrowsingResourceThrottleFactory* factory) {
@@ -34,8 +35,7 @@ class SafeBrowsingResourceThrottleFactory {
   // Creates a new resource throttle for safe browsing
   static content::ResourceThrottle* Create(
       net::URLRequest* request,
-      int render_process_host_id,
-      int render_view_id,
+      content::ResourceContext* resource_context,
       bool is_subresource,
       SafeBrowsingService* service);
 
@@ -45,8 +45,7 @@ class SafeBrowsingResourceThrottleFactory {
 
   virtual content::ResourceThrottle* CreateResourceThrottle(
       net::URLRequest* request,
-      int render_process_host_id,
-      int render_view_id,
+      content::ResourceContext* resource_context,
       bool is_subresource,
       SafeBrowsingService* service) = 0;
 

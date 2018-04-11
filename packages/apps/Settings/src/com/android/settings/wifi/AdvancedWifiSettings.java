@@ -16,16 +16,25 @@
 
 package com.android.settings.wifi;
 
+import android.app.Dialog;
+import android.app.DialogFragment;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.NetworkScoreManager;
+import android.net.NetworkScorerAppManager;
+import android.net.NetworkScorerAppManager.NetworkScorerAppData;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import android.net.wifi.WifiWatchdogStateMachine;
+import android.net.wifi.WpsInfo;
 import android.os.Bundle;
 import android.preference.CheckBoxPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
+import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceScreen;
+import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.security.Credentials;
@@ -37,6 +46,8 @@ import com.android.settings.R;
 import com.android.settings.SettingsPreferenceFragment;
 import com.android.settings.Utils;
 
+import java.util.Collection;
+
 public class AdvancedWifiSettings extends SettingsPreferenceFragment
         implements Preference.OnPreferenceChangeListener {
 
@@ -46,12 +57,27 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
     private static final String KEY_FREQUENCY_BAND = "frequency_band";
     private static final String KEY_NOTIFY_OPEN_NETWORKS = "notify_open_networks";
     private static final String KEY_SLEEP_POLICY = "sleep_policy";
-    private static final String KEY_POOR_NETWORK_DETECTION = "wifi_poor_network_detection";
     private static final String KEY_SCAN_ALWAYS_AVAILABLE = "wifi_scan_always_available";
     private static final String KEY_INSTALL_CREDENTIALS = "install_credentials";
-    private static final String KEY_SUSPEND_OPTIMIZATIONS = "suspend_optimizations";
+    private static final String KEY_WIFI_ASSISTANT = "wifi_assistant";
+    private static final String KEY_WIFI_DIRECT = "wifi_direct";
+    private static final String KEY_WPS_PUSH = "wps_push_button";
+    private static final String KEY_WPS_PIN = "wps_pin_entry";
 
     private WifiManager mWifiManager;
+    private NetworkScoreManager mNetworkScoreManager;
+
+    private IntentFilter mFilter;
+    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action.equals(WifiManager.LINK_CONFIGURATION_CHANGED_ACTION) ||
+                action.equals(WifiManager.NETWORK_STATE_CHANGED_ACTION)) {
+                refreshWifiInfo();
+            }
+        }
+    };
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -63,51 +89,85 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         mWifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        mFilter = new IntentFilter();
+        mFilter.addAction(WifiManager.LINK_CONFIGURATION_CHANGED_ACTION);
+        mFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+        mNetworkScoreManager =
+                (NetworkScoreManager) getSystemService(Context.NETWORK_SCORE_SERVICE);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         initPreferences();
+        getActivity().registerReceiver(mReceiver, mFilter);
         refreshWifiInfo();
     }
 
+    @Override
+    public void onPause() {
+        super.onPause();
+        getActivity().unregisterReceiver(mReceiver);
+    }
+
     private void initPreferences() {
-        CheckBoxPreference notifyOpenNetworks =
-            (CheckBoxPreference) findPreference(KEY_NOTIFY_OPEN_NETWORKS);
+        SwitchPreference notifyOpenNetworks =
+            (SwitchPreference) findPreference(KEY_NOTIFY_OPEN_NETWORKS);
         notifyOpenNetworks.setChecked(Settings.Global.getInt(getContentResolver(),
                 Settings.Global.WIFI_NETWORKS_AVAILABLE_NOTIFICATION_ON, 0) == 1);
         notifyOpenNetworks.setEnabled(mWifiManager.isWifiEnabled());
 
-        CheckBoxPreference poorNetworkDetection =
-            (CheckBoxPreference) findPreference(KEY_POOR_NETWORK_DETECTION);
-        if (poorNetworkDetection != null) {
-            if (Utils.isWifiOnly(getActivity())) {
-                getPreferenceScreen().removePreference(poorNetworkDetection);
-            } else {
-                poorNetworkDetection.setChecked(Global.getInt(getContentResolver(),
-                        Global.WIFI_WATCHDOG_POOR_NETWORK_TEST_ENABLED,
-                        WifiWatchdogStateMachine.DEFAULT_POOR_NETWORK_AVOIDANCE_ENABLED ?
-                        1 : 0) == 1);
-            }
-        }
-
-        CheckBoxPreference scanAlwaysAvailable =
-            (CheckBoxPreference) findPreference(KEY_SCAN_ALWAYS_AVAILABLE);
+        SwitchPreference scanAlwaysAvailable =
+            (SwitchPreference) findPreference(KEY_SCAN_ALWAYS_AVAILABLE);
         scanAlwaysAvailable.setChecked(Global.getInt(getContentResolver(),
                     Global.WIFI_SCAN_ALWAYS_AVAILABLE, 0) == 1);
 
-        Intent intent=new Intent(Credentials.INSTALL_AS_USER_ACTION);
+        Intent intent = new Intent(Credentials.INSTALL_AS_USER_ACTION);
         intent.setClassName("com.android.certinstaller",
                 "com.android.certinstaller.CertInstallerMain");
         intent.putExtra(Credentials.EXTRA_INSTALL_AS_UID, android.os.Process.WIFI_UID);
         Preference pref = findPreference(KEY_INSTALL_CREDENTIALS);
         pref.setIntent(intent);
 
-        CheckBoxPreference suspendOptimizations =
-            (CheckBoxPreference) findPreference(KEY_SUSPEND_OPTIMIZATIONS);
-        suspendOptimizations.setChecked(Global.getInt(getContentResolver(),
-                Global.WIFI_SUSPEND_OPTIMIZATIONS_ENABLED, 1) == 1);
+        final Context context = getActivity();
+        NetworkScorerAppData scorer = WifiSettings.getWifiAssistantApp(context);
+        SwitchPreference wifiAssistant = (SwitchPreference)findPreference(KEY_WIFI_ASSISTANT);
+        if (scorer != null) {
+            final boolean checked = NetworkScorerAppManager.getActiveScorer(context) != null;
+            wifiAssistant.setSummary(getResources().getString(
+                    R.string.wifi_automatically_manage_summary, scorer.mScorerName));
+            wifiAssistant.setOnPreferenceChangeListener(this);
+            wifiAssistant.setChecked(checked);
+        } else {
+            if (wifiAssistant != null) {
+                getPreferenceScreen().removePreference(wifiAssistant);
+            }
+        }
+
+        Intent wifiDirectIntent = new Intent(context,
+                com.android.settings.Settings.WifiP2pSettingsActivity.class);
+        Preference wifiDirectPref = findPreference(KEY_WIFI_DIRECT);
+        wifiDirectPref.setIntent(wifiDirectIntent);
+
+        // WpsDialog: Create the dialog like WifiSettings does.
+        Preference wpsPushPref = findPreference(KEY_WPS_PUSH);
+        wpsPushPref.setOnPreferenceClickListener(new OnPreferenceClickListener() {
+                public boolean onPreferenceClick(Preference arg0) {
+                    WpsFragment wpsFragment = new WpsFragment(WpsInfo.PBC);
+                    wpsFragment.show(getFragmentManager(), KEY_WPS_PUSH);
+                    return true;
+                }
+        });
+
+        // WpsDialog: Create the dialog like WifiSettings does.
+        Preference wpsPinPref = findPreference(KEY_WPS_PIN);
+        wpsPinPref.setOnPreferenceClickListener(new OnPreferenceClickListener(){
+                public boolean onPreferenceClick(Preference arg0) {
+                    WpsFragment wpsFragment = new WpsFragment(WpsInfo.DISPLAY);
+                    wpsFragment.show(getFragmentManager(), KEY_WPS_PIN);
+                    return true;
+                }
+        });
 
         ListPreference frequencyPref = (ListPreference) findPreference(KEY_FREQUENCY_BAND);
 
@@ -129,7 +189,7 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
 
         ListPreference sleepPolicyPref = (ListPreference) findPreference(KEY_SLEEP_POLICY);
         if (sleepPolicyPref != null) {
-            if (Utils.isWifiOnly(getActivity())) {
+            if (Utils.isWifiOnly(context)) {
                 sleepPolicyPref.setEntries(R.array.wifi_sleep_policy_entries_wifi_only);
             }
             sleepPolicyPref.setOnPreferenceChangeListener(this);
@@ -174,19 +234,11 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
         if (KEY_NOTIFY_OPEN_NETWORKS.equals(key)) {
             Global.putInt(getContentResolver(),
                     Settings.Global.WIFI_NETWORKS_AVAILABLE_NOTIFICATION_ON,
-                    ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
-        } else if (KEY_POOR_NETWORK_DETECTION.equals(key)) {
-            Global.putInt(getContentResolver(),
-                    Global.WIFI_WATCHDOG_POOR_NETWORK_TEST_ENABLED,
-                    ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
-        } else if (KEY_SUSPEND_OPTIMIZATIONS.equals(key)) {
-            Global.putInt(getContentResolver(),
-                    Global.WIFI_SUSPEND_OPTIMIZATIONS_ENABLED,
-                    ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
+                    ((SwitchPreference) preference).isChecked() ? 1 : 0);
         } else if (KEY_SCAN_ALWAYS_AVAILABLE.equals(key)) {
             Global.putInt(getContentResolver(),
                     Global.WIFI_SCAN_ALWAYS_AVAILABLE,
-                    ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
+                    ((SwitchPreference) preference).isChecked() ? 1 : 0);
         } else {
             return super.onPreferenceTreeClick(screen, preference);
         }
@@ -195,6 +247,7 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
 
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
+        final Context context = getActivity();
         String key = preference.getKey();
 
         if (KEY_FREQUENCY_BAND.equals(key)) {
@@ -203,10 +256,32 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
                 mWifiManager.setFrequencyBand(value, true);
                 updateFrequencyBandSummary(preference, value);
             } catch (NumberFormatException e) {
-                Toast.makeText(getActivity(), R.string.wifi_setting_frequency_band_error,
+                Toast.makeText(context, R.string.wifi_setting_frequency_band_error,
                         Toast.LENGTH_SHORT).show();
                 return false;
             }
+        } else if (KEY_WIFI_ASSISTANT.equals(key)) {
+            if (((Boolean)newValue).booleanValue() == false) {
+                mNetworkScoreManager.setActiveScorer(null);
+                return true;
+            }
+
+            NetworkScorerAppData wifiAssistant = WifiSettings.getWifiAssistantApp(context);
+            Intent intent = new Intent();
+            if (wifiAssistant.mConfigurationActivityClassName != null) {
+                // App has a custom configuration activity; launch that.
+                // This custom activity will be responsible for launching the system
+                // dialog.
+                intent.setClassName(wifiAssistant.mPackageName,
+                        wifiAssistant.mConfigurationActivityClassName);
+            } else {
+                // Fall back on the system dialog.
+                intent.setAction(NetworkScoreManager.ACTION_CHANGE_ACTIVE);
+                intent.putExtra(NetworkScoreManager.EXTRA_PACKAGE_NAME,
+                        wifiAssistant.mPackageName);
+            }
+
+            startActivity(intent);
         }
 
         if (KEY_SLEEP_POLICY.equals(key)) {
@@ -216,7 +291,7 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
                         Integer.parseInt(stringValue));
                 updateSleepPolicySummary(preference, stringValue);
             } catch (NumberFormatException e) {
-                Toast.makeText(getActivity(), R.string.wifi_setting_sleep_policy_error,
+                Toast.makeText(context, R.string.wifi_setting_sleep_policy_error,
                         Toast.LENGTH_SHORT).show();
                 return false;
             }
@@ -226,17 +301,40 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
     }
 
     private void refreshWifiInfo() {
+        final Context context = getActivity();
         WifiInfo wifiInfo = mWifiManager.getConnectionInfo();
 
         Preference wifiMacAddressPref = findPreference(KEY_MAC_ADDRESS);
         String macAddress = wifiInfo == null ? null : wifiInfo.getMacAddress();
         wifiMacAddressPref.setSummary(!TextUtils.isEmpty(macAddress) ? macAddress
-                : getActivity().getString(R.string.status_unavailable));
+                : context.getString(R.string.status_unavailable));
+        wifiMacAddressPref.setSelectable(false);
 
         Preference wifiIpAddressPref = findPreference(KEY_CURRENT_IP_ADDRESS);
-        String ipAddress = Utils.getWifiIpAddresses(getActivity());
+        String ipAddress = Utils.getWifiIpAddresses(context);
         wifiIpAddressPref.setSummary(ipAddress == null ?
-                getActivity().getString(R.string.status_unavailable) : ipAddress);
+                context.getString(R.string.status_unavailable) : ipAddress);
+        wifiIpAddressPref.setSelectable(false);
+    }
+
+    /* Wrapper class for the WPS dialog to properly handle life cycle events like rotation. */
+    public static class WpsFragment extends DialogFragment {
+        private static int mWpsSetup;
+
+        // Public default constructor is required for rotation.
+        public WpsFragment() {
+            super();
+        }
+
+        public WpsFragment(int wpsSetup) {
+            super();
+            mWpsSetup = wpsSetup;
+        }
+
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            return new WpsDialog(getActivity(), mWpsSetup);
+        }
     }
 
 }

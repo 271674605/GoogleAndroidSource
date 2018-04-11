@@ -31,6 +31,7 @@ import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
 
 import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 class AdapterProperties {
     private static final boolean DBG = true;
@@ -44,7 +45,7 @@ class AdapterProperties {
     private int mScanMode;
     private int mDiscoverableTimeout;
     private ParcelUuid[] mUuids;
-    private ArrayList<BluetoothDevice> mBondedDevices = new ArrayList<BluetoothDevice>();
+    private CopyOnWriteArrayList<BluetoothDevice> mBondedDevices = new CopyOnWriteArrayList<BluetoothDevice>();
 
     private int mProfilesConnecting, mProfilesConnected, mProfilesDisconnecting;
     private HashMap<Integer, Pair<Integer, Integer>> mProfileConnectionState;
@@ -57,6 +58,13 @@ class AdapterProperties {
     private boolean mDiscovering;
     private RemoteDevices mRemoteDevices;
     private BluetoothAdapter mAdapter;
+    //TODO - all hw capabilities to be exposed as a class
+    private int mNumOfAdvertisementInstancesSupported;
+    private boolean mRpaOffloadSupported;
+    private int mNumOfOffloadedIrkSupported;
+    private int mNumOfOffloadedScanFilterSupported;
+    private int mOffloadedScanResultStorageBytes;
+    private boolean mIsActivityAndEnergyReporting;
 
     // Lock for all getters and setters.
     // If finer grained locking is needer, more locks
@@ -87,7 +95,8 @@ class AdapterProperties {
             mBondedDevices.clear();
     }
 
-    public Object Clone() throws CloneNotSupportedException {
+    @Override
+    public Object clone() throws CloneNotSupportedException {
         throw new CloneNotSupportedException();
     }
 
@@ -203,12 +212,52 @@ class AdapterProperties {
      * @return the mState
      */
     int getState() {
-        synchronized (mObject) {
-            if (VDBG) debugLog("State = " + mState);
-            return mState;
-        }
+        /* remove the lock to work around a platform deadlock problem */
+        /* and also for read access, it is safe to remove the lock to save CPU power */
+        return mState;
     }
 
+    /**
+     * @return the mNumOfAdvertisementInstancesSupported
+     */
+    int getNumOfAdvertisementInstancesSupported() {
+        return mNumOfAdvertisementInstancesSupported;
+    }
+
+    /**
+     * @return the mRpaOffloadSupported
+     */
+    boolean isRpaOffloadSupported() {
+        return mRpaOffloadSupported;
+    }
+
+    /**
+     * @return the mNumOfOffloadedIrkSupported
+     */
+    int getNumOfOffloadedIrkSupported() {
+        return mNumOfOffloadedIrkSupported;
+    }
+
+    /**
+     * @return the mNumOfOffloadedScanFilterSupported
+     */
+    int getNumOfOffloadedScanFilterSupported() {
+        return mNumOfOffloadedScanFilterSupported;
+    }
+
+    /**
+     * @return the mOffloadedScanResultStorageBytes
+     */
+    int getOffloadedScanResultStorage() {
+        return mOffloadedScanResultStorageBytes;
+    }
+
+    /**
+     * @return tx/rx/idle activity and energy info
+     */
+    boolean isActivityAndEnergyReportingSupported() {
+        return mIsActivityAndEnergyReporting;
+    }
     /**
      * @return the mBondedDevices
      */
@@ -220,7 +269,7 @@ class AdapterProperties {
 
             try {
                 bondedDeviceList = mBondedDevices.toArray(bondedDeviceList);
-                debugLog("getBondedDevices: length="+bondedDeviceList.length);
+                infoLog("getBondedDevices: length="+bondedDeviceList.length);
                 return bondedDeviceList;
             } catch(ArrayStoreException ee) {
                 errorLog("Error retrieving bonded device array");
@@ -488,11 +537,39 @@ class AdapterProperties {
                         mDiscoverableTimeout = Utils.byteArrayToInt(val, 0);
                         debugLog("Discoverable Timeout:" + mDiscoverableTimeout);
                         break;
+
+                    case AbstractionLayer.BT_PROPERTY_LOCAL_LE_FEATURES:
+                        updateFeatureSupport(val);
+                        break;
+
                     default:
                         errorLog("Property change not handled in Java land:" + type);
                 }
             }
         }
+    }
+
+    void updateFeatureSupport(byte[] val) {
+        mNumOfAdvertisementInstancesSupported = (0xFF & ((int)val[1]));
+        mRpaOffloadSupported = ((0xFF & ((int)val[2]))!= 0);
+        mNumOfOffloadedIrkSupported =  (0xFF & ((int)val[3]));
+        mNumOfOffloadedScanFilterSupported = (0xFF & ((int)val[4]));
+        mOffloadedScanResultStorageBytes = ((0xFF & ((int)val[6])) << 8)
+                            + (0xFF & ((int)val[5]));
+        mIsActivityAndEnergyReporting = ((0xFF & ((int)val[7])) != 0);
+
+        Log.d(TAG, "BT_PROPERTY_LOCAL_LE_FEATURES: update from BT controller"
+                + " mNumOfAdvertisementInstancesSupported = "
+                + mNumOfAdvertisementInstancesSupported
+                + " mRpaOffloadSupported = " + mRpaOffloadSupported
+                + " mNumOfOffloadedIrkSupported = "
+                + mNumOfOffloadedIrkSupported
+                + " mNumOfOffloadedScanFilterSupported = "
+                + mNumOfOffloadedScanFilterSupported
+                + " mOffloadedScanResultStorageBytes= "
+                + mOffloadedScanResultStorageBytes
+                + " mIsActivityAndEnergyReporting = "
+                + mIsActivityAndEnergyReporting);
     }
 
     void onBluetoothReady() {
@@ -548,7 +625,7 @@ class AdapterProperties {
     }
 
     private void infoLog(String msg) {
-        if (DBG) Log.i(TAG, msg);
+        if (VDBG) Log.i(TAG, msg);
     }
 
     private void debugLog(String msg) {

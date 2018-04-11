@@ -7,17 +7,54 @@
 import fnmatch
 import optparse
 import os
+import re
 import sys
 
 from util import build_utils
 from util import md5_check
 
+sys.path.append(build_utils.COLORAMA_ROOT)
+import colorama
 
-def DoJavac(options):
+
+def ColorJavacOutput(output):
+  fileline_prefix = r'(?P<fileline>(?P<file>[-.\w/\\]+.java):(?P<line>[0-9]+):)'
+  warning_re = re.compile(
+      fileline_prefix + r'(?P<full_message> warning: (?P<message>.*))$')
+  error_re = re.compile(
+      fileline_prefix + r'(?P<full_message> (?P<message>.*))$')
+  marker_re = re.compile(r'\s*(?P<marker>\^)\s*$')
+
+  warning_color = ['full_message', colorama.Fore.YELLOW + colorama.Style.DIM]
+  error_color = ['full_message', colorama.Fore.MAGENTA + colorama.Style.BRIGHT]
+  marker_color = ['marker',  colorama.Fore.BLUE + colorama.Style.BRIGHT]
+
+  def Colorize(line, regex, color):
+    match = regex.match(line)
+    start = match.start(color[0])
+    end = match.end(color[0])
+    return (line[:start]
+            + color[1] + line[start:end]
+            + colorama.Fore.RESET + colorama.Style.RESET_ALL
+            + line[end:])
+
+  def ApplyColor(line):
+    if warning_re.match(line):
+      line = Colorize(line, warning_re, warning_color)
+    elif error_re.match(line):
+      line = Colorize(line, error_re, error_color)
+    elif marker_re.match(line):
+      line = Colorize(line, marker_re, marker_color)
+    return line
+
+  return '\n'.join(map(ApplyColor, output.split('\n')))
+
+
+def DoJavac(options, args):
   output_dir = options.output_dir
 
-  src_dirs = build_utils.ParseGypList(options.src_dirs)
-  java_files = build_utils.FindInDirectories(src_dirs, '*.java')
+  src_gendirs = build_utils.ParseGypList(options.src_gendirs)
+  java_files = args + build_utils.FindInDirectories(src_gendirs, '*.java')
   if options.javac_includes:
     javac_includes = build_utils.ParseGypList(options.javac_includes)
     filtered_java_files = []
@@ -41,16 +78,21 @@ def DoJavac(options):
     else:
       jar_inputs.append(path)
 
-  javac_cmd = [
-      'javac',
+  javac_args = [
       '-g',
       '-source', '1.5',
       '-target', '1.5',
       '-classpath', ':'.join(classpath),
-      '-d', output_dir,
-      '-Xlint:unchecked',
-      '-Xlint:deprecation',
-      ] + java_files
+      '-d', output_dir]
+  if options.chromium_code:
+    javac_args.extend(['-Xlint:unchecked', '-Xlint:deprecation'])
+  else:
+    # XDignore.symbol.file makes javac compile against rt.jar instead of
+    # ct.sym. This means that using a java internal package/class will not
+    # trigger a compile warning or error.
+    javac_args.extend(['-XDignore.symbol.file'])
+
+  javac_cmd = ['javac'] + javac_args + java_files
 
   def Compile():
     # Delete the classes directory. This ensures that all .class files in the
@@ -59,8 +101,11 @@ def DoJavac(options):
     # not contain the corresponding old .class file after running this action.
     build_utils.DeleteDirectory(output_dir)
     build_utils.MakeDirectory(output_dir)
-    suppress_output = not options.chromium_code
-    build_utils.CheckCallDie(javac_cmd, suppress_output=suppress_output)
+    build_utils.CheckOutput(
+        javac_cmd,
+        print_stdout=options.chromium_code,
+        stderr_filter=ColorJavacOutput)
+
 
   record_path = '%s/javac.md5.stamp' % options.output_dir
   md5_check.CallAndRecordIfStale(
@@ -70,9 +115,12 @@ def DoJavac(options):
       input_strings=javac_cmd)
 
 
-def main(argv):
+def main():
+  colorama.init()
+
   parser = optparse.OptionParser()
-  parser.add_option('--src-dirs', help='Directories containing java files.')
+  parser.add_option('--src-gendirs',
+      help='Directories containing generated java files.')
   parser.add_option('--javac-includes',
       help='A list of file patterns. If provided, only java files that match' +
         'one of the patterns will be compiled.')
@@ -83,18 +131,15 @@ def main(argv):
                     'compiled should be built with stricter warnings for '
                     'chromium code.')
 
-  # TODO(newt): remove this once http://crbug.com/177552 is fixed in ninja.
-  parser.add_option('--ignore', help='Ignored.')
+  options, args = parser.parse_args()
 
-  options, _ = parser.parse_args()
-
-  DoJavac(options)
+  DoJavac(options, args)
 
   if options.stamp:
     build_utils.Touch(options.stamp)
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  sys.exit(main())
 
 

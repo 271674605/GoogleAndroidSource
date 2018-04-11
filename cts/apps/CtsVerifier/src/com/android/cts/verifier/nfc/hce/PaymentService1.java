@@ -9,10 +9,10 @@ public class PaymentService1 extends HceService {
             new ComponentName("com.android.cts.verifier",
             PaymentService1.class.getName());
 
-    public static final String[] APDU_COMMAND_SEQUENCE = {
-        HceUtils.buildSelectApdu(HceUtils.PPSE_AID),
-        HceUtils.buildSelectApdu(HceUtils.MC_AID),
-        "80CA01F000"
+    public static final CommandApdu[] APDU_COMMAND_SEQUENCE = {
+        HceUtils.buildSelectApdu(HceUtils.PPSE_AID, true),
+        HceUtils.buildSelectApdu(HceUtils.MC_AID, true),
+        HceUtils.buildCommandApdu("80CA01F000", true)
     };
 
     public static final String[] APDU_RESPOND_SEQUENCE = {

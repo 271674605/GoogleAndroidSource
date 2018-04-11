@@ -17,7 +17,9 @@
 package com.android.email.mail.store;
 
 import android.text.TextUtils;
+import android.util.Base64;
 
+import com.android.email.mail.internet.AuthenticationCache;
 import com.android.email.mail.store.ImapStore.ImapException;
 import com.android.email.mail.store.imap.ImapConstants;
 import com.android.email.mail.store.imap.ImapList;
@@ -59,13 +61,14 @@ class ImapConnection {
 
     /** The capabilities supported; a set of CAPABILITY_* values. */
     private int mCapabilities;
-    private static final String IMAP_REDACTED_LOG = "[IMAP command redacted]";
+    static final String IMAP_REDACTED_LOG = "[IMAP command redacted]";
     MailTransport mTransport;
     private ImapResponseParser mParser;
     private ImapStore mImapStore;
-    private String mUsername;
     private String mLoginPhrase;
+    private String mAccessToken;
     private String mIdPhrase = null;
+
     /** # of command/response lines to log upon crash. */
     private static final int DISCOURSE_LOGGER_SIZE = 64;
     private final DiscourseLogger mDiscourse = new DiscourseLogger(DISCOURSE_LOGGER_SIZE);
@@ -77,23 +80,55 @@ class ImapConnection {
      */
     private final AtomicInteger mNextCommandTag = new AtomicInteger(0);
 
-
     // Keep others from instantiating directly
-    ImapConnection(ImapStore store, String username, String password) {
-        setStore(store, username, password);
+    ImapConnection(ImapStore store) {
+        setStore(store);
     }
 
-    void setStore(ImapStore store, String username, String password) {
-        if (username != null && password != null) {
-            mUsername = username;
-
-            // build the LOGIN string once (instead of over-and-over again.)
-            // apply the quoting here around the built-up password
-            mLoginPhrase = ImapConstants.LOGIN + " " + mUsername + " "
-                    + ImapUtility.imapQuoted(password);
-        }
+    void setStore(ImapStore store) {
+        // TODO: maybe we should throw an exception if the connection is not closed here,
+        // if it's not currently closed, then we won't reopen it, so if the credentials have
+        // changed, the connection will not be reestablished.
         mImapStore = store;
+        mLoginPhrase = null;
     }
+
+    /**
+     * Generates and returns the phrase to be used for authentication. This will be a LOGIN with
+     * username and password, or an OAUTH authentication string, with username and access token.
+     * Currently, these are the only two auth mechanisms supported.
+     *
+     * @throws IOException
+     * @throws AuthenticationFailedException
+     * @return the login command string to sent to the IMAP server
+     */
+    String getLoginPhrase() throws MessagingException, IOException {
+        // build the LOGIN string once (instead of over-and-over again.)
+        if (mImapStore.getUseOAuth()) {
+            // We'll recreate the login phrase if it's null, or if the access token
+            // has changed.
+            final String accessToken = AuthenticationCache.getInstance().retrieveAccessToken(
+                    mImapStore.getContext(), mImapStore.getAccount());
+            if (mLoginPhrase == null || !TextUtils.equals(mAccessToken, accessToken)) {
+                mAccessToken = accessToken;
+                final String oauthCode = "user=" + mImapStore.getUsername() + '\001' +
+                        "auth=Bearer " + mAccessToken + '\001' + '\001';
+                mLoginPhrase = ImapConstants.AUTHENTICATE + " " + ImapConstants.XOAUTH2 + " " +
+                        Base64.encodeToString(oauthCode.getBytes(), Base64.NO_WRAP);
+            }
+        } else {
+            if (mLoginPhrase == null) {
+                if (mImapStore.getUsername() != null && mImapStore.getPassword() != null) {
+                    // build the LOGIN string once (instead of over-and-over again.)
+                    // apply the quoting here around the built-up password
+                    mLoginPhrase = ImapConstants.LOGIN + " " + mImapStore.getUsername() + " "
+                            + ImapUtility.imapQuoted(mImapStore.getPassword());
+                }
+            }
+        }
+        return mLoginPhrase;
+    }
+
     void open() throws IOException, MessagingException {
         if (mTransport != null && mTransport.isOpen()) {
             return;
@@ -145,7 +180,7 @@ class ImapConnection {
             mImapStore.ensurePrefixIsValid();
         } catch (SSLException e) {
             if (MailActivityEmail.DEBUG) {
-                LogUtils.d(Logging.LOG_TAG, e.toString());
+                LogUtils.d(Logging.LOG_TAG, e, "SSLException");
             }
             throw new CertificateValidationException(e.getMessage(), e);
         } catch (IOException ioe) {
@@ -153,7 +188,7 @@ class ImapConnection {
             // of other code here that catches IOException and I don't want to break it.
             // This catch is only here to enhance logging of connection-time issues.
             if (MailActivityEmail.DEBUG) {
-                LogUtils.d(Logging.LOG_TAG, ioe.toString());
+                LogUtils.d(Logging.LOG_TAG, ioe, "IOException");
             }
             throw ioe;
         } finally {
@@ -163,7 +198,7 @@ class ImapConnection {
 
     /**
      * Closes the connection and releases all resources. This connection can not be used again
-     * until {@link #setStore(ImapStore, String, String)} is called.
+     * until {@link #setStore(ImapStore)} is called.
      */
     void close() {
         if (mTransport != null) {
@@ -221,7 +256,7 @@ class ImapConnection {
     }
 
     boolean isTransportOpenForTest() {
-        return mTransport != null ? mTransport.isOpen() : false;
+        return mTransport != null && mTransport.isOpen();
     }
 
     ImapResponse readResponse() throws IOException, MessagingException {
@@ -237,15 +272,23 @@ class ImapConnection {
      * @return Returns the command tag that was sent
      */
     String sendCommand(String command, boolean sensitive)
-        throws MessagingException, IOException {
+            throws MessagingException, IOException {
+        LogUtils.d(Logging.LOG_TAG, "sendCommand %s", (sensitive ? IMAP_REDACTED_LOG : command));
         open();
+        return sendCommandInternal(command, sensitive);
+    }
+
+    String sendCommandInternal(String command, boolean sensitive)
+            throws MessagingException, IOException {
+        if (mTransport == null) {
+            throw new IOException("Null transport");
+        }
         String tag = Integer.toString(mNextCommandTag.incrementAndGet());
         String commandToSend = tag + " " + command;
         mTransport.writeLine(commandToSend, sensitive ? IMAP_REDACTED_LOG : null);
         mDiscourse.addSentCommand(sensitive ? IMAP_REDACTED_LOG : commandToSend);
         return tag;
     }
-
 
     /**
      * Send a single, complex command to the server.  The command will be preceded by an IMAP
@@ -280,8 +323,7 @@ class ImapConnection {
         return tag;
     }
 
-    List<ImapResponse> executeSimpleCommand(String command) throws IOException,
-            MessagingException {
+    List<ImapResponse> executeSimpleCommand(String command) throws IOException, MessagingException {
         return executeSimpleCommand(command, false);
     }
 
@@ -293,17 +335,25 @@ class ImapConnection {
      * @throws MessagingException
      */
     List<ImapResponse> getCommandResponses() throws IOException, MessagingException {
-        ArrayList<ImapResponse> responses = new ArrayList<ImapResponse>();
+        final List<ImapResponse> responses = new ArrayList<ImapResponse>();
         ImapResponse response;
         do {
             response = mParser.readResponse();
             responses.add(response);
         } while (!response.isTagged());
+
         if (!response.isOk()) {
             final String toString = response.toString();
             final String alert = response.getAlertTextOrEmpty().getString();
+            final String responseCode = response.getResponseCodeOrEmpty().getString();
             destroyResponses();
-            throw new ImapException(toString, alert);
+
+            // if the response code indicates an error occurred within the server, indicate that
+            if (ImapConstants.UNAVAILABLE.equals(responseCode)) {
+                throw new MessagingException(MessagingException.SERVER_ERROR, alert);
+            }
+
+            throw new ImapException(toString, alert, responseCode);
         }
         return responses;
     }
@@ -320,8 +370,10 @@ class ImapConnection {
      */
      List<ImapResponse> executeSimpleCommand(String command, boolean sensitive)
             throws IOException, MessagingException {
-        sendCommand(command, sensitive);
-        return getCommandResponses();
+         // TODO: It may be nice to catch IOExceptions and close the connection here.
+         // Currently, we expect callers to do that, but if they fail to we'll be in a broken state.
+         sendCommand(command, sensitive);
+         return getCommandResponses();
     }
 
      /**
@@ -336,9 +388,9 @@ class ImapConnection {
       */
       List<ImapResponse> executeComplexCommand(List<String> commands, boolean sensitive)
             throws IOException, MessagingException {
-        sendComplexCommand(commands, sensitive);
-        return getCommandResponses();
-    }
+          sendComplexCommand(commands, sensitive);
+          return getCommandResponses();
+      }
 
     /**
      * Query server for capabilities.
@@ -374,7 +426,8 @@ class ImapConnection {
 
         // Assign user-agent string (for RFC2971 ID command)
         String mUserAgent =
-                ImapStore.getImapId(mImapStore.getContext(), mUsername, host, capabilities);
+                ImapStore.getImapId(mImapStore.getContext(), mImapStore.getUsername(), host,
+                        capabilities);
 
         if (mUserAgent != null) {
             mIdPhrase = ImapConstants.ID + " (" + mUserAgent + ")";
@@ -390,7 +443,7 @@ class ImapConnection {
             } catch (ImapException ie) {
                 // Log for debugging, but this is not a fatal problem.
                 if (MailActivityEmail.DEBUG) {
-                    LogUtils.d(Logging.LOG_TAG, ie.toString());
+                    LogUtils.d(Logging.LOG_TAG, ie, "ImapException");
                 }
             } catch (IOException ioe) {
                 // Special case to handle malformed OK responses and ignore them.
@@ -415,7 +468,7 @@ class ImapConnection {
             } catch (ImapException ie) {
                 // Log for debugging, but this is not a fatal problem.
                 if (MailActivityEmail.DEBUG) {
-                    LogUtils.d(Logging.LOG_TAG, ie.toString());
+                    LogUtils.d(Logging.LOG_TAG, ie, "ImapException");
                 }
             } catch (IOException ioe) {
                 // Special case to handle malformed OK responses and ignore them.
@@ -438,21 +491,87 @@ class ImapConnection {
     /**
      * Logs into the IMAP server
      */
-    private void doLogin()
-            throws IOException, MessagingException, AuthenticationFailedException {
+    private void doLogin() throws IOException, MessagingException, AuthenticationFailedException {
         try {
-            // TODO eventually we need to add additional authentication
-            // options such as SASL
-            executeSimpleCommand(mLoginPhrase, true);
+            if (mImapStore.getUseOAuth()) {
+                // SASL authentication can take multiple steps. Currently the only SASL
+                // authentication supported is OAuth.
+                doSASLAuth();
+            } else {
+                executeSimpleCommand(getLoginPhrase(), true);
+            }
         } catch (ImapException ie) {
             if (MailActivityEmail.DEBUG) {
-                LogUtils.d(Logging.LOG_TAG, ie.toString());
+                LogUtils.d(Logging.LOG_TAG, ie, "ImapException");
             }
-            throw new AuthenticationFailedException(ie.getAlertText(), ie);
 
-        } catch (MessagingException me) {
-            throw new AuthenticationFailedException(null, me);
+            final String code = ie.getResponseCode();
+            final String alertText = ie.getAlertText();
+
+            // if the response code indicates expired or bad credentials, throw a special exception
+            if (ImapConstants.AUTHENTICATIONFAILED.equals(code) ||
+                    ImapConstants.EXPIRED.equals(code)) {
+                throw new AuthenticationFailedException(alertText, ie);
+            }
+
+            throw new MessagingException(alertText, ie);
         }
+    }
+
+    /**
+     * Performs an SASL authentication. Currently, the only type of SASL authentication supported
+     * is OAuth.
+     * @throws MessagingException
+     * @throws IOException
+     */
+    private void doSASLAuth() throws MessagingException, IOException {
+        LogUtils.d(Logging.LOG_TAG, "doSASLAuth");
+        ImapResponse response = getOAuthResponse();
+        if (!response.isOk()) {
+            // Failed to authenticate. This may be just due to an expired token.
+            LogUtils.d(Logging.LOG_TAG, "failed to authenticate, retrying");
+            destroyResponses();
+            // Clear the login phrase, this will force us to refresh the auth token.
+            mLoginPhrase = null;
+            // Close the transport so that we'll retry the authentication.
+            if (mTransport != null) {
+                mTransport.close();
+                mTransport = null;
+            }
+            response = getOAuthResponse();
+            if (!response.isOk()) {
+                LogUtils.d(Logging.LOG_TAG, "failed to authenticate, giving up");
+                destroyResponses();
+                throw new AuthenticationFailedException("OAuth failed after refresh");
+            }
+        }
+    }
+
+    private ImapResponse getOAuthResponse() throws IOException, MessagingException {
+        ImapResponse response;
+        sendCommandInternal(getLoginPhrase(), true);
+        do {
+            response = mParser.readResponse();
+        } while (!response.isTagged() && !response.isContinuationRequest());
+
+        if (response.isContinuationRequest()) {
+            // SASL allows for a challenge/response type authentication, so if it doesn't yet have
+            // enough info, it will send back a continuation request.
+            // Currently, the only type of authentication we support is OAuth. The only case where
+            // it will send a continuation request is when we fail to authenticate. We need to
+            // reply with a CR/LF, and it will then return with a NO response.
+            sendCommandInternal("", true);
+            response = readResponse();
+        }
+
+        // if the response code indicates an error occurred within the server, indicate that
+        final String responseCode = response.getResponseCodeOrEmpty().getString();
+        if (ImapConstants.UNAVAILABLE.equals(responseCode)) {
+            final String alert = response.getAlertTextOrEmpty().getString();
+            throw new MessagingException(MessagingException.SERVER_ERROR, alert);
+        }
+
+        return response;
     }
 
     /**
@@ -470,7 +589,7 @@ class ImapConnection {
             } catch (ImapException ie) {
                 // Log for debugging, but this is not a fatal problem.
                 if (MailActivityEmail.DEBUG) {
-                    LogUtils.d(Logging.LOG_TAG, ie.toString());
+                    LogUtils.d(Logging.LOG_TAG, ie, "ImapException");
                 }
             } catch (IOException ioe) {
                 // Special case to handle malformed OK responses and ignore them.

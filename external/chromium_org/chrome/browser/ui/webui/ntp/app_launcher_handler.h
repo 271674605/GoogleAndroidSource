@@ -11,15 +11,15 @@
 #include "apps/metrics_names.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
-#include "chrome/common/cancelable_task_tracker.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "extensions/common/extension.h"
 #include "sync/api/string_ordinal.h"
 
 class ExtensionEnableFlow;
@@ -27,15 +27,16 @@ class ExtensionService;
 class PrefChangeRegistrar;
 class Profile;
 
-namespace chrome {
+namespace favicon_base {
 struct FaviconImageResult;
 }
 
 // The handler for Javascript messages related to the "apps" view.
-class AppLauncherHandler : public content::WebUIMessageHandler,
-                           public ExtensionUninstallDialog::Delegate,
-                           public ExtensionEnableFlowDelegate,
-                           public content::NotificationObserver {
+class AppLauncherHandler
+    : public content::WebUIMessageHandler,
+      public extensions::ExtensionUninstallDialog::Delegate,
+      public ExtensionEnableFlowDelegate,
+      public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
@@ -111,8 +112,7 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
     AppInstallInfo();
     ~AppInstallInfo();
 
-    bool is_bookmark_app;
-    string16 title;
+    base::string16 title;
     GURL app_url;
     syncer::StringOrdinal page_ordinal;
   };
@@ -133,11 +133,11 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
-  ExtensionUninstallDialog* GetExtensionUninstallDialog();
+  extensions::ExtensionUninstallDialog* GetExtensionUninstallDialog();
 
   // Continuation for installing a bookmark app after favicon lookup.
   void OnFaviconForApp(scoped_ptr<AppInstallInfo> install_info,
-                       const chrome::FaviconImageResult& image_result);
+                       const favicon_base::FaviconImageResult& image_result);
 
   // Sends |highlight_app_id_| to the js.
   void SetAppToBeHighlighted();
@@ -161,7 +161,7 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   PrefChangeRegistrar local_state_pref_change_registrar_;
 
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
-  scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
+  scoped_ptr<extensions::ExtensionUninstallDialog> extension_uninstall_dialog_;
 
   // Used to show confirmation UI for enabling extensions.
   scoped_ptr<ExtensionEnableFlow> extension_enable_flow_;
@@ -190,7 +190,7 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   std::string highlight_app_id_;
 
   // Used for favicon loading tasks.
-  CancelableTaskTracker cancelable_task_tracker_;
+  base::CancelableTaskTracker cancelable_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);
 };

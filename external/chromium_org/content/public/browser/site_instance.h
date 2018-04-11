@@ -12,7 +12,6 @@
 
 namespace content {
 class BrowserContext;
-class BrowsingInstance;
 class RenderProcessHost;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -71,11 +70,12 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // we use process-per-site and there is an existing process available.
   virtual bool HasProcess() const = 0;
 
-  // Returns the current process being used to render pages in this
-  // SiteInstance.  If the process has not yet been created or has cleanly
-  // exited (e.g., when it is not actively being used), then this method will
-  // create a new process with a new ID.  Note that renderer process crashes
-  // leave the current RenderProcessHost (and ID) in place.
+  // Returns the current RenderProcessHost being used to render pages for this
+  // SiteInstance.  If there is no RenderProcessHost (because either none has
+  // yet been created or there was one but it was cleanly destroyed (e.g. when
+  // it is not actively being used)), then this method will create a new
+  // RenderProcessHost (and a new ID).  Note that renderer process crashes leave
+  // the current RenderProcessHost (and ID) in place.
   //
   // For sites that require process-per-site mode (e.g., WebUI), this will
   // ensure only one RenderProcessHost for the site exists/ within the
@@ -105,6 +105,10 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // this one.  If so, JavaScript interactions that are permitted across
   // origins (e.g., postMessage) should be supported.
   virtual bool IsRelatedSiteInstance(const SiteInstance* instance) = 0;
+
+  // Returns the total active WebContents count for this SiteInstance and all
+  // related SiteInstances in the same BrowsingInstance.
+  virtual size_t GetRelatedActiveContentsCount() = 0;
 
   // Factory method to create a new SiteInstance.  This will create a new
   // new BrowsingInstance, so it should only be used when creating a new tab

@@ -19,7 +19,7 @@ void GrGLAttribArrayState::set(const GrGpuGL* gpu,
                                GrGLboolean normalized,
                                GrGLsizei stride,
                                GrGLvoid* offset) {
-    GrAssert(index >= 0 && index < fAttribArrayStates.count());
+    SkASSERT(index >= 0 && index < fAttribArrayStates.count());
     AttribArrayState* array = &fAttribArrayStates[index];
     if (!array->fEnableIsValid || !array->fEnabled) {
         GR_GL_CALL(gpu->glInterface(), EnableVertexAttribArray(index));
@@ -49,7 +49,7 @@ void GrGLAttribArrayState::set(const GrGpuGL* gpu,
     }
 }
 
-void GrGLAttribArrayState::disableUnusedAttribArrays(const GrGpuGL* gpu, uint64_t usedMask) {
+void GrGLAttribArrayState::disableUnusedArrays(const GrGpuGL* gpu, uint64_t usedMask) {
     int count = fAttribArrayStates.count();
     for (int i = 0; i < count; ++i) {
         if (!(usedMask & 0x1)) {
@@ -58,6 +58,8 @@ void GrGLAttribArrayState::disableUnusedAttribArrays(const GrGpuGL* gpu, uint64_
                 fAttribArrayStates[i].fEnableIsValid = true;
                 fAttribArrayStates[i].fEnabled = false;
             }
+        } else {
+            SkASSERT(fAttribArrayStates[i].fEnableIsValid && fAttribArrayStates[i].fEnabled);
         }
         // if the count is greater than 64 then this will become 0 and we will disable arrays 64+.
         usedMask >>= 1;
@@ -67,7 +69,7 @@ void GrGLAttribArrayState::disableUnusedAttribArrays(const GrGpuGL* gpu, uint64_
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 GrGLVertexArray::GrGLVertexArray(GrGpuGL* gpu, GrGLint id, int attribCount)
-    : GrResource(gpu, false)
+    : INHERITED(gpu, false)
     , fID(id)
     , fAttribArrays(attribCount)
     , fIndexBufferIDIsValid(false) {
@@ -115,9 +117,6 @@ void GrGLVertexArray::notifyIndexBufferDelete(GrGLuint bufferID) {
  }
 
 void GrGLVertexArray::invalidateCachedState() {
-    int count = fAttribArrays.count();
-    for (int i = 0; i < count; ++i) {
-        fAttribArrays.invalidate();
-    }
+    fAttribArrays.invalidate();
     fIndexBufferIDIsValid = false;
 }

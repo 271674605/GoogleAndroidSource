@@ -14,21 +14,46 @@
 
 LOCAL_PATH:= $(call my-dir)
 
+# Reusable Sensor test classes and helpers
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := cts-sensors-tests
+LOCAL_MODULE_TAGS := tests
+
+LOCAL_SDK_VERSION := current
+
+# TODO: sensors need to be refactored out into their own namespace: android.hardware.sensors.cts
+LOCAL_SRC_FILES := $(call all-java-files-under, src/android/hardware/cts/helpers)
+LOCAL_SRC_FILES += \
+    src/android/hardware/cts/SensorTestCase.java \
+    src/android/hardware/cts/SingleSensorTests.java \
+    src/android/hardware/cts/SensorIntegrationTests.java \
+    src/android/hardware/cts/SensorBatchingTests.java \
+    src/android/hardware/cts/SensorTest.java \
+
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil
+
+include $(BUILD_STATIC_JAVA_LIBRARY)
+
+
+# CtsHardwareTestCases package
+
 include $(CLEAR_VARS)
 
 LOCAL_MODULE_TAGS := tests
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil ctstestrunner mockito-target android-ex-camera2
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner mockito-target android-ex-camera2
-
-LOCAL_SRC_FILES := $(call all-java-files-under, src)
+LOCAL_SRC_FILES := $(call all-java-files-under, src) $(call all-renderscript-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsHardwareTestCases
 
-LOCAL_INSTRUMENTATION_FOR := CtsTestStubs
-
-# uncomment when dalvik.annotation.Test* are removed or part of SDK
-#LOCAL_SDK_VERSION := current
+# uncomment when b/13281332 is fixed
+# please also uncomment the equivalent code in
+# cts/apps/CtsVerifiers/Android.mk
+#
+# LOCAL_SDK_VERSION := current
+LOCAL_JAVA_LIBRARIES := android.test.runner
 
 include $(BUILD_CTS_PACKAGE)

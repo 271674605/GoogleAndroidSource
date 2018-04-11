@@ -27,17 +27,15 @@ import android.hardware.Camera.Face;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.View;
 
-import com.android.camera.PhotoUI;
+import com.android.camera.debug.Log;
 import com.android.camera.util.CameraUtil;
 import com.android.camera2.R;
 
 public class FaceView extends View
-    implements FocusIndicator, Rotatable,
-    PhotoUI.SurfaceTextureSizeChangedListener {
-    private static final String TAG = "CAM FaceView";
+    implements FocusIndicator, Rotatable, PreviewStatusListener.PreviewAreaChangedListener {
+    private static final Log.Tag TAG = new Log.Tag("FaceView");
     private final boolean LOGV = false;
     // The value for android.hardware.Camera.setDisplayOrientation.
     private int mDisplayOrientation;
@@ -55,14 +53,9 @@ public class FaceView extends View
     private Face[] mFaces;
     private Face[] mPendingFaces;
     private int mColor;
-    private final int mFocusingColor;
-    private final int mFocusedColor;
-    private final int mFailColor;
     private Paint mPaint;
     private volatile boolean mBlocked;
 
-    private int mUncroppedWidth;
-    private int mUncroppedHeight;
     private static final int MSG_SWITCH_FACES = 1;
     private static final int SWITCH_DELAY = 70;
     private boolean mStateSwitchPending = false;
@@ -78,28 +71,22 @@ public class FaceView extends View
             }
         }
     };
+    private final RectF mPreviewArea = new RectF();
 
     public FaceView(Context context, AttributeSet attrs) {
         super(context, attrs);
         Resources res = getResources();
-        mFocusingColor = res.getColor(R.color.face_detect_start);
-        mFocusedColor = res.getColor(R.color.face_detect_success);
-        mFailColor = res.getColor(R.color.face_detect_fail);
-        mColor = mFocusingColor;
+        mColor = res.getColor(R.color.face_detect_start);
         mPaint = new Paint();
         mPaint.setAntiAlias(true);
         mPaint.setStyle(Style.STROKE);
         mPaint.setStrokeWidth(res.getDimension(R.dimen.face_circle_stroke));
     }
 
-    @Override
-    public void onSurfaceTextureSizeChanged(int uncroppedWidth, int uncroppedHeight) {
-        mUncroppedWidth = uncroppedWidth;
-        mUncroppedHeight = uncroppedHeight;
-    }
-
     public void setFaces(Face[] faces) {
-        if (LOGV) Log.v(TAG, "Num of faces=" + faces.length);
+        if (LOGV) {
+            Log.v(TAG, "Num of faces=" + faces.length);
+        }
         if (mPause) return;
         if (mFaces != null) {
             if ((faces.length > 0 && mFaces.length == 0)
@@ -122,7 +109,9 @@ public class FaceView extends View
 
     public void setDisplayOrientation(int orientation) {
         mDisplayOrientation = orientation;
-        if (LOGV) Log.v(TAG, "mDisplayOrientation=" + orientation);
+        if (LOGV) {
+            Log.v(TAG, "mDisplayOrientation=" + orientation);
+        }
     }
 
     @Override
@@ -133,7 +122,9 @@ public class FaceView extends View
 
     public void setMirror(boolean mirror) {
         mMirror = mirror;
-        if (LOGV) Log.v(TAG, "mMirror=" + mirror);
+        if (LOGV) {
+            Log.v(TAG, "mMirror=" + mirror);
+        }
     }
 
     public boolean faceExists() {
@@ -142,21 +133,18 @@ public class FaceView extends View
 
     @Override
     public void showStart() {
-        mColor = mFocusingColor;
         invalidate();
     }
 
     // Ignore the parameter. No autofocus animation for face detection.
     @Override
     public void showSuccess(boolean timeout) {
-        mColor = mFocusedColor;
         invalidate();
     }
 
     // Ignore the parameter. No autofocus animation for face detection.
     @Override
     public void showFail(boolean timeout) {
-        mColor = mFailColor;
         invalidate();
     }
 
@@ -164,7 +152,6 @@ public class FaceView extends View
     public void clear() {
         // Face indicator is displayed during preview. Do not clear the
         // drawable.
-        mColor = mFocusingColor;
         mFaces = null;
         invalidate();
     }
@@ -185,8 +172,8 @@ public class FaceView extends View
     protected void onDraw(Canvas canvas) {
         if (!mBlocked && (mFaces != null) && (mFaces.length > 0)) {
             int rw, rh;
-            rw = mUncroppedWidth;
-            rh = mUncroppedHeight;
+            rw = (int) mPreviewArea.width();
+            rh = (int) mPreviewArea.height();
             // Prepare the matrix.
             if (((rh > rw) && ((mDisplayOrientation == 0) || (mDisplayOrientation == 180)))
                     || ((rw > rh) && ((mDisplayOrientation == 90) || (mDisplayOrientation == 270)))) {
@@ -195,9 +182,6 @@ public class FaceView extends View
                 rh = temp;
             }
             CameraUtil.prepareMatrix(mMatrix, mMirror, mDisplayOrientation, rw, rh);
-            int dx = (getWidth() - rw) / 2;
-            int dy = (getHeight() - rh) / 2;
-
             // Focus indicator is directional. Rotate the matrix and the canvas
             // so it looks correctly in all orientations.
             canvas.save();
@@ -209,15 +193,24 @@ public class FaceView extends View
 
                 // Transform the coordinates.
                 mRect.set(mFaces[i].rect);
-                if (LOGV) CameraUtil.dumpRect(mRect, "Original rect");
+                if (LOGV) {
+                    CameraUtil.dumpRect(mRect, "Original rect");
+                }
                 mMatrix.mapRect(mRect);
-                if (LOGV) CameraUtil.dumpRect(mRect, "Transformed rect");
+                if (LOGV) {
+                    CameraUtil.dumpRect(mRect, "Transformed rect");
+                }
                 mPaint.setColor(mColor);
-                mRect.offset(dx, dy);
-                canvas.drawOval(mRect, mPaint);
+                mRect.offset(mPreviewArea.left, mPreviewArea.top);
+                canvas.drawRect(mRect, mPaint);
             }
             canvas.restore();
         }
         super.onDraw(canvas);
+    }
+
+    @Override
+    public void onPreviewAreaChanged(RectF previewArea) {
+        mPreviewArea.set(previewArea);
     }
 }

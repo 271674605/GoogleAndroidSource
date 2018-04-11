@@ -16,20 +16,28 @@
 
 package android.os.storage.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.os.R;
 
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.Resources.NotFoundException;
-import android.os.cts.FileUtils;
+import android.os.Environment;
+import android.cts.util.FileUtils;
 import android.os.storage.OnObbStateChangeListener;
 import android.os.storage.StorageManager;
 import android.test.AndroidTestCase;
 import android.test.ComparisonFailure;
 import android.util.Log;
 
+import libcore.io.Streams;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class StorageManagerTest extends AndroidTestCase {
 
@@ -39,6 +47,7 @@ public class StorageManagerTest extends AndroidTestCase {
     private static final long WAIT_TIME_INCR = 5*1000;
 
     private static final String OBB_MOUNT_PREFIX = "/mnt/obb/";
+    private static final String TEST1_CONTENTS = "1\n";
 
     private StorageManager mStorageManager;
 
@@ -48,24 +57,41 @@ public class StorageManagerTest extends AndroidTestCase {
         mStorageManager = (StorageManager) mContext.getSystemService(Context.STORAGE_SERVICE);
     }
 
-    public void testMountAndUnmountObbNormal() {
-        final File outFile = getFilePath("test1.obb");
+    public void testMountAndUnmountObbNormal() throws IOException {
+        for (File target : getTargetFiles()) {
+            target = new File(target, "test1.obb");
+            Log.d(TAG, "Testing path " + target);
+            doMountAndUnmountObbNormal(target);
+        }
+    }
 
+    private void doMountAndUnmountObbNormal(File outFile) throws IOException {
         final String canonPath = mountObb(R.raw.test1, outFile, OnObbStateChangeListener.MOUNTED);
 
         mountObb(R.raw.test1, outFile, OnObbStateChangeListener.ERROR_ALREADY_MOUNTED);
 
-        final String mountPath = checkMountedPath(canonPath);
-        final File mountDir = new File(mountPath);
+        try {
+            final String mountPath = checkMountedPath(canonPath);
+            final File mountDir = new File(mountPath);
+            final File testFile = new File(mountDir, "test1.txt");
 
-        assertTrue("OBB mounted path should be a directory", mountDir.isDirectory());
-
-        unmountObb(outFile, OnObbStateChangeListener.UNMOUNTED);
+            assertTrue("OBB mounted path should be a directory", mountDir.isDirectory());
+            assertTrue("test1.txt does not exist in OBB dir", testFile.exists());
+            assertFileContains(testFile, TEST1_CONTENTS);
+        } finally {
+            unmountObb(outFile, OnObbStateChangeListener.UNMOUNTED);
+        }
     }
 
     public void testAttemptMountNonObb() {
-        final File outFile = getFilePath("test1_nosig.obb");
+        for (File target : getTargetFiles()) {
+            target = new File(target, "test1_nosig.obb");
+            Log.d(TAG, "Testing path " + target);
+            doAttemptMountNonObb(target);
+        }
+    }
 
+    private void doAttemptMountNonObb(File outFile) {
         mountObb(R.raw.test1_nosig, outFile, OnObbStateChangeListener.ERROR_INTERNAL);
 
         assertFalse("OBB should not be mounted",
@@ -76,8 +102,14 @@ public class StorageManagerTest extends AndroidTestCase {
     }
 
     public void testAttemptMountObbWrongPackage() {
-        final File outFile = getFilePath("test1_wrongpackage.obb");
+        for (File target : getTargetFiles()) {
+            target = new File(target, "test1_wrongpackage.obb");
+            Log.d(TAG, "Testing path " + target);
+            doAttemptMountObbWrongPackage(target);
+        }
+    }
 
+    private void doAttemptMountObbWrongPackage(File outFile) {
         mountObb(R.raw.test1_wrongpackage, outFile,
                 OnObbStateChangeListener.ERROR_PERMISSION_DENIED);
 
@@ -88,10 +120,16 @@ public class StorageManagerTest extends AndroidTestCase {
                 mStorageManager.getMountedObbPath(outFile.getPath()));
     }
 
-    public void testMountAndUnmountTwoObbs() {
-        final File file1 = getFilePath("test1.obb");
-        final File file2 = getFilePath("test2.obb");
+    public void testMountAndUnmountTwoObbs() throws IOException {
+        for (File target : getTargetFiles()) {
+            Log.d(TAG, "Testing target " + target);
+            final File test1 = new File(target, "test1.obb");
+            final File test2 = new File(target, "test2.obb");
+            doMountAndUnmountTwoObbs(test1, test2);
+        }
+    }
 
+    private void doMountAndUnmountTwoObbs(File file1, File file2) throws IOException {
         ObbObserver oo1 = mountObbWithoutWait(R.raw.test1, file1);
         ObbObserver oo2 = mountObbWithoutWait(R.raw.test1, file2);
 
@@ -100,21 +138,38 @@ public class StorageManagerTest extends AndroidTestCase {
         Log.d(TAG, "Waiting for OBB #2 to complete mount");
         waitForObbActionCompletion(file2, oo2, OnObbStateChangeListener.MOUNTED);
 
-        final String mountPath1 = checkMountedPath(oo1.getPath());
-        final File mountDir1 = new File(mountPath1);
-        assertTrue("OBB mounted path should be a directory", mountDir1.isDirectory());
+        try {
+            final String mountPath1 = checkMountedPath(oo1.getPath());
+            final File mountDir1 = new File(mountPath1);
+            final File testFile1 = new File(mountDir1, "test1.txt");
+            assertTrue("OBB mounted path should be a directory", mountDir1.isDirectory());
+            assertTrue("test1.txt does not exist in OBB dir", testFile1.exists());
+            assertFileContains(testFile1, TEST1_CONTENTS);
 
-        final String mountPath2 = checkMountedPath(oo2.getPath());
-        final File mountDir2 = new File(mountPath2);
-        assertTrue("OBB mounted path should be a directory", mountDir2.isDirectory());
-
-        unmountObb(file1, OnObbStateChangeListener.UNMOUNTED);
-        unmountObb(file2, OnObbStateChangeListener.UNMOUNTED);
+            final String mountPath2 = checkMountedPath(oo2.getPath());
+            final File mountDir2 = new File(mountPath2);
+            final File testFile2 = new File(mountDir2, "test1.txt");
+            assertTrue("OBB mounted path should be a directory", mountDir2.isDirectory());
+            assertTrue("test1.txt does not exist in OBB dir", testFile2.exists());
+            assertFileContains(testFile2, TEST1_CONTENTS);
+        } finally {
+            unmountObb(file1, OnObbStateChangeListener.UNMOUNTED);
+            unmountObb(file2, OnObbStateChangeListener.UNMOUNTED);
+        }
     }
 
     private static void assertStartsWith(String message, String prefix, String actual) {
         if (!actual.startsWith(prefix)) {
             throw new ComparisonFailure(message, prefix, actual);
+        }
+    }
+
+    private static void assertFileContains(File file, String contents) throws IOException {
+        byte[] actual = Streams.readFully(new FileInputStream(file));
+        byte[] expected = contents.getBytes("UTF-8");
+        assertEquals("unexpected size", expected.length, actual.length);
+        for (int i = 0; i < expected.length; i++) {
+            assertEquals("unexpected value at offset " + i, expected[i], actual[i]);
         }
     }
 
@@ -166,10 +221,16 @@ public class StorageManagerTest extends AndroidTestCase {
         }
     }
 
-    private File getFilePath(String name) {
-        final File filesDir = mContext.getFilesDir();
-        final File outFile = new File(filesDir, name);
-        return outFile;
+    private List<File> getTargetFiles() {
+        final List<File> targets = new ArrayList<File>();
+        targets.add(mContext.getFilesDir());
+        for (File dir : mContext.getObbDirs()) {
+            assertNotNull("Valid media must be inserted during CTS", dir);
+            assertEquals("Valid media must be inserted during CTS", Environment.MEDIA_MOUNTED,
+                    Environment.getStorageState(dir));
+            targets.add(dir);
+        }
+        return targets;
     }
 
     private void copyRawToFile(int rawResId, File outFile) {

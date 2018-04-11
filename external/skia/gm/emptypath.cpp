@@ -21,7 +21,7 @@ protected:
         return SkString("emptypath");
     }
 
-    SkISize onISize() { return make_isize(600, 280); }
+    SkISize onISize() { return SkISize::Make(600, 280); }
 
     void drawEmpty(SkCanvas* canvas,
                     SkColor color,
@@ -72,7 +72,7 @@ protected:
                             20 * SK_Scalar1,
                             titlePaint);
 
-        SkRandom rand;
+        SkLCGRandom rand;
         SkRect rect = SkRect::MakeWH(100*SK_Scalar1, 30*SK_Scalar1);
         int i = 0;
         canvas->save();

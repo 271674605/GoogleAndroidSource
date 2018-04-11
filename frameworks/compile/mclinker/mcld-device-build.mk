@@ -5,9 +5,7 @@ include $(LLVM_DEVICE_BUILD_MK)
 # to here.
 LOCAL_CFLAGS := \
   -DANDROID_TARGET_BUILD \
-  -finline-limit=64 \
   -finline-functions \
-  -fno-inline-functions-called-once \
   -include $(MCLD_ROOT_PATH)/include/mcld/Config/Config.h \
   $(LOCAL_CFLAGS)
 
@@ -15,6 +13,8 @@ LOCAL_CPPFLAGS := \
   $(LOCAL_CPPFLAGS) \
   -Wall \
   -Wno-unused-parameter \
+  -Wno-unused-private-field \
+  -Wno-unused-const-variable \
   -Werror
 
 ifeq ($(MCLD_ENABLE_ASSERTION),true)
@@ -23,10 +23,15 @@ ifeq ($(MCLD_ENABLE_ASSERTION),true)
     -UNDEBUG
 endif
 
+ifeq ($(HOST_OS),darwin)
+LOCAL_CFLAGS += -DDARWIN_FLEX=1
+endif
+
 # Make sure bionic is first so we can include system headers.
 LOCAL_C_INCLUDES := \
   bionic \
-  external/stlport/stlport \
+  external/libcxx/include \
+  external/libcxxabi/include \
   $(MCLD_ROOT_PATH)/include \
   $(LLVM_ROOT_PATH) \
   $(LLVM_ROOT_PATH)/include \

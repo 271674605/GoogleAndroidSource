@@ -23,6 +23,8 @@
 #include "rsElement.h"
 #include "rsScriptC.h"
 
+#include <string>
+
 namespace bcc {
     class BCCContext;
     class RSCompilerDriver;
@@ -31,6 +33,45 @@ namespace bcc {
 
 namespace android {
 namespace renderscript {
+
+typedef struct {
+  uint32_t eStride;
+  uint32_t yStride;
+} StridePair;
+
+typedef struct {
+    const void *in;
+    void *out;
+    const void *usr;
+    uint32_t usrLen;
+    uint32_t x;
+    uint32_t y;
+    uint32_t z;
+    uint32_t lod;
+    RsAllocationCubemapFace face;
+    uint32_t ar[16];
+
+    const void **ins;
+    uint32_t *eStrideIns;
+
+    uint32_t lid;
+
+    uint32_t dimX;
+    uint32_t dimY;
+    uint32_t dimZ;
+    uint32_t dimArray;
+
+    const uint8_t *ptrIn;
+    uint8_t *ptrOut;
+    uint32_t eStrideIn;
+    uint32_t eStrideOut;
+    uint32_t yStrideIn;
+    uint32_t yStrideOut;
+    uint32_t slot;
+
+    const uint8_t** ptrIns;
+    StridePair* inStrides;
+} RsForEachStubParamStruct;
 
 extern bool gArchUseSIMD;
 
@@ -70,6 +111,9 @@ typedef struct {
     uint32_t zEnd;
     uint32_t arrayStart;
     uint32_t arrayEnd;
+
+    // Multi-input data.
+    const Allocation ** ains;
 } MTLaunchStruct;
 
 
@@ -96,6 +140,9 @@ public:
 
     void launchThreads(const Allocation * ain, Allocation * aout,
                        const RsScriptCall *sc, MTLaunchStruct *mtls);
+
+    void launchThreads(const Allocation** ains, uint32_t inLen, Allocation* aout,
+                       const RsScriptCall* sc, MTLaunchStruct* mtls);
 
     virtual CpuScript * createScript(const ScriptC *s,
                                      char const *resName, char const *cacheDir,
@@ -134,6 +181,13 @@ public:
     virtual RSSetupCompilerCallback getSetupCompilerCallback() const {
         return mSetupCompilerCallback;
     }
+
+    virtual void setBccPluginName(const char *name) {
+        mBccPluginName.assign(name);
+    }
+    virtual const char *getBccPluginName() const {
+        return mBccPluginName.c_str();
+    }
 #endif
     virtual bool getInForEach() { return mInForEach; }
 
@@ -166,6 +220,7 @@ protected:
     bcc::RSLinkRuntimeCallback mLinkRuntimeCallback;
     RSSelectRTCallback mSelectRTCallback;
     RSSetupCompilerCallback mSetupCompilerCallback;
+    std::string mBccPluginName;
 #endif
 };
 

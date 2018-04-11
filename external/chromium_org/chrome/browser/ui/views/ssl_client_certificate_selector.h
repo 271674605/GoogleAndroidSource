@@ -9,13 +9,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ssl/ssl_client_auth_observer.h"
 #include "chrome/browser/ssl/ssl_client_certificate_selector.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/table/table_view_observer.h"
-#include "ui/views/view.h"
 #include "ui/views/window/dialog_delegate.h"
 
 // This header file exists only for testing.  Chrome should access the
@@ -56,13 +54,11 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
   // DialogDelegateView:
   virtual bool CanResize() const OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
   virtual views::View* CreateExtraView() OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
@@ -78,11 +74,13 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
  private:
   void CreateCertTable();
 
+  // Callback after unlocking certificate slot.
+  void Unlocked(net::X509Certificate* cert);
+
   scoped_ptr<CertificateSelectorTableModel> model_;
 
   content::WebContents* web_contents_;
 
-  views::Widget* window_;
   views::TableView* table_;
   views::LabelButton* view_cert_button_;
 

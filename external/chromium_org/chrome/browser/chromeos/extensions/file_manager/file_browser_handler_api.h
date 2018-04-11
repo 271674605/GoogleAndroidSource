@@ -16,12 +16,17 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 class Browser;
 class FileBrowserHandlerInternalSelectFileFunction;
 
 namespace file_manager {
+
+namespace util {
+struct EntryDefinition;
+struct FileDefinition;
+}
 
 // Interface that is used by FileBrowserHandlerInternalSelectFileFunction to
 // select the file path that should be reported back to the extension function
@@ -76,7 +81,7 @@ class FileSelectorFactory {
 // The fileBrowserHandlerInternal.selectFile extension function implementation.
 // See the file description for more info.
 class FileBrowserHandlerInternalSelectFileFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   // Default constructor used in production code.
   // It will create its own FileSelectorFactory implementation, and set the
@@ -105,54 +110,30 @@ class FileBrowserHandlerInternalSelectFileFunction
 
   // AsyncExtensionFunction implementation.
   // Runs the extension function implementation.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  // Called when the external file system is opened for the extension function
-  // caller in the browser context. It saves opened file system's parameters.
-  // The file system is needed to create FileEntry object for the selection
-  // result.
-  // |success| Whether the file system has been opened successfully.
-  // |file_system_name| The file system's name.
-  // |file_system_root| The file system's root url.
-  void OnFileSystemOpened(bool success,
-                          const std::string& file_system_name,
-                          const GURL& file_system_root);
-
-  // Grants file access permissions for the created file to the caller.
-  // Inside this method, |virtual_path_| value is set.
-  void GrantPermissions();
+  // Respond to the API with selected entry definition.
+  void RespondEntryDefinition(
+      const file_manager::util::EntryDefinition& entry_definition);
 
   // Creates dictionary value that will be used to as the extension function's
   // callback argument and ends extension function execution by calling
   // |SendResponse(true)|.
   // The |results_| value will be set to dictionary containing two properties:
   // * boolean 'success', which will be equal to |success|.
-  // * object 'entry', which will be set only when |success| if true and
-  //   will contain information needed to create a FileEntry object for the
-  //   selected file. It contains following properties:
-  //   * 'file_system_name' set to |file_system_name_|
-  //   * 'file_system_root' set to |file_system_root_|
-  //   * 'file_full_path' set to |virtual_path_| (with leading '/')
-  //   * 'file_is_directory' set to |false|.
-  //   |file_system_name_|, |file_system_root_| and |virtual_path_| are ignored
-  //   if |success| if false.
-  void Respond(bool success);
+  // * object 'entry', which will be set only when |success| is true, and the
+  //   conversion to |entry_definition| was successful. In such case, it will
+  //   contain information needed to create a FileEntry object for the selected
+  //   file.
+  void Respond(const file_manager::util::EntryDefinition& entry_definition,
+               bool success);
 
   // Factory used to create FileSelector to be used for prompting user to select
   // file.
   scoped_ptr<file_manager::FileSelectorFactory> file_selector_factory_;
   // Whether user gesture check is disabled. This should be true only in tests.
   bool user_gesture_check_enabled_;
-
-  // Full file system path of the selected file.
-  base::FilePath full_path_;
-  // Selected file's virtual path in extension function caller's file system.
-  base::FilePath virtual_path_;
-  // Extension function caller's file system name.
-  std::string file_system_name_;
-  // Extension function caller's file system root URL.
-  GURL file_system_root_;
 
   // List of permissions and paths that have to be granted for the selected
   // files.

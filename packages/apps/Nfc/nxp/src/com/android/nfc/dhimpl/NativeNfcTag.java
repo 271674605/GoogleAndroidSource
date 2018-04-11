@@ -16,6 +16,7 @@
 
 package com.android.nfc.dhimpl;
 
+import com.android.nfc.DeviceHost;
 import com.android.nfc.DeviceHost.TagEndpoint;
 
 import android.nfc.FormatException;
@@ -69,6 +70,7 @@ public class NativeNfcTag implements TagEndpoint {
     private PresenceCheckWatchdog mWatchdog;
     class PresenceCheckWatchdog extends Thread {
 
+        private final DeviceHost.TagDisconnectedCallback tagDisconnectedCallback;
         private int watchdogTimeout;
 
         private boolean isPresent = true;
@@ -76,8 +78,9 @@ public class NativeNfcTag implements TagEndpoint {
         private boolean isPaused = false;
         private boolean doCheck = true;
 
-        public PresenceCheckWatchdog(int presenceCheckDelay) {
+        public PresenceCheckWatchdog(int presenceCheckDelay, DeviceHost.TagDisconnectedCallback callback) {
             watchdogTimeout = presenceCheckDelay;
+            tagDisconnectedCallback = callback;
         }
 
         public synchronized void pause() {
@@ -101,33 +104,41 @@ public class NativeNfcTag implements TagEndpoint {
         }
 
         @Override
-        public synchronized void run() {
+        public void run() {
             if (DBG) Log.d(TAG, "Starting background presence check");
-            while (isPresent && !isStopped) {
-                try {
-                    if (!isPaused) {
-                        doCheck = true;
+            synchronized (this) {
+                while (isPresent && !isStopped) {
+                    try {
+                        if (!isPaused) {
+                            doCheck = true;
+                        }
+                        this.wait(watchdogTimeout);
+                        if (doCheck) {
+                            isPresent = doPresenceCheck();
+                        } else {
+                            // 1) We are paused, waiting for unpause
+                            // 2) We just unpaused, do pres check in next iteration
+                            //       (after watchdogTimeout ms sleep)
+                            // 3) We just set the timeout, wait for this timeout
+                            //       to expire once first.
+                            // 4) We just stopped, exit loop anyway
+                        }
+                    } catch (InterruptedException e) {
+                        // Activity detected, loop
                     }
-                    this.wait(watchdogTimeout);
-                    if (doCheck) {
-                        isPresent = doPresenceCheck();
-                    } else {
-                        // 1) We are paused, waiting for unpause
-                        // 2) We just unpaused, do pres check in next iteration
-                        //       (after watchdogTimeout ms sleep)
-                        // 3) We just set the timeout, wait for this timeout
-                        //       to expire once first.
-                        // 4) We just stopped, exit loop anyway
-                    }
-                } catch (InterruptedException e) {
-                    // Activity detected, loop
                 }
             }
-            mIsPresent = false;
+
+            synchronized (NativeNfcTag.this) {
+                mIsPresent = false;
+            }
             // Restart the polling loop
 
             Log.d(TAG, "Tag lost, restarting polling loop");
             doDisconnect();
+            if (tagDisconnectedCallback != null) {
+                tagDisconnectedCallback.onTagDisconnected(mConnectedHandle);
+            }
             if (DBG) Log.d(TAG, "Stopping background presence check");
         }
     }
@@ -203,7 +214,8 @@ public class NativeNfcTag implements TagEndpoint {
     }
 
     @Override
-    public synchronized void startPresenceChecking(int presenceCheckDelay) {
+    public synchronized void startPresenceChecking(int presenceCheckDelay,
+                                                   DeviceHost.TagDisconnectedCallback callback) {
         // Once we start presence checking, we allow the upper layers
         // to know the tag is in the field.
         mIsPresent = true;
@@ -211,7 +223,7 @@ public class NativeNfcTag implements TagEndpoint {
             connect(mTechList[0]);
         }
         if (mWatchdog == null) {
-            mWatchdog = new PresenceCheckWatchdog(presenceCheckDelay);
+            mWatchdog = new PresenceCheckWatchdog(presenceCheckDelay, callback);
             mWatchdog.start();
         }
     }

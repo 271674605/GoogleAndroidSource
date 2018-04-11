@@ -15,14 +15,19 @@
 
 namespace net {
 
+namespace test {
+class QuicHttpStreamPeer;
+}  // namespace test
+
 // The QuicHttpStream is a QUIC-specific HttpStream subclass.  It holds a
 // non-owning pointer to a QuicReliableClientStream which it uses to
 // send and receive data.
 class NET_EXPORT_PRIVATE QuicHttpStream :
+      public QuicClientSession::Observer,
       public QuicReliableClientStream::Delegate,
       public HttpStream {
  public:
-  explicit QuicHttpStream(const base::WeakPtr<QuicClientSession> session);
+  explicit QuicHttpStream(const base::WeakPtr<QuicClientSession>& session);
 
   virtual ~QuicHttpStream();
 
@@ -36,7 +41,6 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
                           const CompletionCallback& callback) OVERRIDE;
   virtual UploadProgress GetUploadProgress() const OVERRIDE;
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
-  virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual int ReadResponseBody(IOBuffer* buf,
                                int buf_len,
                                const CompletionCallback& callback) OVERRIDE;
@@ -47,6 +51,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   virtual bool IsConnectionReused() const OVERRIDE;
   virtual void SetConnectionReused() OVERRIDE;
   virtual bool IsConnectionReusable() const OVERRIDE;
+  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
   virtual bool GetLoadTimingInfo(
       LoadTimingInfo* load_timing_info) const OVERRIDE;
   virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
@@ -54,15 +59,21 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
       SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual bool IsSpdyHttpStream() const OVERRIDE;
   virtual void Drain(HttpNetworkSession* session) OVERRIDE;
+  virtual void SetPriority(RequestPriority priority) OVERRIDE;
 
   // QuicReliableClientStream::Delegate implementation
-  virtual int OnSendData() OVERRIDE;
-  virtual int OnSendDataComplete(int status, bool* eof) OVERRIDE;
   virtual int OnDataReceived(const char* data, int length) OVERRIDE;
   virtual void OnClose(QuicErrorCode error) OVERRIDE;
   virtual void OnError(int error) OVERRIDE;
+  virtual bool HasSendHeadersComplete() OVERRIDE;
+
+  // QuicClientSession::Observer implementation
+  virtual void OnCryptoHandshakeConfirmed() OVERRIDE;
+  virtual void OnSessionClosed(int error) OVERRIDE;
 
  private:
+  friend class test::QuicHttpStreamPeer;
+
   enum State {
     STATE_NONE,
     STATE_SEND_HEADERS,
@@ -94,7 +105,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
 
   State next_state_;
 
-  const base::WeakPtr<QuicClientSession> session_;
+  base::WeakPtr<QuicClientSession> session_;
+  int session_error_;  // Error code from the connection shutdown.
+  bool was_handshake_confirmed_;  // True if the crypto handshake succeeded.
   QuicClientSession::StreamRequest stream_request_;
   QuicReliableClientStream* stream_;  // Non-owning.
 
@@ -105,6 +118,10 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   const HttpRequestInfo* request_info_;
   // The request body to send, if any, owned by the caller.
   UploadDataStream* request_body_stream_;
+  // Time the request was issued.
+  base::Time request_time_;
+  // The priority of the request.
+  RequestPriority priority_;
   // |response_info_| is the HTTP response data object which is filled in
   // when a the response headers are read.  It is not owned by this stream.
   HttpResponseInfo* response_info_;
@@ -113,6 +130,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   // Once all buffered data has been returned, this will be used as the final
   // response.
   int response_status_;
+
+  // Serialized request headers.
+  SpdyHeaderBlock request_headers_;
 
   bool response_headers_received_;
 
@@ -125,6 +145,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   // We buffer the response body as it arrives asynchronously from the stream.
   // TODO(rch): This is infinite buffering, which is bad.
   std::list<scoped_refptr<IOBufferWithSize> > response_body_;
+
+  // Number of bytes received when the stream was closed.
+  int64 closed_stream_received_bytes_;
 
   // The caller's callback to be used for asynchronous operations.
   CompletionCallback callback_;
@@ -141,6 +164,8 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   BoundNetLog stream_net_log_;
 
   base::WeakPtrFactory<QuicHttpStream> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(QuicHttpStream);
 };
 
 }  // namespace net

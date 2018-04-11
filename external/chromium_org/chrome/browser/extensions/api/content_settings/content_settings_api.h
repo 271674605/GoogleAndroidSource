@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_CONTENT_SETTINGS_CONTENT_SETTINGS_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_CONTENT_SETTINGS_CONTENT_SETTINGS_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 class PluginFinder;
 
@@ -16,7 +16,7 @@ struct WebPluginInfo;
 namespace extensions {
 
 class ContentSettingsContentSettingClearFunction
-    : public SyncExtensionFunction {
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contentSettings.clear", CONTENTSETTINGS_CLEAR)
 
@@ -24,10 +24,11 @@ class ContentSettingsContentSettingClearFunction
   virtual ~ContentSettingsContentSettingClearFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ContentSettingsContentSettingGetFunction : public SyncExtensionFunction {
+class ContentSettingsContentSettingGetFunction
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contentSettings.get", CONTENTSETTINGS_GET)
 
@@ -35,10 +36,11 @@ class ContentSettingsContentSettingGetFunction : public SyncExtensionFunction {
   virtual ~ContentSettingsContentSettingGetFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ContentSettingsContentSettingSetFunction : public SyncExtensionFunction {
+class ContentSettingsContentSettingSetFunction
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contentSettings.set", CONTENTSETTINGS_SET)
 
@@ -46,11 +48,11 @@ class ContentSettingsContentSettingSetFunction : public SyncExtensionFunction {
   virtual ~ContentSettingsContentSettingSetFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ContentSettingsContentSettingGetResourceIdentifiersFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("contentSettings.getResourceIdentifiers",
                              CONTENTSETTINGS_GETRESOURCEIDENTIFIERS)
@@ -59,7 +61,7 @@ class ContentSettingsContentSettingGetResourceIdentifiersFunction
   virtual ~ContentSettingsContentSettingGetResourceIdentifiersFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtensionApiTest,

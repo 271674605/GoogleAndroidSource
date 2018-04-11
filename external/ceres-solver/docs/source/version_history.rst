@@ -1,8 +1,217 @@
 .. _chapter-version-history:
 
-===============
-Version History
-===============
+========
+Releases
+========
+
+HEAD
+====
+
+#. Added ``Solver::Options::IsValid`` which allows users to validate
+   their solver configuration before calling ``Solve``.
+
+#. Added ``EIGEN_SPARSE_QR`` algorithm for covariance estimation using
+   ``Eigen``'s sparse QR factorization. (Michael Vitus)
+
+Backward Incompatible API Changes
+---------------------------------
+
+#. ``Solver::Options::solver_log`` has been removed. If needed this
+   iteration callback can easily be implemented in user code.
+
+#. The ``SPARSE_CHOLESKY`` algorithm for covariance estimation has
+   been removed. It is not rank revealing and numerically poorly
+   behaved. Sparse QR factorization is a much better way to do this.
+
+#. The ``SPARSE_QR`` algorithm for covariance estimation has been
+   renamed to ``SUITE_SPARSE_QR`` to be consistent with
+   ``EIGEN_SPARSE_QR``.
+
+
+1.9.0
+=====
+
+New Features
+------------
+
+#. Bounds constraints: Support for upper and/or lower bounds on
+   parameters when using the trust region minimizer.
+#. Dynamic Sparsity: Problems in which the sparsity structure of the
+   Jacobian changes over the course of the optimization can now be
+   solved much more efficiently. (Richard Stebbing)
+#. Improved support for Microsoft Visual C++ including the ability to
+   build and ship DLLs. (Björn Piltz, Alex Stewart and Sergey
+   Sharybin)
+#. Support for building on iOS 6.0 or higher (Jack Feng).
+#. Autogeneration of config.h that captures all the defines used to
+   build and use Ceres Solver.
+#. Simpler and more informative solver termination type
+   reporting. (See below for more details)
+#. New `website <http://www.ceres-solver.org>`_ based entirely on
+   Sphinx.
+#. ``AutoDiffLocalParameterization`` allows the use of automatic
+   differentiation for defining ``LocalParameterization`` objects
+   (Alex Stewart)
+#. LBFGS is faster due to fewer memory copies.
+#. Parameter blocks are not restricted to be less than 32k in size,
+   they can be up to 2G in size.
+#. Faster ``SPARSE_NORMAL_CHOLESKY`` solver when using ``CX_SPARSE``
+   as the sparse linear algebra library.
+#. Added ``Problem::IsParameterBlockPresent`` and
+   ``Problem::GetParameterization``.
+#. Added the (2,4,9) and (2,4,8) template specializations.
+#. An example demonstrating the use of
+   DynamicAutoDiffCostFunction. (Joydeep Biswas)
+#. Homography estimation example from Blender demonstrating the use of
+   a custom ``IterationCallback``. (Sergey Sharybin)
+#. Support user passing a custom CMAKE_MODULE_PATH (for BLAS /
+   LAPACK).
+
+Backward Incompatible API Changes
+---------------------------------
+
+#. ``Solver::Options::linear_solver_ordering`` used to be a naked
+   pointer that Ceres took ownership of. This is error prone behaviour
+   which leads to problems when copying the ``Solver::Options`` struct
+   around. This has been replaced with a ``shared_ptr`` to handle
+   ownership correctly across copies.
+
+#. The enum used for reporting the termination/convergence status of
+   the solver has been renamed from ``SolverTerminationType`` to
+   ``TerminationType``.
+
+   The enum values have also changed. ``FUNCTION_TOLERANCE``,
+   ``GRADIENT_TOLERANCE`` and ``PARAMETER_TOLERANCE`` have all been
+   replaced by ``CONVERGENCE``.
+
+   ``NUMERICAL_FAILURE`` has been replaed by ``FAILURE``.
+
+   ``USER_ABORT`` has been renamed to ``USER_FAILURE``.
+
+   Further ``Solver::Summary::error`` has been renamed to
+   ``Solver::Summary::message``. It contains a more detailed
+   explanation for why the solver terminated.
+
+#. ``Solver::Options::gradient_tolerance`` used to be a relative
+   gradient tolerance. i.e., The solver converged when
+
+   .. math::
+      \|g(x)\|_\infty < \text{gradient_tolerance} * \|g(x_0)\|_\infty
+
+   where :math:`g(x)` is the gradient of the objective function at
+   :math:`x` and :math:`x_0` is the parmeter vector at the start of
+   the optimization.
+
+   This has changed to an absolute tolerance, i.e. the solver
+   converges when
+
+   .. math::
+      \|g(x)\|_\infty < \text{gradient_tolerance}
+
+#. Ceres cannot be built without the line search minimizer
+   anymore. Thus the preprocessor define
+   ``CERES_NO_LINE_SEARCH_MINIMIZER`` has been removed.
+
+Bug Fixes
+---------
+
+#. Disabled warning C4251. (Björn Piltz)
+#. Do not propagate 3d party libs through
+   `IMPORTED_LINK_INTERFACE_LIBRARIES_[DEBUG/RELEASE]` mechanism when
+   building shared libraries. (Björn Piltz)
+#. Fixed errant verbose levels (Björn Piltz)
+#. Variety of code cleanups, optimizations and bug fixes to the line
+   search minimizer code (Alex Stewart)
+#. Fixed ``BlockSparseMatrix::Transpose`` when the matrix has row and
+   column blocks. (Richard Bowen)
+#. Better error checking when ``Problem::RemoveResidualBlock`` is
+   called. (Alex Stewart)
+#. Fixed a memory leak in ``SchurComplementSolver``.
+#. Added ``epsilon()`` method to ``NumTraits<ceres::Jet<T, N> >``. (Filippo
+   Basso)
+#. Fixed a bug in `CompressedRowSparseMatrix::AppendRows`` and
+   ``DeleteRows``.q
+#. Handle empty problems consistently.
+#. Restore the state of the ``Problem`` after a call to
+   ``Problem::Evaluate``. (Stefan Leutenegger)
+#. Better error checking and reporting for linear solvers.
+#. Use explicit formula to solve quadratic polynomials instead of the
+   eigenvalue solver.
+#. Fix constant parameter handling in inner iterations (Mikael
+   Persson).
+#. SuiteSparse errors do not cause a fatal crash anymore.
+#. Fix ``corrector_test.cc``.
+#. Relax the requirements on loss function derivatives.
+#. Minor bugfix to logging.h (Scott Ettinger)
+#. Updated ``gmock`` and ``gtest`` to the latest upstream version.
+#. Fix build breakage on old versions of SuiteSparse.
+#. Fixed build issues related to Clang / LLVM 3.4 (Johannes
+   Schönberger)
+#. METIS_FOUND is never set. Changed the commit to fit the setting of
+   the other #._FOUND definitions. (Andreas Franek)
+#. Variety of bug fixes and cleanups to the ``CMake`` build system
+   (Alex Stewart)
+#. Removed fictious shared library target from the NDK build.
+#. Solver::Options now uses ``shared_ptr`` to handle ownership of
+   ``Solver::Options::linear_solver_ordering`` and
+   ``Solver::Options::inner_iteration_ordering``. As a consequence the
+   ``NDK`` build now depends on ``libc++`` from the ``LLVM`` project.
+#. Variety of lint cleanups (William Rucklidge & Jim Roseborough)
+#. Various internal cleanups including dead code removal.
+
+
+1.8.0
+=====
+
+New Features
+------------
+#. Significant improved ``CMake`` files with better robustness,
+   dependency checking and GUI support. (Alex Stewart)
+#. Added ``DynamicNumericDiffCostFunction`` for numerically
+   differentiated cost functions whose sizing is determined at run
+   time.
+#. ``NumericDiffCostFunction`` now supports a dynamic number of
+   residuals just like ``AutoDiffCostFunction``.
+#. ``Problem`` exposes more of its structure in its API.
+#. Faster automatic differentiation (Tim Langlois)
+#. Added the commonly occuring ``2_d_d`` template specialization for
+   the Schur Eliminator.
+#. Faster ``ITERATIVE_SCHUR`` solver using template specializations.
+#. Faster ``SCHUR_JACOBI`` preconditioner construction.
+#. Faster ``AngleAxisRotatePoint``.
+#. Faster Jacobian evaluation when a loss function is used.
+#. Added support for multiple clustering algorithms in visibility
+   based preconditioning, including a new fast single linkage
+   clustering algorithm.
+
+Bug Fixes
+---------
+#. Fix ordering of ParseCommandLineFlags() & InitGoogleTest() for
+   Windows. (Alex Stewart)
+#. Remove DCHECK_GE checks from fixed_array.h.
+#. Fix build on MSVC 2013 (Petter Strandmark)
+#. Fixed ``AngleAxisToRotationMatrix`` near zero.
+#. Move ``CERES_HASH_NAMESPACE`` macros to ``collections_port.h``.
+#. Fix handling of unordered_map/unordered_set on OSX 10.9.0.
+#. Explicitly link to libm for ``curve_fitting_c.c``. (Alex Stewart)
+#. Minor type conversion fix to autodiff.h
+#. Remove RuntimeNumericDiffCostFunction.
+#. Fix operator= ambiguity on some versions of Clang. (Alex Stewart)
+#. Various Lint cleanups (William Rucklidge & Jim Roseborough)
+#. Modified installation folders for Windows. (Pablo Speciale)
+#. Added librt to link libraries for SuiteSparse_config on Linux. (Alex Stewart)
+#. Check for presence of return-type-c-linkage option with
+   Clang. (Alex Stewart)
+#. Fix Problem::RemoveParameterBlock after calling solve. (Simon Lynen)
+#. Fix a free/delete bug in covariance_impl.cc
+#. Fix two build errors. (Dustin Lang)
+#. Add RequireInitialization = 1 to NumTraits::Jet.
+#. Update gmock/gtest to 1.7.0
+#. Added IterationSummary::gradient_norm.
+#. Reduced verbosity of the inner iteration minimizer.
+#. Fixed a bug in TrustRegionMinimizer. (Michael Vitus)
+#. Removed android/build_android.sh.
+
 
 1.7.0
 =====
@@ -35,7 +244,10 @@ New Features
 #. Add BlockRandomAccessCRSMatrix.
 #. Speeded up automatic differentiation by 7\%.
 #. Bundle adjustment example from libmv/Blender (Sergey Sharybin)
-#. Add the ability to turn shared library compilation on and off
+#. Shared library building is now controlled by CMake, rather than a custom
+   solution. Previously, Ceres had a custom option, but this is now deprecated
+   in favor of CMake's built in support for switching between static and
+   shared. Turn on BUILD_SHARED_LIBS to get shared Ceres libraries.
 #. No more dependence on Protocol Buffers.
 #. Incomplete LQ factorization.
 #. Ability to write trust region problems to disk.
@@ -96,6 +308,7 @@ Bug Fixes
 #. Fix a reallocation bug in
    ``CreateJacobianBlockSparsityTranspose``. (Yuliy Schwartzburg)
 #. Add a define for O_BINARY.
+#. Fix miniglog-based Android NDK build; now works with NDK r9. (Scott Ettinger)
 
 
 1.6.0

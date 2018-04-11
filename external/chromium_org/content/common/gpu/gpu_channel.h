@@ -11,21 +11,19 @@
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_memory_manager.h"
+#include "content/common/gpu/gpu_result_codes.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gpu_preference.h"
-
-#if defined(OS_ANDROID)
-#include "content/common/android/surface_texture_peer.h"
-#endif
 
 struct GPUCreateCommandBufferConfig;
 
@@ -41,23 +39,19 @@ class ImageManager;
 }
 }
 
-#if defined(OS_ANDROID)
-namespace content {
-class StreamTextureManagerAndroid;
+namespace IPC {
+class MessageFilter;
 }
-#endif
 
 namespace content {
+class DevToolsGpuAgent;
 class GpuChannelManager;
-struct GpuRenderingStats;
-class GpuWatchdog;
 class GpuChannelMessageFilter;
+class GpuWatchdog;
 
 // Encapsulates an IPC channel between the GPU process and one renderer
 // process. On the renderer side there's a corresponding GpuChannelHost.
-class GpuChannel : public IPC::Listener,
-                   public IPC::Sender,
-                   public base::RefCountedThreadSafe<GpuChannel> {
+class GpuChannel : public IPC::Listener, public IPC::Sender {
  public:
   // Takes ownership of the renderer process handle.
   GpuChannel(GpuChannelManager* gpu_channel_manager,
@@ -66,8 +60,9 @@ class GpuChannel : public IPC::Listener,
              gpu::gles2::MailboxManager* mailbox_manager,
              int client_id,
              bool software);
+  virtual ~GpuChannel();
 
-  bool Init(base::MessageLoopProxy* io_message_loop,
+  void Init(base::MessageLoopProxy* io_message_loop,
             base::WaitableEvent* shutdown_event);
 
   // Get the GpuChannelManager that owns this channel.
@@ -82,7 +77,13 @@ class GpuChannel : public IPC::Listener,
   int TakeRendererFileDescriptor();
 #endif  // defined(OS_POSIX)
 
-  base::ProcessId renderer_pid() const { return channel_->peer_pid(); }
+  base::ProcessId renderer_pid() const { return channel_->GetPeerPID(); }
+
+  int client_id() const { return client_id_; }
+
+  scoped_refptr<base::MessageLoopProxy> io_message_loop() const {
+    return io_message_loop_;
+  }
 
   // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
@@ -107,11 +108,11 @@ class GpuChannel : public IPC::Listener,
   // other channels.
   void StubSchedulingChanged(bool scheduled);
 
-  void CreateViewCommandBuffer(
+  CreateCommandBufferResult CreateViewCommandBuffer(
       const gfx::GLSurfaceHandle& window,
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params,
-      int32* route_id);
+      int32 route_id);
 
   void CreateImage(
       gfx::PluginWindowHandle window,
@@ -126,14 +127,11 @@ class GpuChannel : public IPC::Listener,
   void LoseAllContexts();
   void MarkAllContextsLost();
 
-  // Destroy channel and all contained contexts.
-  void DestroySoon();
+  // Called to add a listener for a particular message routing ID.
+  // Returns true if succeeded.
+  bool AddRoute(int32 route_id, IPC::Listener* listener);
 
-  // Generate a route ID guaranteed to be unique for this channel.
-  int GenerateRouteID();
-
-  // Called to add/remove a listener for a particular message routing ID.
-  void AddRoute(int32 route_id, IPC::Listener* listener);
+  // Called to remove a listener for a particular message routing ID.
   void RemoveRoute(int32 route_id);
 
   gpu::PreemptionFlag* GetPreemptionFlag();
@@ -146,19 +144,14 @@ class GpuChannel : public IPC::Listener,
   void SetPreemptByFlag(
       scoped_refptr<gpu::PreemptionFlag> preemption_flag);
 
-#if defined(OS_ANDROID)
-  StreamTextureManagerAndroid* stream_texture_manager() {
-    return stream_texture_manager_.get();
-  }
-#endif
-
   void CacheShader(const std::string& key, const std::string& shader);
 
- protected:
-  virtual ~GpuChannel();
+  void AddFilter(IPC::MessageFilter* filter);
+  void RemoveFilter(IPC::MessageFilter* filter);
+
+  uint64 GetMemoryUsage();
 
  private:
-  friend class base::RefCountedThreadSafe<GpuChannel>;
   friend class GpuChannelMessageFilter;
 
   void OnDestroy();
@@ -171,26 +164,11 @@ class GpuChannel : public IPC::Listener,
   void OnCreateOffscreenCommandBuffer(
       const gfx::Size& size,
       const GPUCreateCommandBufferConfig& init_params,
-      int32* route_id);
+      int32 route_id,
+      bool* succeeded);
   void OnDestroyCommandBuffer(int32 route_id);
-
-#if defined(OS_ANDROID)
-  // Register the StreamTextureProxy class with the gpu process so that all
-  // the callbacks will be correctly forwarded to the renderer.
-  void OnRegisterStreamTextureProxy(int32 stream_id, int32* route_id);
-
-  // Create a java surface texture object and send it to the renderer process
-  // through binder thread.
-  void OnEstablishStreamTexture(
-      int32 stream_id, int32 primary_id, int32 secondary_id);
-
-  // Set the size of StreamTexture.
-  void OnSetStreamTextureSize(int32 stream_id, const gfx::Size& size);
-#endif
-
-  // Collect rendering stats.
-  void OnCollectRenderingStatsForSurface(
-      int32 surface_id, GpuRenderingStats* stats);
+  void OnDevToolsStartEventsRecording(int32 route_id, bool* succeeded);
+  void OnDevToolsStopEventsRecording();
 
   // Decrement the count of unhandled IPC messages and defer preemption.
   void MessageProcessed();
@@ -229,27 +207,22 @@ class GpuChannel : public IPC::Listener,
 
   scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
   scoped_refptr<gpu::gles2::ImageManager> image_manager_;
-#if defined(OS_ANDROID)
-  scoped_ptr<StreamTextureManagerAndroid> stream_texture_manager_;
-#endif
 
-#if defined(ENABLE_GPU)
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;
   StubMap stubs_;
-#endif  // defined (ENABLE_GPU)
 
   bool log_messages_;  // True if we should log sent and received messages.
   gpu::gles2::DisallowedFeatures disallowed_features_;
   GpuWatchdog* watchdog_;
   bool software_;
   bool handle_messages_scheduled_;
-  bool processed_get_state_fast_;
   IPC::Message* currently_processing_message_;
 
   base::WeakPtrFactory<GpuChannel> weak_factory_;
 
   scoped_refptr<GpuChannelMessageFilter> filter_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
+  scoped_ptr<DevToolsGpuAgent> devtools_gpu_agent_;
 
   size_t num_stubs_descheduled_;
 

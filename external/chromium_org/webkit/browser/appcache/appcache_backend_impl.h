@@ -11,14 +11,14 @@
 
 namespace appcache {
 
-class AppCacheService;
+class AppCacheServiceImpl;
 
 class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheBackendImpl {
  public:
   AppCacheBackendImpl();
   ~AppCacheBackendImpl();
 
-  void Initialize(AppCacheService* service,
+  void Initialize(AppCacheServiceImpl* service,
                   AppCacheFrontend* frontend,
                   int process_id);
 
@@ -57,8 +57,14 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheBackendImpl {
   typedef base::hash_map<int, AppCacheHost*> HostMap;
   const HostMap& hosts() { return hosts_; }
 
+  // Methods to support cross site navigations. Hosts are transferred
+  // from process to process accordingly, deparented from the old
+  // processes backend and reparented to the new.
+  scoped_ptr<AppCacheHost> TransferHostOut(int host_id);
+  void TransferHostIn(int new_host_id, scoped_ptr<AppCacheHost> host);
+
  private:
-  AppCacheService* service_;
+  AppCacheServiceImpl* service_;
   AppCacheFrontend* frontend_;
   int process_id_;
   HostMap hosts_;

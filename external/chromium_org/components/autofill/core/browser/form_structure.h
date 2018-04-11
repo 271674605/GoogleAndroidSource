@@ -5,12 +5,15 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_STRUCTURE_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_STRUCTURE_H_
 
+#include <set>
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/strings/string16.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -40,7 +43,6 @@ namespace autofill {
 
 class AutofillMetrics;
 
-struct AutocheckoutPageMetaData;
 struct FormData;
 struct FormDataPredictions;
 
@@ -48,8 +50,7 @@ struct FormDataPredictions;
 // in the fields along with additional information needed by Autofill.
 class FormStructure {
  public:
-  FormStructure(const FormData& form,
-                const std::string& autocheckout_url_prefix);
+  FormStructure(const FormData& form);
   virtual ~FormStructure();
 
   // Runs several heuristics against the form fields to determine their possible
@@ -82,7 +83,6 @@ class FormStructure {
   static void ParseQueryResponse(
       const std::string& response_xml,
       const std::vector<FormStructure*>& forms,
-      autofill::AutocheckoutPageMetaData* page_meta_data,
       const AutofillMetrics& metric_logger);
 
   // Fills |forms| with the details from the given |form_structures| and their
@@ -116,7 +116,7 @@ class FormStructure {
   // return false.
   bool ShouldBeCrowdsourced() const;
 
-  // Sets the field types and experiment id to be those set for |cached_form|.
+  // Sets the field types to be those set for |cached_form|.
   void UpdateFromCache(const FormStructure& cached_form);
 
   // Logs quality metrics for |this|, which should be a user-submitted form.
@@ -139,6 +139,28 @@ class FormStructure {
   void ParseFieldTypesFromAutocompleteAttributes(bool* found_types,
                                                  bool* found_sections);
 
+  // Determines whether |type| and |field| match.
+  typedef base::Callback<bool(ServerFieldType type,
+                              const AutofillField& field)>
+      InputFieldComparator;
+
+  // Fills in |fields_| that match |types| (via |matches|) with info from
+  // |get_info|.
+  bool FillFields(
+      const std::vector<ServerFieldType>& types,
+      const InputFieldComparator& matches,
+      const base::Callback<base::string16(const AutofillType&)>& get_info,
+      const std::string& app_locale);
+
+  // Returns the values that can be filled into the form structure for the
+  // given type. For example, there's no way to fill in a value of "The Moon"
+  // into ADDRESS_HOME_STATE if the form only has a
+  // <select autocomplete="region"> with no "The Moon" option. Returns an
+  // empty set if the form doesn't reference the given type or if all inputs
+  // are accepted (e.g., <input type="text" autocomplete="region">).
+  // All returned values are standardized to upper case.
+  std::set<base::string16> PossibleValues(ServerFieldType type);
+
   const AutofillField* field(size_t index) const;
   AutofillField* field(size_t index);
   size_t field_count() const;
@@ -156,18 +178,14 @@ class FormStructure {
 
   const GURL& source_url() const { return source_url_; }
 
+  void set_upload_required(UploadRequired required) {
+    upload_required_ = required;
+  }
   UploadRequired upload_required() const { return upload_required_; }
-
-  virtual std::string server_experiment_id() const;
 
   // Returns a FormData containing the data this form structure knows about.
   // |user_submitted| is currently always false.
   FormData ToFormData() const;
-
-  bool filled_by_autocheckout() const { return filled_by_autocheckout_; }
-  void set_filled_by_autocheckout(bool filled_by_autocheckout) {
-    filled_by_autocheckout_ = filled_by_autocheckout;
-  }
 
   bool operator==(const FormData& form) const;
   bool operator!=(const FormData& form) const;
@@ -199,13 +217,9 @@ class FormStructure {
   // distinguishing credit card sections from non-credit card ones -- is made.
   void IdentifySections(bool has_author_specified_sections);
 
-  bool IsAutocheckoutEnabled() const;
-
   // Returns true if field should be skipped when talking to Autofill server.
   bool ShouldSkipField(const FormFieldData& field) const;
 
-  // Returns the minimal number of fillable fields required to start autofill.
-  size_t RequiredFillableFields() const;
   size_t active_field_count() const;
 
   // The name of the form.
@@ -236,23 +250,12 @@ class FormStructure {
   // to the stored upload rates.
   UploadRequired upload_required_;
 
-  // The server experiment corresponding to the server types returned for this
-  // form.
-  std::string server_experiment_id_;
-
   // GET or POST.
   RequestMethod method_;
 
   // Whether the form includes any field types explicitly specified by the site
   // author, via the |autocompletetype| attribute.
   bool has_author_specified_types_;
-
-  // The URL prefix matched in autocheckout whitelist. An empty string implies
-  // autocheckout is not enabled for this form.
-  std::string autocheckout_url_prefix_;
-
-  // Whether or not this form was filled by Autocheckout.
-  bool filled_by_autocheckout_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

@@ -6,14 +6,12 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ELF_DYNAMIC_SECTION_H
-#define MCLD_ELF_DYNAMIC_SECTION_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_TARGET_ELFDYNAMIC_H
+#define MCLD_TARGET_ELFDYNAMIC_H
 
-#include <llvm/Support/ELF.h>
 #include <mcld/LD/LDSection.h>
+#include <mcld/Support/FileOutputBuffer.h>
+#include <llvm/Support/ELF.h>
 #include <vector>
 #include <cstring>
 
@@ -22,7 +20,6 @@ namespace mcld {
 class ELFFileFormat;
 class GNULDBackend;
 class LinkerConfig;
-class MemoryRegion;
 
 namespace elf_dynamic {
 
@@ -184,6 +181,8 @@ protected:
   void applyOne(uint64_t pTag, uint64_t pValue);
 
   size_t symbolSize() const;
+
+  const LinkerConfig& config() const { return m_Config; }
 
 private:
   EntryListType m_EntryList;

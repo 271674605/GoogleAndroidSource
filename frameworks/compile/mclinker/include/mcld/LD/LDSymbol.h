@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_LD_SYMBOL_H
-#define MCLD_LD_SYMBOL_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_LDSYMBOL_H
+#define MCLD_LD_LDSYMBOL_H
 
 #include <cassert>
 
@@ -19,7 +16,12 @@
 #include <mcld/LD/ResolveInfo.h>
 #include <mcld/Support/Allocators.h>
 
-#include <llvm/Support/ManagedStatic.h>
+namespace llvm {
+
+// forware declaration
+template<class T> void* object_creator();
+
+} // namespace of llvm
 
 namespace mcld {
 
@@ -103,13 +105,16 @@ public:
   const FragmentRef* fragRef() const
   { return m_pFragRef; }
 
+  FragmentRef* fragRef()
+  { return m_pFragRef; }
+
   SizeType size() const
   { return m_pResolveInfo->size(); }
 
   ResolveInfo* resolveInfo()
   { return m_pResolveInfo; }
 
-  const ResolveInfo* resolveInfo() const 
+  const ResolveInfo* resolveInfo() const
   { return m_pResolveInfo; }
 
   bool hasFragRef() const;
@@ -122,7 +127,7 @@ public:
 
   void setValue(ValueType pValue)
   { m_Value = pValue; }
- 
+
   void setFragmentRef(FragmentRef* pFragmentRef);
 
   void setResolveInfo(const ResolveInfo& pInfo);

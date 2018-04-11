@@ -61,6 +61,7 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
   virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
   virtual bool IsItemChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandEnabled(int command_id) const OVERRIDE;
+  virtual bool IsCommandVisible(int command_id) const OVERRIDE;
   virtual bool ShouldCloseAllMenusOnExecute(int id) OVERRIDE;
 
   // Overridden from BookmarkContextMenuControllerDelegate:
@@ -81,9 +82,6 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
 
   // Responsible for running the menu.
   scoped_ptr<views::MenuRunner> menu_runner_;
-
-  // The node we're showing the menu for.
-  const BookmarkNode* parent_node_;
 
   BookmarkContextMenuObserver* observer_;
 

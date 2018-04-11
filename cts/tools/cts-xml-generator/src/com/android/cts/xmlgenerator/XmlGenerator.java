@@ -16,6 +16,8 @@
 
 package com.android.cts.xmlgenerator;
 
+import com.android.cts.util.AbiUtils;
+
 import vogar.Expectation;
 import vogar.ExpectationStore;
 
@@ -27,7 +29,9 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Map;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Generator of TestPackage XML files for native tests.
@@ -70,11 +74,19 @@ class XmlGenerator {
     private final String mOutputPath;
 
     /** ExpectationStore to filter out known failures. */
-    private final ExpectationStore mExpectations;
+    private final ExpectationStore mKnownFailures;
 
-    XmlGenerator(ExpectationStore expectations, String appNameSpace, String appPackageName,
-            String name, String runner, String targetBinaryName, String targetNameSpace,
-            String jarPath, String testType, String outputPath) {
+    /** ExpectationStore to filter out unsupported abis. */
+    private final ExpectationStore mUnsupportedAbis;
+
+    private final String mArchitecture;
+
+    private final Map<String, String> mAdditionalAttributes;
+
+    XmlGenerator(ExpectationStore knownFailures, ExpectationStore unsupportedAbis,
+            String architecture, String appNameSpace, String appPackageName, String name,
+            String runner, String targetBinaryName, String targetNameSpace, String jarPath,
+            String testType, String outputPath, Map<String, String> additionalAttributes) {
         mAppNamespace = appNameSpace;
         mAppPackageName = appPackageName;
         mName = name;
@@ -84,7 +96,10 @@ class XmlGenerator {
         mJarPath = jarPath;
         mTestType = testType;
         mOutputPath = outputPath;
-        mExpectations = expectations;
+        mKnownFailures = knownFailures;
+        mUnsupportedAbis = unsupportedAbis;
+        mArchitecture = architecture;
+        mAdditionalAttributes = additionalAttributes;
     }
 
     public void writePackageXml() throws IOException {
@@ -131,6 +146,10 @@ class XmlGenerator {
 
         if (mJarPath != null) {
             writer.append(" jarPath=\"").append(mJarPath).append("\"");
+        }
+
+        for (Map.Entry<String, String> entry : mAdditionalAttributes.entrySet()) {
+            writer.append(String.format(" %s=\"%s\"", entry.getKey(), entry.getValue()));
         }
 
         writer.println(" version=\"1.0\">");
@@ -183,9 +202,13 @@ class XmlGenerator {
             StringBuilder nameCollector) {
         Collection<Test> sorted = sortCollection(tests);
         for (Test test : sorted) {
+            String className = nameCollector.toString();
             nameCollector.append('#').append(test.getName());
             writer.append("<Test name=\"").append(test.getName()).append("\"");
-            if (isKnownFailure(mExpectations, nameCollector.toString())) {
+            String abis = getSupportedAbis(mUnsupportedAbis, mArchitecture,
+                    className, nameCollector.toString()).toString();
+            writer.append(" abis=\"" + abis.substring(1, abis.length() - 1) + "\"");
+            if (isKnownFailure(mKnownFailures, nameCollector.toString())) {
                 writer.append(" expectation=\"failure\"");
             }
             if (test.getTimeout() >= 0) {
@@ -207,4 +230,39 @@ class XmlGenerator {
     public static boolean isKnownFailure(ExpectationStore expectationStore, String testName) {
         return expectationStore != null && expectationStore.get(testName) != Expectation.SUCCESS;
     }
+
+    // Returns the list of ABIs supported by this TestCase on this architecture.
+    public static Set<String> getSupportedAbis(ExpectationStore expectationStore,
+            String architecture, String className, String testName) {
+        Set<String> supportedAbis = AbiUtils.getAbisForArch(architecture);
+        if (expectationStore == null) {
+            return supportedAbis;
+        }
+
+        removeUnsupportedAbis(expectationStore.get(className), supportedAbis);
+        removeUnsupportedAbis(expectationStore.get(testName), supportedAbis);
+        return supportedAbis;
+    }
+
+    public static void removeUnsupportedAbis(Expectation expectation, Set<String> supportedAbis) {
+        if (expectation == null) {
+            return;
+        }
+
+        String description = expectation.getDescription();
+        if (description.isEmpty()) {
+            return;
+        }
+
+        String[] unsupportedAbis = description.split(":")[1].split(",");
+        for (String a : unsupportedAbis) {
+            String abi = a.trim();
+            if (!AbiUtils.isAbiSupportedByCts(abi)) {
+                throw new RuntimeException(
+                        String.format("Unrecognised ABI %s in %s", abi, description));
+            }
+            supportedAbis.remove(abi);
+        }
+    }
+
 }

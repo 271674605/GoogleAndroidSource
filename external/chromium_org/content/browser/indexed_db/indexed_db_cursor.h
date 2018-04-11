@@ -28,27 +28,36 @@ class CONTENT_EXPORT IndexedDBCursor
 
   void Advance(uint32 count, scoped_refptr<IndexedDBCallbacks> callbacks);
   void Continue(scoped_ptr<IndexedDBKey> key,
+                scoped_ptr<IndexedDBKey> primary_key,
                 scoped_refptr<IndexedDBCallbacks> callbacks);
   void PrefetchContinue(int number_to_fetch,
                         scoped_refptr<IndexedDBCallbacks> callbacks);
-  void PrefetchReset(int used_prefetches, int unused_prefetches);
+  leveldb::Status PrefetchReset(int used_prefetches, int unused_prefetches);
 
   const IndexedDBKey& key() const { return cursor_->key(); }
   const IndexedDBKey& primary_key() const { return cursor_->primary_key(); }
-  std::string* Value() const {
+  IndexedDBValue* Value() const {
     return (cursor_type_ == indexed_db::CURSOR_KEY_ONLY) ? NULL
-                                                         : cursor_->Value();
+                                                         : cursor_->value();
   }
   void Close();
+
+  void CursorIterationOperation(scoped_ptr<IndexedDBKey> key,
+                                scoped_ptr<IndexedDBKey> primary_key,
+                                scoped_refptr<IndexedDBCallbacks> callbacks,
+                                IndexedDBTransaction* transaction);
+  void CursorAdvanceOperation(uint32 count,
+                              scoped_refptr<IndexedDBCallbacks> callbacks,
+                              IndexedDBTransaction* transaction);
+  void CursorPrefetchIterationOperation(
+      int number_to_fetch,
+      scoped_refptr<IndexedDBCallbacks> callbacks,
+      IndexedDBTransaction* transaction);
 
  private:
   friend class base::RefCounted<IndexedDBCursor>;
 
   ~IndexedDBCursor();
-
-  class CursorIterationOperation;
-  class CursorAdvanceOperation;
-  class CursorPrefetchIterationOperation;
 
   IndexedDBDatabase::TaskType task_type_;
   indexed_db::CursorType cursor_type_;
@@ -60,6 +69,8 @@ class CONTENT_EXPORT IndexedDBCursor
   scoped_ptr<IndexedDBBackingStore::Cursor> saved_cursor_;
 
   bool closed_;
+
+  DISALLOW_COPY_AND_ASSIGN(IndexedDBCursor);
 };
 
 }  // namespace content

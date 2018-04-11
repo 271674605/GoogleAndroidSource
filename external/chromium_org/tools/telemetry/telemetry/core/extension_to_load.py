@@ -1,9 +1,9 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import os
 
-from telemetry.core.chrome import crx_id
+from telemetry.core.backends.chrome import crx_id
 
 class ExtensionPathNonExistentException(Exception):
   pass

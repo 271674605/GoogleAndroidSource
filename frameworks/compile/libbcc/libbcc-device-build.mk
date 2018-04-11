@@ -14,12 +14,24 @@
 # limitations under the License.
 #
 
+LOCAL_CLANG := true
+
 LOCAL_CFLAGS := \
   -Wall \
   -Wno-unused-parameter \
   -Werror \
   -DTARGET_BUILD \
+  $(RS_VERSION_DEFINE) \
   $(LOCAL_CFLAGS)
+
+
+ifneq ($(BOARD_OVERRIDE_RS_CPU_VARIANT_32),)
+LOCAL_CFLAGS += -DFORCE_CPU_VARIANT_32=$(BOARD_OVERRIDE_RS_CPU_VARIANT_32)
+endif
+
+ifneq ($(BOARD_OVERRIDE_RS_CPU_VARIANT_64),)
+LOCAL_CFLAGS += -DFORCE_CPU_VARIANT_64=$(BOARD_OVERRIDE_RS_CPU_VARIANT_64)
+endif
 
 ifeq ($(TARGET_BUILD_VARIANT),eng)
 LOCAL_CFLAGS += -DANDROID_ENGINEERING_BUILD
@@ -34,35 +46,21 @@ endif
 # For the host build, we will include as many architecture as possible,
 # so that we can test the execution engine easily.
 
-ifeq ($(TARGET_ARCH),arm)
-  LOCAL_CFLAGS += -DFORCE_ARM_CODEGEN
-  ifeq ($(ARCH_ARM_HAVE_VFP),true)
-    LOCAL_CFLAGS += -DARCH_ARM_HAVE_VFP
-    ifeq ($(ARCH_ARM_HAVE_VFP_D32),true)
-      LOCAL_CFLAGS += -DARCH_ARM_HAVE_VFP_D32
-    endif
-  endif
-  ifeq ($(ARCH_ARM_HAVE_NEON),true)
-    LOCAL_CFLAGS += -DARCH_ARM_HAVE_NEON
-  endif
-else
-  ifeq ($(TARGET_ARCH),mips)
-    LOCAL_CFLAGS += -DFORCE_MIPS_CODEGEN
-  else
-    ifeq ($(TARGET_ARCH),x86)
-      LOCAL_CFLAGS += -DFORCE_X86_CODEGEN
-      ifeq ($(ARCH_X86_HAVE_SSE2), true)
-        LOCAL_CFLAGS += -DARCH_X86_HAVE_SSE2
-      endif
-    else
-      $(error Unsupported architecture $(TARGET_ARCH))
-    endif
-  endif
+LOCAL_MODULE_TARGET_ARCH := $(LLVM_SUPPORTED_ARCH)
+
+ifeq ($(TARGET_ARCH),arm64)
+$(info TODOArm64: $(LOCAL_PATH)/Android.mk Add Arm64 define to LOCAL_CFLAGS)
 endif
+
+ifeq ($(TARGET_ARCH),mips64)
+$(info TODOMips64: $(LOCAL_PATH)/Android.mk Add Mips64 define to LOCAL_CFLAGS)
+endif
+
+include frameworks/compile/libbcc/libbcc-targets.mk
 
 LOCAL_C_INCLUDES := \
   bionic \
-  external/stlport/stlport \
+  external/libcxx/include \
   $(LIBBCC_ROOT_PATH)/include \
   $(LLVM_ROOT_PATH)/include \
   $(LLVM_ROOT_PATH)/device/include \

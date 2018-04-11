@@ -19,7 +19,6 @@
 #include <math.h>
 #include "hwc_mdpcomp.h"
 #include <sys/ioctl.h>
-#include "external.h"
 #include "qdMetaData.h"
 #include "mdp_version.h"
 #include "hwc_fbupdate.h"
@@ -180,11 +179,12 @@ void MDPComp::setMDPCompLayerFlags(hwc_context_t *ctx,
 }
 
 MDPComp::FrameInfo::FrameInfo() {
+    memset(&mdpToLayer, 0, sizeof(mdpToLayer));
     reset(0);
 }
 
 void MDPComp::FrameInfo::reset(const int& numLayers) {
-    for(int i = 0 ; i < MAX_PIPES_PER_MIXER && numLayers; i++ ) {
+    for(int i = 0 ; i < MAX_PIPES_PER_MIXER; i++ ) {
         if(mdpToLayer[i].pipeInfo) {
             delete mdpToLayer[i].pipeInfo;
             mdpToLayer[i].pipeInfo = NULL;
@@ -276,8 +276,9 @@ bool MDPComp::isValidDimension(hwc_context_t *ctx, hwc_layer_1_t *layer) {
        qhwc::calculate_crop_rects(crop, dst, scissor, layer->transform);
     }
 
-    int crop_w = crop.right - crop.left;
-    int crop_h = crop.bottom - crop.top;
+    bool rotated90 = (bool)(layer->transform & HAL_TRANSFORM_ROT_90);
+    int crop_w = rotated90 ? crop.bottom - crop.top : crop.right - crop.left;
+    int crop_h = rotated90 ? crop.right - crop.left : crop.bottom - crop.top;
     int dst_w = dst.right - dst.left;
     int dst_h = dst.bottom - dst.top;
     float w_dscale = ceilf((float)crop_w / (float)dst_w);
@@ -347,7 +348,7 @@ bool MDPComp::isFrameDoable(hwc_context_t *ctx) {
         ret = false;
     } else if(qdutils::MDPVersion::getInstance().is8x26() &&
             ctx->mVideoTransFlag &&
-            ctx->mExtDisplay->isExternalConnected()) {
+            isSecondaryConnected(ctx)) {
         //1 Padding round to shift pipes across mixers
         ALOGD_IF(isDebug(),"%s: MDP Comp. video transition padding round",
                 __FUNCTION__);
@@ -401,6 +402,10 @@ bool MDPComp::isFullFrameDoable(hwc_context_t *ctx,
             }
         }
 
+        if(mDpy > HWC_DISPLAY_PRIMARY && isL3SecureBuffer(hnd)) {
+            return false;
+        }
+
         //For 8x26 with panel width>1k, if RGB layer needs HFLIP fail mdp comp
         // may not need it if Gfx pre-rotation can handle all flips & rotations
         if(qdutils::MDPVersion::getInstance().is8x26() &&
@@ -429,6 +434,14 @@ bool MDPComp::fullMDPComp(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
     if((mDpy > HWC_DISPLAY_PRIMARY) &&
             (list->numHwLayers - 1) > MAX_SEC_LAYERS) {
         ALOGD_IF(isDebug(), "%s: Exceeds max secondary pipes",__FUNCTION__);
+        return false;
+    }
+
+    /* XXX: There is some flicker currently seen with partial
+     * MDP composition on the virtual display.
+     * Disable UI MDP comp on virtual until it is fixed*/
+
+    if(mDpy > HWC_DISPLAY_EXTERNAL) {
         return false;
     }
 
@@ -510,6 +523,14 @@ bool MDPComp::cacheBasedComp(hwc_context_t *ctx,
     if((mDpy > HWC_DISPLAY_PRIMARY) and
             (mdpCount > MAX_SEC_LAYERS)) {
         ALOGD_IF(isDebug(), "%s: Exceeds max secondary pipes",__FUNCTION__);
+        return false;
+    }
+
+    /* XXX: There is some flicker currently seen with partial
+     * MDP composition on the virtual display.
+     * Disable UI MDP comp on virtual until it is fixed*/
+
+    if(mDpy > HWC_DISPLAY_EXTERNAL) {
         return false;
     }
 
@@ -628,6 +649,10 @@ bool MDPComp::isOnlyVideoDoable(hwc_context_t *ctx,
             ALOGD_IF(isDebug(), "%s: Cannot handle YUV layer with plane alpha\
                     in video only mode",
                     __FUNCTION__);
+            return false;
+        }
+        private_handle_t *hnd = (private_handle_t *)layer->handle;
+        if(mDpy > HWC_DISPLAY_PRIMARY && isL3SecureBuffer(hnd)) {
             return false;
         }
     }

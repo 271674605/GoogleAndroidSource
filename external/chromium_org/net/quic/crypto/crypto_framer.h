@@ -10,11 +10,9 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
-#include "net/quic/crypto/crypto_handshake.h"
-#include "net/quic/crypto/crypto_protocol.h"
+#include "net/quic/crypto/crypto_handshake_message.h"
 #include "net/quic/quic_protocol.h"
 
 namespace net {
@@ -83,8 +81,6 @@ class NET_EXPORT_PRIVATE CryptoFramer {
   static bool WritePadTag(QuicDataWriter* writer,
                           size_t pad_length,
                           uint32* end_offset);
-
-  void set_error(QuicErrorCode error) { error_ = error; }
 
   // Represents the current state of the parsing state machine.
   enum CryptoFramerState {

@@ -13,7 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/stl_util.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -37,7 +37,7 @@ struct SavedFileEntry {
 
   SavedFileEntry(const std::string& id,
                  const base::FilePath& path,
-                 bool writable,
+                 bool is_directory,
                  int sequence_number);
 
   // The opaque id of this file entry.
@@ -46,8 +46,8 @@ struct SavedFileEntry {
   // The path to a file entry that the app had permission to access.
   base::FilePath path;
 
-  // Whether or not the app had write access to a file entry.
-  bool writable;
+  // Whether or not the entry refers to a directory.
+  bool is_directory;
 
   // The sequence number in the LRU of the file entry. The value 0 indicates
   // that the entry is not in the LRU.
@@ -56,7 +56,7 @@ struct SavedFileEntry {
 
 // Tracks the files that apps have retained access to both while running and
 // when suspended.
-class SavedFilesService : public BrowserContextKeyedService,
+class SavedFilesService : public KeyedService,
                           public content::NotificationObserver {
  public:
   explicit SavedFilesService(Profile* profile);
@@ -70,7 +70,7 @@ class SavedFilesService : public BrowserContextKeyedService,
   void RegisterFileEntry(const std::string& extension_id,
                          const std::string& id,
                          const base::FilePath& file_path,
-                         bool writable);
+                         bool is_directory);
 
   // If the file with |id| is not in the queue of files to be retained
   // permanently, adds the file to the back of the queue, evicting the least

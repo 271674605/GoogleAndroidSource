@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string16.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -20,16 +20,26 @@ namespace base {
 class RefCountedMemory;
 }
 
+namespace content {
+class RenderProcessHost;
+}
+
 // This class keeps a cache of NTP resources (HTML and CSS) so we don't have to
 // regenerate them all the time.
 class NTPResourceCache : public content::NotificationObserver,
-                         public BrowserContextKeyedService {
+                         public KeyedService {
  public:
+  enum WindowType {
+    NORMAL,
+    INCOGNITO,
+    GUEST,
+  };
+
   explicit NTPResourceCache(Profile* profile);
   virtual ~NTPResourceCache();
 
-  base::RefCountedMemory* GetNewTabHTML(bool is_incognito);
-  base::RefCountedMemory* GetNewTabCSS(bool is_incognito);
+  base::RefCountedMemory* GetNewTabHTML(WindowType win_type);
+  base::RefCountedMemory* GetNewTabCSS(WindowType win_type);
 
   void set_should_show_apps_page(bool should_show_apps_page) {
     should_show_apps_page_ = should_show_apps_page;
@@ -49,6 +59,9 @@ class NTPResourceCache : public content::NotificationObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  static WindowType GetWindowType(
+      Profile* profile, content::RenderProcessHost* render_host);
+
  private:
   void OnPreferenceChanged();
 
@@ -63,24 +76,26 @@ class NTPResourceCache : public content::NotificationObserver,
 
   scoped_refptr<base::RefCountedMemory> new_tab_html_;
 
-#if !defined(OS_ANDROID)
   // Returns a message describing any newly-added sync types, or an empty
   // string if all types have already been acknowledged.
-  string16 GetSyncTypeMessage();
+  base::string16 GetSyncTypeMessage();
 
   void CreateNewTabIncognitoHTML();
-
   void CreateNewTabIncognitoCSS();
+
+  void CreateNewTabGuestHTML();
+  void CreateNewTabGuestCSS();
 
   void CreateNewTabCSS();
 
+  scoped_refptr<base::RefCountedMemory> new_tab_guest_html_;
+  scoped_refptr<base::RefCountedMemory> new_tab_guest_css_;
   scoped_refptr<base::RefCountedMemory> new_tab_incognito_html_;
   scoped_refptr<base::RefCountedMemory> new_tab_incognito_css_;
   scoped_refptr<base::RefCountedMemory> new_tab_css_;
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar profile_pref_change_registrar_;
   PrefChangeRegistrar local_state_pref_change_registrar_;
-#endif
 
   // Set based on platform_util::IsSwipeTrackingFromScrollEventsEnabled.
   bool is_swipe_tracking_from_scroll_events_enabled_;

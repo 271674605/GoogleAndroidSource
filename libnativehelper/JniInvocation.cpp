@@ -18,6 +18,7 @@
 
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <cstddef>
 
@@ -47,21 +48,66 @@ JniInvocation::~JniInvocation() {
   }
 }
 
-bool JniInvocation::Init(const char* library) {
+#ifdef HAVE_ANDROID_OS
+static const char* kLibrarySystemProperty = "persist.sys.dalvik.vm.lib.2";
+static const char* kDebuggableSystemProperty = "ro.debuggable";
+static const char* kDebuggableFallback = "0";  // Not debuggable.
+#endif
+static const char* kLibraryFallback = "libart.so";
+
+const char* JniInvocation::GetLibrary(const char* library) {
 #ifdef HAVE_ANDROID_OS
   char default_library[PROPERTY_VALUE_MAX];
-  property_get("persist.sys.dalvik.vm.lib", default_library, "libdvm.so");
+
+  char debuggable[PROPERTY_VALUE_MAX];
+  property_get(kDebuggableSystemProperty, debuggable, kDebuggableFallback);
+
+  if (strcmp(debuggable, "1") != 0) {
+    // Not a debuggable build.
+    // Do not allow arbitrary library. Ignore the library parameter. This
+    // will also ignore the default library, but initialize to empty string
+    // for cleanliness.
+    library = kLibraryFallback;
+    default_library[0] = 0;
+  } else {
+    // Debuggable build.
+    // Accept the library parameter. For the case it is NULL, load the default
+    // library from the system property.
+    property_get(kLibrarySystemProperty, default_library, kLibraryFallback);
+  }
 #else
-  const char* default_library = "libdvm.so";
+  const char* default_library = kLibraryFallback;
 #endif
   if (library == NULL) {
     library = default_library;
   }
 
+  return library;
+}
+
+bool JniInvocation::Init(const char* library) {
+  library = GetLibrary(library);
+
   handle_ = dlopen(library, RTLD_NOW);
   if (handle_ == NULL) {
-    ALOGE("Failed to dlopen %s: %s", library, dlerror());
-    return false;
+    if (strcmp(library, kLibraryFallback) == 0) {
+      // Nothing else to try.
+      ALOGE("Failed to dlopen %s: %s", library, dlerror());
+      return false;
+    }
+    // Note that this is enough to get something like the zygote
+    // running, we can't property_set here to fix this for the future
+    // because we are root and not the system user. See
+    // RuntimeInit.commonInit for where we fix up the property to
+    // avoid future fallbacks. http://b/11463182
+    ALOGW("Falling back from %s to %s after dlopen error: %s",
+          library, kLibraryFallback, dlerror());
+    library = kLibraryFallback;
+    handle_ = dlopen(library, RTLD_NOW);
+    if (handle_ == NULL) {
+      ALOGE("Failed to dlopen %s: %s", library, dlerror());
+      return false;
+    }
   }
   if (!FindSymbol(reinterpret_cast<void**>(&JNI_GetDefaultJavaVMInitArgs_),
                   "JNI_GetDefaultJavaVMInitArgs")) {

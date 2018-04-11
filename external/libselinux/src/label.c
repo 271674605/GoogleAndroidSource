@@ -106,12 +106,42 @@ selabel_lookup_common(struct selabel_handle *rec,
 	return lr;
 }
 
-int selabel_lookup(struct selabel_handle *rec, security_context_t *con,
+int selabel_lookup(struct selabel_handle *rec, char **con,
 		   const char *key, int type)
 {
 	struct selabel_lookup_rec *lr;
 
 	lr = selabel_lookup_common(rec, key, type);
+	if (!lr)
+		return -1;
+
+	*con = strdup(lr->ctx_raw);
+	return *con ? 0 : -1;
+}
+
+bool selabel_partial_match(struct selabel_handle *rec, const char *key)
+{
+	if (!rec->func_partial_match) {
+		/*
+		 * If the label backend does not support partial matching,
+		 * then assume a match is possible.
+		 */
+		return true;
+	}
+	return rec->func_partial_match(rec, key);
+}
+
+int selabel_lookup_best_match(struct selabel_handle *rec, char **con,
+			      const char *key, const char **aliases, int type)
+{
+	struct selabel_lookup_rec *lr;
+
+	if (!rec->func_lookup_best_match) {
+		errno = ENOTSUP;
+		return -1;
+	}
+
+	lr = rec->func_lookup_best_match(rec, key, aliases, type);
 	if (!lr)
 		return -1;
 

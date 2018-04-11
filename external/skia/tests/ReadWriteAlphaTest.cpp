@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2012 Google Inc.
  *
@@ -9,14 +8,14 @@
 // This test is specific to the GPU backend.
 #if SK_SUPPORT_GPU && !defined(SK_BUILD_FOR_ANDROID)
 
-#include "Test.h"
-#include "SkGpuDevice.h"
 #include "GrContextFactory.h"
+#include "SkGpuDevice.h"
+#include "Test.h"
 
 static const int X_SIZE = 12;
 static const int Y_SIZE = 12;
 
-static void ReadWriteAlphaTest(skiatest::Reporter* reporter, GrContextFactory* factory) {
+DEF_GPUTEST(ReadWriteAlpha, reporter, factory) {
     for (int type = 0; type < GrContextFactory::kLastGLContextType; ++type) {
         GrContextFactory::GLContextType glType = static_cast<GrContextFactory::GLContextType>(type);
         if (!GrContextFactory::IsRenderingGLContext(glType)) {
@@ -46,7 +45,7 @@ static void ReadWriteAlphaTest(skiatest::Reporter* reporter, GrContextFactory* f
             return;
         }
 
-        GrAutoUnref au(texture);
+        SkAutoUnref au(texture);
 
         // create a distinctive texture
         for (int y = 0; y < Y_SIZE; ++y) {
@@ -82,7 +81,7 @@ static void ReadWriteAlphaTest(skiatest::Reporter* reporter, GrContextFactory* f
         REPORTER_ASSERT(reporter, match);
 
         // Now try writing on the single channel texture
-        SkAutoTUnref<SkDevice> device(new SkGpuDevice(context, texture->asRenderTarget()));
+        SkAutoTUnref<SkBaseDevice> device(new SkGpuDevice(context, texture->asRenderTarget()));
         SkCanvas canvas(device);
 
         SkPaint paint;
@@ -109,8 +108,5 @@ static void ReadWriteAlphaTest(skiatest::Reporter* reporter, GrContextFactory* f
         REPORTER_ASSERT(reporter, match);
     }
 }
-
-#include "TestClassDef.h"
-DEFINE_GPUTESTCLASS("ReadWriteAlpha", ReadWriteAlphaTestClass, ReadWriteAlphaTest)
 
 #endif

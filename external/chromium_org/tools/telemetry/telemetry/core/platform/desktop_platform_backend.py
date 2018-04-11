@@ -5,8 +5,8 @@
 import os
 import subprocess
 
-from telemetry.core import util
 from telemetry.core.platform import platform_backend
+from telemetry.util import support_binaries
 
 
 class DesktopPlatformBackend(platform_backend.PlatformBackend):
@@ -14,41 +14,26 @@ class DesktopPlatformBackend(platform_backend.PlatformBackend):
   # This is an abstract class. It is OK to have abstract methods.
   # pylint: disable=W0223
 
-  def GetFlushUtilityName(self):
-    return NotImplementedError()
-
-  def _FindNewestFlushUtility(self):
-    flush_command = None
-    flush_command_mtime = 0
-
-    chrome_root = util.GetChromiumSrcDir()
-    for build_dir, build_type in util.GetBuildDirectories():
-      candidate = os.path.join(chrome_root, build_dir, build_type,
-                               self.GetFlushUtilityName())
-      if os.access(candidate, os.X_OK):
-        candidate_mtime = os.stat(candidate).st_mtime
-        if candidate_mtime > flush_command_mtime:
-          flush_command = candidate
-          flush_command_mtime = candidate_mtime
-
-    return flush_command
-
   def FlushSystemCacheForDirectory(self, directory, ignoring=None):
     assert directory and os.path.exists(directory), \
         'Target directory %s must exist' % directory
-    flush_command = self._FindNewestFlushUtility()
-    assert flush_command, \
-        'You must build %s first' % self.GetFlushUtilityName()
+    flush_command = support_binaries.FindPath('clear_system_cache',
+                                              self.GetOSName())
+    assert flush_command, 'You must build clear_system_cache first'
 
-    args = [flush_command, '--recurse']
+    args = []
     directory_contents = os.listdir(directory)
     for item in directory_contents:
       if not ignoring or item not in ignoring:
         args.append(os.path.join(directory, item))
 
-    if len(args) < 3:
-      return
-
-    p = subprocess.Popen(args)
-    p.wait()
-    assert p.returncode == 0, 'Failed to flush system cache'
+    # According to msdn:
+    # http://msdn.microsoft.com/en-us/library/ms682425%28VS.85%29.aspx
+    # there's a maximum allowable command line of 32,768 characters on windows.
+    while args:
+      # Small note about [:256] and [256:]
+      # [:N] will return a list with the first N elements, ie.
+      # with [1,2,3,4,5], [:2] -> [1,2], and [2:] -> [3,4,5]
+      # with [1,2,3,4,5], [:5] -> [1,2,3,4,5] and [5:] -> []
+      subprocess.check_call([flush_command, '--recurse'] + args[:256])
+      args = args[256:]

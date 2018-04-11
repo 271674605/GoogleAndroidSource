@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_FRAGMENT_FRAGMENT_REFERENCE_H
-#define MCLD_FRAGMENT_FRAGMENT_REFERENCE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_FRAGMENT_FRAGMENTREF_H
+#define MCLD_FRAGMENT_FRAGMENTREF_H
 
 #include <mcld/Config/Config.h>
 #include <mcld/ADT/SizeTraits.h>
@@ -60,7 +57,7 @@ public:
   /// copy memory from the fragment to the pDesc.
   /// @pDest - the destination address
   /// @pNBytes - copies pNBytes from the fragment[offset()+pOffset]
-  /// @pOffset - additional offset. 
+  /// @pOffset - additional offset.
   ///            the start address offset from fragment[offset()]
   void memcpy(void* pDest, size_t pNBytes, Offset pOffset = 0) const;
 
@@ -78,17 +75,6 @@ public:
 
   Offset getOutputOffset() const;
 
-  // -----  dereference  ----- //
-  Address deref();
-
-  ConstAddress deref() const;
-
-  Address operator*()
-  { return deref(); }
-
-  ConstAddress operator*() const
-  { return deref(); }
-
 private:
   friend FragmentRef& NullFragmentRef();
   friend class Chunk<FragmentRef, MCLD_SECTIONS_PER_INPUT>;
@@ -97,7 +83,7 @@ private:
   FragmentRef();
 
   FragmentRef(Fragment& pFrag, Offset pOffset = 0);
-  
+
 private:
   Fragment* m_pFragment;
   Offset m_Offset;

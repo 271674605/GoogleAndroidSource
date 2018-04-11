@@ -35,7 +35,8 @@ LOCAL_C_INCLUDES := external/stlport/stlport bionic/ bionic/libstdc++/include \
     $(LOCAL_PATH)/$(NFC)/include \
     $(LOCAL_PATH)/$(NFC)/int \
     $(LOCAL_PATH)/src/hal/include \
-    $(LOCAL_PATH)/src/hal/int
+    $(LOCAL_PATH)/src/hal/int \
+    $(LOCAL_PATH)/$(HALIMPL)/include
 LOCAL_SRC_FILES := \
     $(call all-c-files-under, $(NFA)/ce $(NFA)/dm $(NFA)/ee) \
     $(call all-c-files-under, $(NFA)/hci $(NFA)/int $(NFA)/p2p $(NFA)/rw $(NFA)/sys) \
@@ -43,6 +44,7 @@ LOCAL_SRC_FILES := \
     $(call all-c-files-under, src/adaptation) \
     $(call all-cpp-files-under, src/adaptation) \
     $(call all-c-files-under, src/gki) \
+    $(HALIMPL)/adaptation/android_logmsg.cpp \
     src/nfca_version.c
 include $(BUILD_SHARED_LIBRARY)
 
@@ -52,8 +54,8 @@ include $(BUILD_SHARED_LIBRARY)
 # Android's generic HAL (libhardware.so) dynamically loads this shared library.
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := nfc_nci.$(TARGET_DEVICE)
-LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+LOCAL_MODULE := nfc_nci.bcm2079x.default
+LOCAL_MODULE_RELATIVE_PATH := hw
 LOCAL_SRC_FILES := $(call all-c-files-under, $(HALIMPL)) \
     $(call all-cpp-files-under, $(HALIMPL)) \
     src/adaptation/CrcChecksum.cpp \

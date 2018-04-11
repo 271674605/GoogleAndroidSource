@@ -16,6 +16,8 @@
 
 package com.android.contacts.common;
 
+import android.content.Context;
+
 import java.util.Iterator;
 import java.util.List;
 
@@ -44,7 +46,8 @@ public final class Collapser {
      */
     public interface Collapsible<T> {
         public void collapseWith(T t);
-        public boolean shouldCollapseWith(T t);
+        public boolean shouldCollapseWith(T t, Context context);
+
     }
 
     /**
@@ -54,7 +57,7 @@ public final class Collapser {
      *
      * @param list List of Objects of type <T extends Collapsible<T>> to be collapsed.
      */
-    public static <T extends Collapsible<T>> void collapseList(List<T> list) {
+    public static <T extends Collapsible<T>> void collapseList(List<T> list, Context context) {
 
         int listSize = list.size();
         // The algorithm below is n^2 so don't run on long lists
@@ -68,10 +71,10 @@ public final class Collapser {
                 for (int j = i + 1; j < listSize; j++) {
                     T jItem = list.get(j);
                     if (jItem != null) {
-                        if (iItem.shouldCollapseWith(jItem)) {
+                        if (iItem.shouldCollapseWith(jItem, context)) {
                             iItem.collapseWith(jItem);
                             list.set(j, null);
-                        } else if (jItem.shouldCollapseWith(iItem)) {
+                        } else if (jItem.shouldCollapseWith(iItem, context)) {
                             jItem.collapseWith(iItem);
                             list.set(i, null);
                             break;

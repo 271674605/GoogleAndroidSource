@@ -20,6 +20,7 @@ package com.android.mail.ui;
 import com.android.mail.R;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.UIProvider.FolderCapabilities;
+import com.android.mail.utils.Utils;
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 
@@ -52,25 +53,25 @@ public class FolderSelectorAdapter extends BaseAdapter {
 
     public static class FolderRow implements Comparable<FolderRow> {
         private final Folder mFolder;
-        private boolean mIsPresent;
+        private boolean mIsSelected;
         // Filled in during folderSort
         public String mPathName;
 
-        public FolderRow(Folder folder, boolean isPresent) {
+        public FolderRow(Folder folder, boolean isSelected) {
             mFolder = folder;
-            mIsPresent = isPresent;
+            mIsSelected = isSelected;
         }
 
         public Folder getFolder() {
             return mFolder;
         }
 
-        public boolean isPresent() {
-            return mIsPresent;
+        public boolean isSelected() {
+            return mIsSelected;
         }
 
-        public void setIsPresent(boolean isPresent) {
-            mIsPresent = isPresent;
+        public void setIsSelected(boolean isSelected) {
+            mIsSelected = isSelected;
         }
 
         @Override
@@ -78,8 +79,6 @@ public class FolderSelectorAdapter extends BaseAdapter {
             // TODO: this should sort the system folders in the appropriate order
             if (equals(another)) {
                 return 0;
-            } else if (mIsPresent != another.mIsPresent) {
-                return mIsPresent ? -1 : 1;
             } else {
                 return mFolder.name.compareToIgnoreCase(another.mFolder.name);
             }
@@ -90,67 +89,63 @@ public class FolderSelectorAdapter extends BaseAdapter {
     protected final List<FolderRow> mFolderRows = Lists.newArrayList();
     private final LayoutInflater mInflater;
     private final int mLayout;
-    private final String mHeader;
     private Folder mExcludedFolder;
 
-
     public FolderSelectorAdapter(Context context, Cursor folders,
-            Set<String> initiallySelected, int layout, String header) {
+            Set<String> selected, int layout) {
         mInflater = LayoutInflater.from(context);
         mLayout = layout;
-        mHeader = header;
-        createFolderRows(folders, initiallySelected);
+        createFolderRows(folders, selected);
     }
 
-    public FolderSelectorAdapter(Context context, Cursor folders, int layout, String header,
-            Folder excludedFolder) {
+    public FolderSelectorAdapter(Context context, Cursor folders,
+            int layout, Folder excludedFolder) {
         mInflater = LayoutInflater.from(context);
         mLayout = layout;
-        mHeader = header;
         mExcludedFolder = excludedFolder;
         createFolderRows(folders, null);
     }
 
-    protected void createFolderRows(Cursor folders, Set<String> initiallySelected) {
+    protected void createFolderRows(Cursor folders, Set<String> selected) {
         if (folders == null) {
             return;
         }
         final List<FolderRow> allFolders = new ArrayList<FolderRow>(folders.getCount());
 
+        // Rows corresponding to user created, unchecked folders.
+        final List<FolderRow> userFolders = new ArrayList<FolderRow>();
+        // Rows corresponding to system created, unchecked folders.
+        final List<FolderRow> systemFolders = new ArrayList<FolderRow>();
+
         if (folders.moveToFirst()) {
             do {
                 final Folder folder = new Folder(folders);
-                final boolean isSelected = initiallySelected != null
-                        && initiallySelected.contains(
+                final boolean isSelected = selected != null
+                        && selected.contains(
                         folder.folderUri.getComparisonUri().toString());
                 final FolderRow row = new FolderRow(folder, isSelected);
                 allFolders.add(row);
+
+                // Add system folders here since we want the original unsorted order (for now..)
+                if (meetsRequirements(folder) && !Objects.equal(folder, mExcludedFolder) &&
+                        folder.isProviderFolder()) {
+                    systemFolders.add(row);
+                }
             } while (folders.moveToNext());
         }
         // Need to do the foldersort first with all folders present to avoid dropping orphans
         folderSort(allFolders);
 
-        // Rows corresponding to user created, unchecked folders.
-        final List<FolderRow> userUnselected = new ArrayList<FolderRow>();
-        // Rows corresponding to system created, unchecked folders.
-        final List<FolderRow> systemUnselected = new ArrayList<FolderRow>();
-
         // Divert the folders to the appropriate sections
         for (final FolderRow row : allFolders) {
             final Folder folder = row.getFolder();
-            if (meetsRequirements(folder) && !Objects.equal(folder, mExcludedFolder)) {
-                // Add the currently selected first.
-                if (row.isPresent()) {
-                    mFolderRows.add(row);
-                } else if (folder.isProviderFolder()) {
-                    systemUnselected.add(row);
-                } else {
-                    userUnselected.add(row);
-                }
+            if (meetsRequirements(folder) && !Objects.equal(folder, mExcludedFolder) &&
+                    !folder.isProviderFolder()) {
+                userFolders.add(row);
             }
         }
-        mFolderRows.addAll(systemUnselected);
-        mFolderRows.addAll(userUnselected);
+        mFolderRows.addAll(systemFolders);
+        mFolderRows.addAll(userFolders);
     }
 
     /**
@@ -221,7 +216,7 @@ public class FolderSelectorAdapter extends BaseAdapter {
                 node.mWrappedObject = folderRow;
             }
             // Special case the top level folders
-            if (folderRow.mFolder.parent == null || folderRow.mFolder.parent.equals(Uri.EMPTY)) {
+            if (Utils.isEmpty(folderRow.mFolder.parent)) {
                 root.addChild(node);
             } else {
                 // Find or half-create the parent TreeNode wrapper
@@ -288,57 +283,32 @@ public class FolderSelectorAdapter extends BaseAdapter {
 
     @Override
     public int getCount() {
-        return mFolderRows.size() + (hasHeader() ? 1 : 0);
+        return mFolderRows.size();
     }
 
     @Override
     public Object getItem(int position) {
-        if (isHeader(position)) {
-            return mHeader;
-        }
-        return mFolderRows.get(correctPosition(position));
+        return mFolderRows.get(position);
     }
 
     @Override
     public long getItemId(int position) {
-        if (isHeader(position)) {
-            return -1;
-        }
         return position;
     }
 
     @Override
     public int getItemViewType(int position) {
-        if (isHeader(position)) {
-            return SeparatedFolderListAdapter.TYPE_SECTION_HEADER;
-        } else {
-            return SeparatedFolderListAdapter.TYPE_ITEM;
-        }
+        return SeparatedFolderListAdapter.TYPE_ITEM;
     }
 
     @Override
     public int getViewTypeCount() {
-        return 2;
-    }
-
-    /**
-     * Returns true if this position represents the header.
-     */
-    protected final boolean isHeader(int position) {
-        return position == 0 && hasHeader();
+        return 1;
     }
 
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
-        // The header is at the top
-        if (isHeader(position)) {
-            final TextView view = convertView != null ? (TextView) convertView :
-                (TextView) mInflater.inflate(R.layout.folder_header, parent, false);
-            view.setText(mHeader);
-            return view;
-        }
         final View view;
-
         if (convertView == null) {
             view = mInflater.inflate(mLayout, parent, false);
         } else {
@@ -354,28 +324,14 @@ public class FolderSelectorAdapter extends BaseAdapter {
             // folder on the parent list item's click handler.
             checkBox.setClickable(false);
             checkBox.setText(folderDisplay);
-            checkBox.setChecked(row.isPresent());
+            checkBox.setChecked(row.isSelected());
         }
         final TextView display = (TextView) view.findViewById(R.id.folder_name);
         if (display != null) {
             display.setText(folderDisplay);
         }
         final View colorBlock = view.findViewById(R.id.color_block);
-        final ImageView iconView = (ImageView) view.findViewById(R.id.folder_icon);
         Folder.setFolderBlockColor(folder, colorBlock);
-        Folder.setIcon(folder, iconView);
         return view;
-    }
-
-    private boolean hasHeader() {
-        return mHeader != null;
-    }
-
-    /**
-     * Since this adapter may contain 2 types of data, make sure that we offset
-     * the position being asked for correctly.
-     */
-    public int correctPosition(int position) {
-        return hasHeader() ? position-1 : position;
     }
 }

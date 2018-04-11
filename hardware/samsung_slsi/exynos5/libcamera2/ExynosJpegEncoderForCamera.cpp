@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "ExynosJpegForCamera"
 #include <utils/Log.h>
 
 #include "ExynosJpegEncoderForCamera.h"
@@ -22,7 +23,7 @@
 static const char ExifAsciiPrefix[] = { 0x41, 0x53, 0x43, 0x49, 0x49, 0x0, 0x0, 0x0 };
 
 #define JPEG_ERROR_LOG ALOGE
-#define LOG_TAG "ExynosJpegForCamera"
+#define JPEG_WARNING_LOG ALOGW
 
 #define JPEG_THUMBNAIL_QUALITY (60)
 #define EXIF_LIMIT_SIZE (64*1024)
@@ -41,7 +42,7 @@ ExynosJpegEncoderForCamera::ExynosJpegEncoderForCamera()
     m_thumbnailW = 0;
     m_thumbnailH = 0;
     m_thumbnailQuality = JPEG_THUMBNAIL_QUALITY;
-    m_ionJpegClient = 0;
+    m_ionJpegClient = -1;
     initJpegMemory(&m_stThumbInBuf, MAX_IMAGE_PLANE_NUM);
     initJpegMemory(&m_stThumbOutBuf, MAX_IMAGE_PLANE_NUM);
     initJpegMemory(&m_stMainInBuf, MAX_IMAGE_PLANE_NUM);
@@ -88,11 +89,15 @@ int ExynosJpegEncoderForCamera::create(void)
         }
     }
 
-    m_ionJpegClient = createIonClient(m_ionJpegClient);
-    if(m_ionJpegClient == 0) {
+    m_ionJpegClient =
+        m_stMainOutBuf.ionClient =
+        m_stMainInBuf.ionClient =
+        m_stThumbInBuf.ionClient =
+        m_stThumbOutBuf.ionClient =
+            createIonClient(m_ionJpegClient);
+    if(m_ionJpegClient < 0) {
         return ERROR_CANNOT_CREATE_EXYNOS_JPEG_ENC_HAL;
     }
-    m_stMainOutBuf.ionClient = m_stMainInBuf.ionClient = m_stThumbInBuf.ionClient = m_stThumbOutBuf.ionClient = m_ionJpegClient;
 
     m_flagCreate = true;
 
@@ -118,11 +123,24 @@ int ExynosJpegEncoderForCamera::destroy(void)
         freeJpegMemory(&m_stThumbOutBuf, MAX_IMAGE_PLANE_NUM);
         initJpegMemory(&m_stMainInBuf, MAX_IMAGE_PLANE_NUM);
         initJpegMemory(&m_stMainOutBuf, MAX_IMAGE_PLANE_NUM);
-        m_ionJpegClient = deleteIonClient(m_ionJpegClient);
-        m_stMainOutBuf.ionClient = m_stMainInBuf.ionClient = m_stThumbInBuf.ionClient = m_stThumbOutBuf.ionClient = m_ionJpegClient;
+        m_ionJpegClient =
+            m_stMainOutBuf.ionClient =
+            m_stMainInBuf.ionClient =
+            m_stThumbInBuf.ionClient =
+            m_stThumbOutBuf.ionClient =
+                deleteIonClient(m_ionJpegClient);
         m_jpegThumb->destroy();
         delete m_jpegThumb;
         m_jpegThumb = NULL;
+    }
+    if (m_ionJpegClient >= 0) {
+        JPEG_WARNING_LOG("WARNING(%s):Ion Client created outside of m_jpegThumb\n", __func__);
+        m_ionJpegClient =
+            m_stMainOutBuf.ionClient =
+            m_stMainInBuf.ionClient =
+            m_stThumbInBuf.ionClient =
+            m_stThumbOutBuf.ionClient =
+                deleteIonClient(m_ionJpegClient);
     }
 
     m_flagCreate = false;
@@ -212,7 +230,7 @@ int  ExynosJpegEncoderForCamera::setOutBuf(int buf, char* vBuf, int size)
         return ERROR_NOT_YET_CREATED;
     }
 
-    if (buf == NULL) {
+    if (!buf) {
         return ERROR_BUFFR_IS_NULL;
     }
 
@@ -260,7 +278,7 @@ int ExynosJpegEncoderForCamera::encode(int *size, exif_attribute_t *exifInfo)
     int iJpegBuffer = m_stMainOutBuf.ionBuffer[0];
     char *pcJpegBuffer = m_stMainOutBuf.pcBuf[0];
 
-    if (pcJpegBuffer[0] == NULL) {
+    if (!pcJpegBuffer[0]) {
         JPEG_ERROR_LOG("%s::pcJpegBuffer[0] is null!!\n", __func__);
         return ERROR_OUT_BUFFER_CREATE_FAIL;
     }
@@ -361,6 +379,8 @@ int ExynosJpegEncoderForCamera::makeExif (unsigned char *exifOut,
                  strlen((char *)exifInfo->software) + 1, exifInfo->software, &LongerTagOffest, pIfdStart);
     writeExifIfd(&pCur, EXIF_TAG_DATE_TIME, EXIF_TYPE_ASCII,
                  20, exifInfo->date_time, &LongerTagOffest, pIfdStart);
+    writeExifIfd(&pCur, EXIF_TAG_SUBSEC_TIME, EXIF_TYPE_ASCII,
+                 sizeof(exifInfo->sub_sec), exifInfo->sub_sec);
     writeExifIfd(&pCur, EXIF_TAG_YCBCR_POSITIONING, EXIF_TYPE_SHORT,
                  1, exifInfo->ycbcr_positioning);
     writeExifIfd(&pCur, EXIF_TAG_EXIF_IFD_POINTER, EXIF_TYPE_LONG,
@@ -394,8 +414,12 @@ int ExynosJpegEncoderForCamera::makeExif (unsigned char *exifOut,
                  4, exifInfo->exif_version);
     writeExifIfd(&pCur, EXIF_TAG_DATE_TIME_ORG, EXIF_TYPE_ASCII,
                  20, exifInfo->date_time, &LongerTagOffest, pIfdStart);
+    writeExifIfd(&pCur, EXIF_TAG_SUBSEC_TIME_ORG, EXIF_TYPE_ASCII,
+                 sizeof(exifInfo->sub_sec), exifInfo->sub_sec);
     writeExifIfd(&pCur, EXIF_TAG_DATE_TIME_DIGITIZE, EXIF_TYPE_ASCII,
                  20, exifInfo->date_time, &LongerTagOffest, pIfdStart);
+    writeExifIfd(&pCur, EXIF_TAG_SUBSEC_TIME_DIGITIZE, EXIF_TYPE_ASCII,
+                 sizeof(exifInfo->sub_sec), exifInfo->sub_sec);
     writeExifIfd(&pCur, EXIF_TAG_SHUTTER_SPEED, EXIF_TYPE_SRATIONAL,
                  1, (rational_t *)&exifInfo->shutter_speed, &LongerTagOffest, pIfdStart);
     writeExifIfd(&pCur, EXIF_TAG_APERTURE, EXIF_TYPE_RATIONAL,
@@ -561,14 +585,13 @@ int ExynosJpegEncoderForCamera::makeExif (unsigned char *exifOut,
         memcpy(pNextIfdOffset, &tmp, OFFSET_SIZE);  // NEXT IFD offset skipped on 0th IFD
     }
 
-    unsigned char App1Marker[2] = { 0xff, 0xe1 };
-    memcpy(pApp1Start, App1Marker, 2);
-    pApp1Start += 2;
+    *(pApp1Start++) = 0xff;
+    *(pApp1Start++) = 0xe1;
 
     *size = 10 + LongerTagOffest;
     tmp = *size - 2;    // APP1 Maker isn't counted
-    unsigned char size_mm[2] = {(tmp >> 8) & 0xFF, tmp & 0xFF};
-    memcpy(pApp1Start, size_mm, 2);
+    *(pApp1Start++) = (tmp >> 8) & 0xFF;
+    *(pApp1Start++) = tmp & 0xFF;
 
     return ERROR_NONE;
 }
@@ -919,11 +942,10 @@ int ExynosJpegEncoderForCamera::encodeThumbnail(unsigned int *size, bool useMain
 
 int ExynosJpegEncoderForCamera::createIonClient(ion_client ionClient)
 {
-    if (ionClient == 0) {
+    if (ionClient < 0) {
         ionClient = ion_client_create();
         if (ionClient < 0) {
             JPEG_ERROR_LOG("[%s]src ion client create failed, value = %d\n", __func__, ionClient);
-            return 0;
         }
     }
 
@@ -932,13 +954,10 @@ int ExynosJpegEncoderForCamera::createIonClient(ion_client ionClient)
 
 int ExynosJpegEncoderForCamera::deleteIonClient(ion_client ionClient)
 {
-    if (ionClient != 0) {
-        if (ionClient > 0) {
-            ion_client_destroy(ionClient);
-        }
-        ionClient = 0;
+    if (ionClient >= 0) {
+        ion_client_destroy(ionClient);
     }
-
+    ionClient = -1;
     return ionClient;
 }
 
@@ -947,8 +966,8 @@ int ExynosJpegEncoderForCamera::allocJpegMemory(struct stJpegMem *pstMem, int iM
     int ret = ERROR_NONE;
     int i = 0;
 
-    if (pstMem->ionClient == 0) {
-        JPEG_ERROR_LOG("[%s] i = %d , ionClient is zero (%d)\n", __func__, i, pstMem->ionClient);
+    if (pstMem->ionClient < 0) {
+        JPEG_ERROR_LOG("[%s] i = %d , ionClient is closed (%d)\n", __func__, i, pstMem->ionClient);
         return ERROR_BUFFR_IS_NULL;
     }
 
@@ -981,8 +1000,8 @@ int ExynosJpegEncoderForCamera::allocJpegMemory(struct stJpegMem *pstMem, int iM
 
 void ExynosJpegEncoderForCamera::freeJpegMemory(struct stJpegMem *pstMem, int iMemoryNum)
 {
-    int i =0 ;
-    if (pstMem->ionClient == 0) {
+    int i = 0;
+    if (pstMem->ionClient < 0) {
         return;
     }
 
@@ -1008,6 +1027,6 @@ void ExynosJpegEncoderForCamera::initJpegMemory(struct stJpegMem *pstMem, int iM
         pstMem->ionBuffer[i] = -1;
         pstMem->iSize[i] = 0;
     }
-    pstMem->ionClient = 0;
+    pstMem->ionClient = -1;
 }
 

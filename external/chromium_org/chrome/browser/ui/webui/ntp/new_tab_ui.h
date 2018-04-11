@@ -15,6 +15,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
 
 class GURL;
@@ -30,6 +31,7 @@ class PrefRegistrySyncable;
 
 // The WebUIController used for the New Tab page.
 class NewTabUI : public content::WebUIController,
+                 public content::WebContentsObserver,
                  public content::NotificationObserver {
  public:
   explicit NewTabUI(content::WebUI* web_ui);
@@ -46,8 +48,12 @@ class NewTabUI : public content::WebUIController,
   // Adds "url", "title", and "direction" keys on incoming dictionary, setting
   // title as the url as a fallback on empty title.
   static void SetUrlTitleAndDirection(base::DictionaryValue* dictionary,
-                                      const string16& title,
+                                      const base::string16& title,
                                       const GURL& gurl);
+
+  // Adds "full_name" and "full_name_direction" keys on incoming dictionary.
+  static void SetFullNameAndDirection(const base::string16& full_name,
+                                      base::DictionaryValue* dictionary);
 
   // Returns a pointer to a NewTabUI if the WebUIController object is a new tab
   // page.
@@ -62,6 +68,9 @@ class NewTabUI : public content::WebUIController,
   virtual void RenderViewReused(
       content::RenderViewHost* render_view_host) OVERRIDE;
 
+  // WebContentsObserver implementation:
+  virtual void WasHidden() OVERRIDE;
+
   bool showing_sync_bubble() { return showing_sync_bubble_; }
   void set_showing_sync_bubble(bool showing) { showing_sync_bubble_ = showing; }
 
@@ -75,7 +84,7 @@ class NewTabUI : public content::WebUIController,
     virtual void StartDataRequest(
         const std::string& path,
         int render_process_id,
-        int render_view_id,
+        int render_frame_id,
         const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
     virtual std::string GetMimeType(const std::string&) const OVERRIDE;
     virtual bool ShouldReplaceExistingSource() const OVERRIDE;
@@ -106,9 +115,10 @@ class NewTabUI : public content::WebUIController,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // If |web_contents| has an NTP URL, emits the number of NTP mouseovers
-  // associated with |web_contents|, to be logged in UMA histogram.
-  void EmitMouseoverCount(content::WebContents* web_contents);
+  // If |web_contents| has an NTP URL, emits a number of NTP statistics (like
+  // mouseovers counts) associated with |web_contents|, to be logged in UMA
+  // histograms.
+  void EmitNtpStatistics();
 
   void OnShowBookmarkBarChanged();
 

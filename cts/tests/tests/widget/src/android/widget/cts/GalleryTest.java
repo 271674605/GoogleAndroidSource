@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 import com.android.internal.view.menu.ContextMenuBuilder;
 
 
@@ -26,6 +26,7 @@ import org.xmlpull.v1.XmlPullParserException;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Context;
+import android.cts.util.WidgetTestUtils;
 import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.UiThreadTest;
@@ -53,7 +54,7 @@ import java.io.IOException;
 /**
  * Test {@link Gallery}.
  */
-public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubActivity>  {
+public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryCtsActivity>  {
     private Gallery mGallery;
     private Activity mActivity;
     private Instrumentation mInstrumentation;
@@ -61,7 +62,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
     private final static float DELTA = 0.01f;
 
     public GalleryTest() {
-        super("com.android.cts.stub", GalleryStubActivity.class);
+        super("com.android.cts.widget", GalleryCtsActivity.class);
     }
 
     @Override
@@ -73,6 +74,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         mGallery = (Gallery) mActivity.findViewById(R.id.gallery_test);
     }
 
+    @UiThreadTest
     public void testConstructor() {
         new Gallery(mContext);
 
@@ -154,6 +156,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertEquals(alpha, t.getAlpha(), DELTA);
     }
 
+    @UiThreadTest
     public void testGenerateLayoutParams() throws XmlPullParserException, IOException {
         final int width = 320;
         final int height = 240;
@@ -187,6 +190,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         // how to check whether the context menu is showing.
     }
 
+    @UiThreadTest
     public void testDispatchKeyEvent() {
         mGallery = new Gallery(mContext);
         final KeyEvent validKeyEvent = new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER);
@@ -222,6 +226,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         mInstrumentation.waitForIdleSync();
     }
 
+    @UiThreadTest
     public void testCheckLayoutParams() {
         MyGallery gallery = new MyGallery(mContext);
         ViewGroup.LayoutParams p1 = new ViewGroup.LayoutParams(320, 480);
@@ -231,6 +236,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertTrue(gallery.checkLayoutParams(p2));
     }
 
+    @UiThreadTest
     public void testComputeHorizontalScrollExtent() {
         MyGallery gallery = new MyGallery(mContext);
 
@@ -238,6 +244,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertEquals(1, gallery.computeHorizontalScrollExtent());
     }
 
+    @UiThreadTest
     public void testComputeHorizontalScrollOffset() {
         MyGallery gallery = new MyGallery(mContext);
         assertEquals(AdapterView.INVALID_POSITION, gallery.computeHorizontalScrollOffset());
@@ -247,6 +254,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertEquals(gallery.getSelectedItemPosition(), gallery.computeHorizontalScrollOffset());
     }
 
+    @UiThreadTest
     public void testComputeHorizontalScrollRange() {
         MyGallery gallery = new MyGallery(mContext);
         ImageAdapter adapter = new ImageAdapter(mActivity);
@@ -270,6 +278,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertFalse(gallery.getChildAt(1).isPressed());
     }
 
+    @UiThreadTest
     public void testGenerateDefaultLayoutParams() {
         MyGallery gallery = new MyGallery(mContext);
         ViewGroup.LayoutParams p = gallery.generateDefaultLayoutParams();
@@ -296,6 +305,7 @@ public class GalleryTest extends ActivityInstrumentationTestCase2<GalleryStubAct
         assertEquals(index + 1, gallery.getChildDrawingOrder(childCount, index));
     }
 
+    @UiThreadTest
     public void testGetContextMenuInfo() {
         MockOnCreateContextMenuListener listener = new MockOnCreateContextMenuListener();
         MyGallery gallery = new MyGallery(mContext);

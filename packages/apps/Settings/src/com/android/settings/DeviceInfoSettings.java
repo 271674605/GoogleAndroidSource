@@ -19,34 +19,47 @@ package com.android.settings;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Parcel;
+import android.os.RemoteException;
 import android.os.SELinux;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.os.UserManager;
 import android.preference.Preference;
 import android.preference.PreferenceGroup;
 import android.preference.PreferenceScreen;
+import android.provider.SearchIndexableResource;
+import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
+import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settings.search.Index;
+import com.android.settings.search.Indexable;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class DeviceInfoSettings extends RestrictedSettingsFragment {
+public class DeviceInfoSettings extends SettingsPreferenceFragment implements Indexable {
 
     private static final String LOG_TAG = "DeviceInfoSettings";
-
     private static final String FILENAME_PROC_VERSION = "/proc/version";
     private static final String FILENAME_MSV = "/sys/board_properties/soc/msv";
 
     private static final String KEY_CONTAINER = "container";
-    private static final String KEY_TEAM = "team";
-    private static final String KEY_CONTRIBUTORS = "contributors";
     private static final String KEY_REGULATORY_INFO = "regulatory_info";
     private static final String KEY_TERMS = "terms";
     private static final String KEY_LICENSE = "license";
@@ -63,6 +76,8 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
     private static final String KEY_UPDATE_SETTING = "additional_system_update_settings";
     private static final String KEY_EQUIPMENT_ID = "fcc_equipment_id";
     private static final String PROPERTY_EQUIPMENT_ID = "ro.ril.fccid";
+    private static final String KEY_DEVICE_FEEDBACK = "device_feedback";
+    private static final String KEY_SAFETY_LEGAL = "safetylegal";
 
     static final int TAPS_TO_BE_A_DEVELOPER = 7;
 
@@ -70,19 +85,11 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
     int mDevHitCountdown;
     Toast mDevHitToast;
 
-    public DeviceInfoSettings() {
-        super(null /* Don't PIN protect the entire screen */);
-    }
-
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
         addPreferencesFromResource(R.xml.device_info_settings);
-
-        // We only call ensurePinRestrictedPreference() when mDevHitCountdown == 0.
-        // This will keep us from entering developer mode without a PIN.
-        protectByRestrictions(KEY_BUILD_NUMBER);
 
         setStringSummary(KEY_FIRMWARE_VERSION, Build.VERSION.RELEASE);
         findPreference(KEY_FIRMWARE_VERSION).setEnabled(true);
@@ -107,7 +114,7 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                 PROPERTY_SELINUX_STATUS);
 
         // Remove Safety information preference if PROPERTY_URL_SAFETYLEGAL is not set
-        removePreferenceIfPropertyMissing(getPreferenceScreen(), "safetylegal",
+        removePreferenceIfPropertyMissing(getPreferenceScreen(), KEY_SAFETY_LEGAL,
                 PROPERTY_URL_SAFETYLEGAL);
 
         // Remove Equipment id preference if FCC ID is not set by RIL
@@ -117,6 +124,11 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
         // Remove Baseband version if wifi-only device
         if (Utils.isWifiOnly(getActivity())) {
             getPreferenceScreen().removePreference(findPreference(KEY_BASEBAND_VERSION));
+        }
+
+        // Dont show feedback option if there is no reporter.
+        if (TextUtils.isEmpty(getFeedbackReporterPackage(getActivity()))) {
+            getPreferenceScreen().removePreference(findPreference(KEY_DEVICE_FEEDBACK));
         }
 
         /*
@@ -132,8 +144,6 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                 Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
         Utils.updatePreferenceToSpecificActivityOrRemove(act, parentPreference, KEY_COPYRIGHT,
                 Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
-        Utils.updatePreferenceToSpecificActivityOrRemove(act, parentPreference, KEY_TEAM,
-                Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
 
         // These are contained by the root preference screen
         parentPreference = getPreferenceScreen();
@@ -145,16 +155,19 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
             // Remove for secondary users
             removePreference(KEY_SYSTEM_UPDATE_SETTINGS);
         }
-        Utils.updatePreferenceToSpecificActivityOrRemove(act, parentPreference, KEY_CONTRIBUTORS,
-                Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
 
         // Read platform settings for additional system update setting
         removePreferenceIfBoolFalse(KEY_UPDATE_SETTING,
                 R.bool.config_additional_system_update_setting_enable);
 
-        // Remove regulatory information if not enabled.
-        removePreferenceIfBoolFalse(KEY_REGULATORY_INFO,
-                R.bool.config_show_regulatory_info);
+        // Remove regulatory information if none present.
+        final Intent intent = new Intent(Settings.ACTION_SHOW_REGULATORY_INFO);
+        if (getPackageManager().queryIntentActivities(intent, 0).isEmpty()) {
+            Preference pref = findPreference(KEY_REGULATORY_INFO);
+            if (pref != null) {
+                getPreferenceScreen().removePreference(pref);
+            }
+        }
     }
 
     @Override
@@ -185,12 +198,10 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
             // Don't enable developer options for secondary users.
             if (UserHandle.myUserId() != UserHandle.USER_OWNER) return true;
 
+            final UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
+            if (um.hasUserRestriction(UserManager.DISALLOW_DEBUGGING_FEATURES)) return true;
+
             if (mDevHitCountdown > 0) {
-                if (mDevHitCountdown == 1) {
-                    if (super.ensurePinRestrictedPreference(preference)) {
-                        return true;
-                    }
-                }
                 mDevHitCountdown--;
                 if (mDevHitCountdown == 0) {
                     getActivity().getSharedPreferences(DevelopmentSettings.PREF_FILE,
@@ -202,6 +213,11 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                     mDevHitToast = Toast.makeText(getActivity(), R.string.show_dev_on,
                             Toast.LENGTH_LONG);
                     mDevHitToast.show();
+                    // This is good time to index the Developer Options
+                    Index.getInstance(
+                            getActivity().getApplicationContext()).updateFromClassNameResource(
+                                    DevelopmentSettings.class.getName(), true, true);
+
                 } else if (mDevHitCountdown > 0
                         && mDevHitCountdown < (TAPS_TO_BE_A_DEVELOPER-2)) {
                     if (mDevHitToast != null) {
@@ -220,6 +236,8 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                         Toast.LENGTH_LONG);
                 mDevHitToast.show();
             }
+        } else if (preference.getKey().equals(KEY_DEVICE_FEEDBACK)) {
+            sendFeedback();
         }
         return super.onPreferenceTreeClick(preferenceScreen, preference);
     }
@@ -263,6 +281,16 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
         } catch (RuntimeException e) {
             // No recovery
         }
+    }
+
+    private void sendFeedback() {
+        String reporterPackage = getFeedbackReporterPackage(getActivity());
+        if (TextUtils.isEmpty(reporterPackage)) {
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_BUG_REPORT);
+        intent.setPackage(reporterPackage);
+        startActivityForResult(intent, 0);
     }
 
     /**
@@ -341,4 +369,118 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
         }
         return "";
     }
+
+    private static String getFeedbackReporterPackage(Context context) {
+        final String feedbackReporter =
+                context.getResources().getString(R.string.oem_preferred_feedback_reporter);
+        if (TextUtils.isEmpty(feedbackReporter)) {
+            // Reporter not configured. Return.
+            return feedbackReporter;
+        }
+        // Additional checks to ensure the reporter is on system image, and reporter is
+        // configured to listen to the intent. Otherwise, dont show the "send feedback" option.
+        final Intent intent = new Intent(Intent.ACTION_BUG_REPORT);
+
+        PackageManager pm = context.getPackageManager();
+        List<ResolveInfo> resolvedPackages =
+                pm.queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER);
+        for (ResolveInfo info : resolvedPackages) {
+            if (info.activityInfo != null) {
+                if (!TextUtils.isEmpty(info.activityInfo.packageName)) {
+                    try {
+                        ApplicationInfo ai = pm.getApplicationInfo(info.activityInfo.packageName, 0);
+                        if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                            // Package is on the system image
+                            if (TextUtils.equals(
+                                        info.activityInfo.packageName, feedbackReporter)) {
+                                return feedbackReporter;
+                            }
+                        }
+                    } catch (PackageManager.NameNotFoundException e) {
+                         // No need to do anything here.
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * For Search.
+     */
+    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
+        new BaseSearchIndexProvider() {
+
+            @Override
+            public List<SearchIndexableResource> getXmlResourcesToIndex(
+                    Context context, boolean enabled) {
+                final SearchIndexableResource sir = new SearchIndexableResource(context);
+                sir.xmlResId = R.xml.device_info_settings;
+                return Arrays.asList(sir);
+            }
+
+            @Override
+            public List<String> getNonIndexableKeys(Context context) {
+                final List<String> keys = new ArrayList<String>();
+                if (isPropertyMissing(PROPERTY_SELINUX_STATUS)) {
+                    keys.add(KEY_SELINUX_STATUS);
+                }
+                if (isPropertyMissing(PROPERTY_URL_SAFETYLEGAL)) {
+                    keys.add(KEY_SAFETY_LEGAL);
+                }
+                if (isPropertyMissing(PROPERTY_EQUIPMENT_ID)) {
+                    keys.add(KEY_EQUIPMENT_ID);
+                }
+                // Remove Baseband version if wifi-only device
+                if (Utils.isWifiOnly(context)) {
+                    keys.add((KEY_BASEBAND_VERSION));
+                }
+                // Dont show feedback option if there is no reporter.
+                if (TextUtils.isEmpty(getFeedbackReporterPackage(context))) {
+                    keys.add(KEY_DEVICE_FEEDBACK);
+                }
+                if (!checkIntentAction(context, "android.settings.TERMS")) {
+                    keys.add(KEY_TERMS);
+                }
+                if (!checkIntentAction(context, "android.settings.LICENSE")) {
+                    keys.add(KEY_LICENSE);
+                }
+                if (!checkIntentAction(context, "android.settings.COPYRIGHT")) {
+                    keys.add(KEY_COPYRIGHT);
+                }
+                if (UserHandle.myUserId() != UserHandle.USER_OWNER) {
+                    keys.add(KEY_SYSTEM_UPDATE_SETTINGS);
+                }
+                if (!context.getResources().getBoolean(
+                        R.bool.config_additional_system_update_setting_enable)) {
+                    keys.add(KEY_UPDATE_SETTING);
+                }
+                return keys;
+            }
+
+            private boolean isPropertyMissing(String property) {
+                return SystemProperties.get(property).equals("");
+            }
+
+            private boolean checkIntentAction(Context context, String action) {
+                final Intent intent = new Intent(action);
+
+                // Find the activity that is in the system image
+                final PackageManager pm = context.getPackageManager();
+                final List<ResolveInfo> list = pm.queryIntentActivities(intent, 0);
+                final int listSize = list.size();
+
+                for (int i = 0; i < listSize; i++) {
+                    ResolveInfo resolveInfo = list.get(i);
+                    if ((resolveInfo.activityInfo.applicationInfo.flags &
+                            ApplicationInfo.FLAG_SYSTEM) != 0) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        };
+
 }
+

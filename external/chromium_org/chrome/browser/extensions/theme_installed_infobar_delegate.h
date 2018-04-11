@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "components/infobars/core/confirm_infobar_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -26,20 +26,19 @@ class Extension;
 class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
                                       public content::NotificationObserver {
  public:
-  // Creates a theme installed infobar delegate and adds it to the last active
-  // tab on |profile|.
+  // Creates a theme installed infobar and delegate and adds the infobar to the
+  // last active tab on |profile|.
   static void Create(const extensions::Extension* new_theme,
                      Profile* profile,
                      const std::string& previous_theme_id,
-                     bool previous_using_native_theme);
+                     bool previous_using_system_theme);
 
  private:
-  ThemeInstalledInfoBarDelegate(InfoBarService* infobar_service,
-                                ExtensionService* extension_service,
+  ThemeInstalledInfoBarDelegate(ExtensionService* extension_service,
                                 ThemeService* theme_service,
                                 const extensions::Extension* new_theme,
                                 const std::string& previous_theme_id,
-                                bool previous_using_native_theme);
+                                bool previous_using_system_theme);
   virtual ~ThemeInstalledInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
@@ -47,9 +46,9 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual ThemeInstalledInfoBarDelegate*
       AsThemePreviewInfobarDelegate() OVERRIDE;
-  virtual string16 GetMessageText() const OVERRIDE;
+  virtual base::string16 GetMessageText() const OVERRIDE;
   virtual int GetButtons() const OVERRIDE;
-  virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
+  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
 
   // content::NotificationObserver:
@@ -68,7 +67,7 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
 
   // Used to undo theme install.
   std::string previous_theme_id_;
-  bool previous_using_native_theme_;
+  bool previous_using_system_theme_;
 
   // Registers and unregisters us for notifications.
   content::NotificationRegistrar registrar_;

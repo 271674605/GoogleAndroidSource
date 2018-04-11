@@ -21,12 +21,12 @@ import android.content.res.Resources;
 import android.database.Cursor;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.Contacts;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPresenceIconUtil;
@@ -67,15 +67,9 @@ public class ContactTileAdapter extends BaseAdapter {
     protected int mPresenceIndex;
     protected int mStatusIndex;
 
-    /**
-     * Only valid when {@link DisplayType#STREQUENT_PHONE_ONLY} is true
-     */
-    private int mPhoneNumberIndex;
-    private int mPhoneNumberTypeIndex;
-    private int mPhoneNumberLabelIndex;
-
     private boolean mIsQuickContactEnabled = false;
     private final int mPaddingInPixels;
+    private final int mWhitespaceStartEnd;
 
     /**
      * Configures the adapter to filter and display contacts using different view types.
@@ -86,12 +80,6 @@ public class ContactTileAdapter extends BaseAdapter {
          * Displays a mixed view type of starred and frequent contacts
          */
         STREQUENT,
-
-        /**
-         * Displays a mixed view type of starred and frequent contacts based on phone data.
-         * Also includes secondary touch target.
-         */
-        STREQUENT_PHONE_ONLY,
 
         /**
          * Display only starred contacts
@@ -126,6 +114,8 @@ public class ContactTileAdapter extends BaseAdapter {
         // Converting padding in dips to padding in pixels
         mPaddingInPixels = mContext.getResources()
                 .getDimensionPixelSize(R.dimen.contact_tile_divider_padding);
+        mWhitespaceStartEnd = mContext.getResources()
+                .getDimensionPixelSize(R.dimen.contact_tile_start_end_whitespace);
 
         bindColumnIndices();
     }
@@ -158,10 +148,10 @@ public class ContactTileAdapter extends BaseAdapter {
         mStarredIndex = ContactTileLoaderFactory.STARRED;
         mPresenceIndex = ContactTileLoaderFactory.CONTACT_PRESENCE;
         mStatusIndex = ContactTileLoaderFactory.CONTACT_STATUS;
+    }
 
-        mPhoneNumberIndex = ContactTileLoaderFactory.PHONE_NUMBER;
-        mPhoneNumberTypeIndex = ContactTileLoaderFactory.PHONE_NUMBER_TYPE;
-        mPhoneNumberLabelIndex = ContactTileLoaderFactory.PHONE_NUMBER_LABEL;
+    private static boolean cursorIsValid(Cursor cursor) {
+        return cursor != null && !cursor.isClosed();
     }
 
     /**
@@ -179,11 +169,11 @@ public class ContactTileAdapter extends BaseAdapter {
                 mNumFrequents = 0;
                 break;
             case STREQUENT:
-            case STREQUENT_PHONE_ONLY:
-                mNumFrequents = cursor.getCount() - mDividerPosition;
+                mNumFrequents = cursorIsValid(cursor) ?
+                    cursor.getCount() - mDividerPosition : 0;
                 break;
             case FREQUENT_ONLY:
-                mNumFrequents = cursor.getCount();
+                mNumFrequents = cursorIsValid(cursor) ? cursor.getCount() : 0;
                 break;
             default:
                 throw new IllegalArgumentException("Unrecognized DisplayType " + mDisplayType);
@@ -212,20 +202,21 @@ public class ContactTileAdapter extends BaseAdapter {
      * Returns 0 if {@link DisplayType#FREQUENT_ONLY}
      */
     protected int getDividerPosition(Cursor cursor) {
-        if (cursor == null || cursor.isClosed()) {
-            throw new IllegalStateException("Unable to access cursor");
-        }
-
         switch (mDisplayType) {
             case STREQUENT:
-            case STREQUENT_PHONE_ONLY:
+                if (!cursorIsValid(cursor)) {
+                    return 0;
+                }
                 cursor.moveToPosition(-1);
                 while (cursor.moveToNext()) {
                     if (cursor.getInt(mStarredIndex) == 0) {
                         return cursor.getPosition();
                     }
                 }
-                break;
+
+                // There are not NON Starred contacts in cursor
+                // Set divider positon to end
+                return cursor.getCount();
             case STARRED_ONLY:
                 // There is no divider
                 return -1;
@@ -235,16 +226,14 @@ public class ContactTileAdapter extends BaseAdapter {
             default:
                 throw new IllegalStateException("Unrecognized DisplayType " + mDisplayType);
         }
-
-        // There are not NON Starred contacts in cursor
-        // Set divider positon to end
-        return cursor.getCount();
     }
 
     protected ContactEntry createContactEntryFromCursor(Cursor cursor, int position) {
         // If the loader was canceled we will be given a null cursor.
         // In that case, show an empty list of contacts.
-        if (cursor == null || cursor.isClosed() || cursor.getCount() <= position) return null;
+        if (!cursorIsValid(cursor) || cursor.getCount() <= position) {
+            return null;
+        }
 
         cursor.moveToPosition(position);
         long id = cursor.getLong(mIdIndex);
@@ -256,38 +245,30 @@ public class ContactTileAdapter extends BaseAdapter {
         contact.name = (name != null) ? name : mResources.getString(R.string.missing_name);
         contact.status = cursor.getString(mStatusIndex);
         contact.photoUri = (photoUri != null ? Uri.parse(photoUri) : null);
-        contact.lookupKey = ContentUris.withAppendedId(
+        contact.lookupKey = lookupKey;
+        contact.lookupUri = ContentUris.withAppendedId(
                 Uri.withAppendedPath(Contacts.CONTENT_LOOKUP_URI, lookupKey), id);
         contact.isFavorite = cursor.getInt(mStarredIndex) > 0;
 
-        // Set phone number and label
-        if (mDisplayType == DisplayType.STREQUENT_PHONE_ONLY) {
-            int phoneNumberType = cursor.getInt(mPhoneNumberTypeIndex);
-            String phoneNumberCustomLabel = cursor.getString(mPhoneNumberLabelIndex);
-            contact.phoneLabel = (String) Phone.getTypeLabel(mResources, phoneNumberType,
-                    phoneNumberCustomLabel);
-            contact.phoneNumber = cursor.getString(mPhoneNumberIndex);
-        } else {
-            // Set presence icon and status message
-            Drawable icon = null;
-            int presence = 0;
-            if (!cursor.isNull(mPresenceIndex)) {
-                presence = cursor.getInt(mPresenceIndex);
-                icon = ContactPresenceIconUtil.getPresenceIcon(mContext, presence);
-            }
-            contact.presenceIcon = icon;
-
-            String statusMessage = null;
-            if (mStatusIndex != 0 && !cursor.isNull(mStatusIndex)) {
-                statusMessage = cursor.getString(mStatusIndex);
-            }
-            // If there is no status message from the contact, but there was a presence value,
-            // then use the default status message string
-            if (statusMessage == null && presence != 0) {
-                statusMessage = ContactStatusUtil.getStatusString(mContext, presence);
-            }
-            contact.status = statusMessage;
+        // Set presence icon and status message
+        Drawable icon = null;
+        int presence = 0;
+        if (!cursor.isNull(mPresenceIndex)) {
+            presence = cursor.getInt(mPresenceIndex);
+            icon = ContactPresenceIconUtil.getPresenceIcon(mContext, presence);
         }
+        contact.presenceIcon = icon;
+
+        String statusMessage = null;
+        if (mStatusIndex != 0 && !cursor.isNull(mStatusIndex)) {
+            statusMessage = cursor.getString(mStatusIndex);
+        }
+        // If there is no status message from the contact, but there was a presence value,
+        // then use the default status message string
+        if (statusMessage == null && presence != 0) {
+            statusMessage = ContactStatusUtil.getStatusString(mContext, presence);
+        }
+        contact.status = statusMessage;
 
         return contact;
     }
@@ -301,7 +282,7 @@ public class ContactTileAdapter extends BaseAdapter {
 
     @Override
     public int getCount() {
-        if (mContactCursor == null || mContactCursor.isClosed()) {
+        if (!cursorIsValid(mContactCursor)) {
             return 0;
         }
 
@@ -309,7 +290,6 @@ public class ContactTileAdapter extends BaseAdapter {
             case STARRED_ONLY:
                 return getRowCount(mContactCursor.getCount());
             case STREQUENT:
-            case STREQUENT_PHONE_ONLY:
                 // Takes numbers of rows the Starred Contacts Occupy
                 int starredRowCount = getRowCount(mDividerPosition);
 
@@ -359,7 +339,6 @@ public class ContactTileAdapter extends BaseAdapter {
                 }
                 break;
             case STREQUENT:
-            case STREQUENT_PHONE_ONLY:
                 if (position < getRowCount(mDividerPosition)) {
                     for (int columnCounter = 0; columnCounter < mColumnCount &&
                             contactIndex != mDividerPosition; columnCounter++) {
@@ -393,8 +372,7 @@ public class ContactTileAdapter extends BaseAdapter {
 
     @Override
     public boolean areAllItemsEnabled() {
-        return (mDisplayType != DisplayType.STREQUENT &&
-                mDisplayType != DisplayType.STREQUENT_PHONE_ONLY);
+        return (mDisplayType != DisplayType.STREQUENT);
     }
 
     @Override
@@ -408,7 +386,9 @@ public class ContactTileAdapter extends BaseAdapter {
 
         if (itemViewType == ViewTypes.DIVIDER) {
             // Checking For Divider First so not to cast convertView
-            return convertView == null ? getDivider() : convertView;
+            final TextView textView = (TextView) (convertView == null ? getDivider() : convertView);
+            setDividerPadding(textView, position == 0);
+            return textView;
         }
 
         ContactTileRow contactTileRowView = (ContactTileRow) convertView;
@@ -427,10 +407,12 @@ public class ContactTileAdapter extends BaseAdapter {
      * Divider uses a list_seperator.xml along with text to denote
      * the most frequently contacted contacts.
      */
-    public View getDivider() {
-        return MoreContactUtils.createHeaderView(mContext,
-                mDisplayType == DisplayType.STREQUENT_PHONE_ONLY ?
-                        R.string.favoritesFrequentCalled : R.string.favoritesFrequentContacted);
+    private TextView getDivider() {
+        return MoreContactUtils.createHeaderView(mContext, R.string.favoritesFrequentContacted);
+    }
+
+    private void setDividerPadding(TextView headerTextView, boolean isFirstRow) {
+        MoreContactUtils.setHeaderViewBottomPadding(mContext, headerTextView, isFirstRow);
     }
 
     private int getLayoutResourceId(int viewType) {
@@ -439,10 +421,7 @@ public class ContactTileAdapter extends BaseAdapter {
                 return mIsQuickContactEnabled ?
                         R.layout.contact_tile_starred_quick_contact : R.layout.contact_tile_starred;
             case ViewTypes.FREQUENT:
-                return mDisplayType == DisplayType.STREQUENT_PHONE_ONLY ?
-                        R.layout.contact_tile_frequent_phone : R.layout.contact_tile_frequent;
-            case ViewTypes.STARRED_PHONE:
-                return R.layout.contact_tile_phone_starred;
+                return R.layout.contact_tile_frequent;
             default:
                 throw new IllegalArgumentException("Unrecognized viewType " + viewType);
         }
@@ -467,14 +446,6 @@ public class ContactTileAdapter extends BaseAdapter {
                 if (position < getRowCount(mDividerPosition)) {
                     return ViewTypes.STARRED;
                 } else if (position == getRowCount(mDividerPosition)) {
-                    return ViewTypes.DIVIDER;
-                } else {
-                    return ViewTypes.FREQUENT;
-                }
-            case STREQUENT_PHONE_ONLY:
-                if (position < getRowCount(mDividerPosition)) {
-                    return ViewTypes.STARRED_PHONE;
-                 } else if (position == getRowCount(mDividerPosition)) {
                     return ViewTypes.DIVIDER;
                 } else {
                     return ViewTypes.FREQUENT;
@@ -537,12 +508,12 @@ public class ContactTileAdapter extends BaseAdapter {
                 // We override onMeasure() for STARRED and we don't care the layout param there.
                 Resources resources = mContext.getResources();
                 FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT);
                 params.setMargins(
-                        resources.getDimensionPixelSize(R.dimen.detail_item_side_margin),
+                        mWhitespaceStartEnd,
                         0,
-                        resources.getDimensionPixelSize(R.dimen.detail_item_side_margin),
+                        mWhitespaceStartEnd,
                         0);
                 contactTile.setLayoutParams(params);
                 contactTile.setPhotoManager(mPhotoManager);
@@ -554,12 +525,13 @@ public class ContactTileAdapter extends BaseAdapter {
             contactTile.loadFromContact(entry);
 
             switch (mItemViewType) {
-                case ViewTypes.STARRED_PHONE:
                 case ViewTypes.STARRED:
-                    // Setting divider visibilities
-                    contactTile.setPaddingRelative(0, 0,
-                            childIndex >= mColumnCount - 1 ? 0 : mPaddingInPixels,
-                            isLastRow ? 0 : mPaddingInPixels);
+                    // Set padding between tiles. Divide mPaddingInPixels between left and right
+                    // tiles as evenly as possible.
+                    contactTile.setPaddingRelative(
+                            (mPaddingInPixels + 1) / 2, 0,
+                            mPaddingInPixels
+                            / 2, 0);
                     break;
                 case ViewTypes.FREQUENT:
                     contactTile.setHorizontalDividerVisibility(
@@ -573,7 +545,6 @@ public class ContactTileAdapter extends BaseAdapter {
         @Override
         protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
             switch (mItemViewType) {
-                case ViewTypes.STARRED_PHONE:
                 case ViewTypes.STARRED:
                     onLayoutForTiles();
                     return;
@@ -586,8 +557,10 @@ public class ContactTileAdapter extends BaseAdapter {
         private void onLayoutForTiles() {
             final int count = getChildCount();
 
+            // Amount of margin needed on the left is based on difference between offset and padding
+            int childLeft = mWhitespaceStartEnd - (mPaddingInPixels + 1) / 2;
+
             // Just line up children horizontally.
-            int childLeft = 0;
             for (int i = 0; i < count; i++) {
                 final View child = getChildAt(i);
 
@@ -601,7 +574,6 @@ public class ContactTileAdapter extends BaseAdapter {
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             switch (mItemViewType) {
-                case ViewTypes.STARRED_PHONE:
                 case ViewTypes.STARRED:
                     onMeasureForTiles(widthMeasureSpec);
                     return;
@@ -622,34 +594,35 @@ public class ContactTileAdapter extends BaseAdapter {
             }
 
             // 1. Calculate image size.
-            //      = ([total width] - [total padding]) / [child count]
+            //      = ([total width] - [total whitespace]) / [child count]
             //
             // 2. Set it to width/height of each children.
             //    If we have a remainder, some tiles will have 1 pixel larger width than its height.
             //
             // 3. Set the dimensions of itself.
             //    Let width = given width.
-            //    Let height = image size + bottom paddding.
+            //    Let height = wrap content.
 
-            final int totalPaddingsInPixels = (mColumnCount - 1) * mPaddingInPixels;
+            final int totalWhitespaceInPixels = (mColumnCount - 1) * mPaddingInPixels
+                    + mWhitespaceStartEnd * 2;
 
             // Preferred width / height for images (excluding the padding).
             // The actual width may be 1 pixel larger than this if we have a remainder.
-            final int imageSize = (width - totalPaddingsInPixels) / mColumnCount;
-            final int remainder = width - (imageSize * mColumnCount) - totalPaddingsInPixels;
+            final int imageSize = (width - totalWhitespaceInPixels) / mColumnCount;
+            final int remainder = width - (imageSize * mColumnCount) - totalWhitespaceInPixels;
 
             for (int i = 0; i < childCount; i++) {
                 final View child = getChildAt(i);
-                final int childWidth = imageSize + child.getPaddingRight()
+                final int childWidth = imageSize + child.getPaddingRight() + child.getPaddingLeft()
                         // Compensate for the remainder
                         + (i < remainder ? 1 : 0);
-                final int childHeight = imageSize + child.getPaddingBottom();
+
                 child.measure(
                         MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
-                        MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
+                        MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                         );
             }
-            setMeasuredDimension(width, imageSize + getChildAt(0).getPaddingBottom());
+            setMeasuredDimension(width, getChildAt(0).getMeasuredHeight());
         }
     }
 
@@ -658,6 +631,5 @@ public class ContactTileAdapter extends BaseAdapter {
         public static final int STARRED = 0;
         public static final int DIVIDER = 1;
         public static final int FREQUENT = 2;
-        public static final int STARRED_PHONE = 3;
     }
 }

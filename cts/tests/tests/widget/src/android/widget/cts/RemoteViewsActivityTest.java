@@ -17,6 +17,7 @@
 package android.widget.cts;
 
 import android.app.Activity;
+import android.cts.util.NullWebViewUtils;
 import android.os.Parcel;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.suitebuilder.annotation.MediumTest;
@@ -25,15 +26,15 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.RemoteViews;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 public class RemoteViewsActivityTest
-        extends ActivityInstrumentationTestCase2<RemoteViewsStubActivity> {
-    private static final String PACKAGE_NAME = "com.android.cts.stub";
+        extends ActivityInstrumentationTestCase2<RemoteViewsCtsActivity> {
+    private static final String PACKAGE_NAME = "com.android.cts.widget";
     private Activity mActivity;
 
     public RemoteViewsActivityTest() {
-        super(PACKAGE_NAME, RemoteViewsStubActivity.class);
+        super(PACKAGE_NAME, RemoteViewsCtsActivity.class);
     }
 
     @Override
@@ -96,6 +97,9 @@ public class RemoteViewsActivityTest
 
     @MediumTest
     public void testWebView() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         RemoteViews orig = new RemoteViews(PACKAGE_NAME, R.layout.remote_view_test_bad_2);
         Parcel p = Parcel.obtain();
         orig.writeToParcel(p, 0);

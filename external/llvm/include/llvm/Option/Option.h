@@ -50,6 +50,7 @@ public:
     FlagClass,
     JoinedClass,
     SeparateClass,
+    RemainingArgsClass,
     CommaJoinedClass,
     MultiArgClass,
     JoinedOrSeparateClass,
@@ -72,7 +73,7 @@ public:
   ~Option();
 
   bool isValid() const {
-    return Info != 0;
+    return Info != nullptr;
   }
 
   unsigned getID() const {
@@ -149,6 +150,7 @@ public:
     case SeparateClass:
     case MultiArgClass:
     case JoinedOrSeparateClass:
+    case RemainingArgsClass:
       return RenderSeparateStyle;
     }
     llvm_unreachable("Unexpected kind!");

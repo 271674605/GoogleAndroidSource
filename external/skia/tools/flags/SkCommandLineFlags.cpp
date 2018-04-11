@@ -8,6 +8,8 @@
 #include "SkCommandLineFlags.h"
 #include "SkTDArray.h"
 
+DEFINE_bool(undefok, false, "Silently ignore unknown flags instead of crashing.");
+
 bool SkFlagInfo::CreateStringFlag(const char* name, const char* shortName,
                                   SkCommandLineFlags::StringArray* pStrings,
                                   const char* defaultValue, const char* helpString) {
@@ -278,15 +280,21 @@ void SkCommandLineFlags::Parse(int argc, char** argv) {
                             flag->setDouble(atof(argv[i]));
                             break;
                         default:
-                            SkASSERT(!"Invalid flag type");
+                            SkDEBUGFAIL("Invalid flag type");
                     }
                     break;
                 }
                 flag = flag->next();
             }
             if (!flagMatched) {
-                SkDebugf("Got unknown flag \"%s\". Exiting.\n", argv[i]);
-                exit(-1);
+                SkString stripped(argv[i]);
+                while (stripped.startsWith('-')) {
+                    stripped.remove(0, 1);
+                }
+                if (!FLAGS_undefok) {
+                    SkDebugf("Got unknown flag \"%s\". Exiting.\n", argv[i]);
+                    exit(-1);
+                }
             }
         }
     }
@@ -304,7 +312,10 @@ void SkCommandLineFlags::Parse(int argc, char** argv) {
     }
 }
 
-bool SkCommandLineFlags::ShouldSkip(const SkTDArray<const char*>& strings, const char* name) {
+namespace {
+
+template <typename Strings>
+bool ShouldSkipImpl(const Strings& strings, const char* name) {
     int count = strings.count();
     size_t testLen = strlen(name);
     bool anyExclude = count == 0;
@@ -333,4 +344,13 @@ bool SkCommandLineFlags::ShouldSkip(const SkTDArray<const char*>& strings, const
         }
     }
     return !anyExclude;
+}
+
+}  // namespace
+
+bool SkCommandLineFlags::ShouldSkip(const SkTDArray<const char*>& strings, const char* name) {
+    return ShouldSkipImpl(strings, name);
+}
+bool SkCommandLineFlags::ShouldSkip(const StringArray& strings, const char* name) {
+    return ShouldSkipImpl(strings, name);
 }

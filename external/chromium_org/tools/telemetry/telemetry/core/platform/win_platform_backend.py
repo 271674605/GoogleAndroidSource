@@ -1,12 +1,13 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import collections
 import ctypes
-import os
+import platform
 import re
 import subprocess
+import time
 try:
   import pywintypes  # pylint: disable=F0401
   import win32api  # pylint: disable=F0401
@@ -18,15 +19,13 @@ except ImportError:
   win32con = None
   win32process = None
 
+from telemetry import decorators
+from telemetry.core import exceptions
 from telemetry.core.platform import desktop_platform_backend
+from telemetry.core.platform import platform_backend
 
 
 class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
-  def _GetProcessHandle(self, pid):
-    mask = (win32con.PROCESS_QUERY_INFORMATION |
-            win32con.PROCESS_VM_READ)
-    return win32api.OpenProcess(mask, False, pid)
-
   # pylint: disable=W0613
   def StartRawDisplayFrameRateMeasurement(self):
     raise NotImplementedError()
@@ -44,6 +43,137 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
     raise NotImplementedError()
 
   def GetSystemCommitCharge(self):
+    performance_info = self._GetPerformanceInfo()
+    return performance_info.CommitTotal * performance_info.PageSize / 1024
+
+  @decorators.Cache
+  def GetSystemTotalPhysicalMemory(self):
+    performance_info = self._GetPerformanceInfo()
+    return performance_info.PhysicalTotal * performance_info.PageSize / 1024
+
+  def GetCpuStats(self, pid):
+    cpu_info = self._GetWin32ProcessInfo(win32process.GetProcessTimes, pid)
+    # Convert 100 nanosecond units to seconds
+    cpu_time = (cpu_info['UserTime'] / 1e7 +
+                cpu_info['KernelTime'] / 1e7)
+    return {'CpuProcessTime': cpu_time}
+
+  def GetCpuTimestamp(self):
+    """Return current timestamp in seconds."""
+    return {'TotalTime': time.time()}
+
+  def GetMemoryStats(self, pid):
+    memory_info = self._GetWin32ProcessInfo(
+        win32process.GetProcessMemoryInfo, pid)
+    return {'VM': memory_info['PagefileUsage'],
+            'VMPeak': memory_info['PeakPagefileUsage'],
+            'WorkingSetSize': memory_info['WorkingSetSize'],
+            'WorkingSetSizePeak': memory_info['PeakWorkingSetSize']}
+
+  def GetIOStats(self, pid):
+    io_stats = self._GetWin32ProcessInfo(win32process.GetProcessIoCounters, pid)
+    return {'ReadOperationCount': io_stats['ReadOperationCount'],
+            'WriteOperationCount': io_stats['WriteOperationCount'],
+            'ReadTransferCount': io_stats['ReadTransferCount'],
+            'WriteTransferCount': io_stats['WriteTransferCount']}
+
+  def KillProcess(self, pid, kill_process_tree=False):
+    # os.kill for Windows is Python 2.7.
+    cmd = ['taskkill', '/F', '/PID', str(pid)]
+    if kill_process_tree:
+      cmd.append('/T')
+    subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT).communicate()
+
+  def GetSystemProcessInfo(self):
+    # [3:] To skip 2 blank lines and header.
+    lines = subprocess.Popen(
+        ['wmic', 'process', 'get',
+         'CommandLine,CreationDate,Name,ParentProcessId,ProcessId',
+         '/format:csv'],
+        stdout=subprocess.PIPE).communicate()[0].splitlines()[3:]
+    process_info = []
+    for line in lines:
+      if not line:
+        continue
+      parts = line.split(',')
+      pi = {}
+      pi['ProcessId'] = int(parts[-1])
+      pi['ParentProcessId'] = int(parts[-2])
+      pi['Name'] = parts[-3]
+      creation_date = None
+      if parts[-4]:
+        creation_date = float(re.split('[+-]', parts[-4])[0])
+      pi['CreationDate'] = creation_date
+      pi['CommandLine'] = ','.join(parts[1:-4])
+      process_info.append(pi)
+    return process_info
+
+  def GetChildPids(self, pid):
+    """Retunds a list of child pids of |pid|."""
+    ppid_map = collections.defaultdict(list)
+    creation_map = {}
+    for pi in self.GetSystemProcessInfo():
+      ppid_map[pi['ParentProcessId']].append(pi['ProcessId'])
+      if pi['CreationDate']:
+        creation_map[pi['ProcessId']] = pi['CreationDate']
+
+    def _InnerGetChildPids(pid):
+      if not pid or pid not in ppid_map:
+        return []
+      ret = [p for p in ppid_map[pid] if creation_map[p] >= creation_map[pid]]
+      for child in ret:
+        if child == pid:
+          continue
+        ret.extend(_InnerGetChildPids(child))
+      return ret
+
+    return _InnerGetChildPids(pid)
+
+  def GetCommandLine(self, pid):
+    for pi in self.GetSystemProcessInfo():
+      if pid == pi['ProcessId']:
+        return pi['CommandLine']
+    raise exceptions.ProcessGoneException()
+
+  def GetOSName(self):
+    return 'win'
+
+  @decorators.Cache
+  def GetOSVersionName(self):
+    os_version = platform.uname()[3]
+
+    if os_version.startswith('5.1.'):
+      return platform_backend.XP
+    if os_version.startswith('6.0.'):
+      return platform_backend.VISTA
+    if os_version.startswith('6.1.'):
+      return platform_backend.WIN7
+    if os_version.startswith('6.2.'):
+      return platform_backend.WIN8
+
+    raise NotImplementedError('Unknown win version %s.' % os_version)
+
+  def CanFlushIndividualFilesFromSystemCache(self):
+    return True
+
+  def _GetWin32ProcessInfo(self, func, pid):
+    mask = (win32con.PROCESS_QUERY_INFORMATION |
+            win32con.PROCESS_VM_READ)
+    handle = None
+    try:
+      handle = win32api.OpenProcess(mask, False, pid)
+      return func(handle)
+    except pywintypes.error, e:
+      errcode = e[0]
+      if errcode == 87:
+        raise exceptions.ProcessGoneException()
+      raise
+    finally:
+      if handle:
+        win32api.CloseHandle(handle)
+
+  def _GetPerformanceInfo(self):
     class PerformanceInfo(ctypes.Structure):
       """Struct for GetPerformanceInfo() call
       http://msdn.microsoft.com/en-us/library/ms683210
@@ -70,98 +200,4 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
     performance_info = PerformanceInfo()
     ctypes.windll.psapi.GetPerformanceInfo(
         ctypes.byref(performance_info), performance_info.size)
-    return performance_info.CommitTotal * performance_info.PageSize / 1024
-
-  def GetMemoryStats(self, pid):
-    try:
-      memory_info = win32process.GetProcessMemoryInfo(
-          self._GetProcessHandle(pid))
-    except pywintypes.error, e:
-      errcode = e[0]
-      if errcode == 87:  # The process may have been closed.
-        return {}
-      raise
-    return {'VM': memory_info['PagefileUsage'],
-            'VMPeak': memory_info['PeakPagefileUsage'],
-            'WorkingSetSize': memory_info['WorkingSetSize'],
-            'WorkingSetSizePeak': memory_info['PeakWorkingSetSize']}
-
-  def GetIOStats(self, pid):
-    try:
-      io_stats = win32process.GetProcessIoCounters(
-          self._GetProcessHandle(pid))
-    except pywintypes.error, e:
-      errcode = e[0]
-      if errcode == 87:  # The process may have been closed.
-        return {}
-      raise
-    return {'ReadOperationCount': io_stats['ReadOperationCount'],
-            'WriteOperationCount': io_stats['WriteOperationCount'],
-            'ReadTransferCount': io_stats['ReadTransferCount'],
-            'WriteTransferCount': io_stats['WriteTransferCount']}
-
-  def GetChildPids(self, pid):
-    """Retunds a list of child pids of |pid|."""
-    creation_ppid_pid_list = subprocess.Popen(
-          ['wmic', 'process', 'get', 'CreationDate,ParentProcessId,ProcessId',
-           '/format:csv'],
-          stdout=subprocess.PIPE).communicate()[0]
-    ppid_map = collections.defaultdict(list)
-    creation_map = {}
-    # [3:] To skip 2 blank lines and header.
-    for creation_ppid_pid in creation_ppid_pid_list.splitlines()[3:]:
-      if not creation_ppid_pid:
-        continue
-      _, creation, curr_ppid, curr_pid = creation_ppid_pid.split(',')
-      ppid_map[int(curr_ppid)].append(int(curr_pid))
-      if creation:
-        creation_map[int(curr_pid)] = float(re.split('[+-]', creation)[0])
-
-    def _InnerGetChildPids(pid):
-      if not pid or pid not in ppid_map:
-        return []
-      ret = [p for p in ppid_map[pid] if creation_map[p] >= creation_map[pid]]
-      for child in ret:
-        if child == pid:
-          continue
-        ret.extend(_InnerGetChildPids(child))
-      return ret
-
-    return _InnerGetChildPids(pid)
-
-  def GetCommandLine(self, pid):
-    command_pid_list = subprocess.Popen(
-          ['wmic', 'process', 'get', 'CommandLine,ProcessId',
-           '/format:csv'],
-          stdout=subprocess.PIPE).communicate()[0]
-    # [3:] To skip 2 blank lines and header.
-    for command_pid in command_pid_list.splitlines()[3:]:
-      if not command_pid:
-        continue
-      parts = command_pid.split(',')
-      curr_pid = parts[-1]
-      if pid == int(curr_pid):
-        command = ','.join(parts[1:-1])
-        return command
-    raise Exception('Could not get command line for %d' % pid)
-
-  def GetOSName(self):
-    return 'win'
-
-  def GetOSVersionName(self):
-    os_version = os.uname()[2]
-
-    if os_version.startswith('5.1.'):
-      return 'xp'
-    if os_version.startswith('6.0.'):
-      return 'vista'
-    if os_version.startswith('6.1.'):
-      return 'win7'
-    if os_version.startswith('6.2.'):
-      return 'win8'
-
-  def CanFlushIndividualFilesFromSystemCache(self):
-    return True
-
-  def GetFlushUtilityName(self):
-    return 'clear_system_cache.exe'
+    return performance_info

@@ -6,16 +6,14 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ARCHIVE_READER_INTERFACE_H
-#define MCLD_ARCHIVE_READER_INTERFACE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_ARCHIVEREADER_H
+#define MCLD_LD_ARCHIVEREADER_H
 #include <mcld/LD/LDReader.h>
 
 namespace mcld
 {
 
+class LinkerConfig;
 class Archive;
 
 /** \class ArchiveReader
@@ -34,7 +32,7 @@ public:
   ArchiveReader();
   virtual ~ArchiveReader();
 
-  virtual bool readArchive(Archive& pArchive) = 0;
+  virtual bool readArchive(const LinkerConfig& pConfig, Archive& pArchive) = 0;
 };
 
 } // namespace of mcld

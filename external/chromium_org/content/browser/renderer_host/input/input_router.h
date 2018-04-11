@@ -6,8 +6,8 @@
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_INPUT_ROUTER_H_
 
 #include "base/basictypes.h"
-#include "content/port/browser/event_with_latency_info.h"
-#include "content/port/common/input_event_ack_state.h"
+#include "content/browser/renderer_host/event_with_latency_info.h"
+#include "content/common/input/input_event_ack_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ipc/ipc_listener.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -24,10 +24,14 @@ class InputRouter : public IPC::Listener {
  public:
   virtual ~InputRouter() {}
 
+  // Should be called only in response to |SetNeedsFlush| requests made via
+  // the |InputRouterClient|.
+  virtual void Flush() = 0;
+
   // Send and take ownership of the the given InputMsg_*. This should be used
   // only for event types not associated with a WebInputEvent.  Returns true on
   // success and false otherwise.
-  virtual bool SendInput(IPC::Message* message) = 0;
+  virtual bool SendInput(scoped_ptr<IPC::Message> message) = 0;
 
   // WebInputEvents
   virtual void SendMouseEvent(
@@ -36,17 +40,12 @@ class InputRouter : public IPC::Listener {
       const MouseWheelEventWithLatencyInfo& wheel_event) = 0;
   virtual void SendKeyboardEvent(
       const NativeWebKeyboardEvent& key_event,
-      const ui::LatencyInfo& latency_info) = 0;
+      const ui::LatencyInfo& latency_info,
+      bool is_shortcut) = 0;
   virtual void SendGestureEvent(
       const GestureEventWithLatencyInfo& gesture_event) = 0;
   virtual void SendTouchEvent(
       const TouchEventWithLatencyInfo& touch_event) = 0;
-  virtual void SendMouseEventImmediately(
-      const MouseEventWithLatencyInfo& mouse_event) = 0;
-  virtual void SendTouchEventImmediately(
-      const TouchEventWithLatencyInfo& touch_event) = 0;
-  virtual void SendGestureEventImmediately(
-      const GestureEventWithLatencyInfo& gesture_event) = 0;
 
   // Returns the oldest queued or in-flight keyboard event sent to the router.
   virtual const NativeWebKeyboardEvent* GetLastKeyboardEvent() const = 0;
@@ -56,13 +55,16 @@ class InputRouter : public IPC::Listener {
   // instead consume them directly.
   virtual bool ShouldForwardTouchEvent() const = 0;
 
-  // Returns |true| if the caller should immediately forward the provided
-  // |gesture_event| to the router.
-  virtual bool ShouldForwardGestureEvent(
-      const GestureEventWithLatencyInfo& gesture_event) const = 0;
+  // Allow the router to make more informed input handling decisions based on
+  // the current view.
+  enum ViewFlags {
+    VIEW_FLAGS_NONE   = 0,
+    FIXED_PAGE_SCALE  = 1 << 0,
+    MOBILE_VIEWPORT   = 1 << 1
+  };
+  virtual void OnViewUpdated(int view_flags) = 0;
 
-  // Returns |true| if the router has any queued or in-flight gesture events.
-  virtual bool HasQueuedGestureEvents() const = 0;
+  virtual bool HasPendingEvents() const = 0;
 };
 
 }  // namespace content

@@ -37,6 +37,13 @@ LOCAL_CFLAGS := \
 #   floating point
 #   -DWEBRTC_NS_FLOAT'
 
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+LOCAL_CFLAGS_x86 := $(MY_WEBRTC_COMMON_DEFS_x86)
+LOCAL_CFLAGS_mips := $(MY_WEBRTC_COMMON_DEFS_mips)
+LOCAL_CFLAGS_arm64 := $(MY_WEBRTC_COMMON_DEFS_arm64)
+LOCAL_CFLAGS_x86_64 := $(MY_WEBRTC_COMMON_DEFS_x86_64)
+LOCAL_CFLAGS_mips64 := $(MY_WEBRTC_COMMON_DEFS_mips64)
+
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/interface \
     $(LOCAL_PATH)/aec/interface \
@@ -54,16 +61,12 @@ LOCAL_SHARED_LIBRARIES := \
     libcutils \
     libdl
 
-ifndef NDK_ROOT
 ifndef WEBRTC_STL
 include external/stlport/libstlport.mk
 else
 LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
 LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-endif
-else
-LOCAL_SHARED_LIBRARIES += libstlport
 endif
 
 include $(BUILD_STATIC_LIBRARY)
@@ -81,6 +84,13 @@ LOCAL_SRC_FILES:= \
 # Flags passed to both C and C++ files.
 LOCAL_CFLAGS := \
     $(MY_WEBRTC_COMMON_DEFS)
+
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+LOCAL_CFLAGS_x86 := $(MY_WEBRTC_COMMON_DEFS_x86)
+LOCAL_CFLAGS_mips := $(MY_WEBRTC_COMMON_DEFS_mips)
+LOCAL_CFLAGS_arm64 := $(MY_WEBRTC_COMMON_DEFS_arm64)
+LOCAL_CFLAGS_x86_64 := $(MY_WEBRTC_COMMON_DEFS_x86_64)
+LOCAL_CFLAGS_mips64 := $(MY_WEBRTC_COMMON_DEFS_mips64)
 
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/interface \
@@ -104,10 +114,6 @@ LOCAL_SHARED_LIBRARIES := \
 
 LOCAL_MODULE:= webrtc_apm_process_test
 
-ifdef NDK_ROOT
-LOCAL_SHARED_LIBRARIES += libstlport
-include $(BUILD_EXECUTABLE)
-else
 ifndef WEBRTC_STL
 include external/stlport/libstlport.mk
 else
@@ -116,7 +122,6 @@ LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
 endif
 include $(BUILD_NATIVE_TEST)
-endif
 
 # apm unit test app
 
@@ -127,18 +132,25 @@ LOCAL_CPP_EXTENSION := .cc
 LOCAL_SRC_FILES:= \
     $(call all-proto-files-under, test) \
     test/unit_test.cc \
-    ../../../test/testsupport/fileutils.cc
+    test/testsupport/fileutils.cc
 
 # Flags passed to both C and C++ files.
 LOCAL_CFLAGS := \
     $(MY_WEBRTC_COMMON_DEFS) \
     '-DWEBRTC_APM_UNIT_TEST_FIXED_PROFILE'
 
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+LOCAL_CFLAGS_x86 := $(MY_WEBRTC_COMMON_DEFS_x86)
+LOCAL_CFLAGS_mips := $(MY_WEBRTC_COMMON_DEFS_mips)
+LOCAL_CFLAGS_arm64 := $(MY_WEBRTC_COMMON_DEFS_arm64)
+LOCAL_CFLAGS_x86_64 := $(MY_WEBRTC_COMMON_DEFS_x86_64)
+LOCAL_CFLAGS_mips64 := $(MY_WEBRTC_COMMON_DEFS_mips64)
+
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/interface \
     $(LOCAL_PATH)/../interface \
     $(LOCAL_PATH)/../.. \
-    $(LOCAL_PATH)/../../../test \
+    $(LOCAL_PATH)/test \
     $(LOCAL_PATH)/../../system_wrappers/interface \
     $(LOCAL_PATH)/../../common_audio/signal_processing/include \
     external/gtest/include \
@@ -158,10 +170,6 @@ LOCAL_SHARED_LIBRARIES := \
 
 LOCAL_MODULE:= webrtc_apm_unit_test
 
-ifdef NDK_ROOT
-LOCAL_SHARED_LIBRARIES += libstlport
-include $(BUILD_EXECUTABLE)
-else
 ifndef WEBRTC_STL
 include external/stlport/libstlport.mk
 else
@@ -170,4 +178,3 @@ LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
 endif
 include $(BUILD_NATIVE_TEST)
-endif

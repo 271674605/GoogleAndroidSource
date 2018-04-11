@@ -32,10 +32,10 @@
   % for value in entry.enum.values:
     /**
     % if value.notes:
-${value.notes | javadoc}\
+${value.notes | javadoc(metadata)}\
     % endif
      * @see ${target_class}#${entry.name | jkey_identifier}
-    % if entry.applied_visibility == 'hidden':
+    % if entry.applied_visibility == 'hidden' or value.hidden:
      * @hide
     %endif
      */

@@ -19,16 +19,18 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.ContactsContract;
-import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Directory;
-import android.provider.ContactsContract.SearchSnippetColumns;
+import android.provider.ContactsContract.SearchSnippets;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ListView;
 
+import com.android.contacts.common.ContactPhotoManager;
+import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.R;
+import com.android.contacts.common.preference.ContactsPreferences;
 
 /**
  * A cursor adapter for the {@link ContactsContract.Contacts#CONTENT_TYPE} content type.
@@ -69,7 +71,7 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            SearchSnippetColumns.SNIPPET,           // 8
+            SearchSnippets.SNIPPET,           // 8
         };
 
         private static final String[] FILTER_PROJECTION_ALTERNATIVE = new String[] {
@@ -81,7 +83,7 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            SearchSnippetColumns.SNIPPET,           // 8
+            SearchSnippets.SNIPPET,           // 8
         };
 
         public static final int CONTACT_ID               = 0;
@@ -140,7 +142,7 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
 
     protected static Uri buildSectionIndexerUri(Uri uri) {
         return uri.buildUpon()
-                .appendQueryParameter(ContactCounts.ADDRESS_BOOK_INDEX_EXTRAS, "true").build();
+                .appendQueryParameter(Contacts.EXTRA_ADDRESS_BOOK_INDEX, "true").build();
     }
 
     @Override
@@ -192,11 +194,12 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
     }
 
     @Override
-    protected View newView(Context context, int partition, Cursor cursor, int position,
-            ViewGroup parent) {
-        ContactListItemView view = new ContactListItemView(context, null);
+    protected ContactListItemView newView(
+            Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
+        ContactListItemView view = super.newView(context, partition, cursor, position, parent);
         view.setUnknownNameText(mUnknownNameText);
         view.setQuickContactEnabled(isQuickContactEnabled());
+        view.setAdjustSelectionBoundsEnabled(isAdjustSelectionBoundsEnabled());
         view.setActivatedStateSupported(isSelectionVisible());
         if (mPhotoPosition != null) {
             view.setPhotoPosition(mPhotoPosition);
@@ -206,21 +209,12 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
 
     protected void bindSectionHeaderAndDivider(ContactListItemView view, int position,
             Cursor cursor) {
+        view.setIsSectionHeaderEnabled(isSectionHeaderDisplayEnabled());
         if (isSectionHeaderDisplayEnabled()) {
             Placement placement = getItemPlacementInSection(position);
-
-            // First position, set the contacts number string
-            if (position == 0 && cursor.getInt(ContactQuery.CONTACT_IS_USER_PROFILE) == 1) {
-                view.setCountView(getContactsCount());
-            } else {
-                view.setCountView(null);
-            }
             view.setSectionHeader(placement.sectionHeader);
-            view.setDividerVisible(!placement.lastInSection);
         } else {
             view.setSectionHeader(null);
-            view.setDividerVisible(true);
-            view.setCountView(null);
         }
     }
 
@@ -237,18 +231,28 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
         }
 
         if (photoId != 0) {
-            getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false);
+            getPhotoLoader().loadThumbnail(view.getPhotoView(), photoId, false,
+                    getCircularPhotos(), null);
         } else {
             final String photoUriString = cursor.getString(ContactQuery.CONTACT_PHOTO_URI);
             final Uri photoUri = photoUriString == null ? null : Uri.parse(photoUriString);
-            getPhotoLoader().loadDirectoryPhoto(view.getPhotoView(), photoUri, false);
+            DefaultImageRequest request = null;
+            if (photoUri == null) {
+                request = getDefaultImageRequestFromCursor(cursor,
+                        ContactQuery.CONTACT_DISPLAY_NAME,
+                        ContactQuery.CONTACT_LOOKUP_KEY);
+            }
+            getPhotoLoader().loadDirectoryPhoto(view.getPhotoView(), photoUri, false,
+                    getCircularPhotos(), request);
         }
     }
 
-    protected void bindName(final ContactListItemView view, Cursor cursor) {
+    protected void bindNameAndViewId(final ContactListItemView view, Cursor cursor) {
         view.showDisplayName(
                 cursor, ContactQuery.CONTACT_DISPLAY_NAME, getContactNameDisplayOrder());
         // Note: we don't show phonetic any more (See issue 5265330)
+
+        bindViewId(view, cursor, ContactQuery.CONTACT_ID);
     }
 
     protected void bindPresenceAndStatusMessage(final ContactListItemView view, Cursor cursor) {
@@ -358,13 +362,13 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
     protected final String[] getProjection(boolean forSearch) {
         final int sortOrder = getContactNameDisplayOrder();
         if (forSearch) {
-            if (sortOrder == ContactsContract.Preferences.DISPLAY_ORDER_PRIMARY) {
+            if (sortOrder == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
                 return ContactQuery.FILTER_PROJECTION_PRIMARY;
             } else {
                 return ContactQuery.FILTER_PROJECTION_ALTERNATIVE;
             }
         } else {
-            if (sortOrder == ContactsContract.Preferences.DISPLAY_ORDER_PRIMARY) {
+            if (sortOrder == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
                 return ContactQuery.CONTACT_PROJECTION_PRIMARY;
             } else {
                 return ContactQuery.CONTACT_PROJECTION_ALTERNATIVE;

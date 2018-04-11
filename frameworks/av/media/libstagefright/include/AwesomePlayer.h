@@ -32,6 +32,7 @@
 namespace android {
 
 struct AudioPlayer;
+struct ClockEstimator;
 struct DataSource;
 struct MediaBuffer;
 struct MediaExtractor;
@@ -63,6 +64,7 @@ struct AwesomePlayer {
     void setUID(uid_t uid);
 
     status_t setDataSource(
+            const sp<IMediaHTTPService> &httpService,
             const char *uri,
             const KeyedVector<String8, String8> *headers = NULL);
 
@@ -159,6 +161,7 @@ private:
     SystemTimeSource mSystemTimeSource;
     TimeSource *mTimeSource;
 
+    sp<IMediaHTTPService> mHTTPService;
     String8 mUri;
     KeyedVector<String8, String8> mUriHeaders;
 
@@ -234,6 +237,7 @@ private:
 
     MediaBuffer *mVideoBuffer;
 
+    sp<ClockEstimator> mClockEstimator;
     sp<HTTPBase> mConnectingDataSource;
     sp<NuCachedSource2> mCachedSource;
 
@@ -247,6 +251,7 @@ private:
     sp<MediaExtractor> mExtractor;
 
     status_t setDataSource_l(
+            const sp<IMediaHTTPService> &httpService,
             const char *uri,
             const KeyedVector<String8, String8> *headers = NULL);
 
@@ -293,6 +298,7 @@ private:
 
     bool getBitrate(int64_t *bitrate);
 
+    int64_t estimateRealTimeUs(TimeSource *ts, int64_t systemTimeUs);
     void finishSeekIfNecessary(int64_t videoTimeUs);
     void ensureCacheIsFetching_l();
 

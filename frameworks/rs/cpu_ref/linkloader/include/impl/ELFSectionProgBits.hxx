@@ -35,7 +35,7 @@ ELFSectionProgBits<Bitwidth>::read(Archiver &AR,
                                    ELFSectionHeaderTy const *sh) {
   int machine = owner->getHeader()->getMachine();
   ELFSectionProgBits *secp = new ELFSectionProgBits(machine);
-  llvm::OwningPtr<ELFSectionProgBits> result(secp);
+  std::unique_ptr<ELFSectionProgBits> result(secp);
   size_t max_num_stubs = 0;
   // Align section boundary to 4 bytes.
   size_t section_size = (sh->getSize() + 3) / 4 * 4;
@@ -43,16 +43,19 @@ ELFSectionProgBits<Bitwidth>::read(Archiver &AR,
   StubLayout *stubs = result->getStubLayout();
   if (stubs) {
     // Compute the maximal possible numbers of stubs
-    std::string reltab_name(".rel" + std::string(sh->getName()));
+    max_num_stubs = 0;
+    for (const char* prefix : {".rel", ".rela"}) {
+      std::string reltab_name(prefix + std::string(sh->getName()));
 
-    ELFSectionRelTableTy const *reltab =
-      static_cast<ELFSectionRelTableTy *>(
-        owner->getSectionByName(reltab_name.c_str()));
+      ELFSectionRelTableTy const *reltab =
+        static_cast<ELFSectionRelTableTy *>(
+          owner->getSectionByName(reltab_name.c_str()));
 
-    if (reltab) {
-      // If we have relocation table, then get the approximation of
-      // maximum numbers of stubs.
-      max_num_stubs = reltab->getMaxNumStubs(owner);
+      if (reltab) {
+        // If we have relocation table, then get the approximation of
+        // maximum numbers of stubs.
+        max_num_stubs += reltab->getMaxNumStubs(owner);
+      }
     }
 
     // Compute the stub table size
@@ -79,7 +82,7 @@ ELFSectionProgBits<Bitwidth>::read(Archiver &AR,
     return NULL;
   }
 
-  return result.take();
+  return result.release();
 }
 
 #endif // ELF_SECTION_PROGBITS_HXX

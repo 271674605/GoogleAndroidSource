@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2008 The Android Open Source Project
+ * Copyright (C) 2014 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,322 +16,448 @@
 
 package com.android.calculator2;
 
+import android.animation.Animator;
+import android.animation.Animator.AnimatorListener;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
+import android.animation.ArgbEvaluator;
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
+import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.app.Activity;
-import android.content.res.Resources;
-import android.content.res.TypedArray;
+import android.graphics.Rect;
 import android.os.Bundle;
-import android.os.Parcelable;
-import android.support.v4.view.PagerAdapter;
+import android.support.annotation.NonNull;
 import android.support.v4.view.ViewPager;
-import android.util.Log;
+import android.text.Editable;
+import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
-import android.view.View.OnClickListener;
-import android.view.ViewConfiguration;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.widget.PopupMenu;
-import android.widget.PopupMenu.OnMenuItemClickListener;
+import android.view.View.OnKeyListener;
+import android.view.View.OnLongClickListener;
+import android.view.ViewAnimationUtils;
+import android.view.ViewGroupOverlay;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.widget.Button;
+import android.widget.TextView;
 
-public class Calculator extends Activity implements PanelSwitcher.Listener, Logic.Listener,
-        OnClickListener, OnMenuItemClickListener {
-    EventListener mListener = new EventListener();
-    private CalculatorDisplay mDisplay;
-    private Persist mPersist;
-    private History mHistory;
-    private Logic mLogic;
-    private ViewPager mPager;
+import com.android.calculator2.CalculatorEditText.OnTextSizeChangeListener;
+import com.android.calculator2.CalculatorExpressionEvaluator.EvaluateCallback;
+
+public class Calculator extends Activity
+        implements OnTextSizeChangeListener, EvaluateCallback, OnLongClickListener {
+
+    private static final String NAME = Calculator.class.getName();
+
+    // instance state keys
+    private static final String KEY_CURRENT_STATE = NAME + "_currentState";
+    private static final String KEY_CURRENT_EXPRESSION = NAME + "_currentExpression";
+
+    /**
+     * Constant for an invalid resource id.
+     */
+    public static final int INVALID_RES_ID = -1;
+
+    private enum CalculatorState {
+        INPUT, EVALUATE, RESULT, ERROR
+    }
+
+    private final TextWatcher mFormulaTextWatcher = new TextWatcher() {
+        @Override
+        public void beforeTextChanged(CharSequence charSequence, int start, int count, int after) {
+        }
+
+        @Override
+        public void onTextChanged(CharSequence charSequence, int start, int count, int after) {
+        }
+
+        @Override
+        public void afterTextChanged(Editable editable) {
+            setState(CalculatorState.INPUT);
+            mEvaluator.evaluate(editable, Calculator.this);
+        }
+    };
+
+    private final OnKeyListener mFormulaOnKeyListener = new OnKeyListener() {
+        @Override
+        public boolean onKey(View view, int keyCode, KeyEvent keyEvent) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    if (keyEvent.getAction() == KeyEvent.ACTION_UP) {
+                        mCurrentButton = mEqualButton;
+                        onEquals();
+                    }
+                    // ignore all other actions
+                    return true;
+            }
+            return false;
+        }
+    };
+
+    private final Editable.Factory mFormulaEditableFactory = new Editable.Factory() {
+        @Override
+        public Editable newEditable(CharSequence source) {
+            final boolean isEdited = mCurrentState == CalculatorState.INPUT
+                    || mCurrentState == CalculatorState.ERROR;
+            return new CalculatorExpressionBuilder(source, mTokenizer, isEdited);
+        }
+    };
+
+    private CalculatorState mCurrentState;
+    private CalculatorExpressionTokenizer mTokenizer;
+    private CalculatorExpressionEvaluator mEvaluator;
+
+    private View mDisplayView;
+    private CalculatorEditText mFormulaEditText;
+    private CalculatorEditText mResultEditText;
+    private ViewPager mPadViewPager;
+    private View mDeleteButton;
+    private View mEqualButton;
     private View mClearButton;
-    private View mBackspaceButton;
-    private View mOverflowMenuButton;
 
-    static final int BASIC_PANEL    = 0;
-    static final int ADVANCED_PANEL = 1;
-
-    private static final String LOG_TAG = "Calculator";
-    private static final boolean DEBUG  = false;
-    private static final boolean LOG_ENABLED = false;
-    private static final String STATE_CURRENT_VIEW = "state-current-view";
+    private View mCurrentButton;
+    private Animator mCurrentAnimator;
 
     @Override
-    public void onCreate(Bundle state) {
-        super.onCreate(state);
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_calculator);
 
-        // Disable IME for this application
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
-                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+        mDisplayView = findViewById(R.id.display);
+        mFormulaEditText = (CalculatorEditText) findViewById(R.id.formula);
+        mResultEditText = (CalculatorEditText) findViewById(R.id.result);
+        mPadViewPager = (ViewPager) findViewById(R.id.pad_pager);
+        mDeleteButton = findViewById(R.id.del);
+        mClearButton = findViewById(R.id.clr);
 
-        setContentView(R.layout.main);
-        mPager = (ViewPager) findViewById(R.id.panelswitch);
-        if (mPager != null) {
-            mPager.setAdapter(new PageAdapter(mPager));
-        } else {
-            // Single page UI
-            final TypedArray buttons = getResources().obtainTypedArray(R.array.buttons);
-            for (int i = 0; i < buttons.length(); i++) {
-                setOnClickListener(null, buttons.getResourceId(i, 0));
+        mEqualButton = findViewById(R.id.pad_numeric).findViewById(R.id.eq);
+        if (mEqualButton == null || mEqualButton.getVisibility() != View.VISIBLE) {
+            mEqualButton = findViewById(R.id.pad_operator).findViewById(R.id.eq);
+        }
+
+        mTokenizer = new CalculatorExpressionTokenizer(this);
+        mEvaluator = new CalculatorExpressionEvaluator(mTokenizer);
+
+        savedInstanceState = savedInstanceState == null ? Bundle.EMPTY : savedInstanceState;
+        setState(CalculatorState.values()[
+                savedInstanceState.getInt(KEY_CURRENT_STATE, CalculatorState.INPUT.ordinal())]);
+        mFormulaEditText.setText(mTokenizer.getLocalizedExpression(
+                savedInstanceState.getString(KEY_CURRENT_EXPRESSION, "")));
+        mEvaluator.evaluate(mFormulaEditText.getText(), this);
+
+        mFormulaEditText.setEditableFactory(mFormulaEditableFactory);
+        mFormulaEditText.addTextChangedListener(mFormulaTextWatcher);
+        mFormulaEditText.setOnKeyListener(mFormulaOnKeyListener);
+        mFormulaEditText.setOnTextSizeChangeListener(this);
+        mDeleteButton.setOnLongClickListener(this);
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        // If there's an animation in progress, cancel it first to ensure our state is up-to-date.
+        if (mCurrentAnimator != null) {
+            mCurrentAnimator.cancel();
+        }
+
+        super.onSaveInstanceState(outState);
+
+        outState.putInt(KEY_CURRENT_STATE, mCurrentState.ordinal());
+        outState.putString(KEY_CURRENT_EXPRESSION,
+                mTokenizer.getNormalizedExpression(mFormulaEditText.getText().toString()));
+    }
+
+    private void setState(CalculatorState state) {
+        if (mCurrentState != state) {
+            mCurrentState = state;
+
+            if (state == CalculatorState.RESULT || state == CalculatorState.ERROR) {
+                mDeleteButton.setVisibility(View.GONE);
+                mClearButton.setVisibility(View.VISIBLE);
+            } else {
+                mDeleteButton.setVisibility(View.VISIBLE);
+                mClearButton.setVisibility(View.GONE);
             }
-            buttons.recycle();
+
+            if (state == CalculatorState.ERROR) {
+                final int errorColor = getResources().getColor(R.color.calculator_error_color);
+                mFormulaEditText.setTextColor(errorColor);
+                mResultEditText.setTextColor(errorColor);
+                getWindow().setStatusBarColor(errorColor);
+            } else {
+                mFormulaEditText.setTextColor(
+                        getResources().getColor(R.color.display_formula_text_color));
+                mResultEditText.setTextColor(
+                        getResources().getColor(R.color.display_result_text_color));
+                getWindow().setStatusBarColor(
+                        getResources().getColor(R.color.calculator_accent_color));
+            }
         }
-
-        if (mClearButton == null) {
-            mClearButton = findViewById(R.id.clear);
-            mClearButton.setOnClickListener(mListener);
-            mClearButton.setOnLongClickListener(mListener);
-        }
-        if (mBackspaceButton == null) {
-            mBackspaceButton = findViewById(R.id.del);
-            mBackspaceButton.setOnClickListener(mListener);
-            mBackspaceButton.setOnLongClickListener(mListener);
-        }
-
-        mPersist = new Persist(this);
-        mPersist.load();
-
-        mHistory = mPersist.history;
-
-        mDisplay = (CalculatorDisplay) findViewById(R.id.display);
-
-        mLogic = new Logic(this, mHistory, mDisplay);
-        mLogic.setListener(this);
-
-        mLogic.setDeleteMode(mPersist.getDeleteMode());
-        mLogic.setLineLength(mDisplay.getMaxDigits());
-
-        HistoryAdapter historyAdapter = new HistoryAdapter(this, mHistory, mLogic);
-        mHistory.setObserver(historyAdapter);
-
-        if (mPager != null) {
-            mPager.setCurrentItem(state == null ? 0 : state.getInt(STATE_CURRENT_VIEW, 0));
-        }
-
-        mListener.setHandler(mLogic, mPager);
-        mDisplay.setOnKeyListener(mListener);
-
-        if (!ViewConfiguration.get(this).hasPermanentMenuKey()) {
-            createFakeMenu();
-        }
-
-        mLogic.resumeWithHistory();
-        updateDeleteMode();
     }
 
-    private void updateDeleteMode() {
-        if (mLogic.getDeleteMode() == Logic.DELETE_MODE_BACKSPACE) {
-            mClearButton.setVisibility(View.GONE);
-            mBackspaceButton.setVisibility(View.VISIBLE);
+    @Override
+    public void onBackPressed() {
+        if (mPadViewPager == null || mPadViewPager.getCurrentItem() == 0) {
+            // If the user is currently looking at the first pad (or the pad is not paged),
+            // allow the system to handle the Back button.
+            super.onBackPressed();
         } else {
-            mClearButton.setVisibility(View.VISIBLE);
-            mBackspaceButton.setVisibility(View.GONE);
-        }
-    }
-
-    void setOnClickListener(View root, int id) {
-        final View target = root != null ? root.findViewById(id) : findViewById(id);
-        target.setOnClickListener(mListener);
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        super.onCreateOptionsMenu(menu);
-        getMenuInflater().inflate(R.menu.menu, menu);
-        return true;
-    }
-
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        super.onPrepareOptionsMenu(menu);
-        menu.findItem(R.id.basic).setVisible(!getBasicVisibility());
-        menu.findItem(R.id.advanced).setVisible(!getAdvancedVisibility());
-        return true;
-    }
-
-
-    private void createFakeMenu() {
-        mOverflowMenuButton = findViewById(R.id.overflow_menu);
-        if (mOverflowMenuButton != null) {
-            mOverflowMenuButton.setVisibility(View.VISIBLE);
-            mOverflowMenuButton.setOnClickListener(this);
+            // Otherwise, select the previous pad.
+            mPadViewPager.setCurrentItem(mPadViewPager.getCurrentItem() - 1);
         }
     }
 
     @Override
-    public void onClick(View v) {
-        switch (v.getId()) {
-            case R.id.overflow_menu:
-                PopupMenu menu = constructPopupMenu();
-                if (menu != null) {
-                    menu.show();
-                }
+    public void onUserInteraction() {
+        super.onUserInteraction();
+
+        // If there's an animation in progress, cancel it so the user interaction can be handled
+        // immediately.
+        if (mCurrentAnimator != null) {
+            mCurrentAnimator.cancel();
+        }
+    }
+
+    public void onButtonClick(View view) {
+        mCurrentButton = view;
+
+        switch (view.getId()) {
+            case R.id.eq:
+                onEquals();
+                break;
+            case R.id.del:
+                onDelete();
+                break;
+            case R.id.clr:
+                onClear();
+                break;
+            case R.id.fun_cos:
+            case R.id.fun_ln:
+            case R.id.fun_log:
+            case R.id.fun_sin:
+            case R.id.fun_tan:
+                // Add left parenthesis after functions.
+                mFormulaEditText.append(((Button) view).getText() + "(");
+                break;
+            default:
+                mFormulaEditText.append(((Button) view).getText());
                 break;
         }
     }
 
-    private PopupMenu constructPopupMenu() {
-        final PopupMenu popupMenu = new PopupMenu(this, mOverflowMenuButton);
-        mOverflowMenuButton.setOnTouchListener(popupMenu.getDragToOpenListener());
-        final Menu menu = popupMenu.getMenu();
-        popupMenu.inflate(R.menu.menu);
-        popupMenu.setOnMenuItemClickListener(this);
-        onPrepareOptionsMenu(menu);
-        return popupMenu;
-    }
-
-
     @Override
-    public boolean onMenuItemClick(MenuItem item) {
-        return onOptionsItemSelected(item);
-    }
+    public boolean onLongClick(View view) {
+        mCurrentButton = view;
 
-    private boolean getBasicVisibility() {
-        return mPager != null && mPager.getCurrentItem() == BASIC_PANEL;
-    }
-
-    private boolean getAdvancedVisibility() {
-        return mPager != null && mPager.getCurrentItem() == ADVANCED_PANEL;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.clear_history:
-                mHistory.clear();
-                mLogic.onClear();
-                break;
-
-            case R.id.basic:
-                if (!getBasicVisibility() && mPager != null) {
-                    mPager.setCurrentItem(BASIC_PANEL, true);
-                }
-                break;
-
-            case R.id.advanced:
-                if (!getAdvancedVisibility() && mPager != null) {
-                    mPager.setCurrentItem(ADVANCED_PANEL, true);
-                }
-                break;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle state) {
-        super.onSaveInstanceState(state);
-        if (mPager != null) {
-            state.putInt(STATE_CURRENT_VIEW, mPager.getCurrentItem());
-        }
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        mLogic.updateHistory();
-        mPersist.setDeleteMode(mLogic.getDeleteMode());
-        mPersist.save();
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent keyEvent) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && getAdvancedVisibility()
-                && mPager != null) {
-            mPager.setCurrentItem(BASIC_PANEL);
+        if (view.getId() == R.id.del) {
+            onClear();
             return true;
-        } else {
-            return super.onKeyDown(keyCode, keyEvent);
         }
-    }
-
-    static void log(String message) {
-        if (LOG_ENABLED) {
-            Log.v(LOG_TAG, message);
-        }
+        return false;
     }
 
     @Override
-    public void onChange() {
-        invalidateOptionsMenu();
+    public void onEvaluate(String expr, String result, int errorResourceId) {
+        if (mCurrentState == CalculatorState.INPUT) {
+            mResultEditText.setText(result);
+        } else if (errorResourceId != INVALID_RES_ID) {
+            onError(errorResourceId);
+        } else if (!TextUtils.isEmpty(result)) {
+            onResult(result);
+        } else if (mCurrentState == CalculatorState.EVALUATE) {
+            // The current expression cannot be evaluated -> return to the input state.
+            setState(CalculatorState.INPUT);
+        }
+
+        mFormulaEditText.requestFocus();
     }
 
     @Override
-    public void onDeleteModeChange() {
-        updateDeleteMode();
+    public void onTextSizeChanged(final TextView textView, float oldSize) {
+        if (mCurrentState != CalculatorState.INPUT) {
+            // Only animate text changes that occur from user input.
+            return;
+        }
+
+        // Calculate the values needed to perform the scale and translation animations,
+        // maintaining the same apparent baseline for the displayed text.
+        final float textScale = oldSize / textView.getTextSize();
+        final float translationX = (1.0f - textScale) *
+                (textView.getWidth() / 2.0f - textView.getPaddingEnd());
+        final float translationY = (1.0f - textScale) *
+                (textView.getHeight() / 2.0f - textView.getPaddingBottom());
+
+        final AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.playTogether(
+                ObjectAnimator.ofFloat(textView, View.SCALE_X, textScale, 1.0f),
+                ObjectAnimator.ofFloat(textView, View.SCALE_Y, textScale, 1.0f),
+                ObjectAnimator.ofFloat(textView, View.TRANSLATION_X, translationX, 0.0f),
+                ObjectAnimator.ofFloat(textView, View.TRANSLATION_Y, translationY, 0.0f));
+        animatorSet.setDuration(getResources().getInteger(android.R.integer.config_mediumAnimTime));
+        animatorSet.setInterpolator(new AccelerateDecelerateInterpolator());
+        animatorSet.start();
     }
 
-    class PageAdapter extends PagerAdapter {
-        private View mSimplePage;
-        private View mAdvancedPage;
+    private void onEquals() {
+        if (mCurrentState == CalculatorState.INPUT) {
+            setState(CalculatorState.EVALUATE);
+            mEvaluator.evaluate(mFormulaEditText.getText(), this);
+        }
+    }
 
-        public PageAdapter(ViewPager parent) {
-            final LayoutInflater inflater = LayoutInflater.from(parent.getContext());
-            final View simplePage = inflater.inflate(R.layout.simple_pad, parent, false);
-            final View advancedPage = inflater.inflate(R.layout.advanced_pad, parent, false);
-            mSimplePage = simplePage;
-            mAdvancedPage = advancedPage;
+    private void onDelete() {
+        // Delete works like backspace; remove the last character from the expression.
+        final Editable formulaText = mFormulaEditText.getEditableText();
+        final int formulaLength = formulaText.length();
+        if (formulaLength > 0) {
+            formulaText.delete(formulaLength - 1, formulaLength);
+        }
+    }
 
-            final Resources res = getResources();
-            final TypedArray simpleButtons = res.obtainTypedArray(R.array.simple_buttons);
-            for (int i = 0; i < simpleButtons.length(); i++) {
-                setOnClickListener(simplePage, simpleButtons.getResourceId(i, 0));
+    private void reveal(View sourceView, int colorRes, AnimatorListener listener) {
+        final ViewGroupOverlay groupOverlay =
+                (ViewGroupOverlay) getWindow().getDecorView().getOverlay();
+
+        final Rect displayRect = new Rect();
+        mDisplayView.getGlobalVisibleRect(displayRect);
+
+        // Make reveal cover the display and status bar.
+        final View revealView = new View(this);
+        revealView.setBottom(displayRect.bottom);
+        revealView.setLeft(displayRect.left);
+        revealView.setRight(displayRect.right);
+        revealView.setBackgroundColor(getResources().getColor(colorRes));
+        groupOverlay.add(revealView);
+
+        final int[] clearLocation = new int[2];
+        sourceView.getLocationInWindow(clearLocation);
+        clearLocation[0] += sourceView.getWidth() / 2;
+        clearLocation[1] += sourceView.getHeight() / 2;
+
+        final int revealCenterX = clearLocation[0] - revealView.getLeft();
+        final int revealCenterY = clearLocation[1] - revealView.getTop();
+
+        final double x1_2 = Math.pow(revealView.getLeft() - revealCenterX, 2);
+        final double x2_2 = Math.pow(revealView.getRight() - revealCenterX, 2);
+        final double y_2 = Math.pow(revealView.getTop() - revealCenterY, 2);
+        final float revealRadius = (float) Math.max(Math.sqrt(x1_2 + y_2), Math.sqrt(x2_2 + y_2));
+
+        final Animator revealAnimator =
+                ViewAnimationUtils.createCircularReveal(revealView,
+                        revealCenterX, revealCenterY, 0.0f, revealRadius);
+        revealAnimator.setDuration(
+                getResources().getInteger(android.R.integer.config_longAnimTime));
+        revealAnimator.addListener(listener);
+
+        final Animator alphaAnimator = ObjectAnimator.ofFloat(revealView, View.ALPHA, 0.0f);
+        alphaAnimator.setDuration(
+                getResources().getInteger(android.R.integer.config_mediumAnimTime));
+
+        final AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.play(revealAnimator).before(alphaAnimator);
+        animatorSet.setInterpolator(new AccelerateDecelerateInterpolator());
+        animatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animator) {
+                groupOverlay.remove(revealView);
+                mCurrentAnimator = null;
             }
-            simpleButtons.recycle();
+        });
 
-            final TypedArray advancedButtons = res.obtainTypedArray(R.array.advanced_buttons);
-            for (int i = 0; i < advancedButtons.length(); i++) {
-                setOnClickListener(advancedPage, advancedButtons.getResourceId(i, 0));
+        mCurrentAnimator = animatorSet;
+        animatorSet.start();
+    }
+
+    private void onClear() {
+        if (TextUtils.isEmpty(mFormulaEditText.getText())) {
+            return;
+        }
+
+        reveal(mCurrentButton, R.color.calculator_accent_color, new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mFormulaEditText.getEditableText().clear();
             }
-            advancedButtons.recycle();
+        });
+    }
 
-            final View clearButton = simplePage.findViewById(R.id.clear);
-            if (clearButton != null) {
-                mClearButton = clearButton;
+    private void onError(final int errorResourceId) {
+        if (mCurrentState != CalculatorState.EVALUATE) {
+            // Only animate error on evaluate.
+            mResultEditText.setText(errorResourceId);
+            return;
+        }
+
+        reveal(mCurrentButton, R.color.calculator_error_color, new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                setState(CalculatorState.ERROR);
+                mResultEditText.setText(errorResourceId);
+            }
+        });
+    }
+
+    private void onResult(final String result) {
+        // Calculate the values needed to perform the scale and translation animations,
+        // accounting for how the scale will affect the final position of the text.
+        final float resultScale =
+                mFormulaEditText.getVariableTextSize(result) / mResultEditText.getTextSize();
+        final float resultTranslationX = (1.0f - resultScale) *
+                (mResultEditText.getWidth() / 2.0f - mResultEditText.getPaddingEnd());
+        final float resultTranslationY = (1.0f - resultScale) *
+                (mResultEditText.getHeight() / 2.0f - mResultEditText.getPaddingBottom()) +
+                (mFormulaEditText.getBottom() - mResultEditText.getBottom()) +
+                (mResultEditText.getPaddingBottom() - mFormulaEditText.getPaddingBottom());
+        final float formulaTranslationY = -mFormulaEditText.getBottom();
+
+        // Use a value animator to fade to the final text color over the course of the animation.
+        final int resultTextColor = mResultEditText.getCurrentTextColor();
+        final int formulaTextColor = mFormulaEditText.getCurrentTextColor();
+        final ValueAnimator textColorAnimator =
+                ValueAnimator.ofObject(new ArgbEvaluator(), resultTextColor, formulaTextColor);
+        textColorAnimator.addUpdateListener(new AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator valueAnimator) {
+                mResultEditText.setTextColor((int) valueAnimator.getAnimatedValue());
+            }
+        });
+
+        final AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.playTogether(
+                textColorAnimator,
+                ObjectAnimator.ofFloat(mResultEditText, View.SCALE_X, resultScale),
+                ObjectAnimator.ofFloat(mResultEditText, View.SCALE_Y, resultScale),
+                ObjectAnimator.ofFloat(mResultEditText, View.TRANSLATION_X, resultTranslationX),
+                ObjectAnimator.ofFloat(mResultEditText, View.TRANSLATION_Y, resultTranslationY),
+                ObjectAnimator.ofFloat(mFormulaEditText, View.TRANSLATION_Y, formulaTranslationY));
+        animatorSet.setDuration(getResources().getInteger(android.R.integer.config_longAnimTime));
+        animatorSet.setInterpolator(new AccelerateDecelerateInterpolator());
+        animatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mResultEditText.setText(result);
             }
 
-            final View backspaceButton = simplePage.findViewById(R.id.del);
-            if (backspaceButton != null) {
-                mBackspaceButton = backspaceButton;
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                // Reset all of the values modified during the animation.
+                mResultEditText.setTextColor(resultTextColor);
+                mResultEditText.setScaleX(1.0f);
+                mResultEditText.setScaleY(1.0f);
+                mResultEditText.setTranslationX(0.0f);
+                mResultEditText.setTranslationY(0.0f);
+                mFormulaEditText.setTranslationY(0.0f);
+
+                // Finally update the formula to use the current result.
+                mFormulaEditText.setText(result);
+                setState(CalculatorState.RESULT);
+
+                mCurrentAnimator = null;
             }
-        }
+        });
 
-        @Override
-        public int getCount() {
-            return 2;
-        }
-
-        @Override
-        public void startUpdate(View container) {
-        }
-
-        @Override
-        public Object instantiateItem(View container, int position) {
-            final View page = position == 0 ? mSimplePage : mAdvancedPage;
-            ((ViewGroup) container).addView(page);
-            return page;
-        }
-
-        @Override
-        public void destroyItem(View container, int position, Object object) {
-            ((ViewGroup) container).removeView((View) object);
-        }
-
-        @Override
-        public void finishUpdate(View container) {
-        }
-
-        @Override
-        public boolean isViewFromObject(View view, Object object) {
-            return view == object;
-        }
-
-        @Override
-        public Parcelable saveState() {
-            return null;
-        }
-
-        @Override
-        public void restoreState(Parcelable state, ClassLoader loader) {
-        }
+        mCurrentAnimator = animatorSet;
+        animatorSet.start();
     }
 }

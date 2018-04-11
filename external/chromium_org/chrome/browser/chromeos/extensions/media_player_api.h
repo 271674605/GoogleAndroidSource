@@ -10,84 +10,35 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_function.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 class MediaPlayerEventRouter;
 
-// Implements the chrome.mediaPlayerPrivate.play method.
-class MediaPlayerPrivatePlayFunction : public SyncExtensionFunction {
+class MediaPlayerAPI : public BrowserContextKeyedAPI {
  public:
-  DECLARE_EXTENSION_FUNCTION("mediaPlayerPrivate.play", MEDIAPLAYERPRIVATE_PLAY)
-
- protected:
-  virtual ~MediaPlayerPrivatePlayFunction() {}
-
-  // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
-// Implements the chrome.mediaPlayerPrivate.getPlaylist method.
-class MediaPlayerPrivateGetPlaylistFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("mediaPlayerPrivate.getPlaylist",
-                             MEDIAPLAYERPRIVATE_GETPLAYLIST)
-
- protected:
-  virtual ~MediaPlayerPrivateGetPlaylistFunction() {}
-
-  // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
-// Implements the chrome.mediaPlayerPrivate.setWindowHeight method.
-class MediaPlayerPrivateSetWindowHeightFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("mediaPlayerPrivate.setWindowHeight",
-                             MEDIAPLAYERPRIVATE_SETWINDOWHEIGHT)
-
- protected:
-  virtual ~MediaPlayerPrivateSetWindowHeightFunction() {}
-
-  // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
-// Implements the chrome.mediaPlayerPrivate.closeWindow method.
-class MediaPlayerPrivateCloseWindowFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("mediaPlayerPrivate.closeWindow",
-                             MEDIAPLAYERPRIVATE_CLOSEWINDOW)
-
- protected:
-  virtual ~MediaPlayerPrivateCloseWindowFunction() {}
-
-  // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class MediaPlayerAPI : public ProfileKeyedAPI {
- public:
-  explicit MediaPlayerAPI(Profile* profile);
+  explicit MediaPlayerAPI(content::BrowserContext* context);
   virtual ~MediaPlayerAPI();
 
   // Convenience method to get the MediaPlayerAPI for a profile.
-  static MediaPlayerAPI* Get(Profile* profile);
+  static MediaPlayerAPI* Get(content::BrowserContext* context);
 
   MediaPlayerEventRouter* media_player_event_router();
 
-  // ProfileKeyedAPI implementation.
-  static ProfileKeyedAPIFactory<MediaPlayerAPI>* GetFactoryInstance();
+  // BrowserContextKeyedAPI implementation.
+  static BrowserContextKeyedAPIFactory<MediaPlayerAPI>* GetFactoryInstance();
 
  private:
-  friend class ProfileKeyedAPIFactory<MediaPlayerAPI>;
+  friend class BrowserContextKeyedAPIFactory<MediaPlayerAPI>;
 
-  Profile* const profile_;
+  content::BrowserContext* const browser_context_;
 
-  // ProfileKeyedAPI implementation.
+  // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
     return "MediaPlayerAPI";
   }

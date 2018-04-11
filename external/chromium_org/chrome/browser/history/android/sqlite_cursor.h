@@ -14,11 +14,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/android/android_history_provider_service.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "components/favicon_base/favicon_callback.h"
+
+class FaviconService;
 
 // This class is JNI implementation of
 // org.chromium.chrome.database.SqliteCursor, it uses the AndroidStatement to
@@ -146,15 +148,15 @@ class SQLiteCursor {
   }
 
   // Get Favicon from history backend.
-  bool GetFavicon(chrome::FaviconID id,
+  bool GetFavicon(favicon_base::FaviconID id,
                   std::vector<unsigned char>* image_data);
 
   void GetFaviconForIDInUIThread(
-      chrome::FaviconID id,
-      const FaviconService::FaviconRawCallback& callback);
+      favicon_base::FaviconID id,
+      const favicon_base::FaviconRawBitmapCallback& callback);
 
   // The callback function of FaviconService::GetLargestRawFaviconForID().
-  void OnFaviconData(const chrome::FaviconBitmapResult& bitmap_result);
+  void OnFaviconData(const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
   // The callback function of MoveTo().
   void OnMoved(AndroidHistoryProviderService::Handle handle, int pos);
@@ -181,13 +183,13 @@ class SQLiteCursor {
 
   // Live on UI thread.
   scoped_ptr<CancelableRequestConsumer> consumer_;
-  scoped_ptr<CancelableTaskTracker> tracker_;
+  scoped_ptr<base::CancelableTaskTracker> tracker_;
 
   // The count of result rows.
   int count_;
 
   // The favicon image.
-  chrome::FaviconBitmapResult favicon_bitmap_result_;
+  favicon_base::FaviconRawBitmapResult favicon_bitmap_result_;
 
   TestObserver* test_observer_;
 

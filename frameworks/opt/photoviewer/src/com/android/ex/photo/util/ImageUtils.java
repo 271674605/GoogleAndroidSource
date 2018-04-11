@@ -28,16 +28,13 @@ import android.os.Build;
 import android.util.Base64;
 import android.util.Log;
 
-import com.android.ex.photo.PhotoViewActivity;
+import com.android.ex.photo.PhotoViewController;
 import com.android.ex.photo.loaders.PhotoBitmapLoaderInterface.BitmapResult;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.regex.Pattern;
 
 
@@ -68,10 +65,10 @@ public class ImageUtils {
         if (Build.VERSION.SDK_INT >= 11) {
             sUseImageSize = ImageSize.NORMAL;
         } else {
-            if (PhotoViewActivity.sMemoryClass >= MIN_NORMAL_CLASS) {
+            if (PhotoViewController.sMemoryClass >= MIN_NORMAL_CLASS) {
                 // We have plenty of memory; use full sized photos
                 sUseImageSize = ImageSize.NORMAL;
-            } else if (PhotoViewActivity.sMemoryClass >= MIN_SMALL_CLASS) {
+            } else if (PhotoViewController.sMemoryClass >= MIN_SMALL_CLASS) {
                 // We have slight less memory; use smaller sized photos
                 sUseImageSize = ImageSize.SMALL;
             } else {
@@ -149,7 +146,9 @@ public class ImageUtils {
             // Determine the orientation for this image
             is = factory.createInputStream();
             final int orientation = Exif.getOrientation(is, -1);
-            is.close();
+            if (is != null) {
+                is.close();
+            }
 
             // Decode the bitmap
             is = factory.createInputStream();
@@ -206,9 +205,7 @@ public class ImageUtils {
     private static InputStreamFactory createInputStreamFactory(final ContentResolver resolver,
             final Uri uri) {
         final String scheme = uri.getScheme();
-        if ("http".equals(scheme) || "https".equals(scheme)) {
-            return new HttpInputStreamFactory(resolver, uri);
-        } else if ("data".equals(scheme)) {
+        if ("data".equals(scheme)) {
             return new DataInputStreamFactory(resolver, uri);
         }
         return new BaseInputStreamFactory(resolver, uri);
@@ -278,61 +275,6 @@ public class ImageUtils {
                 Log.e(TAG, "Mailformed data URI: " + ex);
                 return null;
             }
-        }
-    }
-
-    private static class HttpInputStreamFactory extends BaseInputStreamFactory {
-        private byte[] mData;
-
-        public HttpInputStreamFactory(final ContentResolver resolver, final Uri uri) {
-            super(resolver, uri);
-        }
-
-        @Override
-        public InputStream createInputStream() throws FileNotFoundException {
-            if (mData == null) {
-                mData = downloadBytes();
-                if (mData == null) {
-                    return super.createInputStream();
-                }
-            }
-            return new ByteArrayInputStream(mData);
-        }
-
-        private byte[] downloadBytes() throws FileNotFoundException {
-            InputStream is = null;
-            ByteArrayOutputStream out = null;
-            try {
-                try {
-                    is = new URL(mUri.toString()).openStream();
-                } catch (MalformedURLException e) {
-                    return null;
-                }
-                out = new ByteArrayOutputStream();
-                final byte[] buffer = new byte[4096];
-                int n = is.read(buffer);
-                while (n >= 0) {
-                    out.write(buffer, 0, n);
-                    n = is.read(buffer);
-                }
-
-                return out.toByteArray();
-            } catch (IOException ignored) {
-            } finally {
-                if (is != null) {
-                    try {
-                        is.close();
-                    } catch (IOException ignored) {
-                    }
-                }
-                if (out != null) {
-                    try {
-                        out.close();
-                    } catch (IOException ignored) {
-                    }
-                }
-            }
-            return null;
         }
     }
 }

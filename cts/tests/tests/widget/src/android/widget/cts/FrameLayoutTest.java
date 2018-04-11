@@ -16,7 +16,14 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import android.content.res.ColorStateList;
+import android.cts.util.WidgetTestUtils;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.PorterDuff;
+
+import com.android.cts.widget.R;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -43,13 +50,13 @@ import android.widget.TextView;
 
 import java.io.IOException;
 
-public class FrameLayoutTest extends ActivityInstrumentationTestCase2<FrameLayoutStubActivity> {
+public class FrameLayoutTest extends ActivityInstrumentationTestCase2<FrameLayoutCtsActivity> {
     private Activity mActivity;
     private Instrumentation mInstrumentation;
     private FrameLayout mFrameLayout;
 
     public FrameLayoutTest() {
-        super("com.android.cts.stub", FrameLayoutStubActivity.class);
+        super("com.android.cts.widget", FrameLayoutCtsActivity.class);
     }
 
     @Override
@@ -156,7 +163,7 @@ public class FrameLayoutTest extends ActivityInstrumentationTestCase2<FrameLayou
         // text view and button are VISIBLE, they should be measured
         final TextView textView = (TextView) frameLayout.findViewById(R.id.framelayout_textview);
         compareScaledPixels(30, textView.getMeasuredHeight());
-        compareScaledPixels(100, textView.getMeasuredWidth());
+        compareScaledPixels(60, textView.getMeasuredWidth());
         assertEquals(textView.getMeasuredHeight(), frameLayout.getMeasuredHeight());
         assertEquals(textView.getMeasuredWidth(), frameLayout.getMeasuredWidth());
 
@@ -268,6 +275,31 @@ public class FrameLayoutTest extends ActivityInstrumentationTestCase2<FrameLayou
         assertTrue(myFrameLayout.verifyDrawable(null));
     }
 
+    public void testForegroundTint() {
+        FrameLayout inflatedView = (FrameLayout) mActivity.findViewById(R.id.foreground_tint);
+
+        assertEquals("Foreground tint inflated correctly",
+                Color.WHITE, inflatedView.getForegroundTintList().getDefaultColor());
+        assertEquals("Foreground tint mode inflated correctly",
+                PorterDuff.Mode.SRC_OVER, inflatedView.getForegroundTintMode());
+
+        MockDrawable foreground = new MockDrawable();
+        FrameLayout view = new FrameLayout(mActivity);
+
+        view.setForeground(foreground);
+        assertFalse("No foreground tint applied by default", foreground.hasCalledSetTint());
+
+        view.setForegroundTintList(ColorStateList.valueOf(Color.WHITE));
+        assertTrue("Foreground tint applied when setForegroundTintList() called after setForeground()",
+                foreground.hasCalledSetTint());
+
+        foreground.reset();
+        view.setForeground(null);
+        view.setForeground(foreground);
+        assertTrue("Foreground tint applied when setForegroundTintList() called before setForeground()",
+                foreground.hasCalledSetTint());
+    }
+
     private static void assertCenterAligned(View container, Drawable drawable) {
         Rect rect = drawable.getBounds();
         int leftDelta = rect.left - container.getLeft();
@@ -283,6 +315,38 @@ public class FrameLayoutTest extends ActivityInstrumentationTestCase2<FrameLayou
         XmlPullParser parser = mActivity.getResources().getLayout(R.layout.framelayout_layout);
         WidgetTestUtils.beginDocument(parser, "LinearLayout");
         return Xml.asAttributeSet(parser);
+    }
+
+    private static class MockDrawable extends Drawable {
+        private boolean mCalledSetTint = false;
+
+        @Override
+        public void draw(Canvas canvas) {}
+
+        @Override
+        public void setAlpha(int alpha) {}
+
+        @Override
+        public void setColorFilter(ColorFilter cf) {}
+
+        @Override
+        public void setTintList(ColorStateList tint) {
+            super.setTintList(tint);
+            mCalledSetTint = true;
+        }
+
+        @Override
+        public int getOpacity() {
+            return 0;
+        }
+
+        public boolean hasCalledSetTint() {
+            return mCalledSetTint;
+        }
+
+        public void reset() {
+            mCalledSetTint = false;
+        }
     }
 
     private static class MyFrameLayout extends FrameLayout {

@@ -5,29 +5,38 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_
 
+#include <string>
+
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
+#include "base/scoped_observer.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_function.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_registry_observer.h"
 
 namespace base {
 class DictionaryValue;
 }
 
 namespace content {
+class BrowserContext;
 class WebContents;
 }
 
 namespace extensions {
 class ExtensionPrefs;
+class ExtensionRegistry;
 class TabHelper;
 
-class ExtensionActionAPI : public ProfileKeyedAPI {
+class ExtensionActionAPI : public BrowserContextKeyedAPI {
  public:
-  explicit ExtensionActionAPI(Profile* profile);
+  explicit ExtensionActionAPI(content::BrowserContext* context);
   virtual ~ExtensionActionAPI();
+
+  // Convenience method to get the instance for a profile.
+  static ExtensionActionAPI* Get(content::BrowserContext* context);
 
   static bool GetBrowserActionVisibility(const ExtensionPrefs* prefs,
                                          const std::string& extension_id);
@@ -35,13 +44,48 @@ class ExtensionActionAPI : public ProfileKeyedAPI {
                                          const std::string& extension_id,
                                          bool visible);
 
-  // ProfileKeyedAPI implementation.
-  static ProfileKeyedAPIFactory<ExtensionActionAPI>* GetFactoryInstance();
+  // Fires the onClicked event for page_action.
+  static void PageActionExecuted(content::BrowserContext* context,
+                                 const ExtensionAction& page_action,
+                                 int tab_id,
+                                 const std::string& url,
+                                 int button);
+
+  // Fires the onClicked event for browser_action.
+  static void BrowserActionExecuted(content::BrowserContext* context,
+                                    const ExtensionAction& browser_action,
+                                    content::WebContents* web_contents);
+
+  // BrowserContextKeyedAPI implementation.
+  static BrowserContextKeyedAPIFactory<ExtensionActionAPI>*
+      GetFactoryInstance();
 
  private:
-  friend class ProfileKeyedAPIFactory<ExtensionActionAPI>;
+  friend class BrowserContextKeyedAPIFactory<ExtensionActionAPI>;
 
-  // ProfileKeyedAPI implementation.
+  // The DispatchEvent methods forward events to the |profile|'s event router.
+  static void DispatchEventToExtension(content::BrowserContext* context,
+                                       const std::string& extension_id,
+                                       const std::string& event_name,
+                                       scoped_ptr<base::ListValue> event_args);
+
+  // Called to dispatch a deprecated style page action click event that was
+  // registered like:
+  //   chrome.pageActions["name"].addListener(function(actionId, info){})
+  static void DispatchOldPageActionEvent(content::BrowserContext* context,
+                                         const std::string& extension_id,
+                                         const std::string& page_action_id,
+                                         int tab_id,
+                                         const std::string& url,
+                                         int button);
+
+  // Called when either a browser or page action is executed. Figures out which
+  // event to send based on what the extension wants.
+  static void ExtensionActionExecuted(content::BrowserContext* context,
+                                      const ExtensionAction& extension_action,
+                                      content::WebContents* web_contents);
+
+  // BrowserContextKeyedAPI implementation.
   static const char* service_name() { return "ExtensionActionAPI"; }
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionActionAPI);
@@ -50,6 +94,7 @@ class ExtensionActionAPI : public ProfileKeyedAPI {
 // This class manages reading and writing browser action values from storage.
 class ExtensionActionStorageManager
     : public content::NotificationObserver,
+      public ExtensionRegistryObserver,
       public base::SupportsWeakPtr<ExtensionActionStorageManager> {
  public:
   explicit ExtensionActionStorageManager(Profile* profile);
@@ -61,6 +106,10 @@ class ExtensionActionStorageManager
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // ExtensionRegistryObserver:
+  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
+                                 const Extension* extension) OVERRIDE;
+
   // Reads/Writes the ExtensionAction's default values to/from storage.
   void WriteToStorage(ExtensionAction* extension_action);
   void ReadFromStorage(
@@ -68,15 +117,19 @@ class ExtensionActionStorageManager
 
   Profile* profile_;
   content::NotificationRegistrar registrar_;
+
+  // Listen to extension loaded notification.
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 };
 
-// Implementation of the browserAction, pageAction, and scriptBadge APIs.
+// Implementation of the browserAction and pageAction APIs.
 //
-// Divergent behaviour between the three is minimal (pageAction and scriptBadge
-// have required tabIds while browserAction's are optional, they have different
-// internal browser notification requirements, and not all functions are defined
-// for all APIs).
-class ExtensionActionFunction : public SyncExtensionFunction {
+// Divergent behaviour between the two is minimal (pageAction has required
+// tabIds while browserAction's are optional, they have different internal
+// browser notification requirements, and not all functions are defined for all
+// APIs).
+class ExtensionActionFunction : public ChromeSyncExtensionFunction {
  public:
   static bool ParseCSSColorString(const std::string& color_string,
                                   SkColor* result);
@@ -84,7 +137,7 @@ class ExtensionActionFunction : public SyncExtensionFunction {
  protected:
   ExtensionActionFunction();
   virtual ~ExtensionActionFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
   virtual bool RunExtensionAction() = 0;
 
   bool ExtractDataFromArguments();
@@ -299,36 +352,28 @@ class BrowserActionDisableFunction : public ExtensionActionHideFunction {
   virtual ~BrowserActionDisableFunction() {}
 };
 
-//
-// scriptBadge.* aliases for supported scriptBadge APIs.
-//
-
-class ScriptBadgeSetPopupFunction : public ExtensionActionSetPopupFunction {
+class BrowserActionOpenPopupFunction : public ChromeAsyncExtensionFunction,
+                                       public content::NotificationObserver {
  public:
-  DECLARE_EXTENSION_FUNCTION("scriptBadge.setPopup", SCRIPTBADGE_SETPOPUP)
+  DECLARE_EXTENSION_FUNCTION("browserAction.openPopup",
+                             BROWSERACTION_OPEN_POPUP)
+  BrowserActionOpenPopupFunction();
 
- protected:
-  virtual ~ScriptBadgeSetPopupFunction() {}
-};
+ private:
+  virtual ~BrowserActionOpenPopupFunction() {}
 
-class ScriptBadgeGetPopupFunction : public ExtensionActionGetPopupFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("scriptBadge.getPopup", SCRIPTBADGE_GETPOPUP)
+  // ExtensionFunction:
+  virtual bool RunAsync() OVERRIDE;
 
- protected:
-  virtual ~ScriptBadgeGetPopupFunction() {}
-};
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+  void OpenPopupTimedOut();
 
-// scriptBadge.getAttention(tabId)
-class ScriptBadgeGetAttentionFunction : public ExtensionActionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("scriptBadge.getAttention",
-                             SCRIPTBADGE_GETATTENTION)
+  content::NotificationRegistrar registrar_;
+  bool response_sent_;
 
-  virtual bool RunExtensionAction() OVERRIDE;
-
- protected:
-  virtual ~ScriptBadgeGetAttentionFunction();
+  DISALLOW_COPY_AND_ASSIGN(BrowserActionOpenPopupFunction);
 };
 
 }  // namespace extensions
@@ -399,7 +444,7 @@ class PageActionGetPopupFunction
 };
 
 // Base class for deprecated page actions APIs
-class PageActionsFunction : public SyncExtensionFunction {
+class PageActionsFunction : public ChromeSyncExtensionFunction {
  protected:
   PageActionsFunction();
   virtual ~PageActionsFunction();
@@ -416,7 +461,7 @@ class EnablePageActionsFunction : public PageActionsFunction {
   virtual ~EnablePageActionsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implement chrome.pageActions.disableForTab().
@@ -429,7 +474,7 @@ class DisablePageActionsFunction : public PageActionsFunction {
   virtual ~DisablePageActionsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_

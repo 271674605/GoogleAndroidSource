@@ -6,8 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TARGET_X86_PLT_H
-#define MCLD_TARGET_X86_PLT_H
+#ifndef TARGET_X86_X86PLT_H
+#define TARGET_X86_X86PLT_H
 
 #include <mcld/Target/PLT.h>
 
@@ -110,7 +110,7 @@ class X86PLT : public PLT
 public:
   X86PLT(LDSection& pSection,
          const LinkerConfig& pConfig,
-	 int got_size);
+         int got_size);
   ~X86PLT();
 
   // finalizeSectionSize - set LDSection size
@@ -119,9 +119,7 @@ public:
   // hasPLT1 - return if this PLT has any PLT1 entry
   bool hasPLT1() const;
 
-  void reserveEntry(size_t pNum = 1) ;
-
-  PLTEntryBase* consume();
+  PLTEntryBase* create();
 
   virtual void applyPLT0() = 0;
 
@@ -134,9 +132,6 @@ protected:
   PLTEntryBase* getPLT0() const;
 
 protected:
-  // the last consumed entry.
-  SectionData::iterator m_Last;
-
   const uint8_t *m_PLT0;
   const uint8_t *m_PLT1;
   unsigned int m_PLT0Size;
@@ -155,8 +150,8 @@ class X86_32PLT : public X86PLT
 {
 public:
   X86_32PLT(LDSection& pSection,
-	    X86_32GOTPLT& pGOTPLT,
-	    const LinkerConfig& pConfig);
+            X86_32GOTPLT& pGOTPLT,
+            const LinkerConfig& pConfig);
 
   void applyPLT0();
 
@@ -176,8 +171,8 @@ class X86_64PLT : public X86PLT
 {
 public:
   X86_64PLT(LDSection& pSection,
-	    X86_64GOTPLT& pGOTPLT,
-	    const LinkerConfig& pConfig);
+            X86_64GOTPLT& pGOTPLT,
+            const LinkerConfig& pConfig);
 
   void applyPLT0();
 

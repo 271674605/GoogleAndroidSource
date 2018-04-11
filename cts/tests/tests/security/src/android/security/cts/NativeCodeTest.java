@@ -25,7 +25,10 @@ public class NativeCodeTest extends TestCase {
     }
 
     public void testVroot() throws Exception {
-        assertTrue(doVrootTest());
+        assertTrue("Device is vulnerable to CVE-2013-6282. Please apply security patch at "
+                   + "https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/"
+                   + "commit/arch/arm/include/asm/uaccess.h?id="
+                   + "8404663f81d212918ff85f493649a7991209fa04", doVrootTest());
     }
 
     public void testPerfEvent() throws Exception {
@@ -37,6 +40,20 @@ public class NativeCodeTest extends TestCase {
 
     public void testPerfEvent2() throws Exception {
         assertTrue(doPerfEventTest2());
+    }
+
+    public void testSockDiag() throws Exception {
+        int result = doSockDiagTest();
+        assertFalse("Encountered unexpected error: " + result + ".", (result == -1));
+        assertEquals(0, result);
+    }
+
+    public void testFutex() throws Exception {
+        assertTrue("Device is vulnerable to CVE-2014-3153, a vulnerability in the futex() system "
+                   + "call. Please apply the security patch at "
+                   + "https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/"
+                   + "?id=e9c243a5a6de0be8e584c604d353412584b592f8",
+                   doFutexTest());
     }
 
     /**
@@ -62,16 +79,39 @@ public class NativeCodeTest extends TestCase {
     private static native boolean doPerfEventTest2();
 
     /**
-     * ANDROID-11234878
+     * Hangs if device is vulnerable to CVE-2013-1763, returns -1 if
+     * unexpected error occurs, 0 otherwise.
+     */
+    private static native int doSockDiagTest();
+
+    /**
+     * ANDROID-11234878 / CVE-2013-6282
      *
-     * Returns true if the device is patched against the vroot
-     * vulnerability. Returns false if there was some problem running
-     * the test (for example, out of memory), or the test fails but wasn't
-     * able to crash the device. Most of the time, however, the device will
-     * crash if the vulnerability is present.
+     * Returns true if the device is patched against the vroot vulnerability, false otherwise.
      *
      * The following patch addresses this bug:
      * https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/arch/arm/include/asm/uaccess.h?id=8404663f81d212918ff85f493649a7991209fa04
      */
     private static native boolean doVrootTest();
+
+    public void testCVE20141710() throws Exception {
+        assertTrue("Device is vulnerable to CVE-2014-1710", doCVE20141710Test());
+    }
+
+    /**
+     * ANDROID-15455425 / CVE-2014-3153
+     *
+     * Returns true if the device is patched against the futex() system call vulnerability.
+     *
+     * More information on this vulnerability is at http://seclists.org/oss-sec/2014/q2/467 and
+     * the patch is at:
+     * https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=e9c243a5a6de0be8e584c604d353412584b592f8
+     */
+    private static native boolean doFutexTest();
+
+    /**
+     * Returns true if the device is immune to CVE-2014-1710,
+     * false if the device is vulnerable.
+     */
+    private static native boolean doCVE20141710Test();
 }

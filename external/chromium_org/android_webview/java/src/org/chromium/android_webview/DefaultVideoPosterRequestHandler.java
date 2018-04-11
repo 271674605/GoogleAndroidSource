@@ -73,7 +73,7 @@ public class DefaultVideoPosterRequestHandler {
     private AwContentsClient mContentClient;
 
     public DefaultVideoPosterRequestHandler(AwContentsClient contentClient) {
-        mDefaultVideoPosterURL = GenerateDefaulVideoPosterURL();
+        mDefaultVideoPosterURL = generateDefaulVideoPosterURL();
         mContentClient = contentClient;
     }
 
@@ -81,14 +81,14 @@ public class DefaultVideoPosterRequestHandler {
      * Used to get the image if the url is mDefaultVideoPosterURL.
      *
      * @param url the url requested
-     * @return InterceptedRequestData which caller can get the image if the url is
+     * @return AwWebResourceResponse which caller can get the image if the url is
      * the default video poster URL, otherwise null is returned.
      */
-    public InterceptedRequestData shouldInterceptRequest(final String url) {
+    public AwWebResourceResponse shouldInterceptRequest(final String url) {
         if (!mDefaultVideoPosterURL.equals(url)) return null;
 
         try {
-            return new InterceptedRequestData("image/png", null, getInputStream(mContentClient));
+            return new AwWebResourceResponse("image/png", null, getInputStream(mContentClient));
         } catch (IOException e) {
             Log.e(TAG, null, e);
             return null;
@@ -102,9 +102,11 @@ public class DefaultVideoPosterRequestHandler {
     /**
      * @return a unique URL which has little chance to be used by application.
      */
-    private static String GenerateDefaulVideoPosterURL() {
+    private static String generateDefaulVideoPosterURL() {
         Random randomGenerator = new Random();
         String path = String.valueOf(randomGenerator.nextLong());
-        return "android-webview:default_video_poster/" + path;
+        // The scheme of this URL should be kept in sync with kAndroidWebViewVideoPosterScheme
+        // on the native side (see android_webview/common/url_constants.h)
+        return "android-webview-video-poster:default_video_poster/" + path;
     }
 }

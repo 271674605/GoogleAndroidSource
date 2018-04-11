@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import android.app.Activity;
@@ -25,8 +25,10 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Debug;
 import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
+import android.test.UiThreadTest;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -41,7 +43,7 @@ import android.widget.TextView;
 import android.widget.PopupWindow.OnDismissListener;
 
 public class PopupWindowTest extends
-        ActivityInstrumentationTestCase2<MockPopupWindowStubActivity> {
+        ActivityInstrumentationTestCase2<MockPopupWindowCtsActivity> {
     private Instrumentation mInstrumentation;
     private Activity mActivity;
     /** The popup window. */
@@ -51,7 +53,7 @@ public class PopupWindowTest extends
      * Instantiates a new popup window test.
      */
     public PopupWindowTest() {
-        super("com.android.cts.stub", MockPopupWindowStubActivity.class);
+        super("com.android.cts.widget", MockPopupWindowCtsActivity.class);
     }
 
     /*
@@ -366,6 +368,7 @@ public class PopupWindowTest extends
         assertTrue(maxAvailableHeight <= avaliable);
     }
 
+    @UiThreadTest
     public void testDismiss() {
         mPopupWindow = createPopupWindow(createPopupContent());
         assertFalse(mPopupWindow.isShowing());
@@ -447,7 +450,13 @@ public class PopupWindowTest extends
         int[] sndXY = new int[2];
         int[] viewInWindowXY = new int[2];
 
-        mPopupWindow = createPopupWindow(createPopupContent());
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow = createPopupWindow(createPopupContent());
+            }
+        });
+
+        mInstrumentation.waitForIdleSync();
         // Do not update if it is not shown
         assertFalse(mPopupWindow.isShowing());
         assertEquals(100, mPopupWindow.getWidth());
@@ -492,30 +501,54 @@ public class PopupWindowTest extends
     }
 
     public void testUpdateDimensionAndAlignAnchorView() {
-        mPopupWindow = createPopupWindow(createPopupContent());
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow = createPopupWindow(createPopupContent());
+            }
+        });
+        mInstrumentation.waitForIdleSync();
 
-        View anchorView = mActivity.findViewById(R.id.anchor_upper);
+        final View anchorView = mActivity.findViewById(R.id.anchor_upper);
         mPopupWindow.update(anchorView, 50, 50);
         // Do not update if it is not shown
         assertFalse(mPopupWindow.isShowing());
         assertEquals(100, mPopupWindow.getWidth());
         assertEquals(100, mPopupWindow.getHeight());
 
-        mPopupWindow.showAsDropDown(anchorView);
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow.showAsDropDown(anchorView);
+            }
+        });
         mInstrumentation.waitForIdleSync();
         // update if it is shown
-        mPopupWindow.update(anchorView, 50, 50);
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow.update(anchorView, 50, 50);
+            }
+        });
+        mInstrumentation.waitForIdleSync();
         assertTrue(mPopupWindow.isShowing());
         assertEquals(50, mPopupWindow.getWidth());
         assertEquals(50, mPopupWindow.getHeight());
 
         // ignore if width or height is -1
-        mPopupWindow.update(anchorView, -1, -1);
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow.update(anchorView, -1, -1);
+            }
+        });
+        mInstrumentation.waitForIdleSync();
         assertTrue(mPopupWindow.isShowing());
         assertEquals(50, mPopupWindow.getWidth());
         assertEquals(50, mPopupWindow.getHeight());
 
-        mPopupWindow.dismiss();
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow.dismiss();
+            }
+        });
+        mInstrumentation.waitForIdleSync();
     }
 
     public void testUpdateDimensionAndAlignAnchorViewWithOffsets() {
@@ -548,7 +581,8 @@ public class PopupWindowTest extends
         assertEquals(50, mPopupWindow.getHeight());
 
         mPopupWindow.getContentView().getLocationOnScreen(viewXY);
-        // the position should be changed
+
+        // The popup should appear below and to right with an offset.
         assertEquals(anchorXY[0] + 20 + viewInWindowOff[0], viewXY[0]);
         assertEquals(anchorXY[1] + anchorView.getHeight() + 50 + viewInWindowOff[1], viewXY[1]);
 
@@ -565,14 +599,15 @@ public class PopupWindowTest extends
         assertEquals(50, mPopupWindow.getHeight());
 
         mPopupWindow.getContentView().getLocationOnScreen(viewXY);
-        // the position should be changed
+
+        // The popup should appear below and to right with an offset.
         assertEquals(anchorXY[0] + 10 + viewInWindowOff[0], viewXY[0]);
         assertEquals(anchorXY[1] + anchorView.getHeight() + 50 + viewInWindowOff[1], viewXY[1]);
 
-        final View anthoterView = mActivity.findViewById(R.id.anchor_middle_right);
+        final View anotherView = mActivity.findViewById(R.id.anchor_middle_left);
         mInstrumentation.runOnMainSync(new Runnable() {
             public void run() {
-                mPopupWindow.update(anthoterView, 0, 0, 60, 60);
+                mPopupWindow.update(anotherView, 0, 0, 60, 60);
             }
         });
         mInstrumentation.waitForIdleSync();
@@ -582,11 +617,12 @@ public class PopupWindowTest extends
         assertEquals(60, mPopupWindow.getHeight());
 
         int[] newXY = new int[2];
-        anthoterView.getLocationOnScreen(newXY);
+        anotherView.getLocationOnScreen(newXY);
         mPopupWindow.getContentView().getLocationOnScreen(viewXY);
-        // the position should be changed
+
+        // The popup should appear below and to the right.
         assertEquals(newXY[0] + viewInWindowOff[0], viewXY[0]);
-        assertEquals(newXY[1] + anthoterView.getHeight() + viewInWindowOff[1], viewXY[1]);
+        assertEquals(newXY[1] + anotherView.getHeight() + viewInWindowOff[1], viewXY[1]);
 
         dismissPopup();
     }
@@ -633,7 +669,12 @@ public class PopupWindowTest extends
     }
 
     public void testIsAboveAnchor() {
-        mPopupWindow = createPopupWindow(createPopupContent());
+        mInstrumentation.runOnMainSync(new Runnable() {
+            public void run() {
+                mPopupWindow = createPopupWindow(createPopupContent());
+            }
+        });
+        mInstrumentation.waitForIdleSync();
         final View upperAnchor = mActivity.findViewById(R.id.anchor_upper);
 
         mInstrumentation.runOnMainSync(new Runnable() {
@@ -778,8 +819,7 @@ public class PopupWindowTest extends
     }
 
     private View createPopupContent() {
-        TextView popupView = new TextView(mActivity);
-        popupView.setText("Popup");
+        View popupView = new View(mActivity);
         popupView.setLayoutParams(new ViewGroup.LayoutParams(50, 50));
         popupView.setBackgroundColor(Color.WHITE);
 

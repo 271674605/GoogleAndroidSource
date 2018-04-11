@@ -24,11 +24,14 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.RemoteException;
 import android.os.SystemProperties;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Slog;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import libcore.icu.TimeZoneNames;
 
@@ -171,10 +174,21 @@ public final class MccTable
      * correct version of resources.  If MCC is 0, MCC and MNC will be ignored (not set).
      * @param context Context to act on.
      * @param mccmnc truncated imsi with just the MCC and MNC - MNC assumed to be from 4th to end
+     * @param fromServiceState true if coming from the radio service state, false if from SIM
      */
-    public static void updateMccMncConfiguration(Context context, String mccmnc) {
+    public static void updateMccMncConfiguration(Context context, String mccmnc,
+            boolean fromServiceState) {
+        Slog.d(LOG_TAG, "updateMccMncConfiguration mccmnc='" + mccmnc + "' fromServiceState=" + fromServiceState);
         if (!TextUtils.isEmpty(mccmnc)) {
             int mcc, mnc;
+
+            String defaultMccMnc = TelephonyManager.getDefault().getSimOperator();
+            Slog.d(LOG_TAG, "updateMccMncConfiguration defaultMccMnc=" + defaultMccMnc);
+            //Update mccmnc only for default subscription in case of MultiSim.
+//            if (!defaultMccMnc.equals(mccmnc)) {
+//                Slog.d(LOG_TAG, "Not a Default subscription, ignoring mccmnc config update.");
+//                return;
+//            }
 
             try {
                 mcc = Integer.parseInt(mccmnc.substring(0,3));
@@ -190,28 +204,37 @@ public final class MccTable
             if (mcc != 0) {
                 setTimezoneFromMccIfNeeded(context, mcc);
                 locale = getLocaleFromMcc(context, mcc);
-                setWifiCountryCodeFromMcc(context, mcc);
             }
-            try {
-                Configuration config = new Configuration();
-                boolean updateConfig = false;
-                if (mcc != 0) {
-                    config.mcc = mcc;
-                    config.mnc = mnc == 0 ? Configuration.MNC_ZERO : mnc;
-                    updateConfig = true;
+            if (fromServiceState) {
+                setWifiCountryCodeFromMcc(context, mcc);
+            } else {
+                // from SIM
+                try {
+                    Configuration config = new Configuration();
+                    boolean updateConfig = false;
+                    if (mcc != 0) {
+                        config.mcc = mcc;
+                        config.mnc = mnc == 0 ? Configuration.MNC_ZERO : mnc;
+                        updateConfig = true;
+                    }
+                    if (locale != null) {
+                        config.setLocale(locale);
+                        updateConfig = true;
+                    }
+                    if (updateConfig) {
+                        Slog.d(LOG_TAG, "updateMccMncConfiguration updateConfig config=" + config);
+                        ActivityManagerNative.getDefault().updateConfiguration(config);
+                    } else {
+                        Slog.d(LOG_TAG, "updateMccMncConfiguration nothing to update");
+                    }
+                } catch (RemoteException e) {
+                    Slog.e(LOG_TAG, "Can't update configuration", e);
                 }
-                if (locale != null) {
-                    config.setLocale(locale);
-                    updateConfig = true;
-                }
-                if (updateConfig) {
-                    Slog.d(LOG_TAG, "updateMccMncConfiguration updateConfig config=" + config);
-                    ActivityManagerNative.getDefault().updateConfiguration(config);
-                } else {
-                    Slog.d(LOG_TAG, "updateMccMncConfiguration nothing to update");
-                }
-            } catch (RemoteException e) {
-                Slog.e(LOG_TAG, "Can't update configuration", e);
+            }
+        } else {
+            if (fromServiceState) {
+                // an empty mccmnc means no signal - tell wifi we don't know
+                setWifiCountryCodeFromMcc(context, 0);
             }
         }
     }
@@ -224,63 +247,81 @@ public final class MccTable
      * @param country Two character country code desired
      *
      * @return Locale or null if no appropriate value
-     *  {@hide}
      */
-    public static Locale getLocaleForLanguageCountry(Context context, String language, String country) {
-        String l = SystemProperties.get("persist.sys.language");
-        String c = SystemProperties.get("persist.sys.country");
-
-        if (null == language) {
+    public static Locale getLocaleForLanguageCountry(Context context, String language,
+            String country) {
+        if (language == null) {
             Slog.d(LOG_TAG, "getLocaleForLanguageCountry: skipping no language");
             return null; // no match possible
         }
-        language = language.toLowerCase(Locale.ROOT);
-        if (null == country) {
-            country = "";
+        if (country == null) {
+            country = ""; // The Locale constructor throws if passed null.
         }
-        country = country.toUpperCase(Locale.ROOT);
 
-        Locale locale;
+        // Note: persist.always.persist.locale actually means the opposite!
         boolean alwaysPersist = false;
         if (Build.IS_DEBUGGABLE) {
             alwaysPersist = SystemProperties.getBoolean("persist.always.persist.locale", false);
         }
-        if (alwaysPersist || ((null == l || 0 == l.length()) && (null == c || 0 == c.length()))) {
-            try {
-                // try to find a good match
-                String[] locales = context.getAssets().getLocales();
-                final int N = locales.length;
-                String bestMatch = null;
-                for(int i = 0; i < N; i++) {
-                    // only match full (lang + country) locales
-                    if (locales[i]!=null && locales[i].length() >= 5 &&
-                            locales[i].substring(0,2).equals(language)) {
-                        if (locales[i].substring(3,5).equals(country)) {
-                            bestMatch = locales[i];
-                            break;
-                        } else if (null == bestMatch) {
-                            bestMatch = locales[i];
-                        }
+        String persistSysLanguage = SystemProperties.get("persist.sys.language", "");
+        String persistSysCountry = SystemProperties.get("persist.sys.country", "");
+        if (!(alwaysPersist || (persistSysLanguage.isEmpty() && persistSysCountry.isEmpty()))) {
+            Slog.d(LOG_TAG, "getLocaleForLanguageCountry: skipping already persisted");
+            return null;
+        }
+
+        // Find the best match we actually have a localization for.
+        // TODO: this should really follow the CLDR chain of parent locales!
+        final Locale target = new Locale(language, country);
+        try {
+            String[] localeArray = context.getAssets().getLocales();
+            List<String> locales = new ArrayList<>(Arrays.asList(localeArray));
+
+            // Even in developer mode, you don't want the pseudolocales.
+            locales.remove("ar-XB");
+            locales.remove("en-XA");
+
+            Locale firstMatch = null;
+            for (String locale : locales) {
+                final Locale l = Locale.forLanguageTag(locale.replace('_', '-'));
+
+                // Only consider locales with both language and country.
+                if (l == null || "und".equals(l.getLanguage()) ||
+                        l.getLanguage().isEmpty() || l.getCountry().isEmpty()) {
+                    continue;
+                }
+                if (l.getLanguage().equals(target.getLanguage())) {
+                    // If we got a perfect match, we're done.
+                    if (l.getCountry().equals(target.getCountry())) {
+                        Slog.d(LOG_TAG, "getLocaleForLanguageCountry: got perfect match: " +
+                               l.toLanguageTag());
+                        return l;
+                    }
+                    // Otherwise somewhat arbitrarily take the first locale for the language,
+                    // unless we get a perfect match later. Note that these come back in no
+                    // particular order, so there's no reason to think the first match is
+                    // a particularly good match.
+                    if (firstMatch == null) {
+                        firstMatch = l;
                     }
                 }
-                if (null != bestMatch) {
-                    locale = new Locale(bestMatch.substring(0,2),
-                                               bestMatch.substring(3,5));
-                    Slog.d(LOG_TAG, "getLocaleForLanguageCountry: got match");
-                } else {
-                    locale = null;
-                    Slog.d(LOG_TAG, "getLocaleForLanguageCountry: skip no match");
-                }
-            } catch (Exception e) {
-                locale = null;
-                Slog.d(LOG_TAG, "getLocaleForLanguageCountry: exception", e);
             }
-        } else {
-            locale = null;
-            Slog.d(LOG_TAG, "getLocaleForLanguageCountry: skipping already persisted");
+
+            // We didn't find the exact locale, so return whichever locale we saw first where
+            // the language matched (if any).
+            if (firstMatch != null) {
+                Slog.d(LOG_TAG, "getLocaleForLanguageCountry: got a language-only match: " +
+                       firstMatch.toLanguageTag());
+                return firstMatch;
+            } else {
+                Slog.d(LOG_TAG, "getLocaleForLanguageCountry: no locales for language " +
+                       language);
+            }
+        } catch (Exception e) {
+            Slog.d(LOG_TAG, "getLocaleForLanguageCountry: exception", e);
         }
-        Slog.d(LOG_TAG, "getLocaleForLanguageCountry: X locale=" + locale);
-        return locale;
+
+        return null;
     }
 
     /**
@@ -296,6 +337,7 @@ public final class MccTable
         if (locale != null) {
             Configuration config = new Configuration();
             config.setLocale(locale);
+            config.userSetLocale = false;
             Slog.d(LOG_TAG, "setSystemLocale: updateLocale config=" + config);
             try {
                 ActivityManagerNative.getDefault().updateConfiguration(config);
@@ -342,19 +384,18 @@ public final class MccTable
     }
 
     /**
-     * If the number of allowed wifi channels has not been set, set it based on
-     * the MCC of the SIM.
+     * Set the country code for wifi.  This sets allowed wifi channels based on the
+     * country of the carrier we see.  If we can't see any, reset to 0 so we don't
+     * broadcast on forbidden channels.
      * @param context Context to act on.
-     * @param mcc Mobile Country Code of the SIM or SIM-like entity (build prop on CDMA)
+     * @param mcc Mobile Country Code of the operator.  0 if not known
      */
     private static void setWifiCountryCodeFromMcc(Context context, int mcc) {
         String country = MccTable.countryCodeForMcc(mcc);
-        if (!country.isEmpty()) {
-            Slog.d(LOG_TAG, "WIFI_COUNTRY_CODE set to " + country);
-            WifiManager wM = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
-            //persist
-            wM.setCountryCode(country, true);
-        }
+        Slog.d(LOG_TAG, "WIFI_COUNTRY_CODE set to " + country);
+        WifiManager wM = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+        //persist
+        wM.setCountryCode(country, true);
     }
 
     static {
@@ -383,9 +424,9 @@ public final class MccTable
 		sTable.add(new MccEntry(212,"mc",2));	//Monaco (Principality of)
 		sTable.add(new MccEntry(213,"ad",2));	//Andorra (Principality of)
 		sTable.add(new MccEntry(214,"es",2,"es"));	//Spain
-		sTable.add(new MccEntry(216,"hu",2));	//Hungary (Republic of)
+		sTable.add(new MccEntry(216,"hu",2,"hu"));	//Hungary (Republic of)
 		sTable.add(new MccEntry(218,"ba",2));	//Bosnia and Herzegovina
-		sTable.add(new MccEntry(219,"hr",2));	//Croatia (Republic of)
+		sTable.add(new MccEntry(219,"hr",2,"hr"));	//Croatia (Republic of)
 		sTable.add(new MccEntry(220,"rs",2));	//Serbia and Montenegro
 		sTable.add(new MccEntry(222,"it",2,"it"));	//Italy
 		sTable.add(new MccEntry(225,"va",2,"it"));	//Vatican City State
@@ -429,7 +470,7 @@ public final class MccTable
                 sTable.add(new MccEntry(294,"mk",2));   //The Former Yugoslav Republic of Macedonia
 		sTable.add(new MccEntry(295,"li",2));	//Liechtenstein (Principality of)
                 sTable.add(new MccEntry(297,"me",2));    //Montenegro (Republic of)
-		sTable.add(new MccEntry(302,"ca",3,""));	//Canada
+		sTable.add(new MccEntry(302,"ca",3,"en"));	//Canada
 		sTable.add(new MccEntry(308,"pm",2));	//Saint Pierre and Miquelon (Collectivit territoriale de la Rpublique franaise)
 		sTable.add(new MccEntry(310,"us",3,"en"));	//United States of America
 		sTable.add(new MccEntry(311,"us",3,"en"));	//United States of America

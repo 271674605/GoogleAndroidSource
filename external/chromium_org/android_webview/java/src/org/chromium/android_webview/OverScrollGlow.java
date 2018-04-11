@@ -5,9 +5,7 @@
 package org.chromium.android_webview;
 
 import android.content.Context;
-import android.content.res.Resources;
 import android.graphics.Canvas;
-import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.widget.EdgeEffect;
 
@@ -25,13 +23,18 @@ class OverScrollGlow {
     private int mOverScrollDeltaX;
     private int mOverScrollDeltaY;
 
-    public OverScrollGlow(View host) {
+    private boolean mShouldPull;
+
+    public OverScrollGlow(Context context, View host) {
         mHostView = host;
-        Context context = host.getContext();
         mEdgeGlowTop = new EdgeEffect(context);
         mEdgeGlowBottom = new EdgeEffect(context);
         mEdgeGlowLeft = new EdgeEffect(context);
         mEdgeGlowRight = new EdgeEffect(context);
+    }
+
+    public void setShouldPull(boolean shouldPull) {
+        mShouldPull = shouldPull;
     }
 
     /**
@@ -45,6 +48,7 @@ class OverScrollGlow {
      * @param maxY Maximum range for vertical scrolling
      */
     public void pullGlow(int x, int y, int oldX, int oldY, int maxX, int maxY) {
+        if (!mShouldPull) return;
         // Only show overscroll bars if there was no movement in any direction
         // as a result of scrolling.
         if (oldX == mHostView.getScrollX() && oldY == mHostView.getScrollY()) {

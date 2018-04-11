@@ -70,16 +70,6 @@ public abstract class IndexerListAdapter extends PinnedHeaderListAdapter impleme
      */
     protected abstract void setPinnedSectionTitle(View pinnedHeaderView, String title);
 
-    /**
-     * Sets the contacts count in the pinned header.
-     */
-    protected abstract void setPinnedHeaderContactsCount(View header);
-
-    /**
-     * clears the contacts count in the pinned header and makes the view invisible.
-     */
-    protected abstract void clearPinnedHeaderContactsCount(View header);
-
     public boolean isSectionHeaderDisplayEnabled() {
         return mSectionHeaderDisplayEnabled;
     }
@@ -149,7 +139,6 @@ public abstract class IndexerListAdapter extends PinnedHeaderListAdapter impleme
         if (isSectionHeaderDisplayEnabled() && viewIndex == getPinnedHeaderCount() - 1) {
             if (mHeader == null) {
                 mHeader = createPinnedSectionHeaderView(mContext, parent);
-                mHeader.setLayoutDirection(parent.getLayoutDirection());
             }
             return mHeader;
         } else {
@@ -184,12 +173,13 @@ public abstract class IndexerListAdapter extends PinnedHeaderListAdapter impleme
             if (section == -1) {
                 listView.setHeaderInvisible(index, false);
             } else {
-                setPinnedSectionTitle(mHeader, (String)mIndexer.getSections()[section]);
-                if (section == 0) {
-                    setPinnedHeaderContactsCount(mHeader);
-                } else {
-                    clearPinnedHeaderContactsCount(mHeader);
+                View topChild = listView.getChildAt(listPosition);
+                if (topChild != null) {
+                    // Match the pinned header's height to the height of the list item.
+                    mHeader.setMinimumHeight(topChild.getMeasuredHeight());
                 }
+                setPinnedSectionTitle(mHeader, (String)mIndexer.getSections()[section]);
+
                 // Compute the item position where the current partition begins
                 int partitionStart = getPositionForPartition(mIndexedPartition);
                 if (hasHeader(mIndexedPartition)) {

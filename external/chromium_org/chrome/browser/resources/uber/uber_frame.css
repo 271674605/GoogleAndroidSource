@@ -41,7 +41,8 @@ li.selected {
   pointer-events: none;
 }
 
-#helpNavItem {
+/* Separates the Help nav item if there are at least 3 items. */
+li:not([hidden]) ~ li:not([hidden]) ~ #helpNavItem {
   margin-top: 27px;
 }
 
@@ -51,7 +52,7 @@ button {
   color: #999;
   cursor: pointer;
   font: inherit;
-  line-height: 17px;
+  line-height: 1.417em;  /* 17px based on default 12px font size. */
   margin: 6px 0;
   padding: 0;
 }

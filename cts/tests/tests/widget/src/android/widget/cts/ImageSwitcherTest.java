@@ -16,13 +16,14 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParser;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;

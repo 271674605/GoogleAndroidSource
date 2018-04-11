@@ -21,11 +21,13 @@ import hashlib
 import logging
 import minica
 import os
+import json
 import random
 import re
 import select
 import socket
 import SocketServer
+import ssl
 import struct
 import sys
 import threading
@@ -34,16 +36,39 @@ import urllib
 import urlparse
 import zlib
 
-import echo_message
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(BASE_DIR)))
+
+# Temporary hack to deal with tlslite 0.3.8 -> 0.4.6 upgrade.
+#
+# TODO(davidben): Remove this when it has cycled through all the bots and
+# developer checkouts or when http://crbug.com/356276 is resolved.
+try:
+  os.remove(os.path.join(ROOT_DIR, 'third_party', 'tlslite',
+                         'tlslite', 'utils', 'hmac.pyc'))
+except Exception:
+  pass
+
+# Append at the end of sys.path, it's fine to use the system library.
+sys.path.append(os.path.join(ROOT_DIR, 'third_party', 'pyftpdlib', 'src'))
+
+# Insert at the beginning of the path, we want to use our copies of the library
+# unconditionally.
+sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party', 'pywebsocket', 'src'))
+sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party', 'tlslite'))
+
+import mod_pywebsocket.standalone
+from mod_pywebsocket.standalone import WebSocketServer
+# import manually
+mod_pywebsocket.standalone.ssl = ssl
+
 import pyftpdlib.ftpserver
-import testserver_base
+
 import tlslite
 import tlslite.api
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(
-    0, os.path.join(BASE_DIR, '..', '..', '..', 'third_party/pywebsocket/src'))
-from mod_pywebsocket.standalone import WebSocketServer
+import echo_message
+import testserver_base
 
 SERVER_HTTP = 0
 SERVER_FTP = 1
@@ -76,6 +101,7 @@ class WebSocketOptions:
     self.certificate = None
     self.tls_client_auth = False
     self.tls_client_ca = None
+    self.tls_module = 'ssl'
     self.use_basic_auth = False
 
 
@@ -126,9 +152,12 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
   client verification."""
 
   def __init__(self, server_address, request_hander_class, pem_cert_and_key,
-               ssl_client_auth, ssl_client_cas, ssl_bulk_ciphers,
-               record_resume_info, tls_intolerant):
-    self.cert_chain = tlslite.api.X509CertChain().parseChain(pem_cert_and_key)
+               ssl_client_auth, ssl_client_cas, ssl_client_cert_types,
+               ssl_bulk_ciphers, ssl_key_exchanges, enable_npn,
+               record_resume_info, tls_intolerant, signed_cert_timestamps,
+               fallback_scsv_enabled, ocsp_response):
+    self.cert_chain = tlslite.api.X509CertChain()
+    self.cert_chain.parsePemList(pem_cert_and_key)
     # Force using only python implementation - otherwise behavior is different
     # depending on whether m2crypto Python module is present (error is thrown
     # when it is). m2crypto uses a C (based on OpenSSL) implementation under
@@ -138,16 +167,38 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
                                                implementations=['python'])
     self.ssl_client_auth = ssl_client_auth
     self.ssl_client_cas = []
-    self.tls_intolerant = tls_intolerant
+    self.ssl_client_cert_types = []
+    if enable_npn:
+      self.next_protos = ['http/1.1']
+    else:
+      self.next_protos = None
+    if tls_intolerant == 0:
+      self.tls_intolerant = None
+    else:
+      self.tls_intolerant = (3, tls_intolerant)
+    self.signed_cert_timestamps = signed_cert_timestamps
+    self.fallback_scsv_enabled = fallback_scsv_enabled
+    self.ocsp_response = ocsp_response
 
-    for ca_file in ssl_client_cas:
-      s = open(ca_file).read()
-      x509 = tlslite.api.X509()
-      x509.parse(s)
-      self.ssl_client_cas.append(x509.subject)
+    if ssl_client_auth:
+      for ca_file in ssl_client_cas:
+        s = open(ca_file).read()
+        x509 = tlslite.api.X509()
+        x509.parse(s)
+        self.ssl_client_cas.append(x509.subject)
+
+      for cert_type in ssl_client_cert_types:
+        self.ssl_client_cert_types.append({
+            "rsa_sign": tlslite.api.ClientCertificateType.rsa_sign,
+            "dss_sign": tlslite.api.ClientCertificateType.dss_sign,
+            "ecdsa_sign": tlslite.api.ClientCertificateType.ecdsa_sign,
+            }[cert_type])
+
     self.ssl_handshake_settings = tlslite.api.HandshakeSettings()
     if ssl_bulk_ciphers is not None:
       self.ssl_handshake_settings.cipherNames = ssl_bulk_ciphers
+    if ssl_key_exchanges is not None:
+      self.ssl_handshake_settings.keyExchangeNames = ssl_key_exchanges
 
     if record_resume_info:
       # If record_resume_info is true then we'll replace the session cache with
@@ -170,7 +221,13 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
                                     reqCert=self.ssl_client_auth,
                                     settings=self.ssl_handshake_settings,
                                     reqCAs=self.ssl_client_cas,
-                                    tlsIntolerant=self.tls_intolerant)
+                                    reqCertTypes=self.ssl_client_cert_types,
+                                    nextProtos=self.next_protos,
+                                    tlsIntolerant=self.tls_intolerant,
+                                    signedCertTimestamps=
+                                    self.signed_cert_timestamps,
+                                    fallbackSCSV=self.fallback_scsv_enabled,
+                                    ocspResponse = self.ocsp_response)
       tlsConnection.ignoreAbruptClose = True
       return True
     except tlslite.api.TLSAbruptCloseError:
@@ -272,7 +329,6 @@ class TestPageHandler(testserver_base.BasePageHandler):
       self.NoContentHandler,
       self.ServerRedirectHandler,
       self.ClientRedirectHandler,
-      self.MultipartHandler,
       self.GetSSLSessionCacheHandler,
       self.SSLManySmallRecords,
       self.GetChannelID,
@@ -282,7 +338,8 @@ class TestPageHandler(testserver_base.BasePageHandler):
     post_handlers = [
       self.EchoTitleHandler,
       self.EchoHandler,
-      self.PostOnlyFileHandler] + get_handlers
+      self.PostOnlyFileHandler,
+      self.EchoMultipartPostHandler] + get_handlers
     put_handlers = [
       self.EchoTitleHandler,
       self.EchoHandler] + get_handlers
@@ -298,6 +355,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
       'jpg' : 'image/jpeg',
       'json': 'application/json',
       'pdf' : 'application/pdf',
+      'txt' : 'text/plain',
       'wav' : 'audio/wav',
       'xml' : 'text/xml'
     }
@@ -660,6 +718,37 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.wfile.write('<h1>Request Headers:</h1><pre>%s</pre>' % self.headers)
 
     self.wfile.write('</body></html>')
+    return True
+
+  def EchoMultipartPostHandler(self):
+    """This handler echoes received multipart post data as json format."""
+
+    if not (self._ShouldHandleRequest("/echomultipartpost") or
+            self._ShouldHandleRequest("/searchbyimage")):
+      return False
+
+    content_type, parameters = cgi.parse_header(
+        self.headers.getheader('content-type'))
+    if content_type == 'multipart/form-data':
+      post_multipart = cgi.parse_multipart(self.rfile, parameters)
+    elif content_type == 'application/x-www-form-urlencoded':
+      raise Exception('POST by application/x-www-form-urlencoded is '
+                      'not implemented.')
+    else:
+      post_multipart = {}
+
+    # Since the data can be binary, we encode them by base64.
+    post_multipart_base64_encoded = {}
+    for field, values in post_multipart.items():
+      post_multipart_base64_encoded[field] = [base64.b64encode(value)
+                                              for value in values]
+
+    result = {'POST_multipart' : post_multipart_base64_encoded}
+
+    self.send_response(200)
+    self.send_header("Content-type", "text/plain")
+    self.end_headers()
+    self.wfile.write(json.dumps(result, indent=2, sort_keys=False))
     return True
 
   def DownloadHandler(self):
@@ -1314,7 +1403,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
     if query_char < 0 or len(self.path) <= query_char + 1:
       self.sendRedirectHelp(test_name)
       return True
-    dest = self.path[query_char + 1:]
+    dest = urllib.unquote(self.path[query_char + 1:])
 
     self.send_response(301)  # moved permanently
     self.send_header('Location', dest)
@@ -1338,7 +1427,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
     if query_char < 0 or len(self.path) <= query_char + 1:
       self.sendRedirectHelp(test_name)
       return True
-    dest = self.path[query_char + 1:]
+    dest = urllib.unquote(self.path[query_char + 1:])
 
     self.send_response(200)
     self.send_header('Content-Type', 'text/html')
@@ -1347,29 +1436,6 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.wfile.write('<meta http-equiv="refresh" content="0;url=%s">' % dest)
     self.wfile.write('</head><body>Redirecting to %s</body></html>' % dest)
 
-    return True
-
-  def MultipartHandler(self):
-    """Send a multipart response (10 text/html pages)."""
-
-    test_name = '/multipart'
-    if not self._ShouldHandleRequest(test_name):
-      return False
-
-    num_frames = 10
-    bound = '12345'
-    self.send_response(200)
-    self.send_header('Content-Type',
-                     'multipart/x-mixed-replace;boundary=' + bound)
-    self.end_headers()
-
-    for i in xrange(num_frames):
-      self.wfile.write('--' + bound + '\r\n')
-      self.wfile.write('Content-Type: text/html\r\n\r\n')
-      self.wfile.write('<title>page ' + str(i) + '</title>')
-      self.wfile.write('page ' + str(i))
-
-    self.wfile.write('--' + bound + '--')
     return True
 
   def GetSSLSessionCacheHandler(self):
@@ -1382,11 +1448,14 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_header('Content-Type', 'text/plain')
     self.end_headers()
     try:
-      for (action, sessionID) in self.server.session_cache.log:
-        self.wfile.write('%s\t%s\n' % (action, sessionID.encode('hex')))
+      log = self.server.session_cache.log
     except AttributeError:
       self.wfile.write('Pass --https-record-resume in order to use' +
                        ' this request')
+      return True
+
+    for (action, sessionID) in log:
+      self.wfile.write('%s\t%s\n' % (action, bytes(sessionID).encode('hex')))
     return True
 
   def SSLManySmallRecords(self):
@@ -1416,7 +1485,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_response(200)
     self.send_header('Content-Type', 'text/plain')
     self.end_headers()
-    channel_id = self.server.tlsConnection.channel_id.tostring()
+    channel_id = bytes(self.server.tlsConnection.channel_id)
     self.wfile.write(hashlib.sha256(channel_id).digest().encode('base64'))
     return True
 
@@ -1444,6 +1513,8 @@ class TestPageHandler(testserver_base.BasePageHandler):
     if not self._ShouldHandleRequest('/rangereset'):
       return False
 
+    # HTTP/1.1 is required for ETag and range support.
+    self.protocol_version = 'HTTP/1.1'
     _, _, url_path, _, query, _ = urlparse.urlparse(self.path)
 
     # Defaults
@@ -1524,7 +1595,10 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_header('Content-Type', 'application/octet-stream')
     self.send_header('Content-Length', last_byte - first_byte + 1)
     if send_verifiers:
-      self.send_header('Etag', '"XYZZY"')
+      # If fail_precondition is non-zero, then the ETag for each request will be
+      # different.
+      etag = "%s%d" % (token, fail_precondition)
+      self.send_header('ETag', etag)
       self.send_header('Last-Modified', 'Tue, 19 Feb 2013 14:32 EST')
     self.end_headers()
 
@@ -1894,16 +1968,30 @@ class ServerRunner(testserver_base.TestServerRunner):
             raise testserver_base.OptionError(
                 'specified trusted client CA file not found: ' + ca_cert +
                 ' exiting...')
+
+        stapled_ocsp_response = None
+        if self.__ocsp_server and self.options.staple_ocsp_response:
+          stapled_ocsp_response = self.__ocsp_server.ocsp_response
+
         server = HTTPSServer((host, port), TestPageHandler, pem_cert_and_key,
                              self.options.ssl_client_auth,
                              self.options.ssl_client_ca,
+                             self.options.ssl_client_cert_type,
                              self.options.ssl_bulk_cipher,
+                             self.options.ssl_key_exchange,
+                             self.options.enable_npn,
                              self.options.record_resume,
-                             self.options.tls_intolerant)
-        print 'HTTPS server started on %s:%d...' % (host, server.server_port)
+                             self.options.tls_intolerant,
+                             self.options.signed_cert_timestamps_tls_ext.decode(
+                                 "base64"),
+                             self.options.fallback_scsv,
+                             stapled_ocsp_response)
+        print 'HTTPS server started on https://%s:%d...' % \
+            (host, server.server_port)
       else:
         server = HTTPServer((host, port), TestPageHandler)
-        print 'HTTP server started on %s:%d...' % (host, server.server_port)
+        print 'HTTP server started on http://%s:%d...' % \
+            (host, server.server_port)
 
       server.data_dir = self.__make_data_dir()
       server.file_root_url = self.options.file_root_url
@@ -1916,7 +2004,9 @@ class ServerRunner(testserver_base.TestServerRunner):
       # is required to work correctly. It should be fixed from pywebsocket side.
       os.chdir(self.__make_data_dir())
       websocket_options = WebSocketOptions(host, port, '.')
+      scheme = "ws"
       if self.options.cert_and_key_file:
+        scheme = "wss"
         websocket_options.use_tls = True
         websocket_options.private_key = self.options.cert_and_key_file
         websocket_options.certificate = self.options.cert_and_key_file
@@ -1931,7 +2021,8 @@ class ServerRunner(testserver_base.TestServerRunner):
               self.options.ssl_client_ca[0] + ' exiting...')
         websocket_options.tls_client_ca = self.options.ssl_client_ca[0]
       server = WebSocketServer(websocket_options)
-      print 'WebSocket server started on %s:%d...' % (host, server.server_port)
+      print 'WebSocket server started on %s://%s:%d...' % \
+          (scheme, host, server.server_port)
       server_data['port'] = server.server_port
     elif self.options.server_type == SERVER_TCP_ECHO:
       # Used for generating the key (randomly) that encodes the "echo request"
@@ -2037,6 +2128,26 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   'aborted. 2 means TLS 1.1 or higher will be '
                                   'aborted. 3 means TLS 1.2 or higher will be '
                                   'aborted.')
+    self.option_parser.add_option('--signed-cert-timestamps-tls-ext',
+                                  dest='signed_cert_timestamps_tls_ext',
+                                  default='',
+                                  help='Base64 encoded SCT list. If set, '
+                                  'server will respond with a '
+                                  'signed_certificate_timestamp TLS extension '
+                                  'whenever the client supports it.')
+    self.option_parser.add_option('--fallback-scsv', dest='fallback_scsv',
+                                  default=False, const=True,
+                                  action='store_const',
+                                  help='If given, TLS_FALLBACK_SCSV support '
+                                  'will be enabled. This causes the server to '
+                                  'reject fallback connections from compatible '
+                                  'clients (e.g. Chrome).')
+    self.option_parser.add_option('--staple-ocsp-response',
+                                  dest='staple_ocsp_response',
+                                  default=False, action='store_true',
+                                  help='If set, server will staple the OCSP '
+                                  'response whenever OCSP is on and the client '
+                                  'supports OCSP stapling.')
     self.option_parser.add_option('--https-record-resume',
                                   dest='record_resume', const=True,
                                   default=False, action='store_const',
@@ -2054,6 +2165,15 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   'file. This option may appear multiple '
                                   'times, indicating multiple CA names should '
                                   'be sent in the request.')
+    self.option_parser.add_option('--ssl-client-cert-type', action='append',
+                                  default=[], help='Specify that the client '
+                                  'certificate request should include the '
+                                  'specified certificate_type value. This '
+                                  'option may appear multiple times, '
+                                  'indicating multiple values should be send '
+                                  'in the request. Valid values are '
+                                  '"rsa_sign", "dss_sign", and "ecdsa_sign". '
+                                  'If omitted, "rsa_sign" will be used.')
     self.option_parser.add_option('--ssl-bulk-cipher', action='append',
                                   help='Specify the bulk encryption '
                                   'algorithm(s) that will be accepted by the '
@@ -2062,6 +2182,21 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   'algorithms will be used. This option may '
                                   'appear multiple times, indicating '
                                   'multiple algorithms should be enabled.');
+    self.option_parser.add_option('--ssl-key-exchange', action='append',
+                                  help='Specify the key exchange algorithm(s)'
+                                  'that will be accepted by the SSL server. '
+                                  'Valid values are "rsa", "dhe_rsa". If '
+                                  'omitted, all algorithms will be used. This '
+                                  'option may appear multiple times, '
+                                  'indicating multiple algorithms should be '
+                                  'enabled.');
+    # TODO(davidben): Add ALPN support to tlslite.
+    self.option_parser.add_option('--enable-npn', dest='enable_npn',
+                                  default=False, const=True,
+                                  action='store_const',
+                                  help='Enable server support for the NPN '
+                                  'extension. The server will advertise '
+                                  'support for exactly one protocol, http/1.1')
     self.option_parser.add_option('--file-root-url', default='/files/',
                                   help='Specify a root URL for files served.')
 

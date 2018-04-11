@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2011-2013 Broadcom Corporation
+ *  Copyright (C) 2011-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -140,6 +140,11 @@ UINT8 *p_nfc_hal_dm_lptd_cfg = (UINT8 *) &nfc_hal_dm_lptd_cfg[0];
 */
 UINT8 *p_nfc_hal_dm_pll_325_cfg = NULL;
 
+/*
+** Proprietary pre-set is required, if not NULL.
+*/
+tNFC_HAL_DM_PRE_SET_MEM *p_nfc_hal_dm_pre_set_mem = NULL;
+
 tNFC_HAL_CFG nfc_hal_cfg =
 {
     FALSE,                                  /* set nfc_hal_prm_nvm_required to TRUE, if the platform wants to abort PRM process without NVM */
@@ -148,10 +153,30 @@ tNFC_HAL_CFG nfc_hal_cfg =
                                             ** then set it to short to optimize bootup time because NFCC cannot send RESET NTF.
                                             ** Otherwise, it depends on NVM type and size of patchram.
                                             */
-    (UINT16) NFC_HAL_NFCC_ENABLE_TIMEOUT,   /* max time to wait for RESET NTF after setting Xtal frequency
+    (UINT16) NFC_HAL_NFCC_ENABLE_TIMEOUT    /* max time to wait for RESET NTF after setting Xtal frequency
                                             ** It depends on NVM type and size of patchram.
                                             */
-    (HAL_NFC_HCI_UICC0_HOST | HAL_NFC_HCI_UICC1_HOST)  /* Set bit(s) for supported UICC(s) */
+#if (defined(NFC_HAL_HCI_INCLUDED) && (NFC_HAL_HCI_INCLUDED == TRUE))
+    ,
+    TRUE,                                   /* set nfc_hal_first_boot to TRUE, if platform enables NFC for the first time after bootup */
+    (HAL_NFC_HCI_UICC0_HOST | HAL_NFC_HCI_UICC1_HOST | HAL_NFC_HCI_UICC2_HOST)  /* Set bit(s) for supported UICC(s) */
+#endif
 };
 
 tNFC_HAL_CFG *p_nfc_hal_cfg= (tNFC_HAL_CFG *) &nfc_hal_cfg;
+
+const UINT8 nfc_hal_dm_xtal_params_cfg [] =
+{
+    8,             /* length */
+    0x00,           /* B0 Rfpll_cfg_pll_xtal_div_2                  */
+    0x00,           /* B1 Rfpll_cfg_pll_vcocal1_0_cal_ref_timeout   */
+    0x00,           /* B2 Rfpll_cfg_pll_vcocal2_cal_count           */
+    0x00,           /* B3 Rfpll_cfg_pll_vcocal3_cal_count           */
+    0x00,           /* B4 Rfpll_cfg_pll_dsm_b_msb_wild_base         */
+    0x00,           /* B5 Rfpll_cfg_pll_dsm_b_lsb_3_wild_base_3     */
+    0x00,           /* B6 Rfpll_cfg_pll_dsm_b_lsb_2_wild_base_2     */
+    0x00            /* B7 Rfpll_cfg_pll_dsm_b_lsb_1_wild_base_1     */
+};
+
+/* By default, the XTAL command does not need these extra params. */
+UINT8 *p_nfc_hal_dm_xtal_params_cfg = NULL;

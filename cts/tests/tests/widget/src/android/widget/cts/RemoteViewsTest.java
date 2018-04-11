@@ -16,7 +16,8 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import android.test.UiThreadTest;
+import com.android.cts.widget.R;
 
 
 import android.app.Activity;
@@ -25,13 +26,13 @@ import android.app.PendingIntent;
 import android.app.Instrumentation.ActivityMonitor;
 import android.content.Intent;
 import android.content.res.ColorStateList;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.os.Parcel;
 import android.test.ActivityInstrumentationTestCase2;
-import android.text.style.cts.MockURLSpanTestActivity;
 import android.view.View;
 import android.widget.AbsoluteLayout;
 import android.widget.Chronometer;
@@ -56,8 +57,8 @@ import java.io.OutputStream;
 /**
  * Test {@link RemoteViews}.
  */
-public class RemoteViewsTest extends ActivityInstrumentationTestCase2<RemoteViewsStubActivity> {
-    private static final String PACKAGE_NAME = "com.android.cts.stub";
+public class RemoteViewsTest extends ActivityInstrumentationTestCase2<RemoteViewsCtsActivity> {
+    private static final String PACKAGE_NAME = "com.android.cts.widget";
 
     private static final int INVALD_ID = -1;
 
@@ -70,15 +71,20 @@ public class RemoteViewsTest extends ActivityInstrumentationTestCase2<RemoteView
     private Activity mActivity;
 
     public RemoteViewsTest() {
-        super(PACKAGE_NAME, RemoteViewsStubActivity.class);
+        super(PACKAGE_NAME, RemoteViewsCtsActivity.class);
     }
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
         mActivity = getActivity();
-        mRemoteViews = new RemoteViews(PACKAGE_NAME, R.layout.remoteviews_good);
-        mResult = mRemoteViews.apply(mActivity, null);
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                mRemoteViews = new RemoteViews(PACKAGE_NAME, R.layout.remoteviews_good);
+                mResult = mRemoteViews.apply(mActivity, null);
+            }
+        });
     }
 
     public void testConstructor() {
@@ -308,6 +314,7 @@ public class RemoteViewsTest extends ActivityInstrumentationTestCase2<RemoteView
         mRemoteViews.describeContents();
     }
 
+    @UiThreadTest
     public void testWriteToParcel() {
         mRemoteViews.setTextViewText(R.id.remoteView_text, "This is content");
         mRemoteViews.setViewVisibility(R.id.remoteView_frame, View.GONE);

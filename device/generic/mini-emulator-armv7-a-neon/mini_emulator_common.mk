@@ -22,8 +22,10 @@ PRODUCT_PACKAGES += \
     lights.goldfish \
     power.goldfish \
     sensors.goldfish \
+    vibrator.goldfish \
     qemu-props \
     qemud \
+    libGLES_android \
     libGLESv1_CM_emulation \
     lib_renderControl_enc \
     libEGL_emulation \
@@ -44,5 +46,8 @@ PRODUCT_COPY_FILES += \
     frameworks/av/media/libeffects/data/audio_effects.conf:system/etc/audio_effects.conf \
     hardware/libhardware_legacy/audio/audio_policy.conf:system/etc/audio_policy.conf \
     device/generic/goldfish/camera/media_profiles.xml:system/etc/media_profiles.xml \
+    frameworks/av/media/libstagefright/data/media_codecs_google_audio.xml:system/etc/media_codecs_google_audio.xml \
+    frameworks/av/media/libstagefright/data/media_codecs_google_telephony.xml:system/etc/media_codecs_google_telephony.xml \
+    frameworks/av/media/libstagefright/data/media_codecs_google_video.xml:system/etc/media_codecs_google_video.xml \
     device/generic/goldfish/camera/media_codecs.xml:system/etc/media_codecs.xml \
     device/generic/goldfish/fstab.goldfish:root/fstab.goldfish

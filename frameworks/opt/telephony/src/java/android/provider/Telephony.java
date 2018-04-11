@@ -27,10 +27,12 @@ import android.database.Cursor;
 import android.database.sqlite.SqliteWrapper;
 import android.net.Uri;
 import android.telephony.SmsMessage;
+import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
 import android.telephony.Rlog;
 import android.util.Patterns;
 
+import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.SmsApplication;
 
 
@@ -42,6 +44,64 @@ import java.util.regex.Pattern;
 /**
  * The Telephony provider contains data related to phone operation, specifically SMS and MMS
  * messages and access to the APN list, including the MMSC to use.
+ *
+ * <p class="note"><strong>Note:</strong> These APIs are not available on all Android-powered
+ * devices. If your app depends on telephony features such as for managing SMS messages, include
+ * a <a href="{@docRoot}guide/topics/manifest/uses-feature-element.html">{@code &lt;uses-feature>}
+ * </a> element in your manifest that declares the {@code "android.hardware.telephony"} hardware
+ * feature. Alternatively, you can check for telephony availability at runtime using either
+ * {@link android.content.pm.PackageManager#hasSystemFeature
+ * hasSystemFeature(PackageManager.FEATURE_TELEPHONY)} or {@link
+ * android.telephony.TelephonyManager#getPhoneType}.</p>
+ *
+ * <h3>Creating an SMS app</h3>
+ *
+ * <p>Only the default SMS app (selected by the user in system settings) is able to write to the
+ * SMS Provider (the tables defined within the {@code Telephony} class) and only the default SMS
+ * app receives the {@link android.provider.Telephony.Sms.Intents#SMS_DELIVER_ACTION} broadcast
+ * when the user receives an SMS or the {@link
+ * android.provider.Telephony.Sms.Intents#WAP_PUSH_DELIVER_ACTION} broadcast when the user
+ * receives an MMS.</p>
+ *
+ * <p>Any app that wants to behave as the user's default SMS app must handle the following intents:
+ * <ul>
+ * <li>In a broadcast receiver, include an intent filter for {@link Sms.Intents#SMS_DELIVER_ACTION}
+ * (<code>"android.provider.Telephony.SMS_DELIVER"</code>). The broadcast receiver must also
+ * require the {@link android.Manifest.permission#BROADCAST_SMS} permission.
+ * <p>This allows your app to directly receive incoming SMS messages.</p></li>
+ * <li>In a broadcast receiver, include an intent filter for {@link
+ * Sms.Intents#WAP_PUSH_DELIVER_ACTION}} ({@code "android.provider.Telephony.WAP_PUSH_DELIVER"})
+ * with the MIME type <code>"application/vnd.wap.mms-message"</code>.
+ * The broadcast receiver must also require the {@link
+ * android.Manifest.permission#BROADCAST_WAP_PUSH} permission.
+ * <p>This allows your app to directly receive incoming MMS messages.</p></li>
+ * <li>In your activity that delivers new messages, include an intent filter for
+ * {@link android.content.Intent#ACTION_SENDTO} (<code>"android.intent.action.SENDTO"
+ * </code>) with schemas, <code>sms:</code>, <code>smsto:</code>, <code>mms:</code>, and
+ * <code>mmsto:</code>.
+ * <p>This allows your app to receive intents from other apps that want to deliver a
+ * message.</p></li>
+ * <li>In a service, include an intent filter for {@link
+ * android.telephony.TelephonyManager#ACTION_RESPOND_VIA_MESSAGE}
+ * (<code>"android.intent.action.RESPOND_VIA_MESSAGE"</code>) with schemas,
+ * <code>sms:</code>, <code>smsto:</code>, <code>mms:</code>, and <code>mmsto:</code>.
+ * This service must also require the {@link
+ * android.Manifest.permission#SEND_RESPOND_VIA_MESSAGE} permission.
+ * <p>This allows users to respond to incoming phone calls with an immediate text message
+ * using your app.</p></li>
+ * </ul>
+ *
+ * <p>Other apps that are not selected as the default SMS app can only <em>read</em> the SMS
+ * Provider, but may also be notified when a new SMS arrives by listening for the {@link
+ * Sms.Intents#SMS_RECEIVED_ACTION}
+ * broadcast, which is a non-abortable broadcast that may be delivered to multiple apps. This
+ * broadcast is intended for apps that&mdash;while not selected as the default SMS app&mdash;need to
+ * read special incoming messages such as to perform phone number verification.</p>
+ *
+ * <p>For more information about building SMS apps, read the blog post, <a
+ * href="http://android-developers.blogspot.com/2013/10/getting-your-sms-apps-ready-for-kitkat.html"
+ * >Getting Your SMS Apps Ready for KitKat</a>.</p>
+ *
  */
 public final class Telephony {
     private static final String TAG = "Telephony";
@@ -180,10 +240,30 @@ public final class Telephony {
         public static final String LOCKED = "locked";
 
         /**
-         * Error code associated with sending or receiving this message.
+         * The sub_id to which the message belongs to
+         * <p>Type: INTEGER (long) </p>
+         * @hide
+         */
+        public static final String SUB_ID = "sub_id";
+
+        /**
+         * The MTU size of the mobile interface to which the APN connected
+         * @hide
+         */
+        public static final String MTU = "mtu";
+
+        /**
+         * Error code associated with sending or receiving this message
          * <P>Type: INTEGER</P>
          */
         public static final String ERROR_CODE = "error_code";
+
+        /**
+         * The identity of the sender of a sent message. It is
+         * usually the package name of the app which sends the message.
+         * <p>Type: TEXT</p>
+         */
+        public static final String CREATOR = "creator";
     }
 
     /**
@@ -256,7 +336,29 @@ public final class Telephony {
         public static Uri addMessageToUri(ContentResolver resolver,
                 Uri uri, String address, String body, String subject,
                 Long date, boolean read, boolean deliveryReport) {
-            return addMessageToUri(resolver, uri, address, body, subject,
+            return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                    resolver, uri, address, body, subject, date, read, deliveryReport, -1L);
+        }
+
+        /**
+         * Add an SMS to the given URI.
+         *
+         * @param resolver the content resolver to use
+         * @param uri the URI to add the message to
+         * @param address the address of the sender
+         * @param body the body of the message
+         * @param subject the psuedo-subject of the message
+         * @param date the timestamp for the message
+         * @param read true if the message has been read, false if not
+         * @param deliveryReport true if a delivery report was requested, false if not
+         * @param subId the sub_id which the message belongs to
+         * @return the URI for the new message
+         * @hide
+         */
+        public static Uri addMessageToUri(long subId, ContentResolver resolver,
+                Uri uri, String address, String body, String subject,
+                Long date, boolean read, boolean deliveryReport) {
+            return addMessageToUri(subId, resolver, uri, address, body, subject,
                     date, read, deliveryReport, -1L);
         }
 
@@ -278,8 +380,34 @@ public final class Telephony {
         public static Uri addMessageToUri(ContentResolver resolver,
                 Uri uri, String address, String body, String subject,
                 Long date, boolean read, boolean deliveryReport, long threadId) {
-            ContentValues values = new ContentValues(7);
+            return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                    resolver, uri, address, body, subject,
+                    date, read, deliveryReport, threadId);
+        }
 
+        /**
+         * Add an SMS to the given URI with thread_id specified.
+         *
+         * @param resolver the content resolver to use
+         * @param uri the URI to add the message to
+         * @param address the address of the sender
+         * @param body the body of the message
+         * @param subject the psuedo-subject of the message
+         * @param date the timestamp for the message
+         * @param read true if the message has been read, false if not
+         * @param deliveryReport true if a delivery report was requested, false if not
+         * @param threadId the thread_id of the message
+         * @param subId the sub_id which the message belongs to
+         * @return the URI for the new message
+         * @hide
+         */
+        public static Uri addMessageToUri(long subId, ContentResolver resolver,
+                Uri uri, String address, String body, String subject,
+                Long date, boolean read, boolean deliveryReport, long threadId) {
+            ContentValues values = new ContentValues(8);
+            Rlog.v(TAG,"Telephony addMessageToUri sub id: " + subId);
+
+            values.put(SUB_ID, subId);
             values.put(ADDRESS, address);
             if (date != null) {
                 values.put(DATE, date);
@@ -392,7 +520,26 @@ public final class Telephony {
             public static Uri addMessage(ContentResolver resolver,
                     String address, String body, String subject, Long date,
                     boolean read) {
-                return addMessageToUri(resolver, CONTENT_URI, address, body,
+                return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                        resolver, CONTENT_URI, address, body, subject, date, read, false);
+            }
+
+            /**
+             * Add an SMS to the Draft box.
+             *
+             * @param resolver the content resolver to use
+             * @param address the address of the sender
+             * @param body the body of the message
+             * @param subject the psuedo-subject of the message
+             * @param date the timestamp for the message
+             * @param read true if the message has been read, false if not
+             * @param subId the sub_id which the message belongs to
+             * @return the URI for the new message
+             * @hide
+             */
+            public static Uri addMessage(long subId, ContentResolver resolver,
+                    String address, String body, String subject, Long date, boolean read) {
+                return addMessageToUri(subId, resolver, CONTENT_URI, address, body,
                         subject, date, read, false);
             }
         }
@@ -432,7 +579,25 @@ public final class Telephony {
              */
             public static Uri addMessage(ContentResolver resolver,
                     String address, String body, String subject, Long date) {
-                return addMessageToUri(resolver, CONTENT_URI, address, body,
+                return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                        resolver, CONTENT_URI, address, body, subject, date, true, false);
+            }
+
+            /**
+             * Add an SMS to the Draft box.
+             *
+             * @param resolver the content resolver to use
+             * @param address the address of the sender
+             * @param body the body of the message
+             * @param subject the psuedo-subject of the message
+             * @param date the timestamp for the message
+             * @param subId the sub_id which the message belongs to
+             * @return the URI for the new message
+             * @hide
+             */
+            public static Uri addMessage(long subId, ContentResolver resolver,
+                    String address, String body, String subject, Long date) {
+                return addMessageToUri(subId, resolver, CONTENT_URI, address, body,
                         subject, date, true, false);
             }
         }
@@ -453,6 +618,33 @@ public final class Telephony {
              * The {@code content://} style URL for this table.
              */
             public static final Uri CONTENT_URI = Uri.parse("content://sms/draft");
+
+           /**
+            * @hide
+            */
+            public static Uri addMessage(ContentResolver resolver,
+                    String address, String body, String subject, Long date) {
+                return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                        resolver, CONTENT_URI, address, body, subject, date, true, false);
+            }
+
+            /**
+             * Add an SMS to the Draft box.
+             *
+             * @param resolver the content resolver to use
+             * @param address the address of the sender
+             * @param body the body of the message
+             * @param subject the psuedo-subject of the message
+             * @param date the timestamp for the message
+             * @param subId the sub_id which the message belongs to
+             * @return the URI for the new message
+             * @hide
+             */
+            public static Uri addMessage(long subId, ContentResolver resolver,
+                    String address, String body, String subject, Long date) {
+                return addMessageToUri(subId, resolver, CONTENT_URI, address, body,
+                        subject, date, true, false);
+            }
 
             /**
              * The default sort order for this table.
@@ -497,7 +689,28 @@ public final class Telephony {
             public static Uri addMessage(ContentResolver resolver,
                     String address, String body, String subject, Long date,
                     boolean deliveryReport, long threadId) {
-                return addMessageToUri(resolver, CONTENT_URI, address, body,
+                return addMessageToUri(SubscriptionManager.getDefaultSmsSubId(),
+                        resolver, CONTENT_URI, address, body, subject, date,
+                        true, deliveryReport, threadId);
+            }
+
+            /**
+             * Add an SMS to the Out box.
+             *
+             * @param resolver the content resolver to use
+             * @param address the address of the sender
+             * @param body the body of the message
+             * @param subject the psuedo-subject of the message
+             * @param date the timestamp for the message
+             * @param deliveryReport whether a delivery report was requested for the message
+             * @param subId the sub_id which the message belongs to
+             * @return the URI for the new message
+             * @hide
+             */
+            public static Uri addMessage(long subId, ContentResolver resolver,
+                    String address, String body, String subject, Long date,
+                    boolean deliveryReport, long threadId) {
+                return addMessageToUri(subId, resolver, CONTENT_URI, address, body,
                         subject, date, true, deliveryReport, threadId);
             }
         }
@@ -606,7 +819,7 @@ public final class Telephony {
              * the user. The intent will have the following extra values:</p>
              *
              * <ul>
-             *   <li><em>pdus</em> - An Object[] of byte[]s containing the PDUs
+             *   <li><em>"pdus"</em> - An Object[] of byte[]s containing the PDUs
              *   that make up the message.</li>
              * </ul>
              *
@@ -615,10 +828,49 @@ public final class Telephony {
              *
              * <p>If a BroadcastReceiver encounters an error while processing
              * this intent it should set the result code appropriately.</p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must declare
+             * {@link android.Manifest.permission#BROADCAST_SMS} as a required permission in
+             * the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">{@code
+             * &lt;receiver>}</a> tag.
              */
             @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
             public static final String SMS_DELIVER_ACTION =
                     "android.provider.Telephony.SMS_DELIVER";
+
+            /**
+             * Broadcast Action: A new text-based SMS message has been received
+             * by the device. This intent will only be delivered to a
+             * carrier app which is responsible for filtering the message.
+             * If the carrier app wants to drop a message, it should set the result
+             * code to {@link android.app.Activity#RESULT_CANCELED}. The carrier app can
+             * also modify the SMS PDU by setting the "pdus" value in result extras.</p>
+             *
+             * The intent will have the following extra values:</p>
+             *
+             * <ul>
+             *   <li><em>"pdus"</em> - An Object[] of byte[]s containing the PDUs
+             *   that make up the message.</li>
+             *   <li><em>"format"</em> - A String describing the format of the PDUs. It can
+             *   be either "3gpp" or "3gpp2".</li>
+             *   <li><em>"destport"</em> - An int describing the destination port of a data
+             *   SMS. It will be -1 for text SMS.</li>
+             * </ul>
+             *
+             * <p>The extra values can be extracted using
+             * {@link #getMessagesFromIntent(Intent)}.</p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must be a carrier privileged app.
+             * It must also declare {@link android.Manifest.permission#BROADCAST_SMS} as a required
+             * permission in the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">
+             * {@code &lt;receiver>}</a> tag.
+             * {@hide}
+             */
+            @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
+            public static final String SMS_FILTER_ACTION =
+                    "android.provider.Telephony.SMS_FILTER";
 
             /**
              * Broadcast Action: A new text-based SMS message has been received
@@ -628,7 +880,7 @@ public final class Telephony {
              * values:</p>
              *
              * <ul>
-             *   <li><em>pdus</em> - An Object[] of byte[]s containing the PDUs
+             *   <li><em>"pdus"</em> - An Object[] of byte[]s containing the PDUs
              *   that make up the message.</li>
              * </ul>
              *
@@ -649,7 +901,7 @@ public final class Telephony {
              * values:</p>
              *
              * <ul>
-             *   <li><em>pdus</em> - An Object[] of byte[]s containing the PDUs
+             *   <li><em>"pdus"</em> - An Object[] of byte[]s containing the PDUs
              *   that make up the message.</li>
              * </ul>
              *
@@ -670,12 +922,12 @@ public final class Telephony {
              * the user. The intent will have the following extra values:</p>
              *
              * <ul>
-             *   <li><em>transactionId (Integer)</em> - The WAP transaction ID</li>
-             *   <li><em>pduType (Integer)</em> - The WAP PDU type</li>
-             *   <li><em>header (byte[])</em> - The header of the message</li>
-             *   <li><em>data (byte[])</em> - The data payload of the message</li>
-             *   <li><em>contentTypeParameters (HashMap&lt;String,String&gt;)</em>
-             *   - Any parameters associated with the content type
+             *   <li><em>"transactionId"</em> - (Integer) The WAP transaction ID</li>
+             *   <li><em>"pduType"</em> - (Integer) The WAP PDU type</li>
+             *   <li><em>"header"</em> - (byte[]) The header of the message</li>
+             *   <li><em>"data"</em> - (byte[]) The data payload of the message</li>
+             *   <li><em>"contentTypeParameters" </em>
+             *   -(HashMap&lt;String,String&gt;) Any parameters associated with the content type
              *   (decoded from the WSP Content-Type header)</li>
              * </ul>
              *
@@ -688,6 +940,12 @@ public final class Telephony {
              * <p>If any unassigned well-known parameters are encountered, the key of the map will
              * be 'unassigned/0x...', where '...' is the hex value of the unassigned parameter.  If
              * a parameter has No-Value the value in the map will be null.</p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must declare
+             * {@link android.Manifest.permission#BROADCAST_WAP_PUSH} as a required permission in
+             * the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">{@code
+             * &lt;receiver>}</a> tag.
              */
             @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
             public static final String WAP_PUSH_DELIVER_ACTION =
@@ -701,12 +959,12 @@ public final class Telephony {
              * values:</p>
              *
              * <ul>
-             *   <li><em>transactionId (Integer)</em> - The WAP transaction ID</li>
-             *   <li><em>pduType (Integer)</em> - The WAP PDU type</li>
-             *   <li><em>header (byte[])</em> - The header of the message</li>
-             *   <li><em>data (byte[])</em> - The data payload of the message</li>
-             *   <li><em>contentTypeParameters (HashMap&lt;String,String&gt;)</em>
-             *   - Any parameters associated with the content type
+             *   <li><em>"transactionId"</em> - (Integer) The WAP transaction ID</li>
+             *   <li><em>"pduType"</em> - (Integer) The WAP PDU type</li>
+             *   <li><em>"header"</em> - (byte[]) The header of the message</li>
+             *   <li><em>"data"</em> - (byte[]) The data payload of the message</li>
+             *   <li><em>"contentTypeParameters"</em>
+             *   - (HashMap&lt;String,String&gt;) Any parameters associated with the content type
              *   (decoded from the WSP Content-Type header)</li>
              * </ul>
              *
@@ -730,7 +988,7 @@ public final class Telephony {
              * values:</p>
              *
              * <ul>
-             *   <li><em>message</em> - An SmsCbMessage object containing the broadcast message
+             *   <li><em>"message"</em> - An SmsCbMessage object containing the broadcast message
              *   data. This is not an emergency alert, so ETWS and CMAS data will be null.</li>
              * </ul>
              *
@@ -750,7 +1008,7 @@ public final class Telephony {
              * values:</p>
              *
              * <ul>
-             *   <li><em>message</em> - An SmsCbMessage object containing the broadcast message
+             *   <li><em>"message"</em> - An SmsCbMessage object containing the broadcast message
              *   data, including ETWS or CMAS warning notification info if present.</li>
              * </ul>
              *
@@ -770,7 +1028,7 @@ public final class Telephony {
              * have the following extra values:</p>
              *
              * <ul>
-             *   <li><em>operations</em> - An array of CdmaSmsCbProgramData objects containing
+             *   <li><em>"operations"</em> - An array of CdmaSmsCbProgramData objects containing
              *   the service category operations (add/delete/clear) to perform.</li>
              * </ul>
              *
@@ -800,13 +1058,55 @@ public final class Telephony {
              * following extra value:</p>
              *
              * <ul>
-             *   <li><em>result</em> - An int result code, e.g. {@link #RESULT_SMS_OUT_OF_MEMORY}
+             *   <li><em>"result"</em> - An int result code, e.g. {@link #RESULT_SMS_OUT_OF_MEMORY}
              *   indicating the error returned to the network.</li>
              * </ul>
              */
             @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
             public static final String SMS_REJECTED_ACTION =
                 "android.provider.Telephony.SMS_REJECTED";
+
+            /**
+             * Broadcast Action: A new SMS PDU needs to be sent from
+             * the device. This intent will only be delivered to a
+             * carrier app. That app is responsible for sending the PDU.
+             * The intent will have the following extra values:</p>
+             *
+             * <ul>
+             *   <li><em>"pdu"</em> - (byte[]) The PDU to send.</li>
+             *   <li><em>"smsc"</em> - (byte[]) The service center address (for GSM PDU only).</li>
+             *   <li><em>"format"</em> - (String) The format of the PDU. Either 3gpp or 3gpp2. </li>
+             *   <li><em>"concat.refNumber"</em> - (int) If the SMS is part of a multi-part SMS, the
+             *   ref number used in the SMS header.</li>
+             *   <li><em>"concat.seqNumber"</em> - (int) If the SMS is part of a multi-part SMS, the
+             *   sequence number of this SMS.</li>
+             *   <li><em>"concat.msgCount"</em> - (int) If the SMS is part of a multi-part SMS, the
+             *   total number of SMSes in the multi-part SMS.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver is trying to send the message,
+             *  it should set the result code to {@link android.app.Activity#RESULT_OK} and set
+             *  the following in the result extra values:</p>
+             *
+             * <ul>
+             *   <li><em>"messageref"</em> - (int) The new message reference number which will be
+             *   later used in the updateSmsSendStatus call.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver cannot send the message, it should not set the result
+             *  code and the platform will send it via the normal pathway.
+             * </p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must be a carrier privileged app.
+             * It must also declare {@link android.Manifest.permission#BROADCAST_SMS} as a required
+             * permission in the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">
+             * {@code &lt;receiver>}</a> tag.
+             * {@hide}
+             */
+            @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
+            public static final String SMS_SEND_ACTION =
+                "android.provider.Telephony.SMS_SEND";
 
             /**
              * Read the PDUs out of an {@link #SMS_RECEIVED_ACTION} or a
@@ -818,6 +1118,10 @@ public final class Telephony {
             public static SmsMessage[] getMessagesFromIntent(Intent intent) {
                 Object[] messages = (Object[]) intent.getSerializableExtra("pdus");
                 String format = intent.getStringExtra("format");
+                long subId = intent.getLongExtra(PhoneConstants.SUBSCRIPTION_KEY,
+                        SubscriptionManager.getDefaultSmsSubId());
+
+                Rlog.v(TAG, " getMessagesFromIntent sub_id : " + subId);
 
                 int pduCount = messages.length;
                 SmsMessage[] msgs = new SmsMessage[pduCount];
@@ -825,6 +1129,7 @@ public final class Telephony {
                 for (int i = 0; i < pduCount; i++) {
                     byte[] pdu = (byte[]) messages[i];
                     msgs[i] = SmsMessage.createFromPdu(pdu, format);
+                    msgs[i].setSubId(subId);
                 }
                 return msgs;
             }
@@ -846,6 +1151,8 @@ public final class Telephony {
         public static final int MESSAGE_BOX_DRAFTS = 3;
         /** Message box: outbox. */
         public static final int MESSAGE_BOX_OUTBOX = 4;
+        /** Message box: failed. */
+        public static final int MESSAGE_BOX_FAILED = 5;
 
         /**
          * The thread ID of the message.
@@ -1382,6 +1689,20 @@ public final class Telephony {
          * <P>Type: INTEGER (boolean)</P>
          */
         public static final String LOCKED = "locked";
+
+        /**
+         * The sub id to which message belongs to
+         * <p>Type: INTEGER</p>
+         * @hide
+         */
+        public static final String SUB_ID = "sub_id";
+
+        /**
+         * The identity of the sender of a sent message. It is
+         * usually the package name of the app which sends the message.
+         * <p>Type: TEXT</p>
+         */
+        public static final String CREATOR = "creator";
     }
 
     /**
@@ -1458,6 +1779,12 @@ public final class Telephony {
          * <P>Type: INTEGER</P>
          */
         public static final String HAS_ATTACHMENT = "has_attachment";
+
+        /**
+         * If the thread is archived
+         * <P>Type: INTEGER (boolean)</P>
+         */
+        public static final String ARCHIVED = "archived";
     }
 
     /**
@@ -1948,9 +2275,101 @@ public final class Telephony {
                     = "android.intent.action.CONTENT_CHANGED";
 
             /**
+             * Broadcast Action: A new MMS PDU needs to be sent from
+             * the device. This intent will only be delivered to a
+             * carrier app. That app is responsible for sending the PDU.
+             * The intent will have the following extra values:</p>
+             *
+             * <ul>
+             *   <li><em>{@link #EXTRA_MMS_CONTENT_URI}</em> - (Uri) The content provider of the
+             *     PDU to send.</li>
+             *   <li><em>{@link #EXTRA_MMS_LOCATION_URL}</em> - (String) The optional url to send
+             *     this MMS PDU. If this is not specified, PDU should be sent to the default MMSC
+             *     url.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver is trying to send the message,
+             *  it should set the result code to {@link android.app.Activity#RESULT_OK} and set
+             *  the following in the result extra values:</p>
+             *
+             * <ul>
+             *   <li><em>"messageref"</em> - (int) The new message reference number which will be
+             *   later used in the updateMmsSendStatus call.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver cannot send the message, it should not set the result
+             *  code and the platform will send it via the normal pathway.
+             * </p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must be a carrier privileged app.
+             * It must also declare {@link android.Manifest.permission#BROADCAST_WAP_PUSH} as a required
+             * permission in the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">
+             * {@code &lt;receiver>}</a> tag.
+             * {@hide}
+             */
+            @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
+            public static final String MMS_SEND_ACTION =
+                    "android.provider.Telephony.MMS_SEND";
+
+            /**
+             * Broadcast Action: A new MMS needs to be downloaded.
+             * This intent will only be delivered to a
+             * carrier app. That app is responsible for downloading the message at the URL.
+             * The intent will have the following extra values:</p>
+             *
+             * <ul>
+             *   <li><em>{@link #EXTRA_MMS_CONTENT_URI}</em> - (Uri) The content provider of the
+             *     PDU to be downloaded.</li>
+             *   <li><em>{@link #EXTRA_MMS_LOCATION_URL}</em> - (String) The message URL to be
+             *     downloaded.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver is trying to download the message,
+             *  it should set the result code to {@link android.app.Activity#RESULT_OK} and set
+             *  the following in the result extra values:</p>
+             *
+             * <ul>
+             *   <li><em>"messageref"</em> - (int) The new message reference number which will be
+             *   later used in the updateMmsDownloadStatus call.</li>
+             * </ul>
+             *
+             * <p>If a BroadcastReceiver cannot download the message, it should not set the result
+             *  code and the platform will download it via the normal pathway.
+             * </p>
+             *
+             * <p class="note"><strong>Note:</strong>
+             * The broadcast receiver that filters for this intent must be a carrier privileged app.
+             * It must also declare {@link android.Manifest.permission#BROADCAST_WAP_PUSH} as a required
+             * permission in the <a href="{@docRoot}guide/topics/manifest/receiver-element.html">
+             * {@code &lt;receiver>}</a> tag.
+             * {@hide}
+             */
+            @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
+            public static final String MMS_DOWNLOAD_ACTION =
+                    "android.provider.Telephony.MMS_DOWNLOAD";
+
+            /**
              * An extra field which stores the URI of deleted contents.
              */
             public static final String DELETED_CONTENTS = "deleted_contents";
+
+            /**
+             * The content provider of the PDU to be sent/downloaded passed as an extra for
+             * {@link #MMS_DOWNLOAD_ACTION} and {@link #MMS_SEND_ACTION}.
+             * {@hide}
+             */
+            public static final String EXTRA_MMS_CONTENT_URI =
+                    "android.provider.Telephony.extra.MMS_CONTENT_URI";
+
+            /**
+             * The message URL to be downloaded passed as an extra for {@link #MMS_DOWNLOAD_ACTION}.
+             * It is also the URL to send an MMS to passed as an extra for
+             * {@link #MMS_SEND_ACTION}.
+             * {@hide}
+             */
+            public static final String EXTRA_MMS_LOCATION_URL =
+                    "android.provider.Telephony.extra.MMS_LOCATION_URL";
         }
     }
 
@@ -2111,6 +2530,13 @@ public final class Telephony {
              * <P>Type: INTEGER (long)</P>
              */
             public static final String LAST_TRY = "last_try";
+
+            /**
+             * The sub_id to which the pending message belongs to
+             * <p>Type: INTEGER (long) </p>
+             * @hide
+             */
+            public static final String SUB_ID = "pending_sub_id";
         }
 
         /**
@@ -2317,6 +2743,55 @@ public final class Telephony {
          * <P>Type: TEXT</P>
          */
         public static final String MVNO_MATCH_DATA = "mvno_match_data";
+
+        /**
+         * The sub_id to which the APN belongs to
+         * <p>Type: INTEGER (long) </p>
+         * @hide
+         */
+        public static final String SUB_ID = "sub_id";
+
+        /**
+         * The profile_id to which the APN saved in modem
+         * <p>Type: INTEGER</p>
+         *@hide
+         */
+        public static final String PROFILE_ID = "profile_id";
+
+        /**
+         * Is the apn setting to be set in modem
+         * <P>Type: INTEGER (boolean)</P>
+         *@hide
+         */
+        public static final String MODEM_COGNITIVE = "modem_cognitive";
+
+        /**
+         * The max connections of this apn
+         * <p>Type: INTEGER</p>
+         *@hide
+         */
+        public static final String MAX_CONNS = "max_conns";
+
+        /**
+         * The wait time for retry of the apn
+         * <p>Type: INTEGER</p>
+         *@hide
+         */
+        public static final String WAIT_TIME = "wait_time";
+
+        /**
+         * The time to limit max connection for the apn
+         * <p>Type: INTEGER</p>
+         *@hide
+         */
+        public static final String MAX_CONNS_TIME = "max_conns_time";
+
+        /**
+         * The MTU size of the mobile interface to  which the APN connected
+         * <p>Type: INTEGER </p>
+         * @hide
+         */
+        public static final String MTU = "mtu";
     }
 
     /**

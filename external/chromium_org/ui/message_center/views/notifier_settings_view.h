@@ -11,8 +11,10 @@
 #include "ui/message_center/message_center_export.h"
 #include "ui/message_center/notifier_settings.h"
 #include "ui/message_center/views/message_bubble_base.h"
+#include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -41,27 +43,70 @@ class MESSAGE_CENTER_EXPORT NotifierSettingsView
   virtual void UpdateIconImage(const NotifierId& notifier_id,
                                const gfx::Image& icon) OVERRIDE;
   virtual void NotifierGroupChanged() OVERRIDE;
+  virtual void NotifierEnabledChanged(const NotifierId& notifier_id,
+                                      bool enabled) OVERRIDE;
 
   void set_provider(NotifierSettingsProvider* new_provider) {
     provider_ = new_provider;
   }
 
  private:
-  class NotifierButton;
+  FRIEND_TEST_ALL_PREFIXES(NotifierSettingsViewTest, TestLearnMoreButton);
+
+  class MESSAGE_CENTER_EXPORT NotifierButton : public views::CustomButton,
+                         public views::ButtonListener {
+   public:
+    NotifierButton(NotifierSettingsProvider* provider,
+                   Notifier* notifier,
+                   views::ButtonListener* listener);
+    virtual ~NotifierButton();
+
+    void UpdateIconImage(const gfx::Image& icon);
+    void SetChecked(bool checked);
+    bool checked() const;
+    bool has_learn_more() const;
+    const Notifier& notifier() const;
+
+    void SendLearnMorePressedForTest();
+
+   private:
+    // Overridden from views::ButtonListener:
+    virtual void ButtonPressed(views::Button* button,
+                               const ui::Event& event) OVERRIDE;
+    virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+
+    bool ShouldHaveLearnMoreButton() const;
+    // Helper function to reset the layout when the view has substantially
+    // changed.
+    void GridChanged(bool has_learn_more, bool has_icon_view);
+
+    NotifierSettingsProvider* provider_;  // Weak.
+    const scoped_ptr<Notifier> notifier_;
+    // |icon_view_| is owned by us because sometimes we don't leave it
+    // in the view hierarchy.
+    scoped_ptr<views::ImageView> icon_view_;
+    views::Label* name_view_;
+    views::Checkbox* checkbox_;
+    views::ImageButton* learn_more_;
+
+    DISALLOW_COPY_AND_ASSIGN(NotifierButton);
+  };
 
   // Given a new list of notifiers, updates the view to reflect it.
   void UpdateContentsView(const std::vector<Notifier*>& notifiers);
 
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() const OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
+
+  // Overridden from views::MenuButtonListener:
   virtual void OnMenuButtonClicked(views::View* source,
                                    const gfx::Point& point) OVERRIDE;
 

@@ -8,16 +8,14 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/common/extensions/permissions/permission_set.h"
-
-class ExtensionService;
+#include "extensions/common/permissions/permission_set.h"
 
 namespace extensions {
 
 // chrome.permissions.contains
-class PermissionsContainsFunction : public SyncExtensionFunction {
+class PermissionsContainsFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("permissions.contains", PERMISSIONS_CONTAINS)
 
@@ -25,11 +23,11 @@ class PermissionsContainsFunction : public SyncExtensionFunction {
   virtual ~PermissionsContainsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // chrome.permissions.getAll
-class PermissionsGetAllFunction : public SyncExtensionFunction {
+class PermissionsGetAllFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("permissions.getAll", PERMISSIONS_GETALL)
 
@@ -37,11 +35,11 @@ class PermissionsGetAllFunction : public SyncExtensionFunction {
   virtual ~PermissionsGetAllFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // chrome.permissions.remove
-class PermissionsRemoveFunction : public SyncExtensionFunction {
+class PermissionsRemoveFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("permissions.remove", PERMISSIONS_REMOVE)
 
@@ -49,11 +47,11 @@ class PermissionsRemoveFunction : public SyncExtensionFunction {
   virtual ~PermissionsRemoveFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // chrome.permissions.request
-class PermissionsRequestFunction : public AsyncExtensionFunction,
+class PermissionsRequestFunction : public ChromeAsyncExtensionFunction,
                                    public ExtensionInstallPrompt::Delegate {
  public:
   DECLARE_EXTENSION_FUNCTION("permissions.request", PERMISSIONS_REQUEST)
@@ -72,7 +70,7 @@ class PermissionsRequestFunction : public AsyncExtensionFunction,
   virtual ~PermissionsRequestFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   scoped_ptr<ExtensionInstallPrompt> install_ui_;

@@ -16,54 +16,90 @@
 
 package com.android.camera;
 
-import android.content.Intent;
-import android.content.res.Configuration;
 import android.view.KeyEvent;
 import android.view.View;
 
-public interface CameraModule {
+import com.android.camera.app.AppController;
+import com.android.camera.app.CameraProvider;
+import com.android.camera.app.CameraServices;
+import com.android.camera.module.ModuleController;
 
-    public void init(CameraActivity activity, View frame);
+public abstract class CameraModule implements ModuleController {
+    /** Provides common services and functionality to the module. */
+    private final CameraServices mServices;
+    private final CameraProvider mCameraProvider;
 
-    public void onPreviewFocusChanged(boolean previewFocused);
+    public CameraModule(AppController app) {
+        mServices = app.getServices();
+        mCameraProvider = app.getCameraProvider();
+    }
 
-    public void onPauseBeforeSuper();
+    @Override
+    public boolean onBackPressed() {
+        return false;
+    }
 
-    public void onPauseAfterSuper();
+    @Override
+    public void onPreviewVisibilityChanged(int visibility) {
+        // Do nothing.
+    }
 
-    public void onResumeBeforeSuper();
+    @Deprecated
+    public abstract boolean onKeyDown(int keyCode, KeyEvent event);
 
-    public void onResumeAfterSuper();
+    @Deprecated
+    public abstract boolean onKeyUp(int keyCode, KeyEvent event);
 
-    public void onConfigurationChanged(Configuration config);
+    @Deprecated
+    public abstract void onSingleTapUp(View view, int x, int y);
 
-    public void onStop();
+    /**
+     * @return An instance containing common services to be used by the module.
+     */
+    protected CameraServices getServices() {
+        return mServices;
+    }
 
-    public void installIntentFilter();
+    /**
+     * @return An instance used by the module to get the camera.
+     */
+    protected CameraProvider getCameraProvider() {
+        return mCameraProvider;
+    }
 
-    public void onActivityResult(int requestCode, int resultCode, Intent data);
+    /**
+     * Requests the back camera through {@link CameraProvider}.
+     * This calls {@link
+     * com.android.camera.app.CameraProvider#requestCamera(int)}. The camera
+     * will be returned through {@link
+     * #onCameraAvailable(com.android.ex.camera2.portability.CameraAgent.CameraProxy)}
+     * when it's available. This is a no-op when there's no back camera
+     * available.
+     */
+    protected void requestBackCamera() {
+        int backCameraId = mCameraProvider.getFirstBackCameraId();
+        if (backCameraId != -1) {
+            mCameraProvider.requestCamera(backCameraId);
+        }
+    }
 
-    public boolean onBackPressed();
+    public void onPreviewInitialDataReceived() {}
 
-    public boolean onKeyDown(int keyCode, KeyEvent event);
+    /**
+     * Releases the back camera through {@link CameraProvider}.
+     * This calls {@link
+     * com.android.camera.app.CameraProvider#releaseCamera(int)}.
+     * This is a no-op when there's no back camera available.
+     */
+    protected void releaseBackCamera() {
+        int backCameraId = mCameraProvider.getFirstBackCameraId();
+        if (backCameraId != -1) {
+            mCameraProvider.releaseCamera(backCameraId);
+        }
+    }
 
-    public boolean onKeyUp(int keyCode, KeyEvent event);
-
-    public void onSingleTapUp(View view, int x, int y);
-
-    public void onPreviewTextureCopied();
-
-    public void onCaptureTextureCopied();
-
-    public void onUserInteraction();
-
-    public boolean updateStorageHintOnResume();
-
-    public void onOrientationChanged(int orientation);
-
-    public void onShowSwitcherPopup();
-
-    public void onMediaSaveServiceConnected(MediaSaveService s);
-
-    public boolean arePreviewControlsVisible();
+    /**
+     * @return An accessibility String to be announced during the peek animation.
+     */
+    public abstract String getPeekAccessibilityString();
 }

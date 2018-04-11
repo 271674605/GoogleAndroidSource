@@ -149,8 +149,8 @@
         '../src/animator/SkOperand2.h',
         '../src/animator/SkOperandInterpolator.h',
         '../src/animator/SkOperandIterpolator.cpp',
-        '../src/animator/SkPaintParts.cpp',
-        '../src/animator/SkPaintParts.h',
+        '../src/animator/SkPaintPart.cpp',
+        '../src/animator/SkPaintPart.h',
         '../src/animator/SkParseSVGPath.cpp',
         '../src/animator/SkPathParts.cpp',
         '../src/animator/SkPathParts.h',
@@ -185,9 +185,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

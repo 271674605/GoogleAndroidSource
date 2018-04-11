@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/query_parser.h"
-#include "chrome/browser/search_engines/template_url_id.h"
+#include "components/query_parser/query_parser.h"
+#include "components/search_engines/template_url_id.h"
 #include "sql/statement.h"
 
 class GURL;
@@ -24,7 +24,7 @@ class VisitDatabase;  // For friend statement.
 // Encapsulates an SQL database that holds URL info.  This is a subset of the
 // full history data.  We split this class' functionality out from the larger
 // HistoryDatabase class to support maintaining separate databases of URLs with
-// different capabilities (for example, in-memory, or archived).
+// different capabilities (for example, the in-memory database).
 //
 // This is refcounted to support calling InvokeLater() with some of its methods
 // (necessary to maintain ordering of DB operations).
@@ -73,7 +73,8 @@ class URLDatabase {
   bool UpdateURLRow(URLID url_id, const URLRow& info);
 
   // Adds a line to the URL database with the given information and returns the
-  // row ID. A row with the given URL must not exist. Returns 0 on error.
+  // newly generated ID for the row (the |id| in |info| is ignored). A row with
+  // the given URL must not exist. Returns 0 on error.
   //
   // This does NOT add a row to the full text search database. Use
   // HistoryDatabase::SetPageIndexedData to do this.
@@ -81,9 +82,15 @@ class URLDatabase {
     return AddURLInternal(info, false);
   }
 
-  // Delete the row of the corresponding URL. Only the row in the URL table
-  // will be deleted, not any other data that may refer to it. Returns true if
-  // the row existed and was deleted.
+  // Either adds a new row to the URL table with the given information (with the
+  // the |id| as specified in |info|), or updates the pre-existing row with this
+  // |id| if there is one already. This is also known as an "upsert" or "merge"
+  // operation. Returns true on success.
+  bool InsertOrUpdateURLRowByID(const URLRow& info);
+
+  // Delete the row of the corresponding URL. Only the row in the URL table and
+  // corresponding keyword search terms will be deleted, not any other data that
+  // may refer to the URL row. Returns true if the row existed and was deleted.
   bool DeleteURLRow(URLID id);
 
   // URL mass-deleting ---------------------------------------------------------
@@ -104,10 +111,7 @@ class URLDatabase {
 
   // Ends the mass-deleting by replacing the original URL table with the
   // temporary one created in CreateTemporaryURLTable. Returns true on success.
-  //
-  // This function does not create the supplimentary indices. It is virtual so
-  // that the main history database can provide this additional behavior.
-  virtual bool CommitTemporaryURLTable();
+  bool CommitTemporaryURLTable();
 
   // Enumeration ---------------------------------------------------------------
 
@@ -136,19 +140,6 @@ class URLDatabase {
 
    private:
     DISALLOW_COPY_AND_ASSIGN(URLEnumerator);
-  };
-
-  // A basic enumerator to enumerate icon mapping, it is only used for icon
-  // mapping migration.
-  class IconMappingEnumerator : public URLEnumeratorBase {
-   public:
-    IconMappingEnumerator();
-
-    // Retreives the next url. Returns false if no more urls are available
-    bool GetNextIconMapping(IconMapping* r);
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(IconMappingEnumerator);
   };
 
   // Initializes the given enumerator to enumerator all URLs in the database.
@@ -194,14 +185,14 @@ class URLDatabase {
 
   // Performs a brute force search over the database to find any URLs or titles
   // which match the |query| string.  Returns any matches in |results|.
-  bool GetTextMatches(const string16& query, URLRows* results);
+  bool GetTextMatches(const base::string16& query, URLRows* results);
 
   // Keyword Search Terms ------------------------------------------------------
 
   // Sets the search terms for the specified url/keyword pair.
   bool SetKeywordSearchTermsForURL(URLID url_id,
                                    TemplateURLID keyword_id,
-                                   const string16& term);
+                                   const base::string16& term);
 
   // Looks up a keyword search term given a url id. Returns all the search terms
   // in |rows|. Returns true on success.
@@ -209,7 +200,7 @@ class URLDatabase {
 
   // Looks up all keyword search terms given a term, Fills the rows with data.
   // Returns true on success and false otherwise.
-  bool GetKeywordSearchTermRows(const string16& term,
+  bool GetKeywordSearchTermRows(const base::string16& term,
                                 std::vector<KeywordSearchTermRow>* rows);
 
   // Deletes all search terms for the specified keyword that have been added by
@@ -220,12 +211,15 @@ class URLDatabase {
   // keyword.
   void GetMostRecentKeywordSearchTerms(
       TemplateURLID keyword_id,
-      const string16& prefix,
+      const base::string16& prefix,
       int max_count,
       std::vector<KeywordSearchTermVisit>* matches);
 
   // Deletes all searches matching |term|.
-  bool DeleteKeywordSearchTerm(const string16& term);
+  bool DeleteKeywordSearchTerm(const base::string16& term);
+
+  // Deletes any search corresponding to |url_id|.
+  bool DeleteKeywordSearchTermForURL(URLID url_id);
 
   // Migration -----------------------------------------------------------------
 
@@ -233,11 +227,6 @@ class URLDatabase {
   // about:blank to have no icon or title. Returns true on success, false if
   // the favicon couldn't be updated.
   bool MigrateFromVersion11ToVersion12();
-
-  // Initializes the given enumerator to enumerator all URL and icon mappings
-  // in the database. Only used for icon mapping migration.
-  bool InitIconMappingEnumeratorForEverything(
-      IconMappingEnumerator* enumerator);
 
  protected:
   friend class VisitDatabase;
@@ -264,8 +253,8 @@ class URLDatabase {
   // sets this to true to generate the  temporary table, which will have a
   // different name but the same schema.
   bool CreateURLTable(bool is_temporary);
-  // We have two tiers of indices for the URL table. The main tier is used by
-  // all URL databases, and is an index over the URL itself.
+
+  // Creates the index over URLs so we can quickly look up based on URL.
   bool CreateMainURLIndex();
 
   // Ensures the keyword search terms table exists.
@@ -279,8 +268,10 @@ class URLDatabase {
 
   // Inserts the given URL row into the URLs table, using the regular table
   // if is_temporary is false, or the temporary URL table if is temporary is
-  // true. The temporary table may only be used in between
-  // CreateTemporaryURLTable() and CommitTemporaryURLTable().
+  // true. The current |id| of |info| will be ignored in both cases and a new ID
+  // will be generated, which will also constitute the return value, except in
+  // case of an error, when the return value is 0. The temporary table may only
+  // be used in between CreateTemporaryURLTable() and CommitTemporaryURLTable().
   URLID AddURLInternal(const URLRow& info, bool is_temporary);
 
   // Convenience to fill a history::URLRow. Must be in sync with the fields in
@@ -296,7 +287,7 @@ class URLDatabase {
   // have keyword search terms.
   bool has_keyword_search_terms_;
 
-  QueryParser query_parser_;
+  query_parser::QueryParser query_parser_;
 
   DISALLOW_COPY_AND_ASSIGN(URLDatabase);
 };

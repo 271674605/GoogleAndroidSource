@@ -17,7 +17,7 @@ class URLRequest;
 
 namespace android_webview {
 
-class InterceptedRequestData;
+class AwWebResourceResponse;
 
 // This class provides a means of calling Java methods on an instance that has
 // a 1:1 relationship with a WebContents instance directly from the IO thread.
@@ -56,14 +56,19 @@ class AwContentsIoThreadClient {
   virtual CacheMode GetCacheMode() const = 0;
 
   // This will attempt to fetch the AwContentsIoThreadClient for the given
-  // |render_process_id|, |render_view_id| pair.
+  // |render_process_id|, |render_frame_id| pair.
   // This method can be called from any thread.
   // An empty scoped_ptr is a valid return value.
   static scoped_ptr<AwContentsIoThreadClient> FromID(int render_process_id,
-                                                     int render_view_id);
+                                                     int render_frame_id);
+
+  // Called on the IO thread when a subframe is created.
+  static void SubFrameCreated(int render_process_id,
+                              int parent_render_frame_id,
+                              int child_render_frame_id);
 
   // This method is called on the IO thread only.
-  virtual scoped_ptr<InterceptedRequestData> ShouldInterceptRequest(
+  virtual scoped_ptr<AwWebResourceResponse> ShouldInterceptRequest(
       const GURL& location,
       const net::URLRequest* request) = 0;
 
@@ -78,6 +83,9 @@ class AwContentsIoThreadClient {
   // Retrieve the BlockNetworkLoads setting value of this AwContents.
   // This method is called on the IO thread only.
   virtual bool ShouldBlockNetworkLoads() const = 0;
+
+  // Retrieve the AcceptThirdPartyCookies setting value of this AwContents.
+  virtual bool ShouldAcceptThirdPartyCookies() const = 0;
 
   // Called when ResourceDispathcerHost detects a download request.
   // The download is already cancelled when this is called, since

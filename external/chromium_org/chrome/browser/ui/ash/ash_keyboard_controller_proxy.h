@@ -7,16 +7,15 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/extension_function_dispatcher.h"
 #include "ui/keyboard/keyboard_controller_proxy.h"
-
-class ExtensionFunctionDispatcher;
 
 namespace content {
 class WebContents;
 }
 namespace extensions {
+class ExtensionFunctionDispatcher;
 class WindowController;
 }
 namespace gfx {
@@ -26,10 +25,12 @@ namespace ui {
 class InputMethod;
 }
 
+// Subclass of KeyboardControllerProxy. It is used by KeyboardController to get
+// access to the virtual keyboard window and setup Chrome extension functions.
 class AshKeyboardControllerProxy
     : public keyboard::KeyboardControllerProxy,
       public content::WebContentsObserver,
-      public ExtensionFunctionDispatcher::Delegate {
+      public extensions::ExtensionFunctionDispatcher::Delegate {
  public:
   AshKeyboardControllerProxy();
   virtual ~AshKeyboardControllerProxy();
@@ -46,7 +47,16 @@ class AshKeyboardControllerProxy
   virtual void SetupWebContents(content::WebContents* contents) OVERRIDE;
   virtual void ShowKeyboardContainer(aura::Window* container) OVERRIDE;
 
-  // ExtensionFunctionDispatcher::Delegate overrides
+  // The overridden implementation dispatches
+  // chrome.virtualKeyboardPrivate.onTextInputBoxFocused event to extension to
+  // provide the input type information. Naturally, when the virtual keyboard
+  // extension is used as an IME then chrome.input.ime.onFocus provides the
+  // information, but not when the virtual keyboard is used in conjunction with
+  // another IME. virtualKeyboardPrivate.onTextInputBoxFocused is the remedy in
+  // that case.
+  virtual void SetUpdateInputType(ui::TextInputType type) OVERRIDE;
+
+  // extensions::ExtensionFunctionDispatcher::Delegate overrides
   virtual extensions::WindowController* GetExtensionWindowController() const
       OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
@@ -54,7 +64,8 @@ class AshKeyboardControllerProxy
   // content::WebContentsObserver overrides
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
+  scoped_ptr<extensions::ExtensionFunctionDispatcher>
+      extension_function_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(AshKeyboardControllerProxy);
 };

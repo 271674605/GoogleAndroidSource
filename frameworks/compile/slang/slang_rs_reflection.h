@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#ifndef _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_H_  // NOLINT
+#ifndef _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_H_ // NOLINT
 #define _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_H_
 
 #include <fstream>
@@ -28,316 +28,222 @@
 
 #include "slang_assert.h"
 #include "slang_rs_export_type.h"
+#include "slang_rs_reflect_utils.h"
 
 namespace slang {
 
-  class RSContext;
-  class RSExportVar;
-  class RSExportFunc;
-  class RSExportForEach;
+class RSContext;
+class RSExportVar;
+class RSExportFunc;
+class RSExportForEach;
 
-class RSReflection {
- private:
+class RSReflectionJava {
+private:
   const RSContext *mRSContext;
+
+  // The name of the Java package name we're creating this file for,
+  // e.g. com.example.android.rs.flashlight
+  std::string mPackageName;
+  // The name of the Java Renderscript package we'll be using,
+  // e.g. android.renderscript
+  // e.g. android.support.v8.renderscript
+  std::string mRSPackageName;
+
+  // The directory under which we'll create the Java files, in appropriate subdirectories,
+  // e.g. /tmp/myout
+  std::string mOutputBaseDirectory;
+  // The output directory for the specfied package (mPackageName),
+  // e.g. /tmp/myout/com/example/android/rs/flashlight/
+  // TODO This includes the terminating separator.  Needed?
+  std::string mOutputDirectory;
+
+  // The full path of the .rs file that we are reflecting.
+  std::string mRSSourceFileName;
+  // The full path where the generated bit code can be read.
+  std::string mBitCodeFileName;
+
+  // The name of the resource we pass to the RenderScript constructor
+  // e.g. flashlight
+  std::string mResourceId;
+  // The name of the Java class we are generating for this script.
+  // e.g. ScriptC_flashlight
+  std::string mScriptClassName;
+
+
+  // This is set by startClass() and will change for the multiple classes generated.
+  std::string mClassName;
+
+  // This is the token used for determining the size of a given ScriptField.Item.
+  std::string mItemSizeof;
+
+  bool mEmbedBitcodeInJava;
+
+  int mNextExportVarSlot;
+  int mNextExportFuncSlot;
+  int mNextExportForEachSlot;
+
+  GeneratedFile mOut;
 
   std::string mLastError;
   std::vector<std::string> *mGeneratedFileNames;
 
+  // A mapping from a field in a record type to its index in the rsType
+  // instance. Only used when generates TypeClass (ScriptField_*).
+  typedef std::map<const RSExportRecordType::Field *, unsigned> FieldIndexMapTy;
+  FieldIndexMapTy mFieldIndexMap;
+  // Field index of current processing TypeClass.
+  unsigned mFieldIndex;
+
   inline void setError(const std::string &Error) { mLastError = Error; }
 
-  class Context {
-   private:
-    static const char *const ApacheLicenseNote;
+  inline void clear() {
+    mClassName = "";
+    mNextExportVarSlot = 0;
+    mNextExportFuncSlot = 0;
+    mNextExportForEachSlot = 0;
+  }
 
-    bool mVerbose;
+public:
+  typedef enum {
+    AM_Public,
+    AM_Protected,
+    AM_Private,
+    AM_PublicSynchronized
+  } AccessModifier;
 
-    std::string mOutputPathBase;
+  // Generated RS Elements for type-checking code.
+  std::set<std::string> mTypesToCheck;
 
-    std::string mInputRSFile;
+  // Generated FieldPackers for unsigned setters/validation.
+  std::set<std::string> mFieldPackerTypes;
 
-    std::string mPackageName;
-    std::string mRSPackageName;
-    std::string mResourceId;
-    std::string mPaddingPrefix;
+  bool addTypeNameForElement(const std::string &TypeName);
+  bool addTypeNameForFieldPacker(const std::string &TypeName);
 
-    std::string mClassName;
+  static const char *AccessModifierStr(AccessModifier AM);
 
-    std::string mLicenseNote;
+  inline bool getEmbedBitcodeInJava() const { return mEmbedBitcodeInJava; }
 
-    std::string mIndent;
+  inline int getNextExportVarSlot() { return mNextExportVarSlot++; }
+  inline int getNextExportFuncSlot() { return mNextExportFuncSlot++; }
+  inline int getNextExportForEachSlot() { return mNextExportForEachSlot++; }
 
-    int mPaddingFieldIndex;
+  bool startClass(AccessModifier AM, bool IsStatic,
+                  const std::string &ClassName, const char *SuperClassName,
+                  std::string &ErrorMsg);
+  void endClass();
 
-    int mNextExportVarSlot;
-    int mNextExportFuncSlot;
-    int mNextExportForEachSlot;
+  void startFunction(AccessModifier AM, bool IsStatic, const char *ReturnType,
+                     const std::string &FunctionName, int Argc, ...);
 
-    // A mapping from a field in a record type to its index in the rsType
-    // instance. Only used when generates TypeClass (ScriptField_*).
-    typedef std::map<const RSExportRecordType::Field*, unsigned>
-        FieldIndexMapTy;
-    FieldIndexMapTy mFieldIndexMap;
-    // Field index of current processing TypeClass.
-    unsigned mFieldIndex;
+  typedef std::vector<std::pair<std::string, std::string>> ArgTy;
+  void startFunction(AccessModifier AM, bool IsStatic, const char *ReturnType,
+                     const std::string &FunctionName, const ArgTy &Args);
+  void endFunction();
 
-    inline void clear() {
-      mClassName = "";
-      mIndent = "";
-      mPaddingFieldIndex = 1;
-      mNextExportVarSlot = 0;
-      mNextExportFuncSlot = 0;
-      mNextExportForEachSlot = 0;
-      return;
-    }
+  inline const std::string &getPackageName() const { return mPackageName; }
+  inline const std::string &getRSPackageName() const { return mRSPackageName; }
+  inline const std::string &getClassName() const { return mClassName; }
+  inline const std::string &getResourceId() const { return mResourceId; }
 
-    bool openClassFile(const std::string &ClassName,
-                       std::string &ErrorMsg);
+  void startTypeClass(const std::string &ClassName);
+  void endTypeClass();
 
-   public:
-    typedef enum {
-      AM_Public,
-      AM_Protected,
-      AM_Private,
-      AM_PublicSynchronized
-    } AccessModifier;
+  inline void incFieldIndex() { mFieldIndex++; }
 
-    bool mUseStdout;
-    mutable std::ofstream mOF;
+  inline void resetFieldIndex() { mFieldIndex = 0; }
 
-    // Generated RS Elements for type-checking code.
-    std::set<std::string> mTypesToCheck;
+  inline void addFieldIndexMapping(const RSExportRecordType::Field *F) {
+    slangAssert((mFieldIndexMap.find(F) == mFieldIndexMap.end()) &&
+                "Nested structure never occurs in C language.");
+    mFieldIndexMap.insert(std::make_pair(F, mFieldIndex));
+  }
 
-    // Generated FieldPackers for unsigned setters/validation.
-    std::set<std::string> mFieldPackerTypes;
+  inline unsigned getFieldIndex(const RSExportRecordType::Field *F) const {
+    FieldIndexMapTy::const_iterator I = mFieldIndexMap.find(F);
+    slangAssert((I != mFieldIndexMap.end()) &&
+                "Requesting field is out of scope.");
+    return I->second;
+  }
 
-    bool addTypeNameForElement(const std::string &TypeName);
-    bool addTypeNameForFieldPacker(const std::string &TypeName);
+  inline void clearFieldIndexMap() { mFieldIndexMap.clear(); }
 
-    static const char *AccessModifierStr(AccessModifier AM);
+private:
+  bool genScriptClass(const std::string &ClassName, std::string &ErrorMsg);
+  void genScriptClassConstructor();
 
-    Context(const std::string &OutputPathBase,
-            const std::string &InputRSFile,
-            const std::string &PackageName,
-            const std::string &RSPackageName,
-            const std::string &ResourceId,
-            const std::string &PaddingPrefix,
-            bool UseStdout)
-        : mVerbose(true),
-          mOutputPathBase(OutputPathBase),
-          mInputRSFile(InputRSFile),
-          mPackageName(PackageName),
-          mRSPackageName(RSPackageName),
-          mResourceId(ResourceId),
-          mPaddingPrefix(PaddingPrefix),
-          mLicenseNote(ApacheLicenseNote),
-          mUseStdout(UseStdout) {
-      clear();
-      resetFieldIndex();
-      clearFieldIndexMap();
-      return;
-    }
-
-    inline std::ostream &out() const {
-      return ((mUseStdout) ? std::cout : mOF);
-    }
-    inline std::ostream &indent() const {
-      out() << mIndent;
-      return out();
-    }
-
-    inline void incIndentLevel() {
-      mIndent.append(4, ' ');
-      return;
-    }
-
-    inline void decIndentLevel() {
-      slangAssert(getIndentLevel() > 0 && "No indent");
-      mIndent.erase(0, 4);
-      return;
-    }
-
-    inline int getIndentLevel() { return (mIndent.length() >> 2); }
-
-    inline int getNextExportVarSlot() { return mNextExportVarSlot++; }
-
-    inline int getNextExportFuncSlot() { return mNextExportFuncSlot++; }
-    inline int getNextExportForEachSlot() { return mNextExportForEachSlot++; }
-
-    // Will remove later due to field name information is not necessary for
-    // C-reflect-to-Java
-    inline std::string createPaddingField() {
-      return mPaddingPrefix + llvm::itostr(mPaddingFieldIndex++);
-    }
-
-    inline void setLicenseNote(const std::string &LicenseNote) {
-      mLicenseNote = LicenseNote;
-    }
-
-    bool startClass(AccessModifier AM,
-                    bool IsStatic,
-                    const std::string &ClassName,
-                    const char *SuperClassName,
-                    std::string &ErrorMsg);
-    void endClass();
-
-    void startFunction(AccessModifier AM,
-                       bool IsStatic,
-                       const char *ReturnType,
-                       const std::string &FunctionName,
-                       int Argc, ...);
-
-    typedef std::vector<std::pair<std::string, std::string> > ArgTy;
-    void startFunction(AccessModifier AM,
-                       bool IsStatic,
-                       const char *ReturnType,
-                       const std::string &FunctionName,
-                       const ArgTy &Args);
-    void endFunction();
-
-    void startBlock(bool ShouldIndent = false);
-    void endBlock();
-
-    inline const std::string &getPackageName() const { return mPackageName; }
-    inline const std::string &getRSPackageName() const {
-      return mRSPackageName;
-    }
-    inline const std::string &getClassName() const { return mClassName; }
-    inline const std::string &getResourceId() const { return mResourceId; }
-
-    void startTypeClass(const std::string &ClassName);
-    void endTypeClass();
-
-    inline void incFieldIndex() { mFieldIndex++; }
-
-    inline void resetFieldIndex() { mFieldIndex = 0; }
-
-    inline void addFieldIndexMapping(const RSExportRecordType::Field *F) {
-      slangAssert((mFieldIndexMap.find(F) == mFieldIndexMap.end()) &&
-                  "Nested structure never occurs in C language.");
-      mFieldIndexMap.insert(std::make_pair(F, mFieldIndex));
-    }
-
-    inline unsigned getFieldIndex(const RSExportRecordType::Field *F) const {
-      FieldIndexMapTy::const_iterator I = mFieldIndexMap.find(F);
-      slangAssert((I != mFieldIndexMap.end()) &&
-                  "Requesting field is out of scope.");
-      return I->second;
-    }
-
-    inline void clearFieldIndexMap() { mFieldIndexMap.clear(); }
-  };
-
-  bool genScriptClass(Context &C,
-                      const std::string &ClassName,
-                      std::string &ErrorMsg);
-  void genScriptClassConstructor(Context &C);
-
-  static void genInitBoolExportVariable(Context &C,
-                                        const std::string &VarName,
-                                        const clang::APValue &Val);
-  static void genInitPrimitiveExportVariable(Context &C,
-                                             const std::string &VarName,
-                                             const clang::APValue &Val);
-  static void genInitExportVariable(Context &C,
-                                    const RSExportType *ET,
-                                    const std::string &VarName,
-                                    const clang::APValue &Val);
-  void genExportVariable(Context &C, const RSExportVar *EV);
-  void genPrimitiveTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genPointerTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genVectorTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genMatrixTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genConstantArrayTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genRecordTypeExportVariable(Context &C, const RSExportVar *EV);
-  void genPrivateExportVariable(Context &C,
-                                const std::string &TypeName,
+  void genInitBoolExportVariable(const std::string &VarName,
+                                 const clang::APValue &Val);
+  void genInitPrimitiveExportVariable(const std::string &VarName,
+                                      const clang::APValue &Val);
+  void genInitExportVariable(const RSExportType *ET, const std::string &VarName,
+                             const clang::APValue &Val);
+  void genInitValue(const clang::APValue &Val, bool asBool);
+  void genExportVariable(const RSExportVar *EV);
+  void genPrimitiveTypeExportVariable(const RSExportVar *EV);
+  void genPointerTypeExportVariable(const RSExportVar *EV);
+  void genVectorTypeExportVariable(const RSExportVar *EV);
+  void genMatrixTypeExportVariable(const RSExportVar *EV);
+  void genConstantArrayTypeExportVariable(const RSExportVar *EV);
+  void genRecordTypeExportVariable(const RSExportVar *EV);
+  void genPrivateExportVariable(const std::string &TypeName,
                                 const std::string &VarName);
-  void genSetExportVariable(Context &C,
-                            const std::string &TypeName,
-                            const RSExportVar *EV);
-  void genGetExportVariable(Context &C,
-                            const std::string &TypeName,
+  void genSetExportVariable(const std::string &TypeName, const RSExportVar *EV);
+  void genGetExportVariable(const std::string &TypeName,
                             const std::string &VarName);
-  void genGetFieldID(Context &C,
-                     const std::string &VarName);
+  void genGetFieldID(const std::string &VarName);
 
-  void genExportFunction(Context &C,
-                         const RSExportFunc *EF);
+  void genExportFunction(const RSExportFunc *EF);
 
-  void genExportForEach(Context &C,
-                        const RSExportForEach *EF);
+  void genExportForEach(const RSExportForEach *EF);
 
-  static void genTypeCheck(Context &C,
-                           const RSExportType *ET,
-                           const char *VarName);
+  void genTypeCheck(const RSExportType *ET, const char *VarName);
 
-  static void genTypeInstanceFromPointer(Context &C,
-                                         const RSExportType *ET);
+  void genTypeInstanceFromPointer(const RSExportType *ET);
 
-  static void genTypeInstance(Context &C,
-                              const RSExportType *ET);
+  void genTypeInstance(const RSExportType *ET);
 
-  static void genFieldPackerInstance(Context &C,
-                                     const RSExportType *ET);
+  void genFieldPackerInstance(const RSExportType *ET);
 
-  bool genTypeClass(Context &C,
-                    const RSExportRecordType *ERT,
-                    std::string &ErrorMsg);
-  void genTypeItemClass(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassConstructor(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassCopyToArray(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassCopyToArrayLocal(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassItemSetter(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassItemGetter(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassComponentSetter(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassComponentGetter(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassCopyAll(Context &C, const RSExportRecordType *ERT);
-  void genTypeClassResize(Context &C);
+  bool genTypeClass(const RSExportRecordType *ERT, std::string &ErrorMsg);
+  void genTypeItemClass(const RSExportRecordType *ERT);
+  void genTypeClassConstructor(const RSExportRecordType *ERT);
+  void genTypeClassCopyToArray(const RSExportRecordType *ERT);
+  void genTypeClassCopyToArrayLocal(const RSExportRecordType *ERT);
+  void genTypeClassItemSetter(const RSExportRecordType *ERT);
+  void genTypeClassItemGetter(const RSExportRecordType *ERT);
+  void genTypeClassComponentSetter(const RSExportRecordType *ERT);
+  void genTypeClassComponentGetter(const RSExportRecordType *ERT);
+  void genTypeClassCopyAll(const RSExportRecordType *ERT);
+  void genTypeClassResize();
 
-  void genBuildElement(Context &C,
-                       const char *ElementBuilderName,
+  void genBuildElement(const char *ElementBuilderName,
                        const RSExportRecordType *ERT,
-                       const char *RenderScriptVar,
-                       bool IsInline);
-  void genAddElementToElementBuilder(Context &C,
-                                     const RSExportType *ERT,
+                       const char *RenderScriptVar, bool IsInline);
+  void genAddElementToElementBuilder(const RSExportType *ERT,
                                      const std::string &VarName,
                                      const char *ElementBuilderName,
                                      const char *RenderScriptVar,
                                      unsigned ArraySize);
-  void genAddPaddingToElementBuiler(Context &C,
-                                    int PaddingSize,
-                                    const char *ElementBuilderName,
-                                    const char *RenderScriptVar);
 
-  bool genCreateFieldPacker(Context &C,
-                            const RSExportType *T,
-                            const char *FieldPackerName);
-  void genPackVarOfType(Context &C,
-                        const RSExportType *T,
-                        const char *VarName,
+  bool genCreateFieldPacker(const RSExportType *T, const char *FieldPackerName);
+  void genPackVarOfType(const RSExportType *T, const char *VarName,
                         const char *FieldPackerName);
-  void genAllocateVarOfType(Context &C,
-                            const RSExportType *T,
-                            const std::string &VarName);
-  void genNewItemBufferIfNull(Context &C, const char *Index);
-  void genNewItemBufferPackerIfNull(Context &C);
+  void genAllocateVarOfType(const RSExportType *T, const std::string &VarName);
+  void genNewItemBufferIfNull(const char *Index);
+  void genNewItemBufferPackerIfNull();
 
- public:
-  explicit RSReflection(const RSContext *Context,
-      std::vector<std::string> *GeneratedFileNames)
-      : mRSContext(Context),
-        mLastError(""),
-        mGeneratedFileNames(GeneratedFileNames) {
-    slangAssert(mGeneratedFileNames && "Must supply GeneratedFileNames");
-    return;
-  }
+  void genPairwiseDimCheck(std::string name0, std::string name1);
 
-  bool reflect(const std::string &OutputPathBase,
-               const std::string &OutputPackageName,
-               const std::string &RSPackageName,
-               const std::string &InputFileName,
-               const std::string &OutputBCFileName);
+public:
+  RSReflectionJava(const RSContext *Context,
+                   std::vector<std::string> *GeneratedFileNames,
+                   const std::string &OutputBaseDirectory,
+                   const std::string &RSSourceFilename,
+                   const std::string &BitCodeFileName,
+                   bool EmbedBitcodeInJava);
+
+  bool reflect();
 
   inline const char *getLastError() const {
     if (mLastError.empty())
@@ -345,8 +251,8 @@ class RSReflection {
     else
       return mLastError.c_str();
   }
-};  // class RSReflection
+}; // class RSReflectionJava
 
-}   // namespace slang
+} // namespace slang
 
-#endif  // _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_H_  NOLINT
+#endif // _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_H_  NOLINT

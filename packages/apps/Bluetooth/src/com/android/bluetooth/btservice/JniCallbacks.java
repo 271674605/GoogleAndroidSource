@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2012-2014 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,13 +40,14 @@ final class JniCallbacks {
         mBondStateMachine = null;
     }
 
-    public Object Clone() throws CloneNotSupportedException {
+    @Override
+    public Object clone() throws CloneNotSupportedException {
         throw new CloneNotSupportedException();
     }
 
     void sspRequestCallback(byte[] address, byte[] name, int cod, int pairingVariant,
             int passkey) {
-        mRemoteDevices.sspRequestCallback(address, name, cod, pairingVariant,
+        mBondStateMachine.sspRequestCallback(address, name, cod, pairingVariant,
             passkey);
     }
     void devicePropertyChangedCallback(byte[] address, int[] types, byte[][] val) {
@@ -58,7 +59,7 @@ final class JniCallbacks {
     }
 
     void pinRequestCallback(byte[] address, byte[] name, int cod) {
-        mRemoteDevices.pinRequestCallback(address, name, cod);
+        mBondStateMachine.pinRequestCallback(address, name, cod);
     }
 
     void bondStateChangeCallback(int status, byte[] address, int newState) {
@@ -81,4 +82,8 @@ final class JniCallbacks {
         mAdapterProperties.adapterPropertyChangedCallback(types, val);
     }
 
+    void deviceMasInstancesFoundCallback(int status, byte[] address, String[] name, int[] scn,
+            int[] id, int[] msgtype) {
+        mRemoteDevices.deviceMasInstancesFoundCallback(status, address, name, scn, id, msgtype);
+    }
 }

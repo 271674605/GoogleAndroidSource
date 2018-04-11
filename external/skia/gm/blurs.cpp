@@ -6,6 +6,7 @@
  * found in the LICENSE file.
  */
 #include "gm.h"
+#include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
 
 namespace skiagm {
@@ -17,35 +18,29 @@ public:
     }
 
 protected:
-#ifdef SK_SCALAR_IS_FIXED
     virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // SkCanvas::drawCircle, used by this test, performs a quick reject.
-        // The large size given to the device used by SkGPipeCanvas means that
-        // the device clip will not be set properly and circles will be
-        // rejected when in FIXED.
-        return this->INHERITED::onGetFlags() | GM::kSkipPipe_Flag;
+        return kSkipTiled_Flag;
     }
-#endif
 
     virtual SkString onShortName() {
         return SkString("blurs");
     }
 
     virtual SkISize onISize() {
-        return make_isize(700, 500);
+        return SkISize::Make(700, 500);
     }
 
     virtual void onDraw(SkCanvas* canvas) {
-        SkBlurMaskFilter::BlurStyle NONE = SkBlurMaskFilter::BlurStyle(-999);
+        SkBlurStyle NONE = SkBlurStyle(-999);
         static const struct {
-            SkBlurMaskFilter::BlurStyle fStyle;
-            int                         fCx, fCy;
+            SkBlurStyle fStyle;
+            int         fCx, fCy;
         } gRecs[] = {
-            { NONE,                                 0,  0 },
-            { SkBlurMaskFilter::kInner_BlurStyle,  -1,  0 },
-            { SkBlurMaskFilter::kNormal_BlurStyle,  0,  1 },
-            { SkBlurMaskFilter::kSolid_BlurStyle,   0, -1 },
-            { SkBlurMaskFilter::kOuter_BlurStyle,   1,  0 },
+            { NONE,                 0,  0 },
+            { kInner_SkBlurStyle,  -1,  0 },
+            { kNormal_SkBlurStyle,  0,  1 },
+            { kSolid_SkBlurStyle,   0, -1 },
+            { kOuter_SkBlurStyle,   1,  0 },
         };
 
         SkPaint paint;
@@ -59,32 +54,30 @@ protected:
             paint.setColor(SK_ColorBLUE);
             for (size_t i = 0; i < SK_ARRAY_COUNT(gRecs); i++) {
                 if (gRecs[i].fStyle != NONE) {
-                    SkMaskFilter* mf = SkBlurMaskFilter::Create(
-                            SkIntToScalar(20), gRecs[i].fStyle, flags
-                    );
+                    SkMaskFilter* mf = SkBlurMaskFilter::Create(gRecs[i].fStyle,
+                                           SkBlurMask::ConvertRadiusToSigma(SkIntToScalar(20)),
+                                           flags);
                     paint.setMaskFilter(mf)->unref();
                 } else {
                     paint.setMaskFilter(NULL);
                 }
-                canvas->drawCircle(SkIntToScalar(200 + gRecs[i].fCx*100)
-                                   , SkIntToScalar(200 + gRecs[i].fCy*100)
-                                   , SkIntToScalar(50)
-                                   , paint);
+                canvas->drawCircle(SkIntToScalar(200 + gRecs[i].fCx*100),
+                                   SkIntToScalar(200 + gRecs[i].fCy*100),
+                                   SkIntToScalar(50),
+                                   paint);
             }
             // draw text
             {
-                SkMaskFilter* mf = SkBlurMaskFilter::Create(
-                        SkIntToScalar(4)
-                        , SkBlurMaskFilter::kNormal_BlurStyle
-                        , flags
-                );
+                SkMaskFilter* mf = SkBlurMaskFilter::Create(kNormal_SkBlurStyle,
+                                           SkBlurMask::ConvertRadiusToSigma(SkIntToScalar(4)),
+                                           flags);
                 paint.setMaskFilter(mf)->unref();
                 SkScalar x = SkIntToScalar(70);
                 SkScalar y = SkIntToScalar(400);
                 paint.setColor(SK_ColorBLACK);
                 canvas->drawText("Hamburgefons Style", 18, x, y, paint);
-                canvas->drawText("Hamburgefons Style", 18
-                                 , x, y + SkIntToScalar(50), paint);
+                canvas->drawText("Hamburgefons Style", 18,
+                                 x, y + SkIntToScalar(50), paint);
                 paint.setMaskFilter(NULL);
                 paint.setColor(SK_ColorWHITE);
                 x -= SkIntToScalar(2);

@@ -16,8 +16,14 @@
 
 package com.android.providers.contacts.testutil;
 
+import android.content.ContentProviderOperation;
+import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.OperationApplicationException;
 import android.database.Cursor;
+import android.os.RemoteException;
+import android.provider.ContactsContract;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +32,7 @@ import java.util.List;
  * Common database methods.
  */
 public class CommonDatabaseUtils {
+    public static final String TAG = CommonDatabaseUtils.class.getSimpleName();
 
     // primitive value used when record is not found.
     public static final long NOT_FOUND = -1;
@@ -74,5 +81,32 @@ public class CommonDatabaseUtils {
             values.put(extras[i], extras[i + 1]);
             i += 2;
         }
+    }
+
+    public static void applyBatch(ContentResolver resolver,
+            ArrayList<ContentProviderOperation> operations) {
+        try {
+            resolver.applyBatch(ContactsContract.AUTHORITY, operations);
+        } catch (OperationApplicationException e) {
+            Log.wtf(TAG, "ContentResolver batch operation failed.");
+        } catch (RemoteException e) {
+            Log.wtf(TAG, "Remote exception when performing batch operation.");
+        }
+    }
+
+    /**
+     * Returns an array of values extracted from a {@link ContentValues}, based on the order of
+     * the provided projection.
+     * @param values {@link ContentValues} object containing the values to convert into an array
+     * @param projection array of column names
+     *
+     * @return array of values, in the correct order as defined by the projection
+     */
+    public static Object[] getArrayFromContentValues(ContentValues values, String[] projection) {
+        final Object[] result = new Object[projection.length];
+        for (int i = 0; i < projection.length; i++) {
+            result[i] = values.get(projection[i]);
+        }
+        return result;
     }
 }

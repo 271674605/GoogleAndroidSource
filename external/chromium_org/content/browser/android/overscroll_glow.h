@@ -22,84 +22,76 @@ namespace content {
 
 /* |OverscrollGlow| mirrors its Android counterpart, OverscrollGlow.java.
  * Conscious tradeoffs were made to align this as closely as possible with the
- * original Android java version.
+ * original Android Java version.
  */
 class OverscrollGlow {
  public:
-  // Create and initialize a new effect with the necessary resources.
-  // If |enabled| is false, the effect will be be deactivated until
-  // SetEnabled(true) is called.
-  // The caller should attach |root_layer| to the desired layer tree.
+  // Create a new effect. If |enabled| is false, the effect will remain
+  // deactivated until explicitly enabled.
+  // Note: No resources will be allocated until the effect is both
+  //       enabled and an overscroll event has occurred.
   static scoped_ptr<OverscrollGlow> Create(bool enabled);
-
-  // Force loading of any necessary resources.  This function is thread-safe.
-  static void EnsureResources();
 
   ~OverscrollGlow();
 
-  // If false, the glow will be deactivated, and subsequent calls to
-  // OnOverscrolled or Animate will have no effect.
-  void SetEnabled(bool enabled);
+  // Enable the effect. If the effect was previously disabled, it will remain
+  // dormant until subsequent calls to |OnOverscrolled()|.
+  void Enable();
 
-  // |overscroll| is the accumulated overscroll for the current gesture.
-  // |velocity| is the instantaneous velocity for the overscroll.
-  void OnOverscrolled(base::TimeTicks current_time,
-                      gfx::Vector2dF overscroll,
+  // Deactivate and detach the effect. Subsequent calls to |OnOverscrolled()| or
+  // |Animate()| will have no effect.
+  void Disable();
+
+  // Effect layers will be attached to |overscrolling_layer| if necessary.
+  // |accumulated_overscroll| and |overscroll_delta| are in device pixels, while
+  // |velocity| is in device pixels / second.
+  // Returns true if the effect still needs animation ticks.
+  bool OnOverscrolled(cc::Layer* overscrolling_layer,
+                      base::TimeTicks current_time,
+                      gfx::Vector2dF accumulated_overscroll,
+                      gfx::Vector2dF overscroll_delta,
                       gfx::Vector2dF velocity);
 
-  // Triggers glow recession for any active edges.
-  // Note: This does not actually release any resources; the name mirrors that
-  //       in Android's OverscrollGlow class.
-  void Release(base::TimeTicks current_time);
-
   // Returns true if the effect still needs animation ticks.
+  // Note: The effect will detach itself when no further animation is required.
   bool Animate(base::TimeTicks current_time);
 
-  // Returns true if the effect needs animation ticks.
-  bool NeedsAnimate() const;
+  // Update the effect according to the most recent display parameters,
+  // Note: All dimensions are in device pixels.
+  struct DisplayParameters {
+    DisplayParameters();
+    gfx::SizeF size;
+    float edge_offsets[EdgeEffect::EDGE_COUNT];
+    float device_scale_factor;
+  };
+  void UpdateDisplayParameters(const DisplayParameters& params);
 
-  // The root layer of the effect (not necessarily of the tree).
-  scoped_refptr<cc::Layer> root_layer() const {
-    return root_layer_;
-  }
-
-  // Horizontal overscroll will be ignored when false.
-  void set_horizontal_overscroll_enabled(bool enabled) {
-    horizontal_overscroll_enabled_ = enabled;
-  }
-  // Vertical overscroll will be ignored when false.
-  void set_vertical_overscroll_enabled(bool enabled) {
-    vertical_overscroll_enabled_ = enabled;
-  }
-  // The size of the layer for which edges will be animated.
-  void set_size(gfx::SizeF size) {
-    size_ = size;
-  }
 
  private:
   enum Axis { AXIS_X, AXIS_Y };
 
-  OverscrollGlow(bool enabled, const SkBitmap& edge, const SkBitmap& glow);
+  OverscrollGlow(bool enabled);
 
-  void Pull(base::TimeTicks current_time,
-            gfx::Vector2dF added_overscroll);
+  // Returns whether the effect is initialized.
+  bool InitializeIfNecessary();
+  bool NeedsAnimate() const;
+  void UpdateLayerAttachment(cc::Layer* parent);
+  void Detach();
+  void Pull(base::TimeTicks current_time, gfx::Vector2dF overscroll_delta);
   void Absorb(base::TimeTicks current_time,
               gfx::Vector2dF velocity,
-              gfx::Vector2dF overscroll,
-              gfx::Vector2dF old_overscroll);
-
+              bool x_overscroll_started,
+              bool y_overscroll_started);
+  void Release(base::TimeTicks current_time);
   void ReleaseAxis(Axis axis, base::TimeTicks current_time);
 
   EdgeEffect* GetOppositeEdge(int edge_index);
 
   scoped_ptr<EdgeEffect> edge_effects_[EdgeEffect::EDGE_COUNT];
 
+  DisplayParameters display_params_;
   bool enabled_;
-  gfx::SizeF size_;
-  gfx::Vector2dF old_overscroll_;
-  gfx::Vector2dF old_velocity_;
-  bool horizontal_overscroll_enabled_;
-  bool vertical_overscroll_enabled_;
+  bool initialized_;
 
   scoped_refptr<cc::Layer> root_layer_;
 

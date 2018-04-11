@@ -17,24 +17,23 @@
 
 package com.android.mail.browse;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Paint.FontMetricsInt;
 import android.graphics.Typeface;
+import android.support.v4.view.ViewCompat;
 import android.util.SparseArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.MeasureSpec;
 import android.view.ViewGroup;
-import android.view.ViewGroup.LayoutParams;
-import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import com.android.mail.R;
-import com.android.mail.R.dimen;
-import com.android.mail.R.id;
 import com.android.mail.ui.ViewMode;
 import com.android.mail.utils.Utils;
+import com.android.mail.utils.ViewUtils;
 import com.google.common.base.Objects;
 
 /**
@@ -47,6 +46,8 @@ import com.google.common.base.Objects;
  * @author phamm
  */
 public class ConversationItemViewCoordinates {
+    private static final int SINGLE_LINE = 1;
+
     // Modes
     static final int MODE_COUNT = 2;
     static final int WIDE_MODE = 0;
@@ -57,29 +58,21 @@ public class ConversationItemViewCoordinates {
     static final int GADGET_CONTACT_PHOTO = 1;
     static final int GADGET_CHECKBOX = 2;
 
-    // Attachment previews modes
-    static final int ATTACHMENT_PREVIEW_NONE = 0;
-    static final int ATTACHMENT_PREVIEW_UNREAD = 1;
-    static final int ATTACHMENT_PREVIEW_READ = 2;
-
-    // For combined views
-    private static int COLOR_BLOCK_WIDTH = -1;
-    private static int COLOR_BLOCK_HEIGHT = -1;
-
     /**
      * Simple holder class for an item's abstract configuration state. ListView binding creates an
-     * instance per item, and {@link #forConfig(Context, Config, SparseArray)} uses it to hide/show
-     * optional views and determine the correct coordinates for that item configuration.
+     * instance per item, and {@link #forConfig(Context, Config, CoordinatesCache)} uses it to
+     * hide/show optional views and determine the correct coordinates for that item configuration.
      */
     public static final class Config {
         private int mWidth;
         private int mViewMode = ViewMode.UNKNOWN;
         private int mGadgetMode = GADGET_NONE;
-        private int mAttachmentPreviewMode = ATTACHMENT_PREVIEW_NONE;
+        private int mLayoutDirection = View.LAYOUT_DIRECTION_LTR;
         private boolean mShowFolders = false;
         private boolean mShowReplyState = false;
         private boolean mShowColorBlock = false;
         private boolean mShowPersonalIndicator = false;
+        private boolean mUseFullMargins = false;
 
         public Config setViewMode(int viewMode) {
             mViewMode = viewMode;
@@ -88,11 +81,6 @@ public class ConversationItemViewCoordinates {
 
         public Config withGadget(int gadget) {
             mGadgetMode = gadget;
-            return this;
-        }
-
-        public Config withAttachmentPreviews(int attachmentPreviewMode) {
-            mAttachmentPreviewMode = attachmentPreviewMode;
             return this;
         }
 
@@ -133,10 +121,6 @@ public class ConversationItemViewCoordinates {
             return mGadgetMode;
         }
 
-        public int getAttachmentPreviewMode() {
-            return mAttachmentPreviewMode;
-        }
-
         public boolean areFoldersVisible() {
             return mShowFolders;
         }
@@ -155,10 +139,27 @@ public class ConversationItemViewCoordinates {
 
         private int getCacheKey() {
             // hash the attributes that contribute to item height and child view geometry
-            return Objects.hashCode(mWidth, mViewMode, mGadgetMode, mAttachmentPreviewMode,
-                    mShowFolders, mShowReplyState, mShowPersonalIndicator);
+            return Objects.hashCode(mWidth, mViewMode, mGadgetMode, mShowFolders, mShowReplyState,
+                    mShowPersonalIndicator, mLayoutDirection, mUseFullMargins);
         }
 
+        public Config setLayoutDirection(int layoutDirection) {
+            mLayoutDirection = layoutDirection;
+            return this;
+        }
+
+        public int getLayoutDirection() {
+            return mLayoutDirection;
+        }
+
+        public Config setUseFullMargins(boolean useFullMargins) {
+            mUseFullMargins = useFullMargins;
+            return this;
+        }
+
+        public boolean useFullPadding() {
+            return mUseFullMargins;
+        }
     }
 
     public static class CoordinatesCache {
@@ -201,7 +202,6 @@ public class ConversationItemViewCoordinates {
     final int sendersWidth;
     final int sendersHeight;
     final int sendersLineCount;
-    final int sendersLineHeight;
     final float sendersFontSize;
 
     // Subject.
@@ -209,12 +209,20 @@ public class ConversationItemViewCoordinates {
     final int subjectY;
     final int subjectWidth;
     final int subjectHeight;
-    final int subjectLineCount;
     final float subjectFontSize;
 
+    // Snippet.
+    final int snippetX;
+    final int snippetY;
+    final int maxSnippetWidth;
+    final int snippetHeight;
+    final float snippetFontSize;
+
     // Folders.
-    final int foldersX;
-    final int foldersXEnd;
+    final int folderLayoutWidth;
+    final int folderCellWidth;
+    final int foldersLeft;
+    final int foldersRight;
     final int foldersY;
     final int foldersHeight;
     final Typeface foldersTypeface;
@@ -222,19 +230,21 @@ public class ConversationItemViewCoordinates {
     final int foldersTextBottomPadding;
 
     // Info icon
-    final int infoIconXEnd;
+    final int infoIconX;
+    final int infoIconXRight;
     final int infoIconY;
 
     // Date.
-    final int dateXEnd;
+    final int dateX;
+    final int dateXRight;
     final int dateY;
-    final int datePaddingLeft;
+    final int datePaddingStart;
     final float dateFontSize;
     final int dateYBaseline;
 
     // Paperclip.
     final int paperclipY;
-    final int paperclipPaddingLeft;
+    final int paperclipPaddingStart;
 
     // Color block.
     final int colorBlockX;
@@ -254,64 +264,21 @@ public class ConversationItemViewCoordinates {
     final int contactImagesX;
     final int contactImagesY;
 
-    // Attachment previews
-    public final int attachmentPreviewsX;
-    public final int attachmentPreviewsY;
-    final int attachmentPreviewsWidth;
-    final int attachmentPreviewsHeight;
-    public final int attachmentPreviewsDecodeHeight;
-
-    // Attachment previews overflow badge and count
-    public final int overflowXEnd;
-    public final int overflowYEnd;
-    public final int overflowDiameter;
-    public final float overflowFontSize;
-    public final Typeface overflowTypeface;
-
-    // Attachment previews placeholder
-    final int placeholderY;
-    public final int placeholderWidth;
-    public final int placeholderHeight;
-    // Attachment previews progress bar
-    final int progressBarY;
-    public final int progressBarWidth;
-    public final int progressBarHeight;
 
     /**
      * The smallest item width for which we use the "wide" layout.
      */
     private final int mMinListWidthForWide;
-    /**
-     * The smallest item width for which we use the "spacious" variant of the normal layout,
-     * if the normal version is used at all. Larger than {@link #mMinListWidthForWide}, we use
-     * wide mode anyway, and this value is unused.
-     */
-    private final int mMinListWidthIsSpacious;
-    private final int mFolderCellWidth;
-    private final int mFolderMinimumWidth;
 
     private ConversationItemViewCoordinates(final Context context, final Config config,
             final CoordinatesCache cache) {
         Utils.traceBeginSection("CIV coordinates constructor");
         final Resources res = context.getResources();
-        mFolderCellWidth = res.getDimensionPixelSize(R.dimen.folder_cell_width);
         mMinListWidthForWide = res.getDimensionPixelSize(R.dimen.list_min_width_is_wide);
-        mMinListWidthIsSpacious = res.getDimensionPixelSize(
-                R.dimen.list_normal_mode_min_width_is_spacious);
-        mFolderMinimumWidth = res.getDimensionPixelSize(R.dimen.folder_minimum_width);
 
         mMode = calculateMode(res, config);
 
-        final int layoutId;
-        if (mMode == WIDE_MODE) {
-            layoutId = R.layout.conversation_item_view_wide;
-        } else {
-            if (config.getWidth() >= mMinListWidthIsSpacious) {
-                layoutId = R.layout.conversation_item_view_normal_spacious;
-            } else {
-                layoutId = R.layout.conversation_item_view_normal;
-            }
-        }
+        final int layoutId = R.layout.conversation_item_view;
 
         ViewGroup view = (ViewGroup) cache.getView(layoutId);
         if (view == null) {
@@ -320,28 +287,8 @@ public class ConversationItemViewCoordinates {
         }
 
         // Show/hide optional views before measure/layout call
-
-        final View attachmentPreviews = view.findViewById(R.id.attachment_previews);;
-        if (config.getAttachmentPreviewMode() != ATTACHMENT_PREVIEW_NONE) {
-            final LayoutParams params = attachmentPreviews.getLayoutParams();
-            attachmentPreviews.setVisibility(View.VISIBLE);
-            params.height = getAttachmentPreviewsHeight(context, config.getAttachmentPreviewMode());
-            attachmentPreviews.setLayoutParams(params);
-        } else {
-            attachmentPreviews.setVisibility(View.GONE);
-        }
-        attachmentPreviewsDecodeHeight = getAttachmentPreviewsHeight(context,
-                ATTACHMENT_PREVIEW_UNREAD);
-
         final TextView folders = (TextView) view.findViewById(R.id.folders);
         folders.setVisibility(config.areFoldersVisible() ? View.VISIBLE : View.GONE);
-
-        // Add margin between attachment previews and folders
-        final View attachmentPreviewsBottomMargin = view
-                .findViewById(R.id.attachment_previews_bottom_margin);
-        final boolean marginVisible = config.getAttachmentPreviewMode() != ATTACHMENT_PREVIEW_NONE
-                && config.areFoldersVisible();
-        attachmentPreviewsBottomMargin.setVisibility(marginVisible ? View.VISIBLE : View.GONE);
 
         View contactImagesView = view.findViewById(R.id.contact_image);
 
@@ -366,12 +313,21 @@ public class ConversationItemViewCoordinates {
         personalIndicator.setVisibility(
                 config.isPersonalIndicatorVisible() ? View.VISIBLE : View.GONE);
 
+        setFramePadding(context, view, config.useFullPadding());
+
         // Layout the appropriate view.
+        ViewCompat.setLayoutDirection(view, config.getLayoutDirection());
         final int widthSpec = MeasureSpec.makeMeasureSpec(config.getWidth(), MeasureSpec.EXACTLY);
         final int heightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
 
         view.measure(widthSpec, heightSpec);
         view.layout(0, 0, view.getMeasuredWidth(), view.getMeasuredHeight());
+
+        // Once the view is measured, let's calculate the dynamic width variables.
+        folderLayoutWidth = (int) (view.getWidth() *
+                res.getInteger(R.integer.folder_max_width_proportion) / 100.0);
+        folderCellWidth = (int) (view.getWidth() *
+                res.getInteger(R.integer.folder_cell_max_width_proportion) / 100.0);
 
 //        Utils.dumpViewTree((ViewGroup) view);
 
@@ -387,8 +343,11 @@ public class ConversationItemViewCoordinates {
             contactImagesX = contactImagesY = contactImagesWidth = contactImagesHeight = 0;
         }
 
+        final boolean isRtl = ViewUtils.isViewRtl(view);
+
         final View star = view.findViewById(R.id.star);
-        starX = getX(star);
+        final int starPadding = res.getDimensionPixelSize(R.dimen.conv_list_star_padding_start);
+        starX = getX(star) + (isRtl ? 0 : starPadding);
         starY = getY(star);
         starWidth = star.getWidth();
 
@@ -398,40 +357,38 @@ public class ConversationItemViewCoordinates {
         sendersY = getY(senders) + sendersTopAdjust;
         sendersWidth = senders.getWidth();
         sendersHeight = senders.getHeight();
-        sendersLineCount = getLineCount(senders);
-        sendersLineHeight = senders.getLineHeight();
+        sendersLineCount = SINGLE_LINE;
         sendersFontSize = senders.getTextSize();
 
         final TextView subject = (TextView) view.findViewById(R.id.subject);
         final int subjectTopAdjust = getLatinTopAdjustment(subject);
         subjectX = getX(subject);
-        if (isWide()) {
-            subjectY = getY(subject) + subjectTopAdjust;
-        } else {
-            subjectY = getY(subject) + sendersTopAdjust;
-        }
+        subjectY = getY(subject) + subjectTopAdjust;
         subjectWidth = subject.getWidth();
         subjectHeight = subject.getHeight();
-        subjectLineCount = getLineCount(subject);
         subjectFontSize = subject.getTextSize();
+
+        final TextView snippet = (TextView) view.findViewById(R.id.snippet);
+        final int snippetTopAdjust = getLatinTopAdjustment(snippet);
+        snippetX = getX(snippet);
+        snippetY = getY(snippet) + snippetTopAdjust;
+        maxSnippetWidth = snippet.getWidth();
+        snippetHeight = snippet.getHeight();
+        snippetFontSize = snippet.getTextSize();
 
         if (config.areFoldersVisible()) {
             // vertically align folders min left edge with subject
-            foldersX = subjectX;
-            foldersXEnd = getX(folders) + folders.getWidth();
-            if (isWide()) {
-                foldersY = getY(folders);
-            } else {
-                foldersY = getY(folders) + sendersTopAdjust;
-            }
+            foldersLeft = getX(folders);
+            foldersRight = foldersLeft + folders.getWidth();
+            foldersY = getY(folders) + sendersTopAdjust;
             foldersHeight = folders.getHeight();
             foldersTypeface = folders.getTypeface();
             foldersTextBottomPadding = res
                     .getDimensionPixelSize(R.dimen.folders_text_bottom_padding);
             foldersFontSize = folders.getTextSize();
         } else {
-            foldersX = 0;
-            foldersXEnd = 0;
+            foldersLeft = 0;
+            foldersRight = 0;
             foldersY = 0;
             foldersHeight = 0;
             foldersTypeface = null;
@@ -464,75 +421,44 @@ public class ConversationItemViewCoordinates {
         }
 
         final View infoIcon = view.findViewById(R.id.info_icon);
-        infoIconXEnd = getX(infoIcon) + infoIcon.getWidth();
+        infoIconX = getX(infoIcon);
+        infoIconXRight = infoIconX + infoIcon.getWidth();
         infoIconY = getY(infoIcon);
 
         final TextView date = (TextView) view.findViewById(R.id.date);
-        dateXEnd = getX(date) + date.getWidth();
+        dateX = getX(date);
+        dateXRight =  dateX + date.getWidth();
         dateY = getY(date);
-        datePaddingLeft = date.getPaddingLeft();
+        datePaddingStart = ViewUtils.getPaddingStart(date);
         dateFontSize = date.getTextSize();
         dateYBaseline = dateY + getLatinTopAdjustment(date) + date.getBaseline();
 
         final View paperclip = view.findViewById(R.id.paperclip);
         paperclipY = getY(paperclip);
-        paperclipPaddingLeft = paperclip.getPaddingLeft();
+        paperclipPaddingStart = ViewUtils.getPaddingStart(paperclip);
 
-        if (attachmentPreviews != null) {
-            attachmentPreviewsX = subjectX;
-            attachmentPreviewsY = getY(attachmentPreviews) + sendersTopAdjust;
-            attachmentPreviewsWidth = subjectWidth;
-            attachmentPreviewsHeight = attachmentPreviews.getHeight();
-
-            // We only care about the right and bottom of the overflow count
-            final TextView overflow = (TextView) view.findViewById(id.ap_overflow);
-            final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) overflow
-                    .getLayoutParams();
-            overflowXEnd = attachmentPreviewsX + attachmentPreviewsWidth - params.rightMargin;
-            overflowYEnd = attachmentPreviewsY + attachmentPreviewsHeight - params.bottomMargin;
-            overflowDiameter = overflow.getWidth();
-            overflowFontSize = overflow.getTextSize();
-            overflowTypeface = overflow.getTypeface();
-
-            final View placeholder = view.findViewById(id.ap_placeholder);
-            placeholderWidth = placeholder.getWidth();
-            placeholderHeight = placeholder.getHeight();
-            placeholderY = attachmentPreviewsY + attachmentPreviewsHeight / 2
-                    - placeholderHeight / 2;
-
-            final View progressBar = view.findViewById(id.ap_progress_bar);
-            progressBarWidth = progressBar.getWidth();
-            progressBarHeight = progressBar.getHeight();
-            progressBarY = attachmentPreviewsY + attachmentPreviewsHeight / 2
-                    - progressBarHeight / 2;
-        } else {
-            attachmentPreviewsX = 0;
-            attachmentPreviewsY = 0;
-            attachmentPreviewsWidth = 0;
-            attachmentPreviewsHeight = 0;
-            overflowXEnd = 0;
-            overflowYEnd = 0;
-            overflowDiameter = 0;
-            overflowFontSize = 0;
-            overflowTypeface = null;
-            placeholderY = 0;
-            placeholderWidth = 0;
-            placeholderHeight = 0;
-            progressBarY = 0;
-            progressBarWidth = 0;
-            progressBarHeight = 0;
-        }
-
-        height = view.getHeight() + (isWide() ? 0 : sendersTopAdjust);
+        height = view.getHeight() + sendersTopAdjust;
         Utils.traceEndSection();
+    }
+
+    @SuppressLint("NewApi")
+    private static void setFramePadding(Context context, ViewGroup view, boolean useFullPadding) {
+        final Resources res = context.getResources();
+        final int padding = res.getDimensionPixelSize(useFullPadding ?
+                R.dimen.conv_list_card_border_padding : R.dimen.conv_list_no_border_padding);
+
+        final View frame = view.findViewById(R.id.conversation_item_frame);
+        if (Utils.isRunningJBMR1OrLater()) {
+            // start, top, end, bottom
+            frame.setPaddingRelative(frame.getPaddingStart(), padding,
+                    frame.getPaddingEnd(), padding);
+        } else {
+            frame.setPadding(frame.getPaddingLeft(), padding, frame.getPaddingRight(), padding);
+        }
     }
 
     public int getMode() {
         return mMode;
-    }
-
-    public boolean isWide() {
-        return mMode == WIDE_MODE;
     }
 
     /**
@@ -565,20 +491,6 @@ public class ConversationItemViewCoordinates {
         }
     }
 
-    private int getAttachmentPreviewsHeight(final Context context,
-            final int attachmentPreviewMode) {
-        final Resources res = context.getResources();
-        switch (attachmentPreviewMode) {
-            case ATTACHMENT_PREVIEW_UNREAD:
-                return (int) (isWide() ? res.getDimension(dimen.attachment_preview_height_tall_wide)
-                        : res.getDimension(dimen.attachment_preview_height_tall));
-            case ATTACHMENT_PREVIEW_READ:
-                return (int) res.getDimension(dimen.attachment_preview_height_short);
-            default:
-                return 0;
-        }
-    }
-
     /**
      * Returns the x coordinates of a view by tracing up its hierarchy.
      */
@@ -604,17 +516,6 @@ public class ConversationItemViewCoordinates {
     }
 
     /**
-     * Returns the number of lines of this text view. Delegates to built-in TextView logic on JB+.
-     */
-    private static int getLineCount(TextView textView) {
-        if (Utils.isRunningJellybeanOrLater()) {
-            return textView.getMaxLines();
-        } else {
-            return Math.round(((float) textView.getHeight()) / textView.getLineHeight());
-        }
-    }
-
-    /**
      * Returns the length (maximum of characters) of subject in this mode.
      */
     public static int getSendersLength(Context context, int mode, boolean hasAttachments) {
@@ -623,35 +524,6 @@ public class ConversationItemViewCoordinates {
             return res.getIntArray(R.array.senders_with_attachment_lengths)[mode];
         } else {
             return res.getIntArray(R.array.senders_lengths)[mode];
-        }
-    }
-
-    @Deprecated
-    public static int getColorBlockWidth(Context context) {
-        Resources res = context.getResources();
-        if (COLOR_BLOCK_WIDTH <= 0) {
-            COLOR_BLOCK_WIDTH = res.getDimensionPixelSize(R.dimen.color_block_width);
-        }
-        return COLOR_BLOCK_WIDTH;
-    }
-
-    @Deprecated
-    public static int getColorBlockHeight(Context context) {
-        Resources res = context.getResources();
-        if (COLOR_BLOCK_HEIGHT <= 0) {
-            COLOR_BLOCK_HEIGHT = res.getDimensionPixelSize(R.dimen.color_block_height);
-        }
-        return COLOR_BLOCK_HEIGHT;
-    }
-
-    public static boolean displaySendersInline(int mode) {
-        switch (mode) {
-            case WIDE_MODE:
-                return false;
-            case NORMAL_MODE:
-                return true;
-            default:
-                throw new IllegalArgumentException("Unknown conversation header view mode " + mode);
         }
     }
 
@@ -671,26 +543,4 @@ public class ConversationItemViewCoordinates {
         cache.put(cacheKey, coordinates);
         return coordinates;
     }
-
-    /**
-     * Return the minimum width of a folder cell with no text. Essentially this is the left+right
-     * intra-cell margin within cells.
-     *
-     */
-    public int getFolderCellWidth() {
-        return mFolderCellWidth;
-    }
-
-    /**
-     * Return the minimum width of a folder cell, period. This will affect the
-     * maximum number of folders we can display.
-     */
-    public int getFolderMinimumWidth() {
-        return mFolderMinimumWidth;
-    }
-
-    public static boolean isWideMode(int mode) {
-        return mode == WIDE_MODE;
-    }
-
 }

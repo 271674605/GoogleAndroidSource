@@ -7,11 +7,12 @@
 
 #include <string>
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
+namespace extensions {
 // Base class for all terminalPrivate function classes. Main purpose is to run
 // permission check before calling actual function implementation.
-class TerminalPrivateFunction : public AsyncExtensionFunction {
+class TerminalPrivateFunction : public ChromeAsyncExtensionFunction {
  public:
   TerminalPrivateFunction();
 
@@ -19,7 +20,7 @@ class TerminalPrivateFunction : public AsyncExtensionFunction {
   virtual ~TerminalPrivateFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   // Override with actual extension function implementation.
   virtual bool RunTerminalFunction() = 0;
@@ -96,5 +97,7 @@ class TerminalPrivateOnTerminalResizeFunction : public TerminalPrivateFunction {
   void OnResizeOnFileThread(pid_t pid, int width, int height);
   void RespondOnUIThread(bool success);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_TERMINAL_TERMINAL_PRIVATE_API_H_

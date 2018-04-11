@@ -84,6 +84,8 @@ enum ModelType {
   HISTORY_DELETE_DIRECTIVES,
   // Synced push notifications.
   SYNCED_NOTIFICATIONS,
+  // Synced Notification app info.
+  SYNCED_NOTIFICATION_APP_INFO,
   // Custom spelling dictionary.
   DICTIONARY,
   // Favicon images.
@@ -93,12 +95,19 @@ enum ModelType {
   // These preferences are synced before other user types and are never
   // encrypted.
   PRIORITY_PREFERENCES,
-  // Managed user settings.
-  MANAGED_USER_SETTINGS,
-  // Managed users. Every managed user is a profile that is configured remotely
-  // by this user and can have restrictions applied. MANAGED_USERS and
-  // MANAGED_USER_SETTINGS can not be encrypted.
-  MANAGED_USERS,
+  // Supervised user settings.
+  SUPERVISED_USER_SETTINGS,
+  // Supervised users. Every supervised user is a profile that is configured
+  // remotely by this user and can have restrictions applied. SUPERVISED_USERS
+  // and SUPERVISED_USER_SETTINGS can not be encrypted.
+  SUPERVISED_USERS,
+  // Supervised user shared settings. Shared settings can be modified both by
+  // the manager and the supervised user.
+  SUPERVISED_USER_SHARED_SETTINGS,
+  // Distilled articles.
+  ARTICLES,
+  // App List items
+  APP_LIST,
 
   // ---- Proxy types ----
   // Proxy types are excluded from the sync protocol, but are still considered
@@ -128,10 +137,10 @@ enum ModelType {
 
   // If you are adding a new sync datatype that is exposed to the user via the
   // sync preferences UI, be sure to update the list in
-  // chrome/browser/sync/user_selectable_sync_type.h so that the UMA histograms
-  // for sync include your new type.
-  // In this case, be sure to also update the UserSelectableTypes() definition
-  // in sync/syncable/model_type.cc.
+  // components/sync_driver/user_selectable_sync_type.h so that the UMA
+  // histograms for sync include your new type.  In this case, be sure to also
+  // update the UserSelectableTypes() definition in
+  // sync/syncable/model_type.cc.
 
   MODEL_TYPE_COUNT,
 };
@@ -270,7 +279,12 @@ SYNC_EXPORT_PRIVATE ModelType ModelTypeFromValue(const base::Value& value);
 SYNC_EXPORT ModelType ModelTypeFromString(
     const std::string& model_type_string);
 
+// Returns the comma-separated string representation of |model_types|.
 SYNC_EXPORT std::string ModelTypeSetToString(ModelTypeSet model_types);
+
+// Returns the set of comma-separated model types from |model_type_string|.
+SYNC_EXPORT ModelTypeSet ModelTypeSetFromString(
+    const std::string& model_type_string);
 
 // Caller takes ownership of returned list.
 SYNC_EXPORT base::ListValue* ModelTypeSetToValue(ModelTypeSet model_types);
@@ -297,11 +311,17 @@ SYNC_EXPORT bool NotificationTypeToRealModelType(
 // Returns true if |model_type| is a real datatype
 SYNC_EXPORT bool IsRealDataType(ModelType model_type);
 
+// Returns true if |model_type| is a proxy type
+SYNC_EXPORT bool IsProxyType(ModelType model_type);
+
 // Returns true if |model_type| is an act-once type. Act once types drop
 // entities after applying them. Drops are deletes that are not synced to other
 // clients.
 // TODO(haitaol): Make entries of act-once data types immutable.
 SYNC_EXPORT bool IsActOnceDataType(ModelType model_type);
+
+// Returns set of model types that should be backed up before first sync.
+SYNC_EXPORT ModelTypeSet BackupTypes();
 
 }  // namespace syncer
 

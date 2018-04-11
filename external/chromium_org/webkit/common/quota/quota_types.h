@@ -13,7 +13,9 @@ enum StorageType {
   kStorageTypeTemporary,
   kStorageTypePersistent,
   kStorageTypeSyncable,
+  kStorageTypeQuotaNotManaged,
   kStorageTypeUnknown,
+  kStorageTypeLast = kStorageTypeUnknown
 };
 
 enum QuotaLimitType {

@@ -12,23 +12,22 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mem2reg"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/Dominators.h"
-#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "mem2reg"
+
 STATISTIC(NumPromoted, "Number of alloca's promoted");
 
 namespace {
   struct PromotePass : public FunctionPass {
     static char ID; // Pass identification, replacement for typeid
-
     PromotePass() : FunctionPass(ID) {
       initializePromotePassPass(*PassRegistry::getPassRegistry());
     }
@@ -36,10 +35,10 @@ namespace {
     // runOnFunction - To run this pass, first we calculate the alloca
     // instructions that are safe for promotion, then we promote each one.
     //
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.addRequired<DominatorTree>();
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
+      AU.addRequired<DominatorTreeWrapperPass>();
       AU.setPreservesCFG();
       // This is a cluster of orthogonal Transforms
       AU.addPreserved<UnifyFunctionExitNodes>();
@@ -52,7 +51,7 @@ namespace {
 char PromotePass::ID = 0;
 INITIALIZE_PASS_BEGIN(PromotePass, "mem2reg", "Promote Memory to Register",
                 false, false)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(PromotePass, "mem2reg", "Promote Memory to Register",
                 false, false)
 
@@ -63,8 +62,7 @@ bool PromotePass::runOnFunction(Function &F) {
 
   bool Changed  = false;
 
-  DominatorTree &DT = getAnalysis<DominatorTree>();
-  const DataLayout *DL = getAnalysisIfAvailable<DataLayout>();
+  DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
   while (1) {
     Allocas.clear();
@@ -73,12 +71,12 @@ bool PromotePass::runOnFunction(Function &F) {
     // the entry node
     for (BasicBlock::iterator I = BB.begin(), E = --BB.end(); I != E; ++I)
       if (AllocaInst *AI = dyn_cast<AllocaInst>(I))       // Is it an alloca?
-        if (isAllocaPromotable(AI, DL))
+        if (isAllocaPromotable(AI))
           Allocas.push_back(AI);
 
     if (Allocas.empty()) break;
 
-    PromoteMemToReg(Allocas, DT, DL);
+    PromoteMemToReg(Allocas, DT);
     NumPromoted += Allocas.size();
     Changed = true;
   }

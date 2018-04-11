@@ -6,27 +6,28 @@
 #define CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_MTP_DEVICE_ASYNC_DELEGATE_H_
 
 #include "base/callback.h"
+#include "base/files/file.h"
 #include "base/memory/ref_counted.h"
-#include "base/platform_file.h"
 #include "webkit/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
 }
 
-namespace chrome {
+namespace net {
+class IOBuffer;
+}
 
 // Asynchronous delegate for media transfer protocol (MTP) device to perform
-// media device isolated file system operations. Class that implements this
+// media device file system operations. Class that implements this
 // delegate does the actual communication with the MTP device.
-// ScopedMTPDeviceMapEntry class manages the lifetime of the delegate via
-// MTPDeviceMapService class. Member functions and callbacks runs on the IO
-// thread.
+// The lifetime of the delegate is managed by the MTPDeviceMapService class.
+// Member functions and callbacks run on the IO thread.
 class MTPDeviceAsyncDelegate {
  public:
   // A callback to be called when GetFileInfo method call succeeds.
   typedef base::Callback<
-      void(const base::PlatformFileInfo& file_info)> GetFileInfoSuccessCallback;
+      void(const base::File::Info& file_info)> GetFileInfoSuccessCallback;
 
   // A callback to be called when ReadDirectory method call succeeds.
   typedef base::Callback<
@@ -35,13 +36,32 @@ class MTPDeviceAsyncDelegate {
 
   // A callback to be called when GetFileInfo/ReadDirectory/CreateSnapshot
   // method call fails.
-  typedef base::Callback<
-      void(base::PlatformFileError error)> ErrorCallback;
+  typedef base::Callback<void(base::File::Error error)> ErrorCallback;
 
   // A callback to be called when CreateSnapshotFile method call succeeds.
   typedef base::Callback<
-      void(const base::PlatformFileInfo& file_info,
+      void(const base::File::Info& file_info,
            const base::FilePath& local_path)> CreateSnapshotFileSuccessCallback;
+
+  // A callback to be called when ReadBytes method call succeeds.
+  typedef base::Callback<
+      void(const base::File::Info& file_info,
+           int bytes_read)> ReadBytesSuccessCallback;
+
+  struct ReadBytesRequest {
+    ReadBytesRequest(const std::string& device_file_relative_path,
+                     net::IOBuffer* buf, int64 offset, int buf_len,
+                     const ReadBytesSuccessCallback& success_callback,
+                     const ErrorCallback& error_callback);
+    ~ReadBytesRequest();
+
+    std::string device_file_relative_path;
+    scoped_refptr<net::IOBuffer> buf;
+    int64 offset;
+    int buf_len;
+    ReadBytesSuccessCallback success_callback;
+    ErrorCallback error_callback;
+  };
 
   // Gets information about the given |file_path| and invokes the appropriate
   // callback asynchronously when complete.
@@ -65,6 +85,19 @@ class MTPDeviceAsyncDelegate {
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback) = 0;
 
+  // Platform-specific implementations that are streaming don't create a local
+  // snapshot file. Blobs are instead FileSystemURL backed and read in a stream.
+  virtual bool IsStreaming() = 0;
+
+  // Reads up to |buf_len| bytes from |device_file_path| into |buf|. Invokes the
+  // appropriate callback asynchronously when complete. Only valid when
+  // IsStreaming() is true.
+  virtual void ReadBytes(
+      const base::FilePath& device_file_path,
+      net::IOBuffer* buf, int64 offset, int buf_len,
+      const ReadBytesSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) = 0;
+
   // Called when the
   // (1) Browser application is in shutdown mode (or)
   // (2) Last extension using this MTP device is destroyed (or)
@@ -80,6 +113,11 @@ class MTPDeviceAsyncDelegate {
   virtual ~MTPDeviceAsyncDelegate() {}
 };
 
-}  // namespace chrome
+typedef base::Callback<void(MTPDeviceAsyncDelegate*)>
+    CreateMTPDeviceAsyncDelegateCallback;
+
+void CreateMTPDeviceAsyncDelegate(
+    const base::FilePath::StringType& device_location,
+    const CreateMTPDeviceAsyncDelegateCallback& callback);
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_MTP_DEVICE_ASYNC_DELEGATE_H_

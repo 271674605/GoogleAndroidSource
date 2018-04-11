@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #include "mincrypt/sha.h"
 #include "applypatch.h"
@@ -31,7 +32,7 @@
 #include "edify/expr.h"
 
 static int LoadPartitionContents(const char* filename, FileContents* file);
-static ssize_t FileSink(unsigned char* data, ssize_t len, void* token);
+static ssize_t FileSink(const unsigned char* data, ssize_t len, void* token);
 static int GenerateTarget(FileContents* source_file,
                           const Value* source_patch_value,
                           FileContents* copy_file,
@@ -44,14 +45,11 @@ static int GenerateTarget(FileContents* source_file,
 
 static int mtd_partitions_scanned = 0;
 
-// Read a file into memory; optionally (retouch_flag == RETOUCH_DO_MASK) mask
-// the retouched entries back to their original value (such that SHA-1 checks
-// don't fail due to randomization); store the file contents and associated
+// Read a file into memory; store the file contents and associated
 // metadata in *file.
 //
 // Return 0 on success.
-int LoadFileContents(const char* filename, FileContents* file,
-                     int retouch_flag) {
+int LoadFileContents(const char* filename, FileContents* file) {
     file->data = NULL;
 
     // A special 'filename' beginning with "MTD:" or "EMMC:" means to
@@ -86,20 +84,6 @@ int LoadFileContents(const char* filename, FileContents* file,
         return -1;
     }
     fclose(f);
-
-    // apply_patch[_check] functions are blind to randomization. Randomization
-    // is taken care of in [Undo]RetouchBinariesFn. If there is a mismatch
-    // within a file, this means the file is assumed "corrupt" for simplicity.
-    if (retouch_flag) {
-        int32_t desired_offset = 0;
-        if (retouch_mask_data(file->data, file->size,
-                              &desired_offset, NULL) != RETOUCH_DATA_MATCHED) {
-            printf("error trying to mask retouch entries\n");
-            free(file->data);
-            file->data = NULL;
-            return -1;
-        }
-    }
 
     SHA_hash(file->data, file->size, file->sha1);
     return 0;
@@ -247,7 +231,7 @@ static int LoadPartitionContents(const char* filename, FileContents* file) {
                     break;
             }
             if (next != read) {
-                printf("short read (%d bytes of %d) for partition \"%s\"\n",
+                printf("short read (%zu bytes of %zu) for partition \"%s\"\n",
                        read, next, partition);
                 free(file->data);
                 file->data = NULL;
@@ -274,7 +258,7 @@ static int LoadPartitionContents(const char* filename, FileContents* file) {
         if (memcmp(sha_so_far, parsed_sha, SHA_DIGEST_SIZE) == 0) {
             // we have a match.  stop reading the partition; we'll return
             // the data we've read so far.
-            printf("partition read matched size %d sha %s\n",
+            printf("partition read matched size %zu sha %s\n",
                    size[index[i]], sha1sum[index[i]]);
             break;
         }
@@ -402,7 +386,7 @@ int WriteToPartition(unsigned char* data, size_t len,
 
             size_t written = mtd_write_data(ctx, (char*)data, len);
             if (written != len) {
-                printf("only wrote %d of %d bytes to MTD %s\n",
+                printf("only wrote %zu of %zu bytes to MTD %s\n",
                        written, len, partition);
                 mtd_write_close(ctx);
                 return -1;
@@ -424,20 +408,18 @@ int WriteToPartition(unsigned char* data, size_t len,
         {
             size_t start = 0;
             int success = 0;
-            int fd = open(partition, O_RDWR | O_SYNC);
+            int fd = open(partition, O_RDWR);
             if (fd < 0) {
                 printf("failed to open %s: %s\n", partition, strerror(errno));
                 return -1;
             }
             int attempt;
 
-            for (attempt = 0; attempt < 10; ++attempt) {
-                size_t next_sync = start + (1<<20);
-                printf("raw O_SYNC write %s attempt %d start at %d\n", partition, attempt+1, start);
+            for (attempt = 0; attempt < 2; ++attempt) {
                 lseek(fd, start, SEEK_SET);
                 while (start < len) {
                     size_t to_write = len - start;
-                    if (to_write > 4096) to_write = 4096;
+                    if (to_write > 1<<20) to_write = 1<<20;
 
                     ssize_t written = write(fd, data+start, to_write);
                     if (written < 0) {
@@ -450,10 +432,6 @@ int WriteToPartition(unsigned char* data, size_t len,
                         }
                     }
                     start += written;
-                    if (start >= next_sync) {
-                        fsync(fd);
-                        next_sync = start + (1<<20);
-                    }
                 }
                 fsync(fd);
 
@@ -482,20 +460,20 @@ int WriteToPartition(unsigned char* data, size_t len,
                             if (errno == EINTR) {
                                 read_count = 0;
                             } else {
-                                printf("verify read error %s at %d: %s\n",
+                                printf("verify read error %s at %zu: %s\n",
                                        partition, p, strerror(errno));
                                 return -1;
                             }
                         }
                         if ((size_t)read_count < to_read) {
-                            printf("short verify read %s at %d: %d %d %s\n",
+                            printf("short verify read %s at %zu: %zd %zu %s\n",
                                    partition, p, read_count, to_read, strerror(errno));
                         }
                         so_far += read_count;
                     }
 
                     if (memcmp(buffer, data+p, to_read)) {
-                        printf("verification failed starting at %d\n", p);
+                        printf("verification failed starting at %zu\n", p);
                         start = p;
                         break;
                     }
@@ -506,8 +484,6 @@ int WriteToPartition(unsigned char* data, size_t len,
                     success = true;
                     break;
                 }
-
-                sleep(2);
             }
 
             if (!success) {
@@ -519,11 +495,7 @@ int WriteToPartition(unsigned char* data, size_t len,
                 printf("error closing %s (%s)\n", partition, strerror(errno));
                 return -1;
             }
-            // hack: sync and sleep after closing in hopes of getting
-            // the data actually onto flash.
-            printf("sleeping after close\n");
             sync();
-            sleep(5);
             break;
         }
     }
@@ -591,7 +563,7 @@ int applypatch_check(const char* filename,
     // LoadFileContents is successful.  (Useful for reading
     // partitions, where the filename encodes the sha1s; no need to
     // check them twice.)
-    if (LoadFileContents(filename, &file, RETOUCH_DO_MASK) != 0 ||
+    if (LoadFileContents(filename, &file) != 0 ||
         (num_patches > 0 &&
          FindMatchingPatch(file.sha1, patch_sha1_str, num_patches) < 0)) {
         printf("file \"%s\" doesn't have any of expected "
@@ -606,7 +578,7 @@ int applypatch_check(const char* filename,
         // exists and matches the sha1 we're looking for, the check still
         // passes.
 
-        if (LoadFileContents(CACHE_TEMP_SOURCE, &file, RETOUCH_DO_MASK) != 0) {
+        if (LoadFileContents(CACHE_TEMP_SOURCE, &file) != 0) {
             printf("failed to load cache file\n");
             return 1;
         }
@@ -627,7 +599,7 @@ int ShowLicenses() {
     return 0;
 }
 
-ssize_t FileSink(unsigned char* data, ssize_t len, void* token) {
+ssize_t FileSink(const unsigned char* data, ssize_t len, void* token) {
     int fd = *(int *)token;
     ssize_t done = 0;
     ssize_t wrote;
@@ -648,7 +620,7 @@ typedef struct {
     ssize_t pos;
 } MemorySinkInfo;
 
-ssize_t MemorySink(unsigned char* data, ssize_t len, void* token) {
+ssize_t MemorySink(const unsigned char* data, ssize_t len, void* token) {
     MemorySinkInfo* msi = (MemorySinkInfo*)token;
     if (msi->size - msi->pos < len) {
         return -1;
@@ -742,8 +714,7 @@ int applypatch(const char* source_filename,
     const Value* copy_patch_value = NULL;
 
     // We try to load the target file into the source_file object.
-    if (LoadFileContents(target_filename, &source_file,
-                         RETOUCH_DO_MASK) == 0) {
+    if (LoadFileContents(target_filename, &source_file) == 0) {
         if (memcmp(source_file.sha1, target_sha1, SHA_DIGEST_SIZE) == 0) {
             // The early-exit case:  the patch was already applied, this file
             // has the desired hash, nothing for us to do.
@@ -762,8 +733,7 @@ int applypatch(const char* source_filename,
         // target file, or we did but it's different from the source file.
         free(source_file.data);
         source_file.data = NULL;
-        LoadFileContents(source_filename, &source_file,
-                         RETOUCH_DO_MASK);
+        LoadFileContents(source_filename, &source_file);
     }
 
     if (source_file.data != NULL) {
@@ -779,8 +749,7 @@ int applypatch(const char* source_filename,
         source_file.data = NULL;
         printf("source file is bad; trying copy\n");
 
-        if (LoadFileContents(CACHE_TEMP_SOURCE, &copy_file,
-                             RETOUCH_DO_MASK) < 0) {
+        if (LoadFileContents(CACHE_TEMP_SOURCE, &copy_file) < 0) {
             // fail.
             printf("failed to read copy file\n");
             return 1;

@@ -75,13 +75,22 @@ public:
                            const void * usr,
                            uint32_t usrLen,
                            const RsScriptCall *sc) = 0;
+                           
+        virtual void invokeForEachMulti(uint32_t slot,
+                                         const Allocation** ains,
+                                         uint32_t inLen,
+                                         Allocation * aout,
+                                         const void * usr,
+                                         uint32_t usrLen,
+                                         const RsScriptCall *sc) = 0;
+        
         virtual void invokeInit() = 0;
         virtual void invokeFreeChildren() = 0;
 
         virtual void setGlobalVar(uint32_t slot, const void *data, size_t dataLength) = 0;
         virtual void getGlobalVar(uint32_t slot, void *data, size_t dataLength) = 0;
         virtual void setGlobalVarWithElemDims(uint32_t slot, const void *data, size_t dataLength,
-                                      const Element *e, const size_t *dims, size_t dimLength) = 0;
+                                      const Element *e, const uint32_t *dims, size_t dimLength) = 0;
         virtual void setGlobalBind(uint32_t slot, Allocation *data) = 0;
         virtual void setGlobalObj(uint32_t slot, ObjectBase *obj) = 0;
 
@@ -110,7 +119,8 @@ public:
                                     uint32_t version_minor, sym_lookup_t lfn, script_lookup_t slfn
 #ifndef RS_COMPATIBILITY_LIB
                                     , bcc::RSLinkRuntimeCallback pLinkRuntimeCallback = NULL,
-                                    RSSelectRTCallback pSelectRTCallback = NULL
+                                    RSSelectRTCallback pSelectRTCallback = NULL,
+                                    const char *pBccPluginName = NULL
 #endif
                                     );
     virtual ~RsdCpuReference();

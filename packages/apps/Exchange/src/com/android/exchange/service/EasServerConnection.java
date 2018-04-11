@@ -39,10 +39,12 @@ import com.android.exchange.Eas;
 import com.android.exchange.EasResponse;
 import com.android.exchange.eas.EasConnectionCache;
 import com.android.exchange.utility.CurlLogger;
+import com.android.exchange.utility.WbxmlResponseLogger;
 import com.android.mail.utils.LogUtils;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpOptions;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpUriRequest;
@@ -136,7 +138,7 @@ public class EasServerConnection {
     private EmailClientConnectionManager mClientConnectionManager;
 
     public EasServerConnection(final Context context, final Account account,
-            final HostAuth hostAuth) {
+                               final HostAuth hostAuth) {
         mContext = context;
         mHostAuth = hostAuth;
         mAccount = account;
@@ -144,11 +146,8 @@ public class EasServerConnection {
         setProtocolVersion(account.mProtocolVersion);
     }
 
-    public EasServerConnection(final Context context, final Account account) {
-        this(context, account, HostAuth.restoreHostAuthWithId(context, account.mHostAuthKeyRecv));
-    }
-
-    protected EmailClientConnectionManager getClientConnectionManager() {
+    protected EmailClientConnectionManager getClientConnectionManager()
+        throws CertificateException {
         final EmailClientConnectionManager connManager =
                 EasConnectionCache.instance().getConnectionManager(mContext, mHostAuth);
         if (mClientConnectionManager != connManager) {
@@ -169,7 +168,7 @@ public class EasServerConnection {
         }
     }
 
-    private HttpClient getHttpClient(final long timeout) {
+    private HttpClient getHttpClient(final long timeout) throws CertificateException {
         if (mClient == null) {
             final HttpParams params = new BasicHttpParams();
             HttpConnectionParams.setConnectionTimeout(params, (int)(CONNECTION_TIMEOUT));
@@ -180,6 +179,7 @@ public class EasServerConnection {
                 protected BasicHttpProcessor createHttpProcessor() {
                     final BasicHttpProcessor processor = super.createHttpProcessor();
                     processor.addRequestInterceptor(new CurlLogger());
+                    processor.addResponseInterceptor(new WbxmlResponseLogger());
                     return processor;
                 }
             };
@@ -256,7 +256,7 @@ public class EasServerConnection {
      * @return The {@link EasResponse} from the Exchange server.
      * @throws IOException
      */
-    protected EasResponse sendHttpClientOptions() throws IOException {
+    protected EasResponse sendHttpClientOptions() throws IOException, CertificateException {
         // For OPTIONS, just use the base string and the single header
         final HttpOptions method = new HttpOptions(URI.create(makeBaseUriString()));
         method.setHeader("Authorization", makeAuthString());
@@ -285,7 +285,9 @@ public class EasServerConnection {
         post.setHeader("MS-ASProtocolVersion", String.valueOf(mProtocolVersion));
         post.setHeader("User-Agent", getUserAgent());
         post.setHeader("Accept-Encoding", "gzip");
-        if (contentType != null) {
+        // If there is no entity, we should not be setting a content-type since this will
+        // result in a 400 from the server in the case of loading an attachment.
+        if (contentType != null && entity != null) {
             post.setHeader("Content-Type", contentType);
         }
         if (usePolicyKey) {
@@ -312,6 +314,11 @@ public class EasServerConnection {
         return post;
     }
 
+    public HttpGet makeGet(final String uri) {
+        final HttpGet get = new HttpGet(uri);
+        return get;
+    }
+
     /**
      * Make an {@link HttpOptions} request for this connection.
      * @return The {@link HttpOptions} object.
@@ -332,10 +339,12 @@ public class EasServerConnection {
      * @throws IOException
      */
     protected EasResponse sendHttpClientPost(String cmd, final HttpEntity entity,
-            final long timeout) throws IOException {
+            final long timeout) throws IOException, CertificateException {
         final boolean isPingCommand = cmd.equals("Ping");
 
         // Split the mail sending commands
+        // TODO: This logic should not be here, the command should be generated correctly
+        // in a subclass of EasOperation.
         String extra = null;
         boolean msg = false;
         if (cmd.startsWith("SmartForward&") || cmd.startsWith("SmartReply&")) {
@@ -355,8 +364,7 @@ public class EasServerConnection {
             contentType = MimeUtility.MIME_TYPE_RFC822;
         } else if (entity != null) {
             contentType = EAS_14_MIME_TYPE;
-        }
-        else {
+        } else {
             contentType = null;
         }
         final String uriString;
@@ -377,7 +385,7 @@ public class EasServerConnection {
     }
 
     public EasResponse sendHttpClientPost(final String cmd, final byte[] bytes,
-            final long timeout) throws IOException {
+            final long timeout) throws IOException, CertificateException {
         final ByteArrayEntity entity;
         if (bytes == null) {
             entity = null;
@@ -388,7 +396,7 @@ public class EasServerConnection {
     }
 
     protected EasResponse sendHttpClientPost(final String cmd, final byte[] bytes)
-            throws IOException {
+            throws IOException, CertificateException {
         return sendHttpClientPost(cmd, bytes, COMMAND_TIMEOUT);
     }
 
@@ -402,7 +410,7 @@ public class EasServerConnection {
      * @throws IOException
      */
     public EasResponse executeHttpUriRequest(final HttpUriRequest method, final long timeout)
-            throws IOException {
+            throws IOException, CertificateException {
         LogUtils.d(TAG, "EasServerConnection about to make request %s", method.getRequestLine());
         // The synchronized blocks are here to support the stop() function, specifically to handle
         // when stop() is called first. Notably, they are NOT here in order to guard against
@@ -433,7 +441,8 @@ public class EasServerConnection {
         }
     }
 
-    protected EasResponse executePost(final HttpPost method) throws IOException {
+    protected EasResponse executePost(final HttpPost method)
+            throws IOException, CertificateException {
         return executeHttpUriRequest(method, COMMAND_TIMEOUT);
     }
 
@@ -492,41 +501,5 @@ public class EasServerConnection {
      */
     public boolean isProtocolVersionSet() {
         return mProtocolVersionIsSet;
-    }
-
-    /**
-     * Convenience method for adding a Message to an account's outbox
-     * @param account The {@link Account} from which to send the message.
-     * @param msg The message to send
-     */
-    protected void sendMessage(final Account account, final EmailContent.Message msg) {
-        long mailboxId = Mailbox.findMailboxOfType(mContext, account.mId, Mailbox.TYPE_OUTBOX);
-        // TODO: Improve system mailbox handling.
-        if (mailboxId == Mailbox.NO_MAILBOX) {
-            LogUtils.d(TAG, "No outbox for account %d, creating it", account.mId);
-            final Mailbox outbox =
-                    Mailbox.newSystemMailbox(mContext, account.mId, Mailbox.TYPE_OUTBOX);
-            outbox.save(mContext);
-            mailboxId = outbox.mId;
-        }
-        msg.mMailboxKey = mailboxId;
-        msg.mAccountKey = account.mId;
-        msg.save(mContext);
-        requestSyncForMailbox(new android.accounts.Account(account.mEmailAddress,
-                Eas.EXCHANGE_ACCOUNT_MANAGER_TYPE), EmailContent.AUTHORITY, mailboxId);
-    }
-
-    /**
-     * Issue a {@link android.content.ContentResolver#requestSync} for a specific mailbox.
-     * @param amAccount The {@link android.accounts.Account} for the account we're pinging.
-     * @param authority The authority for the mailbox that needs to sync.
-     * @param mailboxId The id of the mailbox that needs to sync.
-     */
-    protected static void requestSyncForMailbox(final android.accounts.Account amAccount,
-            final String authority, final long mailboxId) {
-        final Bundle extras = Mailbox.createSyncBundle(mailboxId);
-        ContentResolver.requestSync(amAccount, authority, extras);
-        LogUtils.d(TAG, "requestSync EasServerConnection requestSyncForMailbox %s, %s",
-                amAccount.toString(), extras.toString());
     }
 }

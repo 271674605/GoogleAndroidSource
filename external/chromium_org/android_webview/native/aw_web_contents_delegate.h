@@ -28,7 +28,7 @@ class AwWebContentsDelegate
                          int active_match_ordinal,
                          bool final_update) OVERRIDE;
   virtual void CanDownload(content::RenderViewHost* source,
-                           int request_id,
+                           const GURL& url,
                            const std::string& request_method,
                            const base::Callback<void(bool)>& callback) OVERRIDE;
   virtual void RunFileChooser(
@@ -40,8 +40,26 @@ class AwWebContentsDelegate
                               const gfx::Rect& initial_pos,
                               bool user_gesture,
                               bool* was_blocked) OVERRIDE;
+
+  virtual void WebContentsCreated(content::WebContents* source_contents,
+                                  int opener_render_frame_id,
+                                  const base::string16& frame_name,
+                                  const GURL& target_url,
+                                  content::WebContents* new_contents) OVERRIDE;
+
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void ActivateContents(content::WebContents* contents) OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
+  virtual void ToggleFullscreenModeForTab(content::WebContents* web_contents,
+                                          bool enter_fullscreen) OVERRIDE;
+  virtual bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) const OVERRIDE;
+
+ private:
+  bool is_fullscreen_;
 };
 
 bool RegisterAwWebContentsDelegate(JNIEnv* env);

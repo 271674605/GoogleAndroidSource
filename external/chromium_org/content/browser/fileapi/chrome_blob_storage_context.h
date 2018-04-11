@@ -11,10 +11,11 @@
 #include "content/common/content_export.h"
 
 namespace webkit_blob {
-class BlobStorageController;
+class BlobStorageContext;
 }
 
 namespace content {
+class BlobHandle;
 class BrowserContext;
 struct ChromeBlobStorageContextDeleter;
 
@@ -36,9 +37,13 @@ class CONTENT_EXPORT ChromeBlobStorageContext
 
   void InitializeOnIOThread();
 
-  webkit_blob::BlobStorageController* controller() const {
-    return controller_.get();
+  webkit_blob::BlobStorageContext* context() const {
+    return context_.get();
   }
+
+  // Returns a NULL scoped_ptr on failure.
+  scoped_ptr<BlobHandle> CreateMemoryBackedBlob(const char* data,
+                                                size_t length);
 
  protected:
   virtual ~ChromeBlobStorageContext();
@@ -51,7 +56,7 @@ class CONTENT_EXPORT ChromeBlobStorageContext
 
   void DeleteOnCorrectThread() const;
 
-  scoped_ptr<webkit_blob::BlobStorageController> controller_;
+  scoped_ptr<webkit_blob::BlobStorageContext> context_;
 };
 
 struct ChromeBlobStorageContextDeleter {

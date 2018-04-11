@@ -3042,6 +3042,15 @@ OMX_ERRORTYPE  omx_vdec::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
             if ( portDefn->nBufferCountActual >= drv_ctx.op_buf.mincount &&
                  portDefn->nBufferSize >=  buffer_size)
               {
+                // disallow more than 2 extrabuffers when we are in smoothstreaming mode
+                // and output memory comes from a budgeted carveout
+                if (m_use_smoothstreaming && secure_mode &&
+                    (portDefn->nBufferCountActual > drv_ctx.op_buf.actualcount + 2)) {
+                    ALOGI("NOTE: rejecting client's buffer-count %d v/s actual %d",
+                            portDefn->nBufferCountActual, drv_ctx.op_buf.actualcount);
+                    eRet = OMX_ErrorBadParameter;
+                    break;
+                }
                 drv_ctx.op_buf.actualcount = portDefn->nBufferCountActual;
                 drv_ctx.op_buf.buffer_size = portDefn->nBufferSize;
                 eRet = set_buffer_req(&drv_ctx.op_buf);
@@ -3581,10 +3590,10 @@ OMX_ERRORTYPE  omx_vdec::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
       break;
 
 #if defined (_ANDROID_HONEYCOMB_) || defined (_ANDROID_ICS_)
-    case OMX_GoogleAndroidIndexPrepareForAdaptivePlayback:
+    case OMX_QcomIndexParamVideoAdaptivePlaybackMode:
         {
             DEBUG_PRINT_LOW("set_parameter: "
-                    "OMX_GoogleAndroidIndexPrepareForAdaptivePlayback");
+                    "OMX_QcomIndexParamVideoAdaptivePlaybackMode");
             PrepareForAdaptivePlaybackParams* adaptivePlaybackParams =
                     (PrepareForAdaptivePlaybackParams *) paramData;
             if (adaptivePlaybackParams->nPortIndex == OMX_CORE_OUTPUT_PORT_INDEX) {
@@ -3986,7 +3995,7 @@ OMX_ERRORTYPE  omx_vdec::get_extension_index(OMX_IN OMX_HANDLETYPE      hComp,
     }
     else if (!strncmp(paramName,"OMX.google.android.index.prepareForAdaptivePlayback",
             sizeof("OMX.google.android.index.prepareForAdaptivePlayback") - 1)) {
-        *indexType = (OMX_INDEXTYPE)OMX_GoogleAndroidIndexPrepareForAdaptivePlayback;
+        *indexType = (OMX_INDEXTYPE)OMX_QcomIndexParamVideoAdaptivePlaybackMode;
     }
 #endif
 	else {
@@ -6903,7 +6912,7 @@ int omx_vdec::async_message_process (void *context, void* message)
 
         if (omx->output_use_buffer)
           memcpy ( omxhdr->pBuffer,
-                   (vdec_msg->msgdata.output_frame.bufferaddr +
+                   ((char*)vdec_msg->msgdata.output_frame.bufferaddr +
                     vdec_msg->msgdata.output_frame.offset),
                     vdec_msg->msgdata.output_frame.len );
       }
@@ -7596,10 +7605,10 @@ int omx_vdec::alloc_map_ion_memory(OMX_U32 buffer_size,
   }
 
   if(secure_mode) {
-    alloc_data->heap_mask = ION_HEAP(MEM_HEAP_ID);
+    alloc_data->heap_id_mask = ION_HEAP(MEM_HEAP_ID);
     alloc_data->flags |= ION_SECURE;
   } else {
-    alloc_data->heap_mask = (ION_HEAP(ION_IOMMU_HEAP_ID));
+    alloc_data->heap_id_mask = (ION_HEAP(ION_IOMMU_HEAP_ID));
   }
   rc = ioctl(fd,ION_IOC_ALLOC,alloc_data);
   if (rc || !alloc_data->handle) {

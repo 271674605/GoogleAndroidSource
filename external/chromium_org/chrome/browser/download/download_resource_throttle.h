@@ -25,13 +25,14 @@ class DownloadResourceThrottle
   DownloadResourceThrottle(DownloadRequestLimiter* limiter,
                            int render_process_id,
                            int render_view_id,
-                           int request_id,
+                           const GURL& url,
                            const std::string& request_method);
 
   // content::ResourceThrottle implementation:
   virtual void WillStartRequest(bool* defer) OVERRIDE;
   virtual void WillRedirectRequest(const GURL& new_url, bool* defer) OVERRIDE;
   virtual void WillProcessResponse(bool* defer) OVERRIDE;
+  virtual const char* GetNameForLogging() const OVERRIDE;
 
  private:
   virtual ~DownloadResourceThrottle();

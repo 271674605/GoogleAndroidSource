@@ -40,8 +40,6 @@
 #define SCHED_RR 2
 #define SCHED_BATCH 3
 
-#define pthread_cond_timedwait_monotonic pthread_cond_timedwait
-
 #endif
 
 /* Define the structure that holds the GKI variables
@@ -219,8 +217,11 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
     UINT8   *p;
     struct sched_param param;
     int policy, ret = 0;
+    pthread_condattr_t attr;
     pthread_attr_t attr1;
 
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     GKI_TRACE_5 ("GKI_create_task func=0x%x  id=%d  name=%s  stack=0x%x  stackSize=%d", task_entry, task_id, taskname, stack, stacksize);
 
     if (task_id >= GKI_MAX_TASKS)
@@ -237,9 +238,9 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
 
     /* Initialize mutex and condition variable objects for events and timeouts */
     pthread_mutex_init(&gki_cb.os.thread_evt_mutex[task_id], NULL);
-    pthread_cond_init (&gki_cb.os.thread_evt_cond[task_id], NULL);
+    pthread_cond_init (&gki_cb.os.thread_evt_cond[task_id], &attr);
     pthread_mutex_init(&gki_cb.os.thread_timeout_mutex[task_id], NULL);
-    pthread_cond_init (&gki_cb.os.thread_timeout_cond[task_id], NULL);
+    pthread_cond_init (&gki_cb.os.thread_timeout_cond[task_id], &attr);
 
     pthread_attr_init(&attr1);
     /* by default, pthread creates a joinable thread */
@@ -400,7 +401,7 @@ void gki_system_tick_start_stop_cback(BOOLEAN start)
 {
     tGKI_OS         *p_os = &gki_cb.os;
     volatile int    *p_run_cond = &p_os->no_timer_suspend;
-    volatile static int wake_lock_count;
+    static volatile int wake_lock_count;
     if ( FALSE == start )
     {
         /* this can lead to a race condition. however as we only read this variable in the timer loop
@@ -563,7 +564,6 @@ void GKI_run (void *p_task_id)
     } /* for */
 #endif
     GKI_TRACE_1("%s exit", __func__);
-    return(0);
 }
 
 
@@ -681,7 +681,7 @@ UINT16 GKI_wait (UINT16 flag, UINT32 timeout)
             }
             abstime.tv_sec += sec;
 
-            pthread_cond_timedwait_monotonic(&gki_cb.os.thread_evt_cond[rtask],
+            pthread_cond_timedwait(&gki_cb.os.thread_evt_cond[rtask],
                     &gki_cb.os.thread_evt_mutex[rtask], &abstime);
 
         }
@@ -908,7 +908,7 @@ INT8 *GKI_map_taskname (UINT8 task_id)
     }
     else
     {
-        return "BAD";
+        return (INT8*) "BAD";
     }
 }
 

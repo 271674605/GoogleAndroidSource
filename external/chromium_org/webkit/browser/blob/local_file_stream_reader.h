@@ -7,15 +7,19 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "base/time/time.h"
 #include "webkit/browser/blob/file_stream_reader.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
 
 namespace base {
 class TaskRunner;
+}
+
+namespace content {
+class LocalFileStreamReaderTest;
 }
 
 namespace net {
@@ -27,22 +31,8 @@ namespace webkit_blob {
 // A thin wrapper of net::FileStream with range support for sliced file
 // handling.
 class WEBKIT_STORAGE_BROWSER_EXPORT LocalFileStreamReader
-    : public FileStreamReader {
+    : public NON_EXPORTED_BASE(FileStreamReader) {
  public:
-  // Creates a new FileReader for a local file |file_path|.
-  // |initial_offset| specifies the offset in the file where the first read
-  // should start.  If the given offset is out of the file range any
-  // read operation may error out with net::ERR_REQUEST_RANGE_NOT_SATISFIABLE.
-  //
-  // |expected_modification_time| specifies the expected last modification
-  // If the value is non-null, the reader will check the underlying file's
-  // actual modification time to see if the file has been modified, and if
-  // it does any succeeding read operations should fail with
-  // ERR_UPLOAD_FILE_CHANGED error.
-  LocalFileStreamReader(base::TaskRunner* task_runner,
-                        const base::FilePath& file_path,
-                        int64 initial_offset,
-                        const base::Time& expected_modification_time);
   virtual ~LocalFileStreamReader();
 
   // FileStreamReader overrides.
@@ -52,6 +42,13 @@ class WEBKIT_STORAGE_BROWSER_EXPORT LocalFileStreamReader
       const net::Int64CompletionCallback& callback) OVERRIDE;
 
  private:
+  friend class FileStreamReader;
+  friend class content::LocalFileStreamReaderTest;
+
+  LocalFileStreamReader(base::TaskRunner* task_runner,
+                        const base::FilePath& file_path,
+                        int64 initial_offset,
+                        const base::Time& expected_modification_time);
   int Open(const net::CompletionCallback& callback);
 
   // Callbacks that are chained from Open for Read.
@@ -67,8 +64,8 @@ class WEBKIT_STORAGE_BROWSER_EXPORT LocalFileStreamReader
                       int open_result);
 
   void DidGetFileInfoForGetLength(const net::Int64CompletionCallback& callback,
-                                  base::PlatformFileError error,
-                                  const base::PlatformFileInfo& file_info);
+                                  base::File::Error error,
+                                  const base::File::Info& file_info);
 
   scoped_refptr<base::TaskRunner> task_runner_;
   scoped_ptr<net::FileStream> stream_impl_;

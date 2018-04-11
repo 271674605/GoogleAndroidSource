@@ -27,18 +27,11 @@ class BoundNetLog;
 // The SOCKS client socket implementation
 class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
  public:
-  // Takes ownership of the |transport_socket|, which should already be
-  // connected by the time Connect() is called.
-  //
   // |req_info| contains the hostname and port to which the socket above will
   // communicate to via the socks layer. For testing the referrer is optional.
-  SOCKSClientSocket(ClientSocketHandle* transport_socket,
+  SOCKSClientSocket(scoped_ptr<ClientSocketHandle> transport_socket,
                     const HostResolver::RequestInfo& req_info,
-                    HostResolver* host_resolver);
-
-  // Deprecated constructor (http://crbug.com/37810) that takes a StreamSocket.
-  SOCKSClientSocket(StreamSocket* transport_socket,
-                    const HostResolver::RequestInfo& req_info,
+                    RequestPriority priority,
                     HostResolver* host_resolver);
 
   // On destruction Disconnect() is called.
@@ -68,8 +61,8 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
                     int buf_len,
                     const CompletionCallback& callback) OVERRIDE;
 
-  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
-  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+  virtual int SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual int SetSendBufferSize(int32 size) OVERRIDE;
 
   virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
@@ -91,6 +84,7 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
 
   void DoCallback(int result);
   void OnIOComplete(int result);
+  void OnReadWriteComplete(const CompletionCallback& callback, int result);
 
   int DoLoop(int last_io_result);
   int DoResolveHost();
@@ -107,7 +101,7 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
 
   State next_state_;
 
-  // Stores the callback to the layer above, called on completing Connect().
+  // Stores the callbacks to the layer above, called on completing Connect().
   CompletionCallback user_callback_;
 
   // This IOBuffer is used by the class to read and write
@@ -127,10 +121,14 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
   size_t bytes_sent_;
   size_t bytes_received_;
 
+  // This becomes true when the socket is used to send or receive data.
+  bool was_ever_used_;
+
   // Used to resolve the hostname to which the SOCKS proxy will connect.
   SingleRequestHostResolver host_resolver_;
   AddressList addresses_;
   HostResolver::RequestInfo host_request_info_;
+  RequestPriority priority_;
 
   BoundNetLog net_log_;
 

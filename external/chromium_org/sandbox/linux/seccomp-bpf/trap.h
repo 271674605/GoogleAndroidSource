@@ -11,10 +11,10 @@
 #include <map>
 #include <vector>
 
-#include "sandbox/linux/seccomp-bpf/port.h"
+#include "base/basictypes.h"
+#include "sandbox/sandbox_export.h"
 
-
-namespace playground2 {
+namespace sandbox {
 
 class ErrorCode;
 
@@ -26,7 +26,7 @@ class ErrorCode;
 //   Preferably, that means that no other threads should be running at that
 //   time. For the purposes of our sandbox, this assertion should always be
 //   true. Threads are incompatible with the seccomp sandbox anyway.
-class Trap {
+class SANDBOX_EXPORT Trap {
  public:
   // TrapFnc is a pointer to a function that handles Seccomp traps in
   // user-space. The seccomp policy can request that a trap handler gets
@@ -41,13 +41,13 @@ class Trap {
   // range -1..-4096. It should not set errno when reporting errors; on the
   // other hand, accidentally modifying errno is harmless and the changes will
   // be undone afterwards.
-  typedef intptr_t (*TrapFnc)(const struct arch_seccomp_data& args, void *aux);
+  typedef intptr_t (*TrapFnc)(const struct arch_seccomp_data& args, void* aux);
 
   // Registers a new trap handler and sets up the appropriate SIGSYS handler
   // as needed.
   // N.B.: This makes a permanent state change. Traps cannot be unregistered,
   //   as that would break existing BPF filters that are still active.
-  static ErrorCode MakeTrap(TrapFnc fnc, const void *aux, bool safe);
+  static ErrorCode MakeTrap(TrapFnc fnc, const void* aux, bool safe);
 
   // Enables support for unsafe traps in the SIGSYS signal handler. This is a
   // one-way fuse. It works in conjunction with the BPF compiler emitting code
@@ -63,22 +63,22 @@ class Trap {
   static ErrorCode ErrorCodeFromTrapId(uint16_t id);
 
  private:
-  // The destructor is unimplemented. Don't ever attempt to destruct this
-  // object. It'll break subsequent system calls that trigger a SIGSYS.
-  ~Trap();
-
   struct TrapKey {
-    TrapKey(TrapFnc f, const void *a, bool s)
-        : fnc(f),
-          aux(a),
-          safe(s) {
-    }
-    TrapFnc    fnc;
-    const void *aux;
-    bool       safe;
+    TrapKey(TrapFnc f, const void* a, bool s) : fnc(f), aux(a), safe(s) {}
+    TrapFnc fnc;
+    const void* aux;
+    bool safe;
     bool operator<(const TrapKey&) const;
   };
   typedef std::map<TrapKey, uint16_t> TrapIds;
+
+  // Our constructor is private. A shared global instance is created
+  // automatically as needed.
+  Trap();
+
+  // The destructor is unimplemented. Don't ever attempt to destruct this
+  // object. It'll break subsequent system calls that trigger a SIGSYS.
+  ~Trap();
 
   // We only have a very small number of methods. We opt to make them static
   // and have them internally call GetInstance(). This is a little more
@@ -87,34 +87,33 @@ class Trap {
   // It also gracefully deals with methods that should check for the singleton,
   // but avoid instantiating it, if it doesn't exist yet
   // (e.g. ErrorCodeFromTrapId()).
-  static Trap *GetInstance();
-  static void SigSysAction(int nr, siginfo_t *info, void *void_context);
+  static Trap* GetInstance();
+  static void SigSysAction(int nr, siginfo_t* info, void* void_context);
 
-  void SigSys(int nr, siginfo_t *info, void *void_context);
-  ErrorCode MakeTrapImpl(TrapFnc fnc, const void *aux, bool safe);
+  // Make sure that SigSys is not inlined in order to get slightly better crash
+  // dumps.
+  void SigSys(int nr, siginfo_t* info, void* void_context)
+      __attribute__((noinline));
+  ErrorCode MakeTrapImpl(TrapFnc fnc, const void* aux, bool safe);
   bool SandboxDebuggingAllowedByUser() const;
-
-
 
   // We have a global singleton that handles all of our SIGSYS traps. This
   // variable must never be deallocated after it has been set up initially, as
   // there is no way to reset in-kernel BPF filters that generate SIGSYS
   // events.
-  static Trap *global_trap_;
+  static Trap* global_trap_;
 
-  TrapIds   trap_ids_;             // Maps from TrapKeys to numeric ids
-  ErrorCode *trap_array_;          // Array of ErrorCodes indexed by ids
-  size_t    trap_array_size_;      // Currently used size of array
-  size_t    trap_array_capacity_;  // Currently allocated capacity of array
-  bool      has_unsafe_traps_;     // Whether unsafe traps have been enabled
+  TrapIds trap_ids_;            // Maps from TrapKeys to numeric ids
+  ErrorCode* trap_array_;       // Array of ErrorCodes indexed by ids
+  size_t trap_array_size_;      // Currently used size of array
+  size_t trap_array_capacity_;  // Currently allocated capacity of array
+  bool has_unsafe_traps_;       // Whether unsafe traps have been enabled
 
-  // Our constructor is private. A shared global instance is created
-  // automatically as needed.
   // Copying and assigning is unimplemented. It doesn't make sense for a
   // singleton.
-  DISALLOW_IMPLICIT_CONSTRUCTORS(Trap);
+  DISALLOW_COPY_AND_ASSIGN(Trap);
 };
 
-}  // namespace playground2
+}  // namespace sandbox
 
 #endif  // SANDBOX_LINUX_SECCOMP_BPF_TRAP_H__

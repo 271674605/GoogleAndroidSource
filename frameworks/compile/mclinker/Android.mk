@@ -1,4 +1,3 @@
-ifeq (0,1)
 LOCAL_PATH := $(call my-dir)
 MCLD_ROOT_PATH := $(LOCAL_PATH)
 # For mcld.mk
@@ -16,6 +15,7 @@ subdirs := \
   lib/LD \
   lib/MC \
   lib/Object \
+  lib/Script \
   lib/Support \
   lib/Target
 
@@ -23,6 +23,11 @@ subdirs := \
 subdirs += \
   lib/Target/ARM \
   lib/Target/ARM/TargetInfo
+
+# AArch64 Code Generation Libraries
+subdirs += \
+  lib/Target/AArch64 \
+  lib/Target/AArch64/TargetInfo
 
 # MIPS Code Generation Libraries
 subdirs += \
@@ -36,4 +41,3 @@ subdirs += \
 
 include $(MCLD_ROOT_PATH)/mcld.mk
 include $(addprefix $(LOCAL_PATH)/,$(addsuffix /Android.mk, $(subdirs)))
-endif

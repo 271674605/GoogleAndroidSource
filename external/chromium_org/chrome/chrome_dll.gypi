@@ -45,7 +45,6 @@
                   'action': ['tools\\build\\win\\hardlink_failsafe.bat',
                              '$(OutDir)\\initial\\chrome.dll',
                              '$(OutDir)\\chrome.dll'],
-                  'msvs_cygwin_shell': 0,
                 },
               ],
               'conditions': [
@@ -64,7 +63,6 @@
                       'action': ['tools\\build\\win\\hardlink_failsafe.bat',
                                  '$(OutDir)\\initial\\chrome.dll.pdb',
                                  '$(OutDir)\\chrome.dll.pdb'],
-                      'msvs_cygwin_shell': 0,
                     }
                   ]
                 }]
@@ -81,9 +79,18 @@
           'dependencies': [
             '<@(chromium_browser_dependencies)',
             '../content/content.gyp:content_app_browser',
-            'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '<(DEPTH)/chrome_elf/chrome_elf.gyp:chrome_elf',
+              ],
+            }],
+            ['OS=="win" and configuration_policy==1', {
+              'dependencies': [
+                '<(DEPTH)/components/components.gyp:policy',
+              ],
+            }],
             ['use_aura==1', {
               'dependencies': [
                 '../ui/compositor/compositor.gyp:compositor',
@@ -101,14 +108,10 @@
               'dependencies': [
                 # On Windows, link the dependencies (libraries) that make
                 # up actual Chromium functionality into this .dll.
-                'chrome_dll_pdb_workaround',
-                'chrome_resources.gyp:chrome_resources',
                 'chrome_version_resources',
                 '../chrome/chrome_resources.gyp:chrome_unscaled_resources',
                 '../crypto/crypto.gyp:crypto',
-                '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
-                '../third_party/cld/cld.gyp:cld',
                 '../ui/views/views.gyp:views',
                 '../webkit/webkit_resources.gyp:webkit_resources',
               ],
@@ -125,30 +128,8 @@
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
                 '../base/win/dllmain.cc',
 
-                '../ui/resources/cursors/aliasb.cur',
-                '../ui/resources/cursors/cell.cur',
-                '../ui/resources/cursors/col_resize.cur',
-                '../ui/resources/cursors/copy.cur',
-                '../ui/resources/cursors/none.cur',
-                '../ui/resources/cursors/row_resize.cur',
-                '../ui/resources/cursors/vertical_text.cur',
-                '../ui/resources/cursors/zoom_in.cur',
-                '../ui/resources/cursors/zoom_out.cur',
-
-                # TODO:  It would be nice to have these pulled in
-                # automatically from direct_dependent_settings in
-                # their various targets (net.gyp:net_resources, etc.),
-                # but that causes errors in other targets when
-                # resulting .res files get referenced multiple times.
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/chrome_unscaled_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/content/browser/tracing/tracing_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
+                # Cursors.
                 '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_unscaled_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/webkit/blink_resources.rc',
               ],
               'include_dirs': [
                 '<(DEPTH)/third_party/wtl/include',
@@ -164,7 +145,6 @@
               },
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'BaseAddress': '0x01c30000',
                   'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
                   # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
                   'SubSystem': '2',
@@ -174,6 +154,8 @@
                       'UseLibraryDependencyInputs': "true",
                     }],
                     ['target_arch=="ia32"', {
+                      # Don't set an x64 base address (to avoid breaking HE-ASLR).
+                      'BaseAddress': '0x01c30000',
                       # Link against the XP-constrained user32 import library
                       # instead of the platform-SDK provided one to avoid
                       # inadvertently taking dependencies on post-XP user32
@@ -233,6 +215,25 @@
                     '<(allocator_target)',
                   ],
                 }],
+                ['enable_printing!=0', {
+                  'dependencies': [
+                    '../printing/printing.gyp:printing',
+                  ],
+                }],
+                ['chrome_pgo_phase==1', {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkTimeCodeGeneration': '2',
+                    },
+                  },
+                }],
+                ['chrome_pgo_phase==2', {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkTimeCodeGeneration': '3',
+                    },
+                  },
+                }],
               ]
             }],
             ['chrome_multiple_dll==1', {
@@ -247,6 +248,16 @@
               ],
               'dependencies!': [
                 '../content/content.gyp:content_app_browser',
+              ],
+            }],
+            ['cld_version==0 or cld_version==1', {
+              'dependencies': [
+                '../third_party/cld/cld.gyp:cld',
+              ],
+            }],
+            ['cld_version==0 or cld_version==2', {
+              'dependencies': [
+                '../third_party/cld_2/cld_2.gyp:cld_2',
               ],
             }],
             ['OS=="mac" and component!="shared_library"', {
@@ -269,6 +280,9 @@
                 'app/chrome_main_delegate.h',
                 'app/chrome_main_mac.mm',
                 'app/chrome_main_mac.h',
+              ],
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
               ],
               'include_dirs': [
                 '<(grit_out_dir)',
@@ -294,11 +308,9 @@
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
                     '../components/components.gyp:breakpad_component',
-                    'app/policy/cloud_policy_codegen.gyp:policy',
+                    '../components/components.gyp:policy',
                   ],
                   'sources': [
-                    'app/breakpad_mac.mm',
-                    'app/breakpad_mac.h',
                     'app/chrome_breakpad_client.cc',
                     'app/chrome_breakpad_client.h',
                     'app/chrome_breakpad_client_mac.mm',
@@ -308,45 +320,13 @@
                   'dependencies': [
                     '../components/components.gyp:breakpad_stubs',
                   ],
-                  'sources': [
-                    'app/breakpad_mac_stubs.mm',
-                    'app/breakpad_mac.h',
-                  ],
                 }],  # mac_breakpad_compiled_in
-                ['internal_pdf', {
-                  'dependencies': [
-                    '../pdf/pdf.gyp:pdf',
-                  ],
-                }],
               ],  # conditions
             }],  # OS=="mac"
           ],  # conditions
         },  # target chrome_main_dll
       ],  # targets
     }],  # OS=="mac" or OS=="win"
-    ['OS=="win"', {
-      'targets': [
-        {
-          # This target is only depended upon on Windows.
-          'target_name': 'chrome_dll_pdb_workaround',
-          'type': 'static_library',
-          'sources': [ 'empty_pdb_workaround.cc' ],
-          'conditions': [
-            ['fastbuild==0 or win_z7!=0', {
-             'msvs_settings': {
-              'VCCLCompilerTool': {
-                # This *in the compile phase* must match the pdb name that's
-                # output by the final link. See empty_pdb_workaround.cc for
-                # more details.
-                'DebugInformationFormat': '3',
-                'ProgramDataBaseFileName': '<(PRODUCT_DIR)/chrome.dll.pdb',
-              },
-             },
-            }],
-          ],
-        },
-      ],
-    }],
     ['chrome_multiple_dll', {
       'targets': [
         {
@@ -367,12 +347,33 @@
             'CHROME_MULTIPLE_DLL_CHILD',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
             'app/chrome_main.cc',
             'app/chrome_main_delegate.cc',
             'app/chrome_main_delegate.h',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '<(DEPTH)/chrome_elf/chrome_elf.gyp:chrome_elf',
+              ],
+              'conditions': [
+                ['chrome_pgo_phase==1', {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkTimeCodeGeneration': '2',
+                    },
+                  },
+                }],
+                ['chrome_pgo_phase==2', {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkTimeCodeGeneration': '3',
+                    },
+                  },
+                }],
+              ]
+            }],
           ],
         },  # target chrome_child_dll
       ],

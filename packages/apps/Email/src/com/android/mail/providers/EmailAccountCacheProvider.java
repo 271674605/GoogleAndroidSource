@@ -20,33 +20,36 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 
-import com.android.email.activity.setup.AccountSettings;
+import com.android.email.R;
+import com.android.email.activity.setup.AccountSetupFinal;
 
 public class EmailAccountCacheProvider extends MailAppProvider {
     // Content provider for Email
-    private static final String sAuthority = "com.android.email2.accountcache";
+    private static String sAuthority;
     /**
      * Authority for the suggestions provider. This is specified in AndroidManifest.xml and
      * res/xml/searchable.xml.
      */
-    private static final String sSuggestionsAuthority = "com.android.email.suggestionsprovider";
+    private static String sSuggestionsAuthority;
 
     @Override
     protected String getAuthority() {
+        if (sAuthority == null) {
+            sAuthority = getContext().getString(R.string.authority_account_cache_provider);
+        }
         return sAuthority;
     }
 
     @Override
     protected Intent getNoAccountsIntent(Context context) {
-        Intent intent = new Intent();
-        intent.setAction(Intent.ACTION_EDIT);
-        intent.setData(Uri.parse("content://ui.email.android.com/settings"));
-        intent.putExtra(AccountSettings.EXTRA_NO_ACCOUNTS, true);
-        return intent;
+        return AccountSetupFinal.actionNewAccountWithResultIntent(context);
     }
 
     @Override
     public String getSuggestionAuthority() {
+        if (sSuggestionsAuthority == null) {
+            sSuggestionsAuthority = getContext().getString(R.string.authority_suggestions_provider);
+        }
         return sSuggestionsAuthority;
     }
 }

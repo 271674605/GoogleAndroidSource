@@ -5,7 +5,9 @@
 #ifndef PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 #define PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -15,9 +17,9 @@
 #include "ppapi/c/ppb_console.h"
 #include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
+#include "ui/events/latency_info.h"
 
 namespace base {
-class Lock;
 class MessageLoopProxy;
 class TaskRunner;
 }
@@ -69,8 +71,6 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   virtual CallbackTracker* GetCallbackTrackerForInstance(
       PP_Instance instance) = 0;
 
-  virtual base::Lock* GetProxyLock() = 0;
-
   // Logs the given string to the JS console. If "source" is empty, the name of
   // the current module will be used, if it can be determined.
   virtual void LogWithSource(PP_Instance instance,
@@ -118,7 +118,7 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // Returns a task runner for file operations that may block.
   // TODO(bbudge) Move this to PluginGlobals when we no longer support
   // in-process plugins.
-  virtual base::TaskRunner* GetFileTaskRunner(PP_Instance instance) = 0;
+  virtual base::TaskRunner* GetFileTaskRunner() = 0;
 
   // Returns the command line for the process.
   virtual std::string GetCmdLine() = 0;
@@ -131,6 +131,19 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   virtual bool IsHostGlobals() const;
   virtual bool IsPluginGlobals() const;
 
+  // Records that the plugin is active. The plugin reports that it is active to
+  // containers that monitor and shutdown idle content such as background apps.
+  // This method only has an effect on the plugin process, calls from the
+  // renderer process will have no effect.
+  virtual void MarkPluginIsActive();
+
+  // Caches an input event's |latency_info| for the plugin |instance|.
+  void AddLatencyInfo(const ui::LatencyInfo& latency_info,
+                      PP_Instance instance);
+  // Transfers plugin |instance|'s latency info into |latency_info|.
+  void TransferLatencyInfoTo(std::vector<ui::LatencyInfo>* latency_info,
+                             PP_Instance instance);
+
  private:
   // Return the thread-local pointer which is used only for unit testing. It
   // should always be NULL when running in production. It allows separate
@@ -138,6 +151,11 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   static PpapiGlobals* GetThreadLocalPointer();
 
   scoped_refptr<base::MessageLoopProxy> main_loop_proxy_;
+
+  // If an input event is believed to have caused rendering damage, its latency
+  // info is cached in |latency_info_for_frame_| indexed by instance. These
+  // latency info will be passed back to renderer with the next plugin frame.
+  std::map<PP_Instance, std::vector<ui::LatencyInfo> > latency_info_for_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiGlobals);
 };

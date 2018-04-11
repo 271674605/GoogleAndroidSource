@@ -7,6 +7,7 @@
 
 #include <queue>
 
+#include "cc/resources/resource_format.h"
 #include "cc/resources/transferable_resource.h"
 #include "content/renderer/gpu/compositor_output_surface.h"
 #include "ui/gfx/size.h"
@@ -23,16 +24,18 @@ namespace content {
 // to a fixed thread when bindToClient is called.
 class MailboxOutputSurface : public CompositorOutputSurface {
  public:
-  MailboxOutputSurface(int32 routing_id,
-                       uint32 output_surface_id,
-                       WebGraphicsContext3DCommandBufferImpl* context3d,
-                       cc::SoftwareOutputDevice* software);
+  MailboxOutputSurface(
+      int32 routing_id,
+      uint32 output_surface_id,
+      const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
+      scoped_ptr<cc::SoftwareOutputDevice> software_device,
+      cc::ResourceFormat format);
   virtual ~MailboxOutputSurface();
 
   // cc::OutputSurface implementation.
   virtual void EnsureBackbuffer() OVERRIDE;
   virtual void DiscardBackbuffer() OVERRIDE;
-  virtual void Reshape(gfx::Size size, float scale_factor) OVERRIDE;
+  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE;
   virtual void BindFramebuffer() OVERRIDE;
   virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
 
@@ -63,6 +66,7 @@ class MailboxOutputSurface : public CompositorOutputSurface {
 
   uint32 fbo_;
   bool is_backbuffer_discarded_;
+  cc::ResourceFormat format_;
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,16 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -28,20 +30,24 @@ import org.chromium.content_shell_apk.ContentShellTestBase;
 import java.util.ArrayList;
 import java.util.concurrent.Callable;
 
+/**
+ * Integration tests for text input using cases based on fixed regressions.
+ */
 public class ImeTest extends ContentShellTestBase {
 
     private static final String DATA_URL = UrlUtils.encodeHtmlDataUri(
             "<html><head><meta name=\"viewport\"" +
-            "content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0\" /></head>" +
+            "content=\"width=device-width, initial-scale=2.0, maximum-scale=2.0\" /></head>" +
             "<body><form action=\"about:blank\">" +
-            "<input id=\"input_text\" type=\"text\" />" +
-            "<input id=\"input_radio\" type=\"radio\" />" +
+            "<input id=\"input_text\" type=\"text\" /><br/>" +
+            "<input id=\"input_radio\" type=\"radio\" style=\"width:50px;height:50px\" />" +
             "<br/><textarea id=\"textarea\" rows=\"4\" cols=\"20\"></textarea>" +
             "</form></body></html>");
 
     private TestAdapterInputConnection mConnection;
     private ImeAdapter mImeAdapter;
-    private ContentView mContentView;
+
+    private ContentViewCore mContentViewCore;
     private TestCallbackHelperContainer mCallbackContainer;
     private TestInputMethodManagerWrapper mInputMethodManagerWrapper;
 
@@ -51,18 +57,20 @@ public class ImeTest extends ContentShellTestBase {
 
         launchContentShellWithUrl(DATA_URL);
         assertTrue("Page failed to load", waitForActiveShellToBeDoneLoading());
+        mContentViewCore = getContentViewCore();
 
-        mInputMethodManagerWrapper = new TestInputMethodManagerWrapper(getContentViewCore());
+        mInputMethodManagerWrapper = new TestInputMethodManagerWrapper(mContentViewCore);
         getImeAdapter().setInputMethodManagerWrapper(mInputMethodManagerWrapper);
         assertEquals(0, mInputMethodManagerWrapper.getShowSoftInputCounter());
-        getContentViewCore().setAdapterInputConnectionFactory(
+        mContentViewCore.setAdapterInputConnectionFactory(
                 new TestAdapterInputConnectionFactory());
 
-        mContentView = getActivity().getActiveContentView();
-        mCallbackContainer = new TestCallbackHelperContainer(mContentView);
+        mCallbackContainer = new TestCallbackHelperContainer(mContentViewCore);
         // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
-        assertWaitForPageScaleFactor(1);
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_text");
+        assertWaitForPageScaleFactorMatch(2);
+        assertTrue(DOMUtils.waitForNonZeroNodeBounds(
+                mContentViewCore, "input_text"));
+        DOMUtils.clickNode(this, mContentViewCore, "input_text");
         assertWaitForKeyboardStatus(true);
 
         mConnection = (TestAdapterInputConnection) getAdapterInputConnection();
@@ -77,7 +85,7 @@ public class ImeTest extends ContentShellTestBase {
     @MediumTest
     @Feature({"TextInput", "Main"})
     public void testKeyboardDismissedAfterClickingGo() throws Throwable {
-        mConnection.setComposingText("hello", 1);
+        setComposingText(mConnection, "hello", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, 0, 5);
 
         performGo(getAdapterInputConnection(), mCallbackContainer);
@@ -88,47 +96,49 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RerunWithUpdatedContainerView
     public void testGetTextUpdatesAfterEnteringText() throws Throwable {
-        mConnection.setComposingText("h", 1);
+        setComposingText(mConnection, "h", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "h", 1, 1, 0, 1);
         assertEquals(1, mInputMethodManagerWrapper.getShowSoftInputCounter());
 
-        mConnection.setComposingText("he", 1);
+        setComposingText(mConnection, "he", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "he", 2, 2, 0, 2);
         assertEquals(1, mInputMethodManagerWrapper.getShowSoftInputCounter());
 
-        mConnection.setComposingText("hel", 1);
+        setComposingText(mConnection, "hel", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "hel", 3, 3, 0, 3);
         assertEquals(1, mInputMethodManagerWrapper.getShowSoftInputCounter());
 
-        mConnection.commitText("hel", 1);
+        commitText(mConnection, "hel", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 4, "hel", 3, 3, -1, -1);
         assertEquals(1, mInputMethodManagerWrapper.getShowSoftInputCounter());
     }
 
     @SmallTest
     @Feature({"TextInput"})
+    @RerunWithUpdatedContainerView
     public void testImeCopy() throws Exception {
-        mConnection.commitText("hello", 1);
+        commitText(mConnection, "hello", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, -1, -1);
 
-        mConnection.setSelection(2, 5);
+        setSelection(mConnection, 2, 5);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "hello", 2, 5, -1, -1);
 
-        mImeAdapter.copy();
+        copy(mImeAdapter);
         assertClipboardContents(getActivity(), "llo");
     }
 
     @SmallTest
     @Feature({"TextInput"})
     public void testEnterTextAndRefocus() throws Exception {
-        mConnection.commitText("hello", 1);
+        commitText(mConnection, "hello", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, -1, -1);
 
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_radio");
+        DOMUtils.clickNode(this, mContentViewCore, "input_radio");
         assertWaitForKeyboardStatus(false);
 
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_text");
+        DOMUtils.clickNode(this, mContentViewCore, "input_text");
         assertWaitForKeyboardStatus(true);
         assertEquals(5, mInputMethodManagerWrapper.getEditorInfo().initialSelStart);
         assertEquals(5, mInputMethodManagerWrapper.getEditorInfo().initialSelEnd);
@@ -137,13 +147,13 @@ public class ImeTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput"})
     public void testImeCut() throws Exception {
-        mConnection.commitText("snarful", 1);
+        commitText(mConnection, "snarful", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "snarful", 7, 7, -1, -1);
 
-        mConnection.setSelection(1, 5);
+        setSelection(mConnection, 1, 5);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "snarful", 1, 5, -1, -1);
 
-        mImeAdapter.cut();
+        cut(mImeAdapter);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "sul", 1, 1, -1, -1);
 
         assertClipboardContents(getActivity(), "narf");
@@ -162,18 +172,18 @@ public class ImeTest extends ContentShellTestBase {
             }
         });
 
-        mImeAdapter.paste();
+        paste(mImeAdapter);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "blarg", 5, 5, -1, -1);
 
-        mConnection.setSelection(3, 5);
+        setSelection(mConnection, 3, 5);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "blarg", 3, 5, -1, -1);
 
-        mImeAdapter.paste();
+        paste(mImeAdapter);
         // Paste is a two step process when there is a non-zero selection.
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "bla", 3, 3, -1, -1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 4, "blablarg", 8, 8, -1, -1);
 
-        mImeAdapter.paste();
+        paste(mImeAdapter);
         waitAndVerifyEditableCallback(
                 mConnection.mImeUpdateQueue, 5, "blablargblarg", 13, 13, -1, -1);
     }
@@ -181,13 +191,13 @@ public class ImeTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput"})
     public void testImeSelectAndUnSelectAll() throws Exception {
-        mConnection.commitText("hello", 1);
+        commitText(mConnection, "hello", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, -1, -1);
 
-        mImeAdapter.selectAll();
+        selectAll(mImeAdapter);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "hello", 0, 5, -1, -1);
 
-        mImeAdapter.unselect();
+        unselect(mImeAdapter);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "", 0, 0, -1, -1);
 
         assertWaitForKeyboardStatus(false);
@@ -195,37 +205,14 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
-    public void testUpdatesGetIgnoredDuringBatchEdits() throws Throwable {
-        mConnection.beginBatchEdit();
-        assertWaitForSetIgnoreUpdates(true, mConnection);
-
-        mConnection.setComposingText("h", 1);
-        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "h", 1, 1, 0, 1);
-        assertTrue(mConnection.isIgnoringTextInputStateUpdates());
-
-        mConnection.setComposingText("he", 1);
-        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "he", 2, 2, 0, 2);
-        assertTrue(mConnection.isIgnoringTextInputStateUpdates());
-
-        mConnection.setComposingText("hel", 1);
-        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "hel", 3, 3, 0, 3);
-
-        assertEquals(0, mConnection.mUpdateSelectionCounter);
-        assertTrue(mConnection.isIgnoringTextInputStateUpdates());
-        mConnection.endBatchEdit();
-        assertWaitForSetIgnoreUpdates(false, mConnection);
-    }
-
-    @SmallTest
-    @Feature({"TextInput", "Main"})
     public void testShowImeIfNeeded() throws Throwable {
-        DOMUtils.focusNode(this, mContentView, mCallbackContainer, "input_radio");
+        DOMUtils.focusNode(mContentViewCore, "input_radio");
         assertWaitForKeyboardStatus(false);
 
         performShowImeIfNeeded();
         assertWaitForKeyboardStatus(false);
 
-        DOMUtils.focusNode(this, mContentView, mCallbackContainer, "input_text");
+        DOMUtils.focusNode(mContentViewCore, "input_text");
         assertWaitForKeyboardStatus(false);
 
         performShowImeIfNeeded();
@@ -236,9 +223,9 @@ public class ImeTest extends ContentShellTestBase {
     @Feature({"TextInput", "Main"})
     public void testFinishComposingText() throws Throwable {
         // Focus the textarea. We need to do the following steps because we are focusing using JS.
-        DOMUtils.focusNode(this, mContentView, mCallbackContainer, "input_radio");
+        DOMUtils.focusNode(mContentViewCore, "input_radio");
         assertWaitForKeyboardStatus(false);
-        DOMUtils.focusNode(this, mContentView, mCallbackContainer, "textarea");
+        DOMUtils.focusNode(mContentViewCore, "textarea");
         assertWaitForKeyboardStatus(false);
         performShowImeIfNeeded();
         assertWaitForKeyboardStatus(true);
@@ -246,30 +233,63 @@ public class ImeTest extends ContentShellTestBase {
         mConnection = (TestAdapterInputConnection) getAdapterInputConnection();
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 0, "", 0, 0, -1, -1);
 
-        mConnection.commitText("hllo", 1);
+        commitText(mConnection, "hllo", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hllo", 4, 4, -1, -1);
 
-        mConnection.commitText(" ", 1);
+        commitText(mConnection, " ", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "hllo ", 5, 5, -1, -1);
 
-        mConnection.setSelection(1, 1);
+        setSelection(mConnection, 1, 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "hllo ", 1, 1, -1, -1);
 
-        mConnection.setComposingRegion(0, 4);
+        setComposingRegion(mConnection, 0, 4);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 4, "hllo ", 1, 1, 0, 4);
 
-        mConnection.finishComposingText();
+        finishComposingText(mConnection);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 5, "hllo ", 1, 1, -1, -1);
 
-        mConnection.commitText("\n", 1);
+        commitText(mConnection, "\n", 1);
         waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 6, "h\nllo ", 2, 2, -1, -1);
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    public void testEnterKeyEventWhileComposingText() throws Throwable {
+        // Focus the textarea. We need to do the following steps because we are focusing using JS.
+        DOMUtils.focusNode(mContentViewCore, "input_radio");
+        assertWaitForKeyboardStatus(false);
+        DOMUtils.focusNode(mContentViewCore, "textarea");
+        assertWaitForKeyboardStatus(false);
+        performShowImeIfNeeded();
+        assertWaitForKeyboardStatus(true);
+
+        mConnection = (TestAdapterInputConnection) getAdapterInputConnection();
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 0, "", 0, 0, -1, -1);
+
+        setComposingText(mConnection, "hello", 1);
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 1, "hello", 5, 5, 0, 5);
+
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                mConnection.sendKeyEvent(
+                        new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+                mConnection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+            }
+        });
+
+        // TODO(aurimas): remove this workaround when crbug.com/278584 is fixed.
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 2, "hello", 5, 5, -1, -1);
+        // The second new line is not a user visible/editable one, it is a side-effect of Blink
+        // using <br> internally.
+        waitAndVerifyEditableCallback(mConnection.mImeUpdateQueue, 3, "hello\n\n", 6, 6, -1, -1);
     }
 
     private void performShowImeIfNeeded() {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mContentView.getContentViewCore().showImeIfNeeded();
+                mContentViewCore.showImeIfNeeded();
             }
         });
     }
@@ -284,17 +304,6 @@ public class ImeTest extends ContentShellTestBase {
                         inputConnection.performEditorAction(EditorInfo.IME_ACTION_GO);
                     }
                 });
-    }
-
-
-
-    private void assertWaitForPageScaleFactor(final float scale) throws InterruptedException {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return getContentViewCore().getScale() == scale;
-            }
-        }));
     }
 
     private void assertWaitForKeyboardStatus(final boolean show) throws InterruptedException {
@@ -340,55 +349,132 @@ public class ImeTest extends ContentShellTestBase {
         }));
     }
 
-    private void assertWaitForSetIgnoreUpdates(final boolean ignore,
-            final TestAdapterInputConnection connection) throws Throwable {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return ignore == connection.isIgnoringTextInputStateUpdates();
-            }
-        }));
-    }
-
     private ImeAdapter getImeAdapter() {
-        return getContentViewCore().getImeAdapterForTest();
+        return mContentViewCore.getImeAdapterForTest();
     }
 
     private AdapterInputConnection getAdapterInputConnection() {
-        return getContentViewCore().getInputConnectionForTest();
+        return mContentViewCore.getInputConnectionForTest();
+    }
+
+    private void copy(final ImeAdapter adapter) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                adapter.copy();
+            }
+        });
+    }
+
+    private void cut(final ImeAdapter adapter) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                adapter.cut();
+            }
+        });
+    }
+
+    private void paste(final ImeAdapter adapter) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                adapter.paste();
+            }
+        });
+    }
+
+    private void selectAll(final ImeAdapter adapter) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                adapter.selectAll();
+            }
+        });
+    }
+
+    private void unselect(final ImeAdapter adapter) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                adapter.unselect();
+            }
+        });
+    }
+
+    private void commitText(final AdapterInputConnection connection, final CharSequence text,
+            final int newCursorPosition) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                connection.commitText(text, newCursorPosition);
+            }
+        });
+    }
+
+    private void setSelection(final AdapterInputConnection connection, final int start,
+            final int end) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                connection.setSelection(start, end);
+            }
+        });
+    }
+
+    private void setComposingRegion(final AdapterInputConnection connection, final int start,
+            final int end) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                connection.setComposingRegion(start, end);
+            }
+        });
+    }
+
+    private void setComposingText(final AdapterInputConnection connection, final CharSequence text,
+            final int newCursorPosition) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                connection.setComposingText(text, newCursorPosition);
+            }
+        });
+    }
+
+    private void finishComposingText(final AdapterInputConnection connection) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                connection.finishComposingText();
+            }
+        });
     }
 
     private static class TestAdapterInputConnectionFactory extends
             ImeAdapter.AdapterInputConnectionFactory {
         @Override
         public AdapterInputConnection get(View view, ImeAdapter imeAdapter,
-                EditorInfo outAttrs) {
-            return new TestAdapterInputConnection(view, imeAdapter, outAttrs);
+                Editable editable, EditorInfo outAttrs) {
+            return new TestAdapterInputConnection(view, imeAdapter, editable, outAttrs);
         }
     }
 
     private static class TestAdapterInputConnection extends AdapterInputConnection {
-        private int mUpdateSelectionCounter = 0;
-        private ArrayList<TestImeState> mImeUpdateQueue = new ArrayList<ImeTest.TestImeState>();
+        private final ArrayList<TestImeState> mImeUpdateQueue = new ArrayList<TestImeState>();
 
-        public TestAdapterInputConnection(View view, ImeAdapter imeAdapter, EditorInfo outAttrs) {
-            super(view, imeAdapter, outAttrs);
+        public TestAdapterInputConnection(View view, ImeAdapter imeAdapter,
+                Editable editable, EditorInfo outAttrs) {
+            super(view, imeAdapter, editable, outAttrs);
         }
 
         @Override
-        public void setEditableText(String text, int selectionStart, int selectionEnd,
-                int compositionStart, int compositionEnd) {
+        public void updateState(String text, int selectionStart, int selectionEnd,
+                int compositionStart, int compositionEnd, boolean requiredAck) {
             mImeUpdateQueue.add(new TestImeState(text, selectionStart, selectionEnd,
                     compositionStart, compositionEnd));
-            super.setEditableText(
-                    text, selectionStart, selectionEnd, compositionStart, compositionEnd);
-        }
-
-        @Override
-        protected void updateSelection(
-                int selectionStart, int selectionEnd,
-                int compositionStart, int compositionEnd) {
-            mUpdateSelectionCounter++;
+            super.updateState(text, selectionStart, selectionEnd, compositionStart,
+                    compositionEnd, requiredAck);
         }
     }
 

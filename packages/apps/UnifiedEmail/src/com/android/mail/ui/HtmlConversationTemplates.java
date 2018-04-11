@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright (C) 2012 Google Inc.
  * Licensed to The Android Open Source Project.
  *
@@ -18,7 +18,8 @@
 package com.android.mail.ui;
 
 import android.content.Context;
-import android.content.res.Resources.NotFoundException;
+import android.support.v4.text.TextUtilsCompat;
+import android.support.v4.view.ViewCompat;
 
 import com.android.mail.R;
 import com.android.mail.utils.LogTag;
@@ -26,30 +27,19 @@ import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.Utils;
 import com.google.common.annotations.VisibleForTesting;
 
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.util.Formatter;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
  * Renders data into very simple string-substitution HTML templates for conversation view.
- *
- * Templates should be UTF-8 encoded HTML with '%s' placeholders to be substituted upon render.
- * Plain-jane string substitution with '%s' is slightly faster than typed substitution.
- *
  */
-public class HtmlConversationTemplates {
+public class HtmlConversationTemplates extends AbstractHtmlTemplates {
 
     /**
      * Prefix applied to a message id for use as a div id
      */
     public static final String MESSAGE_PREFIX = "m";
     public static final int MESSAGE_PREFIX_LENGTH = MESSAGE_PREFIX.length();
-
-    // TODO: refine. too expensive to iterate over cursor and pre-calculate total. so either
-    // estimate it, or defer assembly until the end when size is known (deferring increases
-    // working set size vs. estimation but is exact).
-    private static final int BUFFER_SIZE_CHARS = 64 * 1024;
 
     private static final String TAG = LogTag.getLogTag();
 
@@ -85,27 +75,23 @@ public class HtmlConversationTemplates {
      */
     private static final String IMG_URL_REPLACEMENT = "$1src='data:' blocked-src$2";
 
+    private static final String LEFT_TO_RIGHT_TRIANGLE = "\u25B6 ";
+    private static final String RIGHT_TO_LEFT_TRIANGLE = "\u25C0 ";
+
     private static boolean sLoadedTemplates;
     private static String sSuperCollapsed;
-    private static String sBorder;
     private static String sMessage;
     private static String sConversationUpper;
     private static String sConversationLower;
 
-    private Context mContext;
-    private Formatter mFormatter;
-    private StringBuilder mBuilder;
-    private boolean mInProgress = false;
-
     public HtmlConversationTemplates(Context context) {
-        mContext = context;
+        super(context);
 
         // The templates are small (~2KB total in ICS MR2), so it's okay to load them once and keep
         // them in memory.
         if (!sLoadedTemplates) {
             sLoadedTemplates = true;
             sSuperCollapsed = readTemplate(R.raw.template_super_collapsed);
-            sBorder = readTemplate(R.raw.template_border);
             sMessage = readTemplate(R.raw.template_message);
             sConversationUpper = readTemplate(R.raw.template_conversation_upper);
             sConversationLower = readTemplate(R.raw.template_conversation_lower);
@@ -120,17 +106,25 @@ public class HtmlConversationTemplates {
         append(sSuperCollapsed, firstCollapsed, blockHeight);
     }
 
-    /**
-     * Adds a spacer for the border that vertically separates cards.
-     * @param blockHeight height of the border
-     */
-    public void appendBorder(int blockHeight) {
-        append(sBorder, blockHeight);
-    }
-
     @VisibleForTesting
     static String replaceAbsoluteImgUrls(final String html) {
         return sAbsoluteImgUrlPattern.matcher(html).replaceAll(IMG_URL_REPLACEMENT);
+    }
+
+    /**
+     * Wrap a given message body string to prevent its contents from flowing out of the current DOM
+     * block context.
+     *
+     */
+    public static String wrapMessageBody(String msgBody) {
+        // FIXME: this breaks RTL for an as-yet undetermined reason. b/13678928
+        // no-op for now.
+        return msgBody;
+
+//        final StringBuilder sb = new StringBuilder("<div style=\"display: table-cell;\">");
+//        sb.append(msgBody);
+//        sb.append("</div>");
+//        return sb.toString();
     }
 
     public void appendMessageHtml(HtmlMessage message, boolean isExpanded,
@@ -166,7 +160,7 @@ public class HtmlConversationTemplates {
                 headerHeight,
                 showImagesClass,
                 bodyDisplay,
-                body,
+                wrapMessageBody(body),
                 bodyDisplay,
                 footerHeight
         );
@@ -176,31 +170,41 @@ public class HtmlConversationTemplates {
         return MESSAGE_PREFIX + msg.getId();
     }
 
-    public void startConversation(int sideMargin, int conversationHeaderHeight) {
+    public String getMessageIdForDomId(String domMessageId) {
+        return domMessageId.substring(MESSAGE_PREFIX_LENGTH);
+    }
+
+    public void startConversation(int viewportWidth, int sideMargin, int conversationHeaderHeight) {
         if (mInProgress) {
-            throw new IllegalStateException("must call startConversation first");
+            throw new IllegalStateException(
+                    "Should not call start conversation until end conversation has been called");
         }
 
         reset();
         final String border = Utils.isRunningKitkatOrLater() ?
                 "img[blocked-src] { border: 1px solid #CCCCCC; }" : "";
-        append(sConversationUpper, border,  sideMargin, conversationHeaderHeight);
+        append(sConversationUpper, viewportWidth, border, sideMargin, conversationHeaderHeight);
         mInProgress = true;
     }
 
-    public String endConversation(String docBaseUri, String conversationBaseUri,
-            int viewportWidth, boolean enableContentReadySignal, boolean normalizeMessageWidths,
-            boolean enableMungeTables, boolean enableMungeImages) {
+    public String endConversation(int convFooterPx, String docBaseUri, String conversationBaseUri,
+            int viewportWidth, int webviewWidth, boolean enableContentReadySignal,
+            boolean normalizeMessageWidths, boolean enableMungeTables, boolean enableMungeImages) {
         if (!mInProgress) {
             throw new IllegalStateException("must call startConversation first");
         }
 
         final String contentReadyClass = enableContentReadySignal ? "initial-load" : "";
 
-        append(sConversationLower, contentReadyClass, mContext.getString(R.string.hide_elided),
-                mContext.getString(R.string.show_elided), docBaseUri, conversationBaseUri,
-                viewportWidth, enableContentReadySignal, normalizeMessageWidths,
-                enableMungeTables, enableMungeImages);
+        final boolean isRtl = TextUtilsCompat.getLayoutDirectionFromLocale(Locale.getDefault())
+                == ViewCompat.LAYOUT_DIRECTION_RTL;
+        final String showElided = (isRtl ? RIGHT_TO_LEFT_TRIANGLE : LEFT_TO_RIGHT_TRIANGLE) +
+                mContext.getString(R.string.show_elided);
+        append(sConversationLower, convFooterPx, contentReadyClass,
+                mContext.getString(R.string.hide_elided),
+                showElided, docBaseUri, conversationBaseUri, viewportWidth, webviewWidth,
+                enableContentReadySignal, normalizeMessageWidths,
+                enableMungeTables, enableMungeImages, Utils.isRunningKitkatOrLater());
 
         mInProgress = false;
 
@@ -209,49 +213,4 @@ public class HtmlConversationTemplates {
 
         return emit();
     }
-
-    public String emit() {
-        String out = mFormatter.toString();
-        // release the builder memory ASAP
-        mFormatter = null;
-        mBuilder = null;
-        return out;
-    }
-
-    public void reset() {
-        mBuilder = new StringBuilder(BUFFER_SIZE_CHARS);
-        mFormatter = new Formatter(mBuilder, null /* no localization */);
-    }
-
-    private String readTemplate(int id) throws NotFoundException {
-        StringBuilder out = new StringBuilder();
-        InputStreamReader in = null;
-        try {
-            try {
-                in = new InputStreamReader(
-                        mContext.getResources().openRawResource(id), "UTF-8");
-                char[] buf = new char[4096];
-                int chars;
-
-                while ((chars=in.read(buf)) > 0) {
-                    out.append(buf, 0, chars);
-                }
-
-                return out.toString();
-
-            } finally {
-                if (in != null) {
-                    in.close();
-                }
-            }
-        } catch (IOException e) {
-            throw new NotFoundException("Unable to open template id=" + Integer.toHexString(id)
-                    + " exception=" + e.getMessage());
-        }
-    }
-
-    private void append(String template, Object... args) {
-        mFormatter.format(template, args);
-    }
-
 }

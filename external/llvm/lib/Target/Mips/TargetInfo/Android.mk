@@ -28,7 +28,7 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 
 # For the device
 # =====================================================
-ifeq ($(TARGET_ARCH),mips)
+ifneq (true,$(DISABLE_LLVM_DEVICE_BUILDS))
 include $(CLEAR_VARS)
 include $(CLEAR_TBLGEN_VARS)
 

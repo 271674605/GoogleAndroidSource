@@ -23,16 +23,19 @@ import android.accounts.AccountManagerFuture;
 import android.accounts.AuthenticatorException;
 import android.accounts.OnAccountsUpdateListener;
 import android.accounts.OperationCanceledException;
+import android.app.admin.DevicePolicyManager;
 import android.content.ContentProvider;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
+import android.content.pm.UserInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
@@ -40,8 +43,12 @@ import android.location.Country;
 import android.location.CountryDetector;
 import android.location.CountryListener;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Handler;
+import android.os.IUserManager;
 import android.os.Looper;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.provider.BaseColumns;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.AggregationExceptions;
@@ -56,13 +63,16 @@ import android.test.IsolatedContext;
 import android.test.RenamingDelegatingContext;
 import android.test.mock.MockContentResolver;
 import android.test.mock.MockContext;
+import android.util.Log;
 
 import com.android.providers.contacts.util.MockSharedPreferences;
 import com.google.android.collect.Sets;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -135,6 +145,103 @@ public class ContactsActor {
         }
     }
 
+    public MockUserManager mockUserManager;
+
+    public static class MockUserManager extends UserManager {
+        public static UserInfo createUserInfo(String name, int id, int groupId, int flags) {
+            final UserInfo ui = new UserInfo();
+            ui.name = name;
+            ui.id = id;
+            ui.profileGroupId = groupId;
+            ui.flags = flags | UserInfo.FLAG_INITIALIZED;
+            return ui;
+        }
+
+        public static final UserInfo PRIMARY_USER = createUserInfo("primary", 0, 0,
+                UserInfo.FLAG_PRIMARY | UserInfo.FLAG_ADMIN);
+        public static final UserInfo CORP_USER = createUserInfo("corp", 10, 0,
+                UserInfo.FLAG_MANAGED_PROFILE);
+        public static final UserInfo SECONDARY_USER = createUserInfo("2nd", 11, 11, 0);
+
+        /** "My" user.  Set it to change the current user. */
+        public int myUser = 0;
+
+        private ArrayList<UserInfo> mUsers = new ArrayList<>();
+
+        public MockUserManager(Context context) {
+            super(context, /* IUserManager */ null);
+
+            mUsers.add(PRIMARY_USER); // Add the primary user.
+        }
+
+        /** Replaces users. */
+        public void setUsers(UserInfo... users) {
+            mUsers.clear();
+            for (UserInfo ui : users) {
+                mUsers.add(ui);
+            }
+        }
+
+        @Override
+        public int getUserHandle() {
+            return myUser;
+        }
+
+        @Override
+        public UserInfo getUserInfo(int userHandle) {
+            for (UserInfo ui : mUsers) {
+                if (ui.id == userHandle) {
+                    return ui;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public UserInfo getProfileParent(int userHandle) {
+            final UserInfo child = getUserInfo(userHandle);
+            if (child == null) {
+                return null;
+            }
+            for (UserInfo ui : mUsers) {
+                if (ui.id != userHandle && ui.id == child.profileGroupId) {
+                    return ui;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<UserInfo> getUsers() {
+            return mUsers;
+        }
+
+        @Override
+        public Bundle getUserRestrictions(UserHandle userHandle) {
+            return new Bundle();
+        }
+    }
+
+    /**
+     * A context wrapper that reports a different user id.
+     *
+     * TODO This should override getSystemService() and returns a UserManager that returns the
+     * same, altered user ID too.
+     */
+    public static class AlteringUserContext extends ContextWrapper {
+        private final int mUserId;
+
+        public AlteringUserContext(Context base, int userId) {
+            super(base);
+            mUserId = userId;
+        }
+
+        @Override
+        public int getUserId() {
+            return mUserId;
+        }
+    }
+
     private IsolatedContext mProviderContext;
 
     /**
@@ -143,7 +250,7 @@ public class ContactsActor {
      * a new instance of {@link RestrictionMockContext}, which stubs out the
      * security infrastructure.
      */
-    public ContactsActor(Context overallContext, String packageName,
+    public ContactsActor(final Context overallContext, String packageName,
             Class<? extends ContentProvider> providerClass, String authority) throws Exception {
         resolver = new MockContentResolver();
         context = new RestrictionMockContext(overallContext, packageName, resolver,
@@ -177,31 +284,62 @@ public class ContactsActor {
                 if (Context.ACCOUNT_SERVICE.equals(name)) {
                     return mMockAccountManager;
                 }
-                return super.getSystemService(name);
+                if (Context.USER_SERVICE.equals(name)) {
+                    return mockUserManager;
+                }
+                // Use overallContext here; super.getSystemService() somehow won't return
+                // DevicePolicyManager.
+                return overallContext.getSystemService(name);
             }
 
             @Override
             public SharedPreferences getSharedPreferences(String name, int mode) {
                 return mPrefs;
             }
+
+            @Override
+            public int getUserId() {
+                return mockUserManager.getUserHandle();
+            }
         };
 
         mMockAccountManager = new MockAccountManager(mProviderContext);
+        mockUserManager = new MockUserManager(mProviderContext);
         provider = addProvider(providerClass, authority);
+    }
+
+    public Context getProviderContext() {
+        return mProviderContext;
     }
 
     public void addAuthority(String authority) {
         resolver.addProvider(authority, provider);
     }
 
-    public ContentProvider addProvider(Class<? extends ContentProvider> providerClass,
+    public <T extends ContentProvider> T addProvider(Class<T> providerClass,
             String authority) throws Exception {
-        ContentProvider provider = providerClass.newInstance();
+        return addProvider(providerClass, authority, mProviderContext);
+    }
+
+    public <T extends ContentProvider> T addProvider(Class<T> providerClass,
+            String authority, Context providerContext) throws Exception {
+        T provider = providerClass.newInstance();
         ProviderInfo info = new ProviderInfo();
-        info.authority = authority;
-        provider.attachInfoForTesting(mProviderContext, info);
+
+        // Here, authority can have "user-id@".  We want to use it for addProvider, but provider
+        // info shouldn't have it.
+        info.authority = stripOutUserIdFromAuthority(authority);
+        provider.attachInfoForTesting(providerContext, info);
         resolver.addProvider(authority, provider);
         return provider;
+    }
+
+    /**
+     * Takes an provider authority. If it has "userid@", then remove it.
+     */
+    private String stripOutUserIdFromAuthority(String authority) {
+        final int pos = authority.indexOf('@');
+        return pos < 0 ? authority : authority.substring(pos + 1);
     }
 
     public void addPermissions(String... permissions) {

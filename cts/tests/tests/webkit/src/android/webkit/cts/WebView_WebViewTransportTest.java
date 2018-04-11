@@ -16,6 +16,7 @@
 
 package android.webkit.cts;
 
+import android.cts.util.NullWebViewUtils;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.UiThreadTest;
 import android.webkit.WebView;
@@ -23,14 +24,17 @@ import android.webkit.WebView.WebViewTransport;
 
 
 public class WebView_WebViewTransportTest
-        extends ActivityInstrumentationTestCase2<WebViewStubActivity> {
+        extends ActivityInstrumentationTestCase2<WebViewCtsActivity> {
 
     public WebView_WebViewTransportTest() {
-        super("com.android.cts.stub", WebViewStubActivity.class);
+        super("com.android.cts.webkit", WebViewCtsActivity.class);
     }
 
     @UiThreadTest
     public void testAccessWebView() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         WebView webView = getActivity().getWebView();
         WebViewTransport transport = webView.new WebViewTransport();
 

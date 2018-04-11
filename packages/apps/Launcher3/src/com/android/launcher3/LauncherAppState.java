@@ -17,28 +17,38 @@
 package com.android.launcher3;
 
 import android.app.SearchManager;
-import android.content.*;
+import android.content.ComponentName;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.os.Handler;
-import android.provider.Settings;
 import android.util.Log;
-import android.view.Display;
+
+import com.android.launcher3.compat.LauncherAppsCompat;
+import com.android.launcher3.compat.PackageInstallerCompat.PackageInstallInfo;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 
-public class LauncherAppState {
+public class LauncherAppState implements DeviceProfile.DeviceProfileCallbacks {
     private static final String TAG = "LauncherAppState";
     private static final String SHARED_PREFERENCES_KEY = "com.android.launcher3.prefs";
 
+    private static final boolean DEBUG = false;
+
+    private final AppFilter mAppFilter;
+    private final BuildInfo mBuildInfo;
     private LauncherModel mModel;
     private IconCache mIconCache;
-    private AppFilter mAppFilter;
     private WidgetPreviewLoader.CacheDb mWidgetPreviewCacheDb;
     private boolean mIsScreenLarge;
     private float mScreenDensity;
     private int mLongPressTimeout = 300;
+    private boolean mWallpaperChangedSinceLastCheck;
 
     private static WeakReference<LauncherProvider> sLauncherProvider;
     private static Context sContext;
@@ -84,21 +94,17 @@ public class LauncherAppState {
         mIsScreenLarge = isScreenLarge(sContext.getResources());
         mScreenDensity = sContext.getResources().getDisplayMetrics().density;
 
-        mWidgetPreviewCacheDb = new WidgetPreviewLoader.CacheDb(sContext);
+        recreateWidgetPreviewDb();
         mIconCache = new IconCache(sContext);
 
         mAppFilter = AppFilter.loadByName(sContext.getString(R.string.app_filter_class));
+        mBuildInfo = BuildInfo.loadByName(sContext.getString(R.string.build_info_class));
         mModel = new LauncherModel(this, mIconCache, mAppFilter);
+        final LauncherAppsCompat launcherApps = LauncherAppsCompat.getInstance(sContext);
+        launcherApps.addOnAppsChangedCallback(mModel);
 
         // Register intent receivers
-        IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
-        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
-        filter.addDataScheme("package");
-        sContext.registerReceiver(mModel, filter);
-        filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
-        filter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
+        IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_LOCALE_CHANGED);
         filter.addAction(Intent.ACTION_CONFIGURATION_CHANGED);
         sContext.registerReceiver(mModel, filter);
@@ -115,11 +121,20 @@ public class LauncherAppState {
                 mFavoritesObserver);
     }
 
+    public void recreateWidgetPreviewDb() {
+        if (mWidgetPreviewCacheDb != null) {
+            mWidgetPreviewCacheDb.close();
+        }
+        mWidgetPreviewCacheDb = new WidgetPreviewLoader.CacheDb(sContext);
+    }
+
     /**
      * Call from Application.onTerminate(), which is not guaranteed to ever be called.
      */
     public void onTerminate() {
         sContext.unregisterReceiver(mModel);
+        final LauncherAppsCompat launcherApps = LauncherAppsCompat.getInstance(sContext);
+        launcherApps.removeOnAppsChangedCallback(mModel);
 
         ContentResolver resolver = sContext.getContentResolver();
         resolver.unregisterContentObserver(mFavoritesObserver);
@@ -146,7 +161,7 @@ public class LauncherAppState {
         return mModel;
     }
 
-    IconCache getIconCache() {
+    public IconCache getIconCache() {
         return mIconCache;
     }
 
@@ -182,16 +197,16 @@ public class LauncherAppState {
                     context.getResources(),
                     minWidth, minHeight, width, height,
                     availableWidth, availableHeight);
+            mDynamicGrid.getDeviceProfile().addCallback(this);
         }
 
         // Update the icon size
         DeviceProfile grid = mDynamicGrid.getDeviceProfile();
-        Utilities.setIconSize(grid.iconSizePx);
-        grid.updateFromConfiguration(context.getResources(), width, height,
+        grid.updateFromConfiguration(context, context.getResources(), width, height,
                 availableWidth, availableHeight);
         return grid;
     }
-    DynamicGrid getDynamicGrid() {
+    public DynamicGrid getDynamicGrid() {
         return mDynamicGrid;
     }
 
@@ -215,5 +230,41 @@ public class LauncherAppState {
 
     public int getLongPressTimeout() {
         return mLongPressTimeout;
+    }
+
+    public void onWallpaperChanged() {
+        mWallpaperChangedSinceLastCheck = true;
+    }
+
+    public boolean hasWallpaperChangedSinceLastCheck() {
+        boolean result = mWallpaperChangedSinceLastCheck;
+        mWallpaperChangedSinceLastCheck = false;
+        return result;
+    }
+
+    @Override
+    public void onAvailableSizeChanged(DeviceProfile grid) {
+        Utilities.setIconSize(grid.iconSizePx);
+    }
+
+    public static boolean isDisableAllApps() {
+        // Returns false on non-dogfood builds.
+        return getInstance().mBuildInfo.isDogfoodBuild() &&
+                Launcher.isPropertyEnabled(Launcher.DISABLE_ALL_APPS_PROPERTY);
+    }
+
+    public static boolean isDogfoodBuild() {
+        return getInstance().mBuildInfo.isDogfoodBuild();
+    }
+
+    public void setPackageState(ArrayList<PackageInstallInfo> installInfo) {
+        mModel.setPackageState(installInfo);
+    }
+
+    /**
+     * Updates the icons and label of all icons for the provided package name.
+     */
+    public void updatePackageBadge(String packageName) {
+        mModel.updatePackageBadge(packageName);
     }
 }

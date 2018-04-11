@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_CONTENT_SETTINGS_MEDIA_SETTING_CHANGED_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_UI_CONTENT_SETTINGS_MEDIA_SETTING_CHANGED_INFOBAR_DELEGATE_H_
 
-#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "components/infobars/core/confirm_infobar_delegate.h"
 
 class InfoBarService;
 
@@ -13,20 +13,20 @@ class InfoBarService;
 // settings, and allows a reload via a button on the infobar.
 class MediaSettingChangedInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // Creates a media setting changed infobar delegate and adds it to
-  // |infobar_service|.
+  // Creates a media setting changed infobar and delegate and adds the infobar
+  // to |infobar_service|.
   static void Create(InfoBarService* infobar_service);
 
  private:
-  explicit MediaSettingChangedInfoBarDelegate(InfoBarService* infobar_service);
+  MediaSettingChangedInfoBarDelegate();
   virtual ~MediaSettingChangedInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
   virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
-  virtual string16 GetMessageText() const OVERRIDE;
+  virtual base::string16 GetMessageText() const OVERRIDE;
   virtual int GetButtons() const OVERRIDE;
-  virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
+  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(MediaSettingChangedInfoBarDelegate);

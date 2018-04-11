@@ -6,13 +6,10 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_INPUT_FACTORY_H
-#define MCLD_INPUT_FACTORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_MC_INPUTFACTORY_H
+#define MCLD_MC_INPUTFACTORY_H
 #include <mcld/Support/GCFactory.h>
-#include <mcld/MC/MCLDInput.h>
+#include <mcld/MC/Input.h>
 
 namespace mcld {
 

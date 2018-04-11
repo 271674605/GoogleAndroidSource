@@ -19,11 +19,11 @@
 
 namespace base {
 class FilePath;
-struct PlatformFileInfo;
 }
 
 namespace fileapi {
 struct DirectoryEntry;
+struct FileSystemInfo;
 }
 
 class GURL;
@@ -35,11 +35,11 @@ namespace content {
 // per child process.  Messages are dispatched on the main child thread.
 class FileSystemDispatcher : public IPC::Listener {
  public:
-  typedef base::Callback<void(base::PlatformFileError error)> StatusCallback;
+  typedef base::Callback<void(base::File::Error error)> StatusCallback;
   typedef base::Callback<void(
-      const base::PlatformFileInfo& file_info)> MetadataCallback;
+      const base::File::Info& file_info)> MetadataCallback;
   typedef base::Callback<void(
-      const base::PlatformFileInfo& file_info,
+      const base::File::Info& file_info,
       const base::FilePath& platform_path,
       int request_id)> CreateSnapshotFileCallback;
   typedef base::Callback<void(
@@ -48,6 +48,10 @@ class FileSystemDispatcher : public IPC::Listener {
   typedef base::Callback<void(
       const std::string& name,
       const GURL& root)> OpenFileSystemCallback;
+  typedef base::Callback<void(
+      const fileapi::FileSystemInfo& info,
+      const base::FilePath& file_path,
+      bool is_directory)> ResolveURLCallback;
   typedef base::Callback<void(
       int64 bytes,
       bool complete)> WriteCallback;
@@ -64,10 +68,11 @@ class FileSystemDispatcher : public IPC::Listener {
 
   void OpenFileSystem(const GURL& origin_url,
                       fileapi::FileSystemType type,
-                      long long size,
-                      bool create,
                       const OpenFileSystemCallback& success_callback,
                       const StatusCallback& error_callback);
+  void ResolveURL(const GURL& filesystem_url,
+                  const ResolveURLCallback& success_callback,
+                  const StatusCallback& error_callback);
   void DeleteFileSystem(const GURL& origin_url,
                         fileapi::FileSystemType type,
                         const StatusCallback& callback);
@@ -101,7 +106,7 @@ class FileSystemDispatcher : public IPC::Listener {
                 int* request_id_out,
                 const StatusCallback& callback);
   void Write(const GURL& path,
-             const GURL& blob_url,
+             const std::string& blob_id,
              int64 offset,
              int* request_id_out,
              const WriteCallback& success_callback,
@@ -112,16 +117,6 @@ class FileSystemDispatcher : public IPC::Listener {
                  const base::Time& last_access_time,
                  const base::Time& last_modified_time,
                  const StatusCallback& callback);
-
-  // This returns a raw open PlatformFile, unlike the above, which are
-  // self-contained operations.
-  void OpenFile(const GURL& file_path,
-                int file_flags,  // passed to FileUtilProxy::CreateOrOpen
-                const OpenFileCallback& success_callback,
-                const StatusCallback& error_callback);
-  // This must be paired with OpenFile, and called after finished using the
-  // raw PlatformFile returned from OpenFile.
-  void NotifyCloseFile(int file_open_id);
 
   // The caller must send FileSystemHostMsg_DidReceiveSnapshot message
   // with |request_id| passed to |success_callback| after the snapshot file
@@ -137,16 +132,20 @@ class FileSystemDispatcher : public IPC::Listener {
   void OnDidOpenFileSystem(int request_id,
                            const std::string& name,
                            const GURL& root);
+  void OnDidResolveURL(int request_id,
+                       const fileapi::FileSystemInfo& info,
+                       const base::FilePath& file_path,
+                       bool is_directory);
   void OnDidSucceed(int request_id);
   void OnDidReadMetadata(int request_id,
-                         const base::PlatformFileInfo& file_info);
+                         const base::File::Info& file_info);
   void OnDidCreateSnapshotFile(int request_id,
-                               const base::PlatformFileInfo& file_info,
+                               const base::File::Info& file_info,
                                const base::FilePath& platform_path);
   void OnDidReadDirectory(int request_id,
                           const std::vector<fileapi::DirectoryEntry>& entries,
                           bool has_more);
-  void OnDidFail(int request_id, base::PlatformFileError error_code);
+  void OnDidFail(int request_id, base::File::Error error_code);
   void OnDidWrite(int request_id, int64 bytes, bool complete);
   void OnDidOpenFile(
       int request_id,

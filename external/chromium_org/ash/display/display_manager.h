@@ -17,25 +17,26 @@
 #include "ui/gfx/display.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/display/output_configurator.h"
+#include "ui/display/chromeos/display_configurator.h"
 #endif
 
 namespace gfx {
 class Display;
 class Insets;
 class Rect;
+class Screen;
 }
 
 namespace ash {
 class AcceleratorControllerTest;
 class DisplayController;
+class DisplayLayoutStore;
+class ScreenAsh;
 
 namespace test {
 class DisplayManagerTestApi;
 class SystemGestureEventFilterTest;
 }
-namespace internal {
-class DisplayLayoutStore;
 
 // DisplayManager maintains the current display configurations,
 // and notifies observers when configuration changes.
@@ -43,7 +44,7 @@ class DisplayLayoutStore;
 // TODO(oshima): Make this non internal.
 class ASH_EXPORT DisplayManager
 #if defined(OS_CHROMEOS)
-    : public chromeos::OutputConfigurator::SoftwareMirroringController
+    : public ui::DisplayConfigurator::SoftwareMirroringController
 #endif
       {
  public:
@@ -51,16 +52,31 @@ class ASH_EXPORT DisplayManager
    public:
     virtual ~Delegate() {}
 
-    // Create or updates the mirror window with |display_info|.
-    virtual void CreateOrUpdateMirrorWindow(
+    // Create or updates the non desktop window with |display_info|.
+    virtual void CreateOrUpdateNonDesktopDisplay(
         const DisplayInfo& display_info) = 0;
 
     // Closes the mirror window if exists.
-    virtual void CloseMirrorWindow() = 0;
+    virtual void CloseNonDesktopDisplay() = 0;
 
     // Called before and after the display configuration changes.
-    virtual void PreDisplayConfigurationChange() = 0;
+    // When |clear_focus| is true, the implementation should
+    // deactivate the active window and set the focus window to NULL.
+    virtual void PreDisplayConfigurationChange(bool clear_focus) = 0;
     virtual void PostDisplayConfigurationChange() = 0;
+  };
+
+  // How the second display will be used.
+  // 1) EXTENDED mode extends the desktop to the second dislpay.
+  // 2) MIRRORING mode copies the content of the primary display to
+  //    the 2nd display. (Software Mirroring).
+  // 3) In VIRTUAL_KEYBOARD mode, the 2nd display is used as a
+  //    dedicated display for virtual keyboard, and it is not
+  //    recognized as a part of desktop.
+  enum SecondDisplayMode {
+    EXTENDED,
+    MIRRORING,
+    VIRTUAL_KEYBOARD
   };
 
   // Returns the list of possible UI scales for the display.
@@ -83,9 +99,13 @@ class ASH_EXPORT DisplayManager
     return layout_store_.get();
   }
 
+  gfx::Screen* screen() {
+    return screen_;
+  }
+
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
-  // When set to true, the MonitorManager calls OnDisplayBoundsChanged
+  // When set to true, the MonitorManager calls OnDisplayMetricsChanged
   // even if the display's bounds didn't change. Used to swap primary
   // display.
   void set_force_bounds_changed(bool force_bounds_changed) {
@@ -95,9 +115,12 @@ class ASH_EXPORT DisplayManager
   // Returns the display id of the first display in the outupt list.
   int64 first_display_id() const { return first_display_id_; }
 
-  // Initializes displays using command line flag, or uses
-  // defualt if no options are specified.
-  void InitFromCommandLine();
+  // Initializes displays using command line flag. Returns false
+  // if no command line flag was provided.
+  bool InitFromCommandLine();
+
+  // Initialize default display.
+  void InitDefaultDisplay();
 
   // True if the given |display| is currently connected.
   bool IsActiveDisplay(const gfx::Display& display) const;
@@ -106,6 +129,17 @@ class ASH_EXPORT DisplayManager
   bool HasInternalDisplay() const;
 
   bool IsInternalDisplayId(int64 id) const;
+
+  // Returns the display layout used for current displays.
+  DisplayLayout GetCurrentDisplayLayout();
+
+  // Returns the current display pair.
+  DisplayIdPair GetCurrentDisplayIdPair() const;
+
+  // Sets the layout for the current display pair. The |layout| specifies
+  // the locaion of the secondary display relative to the primary.
+  void SetLayoutForCurrentDisplays(
+      const DisplayLayout& layout_relative_to_primary);
 
   // Returns display for given |id|;
   const gfx::Display& GetDisplayForId(int64 id) const;
@@ -139,20 +173,24 @@ class ASH_EXPORT DisplayManager
                                gfx::Display::Rotation rotation,
                                float ui_scale,
                                const gfx::Insets* overscan_insets,
-                               const gfx::Size& resolution_in_pixels);
+                               const gfx::Size& resolution_in_pixels,
+                               ui::ColorCalibrationProfile color_profile);
 
-  // Returns the display's selected resolution.
-  bool GetSelectedResolutionForDisplayId(int64 display_id,
-                                         gfx::Size* resolution_out) const;
+  // Returns the display's selected mode.
+  bool GetSelectedModeForDisplayId(int64 display_id,
+                                   DisplayMode* mode_out) const;
 
-  // Tells if display rotation/ui scaling features are enabled.
-  bool IsDisplayRotationEnabled() const;
+  // Tells if the virtual resolution feature is enabled.
   bool IsDisplayUIScalingEnabled() const;
 
   // Returns the current overscan insets for the specified |display_id|.
   // Returns an empty insets (0, 0, 0, 0) if no insets are specified for
   // the display.
   gfx::Insets GetOverscanInsets(int64 display_id) const;
+
+  // Sets the color calibration of the display to |profile|.
+  void SetColorCalibrationProfile(int64 display_id,
+                                  ui::ColorCalibrationProfile profile);
 
   // Called when display configuration has changed. The new display
   // configurations is passed as a vector of Display object, which
@@ -170,11 +208,13 @@ class ASH_EXPORT DisplayManager
   // no longer considered "primary".
   const gfx::Display& GetDisplayAt(size_t index) const;
 
-  const gfx::Display* GetPrimaryDisplayCandidate() const;
+  const gfx::Display& GetPrimaryDisplayCandidate() const;
 
   // Returns the logical number of displays. This returns 1
   // when displays are mirrored.
   size_t GetNumDisplays() const;
+
+  const std::vector<gfx::Display>& displays() const { return displays_; }
 
   // Returns the number of connected displays. This returns 2
   // when displays are mirrored.
@@ -182,7 +222,12 @@ class ASH_EXPORT DisplayManager
 
   // Returns the mirroring status.
   bool IsMirrored() const;
-  const gfx::Display& mirrored_display() const { return mirrored_display_; }
+  int64 mirrored_display_id() const { return mirrored_display_id_; }
+
+  // Returns the display object that is not a part of desktop.
+  const gfx::Display& non_desktop_display() const {
+    return non_desktop_display_;
+  }
 
   // Retuns the display info associated with |display_id|.
   const DisplayInfo& GetDisplayInfo(int64 display_id) const;
@@ -207,13 +252,33 @@ class ASH_EXPORT DisplayManager
   // SoftwareMirroringController override:
 #if defined(OS_CHROMEOS)
   virtual void SetSoftwareMirroring(bool enabled) OVERRIDE;
-#else
-  void SetSoftwareMirroring(bool enabled);
+  virtual bool SoftwareMirroringEnabled() const OVERRIDE;
 #endif
+  bool software_mirroring_enabled() const {
+    return second_display_mode_ == MIRRORING;
+  };
+
+  bool virtual_keyboard_root_window_enabled() const {
+    return second_display_mode_ == VIRTUAL_KEYBOARD;
+  };
+
+  // Sets/gets second display mode.
+  void SetSecondDisplayMode(SecondDisplayMode mode);
+  SecondDisplayMode second_display_mode() const {
+    return second_display_mode_;
+  }
 
   // Update the bounds of the display given by |display_id|.
   bool UpdateDisplayBounds(int64 display_id,
                            const gfx::Rect& new_bounds);
+
+  // Creates mirror window if the software mirror mode is enabled.
+  // This is used only for bootstrap.
+  void CreateMirrorWindowIfAny();
+
+  // Create a screen instance to be used during shutdown.
+  void CreateScreenForShutdown() const;
+
 private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, ConvertPoint);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, TestNativeDisplaysChanged);
@@ -244,6 +309,9 @@ private:
   // a display.
   void InsertAndUpdateDisplayInfo(const DisplayInfo& new_info);
 
+  // Called when the display info is updated through InsertAndUpdateDisplayInfo.
+  void OnDisplayInfoUpdated(const DisplayInfo& display_info);
+
   // Creates a display object from the DisplayInfo for |display_id|.
   gfx::Display CreateDisplayFromDisplayInfoById(int64 display_id);
 
@@ -262,13 +330,15 @@ private:
 
   Delegate* delegate_;  // not owned.
 
+  scoped_ptr<ScreenAsh> screen_ash_;
+  // This is to have an accessor without ScreenAsh definition.
+  gfx::Screen* screen_;
+
   scoped_ptr<DisplayLayoutStore> layout_store_;
 
   int64 first_display_id_;
 
-  gfx::Display mirrored_display_;
-
-  // List of current active dispays.
+  // List of current active displays.
   DisplayList displays_;
 
   int num_connected_displays_;
@@ -278,22 +348,23 @@ private:
   // The mapping from the display ID to its internal data.
   std::map<int64, DisplayInfo> display_info_;
 
-  // Selected resolutions for displays. Key is the displays' ID.
-  std::map<int64, gfx::Size> resolutions_;
+  // Selected display modes for displays. Key is the displays' ID.
+  std::map<int64, DisplayMode> display_modes_;
 
   // When set to true, the host window's resize event updates
   // the display's size. This is set to true when running on
   // desktop environment (for debugging) so that resizing the host
-  // window wil update the display properly. This is set to false
+  // window will update the display properly. This is set to false
   // on device as well as during the unit tests.
   bool change_display_upon_host_resize_;
 
-  bool software_mirroring_enabled_;
+  SecondDisplayMode second_display_mode_;
+  int64 mirrored_display_id_;
+  gfx::Display non_desktop_display_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayManager);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_DISPLAY_DISPLAY_MANAGER_H_

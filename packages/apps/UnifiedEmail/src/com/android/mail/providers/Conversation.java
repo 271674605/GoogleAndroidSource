@@ -30,13 +30,12 @@ import com.android.mail.R;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.content.CursorCreator;
 import com.android.mail.providers.UIProvider.ConversationColumns;
+import com.android.mail.providers.UIProvider.ConversationCursorCommand;
 import com.android.mail.ui.ConversationCursorLoader;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -51,69 +50,31 @@ public class Conversation implements Parcelable {
     /**
      * @see BaseColumns#_ID
      */
-    public long id;
+    public final long id;
     /**
      * @see UIProvider.ConversationColumns#URI
      */
-    public Uri uri;
+    public final Uri uri;
     /**
      * @see UIProvider.ConversationColumns#SUBJECT
      */
-    public String subject;
+    public final String subject;
     /**
      * @see UIProvider.ConversationColumns#DATE_RECEIVED_MS
      */
-    public long dateMs;
-    /**
-     * @see UIProvider.ConversationColumns#SNIPPET
-     */
-    @Deprecated
-    public String snippet;
+    public final long dateMs;
     /**
      * @see UIProvider.ConversationColumns#HAS_ATTACHMENTS
      */
-    public boolean hasAttachments;
-    /**
-     * Union of attachmentPreviewUri0 and attachmentPreviewUri1
-     */
-    public transient ArrayList<String> attachmentPreviews;
-    /**
-     * @see UIProvider.ConversationColumns#ATTACHMENT_PREVIEW_URI0
-     */
-    public String attachmentPreviewUri0;
-    /**
-     * @see UIProvider.ConversationColumns#ATTACHMENT_PREVIEW_URI1
-     */
-    public String attachmentPreviewUri1;
-    /**
-     * @see UIProvider.ConversationColumns#ATTACHMENT_PREVIEW_STATES
-     */
-    public int attachmentPreviewStates;
-    /**
-     * @see UIProvider.ConversationColumns#ATTACHMENT_PREVIEWS_COUNT
-     */
-    public int attachmentPreviewsCount;
+    public final boolean hasAttachments;
     /**
      * @see UIProvider.ConversationColumns#MESSAGE_LIST_URI
      */
-    public Uri messageListUri;
-    /**
-     * @see UIProvider.ConversationColumns#SENDER_INFO
-     */
-    @Deprecated
-    public String senders;
-    /**
-     * @see UIProvider.ConversationColumns#NUM_MESSAGES
-     */
-    private int numMessages;
-    /**
-     * @see UIProvider.ConversationColumns#NUM_DRAFTS
-     */
-    private int numDrafts;
+    public final Uri messageListUri;
     /**
      * @see UIProvider.ConversationColumns#SENDING_STATE
      */
-    public int sendingState;
+    public final int sendingState;
     /**
      * @see UIProvider.ConversationColumns#PRIORITY
      */
@@ -141,39 +102,43 @@ public class Conversation implements Parcelable {
     /**
      * @see UIProvider.ConversationColumns#PERSONAL_LEVEL
      */
-    public int personalLevel;
+    public final int personalLevel;
     /**
      * @see UIProvider.ConversationColumns#SPAM
      */
-    public boolean spam;
+    public final boolean spam;
     /**
      * @see UIProvider.ConversationColumns#MUTED
      */
-    public boolean muted;
+    public final boolean muted;
     /**
      * @see UIProvider.ConversationColumns#PHISHING
      */
-    public boolean phishing;
+    public final boolean phishing;
     /**
      * @see UIProvider.ConversationColumns#COLOR
      */
-    public int color;
+    public final int color;
     /**
      * @see UIProvider.ConversationColumns#ACCOUNT_URI
      */
-    public Uri accountUri;
+    public final Uri accountUri;
     /**
      * @see UIProvider.ConversationColumns#CONVERSATION_INFO
      */
-    public ConversationInfo conversationInfo;
+    public final ConversationInfo conversationInfo;
     /**
      * @see UIProvider.ConversationColumns#CONVERSATION_BASE_URI
      */
-    public Uri conversationBaseUri;
+    public final Uri conversationBaseUri;
     /**
      * @see UIProvider.ConversationColumns#REMOTE
      */
-    public boolean isRemote;
+    public final boolean isRemote;
+    /**
+     * @see UIProvider.ConversationColumns#ORDER_KEY
+     */
+    public final long orderKey;
 
     /**
      * Used within the UI to indicate the adapter position of this conversation
@@ -192,7 +157,7 @@ public class Conversation implements Parcelable {
 
     private transient boolean viewed;
 
-    private static String sSubjectAndSnippet;
+    private static String sBadgeAndSubject;
 
     // Constituents of convFlags below
     // Flag indicating that the item has been deleted, but will continue being
@@ -214,12 +179,8 @@ public class Conversation implements Parcelable {
         dest.writeParcelable(uri, flags);
         dest.writeString(subject);
         dest.writeLong(dateMs);
-        dest.writeString(snippet);
         dest.writeInt(hasAttachments ? 1 : 0);
         dest.writeParcelable(messageListUri, 0);
-        dest.writeString(senders);
-        dest.writeInt(numMessages);
-        dest.writeInt(numDrafts);
         dest.writeInt(sendingState);
         dest.writeInt(priority);
         dest.writeInt(read ? 1 : 0);
@@ -236,10 +197,7 @@ public class Conversation implements Parcelable {
         dest.writeParcelable(conversationInfo, 0);
         dest.writeParcelable(conversationBaseUri, 0);
         dest.writeInt(isRemote ? 1 : 0);
-        dest.writeString(attachmentPreviewUri0);
-        dest.writeString(attachmentPreviewUri1);
-        dest.writeInt(attachmentPreviewStates);
-        dest.writeInt(attachmentPreviewsCount);
+        dest.writeLong(orderKey);
     }
 
     private Conversation(Parcel in, ClassLoader loader) {
@@ -247,12 +205,8 @@ public class Conversation implements Parcelable {
         uri = in.readParcelable(null);
         subject = in.readString();
         dateMs = in.readLong();
-        snippet = in.readString();
         hasAttachments = (in.readInt() != 0);
         messageListUri = in.readParcelable(null);
-        senders = emptyIfNull(in.readString());
-        numMessages = in.readInt();
-        numDrafts = in.readInt();
         sendingState = in.readInt();
         priority = in.readInt();
         read = (in.readInt() != 0);
@@ -271,11 +225,7 @@ public class Conversation implements Parcelable {
         conversationInfo = in.readParcelable(loader);
         conversationBaseUri = in.readParcelable(null);
         isRemote = in.readInt() != 0;
-        attachmentPreviews = null;
-        attachmentPreviewUri0 = in.readString();
-        attachmentPreviewUri1 = in.readString();
-        attachmentPreviewStates = in.readInt();
-        attachmentPreviewsCount = in.readInt();
+        orderKey = in.readLong();
     }
 
     @Override
@@ -319,61 +269,53 @@ public class Conversation implements Parcelable {
     public static final String UPDATE_FOLDER_COLUMN = ConversationColumns.RAW_FOLDERS;
 
     public Conversation(Cursor cursor) {
-        if (cursor != null) {
-            id = cursor.getLong(UIProvider.CONVERSATION_ID_COLUMN);
-            uri = Uri.parse(cursor.getString(UIProvider.CONVERSATION_URI_COLUMN));
-            dateMs = cursor.getLong(UIProvider.CONVERSATION_DATE_RECEIVED_MS_COLUMN);
-            subject = cursor.getString(UIProvider.CONVERSATION_SUBJECT_COLUMN);
-            // Don't allow null subject
-            if (subject == null) {
-                subject = "";
-            }
-            hasAttachments = cursor.getInt(UIProvider.CONVERSATION_HAS_ATTACHMENTS_COLUMN) != 0;
-            String messageList = cursor.getString(UIProvider.CONVERSATION_MESSAGE_LIST_URI_COLUMN);
-            messageListUri = !TextUtils.isEmpty(messageList) ? Uri.parse(messageList) : null;
-            sendingState = cursor.getInt(UIProvider.CONVERSATION_SENDING_STATE_COLUMN);
-            priority = cursor.getInt(UIProvider.CONVERSATION_PRIORITY_COLUMN);
-            read = cursor.getInt(UIProvider.CONVERSATION_READ_COLUMN) != 0;
-            seen = cursor.getInt(UIProvider.CONVERSATION_SEEN_COLUMN) != 0;
-            starred = cursor.getInt(UIProvider.CONVERSATION_STARRED_COLUMN) != 0;
-            rawFolders = readRawFolders(cursor);
-            convFlags = cursor.getInt(UIProvider.CONVERSATION_FLAGS_COLUMN);
-            personalLevel = cursor.getInt(UIProvider.CONVERSATION_PERSONAL_LEVEL_COLUMN);
-            spam = cursor.getInt(UIProvider.CONVERSATION_IS_SPAM_COLUMN) != 0;
-            phishing = cursor.getInt(UIProvider.CONVERSATION_IS_PHISHING_COLUMN) != 0;
-            muted = cursor.getInt(UIProvider.CONVERSATION_MUTED_COLUMN) != 0;
-            color = cursor.getInt(UIProvider.CONVERSATION_COLOR_COLUMN);
-            String account = cursor.getString(UIProvider.CONVERSATION_ACCOUNT_URI_COLUMN);
-            accountUri = !TextUtils.isEmpty(account) ? Uri.parse(account) : null;
-            position = NO_POSITION;
-            localDeleteOnUpdate = false;
-            conversationInfo = readConversationInfo(cursor);
-            final String conversationBase =
-                    cursor.getString(UIProvider.CONVERSATION_BASE_URI_COLUMN);
-            conversationBaseUri = !TextUtils.isEmpty(conversationBase) ?
-                    Uri.parse(conversationBase) : null;
-            if (conversationInfo == null) {
-                snippet = cursor.getString(UIProvider.CONVERSATION_SNIPPET_COLUMN);
-                senders = emptyIfNull(cursor.getString(UIProvider.CONVERSATION_SENDER_INFO_COLUMN));
-                numMessages = cursor.getInt(UIProvider.CONVERSATION_NUM_MESSAGES_COLUMN);
-                numDrafts = cursor.getInt(UIProvider.CONVERSATION_NUM_DRAFTS_COLUMN);
-            }
-            isRemote = cursor.getInt(UIProvider.CONVERSATION_REMOTE_COLUMN) != 0;
-            attachmentPreviews = null;
-            attachmentPreviewUri0 = cursor.getString(
-                    UIProvider.CONVERSATION_ATTACHMENT_PREVIEW_URI0_COLUMN);
-            attachmentPreviewUri1 = cursor.getString(
-                    UIProvider.CONVERSATION_ATTACHMENT_PREVIEW_URI1_COLUMN);
-            attachmentPreviewStates = cursor.getInt(
-                    UIProvider.CONVERSATION_ATTACHMENT_PREVIEW_STATES_COLUMN);
-            attachmentPreviewsCount = cursor.getInt(
-                    UIProvider.CONVERSATION_ATTACHMENT_PREVIEWS_COUNT_COLUMN);
+        if (cursor == null) {
+            throw new IllegalArgumentException("Creating conversation from null cursor");
         }
+        id = cursor.getLong(UIProvider.CONVERSATION_ID_COLUMN);
+        uri = Uri.parse(cursor.getString(UIProvider.CONVERSATION_URI_COLUMN));
+        dateMs = cursor.getLong(UIProvider.CONVERSATION_DATE_RECEIVED_MS_COLUMN);
+        final String subj = cursor.getString(UIProvider.CONVERSATION_SUBJECT_COLUMN);
+        // Don't allow null subject
+        if (subj == null) {
+            subject = "";
+        } else {
+            subject = subj;
+        }
+        hasAttachments = cursor.getInt(UIProvider.CONVERSATION_HAS_ATTACHMENTS_COLUMN) != 0;
+        String messageList = cursor.getString(UIProvider.CONVERSATION_MESSAGE_LIST_URI_COLUMN);
+        messageListUri = !TextUtils.isEmpty(messageList) ? Uri.parse(messageList) : null;
+        sendingState = cursor.getInt(UIProvider.CONVERSATION_SENDING_STATE_COLUMN);
+        priority = cursor.getInt(UIProvider.CONVERSATION_PRIORITY_COLUMN);
+        read = cursor.getInt(UIProvider.CONVERSATION_READ_COLUMN) != 0;
+        seen = cursor.getInt(UIProvider.CONVERSATION_SEEN_COLUMN) != 0;
+        starred = cursor.getInt(UIProvider.CONVERSATION_STARRED_COLUMN) != 0;
+        rawFolders = readRawFolders(cursor);
+        convFlags = cursor.getInt(UIProvider.CONVERSATION_FLAGS_COLUMN);
+        personalLevel = cursor.getInt(UIProvider.CONVERSATION_PERSONAL_LEVEL_COLUMN);
+        spam = cursor.getInt(UIProvider.CONVERSATION_IS_SPAM_COLUMN) != 0;
+        phishing = cursor.getInt(UIProvider.CONVERSATION_IS_PHISHING_COLUMN) != 0;
+        muted = cursor.getInt(UIProvider.CONVERSATION_MUTED_COLUMN) != 0;
+        color = cursor.getInt(UIProvider.CONVERSATION_COLOR_COLUMN);
+        String account = cursor.getString(UIProvider.CONVERSATION_ACCOUNT_URI_COLUMN);
+        accountUri = !TextUtils.isEmpty(account) ? Uri.parse(account) : null;
+        position = NO_POSITION;
+        localDeleteOnUpdate = false;
+        conversationInfo = readConversationInfo(cursor);
+        if (conversationInfo == null) {
+            LogUtils.wtf(LOG_TAG, "Null conversation info from cursor");
+        }
+        final String conversationBase =
+                cursor.getString(UIProvider.CONVERSATION_BASE_URI_COLUMN);
+        conversationBaseUri = !TextUtils.isEmpty(conversationBase) ?
+                Uri.parse(conversationBase) : null;
+        isRemote = cursor.getInt(UIProvider.CONVERSATION_REMOTE_COLUMN) != 0;
+        orderKey = cursor.getLong(UIProvider.CONVERSATION_ORDER_KEY_COLUMN);
     }
 
     public Conversation(Conversation other) {
         if (other == null) {
-            return;
+            throw new IllegalArgumentException("Copying null conversation");
         }
 
         id = other.id;
@@ -401,67 +343,220 @@ public class Conversation implements Parcelable {
         // will overwrite this if cached changes exist anyway, so a shallow copy is OK
         conversationInfo = other.conversationInfo;
         conversationBaseUri = other.conversationBaseUri;
-        snippet = other.snippet;
-        senders = other.senders;
-        numMessages = other.numMessages;
-        numDrafts = other.numDrafts;
         isRemote = other.isRemote;
-        attachmentPreviews = null;
-        attachmentPreviewUri0 = other.attachmentPreviewUri0;
-        attachmentPreviewUri1 = other.attachmentPreviewUri1;
-        attachmentPreviewStates = other.attachmentPreviewStates;
-        attachmentPreviewsCount = other.attachmentPreviewsCount;
+        orderKey = other.orderKey;
     }
 
-    public Conversation() {
-    }
-
-    public static Conversation create(long id, Uri uri, String subject, long dateMs, String snippet,
-            boolean hasAttachment, Uri messageListUri, String senders,
-            int numMessages, int numDrafts, int sendingState, int priority, boolean read,
+    private Conversation(long id, Uri uri, String subject, long dateMs,
+            boolean hasAttachment, Uri messageListUri,
+            int sendingState, int priority, boolean read,
             boolean seen, boolean starred, FolderList rawFolders, int convFlags, int personalLevel,
             boolean spam, boolean phishing, boolean muted, Uri accountUri,
             ConversationInfo conversationInfo, Uri conversationBase, boolean isRemote,
-            String attachmentPreviewUri0, String attachmentPreviewUri1, int attachmentPreviewStates,
-            int attachmentPreviewsCount) {
-        final Conversation conversation = new Conversation();
-
-        conversation.id = id;
-        conversation.uri = uri;
-        conversation.subject = subject;
-        conversation.dateMs = dateMs;
-        conversation.snippet = snippet;
-        conversation.hasAttachments = hasAttachment;
-        conversation.messageListUri = messageListUri;
-        conversation.senders = emptyIfNull(senders);
-        conversation.numMessages = numMessages;
-        conversation.numDrafts = numDrafts;
-        conversation.sendingState = sendingState;
-        conversation.priority = priority;
-        conversation.read = read;
-        conversation.seen = seen;
-        conversation.starred = starred;
-        conversation.rawFolders = rawFolders;
-        conversation.convFlags = convFlags;
-        conversation.personalLevel = personalLevel;
-        conversation.spam = spam;
-        conversation.phishing = phishing;
-        conversation.muted = muted;
-        conversation.color = 0;
-        conversation.accountUri = accountUri;
-        conversation.conversationInfo = conversationInfo;
-        conversation.conversationBaseUri = conversationBase;
-        conversation.isRemote = isRemote;
-        conversation.attachmentPreviews = null;
-        conversation.attachmentPreviewUri0 = attachmentPreviewUri0;
-        conversation.attachmentPreviewUri1 = attachmentPreviewUri1;
-        conversation.attachmentPreviewStates = attachmentPreviewStates;
-        conversation.attachmentPreviewsCount = attachmentPreviewsCount;
-        return conversation;
+            String permalink, long orderKey) {
+        if (conversationInfo == null) {
+            throw new IllegalArgumentException("Null conversationInfo");
+        }
+        this.id = id;
+        this.uri = uri;
+        this.subject = subject;
+        this.dateMs = dateMs;
+        this.hasAttachments = hasAttachment;
+        this.messageListUri = messageListUri;
+        this.sendingState = sendingState;
+        this.priority = priority;
+        this.read = read;
+        this.seen = seen;
+        this.starred = starred;
+        this.rawFolders = rawFolders;
+        this.convFlags = convFlags;
+        this.personalLevel = personalLevel;
+        this.spam = spam;
+        this.phishing = phishing;
+        this.muted = muted;
+        this.color = 0;
+        this.accountUri = accountUri;
+        this.conversationInfo = conversationInfo;
+        this.conversationBaseUri = conversationBase;
+        this.isRemote = isRemote;
+        this.orderKey = orderKey;
     }
 
-    private static final Bundle sConversationInfoRequest = new Bundle(1);
-    private static final Bundle sRawFoldersRequest = new Bundle(1);
+    public static class Builder {
+        private long mId;
+        private Uri mUri;
+        private String mSubject;
+        private long mDateMs;
+        private boolean mHasAttachments;
+        private Uri mMessageListUri;
+        private int mSendingState;
+        private int mPriority;
+        private boolean mRead;
+        private boolean mSeen;
+        private boolean mStarred;
+        private FolderList mRawFolders;
+        private int mConvFlags;
+        private int mPersonalLevel;
+        private boolean mSpam;
+        private boolean mPhishing;
+        private boolean mMuted;
+        private Uri mAccountUri;
+        private ConversationInfo mConversationInfo;
+        private Uri mConversationBaseUri;
+        private boolean mIsRemote;
+        private String mPermalink;
+        private long mOrderKey;
+
+        public Builder setId(long id) {
+            mId = id;
+            return this;
+        }
+
+        public Builder setUri(Uri uri) {
+            mUri = uri;
+            return this;
+        }
+
+        public Builder setSubject(String subject) {
+            mSubject = subject;
+            return this;
+        }
+
+        public Builder setDateMs(long dateMs) {
+            mDateMs = dateMs;
+            return this;
+        }
+
+        public Builder setHasAttachments(boolean hasAttachments) {
+            mHasAttachments = hasAttachments;
+            return this;
+        }
+
+        public Builder setMessageListUri(Uri messageListUri) {
+            mMessageListUri = messageListUri;
+            return this;
+        }
+
+        public Builder setSendingState(int sendingState) {
+            mSendingState = sendingState;
+            return this;
+        }
+
+        public Builder setPriority(int priority) {
+            mPriority = priority;
+            return this;
+        }
+
+        public Builder setRead(boolean read) {
+            mRead = read;
+            return this;
+        }
+
+        public Builder setSeen(boolean seen) {
+            mSeen = seen;
+            return this;
+        }
+
+        public Builder setStarred(boolean starred) {
+            mStarred = starred;
+            return this;
+        }
+
+        public Builder setRawFolders(FolderList rawFolders) {
+            mRawFolders = rawFolders;
+            return this;
+        }
+
+        public Builder setConvFlags(int convFlags) {
+            mConvFlags = convFlags;
+            return this;
+        }
+
+        public Builder setPersonalLevel(int personalLevel) {
+            mPersonalLevel = personalLevel;
+            return this;
+        }
+
+        public Builder setSpam(boolean spam) {
+            mSpam = spam;
+            return this;
+        }
+
+        public Builder setPhishing(boolean phishing) {
+            mPhishing = phishing;
+            return this;
+        }
+
+        public Builder setMuted(boolean muted) {
+            mMuted = muted;
+            return this;
+        }
+
+        public Builder setAccountUri(Uri accountUri) {
+            mAccountUri = accountUri;
+            return this;
+        }
+
+        public Builder setConversationInfo(ConversationInfo conversationInfo) {
+            if (conversationInfo == null) {
+                throw new IllegalArgumentException("Can't set null ConversationInfo");
+            }
+            mConversationInfo = conversationInfo;
+            return this;
+        }
+
+        public Builder setConversationBaseUri(Uri conversationBaseUri) {
+            mConversationBaseUri = conversationBaseUri;
+            return this;
+        }
+
+        public Builder setIsRemote(boolean isRemote) {
+            mIsRemote = isRemote;
+            return this;
+        }
+
+        public Builder setPermalink(String permalink) {
+            mPermalink = permalink;
+            return this;
+        }
+
+        public Builder setOrderKey(long orderKey) {
+            mOrderKey = orderKey;
+            return this;
+        }
+
+        public Builder() {}
+
+        public Conversation build() {
+            if (mConversationInfo == null) {
+                LogUtils.d(LOG_TAG, "Null conversationInfo in Builder");
+                mConversationInfo = new ConversationInfo();
+            }
+            return new Conversation(mId, mUri, mSubject, mDateMs, mHasAttachments, mMessageListUri,
+                    mSendingState, mPriority, mRead, mSeen, mStarred, mRawFolders, mConvFlags,
+                    mPersonalLevel, mSpam, mPhishing, mMuted, mAccountUri, mConversationInfo,
+                    mConversationBaseUri, mIsRemote, mPermalink, mOrderKey);
+        }
+    }
+
+    private static final Bundle CONVERSATION_INFO_REQUEST;
+    private static final Bundle RAW_FOLDERS_REQUEST;
+
+    static {
+        RAW_FOLDERS_REQUEST = new Bundle(2);
+        RAW_FOLDERS_REQUEST.putBoolean(
+                ConversationCursorCommand.COMMAND_GET_RAW_FOLDERS, true);
+        RAW_FOLDERS_REQUEST.putInt(
+                ConversationCursorCommand.COMMAND_KEY_OPTIONS,
+                ConversationCursorCommand.OPTION_MOVE_POSITION);
+
+        CONVERSATION_INFO_REQUEST = new Bundle(2);
+        CONVERSATION_INFO_REQUEST.putBoolean(
+                ConversationCursorCommand.COMMAND_GET_CONVERSATION_INFO, true);
+        CONVERSATION_INFO_REQUEST.putInt(
+                ConversationCursorCommand.COMMAND_KEY_OPTIONS,
+                ConversationCursorCommand.OPTION_MOVE_POSITION);
+    }
 
     private static ConversationInfo readConversationInfo(Cursor cursor) {
         final ConversationInfo ci;
@@ -474,16 +569,9 @@ public class Conversation implements Parcelable {
             }
         }
 
-        final String key = UIProvider.ConversationCursorCommand.COMMAND_GET_CONVERSATION_INFO;
-        if (sConversationInfoRequest.isEmpty()) {
-            sConversationInfoRequest.putBoolean(key, true);
-            sConversationInfoRequest.putInt(
-                    UIProvider.ConversationCursorCommand.COMMAND_KEY_OPTIONS,
-                    UIProvider.ConversationCursorCommand.OPTION_MOVE_POSITION);
-        }
-        final Bundle response = cursor.respond(sConversationInfoRequest);
-        if (response.containsKey(key)) {
-            ci = response.getParcelable(key);
+        final Bundle response = cursor.respond(CONVERSATION_INFO_REQUEST);
+        if (response.containsKey(ConversationCursorCommand.COMMAND_GET_CONVERSATION_INFO)) {
+            ci = response.getParcelable(ConversationCursorCommand.COMMAND_GET_CONVERSATION_INFO);
         } else {
             // legacy fallback
             ci = ConversationInfo.fromBlob(cursor.getBlob(UIProvider.CONVERSATION_INFO_COLUMN));
@@ -502,16 +590,9 @@ public class Conversation implements Parcelable {
             }
         }
 
-        final String key = UIProvider.ConversationCursorCommand.COMMAND_GET_RAW_FOLDERS;
-        if (sRawFoldersRequest.isEmpty()) {
-            sRawFoldersRequest.putBoolean(key, true);
-            sRawFoldersRequest.putInt(
-                    UIProvider.ConversationCursorCommand.COMMAND_KEY_OPTIONS,
-                    UIProvider.ConversationCursorCommand.OPTION_MOVE_POSITION);
-        }
-        final Bundle response = cursor.respond(sRawFoldersRequest);
-        if (response.containsKey(key)) {
-            fl = response.getParcelable(key);
+        final Bundle response = cursor.respond(RAW_FOLDERS_REQUEST);
+        if (response.containsKey(ConversationCursorCommand.COMMAND_GET_RAW_FOLDERS)) {
+            fl = response.getParcelable(ConversationCursorCommand.COMMAND_GET_RAW_FOLDERS);
         } else {
             // legacy fallback
             // TODO: delete this once Email supports the respond call
@@ -537,7 +618,12 @@ public class Conversation implements Parcelable {
             if (ConversationColumns.READ.equals(key)) {
                 read = (Integer) val != 0;
             } else if (ConversationColumns.CONVERSATION_INFO.equals(key)) {
-                conversationInfo = ConversationInfo.fromBlob((byte[]) val);
+                final ConversationInfo cachedCi = ConversationInfo.fromBlob((byte[]) val);
+                if (cachedCi == null) {
+                    LogUtils.d(LOG_TAG, "Null ConversationInfo in applyCachedValues");
+                } else {
+                    conversationInfo.overwriteWith(cachedCi);
+                }
             } else if (ConversationColumns.FLAGS.equals(key)) {
                 convFlags = (Integer) val;
             } else if (ConversationColumns.STARRED.equals(key)) {
@@ -548,6 +634,8 @@ public class Conversation implements Parcelable {
                 rawFolders = FolderList.fromBlob((byte[]) val);
             } else if (ConversationColumns.VIEWED.equals(key)) {
                 // ignore. this is not read from the cursor, either.
+            } else if (ConversationColumns.PRIORITY.equals(key)) {
+                priority = (Integer) val;
             } else {
                 LogUtils.e(LOG_TAG, new UnsupportedOperationException(),
                         "unsupported cached conv value in col=%s", key);
@@ -637,26 +725,25 @@ public class Conversation implements Parcelable {
     }
 
     /**
-     * Get the snippet for this conversation. Masks that it may come from
-     * conversation info or the original deprecated snippet string.
+     * Get the snippet for this conversation.
      */
     public String getSnippet() {
-        return conversationInfo != null && !TextUtils.isEmpty(conversationInfo.firstSnippet) ?
-                conversationInfo.firstSnippet : snippet;
+        return !TextUtils.isEmpty(conversationInfo.firstSnippet) ?
+                conversationInfo.firstSnippet : "";
     }
 
     /**
      * Get the number of messages for this conversation.
      */
     public int getNumMessages() {
-        return conversationInfo != null ? conversationInfo.messageCount : numMessages;
+        return conversationInfo.messageCount;
     }
 
     /**
      * Get the number of drafts for this conversation.
      */
     public int numDrafts() {
-        return conversationInfo != null ? conversationInfo.draftCount : numDrafts;
+        return conversationInfo.draftCount;
     }
 
     public boolean isViewed() {
@@ -669,19 +756,6 @@ public class Conversation implements Parcelable {
 
     public String getBaseUri(String defaultValue) {
         return conversationBaseUri != null ? conversationBaseUri.toString() : defaultValue;
-    }
-
-    public ArrayList<String> getAttachmentPreviewUris() {
-        if (attachmentPreviews == null) {
-            attachmentPreviews = Lists.newArrayListWithCapacity(2);
-            if (!TextUtils.isEmpty(attachmentPreviewUri0)) {
-                attachmentPreviews.add(attachmentPreviewUri0);
-            }
-            if (!TextUtils.isEmpty(attachmentPreviewUri1)) {
-                attachmentPreviews.add(attachmentPreviewUri1);
-            }
-        }
-        return attachmentPreviews;
     }
 
     /**
@@ -709,27 +783,20 @@ public class Conversation implements Parcelable {
     }
 
     /**
-     * Get the properly formatted subject and snippet string for display a
-     * conversation.
-     *
-     * @param context
-     * @param filteredSubject
-     * @param snippet
+     * Get the properly formatted badge and subject string for displaying a conversation.
      */
-    public static String getSubjectAndSnippetForDisplay(Context context,
-            String filteredSubject, String snippet) {
-        if (sSubjectAndSnippet == null) {
-            sSubjectAndSnippet = context.getString(R.string.subject_and_snippet);
-        }
-        if (TextUtils.isEmpty(filteredSubject) && TextUtils.isEmpty(snippet)) {
-            return "";
-        } else if (TextUtils.isEmpty(filteredSubject)) {
-            return snippet;
-        } else if (TextUtils.isEmpty(snippet)) {
-            return filteredSubject;
+    public static String getSubjectForDisplay(Context context, String badgeText,
+            String filteredSubject) {
+        if (TextUtils.isEmpty(filteredSubject)) {
+            return context.getString(R.string.no_subject);
+        } else if (!TextUtils.isEmpty(badgeText)) {
+            if (sBadgeAndSubject == null) {
+                sBadgeAndSubject = context.getString(R.string.badge_and_subject);
+            }
+            return String.format(sBadgeAndSubject, badgeText, filteredSubject);
         }
 
-        return String.format(sSubjectAndSnippet, filteredSubject, snippet);
+        return filteredSubject;
     }
 
     /**

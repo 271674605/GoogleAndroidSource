@@ -17,6 +17,7 @@
 namespace llvm {
 
 class AMDGPUInstrPrinter;
+class AMDGPUSubtarget;
 class AMDGPUTargetMachine;
 class FunctionPass;
 class MCAsmInfo;
@@ -28,27 +29,37 @@ class TargetMachine;
 FunctionPass *createR600VectorRegMerger(TargetMachine &tm);
 FunctionPass *createR600TextureIntrinsicsReplacer();
 FunctionPass *createR600ExpandSpecialInstrsPass(TargetMachine &tm);
-FunctionPass *createR600EmitClauseMarkers(TargetMachine &tm);
+FunctionPass *createR600EmitClauseMarkers();
+FunctionPass *createR600ClauseMergePass(TargetMachine &tm);
 FunctionPass *createR600Packetizer(TargetMachine &tm);
 FunctionPass *createR600ControlFlowFinalizer(TargetMachine &tm);
-FunctionPass *createAMDGPUCFGStructurizerPass(TargetMachine &tm);
+FunctionPass *createAMDGPUCFGStructurizerPass();
 
 // SI Passes
+FunctionPass *createSITypeRewriter();
 FunctionPass *createSIAnnotateControlFlowPass();
+FunctionPass *createSILowerI1CopiesPass();
 FunctionPass *createSILowerControlFlowPass(TargetMachine &tm);
 FunctionPass *createSIFixSGPRCopiesPass(TargetMachine &tm);
+FunctionPass *createSIFixSGPRLiveRangesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
 FunctionPass *createSIInsertWaits(TargetMachine &tm);
 
+void initializeSILowerI1CopiesPass(PassRegistry &);
+extern char &SILowerI1CopiesID;
+
 // Passes common to R600 and SI
+FunctionPass *createAMDGPUPromoteAlloca(const AMDGPUSubtarget &ST);
 Pass *createAMDGPUStructurizeCFGPass();
-FunctionPass *createAMDGPUConvertToISAPass(TargetMachine &tm);
-FunctionPass *createAMDGPUIndirectAddressingPass(TargetMachine &tm);
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
 
 /// \brief Creates an AMDGPU-specific Target Transformation Info pass.
 ImmutablePass *
 createAMDGPUTargetTransformInfoPass(const AMDGPUTargetMachine *TM);
+
+void initializeSIFixSGPRLiveRangesPass(PassRegistry&);
+extern char &SIFixSGPRLiveRangesID;
+
 
 extern Target TheAMDGPUTarget;
 
@@ -67,7 +78,7 @@ namespace ShaderType {
 /// various memory regions on the hardware. On the CPU
 /// all of the address spaces point to the same memory,
 /// however on the GPU, each address space points to
-/// a seperate piece of memory that is unique from other
+/// a separate piece of memory that is unique from other
 /// memory locations.
 namespace AMDGPUAS {
 enum AddressSpaces {
@@ -75,8 +86,8 @@ enum AddressSpaces {
   GLOBAL_ADDRESS   = 1, ///< Address space for global memory (RAT0, VTX0).
   CONSTANT_ADDRESS = 2, ///< Address space for constant memory
   LOCAL_ADDRESS    = 3, ///< Address space for local memory.
-  REGION_ADDRESS   = 4, ///< Address space for region memory.
-  ADDRESS_NONE     = 5, ///< Address space for unknown memory.
+  FLAT_ADDRESS     = 4, ///< Address space for flat memory.
+  REGION_ADDRESS   = 5, ///< Address space for region memory.
   PARAM_D_ADDRESS  = 6, ///< Address space for direct addressible parameter memory (CONST0)
   PARAM_I_ADDRESS  = 7, ///< Address space for indirect addressible parameter memory (VTX1)
 
@@ -101,7 +112,8 @@ enum AddressSpaces {
   CONSTANT_BUFFER_13 = 21,
   CONSTANT_BUFFER_14 = 22,
   CONSTANT_BUFFER_15 = 23,
-  LAST_ADDRESS     = 24
+  ADDRESS_NONE = 24, ///< Address space for unknown memory.
+  LAST_ADDRESS = ADDRESS_NONE
 };
 
 } // namespace AMDGPUAS

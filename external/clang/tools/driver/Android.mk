@@ -61,6 +61,13 @@ LOCAL_STATIC_LIBRARIES := \
   libLLVMX86Desc \
   libLLVMX86AsmPrinter \
   libLLVMX86Utils \
+  libLLVMAArch64Info \
+  libLLVMAArch64AsmParser \
+  libLLVMAArch64CodeGen \
+  libLLVMAArch64Disassembler \
+  libLLVMAArch64Desc \
+  libLLVMAArch64AsmPrinter \
+  libLLVMAArch64Utils \
   libLLVMIRReader \
   libLLVMAsmParser \
   libLLVMAsmPrinter \
@@ -84,7 +91,9 @@ LOCAL_STATIC_LIBRARIES := \
   libLLVMCore \
   libLLVMOption \
   libLLVMSupport \
-  libLLVMTarget
+  libLLVMTarget \
+  libLLVMProfileData \
+  libLLVMObject
 
 LOCAL_LDLIBS += -lm
 ifdef USE_MINGW
@@ -97,14 +106,18 @@ include $(CLANG_HOST_BUILD_MK)
 include $(CLANG_TBLGEN_RULES_MK)
 include $(BUILD_HOST_EXECUTABLE)
 
+ifeq (true,$(FORCE_BUILD_LLVM_COMPONENTS))
 # Make sure if clang (i.e. $(LOCAL_MODULE)) get installed,
 # clang++ will get installed as well.
 ALL_MODULES.$(LOCAL_MODULE).INSTALLED := \
     $(ALL_MODULES.$(LOCAL_MODULE).INSTALLED) $(CLANG_CXX)
 # the additional dependency is needed when you run mm/mmm.
 $(LOCAL_MODULE) : $(CLANG_CXX)
+CLANG_ARM_NEON_H := $(TARGET_OUT_HEADERS)/clang/arm_neon.h
+$(LOCAL_MODULE) : $(CLANG_ARM_NEON_H)
 
 # Symlink for clang++
 $(CLANG_CXX) : $(LOCAL_INSTALLED_MODULE)
 	@echo "Symlink $@ -> $<"
 	$(hide) ln -sf $(notdir $<) $@
+endif

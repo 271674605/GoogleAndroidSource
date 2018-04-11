@@ -91,6 +91,20 @@ host-cp = cp -f $1 $2
 endif
 
 # -----------------------------------------------------------------------------
+# Function : host-mv
+# Arguments: 1: source file
+#            2: target file
+# Usage    : $(call host-mv,<src-file>,<dst-file>)
+# Rationale: This function expands to the host-specific shell command used
+#            to move a single file
+# -----------------------------------------------------------------------------
+ifeq ($(HOST_OS),windows)
+host-mv = move /y $(subst /,\,"$1" "$2") > NUL
+else
+host-mv = mv -f $1 $2
+endif
+
+# -----------------------------------------------------------------------------
 # Function : host-install
 # Arguments: 1: source file
 #            2: target file
@@ -104,6 +118,16 @@ host-install = copy /b/y $(subst /,\,"$1" "$2") > NUL
 else
 host-install = install -p $1 $2
 endif
+
+# -----------------------------------------------------------------------------
+# Function : host-echo-build-step
+# Arguments: 1: ABI
+#            2: Step description (e.g. 'Compile C++', or 'StaticLibrary')
+# Usage    : ---->|$(call host-echo-build-step,Compile) ....other text...
+# Rationale: This function expands to the host-specific shell command used
+#            to print the prefix of a given build step / command.
+# -----------------------------------------------------------------------------
+host-echo-build-step = @ $(HOST_ECHO) [$1] $(call left-justify-quoted-15,$2):
 
 # -----------------------------------------------------------------------------
 # Function : host-c-includes

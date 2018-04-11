@@ -20,7 +20,6 @@ class PluginModule;
 class HostGlobals : public ppapi::PpapiGlobals {
  public:
   HostGlobals();
-  explicit HostGlobals(ppapi::PpapiGlobals::PerThreadForTest);
   virtual ~HostGlobals();
 
   // Getter for the global singleton. Generally, you should use
@@ -36,14 +35,13 @@ class HostGlobals : public ppapi::PpapiGlobals {
   virtual ppapi::VarTracker* GetVarTracker() OVERRIDE;
   virtual ppapi::CallbackTracker* GetCallbackTrackerForInstance(
       PP_Instance instance) OVERRIDE;
-  virtual ppapi::thunk::PPB_Instance_API* GetInstanceAPI(
-      PP_Instance instance) OVERRIDE;
+  virtual ppapi::thunk::PPB_Instance_API* GetInstanceAPI(PP_Instance instance)
+      OVERRIDE;
   virtual ppapi::thunk::ResourceCreationAPI* GetResourceCreationAPI(
       PP_Instance instance) OVERRIDE;
   virtual PP_Module GetModuleForInstance(PP_Instance instance) OVERRIDE;
   virtual std::string GetCmdLine() OVERRIDE;
   virtual void PreCacheFontForFlash(const void* logfontw) OVERRIDE;
-  virtual base::Lock* GetProxyLock() OVERRIDE;
   virtual void LogWithSource(PP_Instance instance,
                              PP_LogLevel level,
                              const std::string& source,
@@ -53,11 +51,9 @@ class HostGlobals : public ppapi::PpapiGlobals {
                                       const std::string& source,
                                       const std::string& value) OVERRIDE;
   virtual ppapi::MessageLoopShared* GetCurrentMessageLoop() OVERRIDE;
-  virtual base::TaskRunner* GetFileTaskRunner(PP_Instance instance) OVERRIDE;
+  virtual base::TaskRunner* GetFileTaskRunner() OVERRIDE;
 
-  HostVarTracker* host_var_tracker() {
-    return &host_var_tracker_;
-  }
+  HostVarTracker* host_var_tracker() { return &host_var_tracker_; }
 
   // PP_Modules ----------------------------------------------------------------
 
@@ -113,4 +109,4 @@ class HostGlobals : public ppapi::PpapiGlobals {
 
 }  // namespace content
 
-#endif   // CONTENT_RENDERER_PEPPER_HOST_GLOBALS_H_
+#endif  // CONTENT_RENDERER_PEPPER_HOST_GLOBALS_H_

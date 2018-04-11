@@ -25,6 +25,9 @@ class WebElement(object):
     return self._Execute(
         Command.FIND_CHILD_ELEMENTS, {'using': strategy, 'value': target})
 
+  def GetText(self):
+    return self._Execute(Command.GET_ELEMENT_TEXT)
+
   def HoverOver(self):
     self._Execute(Command.HOVER_OVER_ELEMENT)
 
@@ -45,3 +48,6 @@ class WebElement(object):
       for i in range(len(value)):
         typing.append(value[i])
     self._Execute(Command.SEND_KEYS_TO_ELEMENT, {'value': typing})
+
+  def GetLocation(self):
+    return self._Execute(Command.GET_ELEMENT_LOCATION)

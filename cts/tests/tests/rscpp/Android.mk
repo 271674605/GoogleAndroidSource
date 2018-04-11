@@ -22,18 +22,16 @@ LOCAL_PACKAGE_NAME := CtsRsCppTestCases
 # Don't include this package in any target.
 LOCAL_MODULE_TAGS := optional
 
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
+
 # When built, explicitly put it in the data partition.
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
-
-# All tests should include android.test.runner.
-LOCAL_JAVA_LIBRARIES := android.test.runner
 
 LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner
 LOCAL_JNI_SHARED_LIBRARIES := librscpptest_jni
 
-LOCAL_SRC_FILES := $(call all-java-files-under, src)
-
-LOCAL_INSTRUMENTATION_FOR := CtsTestStubs
+LOCAL_SRC_FILES := $(call all-java-files-under, src) $(call all-renderscript-files-under, src)
 
 LOCAL_SDK_VERSION := current
 

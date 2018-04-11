@@ -67,10 +67,8 @@ class SolverImpl {
       CoordinateDescentMinimizer* inner_iteration_minimizer,
       Evaluator* evaluator,
       LinearSolver* linear_solver,
-      double* parameters,
       Solver::Summary* summary);
 
-#ifndef CERES_NO_LINE_SEARCH_MINIMIZER
   static void LineSearchSolve(const Solver::Options& options,
                               ProblemImpl* problem_impl,
                               Solver::Summary* summary);
@@ -79,9 +77,7 @@ class SolverImpl {
   static void LineSearchMinimize(const Solver::Options &options,
                                  Program* program,
                                  Evaluator* evaluator,
-                                 double* parameters,
                                  Solver::Summary* summary);
-#endif  // CERES_NO_LINE_SEARCH_MINIMIZER
 
   // Create the transformed Program, which has all the fixed blocks
   // and residuals eliminated, and in the case of automatic schur
@@ -93,7 +89,7 @@ class SolverImpl {
   static Program* CreateReducedProgram(Solver::Options* options,
                                        ProblemImpl* problem_impl,
                                        double* fixed_cost,
-                                       string* error);
+                                       string* message);
 
   // Create the appropriate linear solver, taking into account any
   // config changes decided by CreateTransformedProgram(). The
@@ -101,38 +97,18 @@ class SolverImpl {
   // selected; consider the case that the remaining elimininated
   // blocks is zero after removing fixed blocks.
   static LinearSolver* CreateLinearSolver(Solver::Options* options,
-                                          string* error);
-
-  // Reorder the residuals for program, if necessary, so that the
-  // residuals involving e block (i.e., the first num_eliminate_block
-  // parameter blocks) occur together. This is a necessary condition
-  // for the Schur eliminator.
-  static bool LexicographicallyOrderResidualBlocks(
-      const int num_eliminate_blocks,
-      Program* program,
-      string* error);
+                                          string* message);
 
   // Create the appropriate evaluator for the transformed program.
   static Evaluator* CreateEvaluator(
       const Solver::Options& options,
       const ProblemImpl::ParameterMap& parameter_map,
       Program* program,
-      string* error);
-
-  // Remove the fixed or unused parameter blocks and residuals
-  // depending only on fixed parameters from the problem. Also updates
-  // num_eliminate_blocks, since removed parameters changes the point
-  // at which the eliminated blocks is valid.  If fixed_cost is not
-  // NULL, the residual blocks that are removed are evaluated and the
-  // sum of their cost is returned in fixed_cost.
-  static bool RemoveFixedBlocksFromProgram(Program* program,
-                                           ParameterBlockOrdering* ordering,
-                                           double* fixed_cost,
-                                           string* error);
+      string* message);
 
   static bool IsOrderingValid(const Solver::Options& options,
                               const ProblemImpl* problem_impl,
-                              string* error);
+                              string* message);
 
   static bool IsParameterBlockSetIndependent(
       const set<double*>& parameter_block_ptrs,
@@ -143,78 +119,6 @@ class SolverImpl {
       const Program& program,
       const ProblemImpl::ParameterMap& parameter_map,
       Solver::Summary* summary);
-
-  // If the linear solver is of Schur type, then replace it with the
-  // closest equivalent linear solver. This is done when the user
-  // requested a Schur type solver but the problem structure makes it
-  // impossible to use one.
-  //
-  // If the linear solver is not of Schur type, the function is a
-  // no-op.
-  static void AlternateLinearSolverForSchurTypeLinearSolver(
-      Solver::Options* options);
-
-  // Create a TripletSparseMatrix which contains the zero-one
-  // structure corresponding to the block sparsity of the transpose of
-  // the Jacobian matrix.
-  //
-  // Caller owns the result.
-  static TripletSparseMatrix* CreateJacobianBlockSparsityTranspose(
-      const Program* program);
-
-  // Reorder the parameter blocks in program using the ordering
-  static bool ApplyUserOrdering(
-      const ProblemImpl::ParameterMap& parameter_map,
-      const ParameterBlockOrdering* parameter_block_ordering,
-      Program* program,
-      string* error);
-
-  // Sparse cholesky factorization routines when doing the sparse
-  // cholesky factorization of the Jacobian matrix, reorders its
-  // columns to reduce the fill-in. Compute this permutation and
-  // re-order the parameter blocks.
-  //
-  // If the parameter_block_ordering contains more than one
-  // elimination group and support for constrained fill-reducing
-  // ordering is available in the sparse linear algebra library
-  // (SuiteSparse version >= 4.2.0) then the fill reducing
-  // ordering will take it into account, otherwise it will be ignored.
-  static bool ReorderProgramForSparseNormalCholesky(
-      const SparseLinearAlgebraLibraryType sparse_linear_algebra_library_type,
-      const ParameterBlockOrdering* parameter_block_ordering,
-      Program* program,
-      string* error);
-
-  // Schur type solvers require that all parameter blocks eliminated
-  // by the Schur eliminator occur before others and the residuals be
-  // sorted in lexicographic order of their parameter blocks.
-  //
-  // If the parameter_block_ordering only contains one elimination
-  // group then a maximal independent set is computed and used as the
-  // first elimination group, otherwise the user's ordering is used.
-  //
-  // If the linear solver type is SPARSE_SCHUR and support for
-  // constrained fill-reducing ordering is available in the sparse
-  // linear algebra library (SuiteSparse version >= 4.2.0) then
-  // columns of the schur complement matrix are ordered to reduce the
-  // fill-in the Cholesky factorization.
-  //
-  // Upon return, ordering contains the parameter block ordering that
-  // was used to order the program.
-  static bool ReorderProgramForSchurTypeLinearSolver(
-      const LinearSolverType linear_solver_type,
-      const SparseLinearAlgebraLibraryType sparse_linear_algebra_library_type,
-      const ProblemImpl::ParameterMap& parameter_map,
-      ParameterBlockOrdering* parameter_block_ordering,
-      Program* program,
-      string* error);
-
-  // array contains a list of (possibly repeating) non-negative
-  // integers. Let us assume that we have constructed another array
-  // `p` by sorting and uniqueing the entries of array.
-  // CompactifyArray replaces each entry in "array" with its position
-  // in `p`.
-  static void CompactifyArray(vector<int>* array);
 };
 
 }  // namespace internal

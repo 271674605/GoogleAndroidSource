@@ -19,9 +19,10 @@ package com.android.mail.providers;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.graphics.PorterDuff;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.PaintDrawable;
 import android.net.Uri;
-import android.net.Uri.Builder;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
@@ -163,8 +164,8 @@ public class Folder implements Parcelable, Comparable<Folder> {
     public String bgColor;
     public String fgColor;
 
-    public int bgColorInt;
-    public int fgColorInt;
+    private int bgColorInt;
+    private int fgColorInt;
 
     /**
      * The content provider URI to request additional conversations
@@ -186,6 +187,11 @@ public class Folder implements Parcelable, Comparable<Folder> {
      * The time at which the last message was received.
      */
     public long lastMessageTimestamp;
+
+    /**
+     * A string of unread senders sorted by date, so we don't have to fetch this in multiple queries
+     */
+    public String unreadSenders;
 
     /** An immutable, empty conversation list */
     public static final Collection<Folder> EMPTY = Collections.emptyList();
@@ -215,6 +221,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
         private String mHierarchicalDesc;
         private Uri mParent;
         private long mLastMessageTimestamp;
+        private String mUnreadSenders;
 
         public Folder build() {
             return new Folder(mId, mPersistentId, mUri, mName, mCapabilities,
@@ -222,7 +229,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
                     mUnseenCount, mUnreadCount, mTotalCount, mRefreshUri, mSyncStatus,
                     mLastSyncResult, mType, mIconResId, mNotificationIconResId, mBgColor,
                     mFgColor, mLoadMoreUri, mHierarchicalDesc, mParent,
-                    mLastMessageTimestamp);
+                    mLastMessageTimestamp, mUnreadSenders);
         }
 
         public Builder setId(final int id) {
@@ -321,6 +328,10 @@ public class Folder implements Parcelable, Comparable<Folder> {
             mLastMessageTimestamp = lastMessageTimestamp;
             return this;
         }
+        public Builder setUnreadSenders(final String unreadSenders) {
+            mUnreadSenders = unreadSenders;
+            return this;
+        }
     }
 
     public Folder(int id, String persistentId, Uri uri, String name, int capabilities,
@@ -328,7 +339,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
             int unseenCount, int unreadCount, int totalCount, Uri refreshUri, int syncStatus,
             int lastSyncResult, int type, int iconResId, int notificationIconResId, String bgColor,
             String fgColor, Uri loadMoreUri, String hierarchicalDesc, Uri parent,
-            final long lastMessageTimestamp) {
+            final long lastMessageTimestamp, final String unreadSenders) {
         this.id = id;
         this.persistentId = persistentId;
         this.folderUri = new FolderUri(uri);
@@ -359,6 +370,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
         this.hierarchicalDesc = hierarchicalDesc;
         this.lastMessageTimestamp = lastMessageTimestamp;
         this.parent = parent;
+        this.unreadSenders = unreadSenders;
     }
 
     public Folder(Cursor cursor) {
@@ -401,6 +413,13 @@ public class Folder implements Parcelable, Comparable<Folder> {
         // A null parent URI means that this is a top-level folder.
         final String parentString = cursor.getString(UIProvider.FOLDER_PARENT_URI_COLUMN);
         parent = parentString == null ? Uri.EMPTY : Uri.parse(parentString);
+        final int unreadSendersColumn =
+                cursor.getColumnIndex(UIProvider.FolderColumns.UNREAD_SENDERS);
+        if (unreadSendersColumn != -1) {
+            unreadSenders = cursor.getString(unreadSendersColumn);
+        } else {
+            unreadSenders = null;
+        }
     }
 
     /**
@@ -451,6 +470,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
         parent = in.readParcelable(loader);
         lastMessageTimestamp = in.readLong();
         parent = in.readParcelable(loader);
+        unreadSenders = in.readString();
      }
 
     @Override
@@ -481,6 +501,7 @@ public class Folder implements Parcelable, Comparable<Folder> {
         dest.writeParcelable(parent, 0);
         dest.writeLong(lastMessageTimestamp);
         dest.writeParcelable(parent, 0);
+        dest.writeString(unreadSenders);
     }
 
     /**
@@ -488,10 +509,12 @@ public class Folder implements Parcelable, Comparable<Folder> {
      * thread.
      */
     public static ObjectCursorLoader<Folder> forSearchResults(Account account, String query,
-            Context context) {
+            String queryIdentifier, Context context) {
         if (account.searchUri != null) {
             final Uri.Builder searchBuilder = account.searchUri.buildUpon();
             searchBuilder.appendQueryParameter(UIProvider.SearchQueryParameters.QUERY, query);
+            searchBuilder.appendQueryParameter(UIProvider.SearchQueryParameters.QUERY_IDENTIFER,
+                    queryIdentifier);
             final Uri searchUri = searchBuilder.build();
             return new ObjectCursorLoader<Folder>(context, searchUri, UIProvider.FOLDERS_PROJECTION,
                     FACTORY);
@@ -563,15 +586,18 @@ public class Folder implements Parcelable, Comparable<Folder> {
     @Override
     public String toString() {
         // log extra info at DEBUG level or finer
-        final StringBuilder sb = new StringBuilder("[folder id=");
+        final StringBuilder sb = new StringBuilder(super.toString());
+        sb.append("{id=");
         sb.append(id);
         if (LogUtils.isLoggable(LOG_TAG, LogUtils.DEBUG)) {
             sb.append(", uri=");
             sb.append(folderUri);
             sb.append(", name=");
             sb.append(name);
+            sb.append(", count=");
+            sb.append(totalCount);
         }
-        sb.append("]");
+        sb.append("}");
         return sb.toString();
     }
 
@@ -620,10 +646,16 @@ public class Folder implements Parcelable, Comparable<Folder> {
         }
         final int icon = folder.iconResId;
         if (icon > 0) {
-            iconView.setImageResource(icon);
-            iconView.setVisibility(View.VISIBLE);
+            final Drawable iconDrawable = iconView.getResources().getDrawable(icon);
+            if (iconDrawable != null &&
+                    folder.supportsCapability(UIProvider.FolderCapabilities.TINT_ICON)) {
+                // Default multiply by white
+                iconDrawable.mutate().setColorFilter(folder.getBackgroundColor(0xFFFFFF),
+                        PorterDuff.Mode.MULTIPLY);
+            }
+            iconView.setImageDrawable(iconDrawable);
         } else {
-            iconView.setVisibility(View.GONE);
+            LogUtils.e(LogUtils.TAG, "No icon returned for folder %s", folder);
         }
     }
 
@@ -680,22 +712,39 @@ public class Folder implements Parcelable, Comparable<Folder> {
         return (typeMask & folderType) != 0;
     }
 
+    /**
+     * Returns {@code true} if this folder is an inbox folder.
+     */
     public boolean isInbox() {
-        return isType(UIProvider.FolderType.INBOX);
+        return isType(FolderType.INBOX);
+    }
+
+    /**
+     * Returns {@code true} if this folder is a search folder.
+     */
+    public boolean isSearch() {
+        return isType(FolderType.SEARCH);
+    }
+
+    /**
+     * Returns {@code true} if this folder is the spam folder.
+     */
+    public boolean isSpam() {
+        return isType(FolderType.SPAM);
     }
 
     /**
      * Return if this is the trash folder.
      */
     public boolean isTrash() {
-        return isType(UIProvider.FolderType.TRASH);
+        return isType(FolderType.TRASH);
     }
 
     /**
      * Return if this is a draft folder.
      */
     public boolean isDraft() {
-        return isType(UIProvider.FolderType.DRAFT);
+        return isType(FolderType.DRAFT);
     }
 
     /**
@@ -707,10 +756,38 @@ public class Folder implements Parcelable, Comparable<Folder> {
     }
 
     /**
+     * Return if this is the sent folder.
+     */
+    public boolean isSent() {
+        return isType(FolderType.SENT);
+    }
+
+    /**
+     * Return if this is the outbox folder
+     */
+    public boolean isOutbox() {
+        return isType(FolderType.OUTBOX);
+    }
+
+    /**
      * Whether this is the special folder just used to display all mail for an account.
      */
     public boolean isViewAll() {
-        return isType(UIProvider.FolderType.ALL_MAIL);
+        return isType(FolderType.ALL_MAIL);
+    }
+
+    /**
+     * Return true if this folder prefers to display recipients over senders.
+     */
+    public boolean shouldShowRecipients() {
+        return supportsCapability(UIProvider.FolderCapabilities.SHOW_RECIPIENTS);
+    }
+
+    /**
+     * Return true if this folder prefers to display recipients over senders.
+     */
+    public static boolean shouldShowRecipients(final int folderCapabilities) {
+        return (folderCapabilities & UIProvider.FolderCapabilities.SHOW_RECIPIENTS) != 0;
     }
 
     /**
@@ -738,6 +815,8 @@ public class Folder implements Parcelable, Comparable<Folder> {
             desc = "trash";
         } else if (isType(FolderType.UNREAD)) {
             desc = "unread";
+        } else if (isType(FolderType.SEARCH)) {
+            desc = "search";
         } else if (isViewAll()) {
             desc = "all_mail";
         } else if (isProviderFolder()) {
@@ -765,60 +844,73 @@ public class Folder implements Parcelable, Comparable<Folder> {
         return (isDraft() || isTrash() || isType(FolderType.OUTBOX));
     }
 
+    /**
+     * This method is only used for parsing folders out of legacy intent extras, and only the
+     * folderUri and conversationListUri fields are actually read before the object is discarded.
+     * TODO: replace this with a parsing function that just directly returns those values
+     * @param inString UR8 or earlier EXTRA_FOLDER intent extra string
+     * @return Constructed folder object
+     */
     @Deprecated
     public static Folder fromString(String inString) {
-         if (TextUtils.isEmpty(inString)) {
-             return null;
-         }
-         final Folder f = new Folder();
-         int indexOf = inString.indexOf(SPLITTER);
-         int id = -1;
-         if (indexOf != -1) {
-             id = Integer.valueOf(inString.substring(0, indexOf));
-         } else {
-             // If no separator was found, we can't parse this folder and the
-             // TextUtils.split call would also fail. Return null.
-             return null;
-         }
-         final String[] split = TextUtils.split(inString, SPLITTER_REGEX);
-         if (split.length < 20) {
-             LogUtils.e(LOG_TAG, "split.length %d", split.length);
-             return null;
-         }
-         f.id = id;
-         int index = 1;
-         f.folderUri = new FolderUri(Folder.getValidUri(split[index++]));
-         f.name = split[index++];
-         f.hasChildren = Integer.parseInt(split[index++]) != 0;
-         f.capabilities = Integer.parseInt(split[index++]);
-         f.syncWindow = Integer.parseInt(split[index++]);
-         f.conversationListUri = getValidUri(split[index++]);
-         f.childFoldersListUri = getValidUri(split[index++]);
-         f.unreadCount = Integer.parseInt(split[index++]);
-         f.totalCount = Integer.parseInt(split[index++]);
-         f.refreshUri = getValidUri(split[index++]);
-         f.syncStatus = Integer.parseInt(split[index++]);
-         f.lastSyncResult = Integer.parseInt(split[index++]);
-         f.type = Integer.parseInt(split[index++]);
-         f.iconResId = Integer.parseInt(split[index++]);
-         f.bgColor = split[index++];
-         f.fgColor = split[index++];
-         if (f.bgColor != null) {
-             f.bgColorInt = Integer.parseInt(f.bgColor);
-         }
-         if (f.fgColor != null) {
-             f.fgColorInt = Integer.parseInt(f.fgColor);
-         }
-         f.loadMoreUri = getValidUri(split[index++]);
-         f.hierarchicalDesc = split[index++];
-         f.parent = Folder.getValidUri(split[index++]);
-         return f;
-     }
+        if (TextUtils.isEmpty(inString)) {
+            return null;
+        }
+        final Folder f = new Folder();
+        int indexOf = inString.indexOf(SPLITTER);
+        int id = -1;
+        if (indexOf != -1) {
+            id = Integer.valueOf(inString.substring(0, indexOf));
+        } else {
+            // If no separator was found, we can't parse this folder and the
+            // TextUtils.split call would also fail. Return null.
+            return null;
+        }
+        final String[] split = TextUtils.split(inString, SPLITTER_REGEX);
+        if (split.length < 20) {
+            LogUtils.e(LOG_TAG, "split.length %d", split.length);
+            return null;
+        }
+        f.id = id;
+        int index = 1;
+        f.folderUri = new FolderUri(Folder.getValidUri(split[index++]));
+        f.name = split[index++];
+        f.hasChildren = Integer.parseInt(split[index++]) != 0;
+        f.capabilities = Integer.parseInt(split[index++]);
+        f.syncWindow = Integer.parseInt(split[index++]);
+        f.conversationListUri = getValidUri(split[index++]);
+        f.childFoldersListUri = getValidUri(split[index++]);
+        f.unreadCount = Integer.parseInt(split[index++]);
+        f.totalCount = Integer.parseInt(split[index++]);
+        f.refreshUri = getValidUri(split[index++]);
+        f.syncStatus = Integer.parseInt(split[index++]);
+        f.lastSyncResult = Integer.parseInt(split[index++]);
+        f.type = Integer.parseInt(split[index++]);
+        f.iconResId = Integer.parseInt(split[index++]);
+        f.bgColor = split[index++];
+        f.fgColor = split[index++];
+        if (f.bgColor != null) {
+            f.bgColorInt = Integer.parseInt(f.bgColor);
+        }
+        if (f.fgColor != null) {
+            f.fgColorInt = Integer.parseInt(f.fgColor);
+        }
+        f.loadMoreUri = getValidUri(split[index++]);
+        f.hierarchicalDesc = split[index++];
+        f.parent = Folder.getValidUri(split[index++]);
+        f.unreadSenders = null;
+
+        return f;
+    }
 
     private static Uri getValidUri(String uri) {
-         if (TextUtils.isEmpty(uri)) {
-             return null;
-         }
-         return Uri.parse(uri);
+        if (TextUtils.isEmpty(uri)) {
+            return null;
+        }
+        return Uri.parse(uri);
+    }
+
+    public static final boolean isRoot(Folder folder) {
+        return (folder == null) || Uri.EMPTY.equals(folder.parent);
     }
 }

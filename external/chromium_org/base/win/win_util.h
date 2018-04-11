@@ -50,6 +50,11 @@ BASE_EXPORT bool IsCtrlPressed();
 // Returns true if the alt key is currently pressed.
 BASE_EXPORT bool IsAltPressed();
 
+// Returns true if the altgr key is currently pressed.
+// Windows does not have specific key code and modifier bit and Alt+Ctrl key is
+// used as AltGr key in Windows.
+BASE_EXPORT bool IsAltGrPressed();
+
 // Returns false if user account control (UAC) has been disabled with the
 // EnableLUA registry flag. Returns true if user account control is enabled.
 // NOTE: The EnableLUA registry flag, which is ignored on Windows XP
@@ -102,9 +107,10 @@ BASE_EXPORT bool ShouldCrashOnProcessDetach();
 // process is aborted.
 BASE_EXPORT void SetAbortBehaviorForCrashReporting();
 
-// A touch enabled device by this definition is something that has
-// integrated multi-touch ready to use and has Windows version > Windows7.
-BASE_EXPORT bool IsTouchEnabledDevice();
+// A tablet is a device that is touch enabled and also is being used
+// "like a tablet".  This is used primarily for metrics in order to gain some
+// insight into how users use Chrome.
+BASE_EXPORT bool IsTabletDevice();
 
 // Get the size of a struct up to and including the specified member.
 // This is necessary to set compatible struct sizes for different versions
@@ -120,6 +126,13 @@ BASE_EXPORT bool DisplayVirtualKeyboard();
 // Dismisses the on screen keyboard if it is being displayed on Windows 8 and.
 // above. Returns true on success.
 BASE_EXPORT bool DismissVirtualKeyboard();
+
+// Returns true if the machine is enrolled to a domain.
+BASE_EXPORT bool IsEnrolledToDomain();
+
+// Used by tests to mock any wanted state. Call with |state| set to true to
+// simulate being in a domain and false otherwise.
+BASE_EXPORT void SetDomainStateForTesting(bool state);
 
 }  // namespace win
 }  // namespace base

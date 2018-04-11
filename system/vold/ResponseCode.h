@@ -33,7 +33,7 @@ public:
     static const int ShareStatusResult        = 210;
     static const int AsecPathResult           = 211;
     static const int ShareEnabledResult       = 212;
-    static const int XwarpStatusResult        = 213;
+    static const int PasswordTypeResult       = 213;
 
     // 400 series - The command was accepted but the requested action
     // did not take place.
@@ -57,6 +57,8 @@ public:
     static const int VolumeMountFailedBlank         = 610;
     static const int VolumeMountFailedDamaged       = 611;
     static const int VolumeMountFailedNoMedia       = 612;
+    static const int VolumeUuidChange               = 613;
+    static const int VolumeUserLabelChange          = 614;
 
     static const int ShareAvailabilityChange        = 620;
 

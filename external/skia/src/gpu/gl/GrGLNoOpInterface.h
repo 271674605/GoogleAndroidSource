@@ -55,6 +55,16 @@ GrGLvoid GR_GL_FUNCTION_TYPE noOpGLCompressedTexImage2D(GrGLenum target,
                                                         GrGLsizei imageSize,
                                                         const GrGLvoid* data);
 
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLCompressedTexSubImage2D(GrGLenum target,
+                                                           GrGLint level,
+                                                           GrGLint xoffset,
+                                                           GrGLint yoffset,
+                                                           GrGLsizei width,
+                                                           GrGLsizei height,
+                                                           GrGLenum format,
+                                                           GrGLsizei imageSize,
+                                                           const GrGLvoid* data);
+
 GrGLvoid GR_GL_FUNCTION_TYPE noOpGLCopyTexSubImage2D(GrGLenum target,
                                                      GrGLint level,
                                                      GrGLint xoffset,
@@ -95,6 +105,10 @@ GrGLvoid GR_GL_FUNCTION_TYPE noOpGLFinish();
 GrGLvoid GR_GL_FUNCTION_TYPE noOpGLFlush();
 
 GrGLvoid GR_GL_FUNCTION_TYPE noOpGLFrontFace(GrGLenum mode);
+
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLMatrixLoadf(GrGLenum, const GrGLfloat*);
+
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLMatrixLoadIdentity(GrGLenum);
 
 GrGLvoid GR_GL_FUNCTION_TYPE noOpGLLineWidth(GrGLfloat width);
 
@@ -356,5 +370,9 @@ GrGLvoid GR_GL_FUNCTION_TYPE noOpGLGetTexLevelParameteriv(GrGLenum target,
                                                           GrGLint* params);
 
 GrGLint GR_GL_FUNCTION_TYPE noOpGLGetUniformLocation(GrGLuint program, const char* name);
+
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLInsertEventMarker(GrGLsizei length, const char* marker);
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLPushGroupMarker(GrGLsizei length  , const char* marker);
+GrGLvoid GR_GL_FUNCTION_TYPE noOpGLPopGroupMarker();
 
 #endif

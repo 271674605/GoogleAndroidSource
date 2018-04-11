@@ -8,7 +8,7 @@
 #ifndef GrGLBufferImpl_DEFINED
 #define GrGLBufferImpl_DEFINED
 
-#include "GrNoncopyable.h"
+#include "SkTypes.h"
 #include "gl/GrGLFunctions.h"
 
 class GrGpuGL;
@@ -17,7 +17,7 @@ class GrGpuGL;
  * This class serves as the implementation of GrGL*Buffer classes. It was written to avoid code
  * duplication in those classes.
  */
-class GrGLBufferImpl : public GrNoncopyable {
+class GrGLBufferImpl : SkNoncopyable {
 public:
     struct Desc {
         bool        fIsWrapped;
@@ -29,7 +29,7 @@ public:
     GrGLBufferImpl(GrGpuGL*, const Desc&, GrGLenum bufferType);
     ~GrGLBufferImpl() {
         // either release or abandon should have been called by the owner of this object.
-        GrAssert(0 == fDesc.fID);
+        SkASSERT(0 == fDesc.fID);
     }
 
     void abandon();
@@ -40,10 +40,9 @@ public:
 
     void bind(GrGpuGL* gpu) const;
 
-    void* lock(GrGpuGL* gpu);
-    void* lockPtr() const { return fLockPtr; }
-    void unlock(GrGpuGL* gpu);
-    bool isLocked() const;
+    void* map(GrGpuGL* gpu);
+    void unmap(GrGpuGL* gpu);
+    bool isMapped() const;
     bool updateData(GrGpuGL* gpu, const void* src, size_t srcSizeInBytes);
 
 private:
@@ -52,9 +51,11 @@ private:
     Desc         fDesc;
     GrGLenum     fBufferType; // GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER
     void*        fCPUData;
-    void*        fLockPtr;
+    void*        fMapPtr;
+    size_t       fGLSizeInBytes;     // In certain cases we make the size of the GL buffer object
+                                     // smaller or larger than the size in fDesc.
 
-    typedef GrNoncopyable INHERITED;
+    typedef SkNoncopyable INHERITED;
 };
 
 #endif

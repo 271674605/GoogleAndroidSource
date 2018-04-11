@@ -16,7 +16,6 @@
 package com.android.cts.tradefed.result;
 
 import com.android.ddmlib.Log;
-import com.android.tradefed.result.TestResult;
 
 import org.kxml2.io.KXmlSerializer;
 import org.xmlpull.v1.XmlPullParser;
@@ -44,7 +43,7 @@ class Test extends AbstractXmlPullParser {
     private static final String SCORETYPE_ATTR = "scoreType";
     private static final String UNIT_ATTR = "unit";
     private static final String SOURCE_ATTR = "source";
-    // separators for the message from PTS
+    // separators for the message
     private static final String LOG_SEPARATOR = "\\+\\+\\+";
     private static final String LOG_ELEM_SEPARATOR = "\\|";
 
@@ -54,7 +53,7 @@ class Test extends AbstractXmlPullParser {
     private String mEndTime;
     private String mMessage;
     private String mStackTrace;
-    // summary and details passed from pts
+    // summary and details passed from cts
     private String mSummary;
     private String mDetails;
 
@@ -184,7 +183,7 @@ class Test extends AbstractXmlPullParser {
                 serializer.endTag(CtsXmlResultReporter.ns, SUMMARY_TAG);
                 // add details only if summary is present
                 // <Details>
-                //   <ValueArray source=”com.android.pts.dram.BandwidthTest#doRunMemcpy:98”
+                //   <ValueArray source=”com.android.cts.dram.BandwidthTest#doRunMemcpy:98”
                 //                    message=”measure1” unit="ms" scoretype="higherBetter">
                 //     <Value>0.0</Value>
                 //     <Value>0.1</Value>

@@ -21,37 +21,47 @@
     {
       'target_name': 'content_shell_lib',
       'type': 'static_library',
-      'defines!': ['CONTENT_IMPLEMENTATION'],
       'defines': ['CONTENT_SHELL_VERSION="<(content_shell_version)"'],
       'variables': {
         'chromium_code': 1,
       },
       'dependencies': [
-        'content_app_both',
-        'content_browser',
-        'content_common',
-        'content_gpu',
-        'content_plugin',
-        'content_ppapi_plugin',
-        'content_renderer',
-        'content_shell_resources',
-        'content_utility',
-        'content_worker',
-        'test_support_content',
+        'content.gyp:content_app_both',
+        'content.gyp:content_browser',
+        'content.gyp:content_common',
+        'content.gyp:content_gpu',
+        'content.gyp:content_plugin',
+        'content.gyp:content_ppapi_plugin',
+        'content.gyp:content_renderer',
+        'content.gyp:content_utility',
+        'content.gyp:content_worker',
         'content_resources.gyp:content_resources',
+        'content_shell_resources',
+        'copy_test_netscape_plugin',
+        'layouttest_support_content',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_static',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../cc/cc.gyp:cc',
+        '../components/components.gyp:breakpad_component',
+        '../gin/gin.gyp:gin',
+        '../gpu/gpu.gyp:gpu',
         '../ipc/ipc.gyp:ipc',
         '../media/media.gyp:media',
         '../net/net.gyp:net',
         '../net/net.gyp:net_resources',
         '../skia/skia.gyp:skia',
-        '../third_party/WebKit/public/blink_test_runner.gyp:blink_test_runner',
+        '../third_party/WebKit/public/blink.gyp:blink',
+        '../third_party/WebKit/public/blink.gyp:blink_test_support',
+        '../ui/base/ui_base.gyp:ui_base',
+        '../ui/events/events.gyp:events_base',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
         '../ui/gl/gl.gyp:gl',
-        '../ui/ui.gyp:ui',
         '../url/url.gyp:url_lib',
         '../v8/tools/gyp/v8.gyp:v8',
-        '../webkit/support/webkit_support.gyp:webkit_support',
+        '../webkit/common/webkit_common.gyp:webkit_common',
+        '../webkit/storage_browser.gyp:webkit_storage_browser',
         '../webkit/webkit_resources.gyp:webkit_resources',
       ],
       'include_dirs': [
@@ -64,15 +74,78 @@
         'shell/android/shell_manager.h',
         'shell/app/paths_mac.h',
         'shell/app/paths_mac.mm',
+        'shell/app/shell_breakpad_client.cc',
+        'shell/app/shell_breakpad_client.h',
         'shell/app/shell_main_delegate.cc',
         'shell/app/shell_main_delegate.h',
         'shell/app/shell_main_delegate_mac.h',
         'shell/app/shell_main_delegate_mac.mm',
-        'shell/app/webkit_test_platform_support.h',
         'shell/app/webkit_test_platform_support_android.cc',
+        'shell/app/webkit_test_platform_support.h',
         'shell/app/webkit_test_platform_support_linux.cc',
         'shell/app/webkit_test_platform_support_mac.mm',
         'shell/app/webkit_test_platform_support_win.cc',
+        'shell/browser/notify_done_forwarder.cc',
+        'shell/browser/notify_done_forwarder.h',
+        'shell/browser/shell_android.cc',
+        'shell/browser/shell_application_mac.h',
+        'shell/browser/shell_application_mac.mm',
+        'shell/browser/shell_aura.cc',
+        'shell/browser/shell_browser_context.cc',
+        'shell/browser/shell_browser_context.h',
+        'shell/browser/shell_browser_main.cc',
+        'shell/browser/shell_browser_main.h',
+        'shell/browser/shell_browser_main_parts.cc',
+        'shell/browser/shell_browser_main_parts.h',
+        'shell/browser/shell_browser_main_parts_mac.mm',
+        'shell/browser/shell.cc',
+        'shell/browser/shell_content_browser_client.cc',
+        'shell/browser/shell_content_browser_client.h',
+        'shell/browser/shell_devtools_delegate.cc',
+        'shell/browser/shell_devtools_delegate.h',
+        'shell/browser/shell_devtools_frontend.cc',
+        'shell/browser/shell_devtools_frontend.h',
+        'shell/browser/shell_download_manager_delegate.cc',
+        'shell/browser/shell_download_manager_delegate.h',
+        'shell/browser/shell.h',
+        'shell/browser/shell_javascript_dialog.h',
+        'shell/browser/shell_javascript_dialog_mac.mm',
+        'shell/browser/shell_javascript_dialog_manager.cc',
+        'shell/browser/shell_javascript_dialog_manager.h',
+        'shell/browser/shell_javascript_dialog_win.cc',
+        'shell/browser/shell_layout_tests_android.cc',
+        'shell/browser/shell_layout_tests_android.h',
+        'shell/browser/shell_login_dialog.cc',
+        'shell/browser/shell_login_dialog.h',
+        'shell/browser/shell_login_dialog_mac.mm',
+        'shell/browser/shell_mac.mm',
+        'shell/browser/shell_message_filter.cc',
+        'shell/browser/shell_message_filter.h',
+        'shell/browser/shell_net_log.cc',
+        'shell/browser/shell_net_log.h',
+        'shell/browser/shell_network_delegate.cc',
+        'shell/browser/shell_network_delegate.h',
+        'shell/browser/shell_platform_data_aura.cc',
+        'shell/browser/shell_platform_data_aura.h',
+        'shell/browser/shell_plugin_service_filter.cc',
+        'shell/browser/shell_plugin_service_filter.h',
+        'shell/browser/shell_quota_permission_context.cc',
+        'shell/browser/shell_quota_permission_context.h',
+        'shell/browser/shell_resource_dispatcher_host_delegate.cc',
+        'shell/browser/shell_resource_dispatcher_host_delegate.h',
+        'shell/browser/shell_speech_recognition_manager_delegate.cc',
+        'shell/browser/shell_speech_recognition_manager_delegate.h',
+        'shell/browser/shell_url_request_context_getter.cc',
+        'shell/browser/shell_url_request_context_getter.h',
+        'shell/browser/shell_views.cc',
+        'shell/browser/shell_web_contents_view_delegate_android.cc',
+        'shell/browser/shell_web_contents_view_delegate_creator.h',
+        'shell/browser/shell_web_contents_view_delegate.h',
+        'shell/browser/shell_web_contents_view_delegate_mac.mm',
+        'shell/browser/shell_web_contents_view_delegate_win.cc',
+        'shell/browser/webkit_test_controller.cc',
+        'shell/browser/webkit_test_controller.h',
+        'shell/common/leak_detection_result.h',
         'shell/common/shell_content_client.cc',
         'shell/common/shell_content_client.h',
         'shell/common/shell_messages.cc',
@@ -81,82 +154,89 @@
         'shell/common/shell_switches.h',
         'shell/common/shell_test_configuration.cc',
         'shell/common/shell_test_configuration.h',
+        'shell/common/test_runner/test_preferences.cc',
+        'shell/common/test_runner/test_preferences.h',
         'shell/common/webkit_test_helpers.cc',
         'shell/common/webkit_test_helpers.h',
         'shell/geolocation/shell_access_token_store.cc',
         'shell/geolocation/shell_access_token_store.h',
-        'shell/minimal_shell.cc',
-        'shell/minimal_shell.h',
-        'shell/notify_done_forwarder.cc',
-        'shell/notify_done_forwarder.h',
-        'shell/renderer/gc_extension.cc',
-        'shell/renderer/gc_extension.h',
+        'shell/renderer/gc_controller.cc',
+        'shell/renderer/gc_controller.h',
+        'shell/renderer/leak_detector.cc',
+        'shell/renderer/leak_detector.h',
         'shell/renderer/shell_content_renderer_client.cc',
         'shell/renderer/shell_content_renderer_client.h',
+        'shell/renderer/shell_render_frame_observer.cc',
+        'shell/renderer/shell_render_frame_observer.h',
         'shell/renderer/shell_render_process_observer.cc',
         'shell/renderer/shell_render_process_observer.h',
         'shell/renderer/shell_render_view_observer.cc',
         'shell/renderer/shell_render_view_observer.h',
+        'shell/renderer/test_runner/MockColorChooser.cpp',
+        'shell/renderer/test_runner/MockColorChooser.h',
+        'shell/renderer/test_runner/MockSpellCheck.cpp',
+        'shell/renderer/test_runner/MockSpellCheck.h',
+        'shell/renderer/test_runner/MockWebMIDIAccessor.cpp',
+        'shell/renderer/test_runner/MockWebMIDIAccessor.h',
+        'shell/renderer/test_runner/MockWebMediaStreamCenter.cpp',
+        'shell/renderer/test_runner/MockWebMediaStreamCenter.h',
+        'shell/renderer/test_runner/MockWebSpeechRecognizer.cpp',
+        'shell/renderer/test_runner/MockWebSpeechRecognizer.h',
+        'shell/renderer/test_runner/SpellCheckClient.cpp',
+        'shell/renderer/test_runner/SpellCheckClient.h',
+        'shell/renderer/test_runner/TestCommon.cpp',
+        'shell/renderer/test_runner/TestCommon.h',
+        'shell/renderer/test_runner/TestInterfaces.cpp',
+        'shell/renderer/test_runner/TestInterfaces.h',
+        'shell/renderer/test_runner/TestPlugin.cpp',
+        'shell/renderer/test_runner/TestPlugin.h',
+        'shell/renderer/test_runner/WebTask.cpp',
+        'shell/renderer/test_runner/WebTask.h',
+        'shell/renderer/test_runner/WebTestDelegate.h',
+        'shell/renderer/test_runner/WebTestInterfaces.cpp',
+        'shell/renderer/test_runner/WebTestInterfaces.h',
+        'shell/renderer/test_runner/WebTestThemeEngineMac.h',
+        'shell/renderer/test_runner/WebTestThemeEngineMac.mm',
+        'shell/renderer/test_runner/WebTestThemeEngineMock.cpp',
+        'shell/renderer/test_runner/WebTestThemeEngineMock.h',
+        'shell/renderer/test_runner/accessibility_controller.cc',
+        'shell/renderer/test_runner/accessibility_controller.h',
+        'shell/renderer/test_runner/event_sender.cc',
+        'shell/renderer/test_runner/event_sender.h',
+        'shell/renderer/test_runner/gamepad_controller.cc',
+        'shell/renderer/test_runner/gamepad_controller.h',
+        'shell/renderer/test_runner/mock_constraints.cc',
+        'shell/renderer/test_runner/mock_constraints.h',
+        'shell/renderer/test_runner/mock_grammar_check.cc',
+        'shell/renderer/test_runner/mock_grammar_check.h',
+        'shell/renderer/test_runner/mock_web_audio_device.cc',
+        'shell/renderer/test_runner/mock_web_audio_device.h',
+        'shell/renderer/test_runner/mock_web_push_client.cc',
+        'shell/renderer/test_runner/mock_web_push_client.h',
+        'shell/renderer/test_runner/mock_web_user_media_client.cc',
+        'shell/renderer/test_runner/mock_web_user_media_client.h',
+        'shell/renderer/test_runner/mock_webrtc_data_channel_handler.cc',
+        'shell/renderer/test_runner/mock_webrtc_data_channel_handler.h',
+        'shell/renderer/test_runner/mock_webrtc_dtmf_sender_handler.cc',
+        'shell/renderer/test_runner/mock_webrtc_dtmf_sender_handler.h',
+        'shell/renderer/test_runner/mock_webrtc_peer_connection_handler.cc',
+        'shell/renderer/test_runner/mock_webrtc_peer_connection_handler.h',
+        'shell/renderer/test_runner/notification_presenter.cc',
+        'shell/renderer/test_runner/notification_presenter.h',
+        'shell/renderer/test_runner/test_runner.cc',
+        'shell/renderer/test_runner/test_runner.h',
+        'shell/renderer/test_runner/text_input_controller.cc',
+        'shell/renderer/test_runner/text_input_controller.h',
+        'shell/renderer/test_runner/web_ax_object_proxy.cc',
+        'shell/renderer/test_runner/web_ax_object_proxy.h',
+        'shell/renderer/test_runner/web_frame_test_proxy.h',
+        'shell/renderer/test_runner/web_permissions.cc',
+        'shell/renderer/test_runner/web_permissions.h',
+        'shell/renderer/test_runner/web_test_proxy.cc',
+        'shell/renderer/test_runner/web_test_proxy.h',
+        'shell/renderer/test_runner/web_test_runner.h',
         'shell/renderer/webkit_test_runner.cc',
         'shell/renderer/webkit_test_runner.h',
-        'shell/shell.cc',
-        'shell/shell.h',
-        'shell/shell_android.cc',
-        'shell/shell_aura.cc',
-        'shell/shell_gtk.cc',
-        'shell/shell_mac.mm',
-        'shell/shell_win.cc',
-        'shell/shell_application_mac.h',
-        'shell/shell_application_mac.mm',
-        'shell/shell_browser_context.cc',
-        'shell/shell_browser_context.h',
-        'shell/shell_browser_main.cc',
-        'shell/shell_browser_main.h',
-        'shell/shell_browser_main_parts.cc',
-        'shell/shell_browser_main_parts.h',
-        'shell/shell_browser_main_parts_mac.mm',
-        'shell/shell_content_browser_client.cc',
-        'shell/shell_content_browser_client.h',
-        'shell/shell_devtools_delegate.cc',
-        'shell/shell_devtools_delegate.h',
-        'shell/shell_devtools_frontend.cc',
-        'shell/shell_devtools_frontend.h',
-        'shell/shell_download_manager_delegate.cc',
-        'shell/shell_download_manager_delegate.h',
-        'shell/shell_javascript_dialog_manager.cc',
-        'shell/shell_javascript_dialog_manager.h',
-        'shell/shell_javascript_dialog_gtk.cc',
-        'shell/shell_javascript_dialog_mac.mm',
-        'shell/shell_javascript_dialog_win.cc',
-        'shell/shell_javascript_dialog.h',
-        'shell/shell_layout_tests_android.cc',
-        'shell/shell_layout_tests_android.h',
-        'shell/shell_login_dialog_gtk.cc',
-        'shell/shell_login_dialog_mac.mm',
-        'shell/shell_login_dialog.cc',
-        'shell/shell_login_dialog.h',
-        'shell/shell_message_filter.cc',
-        'shell/shell_message_filter.h',
-        'shell/shell_net_log.cc',
-        'shell/shell_net_log.h',
-        'shell/shell_network_delegate.cc',
-        'shell/shell_network_delegate.h',
-        'shell/shell_plugin_service_filter.cc',
-        'shell/shell_plugin_service_filter.h',
-        'shell/shell_quota_permission_context.cc',
-        'shell/shell_quota_permission_context.h',
-        'shell/shell_resource_dispatcher_host_delegate.cc',
-        'shell/shell_resource_dispatcher_host_delegate.h',
-        'shell/shell_url_request_context_getter.cc',
-        'shell/shell_url_request_context_getter.h',
-        'shell/shell_web_contents_view_delegate_android.cc',
-        'shell/shell_web_contents_view_delegate_creator.h',
-        'shell/shell_web_contents_view_delegate_gtk.cc',
-        'shell/shell_web_contents_view_delegate_mac.mm',
-        'shell/shell_web_contents_view_delegate_win.cc',
-        'shell/shell_web_contents_view_delegate.h',
-        'shell/webkit_test_controller.cc',
-        'shell/webkit_test_controller.h',
       ],
       'msvs_settings': {
         'VCLinkerTool': {
@@ -164,6 +244,11 @@
         },
       },
       'conditions': [
+        ['OS=="mac"', {
+          'sources/': [
+            ['exclude', 'WebTestThemeEngineMock.cpp'],
+          ],
+        }],
         ['OS=="win" and win_use_allocator_shim==1', {
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator',
@@ -187,24 +272,35 @@
           },
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],
+        }, {  # OS!="win"
+          'sources/': [
+            ['exclude', 'Win\\.cpp$'],
+          ],
         }],  # OS=="win"
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:fontconfig',
           ],
         }],
+        ['use_x11 == 1', {
+          'dependencies': [
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+          ],
+        }],
         ['OS=="android"', {
           'dependencies': [
             'content_shell_jni_headers',
           ],
-        }, {  # else: OS!="android"
-          'dependencies': [
-            # This dependency is for running DRT against the content shell, and
-            # this combination is not yet supported on Android.
-            '../webkit/support/webkit_support.gyp:webkit_support',
+          'dependencies!': [
+            'copy_test_netscape_plugin',
           ],
         }],  # OS=="android"
-        ['(os_posix==1 and use_aura==1 and linux_use_tcmalloc==1) or (android_use_tcmalloc==1)', {
+        ['os_posix == 1 and OS != "mac" and android_webview_build != 1', {
+          'dependencies': [
+            '../components/components.gyp:breakpad_host',
+          ],
+        }],
+        ['(OS=="linux" or OS=="android") and use_allocator!="none"', {
           'dependencies': [
             # This is needed by content/app/content_main_runner.cc
             '../base/allocator/allocator.gyp:allocator',
@@ -213,27 +309,46 @@
         ['use_aura==1', {
           'dependencies': [
             '../ui/aura/aura.gyp:aura',
-            '../ui/base/strings/ui_strings.gyp:ui_strings',
-            '../ui/views/controls/webview/webview.gyp:webview',
-            '../ui/views/views.gyp:views',
-            '../ui/views/views.gyp:views_test_support',
-            '../ui/ui.gyp:ui_resources',
+            '../ui/aura/aura.gyp:aura_test_support',
+            '../ui/events/events.gyp:events',
+            '../ui/strings/ui_strings.gyp:ui_strings',
+            '../ui/wm/wm.gyp:wm',
           ],
+          'conditions': [
+            ['toolkit_views==1', {
+              'dependencies': [
+                '../ui/resources/ui_resources.gyp:ui_resources',
+                '../ui/views/controls/webview/webview.gyp:webview',
+                '../ui/views/views.gyp:views',
+                '../ui/views/views.gyp:views_test_support',
+              ],
+              'sources/': [
+                ['exclude', 'shell/browser/shell_aura.cc'],
+              ],
+            }, {
+              'sources/': [
+                ['exclude', 'shell/browser/shell_views.cc'],
+              ],
+            }],
+          ],
+        }, {
           'sources/': [
-            ['exclude', 'shell/shell_gtk.cc'],
-            ['exclude', 'shell/shell_win.cc'],
+            ['exclude', 'shell/browser/shell_aura.cc'],
+            ['exclude', 'shell/browser/shell_views.cc'],
           ],
         }],  # use_aura==1
+        # The test plugin relies on X11.
+        ['OS=="linux" and use_x11==0', {
+          'dependencies!': [
+            'copy_test_netscape_plugin',
+          ],
+        }],
         ['chromeos==1', {
           'dependencies': [
             '../chromeos/chromeos.gyp:chromeos',
+            '../ui/wm/wm.gyp:wm_test_support',
            ],
         }], # chromeos==1
-        ['use_ash==1', {
-          'dependencies': [
-            '../ash/ash.gyp:ash',
-           ],
-        }],
         ['use_custom_freetype==1', {
           'dependencies': [
              '../third_party/freetype2/freetype2.gyp:freetype2',
@@ -241,8 +356,8 @@
         }],
         ['enable_plugins==0', {
           'sources/': [
-            ['exclude', 'shell/shell_plugin_service_filter.cc'],
-            ['exclude', 'shell/shell_plugin_service_filter.h'],
+            ['exclude', 'shell/browser/shell_plugin_service_filter.cc'],
+            ['exclude', 'shell/browser/shell_plugin_service_filter.h'],
           ],
         }]
       ],
@@ -250,12 +365,18 @@
     {
       'target_name': 'content_shell_resources',
       'type': 'none',
-      'dependencies': [
-        'generate_content_shell_resources',
-      ],
       'variables': {
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/content',
       },
+      'actions': [
+        {
+          'action_name': 'generate_content_shell_resources',
+          'variables': {
+            'grit_grd_file': 'shell/shell_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+      ],
       'includes': [ '../build/grit_target.gypi' ],
       'copies': [
         {
@@ -265,21 +386,42 @@
           ],
         },
       ],
-    },
-    {
-      'target_name': 'generate_content_shell_resources',
-      'type': 'none',
-      'variables': {
-        'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/content',
-      },
-      'actions': [
-        {
-          'action_name': 'content_shell_resources',
-          'variables': {
-            'grit_grd_file': 'shell/shell_resources.grd',
+      'conditions': [
+        ['OS=="win"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)',
+            'files': ['shell/renderer/test_runner/resources/fonts/AHEM____.TTF'],
+          }],
+        }],
+        ['OS=="mac"', {
+          'all_dependent_settings': {
+            'mac_bundle_resources': [
+              'shell/renderer/test_runner/resources/fonts/AHEM____.TTF',
+              'shell/renderer/test_runner/resources/fonts/ChromiumAATTest.ttf',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/missingImage.png',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/textAreaResizeCorner.png',
+            ],
           },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
+        }],
+        ['use_x11 == 1', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)',
+            'files': [
+              'shell/renderer/test_runner/resources/fonts/AHEM____.TTF',
+              'shell/renderer/test_runner/resources/fonts/fonts.conf',
+            ]
+          }],
+        }],
+        ['OS=="android"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)',
+            'files': [
+              'shell/renderer/test_runner/resources/fonts/AHEM____.TTF',
+              'shell/renderer/test_runner/resources/fonts/android_main_fonts.xml',
+              'shell/renderer/test_runner/resources/fonts/android_fallback_fonts.xml',
+            ]
+          }],
+        }],
       ],
     },
     {
@@ -288,12 +430,11 @@
       'target_name': 'content_shell_pak',
       'type': 'none',
       'dependencies': [
-        'browser/devtools/devtools_resources.gyp:devtools_resources',
         'content_resources.gyp:content_resources',
         'content_shell_resources',
         '<(DEPTH)/net/net.gyp:net_resources',
-        '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
-        '<(DEPTH)/ui/ui.gyp:ui_resources',
+        '<(DEPTH)/ui/resources/ui_resources.gyp:ui_resources',
+        '<(DEPTH)/ui/strings/ui_strings.gyp:ui_strings',
         '<(DEPTH)/webkit/webkit_resources.gyp:webkit_resources',
         '<(DEPTH)/webkit/webkit_resources.gyp:webkit_strings',
       ],
@@ -303,10 +444,12 @@
             'browser/tracing/tracing_resources.gyp:tracing_resources',
           ],
         }],
+        ['OS!="android"', {
+          'dependencies': [
+            'browser/devtools/devtools_resources.gyp:devtools_resources',
+          ],
+        }],
       ],
-      'variables': {
-        'repack_path': '<(DEPTH)/tools/grit/grit/format/repack.py',
-      },
       'actions': [
         {
           'action_name': 'repack_content_shell_pack',
@@ -320,29 +463,20 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/webui_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/blink_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
             ],
+            'conditions': [
+              ['OS!="android"', {
+                'pak_inputs': ['<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',],
+                'pak_output': '<(PRODUCT_DIR)/content_shell.pak',
+              }, {
+                'pak_output': '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
+              }],
+            ],
           },
-          'inputs': [
-            '<(repack_path)',
-            '<@(pak_inputs)',
-          ],
-          'action': ['python', '<(repack_path)', '<@(_outputs)',
-                     '<@(pak_inputs)'],
-          'conditions': [
-            ['OS!="android"', {
-              'outputs': [
-                '<(PRODUCT_DIR)/content_shell.pak',
-              ],
-            }, {
-              'outputs': [
-                '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
-              ],
-            }],
-          ],
+          'includes': [ '../build/repack_action.gypi' ],
         },
       ],
     },
@@ -350,7 +484,6 @@
       'target_name': 'content_shell',
       'type': 'executable',
       'mac_bundle': 1,
-      'defines!': ['CONTENT_IMPLEMENTATION'],
       'variables': {
         'chromium_code': 1,
       },
@@ -410,16 +543,11 @@
             },
           },
         }],  # OS=="win"
-        ['OS == "win" or toolkit_uses_gtk == 1', {
+        ['OS == "win"', {
           'dependencies': [
             '../sandbox/sandbox.gyp:sandbox',
           ],
-        }],  # OS=="win" or toolkit_uses_gtk == 1
-        ['toolkit_uses_gtk == 1', {
-          'dependencies': [
-            '<(DEPTH)/build/linux/system.gyp:gtk',
-          ],
-        }],  # toolkit_uses_gtk
+        }],  # OS=="win"
         ['OS=="mac"', {
           'product_name': '<(content_shell_product_name)',
           'dependencies!': [
@@ -444,16 +572,6 @@
                 '../build/mac/copy_framework_unversioned.sh',
                 '${BUILT_PRODUCTS_DIR}/<(content_shell_product_name) Framework.framework',
                 '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks',
-              ],
-            },
-            {
-              'postbuild_name': 'Fix Framework Link',
-              'action': [
-                'install_name_tool',
-                '-change',
-                '/Library/Frameworks/<(content_shell_product_name) Framework.framework/Versions/A/<(content_shell_product_name) Framework',
-                '@executable_path/../Frameworks/<(content_shell_product_name) Framework.framework/<(content_shell_product_name) Framework',
-                '${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}'
               ],
             },
             {
@@ -508,8 +626,133 @@
         'content_shell',
       ],
     },
+
+    {
+      'target_name': 'test_netscape_plugin',
+      'type': 'loadable_module',
+      'sources': [
+        'shell/tools/plugin/PluginObject.cpp',
+        'shell/tools/plugin/PluginObject.h',
+        'shell/tools/plugin/PluginObjectMac.mm',
+        'shell/tools/plugin/PluginTest.cpp',
+        'shell/tools/plugin/PluginTest.h',
+        'shell/tools/plugin/TestObject.cpp',
+        'shell/tools/plugin/Tests/DocumentOpenInDestroyStream.cpp',
+        'shell/tools/plugin/Tests/EvaluateJSAfterRemovingPluginElement.cpp',
+        'shell/tools/plugin/Tests/FormValue.cpp',
+        'shell/tools/plugin/Tests/GetURLNotifyWithURLThatFailsToLoad.cpp',
+        'shell/tools/plugin/Tests/GetURLWithJavaScriptURL.cpp',
+        'shell/tools/plugin/Tests/GetURLWithJavaScriptURLDestroyingPlugin.cpp',
+        'shell/tools/plugin/Tests/GetUserAgentWithNullNPPFromNPPNew.cpp',
+        'shell/tools/plugin/Tests/LeakWindowScriptableObject.cpp',
+        'shell/tools/plugin/Tests/LogNPPSetWindow.cpp',
+        'shell/tools/plugin/Tests/NPDeallocateCalledBeforeNPShutdown.cpp',
+        'shell/tools/plugin/Tests/NPPNewFails.cpp',
+        'shell/tools/plugin/Tests/NPRuntimeCallsWithNullNPP.cpp',
+        'shell/tools/plugin/Tests/NPRuntimeObjectFromDestroyedPlugin.cpp',
+        'shell/tools/plugin/Tests/NPRuntimeRemoveProperty.cpp',
+        'shell/tools/plugin/Tests/NullNPPGetValuePointer.cpp',
+        'shell/tools/plugin/Tests/PassDifferentNPPStruct.cpp',
+        'shell/tools/plugin/Tests/PluginScriptableNPObjectInvokeDefault.cpp',
+        'shell/tools/plugin/Tests/PluginScriptableObjectOverridesAllProperties.cpp',
+        'shell/tools/plugin/main.cpp',
+        'shell/tools/plugin/test_object.h',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+        '<(DEPTH)/content/shell/tools/plugin/',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../third_party/npapi/npapi.gyp:npapi',
+      ],
+      'conditions': [
+        ['OS=="mac"', {
+          'mac_bundle': 1,
+          'product_extension': 'plugin',
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Cocoa.framework',
+              '$(SDKROOT)/System/Library/Frameworks/QuartzCore.framework',
+            ]
+          },
+          'xcode_settings': {
+            'GCC_SYMBOLS_PRIVATE_EXTERN': 'NO',
+            'INFOPLIST_FILE': 'shell/tools/plugin/mac/Info.plist',
+          },
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'cflags': [
+            '-fvisibility=default',
+          ],
+        }],
+        ['OS=="win"', {
+          'defines': [
+            # This seems like a hack, but this is what Safari Win does.
+            'snprintf=_snprintf',
+          ],
+          'sources': [
+            'shell/tools/plugin/win/TestNetscapePlugin.def',
+            'shell/tools/plugin/win/TestNetscapePlugin.rc',
+          ],
+          # The .rc file requires that the name of the dll is np_test_netscape_plugin.dll.
+          'product_name': 'np_test_netscape_plugin',
+          # Disable c4267 warnings until we fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
+        }],
+      ],
+    },
+    {
+      'target_name': 'copy_test_netscape_plugin',
+      'type': 'none',
+      'dependencies': [
+        'test_netscape_plugin',
+      ],
+      'conditions': [
+        ['OS=="win"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/plugins',
+            'files': ['<(PRODUCT_DIR)/np_test_netscape_plugin.dll'],
+          }],
+        }],
+        ['OS=="mac"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/plugins/',
+            'files': ['<(PRODUCT_DIR)/test_netscape_plugin.plugin/'],
+          }],
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/plugins',
+            'files': ['<(PRODUCT_DIR)/libtest_netscape_plugin.so'],
+          }],
+        }],
+      ],
+    }
   ],
   'conditions': [
+    ['OS=="mac" or OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'layout_test_helper',
+          'type': 'executable',
+          'sources': [
+            'shell/renderer/test_runner/helper/layout_test_helper_mac.mm',
+            'shell/renderer/test_runner/helper/layout_test_helper_win.cc',
+          ],
+          'conditions': [
+            ['OS=="mac"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
+                ],
+              },
+            }],
+          ],
+        },
+      ],
+    }],  # OS=="mac" or OS=="win"
     ['OS=="mac"', {
       'targets': [
         {
@@ -520,8 +763,25 @@
           'mac_bundle_resources': [
             'shell/app/English.lproj/HttpAuth.xib',
             'shell/app/English.lproj/MainMenu.xib',
-            '<(PRODUCT_DIR)/content_shell.pak'
+            '<(PRODUCT_DIR)/content_shell.pak',
+            'shell/app/framework-Info.plist',
           ],
+          'mac_bundle_resources!': [
+            'shell/app/framework-Info.plist',
+          ],
+          'xcode_settings': {
+            # The framework is placed within the .app's Framework
+            # directory.  DYLIB_INSTALL_NAME_BASE and
+            # LD_DYLIB_INSTALL_NAME affect -install_name.
+            'DYLIB_INSTALL_NAME_BASE':
+                '@executable_path/../Frameworks',
+            # See /build/mac/copy_framework_unversioned.sh for
+            # information on LD_DYLIB_INSTALL_NAME.
+            'LD_DYLIB_INSTALL_NAME':
+                '$(DYLIB_INSTALL_NAME_BASE:standardizepath)/$(WRAPPER_NAME)/$(PRODUCT_NAME)',
+
+            'INFOPLIST_FILE': 'shell/app/framework-Info.plist',
+          },
           'dependencies': [
             'content_shell_lib',
           ],
@@ -532,12 +792,37 @@
             'shell/app/shell_content_main.cc',
             'shell/app/shell_content_main.h',
           ],
+          'postbuilds': [
+            {
+              # Modify the Info.plist as needed.  The script explains why
+              # this is needed.  This is also done in the chrome target.
+              # The framework needs the Breakpad keys if this feature is
+              # enabled.  It does not need the Keystone keys; these always
+              # come from the outer application bundle.  The framework
+              # doesn't currently use the SCM keys for anything,
+              # but this seems like a really good place to store them.
+              'postbuild_name': 'Tweak Info.plist',
+              'action': ['../build/mac/tweak_info_plist.py',
+                         '--breakpad=1',
+                         '--keystone=0',
+                         '--scm=1',
+                         '--version=<(content_shell_version)',
+                         '--branding=<(content_shell_product_name)'],
+            },
+          ],
           'copies': [
             {
               # Copy FFmpeg binaries for audio/video support.
               'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
               'files': [
                 '<(PRODUCT_DIR)/ffmpegsumo.so',
+              ],
+            },
+            {
+              'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
+              'files': [
+                '<(PRODUCT_DIR)/crash_inspector',
+                '<(PRODUCT_DIR)/crash_report_sender.app'
               ],
             },
           ],
@@ -555,6 +840,11 @@
                     ],
                   }],
                 }],
+              ],
+            }],
+            ['icu_use_data_file_flag==1', {
+              'mac_bundle_resources': [
+                '<(PRODUCT_DIR)/icudtl.dat',
               ],
             }],
           ],
@@ -597,8 +887,8 @@
               'action': [
                 'install_name_tool',
                 '-change',
-                '/Library/Frameworks/<(content_shell_product_name) Framework.framework/Versions/A/<(content_shell_product_name) Framework',
-                '@executable_path/../../../../Frameworks/<(content_shell_product_name) Framework.framework/<(content_shell_product_name) Framework',
+                '@executable_path/../Frameworks/<(content_shell_product_name) Framework.framework/<(content_shell_product_name) Framework',
+                '@executable_path/../../../<(content_shell_product_name) Framework.framework/<(content_shell_product_name) Framework',
                 '${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}'
               ],
             },
@@ -651,11 +941,6 @@
             'shell/android/java/src/org/chromium/content_shell/ShellManager.java',
             'shell/android/java/src/org/chromium/content_shell/Shell.java',
           ],
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/content/shell',
-            ],
-          },
           'variables': {
             'jni_gen_package': 'content/shell',
           },
@@ -689,7 +974,7 @@
           'target_name': 'content_shell_java',
           'type': 'none',
           'dependencies': [
-            'content_java',
+            'content.gyp:content_java',
           ],
           'variables': {
             'java_in_dir': '../content/shell/android/java',
@@ -716,14 +1001,17 @@
           'target_name': 'content_shell_apk',
           'type': 'none',
           'dependencies': [
-            'content_java',
+            'content.gyp:content_icudata',
+            'content.gyp:content_java',
             'content_java_test_support',
             'content_shell_java',
             'libcontent_shell_content_view',
             '../base/base.gyp:base_java',
             '../media/media.gyp:media_java',
             '../net/net.gyp:net_java',
-            '../ui/ui.gyp:ui_java',
+            '../third_party/mesa/mesa.gyp:osmesa_in_lib_dir',
+            '../tools/android/forwarder/forwarder.gyp:forwarder',
+            '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
             'apk_name': 'ContentShell',
@@ -732,7 +1020,15 @@
             'resource_dir': 'shell/android/shell_apk/res',
             'native_lib_target': 'libcontent_shell_content_view',
             'additional_input_paths': ['<(PRODUCT_DIR)/content_shell/assets/content_shell.pak'],
-            'asset_location': '<(ant_build_out)/content_shell/assets',
+            'asset_location': '<(PRODUCT_DIR)/content_shell/assets',
+            'extra_native_libs': ['<(SHARED_LIB_DIR)/libosmesa.so'],
+            'conditions': [
+              ['icu_use_data_file_flag==1', {
+                'additional_input_paths': [
+                  '<(PRODUCT_DIR)/icudtl.dat',
+                ],
+              }],
+            ],
           },
           'conditions': [
             ['android_webview_build==0', {
@@ -745,5 +1041,61 @@
         },
       ],
     }],  # OS=="android"
+    ['OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'content_shell_crash_service',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../components/components.gyp:breakpad_crash_service',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'shell/tools/content_shell_crash_service.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
+            },
+          },
+        },
+      ],
+    }],  # OS=="win"
+    ['OS=="win" and fastbuild==0 and target_arch=="ia32" and syzyasan==1', {
+      'variables': {
+        'dest_dir': '<(PRODUCT_DIR)/syzygy',
+      },
+      'targets': [
+        {
+          'target_name': 'content_shell_syzyasan',
+          'type': 'none',
+          'sources' : [],
+          # Instrument content_shell with SyzyAsan.
+          'actions': [
+            {
+              'action_name': 'Instrument content_shell with SyzyAsan',
+              'inputs': [
+                '<(PRODUCT_DIR)/content_shell.exe',
+              ],
+              'outputs': [
+                '<(dest_dir)/content_shell.exe',
+                '<(dest_dir)/content_shell.exe.pdb',
+              ],
+              'action': [
+                'python',
+                '<(DEPTH)/chrome/tools/build/win/syzygy_instrument.py',
+                '--mode', 'asan',
+                '--input_executable', '<(PRODUCT_DIR)/content_shell.exe',
+                '--input_symbol', '<(PRODUCT_DIR)/content_shell.exe.pdb',
+                '--destination_dir', '<(dest_dir)',
+              ],
+            },
+          ],
+        },
+      ],
+    }],  # OS=="win" and fastbuild==0 and target_arch=="ia32"
   ]
 }

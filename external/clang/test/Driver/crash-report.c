@@ -3,7 +3,8 @@
 // RUN: not env TMPDIR=%t TEMP=%t TMP=%t RC_DEBUG_OPTIONS=1 %clang -fsyntax-only %s \
 // RUN:  -F/tmp/ -I /tmp/ -idirafter /tmp/ -iquote /tmp/ -isystem /tmp/ \
 // RUN:  -iprefix /the/prefix -iwithprefix /tmp -iwithprefixbefore /tmp/ \
-// RUN:  -internal-isystem /tmp/ -internal-externc-isystem /tmp/ \
+// RUN:  -Xclang -internal-isystem -Xclang /tmp/                         \
+// RUN:  -Xclang -internal-externc-isystem -Xclang /tmp/                 \
 // RUN:  -DFOO=BAR 2>&1 | FileCheck %s
 // RUN: cat %t/crash-report-*.c | FileCheck --check-prefix=CHECKSRC %s
 // RUN: cat %t/crash-report-*.sh | FileCheck --check-prefix=CHECKSH %s
@@ -12,7 +13,7 @@
 // because of the glob (*.c, *.sh)
 // REQUIRES: shell
 
-// RUN: not env FORCE_CLANG_DIAGNOSTICS_CRASH=1 %clang -fsyntax-only -x c /dev/null 2>&1 | FileCheck %s
+// RUN: not env FORCE_CLANG_DIAGNOSTICS_CRASH=1 %clang -fsyntax-only -x c /dev/null -lstdc++ 2>&1 | FileCheck %s
 
 // FIXME: Investigating. "fatal error: file 'nul' modified since it was first processed"
 // XFAIL: mingw32
@@ -22,6 +23,7 @@
 // CHECK-NEXT: note: diagnostic msg: {{.*}}.c
 FOO
 // CHECKSRC: FOO
+// CHECKSH: -cc1
 // CHECKSH: -D "FOO=BAR"
 // CHECKSH-NOT: -F/tmp/
 // CHECKSH-NOT: -I /tmp/
@@ -34,3 +36,4 @@ FOO
 // CHECKSH-NOT: -internal-isystem /tmp/
 // CHECKSH-NOT: -internal-externc-isystem /tmp/
 // CHECKSH-NOT: -dwarf-debug-flags
+// CHECKSH: crash-report-{{[^ ]*}}.c

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,8 @@ public class TestFileUtil {
 
     public static void deleteFile(String name) {
         File file = new File(name);
-        file.delete();
+        boolean deleted = file.delete();
+        assert (deleted || !file.exists());
     }
 
     /**

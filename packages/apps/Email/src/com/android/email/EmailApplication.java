@@ -17,11 +17,20 @@
 package com.android.email;
 
 import android.app.Application;
+import android.content.Context;
+import android.content.Intent;
 
+import com.android.email.activity.setup.EmailPreferenceActivity;
 import com.android.email.preferences.EmailPreferenceMigrator;
+import com.android.mail.browse.ConversationMessage;
+import com.android.mail.browse.InlineAttachmentViewIntentBuilder;
+import com.android.mail.browse.InlineAttachmentViewIntentBuilderCreator;
+import com.android.mail.browse.InlineAttachmentViewIntentBuilderCreatorHolder;
 import com.android.mail.preferences.BasePreferenceMigrator;
 import com.android.mail.preferences.PreferenceMigratorHolder;
 import com.android.mail.preferences.PreferenceMigratorHolder.PreferenceMigratorCreator;
+import com.android.mail.providers.Account;
+import com.android.mail.ui.settings.PublicPreferenceActivity;
 import com.android.mail.utils.LogTag;
 
 public class EmailApplication extends Application {
@@ -36,5 +45,22 @@ public class EmailApplication extends Application {
                 return new EmailPreferenceMigrator();
             }
         });
+
+        InlineAttachmentViewIntentBuilderCreatorHolder.setInlineAttachmentViewIntentCreator(
+                new InlineAttachmentViewIntentBuilderCreator() {
+                    @Override
+                    public InlineAttachmentViewIntentBuilder
+                    createInlineAttachmentViewIntentBuilder(Account account, long conversationId) {
+                        return new InlineAttachmentViewIntentBuilder() {
+                            @Override
+                            public Intent createInlineAttachmentViewIntent(Context context,
+                                    String url, ConversationMessage message) {
+                                return null;
+                            }
+                        };
+                    }
+                });
+
+        PublicPreferenceActivity.sPreferenceActivityClass = EmailPreferenceActivity.class;
     }
 }

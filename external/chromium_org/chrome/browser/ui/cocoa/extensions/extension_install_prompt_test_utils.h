@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_EXTENSION_INSTALL_PROMPT_TEST_UTILS_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_EXTENSION_INSTALL_PROMPT_TEST_UTILS_H_
 
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 
 namespace chrome {
@@ -30,18 +31,24 @@ class MockExtensionInstallPromptDelegate
   int abort_count_;
 };
 
-// Loads the install prompt test extension.
+// Loads the test extension from the given test directory and manifest file.
+scoped_refptr<extensions::Extension> LoadInstallPromptExtension(
+    const char* extension_dir_name,
+    const char* manifest_file);
+
+// Loads the default install_prompt test extension.
 scoped_refptr<extensions::Extension> LoadInstallPromptExtension();
 
 // Loads the icon for the install prompt extension.
 gfx::Image LoadInstallPromptIcon();
 
 // Builds a prompt using the given extension.
-ExtensionInstallPrompt::Prompt BuildExtensionInstallPrompt(
+scoped_refptr<ExtensionInstallPrompt::Prompt> BuildExtensionInstallPrompt(
     extensions::Extension* extension);
 
-ExtensionInstallPrompt::Prompt BuildExtensionPostInstallPermissionsPrompt(
-    extensions::Extension* extension);
+scoped_refptr<ExtensionInstallPrompt::Prompt>
+    BuildExtensionPostInstallPermissionsPrompt(
+        extensions::Extension* extension);
 
 }  // namespace chrome
 

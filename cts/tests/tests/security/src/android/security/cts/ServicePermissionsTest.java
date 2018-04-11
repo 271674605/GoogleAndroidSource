@@ -17,6 +17,7 @@
 package android.security.cts;
 
 import android.os.IBinder;
+import android.os.TransactionTooLargeException;
 import android.test.AndroidTestCase;
 import android.util.Log;
 
@@ -99,13 +100,17 @@ public class ServicePermissionsTest extends AndroidTestCase {
             try {
                 serviceBinder.dump(out.getFD(), new String[0]);
             } catch (SecurityException e) {
-                if (e.getMessage().contains("android.permission.DUMP")) {
+                String msg = e.getMessage();
+                if ((msg == null) || msg.contains("android.permission.DUMP")) {
                     // Service correctly checked for DUMP permission, yay
                 } else {
                     // Service is throwing about something else; they're
                     // probably not checking for DUMP.
                     throw e;
                 }
+            } catch (TransactionTooLargeException e) {
+                // SELinux likely prevented the dump - assume safe
+                continue;
             } finally {
                 out.close();
             }

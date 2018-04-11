@@ -21,7 +21,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect_f.h"
-#include "ui/gfx/vector2d.h"
 
 class GURL;
 
@@ -37,8 +36,10 @@ class DownloadItem;
 class JavaScriptDialogManager;
 class PageState;
 class RenderViewHost;
+class SessionStorageNamespace;
 class WebContents;
 class WebContentsImpl;
+struct ColorSuggestion;
 struct ContextMenuParams;
 struct DropData;
 struct FileChooserParams;
@@ -53,7 +54,8 @@ class Rect;
 class Size;
 }
 
-namespace WebKit {
+namespace blink {
+class WebGestureEvent;
 class WebLayer;
 struct WebWindowFeatures;
 }
@@ -87,15 +89,16 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void NavigationStateChanged(const WebContents* source,
                                       unsigned changed_flags) {}
 
-  // Adds the navigation request headers to |headers|. Use
-  // net::HttpUtil::AppendHeaderIfMissing to build the set of headers.
-  virtual void AddNavigationHeaders(const GURL& url, std::string* headers) {}
+  // Called to inform the delegate that the WebContent's visible SSL state (as
+  // defined by SSLStatus) changed.
+  virtual void VisibleSSLStateChanged(const WebContents* source) {}
 
   // Creates a new tab with the already-created WebContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
-  // method returns.  If |disposition| is NEW_POPUP, |pos| should hold the
-  // initial position. If |was_blocked| is non-NULL, then |*was_blocked| will
-  // be set to true if the popup gets blocked, and left unchanged otherwise.
+  // method returns.  If |disposition| is NEW_POPUP, |initial_pos| should hold
+  // the initial position. If |was_blocked| is non-NULL, then |*was_blocked|
+  // will be set to true if the popup gets blocked, and left unchanged
+  // otherwise.
   virtual void AddNewContents(WebContents* source,
                               WebContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -113,15 +116,16 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Notifies the delegate that this contents is starting or is done loading
   // some resource. The delegate should use this notification to represent
   // loading feedback. See WebContents::IsLoading()
-  virtual void LoadingStateChanged(WebContents* source) {}
+  // |to_different_document| will be true unless the load is a fragment
+  // navigation, or triggered by history.pushState/replaceState.
+  virtual void LoadingStateChanged(WebContents* source,
+                                   bool to_different_document) {}
 
-#if defined(OS_ANDROID)
   // Notifies the delegate that the page has made some progress loading.
   // |progress| is a value between 0.0 (nothing loaded) to 1.0 (page fully
   // loaded).
   virtual void LoadProgressChanged(WebContents* source,
                                    double progress) {}
-#endif
 
   // Request the delegate to close this web contents, and do whatever cleanup
   // it needs to do.
@@ -162,10 +166,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // delegate.
   virtual void OverscrollUpdate(int delta_y) {}
 
-  // Check whether this contents is permitted to load data URLs in WebUI mode.
-  // This is normally disallowed for security.
-  virtual bool CanLoadDataURLsInWebUI() const;
-
   // Return the rect where to display the resize corner, if any, otherwise
   // an empty rect.
   virtual gfx::Rect GetRootWindowResizerRect() const;
@@ -177,14 +177,19 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Default is false.
   virtual bool ShouldSuppressDialogs();
 
+  // Returns whether pending NavigationEntries for aborted browser-initiated
+  // navigations should be preserved (and thus returned from GetVisibleURL).
+  // Defaults to false.
+  virtual bool ShouldPreserveAbortedURLs(WebContents* source);
+
   // Add a message to the console. Returning true indicates that the delegate
   // handled the message. If false is returned the default logging mechanism
   // will be used for the message.
   virtual bool AddMessageToConsole(WebContents* source,
                                    int32 level,
-                                   const string16& message,
+                                   const base::string16& message,
                                    int32 line_no,
-                                   const string16& source_id);
+                                   const base::string16& source_id);
 
   // Tells us that we've finished firing this tab's beforeunload event.
   // The proceed bool tells us whether the user chose to proceed closing the
@@ -210,11 +215,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // to live. Default is true.
   virtual bool ShouldFocusPageAfterCrash();
 
-  // Called when a popup select is about to be displayed. The delegate can use
-  // this to disable inactive rendering for the frame in the window the select
-  // is opened within if necessary.
-  virtual void RenderWidgetShowing() {}
-
   // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for WebContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
@@ -230,7 +230,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Asks the delegate if the given tab can download.
   // Invoking the |callback| synchronously is OK.
   virtual void CanDownload(RenderViewHost* render_view_host,
-                           int request_id,
+                           const GURL& url,
                            const std::string& request_method,
                            const base::Callback<void(bool)>& callback);
 
@@ -271,6 +271,15 @@ class CONTENT_EXPORT WebContentsDelegate {
   // pressed, or a touch-gesture begins).
   virtual void HandlePointerActivate() {}
 
+  // Allows delegates to handle gesture events before sending to the renderer.
+  // Returns true if the |event| was handled and thus shouldn't be processed
+  // by the renderer's event handler. Note that the touch events that create
+  // the gesture are always passed to the renderer since the gesture is created
+  // and dispatched after the touches return without being "preventDefault()"ed.
+  virtual bool PreHandleGestureEvent(
+      WebContents* source,
+      const blink::WebGestureEvent& event);
+
   virtual void HandleGestureBegin() {}
   virtual void HandleGestureEnd() {}
 
@@ -279,7 +288,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // cancel the operation. This method is used by Chromium Embedded Framework.
   virtual bool CanDragEnter(WebContents* source,
                             const DropData& data,
-                            WebKit::WebDragOperationsMask operations_allowed);
+                            blink::WebDragOperationsMask operations_allowed);
 
   // Render view drag n drop ended.
   virtual void DragEnded() {}
@@ -294,23 +303,22 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Allows delegate to control whether a WebContents will be created. Returns
   // true to allow the creation. Default is to allow it. In cases where the
   // delegate handles the creation/navigation itself, it will use |target_url|.
+  // The embedder has to synchronously adopt |route_id| or else the view will
+  // be destroyed.
   virtual bool ShouldCreateWebContents(
       WebContents* web_contents,
       int route_id,
       WindowContainerType window_container_type,
-      const string16& frame_name,
+      const base::string16& frame_name,
       const GURL& target_url,
-      const Referrer& referrer,
-      WindowOpenDisposition disposition,
-      const WebKit::WebWindowFeatures& features,
-      bool user_gesture,
-      bool opener_suppressed);
+      const std::string& partition_id,
+      SessionStorageNamespace* session_storage_namespace);
 
   // Notifies the delegate about the creation of a new WebContents. This
   // typically happens when popups are created.
   virtual void WebContentsCreated(WebContents* source_contents,
-                                  int64 source_frame_id,
-                                  const string16& frame_name,
+                                  int opener_render_frame_id,
+                                  const base::string16& frame_name,
                                   const GURL& target_url,
                                   WebContents* new_contents) {}
 
@@ -336,9 +344,13 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager();
 
   // Called when color chooser should open. Returns the opened color chooser.
-  // Ownership of the returned pointer is transferred to the caller.
-  virtual ColorChooser* OpenColorChooser(WebContents* web_contents,
-                                         SkColor color);
+  // Returns NULL if we failed to open the color chooser (e.g. when there is a
+  // ColorChooserDialog already open on Windows). Ownership of the returned
+  // pointer is transferred to the caller.
+  virtual ColorChooser* OpenColorChooser(
+      WebContents* web_contents,
+      SkColor color,
+      const std::vector<ColorSuggestion>& suggestions);
 
   // Called when a file selection is to be done.
   virtual void RunFileChooser(WebContents* web_contents,
@@ -351,18 +363,17 @@ class CONTENT_EXPORT WebContentsDelegate {
                                   int request_id,
                                   const base::FilePath& path) {}
 
+  // Returns true if the delegate will embed a WebContents-owned fullscreen
+  // render widget.  In this case, the delegate may access the widget by calling
+  // WebContents::GetFullscreenRenderWidgetHostView().  If false is returned,
+  // WebContents will be responsible for showing the fullscreen widget.
+  virtual bool EmbedsFullscreenWidget() const;
+
   // Called when the renderer puts a tab into or out of fullscreen mode.
   virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
                                           bool enter_fullscreen) {}
   virtual bool IsFullscreenForTabOrPending(
       const WebContents* web_contents) const;
-
-  // Called when the renderer has scrolled programmatically.
-  virtual void DidProgrammaticallyScroll(WebContents* web_contents,
-                                         const gfx::Vector2d& scroll_point) {}
-
-  // Called when a Javascript out of memory notification is received.
-  virtual void JSOutOfMemory(WebContents* web_contents) {}
 
   // Register a new handler for URL requests with the given scheme.
   // |user_gesture| is true if the registration is made in the context of a user
@@ -370,7 +381,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void RegisterProtocolHandler(WebContents* web_contents,
                                        const std::string& protocol,
                                        const GURL& url,
-                                       const string16& title,
                                        bool user_gesture) {}
 
   // Result of string search in the page. This includes the number of matches
@@ -434,6 +444,32 @@ class CONTENT_EXPORT WebContentsDelegate {
       const GURL& url,
       const base::FilePath& plugin_path,
       const base::Callback<void(bool)>& callback);
+
+  // Returns the size for the new render view created for the pending entry in
+  // |web_contents|; if there's no size, returns an empty size.
+  // This is optional for implementations of WebContentsDelegate; if the
+  // delegate doesn't provide a size, the current WebContentsView's size will be
+  // used.
+  virtual gfx::Size GetSizeForNewRenderView(WebContents* web_contents) const;
+
+  // Notification that validation of a form displayed by the |web_contents|
+  // has failed. There can only be one message per |web_contents| at a time.
+  virtual void ShowValidationMessage(WebContents* web_contents,
+                                     const gfx::Rect& anchor_in_root_view,
+                                     const base::string16& main_text,
+                                     const base::string16& sub_text) {}
+
+  // Notification that the delegate should hide any showing form validation
+  // message.
+  virtual void HideValidationMessage(WebContents* web_contents) {}
+
+  // Notification that the form element that triggered the validation failure
+  // has moved.
+  virtual void MoveValidationMessage(WebContents* web_contents,
+                                     const gfx::Rect& anchor_in_root_view) {}
+
+  // Returns true if the WebContents is never visible.
+  virtual bool IsNeverVisible(WebContents* web_contents);
 
  protected:
   virtual ~WebContentsDelegate();

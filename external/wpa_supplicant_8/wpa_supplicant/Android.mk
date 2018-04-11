@@ -24,22 +24,18 @@ L_CFLAGS += -DVERSION_STR_POSTFIX=\"-$(PLATFORM_VERSION)\"
 # Set Android log name
 L_CFLAGS += -DANDROID_LOG_NAME=\"wpa_supplicant\"
 
+# Disable unused parameter warnings
+L_CFLAGS += -Wno-unused-parameter
+
+# Set Android extended P2P functionality
+L_CFLAGS += -DANDROID_P2P
+ifeq ($(BOARD_WPA_SUPPLICANT_PRIVATE_LIB),)
+L_CFLAGS += -DANDROID_P2P_STUB
+endif
+
 # Disable roaming in wpa_supplicant
 ifdef CONFIG_NO_ROAMING
 L_CFLAGS += -DCONFIG_NO_ROAMING
-endif
-
-ifeq ($(BOARD_WLAN_DEVICE), bcmdhd)
-L_CFLAGS += -DANDROID_P2P
-L_CFLAGS += -DP2P_CONCURRENT_SEARCH_DELAY=0
-endif
-
-ifeq ($(BOARD_WLAN_DEVICE), qcwcn)
-L_CFLAGS += -DANDROID_P2P
-endif
-
-ifeq ($(BOARD_WLAN_DEVICE), mrvl)
-L_CFLAGS += -DANDROID_P2P
 endif
 
 # Use Android specific directory for control interface sockets
@@ -50,9 +46,6 @@ L_CFLAGS += -DCONFIG_CTRL_IFACE_DIR=\"/data/system/wpa_supplicant\"
 ifeq ($(TARGET_ARCH),arm)
 L_CFLAGS += -mabi=aapcs-linux
 endif
-
-# To allow non-ASCII characters in SSID
-L_CFLAGS += -DWPA_UNICODE_SSID
 
 INCLUDES = $(LOCAL_PATH)
 INCLUDES += $(LOCAL_PATH)/src
@@ -71,9 +64,13 @@ INCLUDES += $(LOCAL_PATH)/src/tls
 INCLUDES += $(LOCAL_PATH)/src/utils
 INCLUDES += $(LOCAL_PATH)/src/wps
 INCLUDES += external/openssl/include
-INCLUDES += system/security/keystore
+INCLUDES += system/security/keystore/include
 ifdef CONFIG_DRIVER_NL80211
+ifneq ($(wildcard external/libnl),)
+INCLUDES += external/libnl/include
+else
 INCLUDES += external/libnl-headers
+endif
 endif
 
 ifdef CONFIG_FIPS
@@ -137,6 +134,10 @@ OBJS_c += src/utils/$(CONFIG_ELOOP).c
 
 ifdef CONFIG_ELOOP_POLL
 L_CFLAGS += -DCONFIG_ELOOP_POLL
+endif
+
+ifdef CONFIG_ELOOP_EPOLL
+L_CFLAGS += -DCONFIG_ELOOP_EPOLL
 endif
 
 ifdef CONFIG_EAPOL_TEST
@@ -258,6 +259,7 @@ OBJS += src/p2p/p2p_invitation.c
 OBJS += src/p2p/p2p_dev_disc.c
 OBJS += src/p2p/p2p_group.c
 OBJS += src/ap/p2p_hostapd.c
+OBJS += src/utils/bitfield.c
 L_CFLAGS += -DCONFIG_P2P
 NEED_GAS=y
 NEED_OFFCHANNEL=y
@@ -278,6 +280,7 @@ ifdef CONFIG_HS20
 OBJS += hs20_supplicant.c
 L_CFLAGS += -DCONFIG_HS20
 CONFIG_INTERWORKING=y
+NEED_AES_OMAC1=y
 endif
 
 ifdef CONFIG_INTERWORKING
@@ -507,7 +510,7 @@ endif
 ifdef CONFIG_EAP_PROXY
 L_CFLAGS += -DCONFIG_EAP_PROXY
 OBJS += src/eap_peer/eap_proxy_$(CONFIG_EAP_PROXY).c
-include eap_proxy_$(CONFIG_EAP_PROXY).mk
+include $(LOCAL_PATH)/eap_proxy_$(CONFIG_EAP_PROXY).mk
 CONFIG_IEEE8021X_EAPOL=y
 endif
 
@@ -614,10 +617,6 @@ NEED_SHA256=y
 endif
 
 ifdef CONFIG_WPS
-ifdef CONFIG_WPS2
-L_CFLAGS += -DCONFIG_WPS2
-endif
-
 # EAP-WSC
 L_CFLAGS += -DCONFIG_WPS -DEAP_WSC
 OBJS += wps_supplicant.c
@@ -772,6 +771,9 @@ OBJS += src/ap/beacon.c
 OBJS += src/ap/eap_user_db.c
 ifdef CONFIG_IEEE80211N
 OBJS += src/ap/ieee802_11_ht.c
+ifdef CONFIG_IEEE80211AC
+OBJS += src/ap/ieee802_11_vht.c
+endif
 endif
 ifdef CONFIG_WNM
 OBJS += src/ap/wnm_ap.c
@@ -787,6 +789,9 @@ OBJS += src/eap_server/eap_server_methods.c
 
 ifdef CONFIG_IEEE80211N
 L_CFLAGS += -DCONFIG_IEEE80211N
+ifdef CONFIG_IEEE80211AC
+L_CFLAGS += -DCONFIG_IEEE80211AC
+endif
 endif
 
 ifdef NEED_AP_MLME
@@ -794,6 +799,7 @@ OBJS += src/ap/wmm.c
 OBJS += src/ap/ap_list.c
 OBJS += src/ap/ieee802_11.c
 OBJS += src/ap/hw_features.c
+OBJS += src/ap/dfs.c
 L_CFLAGS += -DNEED_AP_MLME
 endif
 ifdef CONFIG_WPS
@@ -952,7 +958,8 @@ endif
 OBJS += src/crypto/crypto_gnutls.c
 OBJS_p += src/crypto/crypto_gnutls.c
 ifdef NEED_FIPS186_2_PRF
-OBJS += src/crypto/fips_prf_gnutls.c
+OBJS += src/crypto/fips_prf_internal.c
+OBJS += src/crypto/sha1-internal.c
 endif
 LIBS += -lgcrypt
 LIBS_p += -lgcrypt
@@ -968,7 +975,8 @@ endif
 OBJS += src/crypto/crypto_cryptoapi.c
 OBJS_p += src/crypto/crypto_cryptoapi.c
 ifdef NEED_FIPS186_2_PRF
-OBJS += src/crypto/fips_prf_cryptoapi.c
+OBJS += src/crypto/fips_prf_internal.c
+OBJS += src/crypto/sha1-internal.c
 endif
 CONFIG_INTERNAL_SHA256=y
 CONFIG_INTERNAL_RC4=y
@@ -983,7 +991,8 @@ endif
 OBJS += src/crypto/crypto_nss.c
 OBJS_p += src/crypto/crypto_nss.c
 ifdef NEED_FIPS186_2_PRF
-OBJS += src/crypto/fips_prf_nss.c
+OBJS += src/crypto/fips_prf_internal.c
+OBJS += src/crypto/sha1-internal.c
 endif
 LIBS += -lnss3
 LIBS_p += -lnss3
@@ -1122,7 +1131,7 @@ endif
 ifdef NEED_AES_OMAC1
 NEED_AES_ENC=y
 ifdef CONFIG_OPENSSL_CMAC
-CFLAGS += -DCONFIG_OPENSSL_CMAC
+L_CFLAGS += -DCONFIG_OPENSSL_CMAC
 else
 AESOBJS += src/crypto/aes-omac1.c
 endif
@@ -1171,7 +1180,10 @@ SHA1OBJS += src/crypto/sha1-tlsprf.c
 endif
 endif
 
-MD5OBJS = src/crypto/md5.c
+MD5OBJS =
+ifndef CONFIG_FIPS
+MD5OBJS += src/crypto/md5.c
+endif
 ifdef NEED_MD5
 ifdef CONFIG_INTERNAL_MD5
 MD5OBJS += src/crypto/md5-internal.c
@@ -1425,7 +1437,7 @@ NEED_AUTOSCAN=y
 endif
 
 ifdef CONFIG_AUTOSCAN_PERIODIC
-CFLAGS += -DCONFIG_AUTOSCAN_PERIODIC
+L_CFLAGS += -DCONFIG_AUTOSCAN_PERIODIC
 OBJS += autoscan_periodic.c
 NEED_AUTOSCAN=y
 endif
@@ -1552,11 +1564,19 @@ ifneq ($(BOARD_WPA_SUPPLICANT_PRIVATE_LIB),)
 LOCAL_STATIC_LIBRARIES += $(BOARD_WPA_SUPPLICANT_PRIVATE_LIB)
 endif
 LOCAL_SHARED_LIBRARIES := libc libcutils liblog
+ifdef CONFIG_EAP_PROXY
+LOCAL_STATIC_LIBRARIES += $(LIB_STATIC_EAP_PROXY)
+LOCAL_SHARED_LIBRARIES += $(LIB_SHARED_EAP_PROXY)
+endif
 ifeq ($(CONFIG_TLS), openssl)
 LOCAL_SHARED_LIBRARIES += libcrypto libssl libkeystore_binder
 endif
 ifdef CONFIG_DRIVER_NL80211
+ifneq ($(wildcard external/libnl),)
+LOCAL_SHARED_LIBRARIES += libnl
+else
 LOCAL_STATIC_LIBRARIES += libnl_2
+endif
 endif
 LOCAL_CFLAGS := $(L_CFLAGS)
 LOCAL_SRC_FILES := $(OBJS)
@@ -1597,4 +1617,5 @@ LOCAL_C_INCLUDES = $(INCLUDES)
 LOCAL_SHARED_LIBRARIES := libcutils liblog
 LOCAL_COPY_HEADERS_TO := libwpa_client
 LOCAL_COPY_HEADERS := src/common/wpa_ctrl.h
+LOCAL_COPY_HEADERS += src/common/qca-vendor.h
 include $(BUILD_SHARED_LIBRARY)

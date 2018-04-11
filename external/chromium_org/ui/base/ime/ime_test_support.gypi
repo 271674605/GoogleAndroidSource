@@ -6,15 +6,7 @@
   'sources': [
     'dummy_input_method.cc',
     'dummy_input_method.h',
-    'win/mock_tsf_bridge.cc',
-    'win/mock_tsf_bridge.h',
-  ],
-  'conditions': [
-    ['OS!="win"', {
-      'sources!': [
-        'win/mock_tsf_bridge.cc',
-        'win/mock_tsf_bridge.h',
-      ],
-    }],
+    'dummy_text_input_client.cc',
+    'dummy_text_input_client.h',
   ],
 }

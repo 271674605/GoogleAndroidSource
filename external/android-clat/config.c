@@ -31,7 +31,6 @@
 #include "logging.h"
 #include "getaddr.h"
 #include "clatd.h"
-#include "setroute.h"
 
 struct clat_config Global_Clatd_Config;
 
@@ -152,29 +151,25 @@ void free_config() {
 
 /* function: dns64_detection
  * does dns lookups to set the plat subnet or exits on failure, waits forever for a dns response with a query backoff timer
+ * net_id - (optional) netId to use, NETID_UNSET indicates use of default network
  */
-void dns64_detection() {
-  int i, backoff_sleep, status;
+void dns64_detection(unsigned net_id) {
+  int backoff_sleep, status;
   struct in6_addr tmp_ptr;
 
   backoff_sleep = 1;
 
   while(1) {
-    status = plat_prefix(Global_Clatd_Config.plat_from_dns64_hostname,&tmp_ptr);
+    status = plat_prefix(Global_Clatd_Config.plat_from_dns64_hostname,net_id,&tmp_ptr);
     if(status > 0) {
       memcpy(&Global_Clatd_Config.plat_subnet, &tmp_ptr, sizeof(struct in6_addr));
       return;
     }
-    if(status < 0) {
-      logmsg(ANDROID_LOG_FATAL, "dns64_detection/no dns64, giving up\n");
-      exit(1);
-    }
-    logmsg(ANDROID_LOG_WARN, "dns64_detection failed, sleeping for %d seconds", backoff_sleep);
+    logmsg(ANDROID_LOG_WARN, "dns64_detection -- error, sleeping for %d seconds", backoff_sleep);
     sleep(backoff_sleep);
+    backoff_sleep *= 2;
     if(backoff_sleep >= 120) {
       backoff_sleep = 120;
-    } else {
-      backoff_sleep *= 2;
     }
   }
 }
@@ -223,8 +218,10 @@ int subnet_from_interface(cnode *root, const char *interface) {
  * file             - filename to parse
  * uplink_interface - interface to use to reach the internet and supplier of address space
  * plat_prefix      - (optional) plat prefix to use, otherwise follow config file
+ * net_id           - (optional) netId to use, NETID_UNSET indicates use of default network
  */
-int read_config(const char *file, const char *uplink_interface, const char *plat_prefix) {
+int read_config(const char *file, const char *uplink_interface, const char *plat_prefix,
+        unsigned net_id) {
   cnode *root = config_node("", "");
   void *tmp_ptr = NULL;
 
@@ -255,6 +252,9 @@ int read_config(const char *file, const char *uplink_interface, const char *plat
   if(!config_item_ip(root, "ipv4_local_subnet", DEFAULT_IPV4_LOCAL_SUBNET, &Global_Clatd_Config.ipv4_local_subnet))
     goto failed;
 
+  if(!config_item_ip6(root, "ipv6_local_address", DEFAULT_IPV6_LOCAL_ADDRESS, &Global_Clatd_Config.ipv6_local_address))
+    goto failed;
+
   if(plat_prefix) { // plat subnet is coming from the command line
     if(inet_pton(AF_INET6, plat_prefix, &Global_Clatd_Config.plat_subnet) <= 0) {
       logmsg(ANDROID_LOG_FATAL,"invalid IPv6 address specified for plat prefix: %s", plat_prefix);
@@ -274,7 +274,7 @@ int read_config(const char *file, const char *uplink_interface, const char *plat
 
       if(!(Global_Clatd_Config.plat_from_dns64_hostname = config_item_str(root, "plat_from_dns64_hostname", DEFAULT_DNS64_DETECTION_HOSTNAME)))
         goto failed;
-      dns64_detection();
+      dns64_detection(net_id);
     }
   }
 
@@ -295,6 +295,7 @@ void dump_config() {
 
   logmsg(ANDROID_LOG_DEBUG,"mtu = %d",Global_Clatd_Config.mtu);
   logmsg(ANDROID_LOG_DEBUG,"ipv4mtu = %d",Global_Clatd_Config.ipv4mtu);
+  logmsg(ANDROID_LOG_DEBUG,"ipv6_local_address = %s",inet_ntop(AF_INET6, &Global_Clatd_Config.ipv6_local_address, charbuffer, sizeof(charbuffer)));
   logmsg(ANDROID_LOG_DEBUG,"ipv6_local_subnet = %s",inet_ntop(AF_INET6, &Global_Clatd_Config.ipv6_local_subnet, charbuffer, sizeof(charbuffer)));
   logmsg(ANDROID_LOG_DEBUG,"ipv4_local_subnet = %s",inet_ntop(AF_INET, &Global_Clatd_Config.ipv4_local_subnet, charbuffer, sizeof(charbuffer)));
   logmsg(ANDROID_LOG_DEBUG,"plat_subnet = %s",inet_ntop(AF_INET6, &Global_Clatd_Config.plat_subnet, charbuffer, sizeof(charbuffer)));

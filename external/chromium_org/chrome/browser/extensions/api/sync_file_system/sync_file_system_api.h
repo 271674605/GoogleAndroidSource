@@ -7,8 +7,7 @@
 
 #include <map>
 
-#include "base/platform_file.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/sync_file_system/conflict_resolution_policy.h"
 #include "chrome/browser/sync_file_system/sync_file_status.h"
 #include "chrome/browser/sync_file_system/sync_status_code.h"
@@ -23,7 +22,7 @@ class FileSystemContext;
 namespace extensions {
 
 class SyncFileSystemDeleteFileSystemFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   // TODO(kinuko,calvinlo): Uncomment this or delete this class when
   // we decide if we want to revive this function.
@@ -32,22 +31,21 @@ class SyncFileSystemDeleteFileSystemFunction
 
  protected:
   virtual ~SyncFileSystemDeleteFileSystemFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  void DidDeleteFileSystem(base::PlatformFileError error);
+  void DidDeleteFileSystem(base::File::Error error);
 };
 
-
 class SyncFileSystemGetFileStatusFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.getFileStatus",
                              SYNCFILESYSTEM_GETFILESYNCSTATUS)
 
  protected:
   virtual ~SyncFileSystemGetFileStatusFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void DidGetFileStatus(
@@ -56,7 +54,7 @@ class SyncFileSystemGetFileStatusFunction
 };
 
 class SyncFileSystemGetFileStatusesFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.getFileStatuses",
                              SYNCFILESYSTEM_GETFILESYNCSTATUSES)
@@ -64,7 +62,7 @@ class SyncFileSystemGetFileStatusesFunction
 
  protected:
   virtual ~SyncFileSystemGetFileStatusesFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   typedef std::pair<sync_file_system::SyncStatusCode,
@@ -83,14 +81,14 @@ class SyncFileSystemGetFileStatusesFunction
 };
 
 class SyncFileSystemGetUsageAndQuotaFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.getUsageAndQuota",
                              SYNCFILESYSTEM_GETUSAGEANDQUOTA)
 
  protected:
   virtual ~SyncFileSystemGetUsageAndQuotaFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void DidGetUsageAndQuota(quota::QuotaStatusCode status,
@@ -99,14 +97,14 @@ class SyncFileSystemGetUsageAndQuotaFunction
 };
 
 class SyncFileSystemRequestFileSystemFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.requestFileSystem",
                              SYNCFILESYSTEM_REQUESTFILESYSTEM)
 
  protected:
   virtual ~SyncFileSystemRequestFileSystemFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   typedef SyncFileSystemRequestFileSystemFunction self;
@@ -114,32 +112,42 @@ class SyncFileSystemRequestFileSystemFunction
   // Returns the file system context for this extension.
   fileapi::FileSystemContext* GetFileSystemContext();
 
-  void DidInitializeFileSystemContext(sync_file_system::SyncStatusCode status);
-  void DidOpenFileSystem(base::PlatformFileError error,
+  void DidOpenFileSystem(const GURL& root_url,
                          const std::string& file_system_name,
-                         const GURL& root_url);
+                         base::File::Error error);
 };
 
 class SyncFileSystemSetConflictResolutionPolicyFunction
-    : public SyncExtensionFunction {
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.setConflictResolutionPolicy",
                              SYNCFILESYSTEM_SETCONFLICTRESOLUTIONPOLICY)
 
  protected:
   virtual ~SyncFileSystemSetConflictResolutionPolicyFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class SyncFileSystemGetConflictResolutionPolicyFunction
-    : public SyncExtensionFunction {
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("syncFileSystem.getConflictResolutionPolicy",
                              SYNCFILESYSTEM_GETCONFLICTRESOLUTIONPOLICY)
 
  protected:
   virtual ~SyncFileSystemGetConflictResolutionPolicyFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
+};
+
+class SyncFileSystemGetServiceStatusFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("syncFileSystem.getServiceStatus",
+                             SYNCFILESYSTEM_GETSERVICESTATUS)
+
+ protected:
+  virtual ~SyncFileSystemGetServiceStatusFunction() {}
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

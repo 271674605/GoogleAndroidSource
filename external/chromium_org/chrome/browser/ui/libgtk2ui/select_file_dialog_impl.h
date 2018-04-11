@@ -39,7 +39,6 @@ class SelectFileDialogImpl : public ui::SelectFileDialog {
   static bool CheckKDEDialogWorksOnUIThread();
 
   // BaseShellDialog implementation.
-  virtual bool IsRunning(gfx::NativeWindow parent_window) const OVERRIDE;
   virtual void ListenerDestroyed() OVERRIDE;
 
  protected:
@@ -51,7 +50,7 @@ class SelectFileDialogImpl : public ui::SelectFileDialog {
   // |params| is user data we pass back via the Listener interface.
   virtual void SelectFileImpl(
       Type type,
-      const string16& title,
+      const base::string16& title,
       const base::FilePath& default_path,
       const FileTypeInfo* file_types,
       int file_type_index,
@@ -71,9 +70,6 @@ class SelectFileDialogImpl : public ui::SelectFileDialog {
   // The index of the default selected file filter.
   // Note: This starts from 1, not 0.
   size_t file_type_index_;
-
-  // The set of all parent windows for which we are currently running dialogs.
-  std::set<aura::Window*> parents_;
 
   // The type of dialog we are showing the user.
   Type type_;

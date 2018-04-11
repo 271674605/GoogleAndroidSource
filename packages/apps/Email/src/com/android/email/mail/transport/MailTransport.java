@@ -55,7 +55,7 @@ public class MailTransport {
 
     private final String mDebugLabel;
     private final Context mContext;
-    private final HostAuth mHostAuth;
+    protected final HostAuth mHostAuth;
 
     private Socket mSocket;
     private InputStream mIn;
@@ -207,6 +207,15 @@ public class MailTransport {
             throw new SSLPeerUnverifiedException(
                     "Certificate hostname not useable for server: " + hostname);
         }
+    }
+
+    /**
+     * Get the socket timeout.
+     * @return the read timeout value in milliseconds
+     * @throws SocketException
+     */
+    public int getSoTimeout() throws SocketException {
+        return mSocket.getSoTimeout();
     }
 
     /**

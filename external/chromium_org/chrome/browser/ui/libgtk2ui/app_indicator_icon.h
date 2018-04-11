@@ -7,8 +7,9 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_signal.h"
-#include "ui/linux_ui/status_icon_linux.h"
+#include "ui/views/linux_ui/status_icon_linux.h"
 
 typedef struct _AppIndicator AppIndicator;
 typedef struct _GtkWidget GtkWidget;
@@ -17,66 +18,63 @@ namespace gfx {
 class ImageSkia;
 }
 
-namespace libgtk2ui {
+namespace ui {
+class MenuModel;
+}
 
-class AppIndicatorIcon : public StatusIconLinux {
+namespace libgtk2ui {
+class AppIndicatorIconMenu;
+
+// Status icon implementation which uses libappindicator.
+class AppIndicatorIcon : public views::StatusIconLinux {
  public:
   // The id uniquely identifies the new status icon from other chrome status
   // icons.
-  explicit AppIndicatorIcon(std::string id,
-                            const gfx::ImageSkia& image,
-                            const string16& tool_tip);
+  AppIndicatorIcon(std::string id,
+                   const gfx::ImageSkia& image,
+                   const base::string16& tool_tip);
   virtual ~AppIndicatorIcon();
 
   // Indicates whether libappindicator so could be opened.
   static bool CouldOpen();
 
-  // Overridden from StatusIcon:
+  // Overridden from views::StatusIconLinux:
   virtual void SetImage(const gfx::ImageSkia& image) OVERRIDE;
   virtual void SetPressedImage(const gfx::ImageSkia& image) OVERRIDE;
-  virtual void SetToolTip(const string16& tool_tip) OVERRIDE;
-
- protected:
-  // Overridden from StatusIcon.
+  virtual void SetToolTip(const base::string16& tool_tip) OVERRIDE;
   virtual void UpdatePlatformContextMenu(ui::MenuModel* menu) OVERRIDE;
+  virtual void RefreshPlatformContextMenu() OVERRIDE;
 
  private:
-  void SetImageFromFile(base::FilePath icon_file_path);
+  void SetImageFromFile(const base::FilePath& icon_file_path);
   void SetMenu();
 
-  // Adds a menu item to the top of the existing gtk_menu as a replacement for
-  // the status icon click action or creates a new gtk menu with the menu item
-  // if a menu doesn't exist. Clicking on this menu item should simulate a
-  // status icon click by despatching a click event.
-  void CreateClickActionReplacement();
-  void DestroyMenu();
+  // Sets a menu item at the top of the menu as a replacement for the status
+  // icon click action. Clicking on this menu item should simulate a status icon
+  // click by despatching a click event.
+  void UpdateClickActionReplacementMenuItem();
 
-  static base::FilePath CreateTempImageFile(gfx::ImageSkia* image,
-                                            int icon_change_count,
-                                            std::string id);
-  static void DeletePath(base::FilePath icon_file_path);
-
-  // Updates all the enabled/checked states and the dynamic labels.
-  void UpdateMenu();
-
-  // Callback for when the status icon click replacement menu item is clicked.
-  CHROMEGTK_CALLBACK_0(AppIndicatorIcon, void, OnClick);
-
-  // Callback for when a menu item is clicked.
-  CHROMEGTK_CALLBACK_0(AppIndicatorIcon, void, OnMenuItemActivated);
+  // Callback for when the status icon click replacement menu item is activated.
+  void OnClickActionReplacementMenuItemActivated();
 
   std::string id_;
   std::string tool_tip_;
 
+  // Whether the user is using KDE.
+  bool using_kde4_;
+
   // Gtk status icon wrapper
   AppIndicator* icon_;
 
-  GtkWidget* gtk_menu_;
+  scoped_ptr<AppIndicatorIconMenu> menu_;
   ui::MenuModel* menu_model_;
 
   base::FilePath icon_file_path_;
   int icon_change_count_;
-  bool block_activation_;
+
+  base::WeakPtrFactory<AppIndicatorIcon> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppIndicatorIcon);
 };
 
 }  // namespace libgtk2ui

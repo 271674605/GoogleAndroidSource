@@ -22,10 +22,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+
 import org.xmlpull.v1.XmlPullParser;
 
 import android.app.Activity;
 import android.content.Context;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -44,18 +48,18 @@ import android.util.Xml;
 import android.widget.ImageView;
 import android.widget.ImageView.ScaleType;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 /**
  * Test {@link ImageView}.
  */
-public class ImageViewTest extends ActivityInstrumentationTestCase<ImageViewStubActivity> {
+public class ImageViewTest extends ActivityInstrumentationTestCase<ImageViewCtsActivity> {
     private ImageView mImageView;
     private Activity mActivity;
 
     public ImageViewTest() {
-        super("com.android.cts.stub", ImageViewStubActivity.class);
+        super("com.android.cts.widget", ImageViewCtsActivity.class);
     }
 
     /**
@@ -437,6 +441,31 @@ public class ImageViewTest extends ActivityInstrumentationTestCase<ImageViewStub
         assertTrue(mockImageView.verifyDrawable(bgdrawable));
     }
 
+    public void testImageTint() {
+        ImageView inflatedView = (ImageView) mActivity.findViewById(R.id.image_tint);
+
+        assertEquals("Image tint inflated correctly",
+                Color.WHITE, inflatedView.getImageTintList().getDefaultColor());
+        assertEquals("Image tint mode inflated correctly",
+                PorterDuff.Mode.SRC_OVER, inflatedView.getImageTintMode());
+
+        MockDrawable image = new MockDrawable();
+        ImageView view = new ImageView(mActivity);
+
+        view.setImageDrawable(image);
+        assertFalse("No image tint applied by default", image.hasCalledSetTint());
+
+        view.setImageTintList(ColorStateList.valueOf(Color.WHITE));
+        assertTrue("Image tint applied when setImageTintList() called after set()",
+                image.hasCalledSetTint());
+
+        image.reset();
+        view.setImageDrawable(null);
+        view.setImageDrawable(image);
+        assertTrue("Image tint applied when setImageTintList() called before set()",
+                image.hasCalledSetTint());
+    }
+
     private static class MockImageView extends ImageView {
         private boolean mOnSizeChangedCalled = false;
 
@@ -500,6 +529,7 @@ public class ImageViewTest extends ActivityInstrumentationTestCase<ImageViewStub
     private class MockDrawable extends Drawable {
         private ColorFilter mColorFilter;
         private boolean mDrawCalled = false;
+        private boolean mCalledSetTint = false;
         private int mAlpha;
 
         public boolean hasDrawCalled() {
@@ -536,6 +566,20 @@ public class ImageViewTest extends ActivityInstrumentationTestCase<ImageViewStub
 
         public boolean isStateful() {
             return true;
+        }
+
+        @Override
+        public void setTintList(ColorStateList tint) {
+            super.setTintList(tint);
+            mCalledSetTint = true;
+        }
+
+        public boolean hasCalledSetTint() {
+            return mCalledSetTint;
+        }
+
+        public void reset() {
+            mCalledSetTint = false;
         }
     }
 }

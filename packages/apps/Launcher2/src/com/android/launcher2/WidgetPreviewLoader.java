@@ -4,11 +4,14 @@ import android.appwidget.AppWidgetProviderInfo;
 import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDiskIOException;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
@@ -22,9 +25,9 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.os.AsyncTask;
-import android.util.Log;
 
+import android.os.AsyncTask;
+import android.view.View;
 import com.android.launcher.R;
 
 import java.io.ByteArrayOutputStream;
@@ -102,6 +105,7 @@ class BitmapFactoryOptionsCache extends SoftReferenceThreadLocal<BitmapFactory.O
 
 public class WidgetPreviewLoader {
     static final String TAG = "WidgetPreviewLoader";
+    static final String ANDROID_INCREMENTAL_VERSION_NAME_KEY = "android.incremental.version";
 
     private int mPreviewBitmapWidth;
     private int mPreviewBitmapHeight;
@@ -125,6 +129,9 @@ public class WidgetPreviewLoader {
     private BitmapFactoryOptionsCache mCachedBitmapFactoryOptions = new BitmapFactoryOptionsCache();
 
     private int mAppIconSize;
+    private int mProfileBadgeSize;
+    private int mProfileBadgeMargin;
+
     private IconCache mIconCache;
 
     private final float sWidgetPreviewIconPaddingPercentage = 0.25f;
@@ -143,11 +150,34 @@ public class WidgetPreviewLoader {
         mContext = mLauncher = launcher;
         mPackageManager = mContext.getPackageManager();
         mAppIconSize = mContext.getResources().getDimensionPixelSize(R.dimen.app_icon_size);
+        mProfileBadgeSize = mContext.getResources().getDimensionPixelSize(
+                R.dimen.profile_badge_size);
+        mProfileBadgeMargin = mContext.getResources().getDimensionPixelSize(
+                R.dimen.profile_badge_margin);
         LauncherApplication app = (LauncherApplication) launcher.getApplicationContext();
         mIconCache = app.getIconCache();
         mDb = app.getWidgetPreviewCacheDb();
         mLoadedPreviews = new HashMap<String, WeakReference<Bitmap>>();
         mUnusedBitmaps = new ArrayList<SoftReference<Bitmap>>();
+
+        SharedPreferences sp = launcher.getSharedPreferences(
+                LauncherApplication.getSharedPreferencesKey(), Context.MODE_PRIVATE);
+        final String lastVersionName = sp.getString(ANDROID_INCREMENTAL_VERSION_NAME_KEY, null);
+        final String versionName = android.os.Build.VERSION.INCREMENTAL;
+        if (!versionName.equals(lastVersionName)) {
+            // clear all the previews whenever the system version changes, to ensure that previews
+            // are up-to-date for any apps that might have been updated with the system
+            clearDb();
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putString(ANDROID_INCREMENTAL_VERSION_NAME_KEY, versionName);
+            editor.commit();
+        }
+    }
+
+    public void recreateDb() {
+        LauncherApplication app = (LauncherApplication) mLauncher.getApplication();
+        app.recreateWidgetPreviewDb();
+        mDb = app.getWidgetPreviewCacheDb();
     }
 
     public void setPreviewSize(int previewWidth, int previewHeight,
@@ -296,8 +326,11 @@ public class WidgetPreviewLoader {
         StringBuilder sb = new StringBuilder();
         String output;
         if (o instanceof AppWidgetProviderInfo) {
+            AppWidgetProviderInfo info = (AppWidgetProviderInfo) o;
             sb.append(WIDGET_PREFIX);
-            sb.append(((AppWidgetProviderInfo) o).provider.flattenToString());
+            sb.append(info.getProfile());
+            sb.append('/');
+            sb.append(info.provider.flattenToString());
             output = sb.toString();
             sb.setLength(0);
         } else {
@@ -331,7 +364,20 @@ public class WidgetPreviewLoader {
         preview.compress(Bitmap.CompressFormat.PNG, 100, stream);
         values.put(CacheDb.COLUMN_PREVIEW_BITMAP, stream.toByteArray());
         values.put(CacheDb.COLUMN_SIZE, mSize);
-        db.insert(CacheDb.TABLE_NAME, null, values);
+        try {
+            db.insert(CacheDb.TABLE_NAME, null, values);
+        } catch (SQLiteDiskIOException e) {
+            recreateDb();
+        }
+    }
+
+    private void clearDb() {
+        SQLiteDatabase db = mDb.getWritableDatabase();
+        // Delete everything
+        try {
+            db.delete(CacheDb.TABLE_NAME, null, null);
+        } catch (SQLiteDiskIOException e) {
+        }
     }
 
     public static void removeFromDb(final CacheDb cacheDb, final String packageName) {
@@ -341,15 +387,18 @@ public class WidgetPreviewLoader {
         new AsyncTask<Void, Void, Void>() {
             public Void doInBackground(Void ... args) {
                 SQLiteDatabase db = cacheDb.getWritableDatabase();
-                db.delete(CacheDb.TABLE_NAME,
-                        CacheDb.COLUMN_NAME + " LIKE ? OR " +
-                        CacheDb.COLUMN_NAME + " LIKE ?", // SELECT query
-                        new String[] {
-                            WIDGET_PREFIX + packageName + "/%",
-                            SHORTCUT_PREFIX + packageName + "/%"} // args to SELECT query
-                            );
-                synchronized(sInvalidPackages) {
-                    sInvalidPackages.remove(packageName);
+                try {
+                    db.delete(CacheDb.TABLE_NAME,
+                              CacheDb.COLUMN_NAME + " LIKE ? OR " +
+                              CacheDb.COLUMN_NAME + " LIKE ?", // SELECT query
+                              new String[] {
+                                  WIDGET_PREFIX + packageName + "/%",
+                                  SHORTCUT_PREFIX + packageName + "/%"} // args to SELECT query
+                              );
+                    synchronized(sInvalidPackages) {
+                        sInvalidPackages.remove(packageName);
+                    }
+                } catch (SQLiteDiskIOException e) {
                 }
                 return null;
             }
@@ -362,14 +411,20 @@ public class WidgetPreviewLoader {
                     CacheDb.COLUMN_SIZE + " = ?";
         }
         SQLiteDatabase db = mDb.getReadableDatabase();
-        Cursor result = db.query(CacheDb.TABLE_NAME,
-                new String[] { CacheDb.COLUMN_PREVIEW_BITMAP }, // cols to return
-                mCachedSelectQuery, // select query
-                new String[] { name, mSize }, // args to select query
-                null,
-                null,
-                null,
-                null);
+        Cursor result;
+        try {
+            result = db.query(CacheDb.TABLE_NAME,
+                    new String[] { CacheDb.COLUMN_PREVIEW_BITMAP }, // cols to return
+                    mCachedSelectQuery, // select query
+                    new String[] { name, mSize }, // args to select query
+                    null,
+                    null,
+                    null,
+                    null);
+        } catch (SQLiteDiskIOException e) {
+            recreateDb();
+            return null;
+        }
         if (result.getCount() > 0) {
             result.moveToFirst();
             byte[] blob = result.getBlob(0);
@@ -403,8 +458,8 @@ public class WidgetPreviewLoader {
         int[] cellSpans = Launcher.getSpanForWidget(mLauncher, info);
         int maxWidth = maxWidthForWidgetPreview(cellSpans[0]);
         int maxHeight = maxHeightForWidgetPreview(cellSpans[1]);
-        return generateWidgetPreview(info.provider, info.previewImage, info.icon,
-                cellSpans[0], cellSpans[1], maxWidth, maxHeight, preview, null);
+        return generateWidgetPreview(info, cellSpans[0], cellSpans[1], maxWidth,
+                maxHeight, preview, null);
     }
 
     public int maxWidthForWidgetPreview(int spanX) {
@@ -417,22 +472,14 @@ public class WidgetPreviewLoader {
                 mWidgetSpacingLayout.estimateCellHeight(spanY));
     }
 
-    public Bitmap generateWidgetPreview(ComponentName provider, int previewImage,
-            int iconId, int cellHSpan, int cellVSpan, int maxPreviewWidth, int maxPreviewHeight,
-            Bitmap preview, int[] preScaledWidthOut) {
+    public Bitmap generateWidgetPreview(AppWidgetProviderInfo info, int cellHSpan,
+            int cellVSpan, int maxPreviewWidth, int maxPreviewHeight, Bitmap preview,
+            int[] preScaledWidthOut) {
         // Load the preview image if possible
-        String packageName = provider.getPackageName();
         if (maxPreviewWidth < 0) maxPreviewWidth = Integer.MAX_VALUE;
         if (maxPreviewHeight < 0) maxPreviewHeight = Integer.MAX_VALUE;
 
-        Drawable drawable = null;
-        if (previewImage != 0) {
-            drawable = mPackageManager.getDrawable(packageName, previewImage, null);
-            if (drawable == null) {
-                Log.w(TAG, "Can't load widget preview drawable 0x" +
-                        Integer.toHexString(previewImage) + " for provider: " + provider);
-            }
-        }
+        Drawable drawable = info.loadPreviewImage(mContext, 0);
 
         int previewWidth;
         int previewHeight;
@@ -477,8 +524,9 @@ public class WidgetPreviewLoader {
                         (int) ((previewDrawableWidth - mAppIconSize * iconScale) / 2);
                 int yoffset =
                         (int) ((previewDrawableHeight - mAppIconSize * iconScale) / 2);
-                if (iconId > 0)
-                    icon = mIconCache.getFullResIcon(packageName, iconId);
+                if (info.icon > 0)
+                    icon = mIconCache.getFullResIcon(info.provider.getPackageName(),
+                            info.icon, info.getProfile());
                 if (icon != null) {
                     renderDrawableToBitmap(icon, defaultPreview, hoffset,
                             yoffset, (int) (mAppIconSize * iconScale),
@@ -529,6 +577,42 @@ public class WidgetPreviewLoader {
             c.drawBitmap(defaultPreview, src, dest, p);
             c.setBitmap(null);
         }
+
+        // Finally, if the preview is for a managed profile, badge it.
+        if (!info.getProfile().equals(android.os.Process.myUserHandle())) {
+            final int previewBitmapWidth = preview.getWidth();
+            final int previewBitmapHeight = preview.getHeight();
+
+            // Figure out the badge location.
+            final Rect badgeLocation;
+            Configuration configuration = mContext.getResources().getConfiguration();
+            if (configuration.getLayoutDirection() == View.LAYOUT_DIRECTION_LTR) {
+                final int badgeLeft = previewBitmapWidth - mProfileBadgeSize - mProfileBadgeMargin;
+                final int badgeTop = previewBitmapHeight - mProfileBadgeSize - mProfileBadgeMargin;
+                final int badgeRight = badgeLeft + mProfileBadgeSize;
+                final int badgeBottom = badgeTop + mProfileBadgeSize;
+                badgeLocation = new Rect(badgeLeft, badgeTop, badgeRight, badgeBottom);
+            } else {
+                final int badgeLeft = mProfileBadgeMargin;
+                final int badgeTop = previewBitmapHeight - mProfileBadgeSize - mProfileBadgeMargin;
+                final int badgeRight = badgeLeft + mProfileBadgeSize;
+                final int badgeBottom = badgeTop + mProfileBadgeSize;
+                badgeLocation = new Rect(badgeLeft, badgeTop, badgeRight, badgeBottom);
+            }
+
+            // Badge the preview.
+            BitmapDrawable previewDrawable = new BitmapDrawable(
+                    mContext.getResources(), preview);
+            Drawable badgedPreviewDrawable = mContext.getPackageManager().getUserBadgedDrawableForDensity(
+                    previewDrawable, info.getProfile(), badgeLocation, 0);
+
+            // Reture the nadged bitmap.
+            if (badgedPreviewDrawable instanceof BitmapDrawable) {
+                BitmapDrawable bitmapDrawable = (BitmapDrawable) badgedPreviewDrawable;
+                return bitmapDrawable.getBitmap();
+            }
+        }
+
         return preview;
     }
 
@@ -547,7 +631,7 @@ public class WidgetPreviewLoader {
             c.setBitmap(null);
         }
         // Render the icon
-        Drawable icon = mIconCache.getFullResIcon(info);
+        Drawable icon = mIconCache.getFullResIcon(info, android.os.Process.myUserHandle());
 
         int paddingTop = mContext.
                 getResources().getDimensionPixelOffset(R.dimen.shortcut_preview_padding_top);
@@ -606,5 +690,4 @@ public class WidgetPreviewLoader {
             c.setBitmap(null);
         }
     }
-
 }

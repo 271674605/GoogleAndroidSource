@@ -41,7 +41,7 @@ import com.android.mms.MmsApp;
  * </ul>
  */
 public class MmsSystemEventReceiver extends BroadcastReceiver {
-    private static final String TAG = "MmsSystemEventReceiver";
+    private static final String TAG = LogTag.TAG;
     private static ConnectivityManager mConnMgr = null;
 
     public static void wakeUpService(Context context) {
@@ -75,6 +75,9 @@ public class MmsSystemEventReceiver extends BroadcastReceiver {
             }
             NetworkInfo mmsNetworkInfo = mConnMgr
                     .getNetworkInfo(ConnectivityManager.TYPE_MOBILE_MMS);
+            if (mmsNetworkInfo == null) {
+                return;
+            }
             boolean available = mmsNetworkInfo.isAvailable();
             boolean isConnected = mmsNetworkInfo.isConnected();
 

@@ -24,21 +24,31 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.OperationApplicationException;
 import android.content.res.Resources;
+import android.database.ContentObservable;
+import android.database.ContentObserver;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.Looper;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.RemoteException;
+import android.provider.BaseColumns;
 
 import com.android.emailcommon.utility.TextUtilities;
 import com.android.emailcommon.utility.Utility;
+import com.android.emailcommon.Logging;
 import com.android.emailcommon.R;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.commons.io.IOUtils;
+
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 
 
@@ -53,7 +63,7 @@ import java.util.ArrayList;
  * necessarily be cloned for use in these two cases.
  *
  * Conventions used in naming columns:
- *   RECORD_ID is the primary key for all Email records
+ *   BaseColumns._ID is the primary key for all Email records
  *   The SyncColumns interface is used by all classes that are synced to the server directly
  *   (Mailbox and Email)
  *
@@ -67,24 +77,20 @@ public abstract class EmailContent {
     public static final int NOTIFICATION_MAILBOX_UNSEEN_COUNT_COLUMN = 2;
 
     // All classes share this
+    // Use BaseColumns._ID instead
+    @Deprecated
     public static final String RECORD_ID = "_id";
 
-    public static final String[] COUNT_COLUMNS = new String[]{"count(*)"};
+    public static final String[] COUNT_COLUMNS = {"count(*)"};
 
     /**
      * This projection can be used with any of the EmailContent classes, when all you need
      * is a list of id's.  Use ID_PROJECTION_COLUMN to access the row data.
      */
-    public static final String[] ID_PROJECTION = new String[] {
-        RECORD_ID
-    };
+    public static final String[] ID_PROJECTION = { BaseColumns._ID };
     public static final int ID_PROJECTION_COLUMN = 0;
 
-    public static final String ID_SELECTION = RECORD_ID + " =?";
-
-    public static final String FIELD_COLUMN_NAME = "field";
-    public static final String ADD_COLUMN_NAME = "add";
-    public static final String SET_COLUMN_NAME = "set";
+    public static final String ID_SELECTION = BaseColumns._ID + " =?";
 
     public static final int SYNC_STATUS_NONE = UIProvider.SyncStatus.NO_SYNC;
     public static final int SYNC_STATUS_USER = UIProvider.SyncStatus.USER_REFRESH;
@@ -109,10 +115,25 @@ public abstract class EmailContent {
     // The id of the Content
     public long mId = NOT_SAVED;
 
+    /**
+     * Since we close the cursor we use to generate this object, and possibly create the object
+     * without using any cursor at all (eg: parcel), we need to handle observing provider changes
+     * ourselves. This content observer uses a weak reference to keep from rooting this object
+     * in the ContentResolver in case it is not properly disposed of using {@link #close(Context)}
+     */
+    private SelfContentObserver mSelfObserver;
+    private ContentObservable mObservable;
+
     // Write the Content into a ContentValues container
     public abstract ContentValues toContentValues();
     // Read the Content from a ContentCursor
-    public abstract void restore (Cursor cursor);
+    public abstract void restore(Cursor cursor);
+    // Same as above, with the addition of a context to retrieve extra content.
+    // Body uses this to fetch the email body html/text from the provider bypassing the cursor
+    // Not always safe to call on the UI thread.
+    public void restore(Context context, Cursor cursor) {
+        restore(cursor);
+    }
 
 
     public static String EMAIL_PACKAGE_NAME;
@@ -123,12 +144,24 @@ public abstract class EmailContent {
     public static String NOTIFIER_AUTHORITY;
     public static Uri CONTENT_URI;
     public static final String PARAMETER_LIMIT = "limit";
+
+    /**
+     * Query parameter for the UI accounts query to enable suppression of the combined account.
+     */
+    public static final String SUPPRESS_COMBINED_ACCOUNT_PARAM = "suppress_combined";
     public static Uri CONTENT_NOTIFIER_URI;
     public static Uri PICK_TRASH_FOLDER_URI;
     public static Uri PICK_SENT_FOLDER_URI;
     public static Uri MAILBOX_NOTIFICATION_URI;
     public static Uri MAILBOX_MOST_RECENT_MESSAGE_URI;
     public static Uri ACCOUNT_CHECK_URI;
+
+    /**
+     * String for both the EmailProvider call, and the key for the value in the response.
+     * TODO: Eventually this ought to be a device property, not defined by the app.
+     */
+    public static String DEVICE_FRIENDLY_NAME = "deviceFriendlyName";
+
 
     public static String PROVIDER_PERMISSION;
 
@@ -153,12 +186,20 @@ public abstract class EmailContent {
             Mailbox.initMailbox();
             QuickResponse.initQuickResponse();
             HostAuth.initHostAuth();
+            Credential.initCredential();
             Policy.initPolicy();
             Message.initMessage();
             MessageMove.init();
             MessageStateChange.init();
             Body.initBody();
             Attachment.initAttachment();
+        }
+    }
+
+
+    private static void warnIfUiThread() {
+        if (Looper.getMainLooper().getThread() == Thread.currentThread()) {
+            LogUtils.w(Logging.LOG_TAG, new Throwable(), "Method called on the UI thread");
         }
     }
 
@@ -190,12 +231,23 @@ public abstract class EmailContent {
      */
     public static <T extends EmailContent> T restoreContentWithId(Context context,
             Class<T> klass, Uri contentUri, String[] contentProjection, long id) {
-        Uri u = ContentUris.withAppendedId(contentUri, id);
-        Cursor c = context.getContentResolver().query(u, contentProjection, null, null, null);
+        return restoreContentWithId(context, klass, contentUri, contentProjection, id, null);
+    }
+
+    public static <T extends EmailContent> T restoreContentWithId(final Context context,
+                final Class<T> klass, final Uri contentUri, final String[] contentProjection,
+            final long id, final ContentObserver observer) {
+        warnIfUiThread();
+        final Uri u = ContentUris.withAppendedId(contentUri, id);
+        final Cursor c = context.getContentResolver().query(u, contentProjection, null, null, null);
         if (c == null) throw new ProviderUnavailableException();
         try {
             if (c.moveToFirst()) {
-                return getContent(c, klass);
+                final T content = getContent(context, c, klass);
+                if (observer != null) {
+                    content.registerObserver(context, observer);
+                }
+                return content;
             } else {
                 return null;
             }
@@ -204,13 +256,111 @@ public abstract class EmailContent {
         }
     }
 
+    /**
+     * Register a content observer to be notified when the data underlying this object changes
+     * @param observer ContentObserver to register
+     */
+    public synchronized void registerObserver(final Context context, final ContentObserver observer) {
+        if (mSelfObserver == null) {
+            mSelfObserver = new SelfContentObserver(this);
+            context.getContentResolver().registerContentObserver(getContentNotificationUri(),
+                    true, mSelfObserver);
+            mObservable = new ContentObservable();
+        }
+        mObservable.registerObserver(observer);
+    }
+
+    /**
+     * Unregister a content observer previously registered with
+     * {@link #registerObserver(Context, ContentObserver)}
+     * @param observer ContentObserver to unregister
+     */
+    public synchronized void unregisterObserver(final ContentObserver observer) {
+        if (mObservable == null) {
+            throw new IllegalStateException("Unregistering with null observable");
+        }
+        mObservable.unregisterObserver(observer);
+    }
+
+    /**
+     * Unregister all content observers previously registered with
+     * {@link #registerObserver(Context, ContentObserver)}
+     */
+    public synchronized void unregisterAllObservers() {
+        if (mObservable == null) {
+            throw new IllegalStateException("Unregistering with null observable");
+        }
+        mObservable.unregisterAll();
+    }
+
+    /**
+     * Unregister all content observers previously registered with
+     * {@link #registerObserver(Context, ContentObserver)} and release internal resources associated
+     * with content observing
+     */
+    public synchronized void close(final Context context) {
+        if (mSelfObserver == null) {
+            return;
+        }
+        unregisterAllObservers();
+        context.getContentResolver().unregisterContentObserver(mSelfObserver);
+        mSelfObserver = null;
+    }
+
+    /**
+     * Returns a Uri for observing the underlying content. Subclasses that wish to implement content
+     * observing must override this method.
+     * @return Uri for registering content notifications
+     */
+    protected Uri getContentNotificationUri() {
+        throw new UnsupportedOperationException(
+                "Subclasses must override this method for content observation to work");
+    }
+
+    /**
+     * This method is called when the underlying data has changed, and notifies registered observers
+     * @param selfChange true if this is a self-change notification
+     */
+    @SuppressWarnings("deprecation")
+    public synchronized void onChange(final boolean selfChange) {
+        if (mObservable != null) {
+            mObservable.dispatchChange(selfChange);
+        }
+    }
+
+    /**
+     * A content observer that calls {@link #onChange(boolean)} when triggered
+     */
+    private static class SelfContentObserver extends ContentObserver {
+        WeakReference<EmailContent> mContent;
+
+        public SelfContentObserver(final EmailContent content) {
+            super(null);
+            mContent = new WeakReference<EmailContent>(content);
+        }
+
+        @Override
+        public boolean deliverSelfNotifications() {
+            return false;
+        }
+
+        @Override
+        public void onChange(final boolean selfChange) {
+            EmailContent content = mContent.get();
+            if (content != null) {
+                content.onChange(false);
+            }
+        }
+    }
+
 
     // The Content sub class must have a no-arg constructor
-    static public <T extends EmailContent> T getContent(Cursor cursor, Class<T> klass) {
+    static public <T extends EmailContent> T getContent(final Context context, final Cursor cursor,
+            final Class<T> klass) {
         try {
             T content = klass.newInstance();
             content.mId = cursor.getLong(0);
-            content.restore(cursor);
+            content.restore(context, cursor);
             return content;
         } catch (IllegalAccessException e) {
             e.printStackTrace();
@@ -257,7 +407,7 @@ public abstract class EmailContent {
      */
     static public int count(Context context, Uri uri, String selection, String[] selectionArgs) {
         return Utility.getFirstRowLong(context,
-                uri, COUNT_COLUMNS, selection, selectionArgs, null, 0, Long.valueOf(0)).intValue();
+                uri, COUNT_COLUMNS, selection, selectionArgs, null, 0, 0L).intValue();
     }
 
     /**
@@ -279,21 +429,23 @@ public abstract class EmailContent {
     }
 
     public interface SyncColumns {
-        public static final String ID = "_id";
         // source id (string) : the source's name of this item
         public static final String SERVER_ID = "syncServerId";
         // source's timestamp (long) for this item
         public static final String SERVER_TIMESTAMP = "syncServerTimeStamp";
     }
 
-    public interface BodyColumns {
-        public static final String ID = "_id";
+    public interface BodyColumns extends BaseColumns {
         // Foreign key to the message corresponding to this body
         public static final String MESSAGE_KEY = "messageKey";
-        // The html content itself
+        // The html content itself, not returned on query
         public static final String HTML_CONTENT = "htmlContent";
-        // The plain text content itself
+        // The html content URI, for ContentResolver#openFileDescriptor()
+        public static final String HTML_CONTENT_URI = "htmlContentUri";
+        // The plain text content itself, not returned on query
         public static final String TEXT_CONTENT = "textContent";
+        // The text content URI, for ContentResolver#openFileDescriptor()
+        public static final String TEXT_CONTENT_URI = "textContentUri";
         // Replied-to or forwarded body (in html form)
         @Deprecated
         public static final String HTML_REPLY = "htmlReply";
@@ -311,10 +463,10 @@ public abstract class EmailContent {
         public static final String QUOTED_TEXT_START_POS = "quotedTextStartPos";
     }
 
-    public static final class Body extends EmailContent implements BodyColumns {
+    public static final class Body extends EmailContent {
         public static final String TABLE_NAME = "Body";
 
-        public static final String SELECTION_BY_MESSAGE_KEY = MESSAGE_KEY + "=?";
+        public static final String SELECTION_BY_MESSAGE_KEY = BodyColumns.MESSAGE_KEY + "=?";
 
         public static Uri CONTENT_URI;
 
@@ -322,68 +474,34 @@ public abstract class EmailContent {
             CONTENT_URI = Uri.parse(EmailContent.CONTENT_URI + "/body");
         }
 
+        public static final String[] CONTENT_PROJECTION = new String[] {
+                BaseColumns._ID,
+                BodyColumns.MESSAGE_KEY,
+                BodyColumns.HTML_CONTENT_URI,
+                BodyColumns.TEXT_CONTENT_URI,
+                BodyColumns.SOURCE_MESSAGE_KEY,
+                BodyColumns.QUOTED_TEXT_START_POS
+        };
+
         public static final int CONTENT_ID_COLUMN = 0;
         public static final int CONTENT_MESSAGE_KEY_COLUMN = 1;
-        public static final int CONTENT_HTML_CONTENT_COLUMN = 2;
-        public static final int CONTENT_TEXT_CONTENT_COLUMN = 3;
-        @Deprecated
-        public static final int CONTENT_HTML_REPLY_COLUMN = 4;
-        @Deprecated
-        public static final int CONTENT_TEXT_REPLY_COLUMN = 5;
-        public static final int CONTENT_SOURCE_KEY_COLUMN = 6;
-        @Deprecated
-        public static final int CONTENT_INTRO_TEXT_COLUMN = 7;
-        public static final int CONTENT_QUOTED_TEXT_START_POS_COLUMN = 8;
-
-        public static final String[] CONTENT_PROJECTION = new String[] {
-            RECORD_ID, BodyColumns.MESSAGE_KEY, BodyColumns.HTML_CONTENT, BodyColumns.TEXT_CONTENT,
-            BodyColumns.HTML_REPLY, BodyColumns.TEXT_REPLY, BodyColumns.SOURCE_MESSAGE_KEY,
-            BodyColumns.INTRO_TEXT, BodyColumns.QUOTED_TEXT_START_POS
-        };
-
-        public static final String[] COMMON_PROJECTION_TEXT = new String[] {
-            RECORD_ID, BodyColumns.TEXT_CONTENT
-        };
-        public static final String[] COMMON_PROJECTION_HTML = new String[] {
-            RECORD_ID, BodyColumns.HTML_CONTENT
-        };
-        @Deprecated
-        public static final String[] COMMON_PROJECTION_REPLY_TEXT = new String[] {
-            RECORD_ID, BodyColumns.TEXT_REPLY
-        };
-        @Deprecated
-        public static final String[] COMMON_PROJECTION_REPLY_HTML = new String[] {
-            RECORD_ID, BodyColumns.HTML_REPLY
-        };
-        @Deprecated
-        public static final String[] COMMON_PROJECTION_INTRO = new String[] {
-            RECORD_ID, BodyColumns.INTRO_TEXT
-        };
-        public static final String[] COMMON_PROJECTION_SOURCE = new String[] {
-            RECORD_ID, BodyColumns.SOURCE_MESSAGE_KEY
-        };
-        public static final int COMMON_PROJECTION_COLUMN_TEXT = 1;
+        public static final int CONTENT_HTML_URI_COLUMN = 2;
+        public static final int CONTENT_TEXT_URI_COLUMN = 3;
+        public static final int CONTENT_SOURCE_KEY_COLUMN = 4;
+        public static final int CONTENT_QUOTED_TEXT_START_POS_COLUMN = 5;
 
         private static final String[] PROJECTION_SOURCE_KEY =
-            new String[] { BodyColumns.SOURCE_MESSAGE_KEY };
+            new String[] {BaseColumns._ID, BodyColumns.SOURCE_MESSAGE_KEY};
 
         public long mMessageKey;
         public String mHtmlContent;
         public String mTextContent;
-        @Deprecated
-        public String mHtmlReply;
-        @Deprecated
-        public String mTextReply;
         public int mQuotedTextStartPos;
 
         /**
-         * Points to the ID of the message being replied to or forwarded. Will always be set,
-         * even if {@link #mHtmlReply} and {@link #mTextReply} are null (indicating the user doesn't
-         * want to include quoted text.
+         * Points to the ID of the message being replied to or forwarded. Will always be set.
          */
         public long mSourceKey;
-        @Deprecated
-        public String mIntroText;
 
         public Body() {
             mBaseUri = CONTENT_URI;
@@ -397,10 +515,7 @@ public abstract class EmailContent {
             values.put(BodyColumns.MESSAGE_KEY, mMessageKey);
             values.put(BodyColumns.HTML_CONTENT, mHtmlContent);
             values.put(BodyColumns.TEXT_CONTENT, mTextContent);
-            values.put(BodyColumns.HTML_REPLY, mHtmlReply);
-            values.put(BodyColumns.TEXT_REPLY, mTextReply);
             values.put(BodyColumns.SOURCE_MESSAGE_KEY, mSourceKey);
-            values.put(BodyColumns.INTRO_TEXT, mIntroText);
             return values;
         }
 
@@ -409,10 +524,10 @@ public abstract class EmailContent {
          * @param cursor a cursor which must NOT be null
          * @return the Body as restored from the cursor
          */
-        private static Body restoreBodyWithCursor(Cursor cursor) {
+        private static Body restoreBodyWithCursor(final Context context, final Cursor cursor) {
             try {
                 if (cursor.moveToFirst()) {
-                    return getContent(cursor, Body.class);
+                    return getContent(context, cursor, Body.class);
                 } else {
                     return null;
                 }
@@ -421,20 +536,12 @@ public abstract class EmailContent {
             }
         }
 
-        public static Body restoreBodyWithId(Context context, long id) {
-            Uri u = ContentUris.withAppendedId(Body.CONTENT_URI, id);
-            Cursor c = context.getContentResolver().query(u, Body.CONTENT_PROJECTION,
-                    null, null, null);
-            if (c == null) throw new ProviderUnavailableException();
-            return restoreBodyWithCursor(c);
-        }
-
         public static Body restoreBodyWithMessageId(Context context, long messageId) {
             Cursor c = context.getContentResolver().query(Body.CONTENT_URI,
-                    Body.CONTENT_PROJECTION, Body.MESSAGE_KEY + "=?",
+                    Body.CONTENT_PROJECTION, BodyColumns.MESSAGE_KEY + "=?",
                     new String[] {Long.toString(messageId)}, null);
             if (c == null) throw new ProviderUnavailableException();
-            return restoreBodyWithCursor(c);
+            return restoreBodyWithCursor(context, c);
         }
 
         /**
@@ -442,9 +549,8 @@ public abstract class EmailContent {
          */
         public static long lookupBodyIdWithMessageId(Context context, long messageId) {
             return Utility.getFirstRowLong(context, Body.CONTENT_URI,
-                    ID_PROJECTION, Body.MESSAGE_KEY + "=?",
-                    new String[] {Long.toString(messageId)}, null, ID_PROJECTION_COLUMN,
-                            Long.valueOf(-1));
+                    ID_PROJECTION, BodyColumns.MESSAGE_KEY + "=?",
+                    new String[] {Long.toString(messageId)}, null, ID_PROJECTION_COLUMN, -1L);
         }
 
         /**
@@ -469,65 +575,67 @@ public abstract class EmailContent {
         public static long restoreBodySourceKey(Context context, long messageId) {
             return Utility.getFirstRowLong(context, Body.CONTENT_URI,
                     Body.PROJECTION_SOURCE_KEY,
-                    Body.MESSAGE_KEY + "=?", new String[] {Long.toString(messageId)}, null, 0,
-                            Long.valueOf(0));
+                    BodyColumns.MESSAGE_KEY + "=?", new String[] {Long.toString(messageId)}, null,
+                    0, 0L);
         }
 
-        private static String restoreTextWithMessageId(Context context, long messageId,
-                String[] projection) {
-            Cursor c = context.getContentResolver().query(Body.CONTENT_URI, projection,
-                    Body.MESSAGE_KEY + "=?", new String[] {Long.toString(messageId)}, null);
-            if (c == null) throw new ProviderUnavailableException();
-            try {
-                if (c.moveToFirst()) {
-                    return c.getString(COMMON_PROJECTION_COLUMN_TEXT);
-                } else {
-                    return null;
-                }
-            } finally {
-                c.close();
-            }
+        public static Uri getBodyTextUriForMessageWithId(long messageId) {
+            return EmailContent.CONTENT_URI.buildUpon()
+                    .appendPath("bodyText").appendPath(Long.toString(messageId)).build();
+        }
+
+        public static Uri getBodyHtmlUriForMessageWithId(long messageId) {
+            return EmailContent.CONTENT_URI.buildUpon()
+                    .appendPath("bodyHtml").appendPath(Long.toString(messageId)).build();
         }
 
         public static String restoreBodyTextWithMessageId(Context context, long messageId) {
-            return restoreTextWithMessageId(context, messageId, Body.COMMON_PROJECTION_TEXT);
+            return readBodyFromProvider(context,
+                    getBodyTextUriForMessageWithId(messageId).toString());
         }
 
         public static String restoreBodyHtmlWithMessageId(Context context, long messageId) {
-            return restoreTextWithMessageId(context, messageId, Body.COMMON_PROJECTION_HTML);
+            return readBodyFromProvider(context,
+                    getBodyHtmlUriForMessageWithId(messageId).toString());
         }
 
-        @Deprecated
-        public static String restoreReplyTextWithMessageId(Context context, long messageId) {
-            return restoreTextWithMessageId(context, messageId, Body.COMMON_PROJECTION_REPLY_TEXT);
-        }
-
-        @Deprecated
-        public static String restoreReplyHtmlWithMessageId(Context context, long messageId) {
-            return restoreTextWithMessageId(context, messageId, Body.COMMON_PROJECTION_REPLY_HTML);
-        }
-
-        @Deprecated
-        public static String restoreIntroTextWithMessageId(Context context, long messageId) {
-            return restoreTextWithMessageId(context, messageId, Body.COMMON_PROJECTION_INTRO);
+        private static String readBodyFromProvider(final Context context, final String uri) {
+            String content = null;
+            try {
+                final InputStream bodyInput =
+                        context.getContentResolver().openInputStream(Uri.parse(uri));
+                try {
+                    content = IOUtils.toString(bodyInput);
+                } finally {
+                    bodyInput.close();
+                }
+            } catch (final IOException e) {
+                LogUtils.v(LogUtils.TAG, e, "Exception while reading body content");
+            }
+            return content;
         }
 
         @Override
-        public void restore(Cursor cursor) {
+        public void restore(final Cursor cursor) {
+            throw new UnsupportedOperationException("Must have context to restore Body object");
+        }
+
+        @Override
+        public void restore(final Context context, final Cursor cursor) {
+            warnIfUiThread();
             mBaseUri = EmailContent.Body.CONTENT_URI;
             mMessageKey = cursor.getLong(CONTENT_MESSAGE_KEY_COLUMN);
-            mHtmlContent = cursor.getString(CONTENT_HTML_CONTENT_COLUMN);
-            mTextContent = cursor.getString(CONTENT_TEXT_CONTENT_COLUMN);
-            mHtmlReply = cursor.getString(CONTENT_HTML_REPLY_COLUMN);
-            mTextReply = cursor.getString(CONTENT_TEXT_REPLY_COLUMN);
+            // These get overwritten below if we find a file descriptor in the respond() call,
+            // but we'll keep this here in case we want to construct a matrix cursor or something
+            // to build a Body object from.
+            mHtmlContent = readBodyFromProvider(context, cursor.getString(CONTENT_HTML_URI_COLUMN));
+            mTextContent = readBodyFromProvider(context, cursor.getString(CONTENT_TEXT_URI_COLUMN));
             mSourceKey = cursor.getLong(CONTENT_SOURCE_KEY_COLUMN);
-            mIntroText = cursor.getString(CONTENT_INTRO_TEXT_COLUMN);
             mQuotedTextStartPos = cursor.getInt(CONTENT_QUOTED_TEXT_START_POS_COLUMN);
         }
     }
 
-    public interface MessageColumns {
-        public static final String ID = "_id";
+    public interface MessageColumns extends BaseColumns, SyncColumns {
         // Basic columns used in message list presentation
         // The name as shown to the user in a message list
         public static final String DISPLAY_NAME = "displayName";
@@ -554,6 +662,10 @@ public abstract class EmailContent {
 
         // References to other Email objects in the database
         // Foreign key to the Mailbox holding this message [INDEX]
+        // TODO: This column is used in a complicated way: Usually, this refers to the mailbox
+        // the server considers this message to be in. In the case of search results, this key
+        // will refer to a special "search" mailbox, which does not exist on the server.
+        // This is confusing and causes problems, see b/11294681.
         public static final String MAILBOX_KEY = "mailboxKey";
         // Foreign key to the Account holding this message
         public static final String ACCOUNT_KEY = "accountKey";
@@ -580,9 +692,18 @@ public abstract class EmailContent {
 
         /** Boolean, unseen = 0, seen = 1 [INDEX] */
         public static final String FLAG_SEEN = "flagSeen";
+
+        // References to other Email objects in the database
+        // Foreign key to the Mailbox holding this message [INDEX]
+        // In cases where mailboxKey is NOT the real mailbox the server considers this message in,
+        // this will be set. See b/11294681
+        // We'd like to get rid of this column when the other changes mentioned in that bug
+        // can be addressed.
+        public static final String MAIN_MAILBOX_KEY = "mainMailboxKey";
+
     }
 
-    public static final class Message extends EmailContent implements SyncColumns, MessageColumns {
+    public static final class Message extends EmailContent {
         private static final String LOG_TAG = "Email";
 
         public static final String TABLE_NAME = "Message";
@@ -613,8 +734,6 @@ public abstract class EmailContent {
                     Uri.parse(EmailContent.CONTENT_NOTIFIER_URI + "/message");
         }
 
-        public static final String KEY_TIMESTAMP_DESC = MessageColumns.TIMESTAMP + " desc";
-
         public static final int CONTENT_ID_COLUMN = 0;
         public static final int CONTENT_DISPLAY_NAME_COLUMN = 1;
         public static final int CONTENT_TIMESTAMP_COLUMN = 2;
@@ -641,9 +760,10 @@ public abstract class EmailContent {
         public static final int CONTENT_THREAD_TOPIC_COLUMN = 23;
         public static final int CONTENT_SYNC_DATA_COLUMN = 24;
         public static final int CONTENT_FLAG_SEEN_COLUMN = 25;
+        public static final int CONTENT_MAIN_MAILBOX_KEY_COLUMN = 26;
 
-        public static final String[] CONTENT_PROJECTION = new String[] {
-            RECORD_ID,
+        public static final String[] CONTENT_PROJECTION = {
+            MessageColumns._ID,
             MessageColumns.DISPLAY_NAME, MessageColumns.TIMESTAMP,
             MessageColumns.SUBJECT, MessageColumns.FLAG_READ,
             MessageColumns.FLAG_LOADED, MessageColumns.FLAG_FAVORITE,
@@ -655,7 +775,8 @@ public abstract class EmailContent {
             MessageColumns.BCC_LIST, MessageColumns.REPLY_TO_LIST,
             SyncColumns.SERVER_TIMESTAMP, MessageColumns.MEETING_INFO,
             MessageColumns.SNIPPET, MessageColumns.PROTOCOL_SEARCH_INFO,
-            MessageColumns.THREAD_TOPIC, MessageColumns.SYNC_DATA, MessageColumns.FLAG_SEEN
+            MessageColumns.THREAD_TOPIC, MessageColumns.SYNC_DATA,
+            MessageColumns.FLAG_SEEN, MessageColumns.MAIN_MAILBOX_KEY
         };
 
         public static final int LIST_ID_COLUMN = 0;
@@ -673,8 +794,8 @@ public abstract class EmailContent {
         public static final int LIST_SNIPPET_COLUMN = 12;
 
         // Public projection for common list columns
-        public static final String[] LIST_PROJECTION = new String[] {
-            RECORD_ID,
+        public static final String[] LIST_PROJECTION = {
+            MessageColumns._ID,
             MessageColumns.DISPLAY_NAME, MessageColumns.TIMESTAMP,
             MessageColumns.SUBJECT, MessageColumns.FLAG_READ,
             MessageColumns.FLAG_LOADED, MessageColumns.FLAG_FAVORITE,
@@ -685,16 +806,16 @@ public abstract class EmailContent {
 
         public static final int ID_COLUMNS_ID_COLUMN = 0;
         public static final int ID_COLUMNS_SYNC_SERVER_ID = 1;
-        public static final String[] ID_COLUMNS_PROJECTION = new String[] {
-            RECORD_ID, SyncColumns.SERVER_ID
+        public static final String[] ID_COLUMNS_PROJECTION = {
+                MessageColumns._ID, SyncColumns.SERVER_ID
         };
 
-        public static final String[] ID_COLUMN_PROJECTION = new String[] { RECORD_ID };
+        public static final String[] ID_COLUMN_PROJECTION = { MessageColumns._ID };
 
         public static final String ACCOUNT_KEY_SELECTION =
             MessageColumns.ACCOUNT_KEY + "=?";
 
-        public static final String[] MAILBOX_KEY_PROJECTION = new String[] { MAILBOX_KEY };
+        public static final String[] MAILBOX_KEY_PROJECTION = { MessageColumns.MAILBOX_KEY };
 
         /**
          * Selection for messages that are loaded
@@ -712,7 +833,7 @@ public abstract class EmailContent {
         public static final String ALL_FAVORITE_SELECTION =
             MessageColumns.FLAG_FAVORITE + "=1 AND "
             + MessageColumns.MAILBOX_KEY + " NOT IN ("
-            +     "SELECT " + MailboxColumns.ID + " FROM " + Mailbox.TABLE_NAME + ""
+            +     "SELECT " + MailboxColumns._ID + " FROM " + Mailbox.TABLE_NAME + ""
             +     " WHERE " + MailboxColumns.TYPE + " = " + Mailbox.TYPE_TRASH
             +     ")"
             + " AND " + FLAG_LOADED_SELECTION;
@@ -720,7 +841,7 @@ public abstract class EmailContent {
         /** Selection to retrieve all messages in "inbox" for any account */
         public static final String ALL_INBOX_SELECTION =
             MessageColumns.MAILBOX_KEY + " IN ("
-            +     "SELECT " + MailboxColumns.ID + " FROM " + Mailbox.TABLE_NAME
+            +     "SELECT " + MailboxColumns._ID + " FROM " + Mailbox.TABLE_NAME
             +     " WHERE " + MailboxColumns.TYPE + " = " + Mailbox.TYPE_INBOX
             +     ")"
             + " AND " + FLAG_LOADED_SELECTION;
@@ -728,7 +849,7 @@ public abstract class EmailContent {
         /** Selection to retrieve all messages in "drafts" for any account */
         public static final String ALL_DRAFT_SELECTION =
             MessageColumns.MAILBOX_KEY + " IN ("
-            +     "SELECT " + MailboxColumns.ID + " FROM " + Mailbox.TABLE_NAME
+            +     "SELECT " + MailboxColumns._ID + " FROM " + Mailbox.TABLE_NAME
             +     " WHERE " + MailboxColumns.TYPE + " = " + Mailbox.TYPE_DRAFTS
             +     ")"
             + " AND " + FLAG_LOADED_SELECTION;
@@ -736,7 +857,7 @@ public abstract class EmailContent {
         /** Selection to retrieve all messages in "outbox" for any account */
         public static final String ALL_OUTBOX_SELECTION =
             MessageColumns.MAILBOX_KEY + " IN ("
-            +     "SELECT " + MailboxColumns.ID + " FROM " + Mailbox.TABLE_NAME
+            +     "SELECT " + MailboxColumns._ID + " FROM " + Mailbox.TABLE_NAME
             +     " WHERE " + MailboxColumns.TYPE + " = " + Mailbox.TYPE_OUTBOX
             +     ")"; // NOTE No flag_loaded test for outboxes.
 
@@ -755,7 +876,7 @@ public abstract class EmailContent {
         public static final String PER_ACCOUNT_FAVORITE_SELECTION =
             ACCOUNT_KEY_SELECTION + " AND " + ALL_FAVORITE_SELECTION;
 
-        public static final String MAILBOX_SELECTION = MAILBOX_KEY + "=?";
+        public static final String MAILBOX_SELECTION = MessageColumns.MAILBOX_KEY + "=?";
 
         // _id field is in AbstractContent
         public String mDisplayName;
@@ -775,6 +896,7 @@ public abstract class EmailContent {
 
         public long mMailboxKey;
         public long mAccountKey;
+        public long mMainMailboxKey;
 
         public String mFrom;
         public String mTo;
@@ -804,11 +926,8 @@ public abstract class EmailContent {
         // but they are NOT persisted directly by EmailProvider. See Body for related fields.
         transient public String mText;
         transient public String mHtml;
-        transient public String mTextReply;
-        transient public String mHtmlReply;
         transient public long mSourceKey;
         transient public ArrayList<Attachment> mAttachments = null;
-        transient public String mIntroText;
         transient public int mQuotedTextStartPos;
 
 
@@ -905,6 +1024,7 @@ public abstract class EmailContent {
             values.put(MessageColumns.PROTOCOL_SEARCH_INFO, mProtocolSearchInfo);
             values.put(MessageColumns.THREAD_TOPIC, mThreadTopic);
             values.put(MessageColumns.SYNC_DATA, mSyncData);
+            values.put(MessageColumns.MAIN_MAILBOX_KEY, mMainMailboxKey);
             return values;
         }
 
@@ -931,6 +1051,7 @@ public abstract class EmailContent {
             mDraftInfo = cursor.getInt(CONTENT_DRAFT_INFO_COLUMN);
             mMessageId = cursor.getString(CONTENT_MESSAGE_ID_COLUMN);
             mMailboxKey = cursor.getLong(CONTENT_MAILBOX_KEY_COLUMN);
+            mMainMailboxKey = cursor.getLong(CONTENT_MAIN_MAILBOX_KEY_COLUMN);
             mAccountKey = cursor.getLong(CONTENT_ACCOUNT_KEY_COLUMN);
             mFrom = cursor.getString(CONTENT_FROM_LIST_COLUMN);
             mTo = cursor.getString(CONTENT_TO_LIST_COLUMN);
@@ -958,11 +1079,13 @@ public abstract class EmailContent {
             // This logic is in place so I can (a) short circuit the expensive stuff when
             // possible, and (b) override (and throw) if anyone tries to call save() or update()
             // directly for Message, which are unsupported.
-            if (mText == null && mHtml == null && mTextReply == null && mHtmlReply == null &&
+            if (mText == null && mHtml == null &&
                     (mAttachments == null || mAttachments.isEmpty())) {
                 if (doSave) {
                     return super.save(context);
                 } else {
+                    // FLAG: Should we be doing this? In the base class, if someone calls "save" on
+                    // an EmailContent that is already saved, it throws an exception.
                     // Call update, rather than super.update in case we ever override it
                     if (update(context, toContentValues()) == 1) {
                         return getUri();
@@ -1026,7 +1149,8 @@ public abstract class EmailContent {
                 b = ContentProviderOperation.newInsert(mBaseUri);
             } else {
                 b = ContentProviderOperation.newUpdate(mBaseUri)
-                        .withSelection(Message.RECORD_ID + "=?", new String[] {Long.toString(mId)});
+                        .withSelection(MessageColumns._ID + "=?",
+                                new String[] {Long.toString(mId)});
             }
             // Generate the snippet here, before we create the CPO for Message
             if (mText != null) {
@@ -1039,16 +1163,16 @@ public abstract class EmailContent {
             // Create and save the body
             ContentValues cv = new ContentValues();
             if (mText != null) {
-                cv.put(Body.TEXT_CONTENT, mText);
+                cv.put(BodyColumns.TEXT_CONTENT, mText);
             }
             if (mHtml != null) {
-                cv.put(Body.HTML_CONTENT, mHtml);
+                cv.put(BodyColumns.HTML_CONTENT, mHtml);
             }
             if (mSourceKey != 0) {
-                cv.put(Body.SOURCE_MESSAGE_KEY, mSourceKey);
+                cv.put(BodyColumns.SOURCE_MESSAGE_KEY, mSourceKey);
             }
             if (mQuotedTextStartPos != 0) {
-                cv.put(Body.QUOTED_TEXT_START_POS, mQuotedTextStartPos);
+                cv.put(BodyColumns.QUOTED_TEXT_START_POS, mQuotedTextStartPos);
             }
             // We'll need this if we're new
             int messageBackValue = ops.size() - 1;
@@ -1057,13 +1181,13 @@ public abstract class EmailContent {
                 b = ContentProviderOperation.newInsert(Body.CONTENT_URI);
                 // Put our message id in the Body
                 if (!isNew) {
-                    cv.put(Body.MESSAGE_KEY, mId);
+                    cv.put(BodyColumns.MESSAGE_KEY, mId);
                 }
                 b.withValues(cv);
                 // If we're new, create a back value entry
                 if (isNew) {
                     ContentValues backValues = new ContentValues();
-                    backValues.put(Body.MESSAGE_KEY, messageBackValue);
+                    backValues.put(BodyColumns.MESSAGE_KEY, messageBackValue);
                     b.withValueBackReferences(backValues);
                 }
                 // And add the Body operation
@@ -1079,7 +1203,7 @@ public abstract class EmailContent {
                     b = ContentProviderOperation.newInsert(Attachment.CONTENT_URI)
                             .withValues(att.toContentValues());
                     if (isNew) {
-                        b.withValueBackReference(Attachment.MESSAGE_KEY, messageBackValue);
+                        b.withValueBackReference(AttachmentColumns.MESSAGE_KEY, messageBackValue);
                     }
                     ops.add(b.build());
                 }
@@ -1158,16 +1282,15 @@ public abstract class EmailContent {
         public void setFlags(boolean quotedReply, boolean quotedForward) {
             // Set message flags as well
             if (quotedReply || quotedForward) {
-                mFlags &= ~EmailContent.Message.FLAG_TYPE_MASK;
+                mFlags &= ~Message.FLAG_TYPE_MASK;
                 mFlags |= quotedReply
-                        ? EmailContent.Message.FLAG_TYPE_REPLY
-                        : EmailContent.Message.FLAG_TYPE_FORWARD;
+                        ? Message.FLAG_TYPE_REPLY
+                        : Message.FLAG_TYPE_FORWARD;
             }
         }
     }
 
-    public interface AttachmentColumns {
-        public static final String ID = "_id";
+    public interface AttachmentColumns extends BaseColumns {
         // The display name of the attachment
         public static final String FILENAME = "fileName";
         // The mime type of the attachment
@@ -1204,8 +1327,7 @@ public abstract class EmailContent {
         public static final String UI_DOWNLOADED_SIZE = "uiDownloadedSize";
     }
 
-    public static final class Attachment extends EmailContent
-            implements AttachmentColumns, Parcelable {
+    public static final class Attachment extends EmailContent implements Parcelable {
         public static final String TABLE_NAME = "Attachment";
         public static final String ATTACHMENT_PROVIDER_LEGACY_URI_PREFIX =
                 "content://com.android.email.attachmentprovider";
@@ -1216,14 +1338,16 @@ public abstract class EmailContent {
         // This must be used with an appended id: ContentUris.withAppendedId(MESSAGE_ID_URI, id)
         public static Uri MESSAGE_ID_URI;
         public static String ATTACHMENT_PROVIDER_URI_PREFIX;
+        public static String ATTACHMENT_PROVIDER_AUTHORITY;
         public static boolean sUsingLegacyPrefix;
 
         public static void initAttachment() {
             CONTENT_URI = Uri.parse(EmailContent.CONTENT_URI + "/attachment");
             MESSAGE_ID_URI = Uri.parse(
                     EmailContent.CONTENT_URI + "/attachment/message");
-            ATTACHMENT_PROVIDER_URI_PREFIX = "content://" + EmailContent.EMAIL_PACKAGE_NAME +
+            ATTACHMENT_PROVIDER_AUTHORITY = EmailContent.EMAIL_PACKAGE_NAME +
                     ".attachmentprovider";
+            ATTACHMENT_PROVIDER_URI_PREFIX = "content://" + ATTACHMENT_PROVIDER_AUTHORITY;
             sUsingLegacyPrefix =
                     ATTACHMENT_PROVIDER_URI_PREFIX.equals(ATTACHMENT_PROVIDER_LEGACY_URI_PREFIX);
         }
@@ -1262,8 +1386,8 @@ public abstract class EmailContent {
         public static final int CONTENT_UI_STATE_COLUMN = 14;
         public static final int CONTENT_UI_DESTINATION_COLUMN = 15;
         public static final int CONTENT_UI_DOWNLOADED_SIZE_COLUMN = 16;
-        public static final String[] CONTENT_PROJECTION = new String[] {
-            RECORD_ID, AttachmentColumns.FILENAME, AttachmentColumns.MIME_TYPE,
+        public static final String[] CONTENT_PROJECTION = {
+            AttachmentColumns._ID, AttachmentColumns.FILENAME, AttachmentColumns.MIME_TYPE,
             AttachmentColumns.SIZE, AttachmentColumns.CONTENT_ID, AttachmentColumns.CONTENT_URI,
             AttachmentColumns.CACHED_FILE, AttachmentColumns.MESSAGE_KEY,
             AttachmentColumns.LOCATION, AttachmentColumns.ENCODING, AttachmentColumns.CONTENT,
@@ -1274,16 +1398,16 @@ public abstract class EmailContent {
 
         // All attachments with an empty URI, regardless of mailbox
         public static final String PRECACHE_SELECTION =
-            AttachmentColumns.CONTENT_URI + " isnull AND " + Attachment.FLAGS + "=0";
+            AttachmentColumns.CONTENT_URI + " isnull AND " + AttachmentColumns.FLAGS + "=0";
         // Attachments with an empty URI that are in an inbox
         public static final String PRECACHE_INBOX_SELECTION =
             PRECACHE_SELECTION + " AND " + AttachmentColumns.MESSAGE_KEY + " IN ("
-            +     "SELECT " + MessageColumns.ID + " FROM " + Message.TABLE_NAME
+            +     "SELECT " + MessageColumns._ID + " FROM " + Message.TABLE_NAME
             +     " WHERE " + Message.ALL_INBOX_SELECTION
             +     ")";
 
         // Bits used in mFlags
-        // WARNING: AttachmentDownloadService relies on the fact that ALL of the flags below
+        // WARNING: AttachmentService relies on the fact that ALL of the flags below
         // disqualify attachments for precaching.  If you add a flag that does NOT disqualify an
         // attachment for precaching, you MUST change the PRECACHE_SELECTION definition above
 
@@ -1491,7 +1615,7 @@ public abstract class EmailContent {
         }
 
         public Attachment(Parcel in) {
-            mBaseUri = EmailContent.Attachment.CONTENT_URI;
+            mBaseUri = Attachment.CONTENT_URI;
             mId = in.readLong();
             mFileName = in.readString();
             mMimeType = in.readString();
@@ -1540,8 +1664,7 @@ public abstract class EmailContent {
         }
     }
 
-    public interface AccountColumns {
-        public static final String ID = "_id";
+    public interface AccountColumns extends BaseColumns {
         // The display name of the account (user-settable)
         public static final String DISPLAY_NAME = "displayName";
         // The email address corresponding to this account
@@ -1568,6 +1691,7 @@ public abstract class EmailContent {
         @Deprecated
         public static final String IS_DEFAULT = "isDefault";
         // Old-Style UUID for compatibility with previous versions
+        @Deprecated
         public static final String COMPATIBILITY_UUID = "compatibilityUuid";
         // User name (for outgoing messages)
         public static final String SENDER_NAME = "senderName";
@@ -1581,6 +1705,7 @@ public abstract class EmailContent {
         // Protocol version (arbitrary string, used by EAS currently)
         public static final String PROTOCOL_VERSION = "protocolVersion";
         // The number of new messages (reported by the sync/download engines
+        @Deprecated
         public static final String NEW_MESSAGE_COUNT = "newMessageCount";
         // Legacy flags defining security (provisioning) requirements of this account; this
         // information is now found in the Policy table; POLICY_KEY (below) is the foreign key
@@ -1592,19 +1717,22 @@ public abstract class EmailContent {
         public static final String SIGNATURE = "signature";
         // A foreign key into the Policy table
         public static final String POLICY_KEY = "policyKey";
+        // Max upload attachment size.
+        public static final String MAX_ATTACHMENT_SIZE = "maxAttachmentSize";
         // Current duration of the Exchange ping
         public static final String PING_DURATION = "pingDuration";
     }
 
-    public interface QuickResponseColumns {
-        static final String ID = "_id";
+    public interface QuickResponseColumns extends BaseColumns {
         // The QuickResponse text
         static final String TEXT = "quickResponse";
         // A foreign key into the Account table owning the QuickResponse
         static final String ACCOUNT_KEY = "accountKey";
     }
 
-    public interface MailboxColumns {
+    public interface MailboxColumns extends BaseColumns {
+        // Use _ID instead
+        @Deprecated
         public static final String ID = "_id";
         // The display name of this mailbox [INDEX]
         static final String DISPLAY_NAME = "displayName";
@@ -1669,8 +1797,7 @@ public abstract class EmailContent {
         public static final String LAST_FULL_SYNC_TIME = "lastFullSyncTime";
     }
 
-    public interface HostAuthColumns {
-        public static final String ID = "_id";
+    public interface HostAuthColumns extends BaseColumns {
         // The protocol (e.g. "imap", "pop3", "eas", "smtp"
         static final String PROTOCOL = "protocol";
         // The host address
@@ -1691,10 +1818,11 @@ public abstract class EmailContent {
         static final String ACCOUNT_KEY = "accountKey";
         // A blob containing an X509 server certificate
         static final String SERVER_CERT = "serverCert";
+        // The credentials row this hostAuth should use. Currently only set if using OAuth.
+        static final String CREDENTIAL_KEY = "credentialKey";
     }
 
-    public interface PolicyColumns {
-        public static final String ID = "_id";
+    public interface PolicyColumns extends BaseColumns {
         public static final String PASSWORD_MODE = "passwordMode";
         public static final String PASSWORD_MIN_LENGTH = "passwordMinLength";
         public static final String PASSWORD_EXPIRATION_DAYS = "passwordExpirationDays";

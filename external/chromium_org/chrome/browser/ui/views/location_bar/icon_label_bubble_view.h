@@ -9,11 +9,12 @@
 
 #include "base/strings/string16.h"
 #include "ui/gfx/size.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/view.h"
 
 namespace gfx {
 class Canvas;
-class Font;
+class FontList;
 class ImageSkia;
 }
 
@@ -28,20 +29,18 @@ class Painter;
 // tab-to-search UI.
 class IconLabelBubbleView : public views::View {
  public:
-  // The label will be positioned |font_y_offset| px. from the top of the view.
   // |hover_background_images| is an optional set of images to be used in place
   // of |background_images| during mouse hover.
   IconLabelBubbleView(const int background_images[],
                       const int hover_background_images[],
                       int contained_image,
-                      const gfx::Font& font,
-                      int font_y_offset,
+                      const gfx::FontList& font_list,
                       SkColor text_color,
                       SkColor parent_background_color,
                       bool elide_in_middle);
   virtual ~IconLabelBubbleView();
 
-  void SetLabel(const string16& label);
+  void SetLabel(const base::string16& label);
   void SetImage(const gfx::ImageSkia& image);
   void set_is_extension_icon(bool is_extension_icon) {
     is_extension_icon_ = is_extension_icon;
@@ -49,10 +48,12 @@ class IconLabelBubbleView : public views::View {
 
  protected:
   // views::View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+
+  const gfx::FontList& font_list() const { return label_->font_list(); }
 
   gfx::Size GetSizeForLabelWidth(int width) const;
 

@@ -15,7 +15,6 @@
 #include "remoting/codec/video_encoder.h"
 #include "remoting/host/capture_scheduler.h"
 #include "remoting/proto/video.pb.h"
-#include "third_party/skia/include/core/SkSize.h"
 #include "third_party/webrtc/modules/desktop_capture/screen_capturer.h"
 
 namespace base {
@@ -113,6 +112,11 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler>,
   // Sequence numbers are used for performance measurements.
   void UpdateSequenceNumber(int64 sequence_number);
 
+  // Sets whether the video encoder should be requested to encode losslessly,
+  // or to use a lossless color space (typically requiring higher bandwidth).
+  void SetLosslessEncode(bool want_lossless);
+  void SetLosslessColor(bool want_lossless);
+
  private:
   friend class base::RefCountedThreadSafe<VideoScheduler>;
   virtual ~VideoScheduler();
@@ -141,7 +145,13 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler>,
 
   // Callback passed to |video_stub_| for the last packet in each frame, to
   // rate-limit frame captures to network throughput.
-  void VideoFrameSentCallback();
+  void OnVideoPacketSent();
+
+  // Called by |keep_alive_timer_|.
+  void SendKeepAlivePacket();
+
+  // Callback for |video_stub_| called after a keep-alive packet is sent.
+  void OnKeepAlivePacketSent();
 
   // Send updated cursor shape to client.
   void SendCursorShape(scoped_ptr<protocol::CursorShapeInfo> cursor_shape);
@@ -174,6 +184,10 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler>,
   // Timer used to schedule CaptureNextFrame().
   scoped_ptr<base::OneShotTimer<VideoScheduler> > capture_timer_;
 
+  // Timer used to ensure that we send empty keep-alive frames to the client
+  // even when the video stream is paused or encoder is busy.
+  scoped_ptr<base::DelayTimer<VideoScheduler> > keep_alive_timer_;
+
   // The number of frames being processed, i.e. frames that we are currently
   // capturing, encoding or sending. The value is capped at 2 to minimize
   // latency.
@@ -188,7 +202,7 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler>,
   // True if capture of video frames is paused.
   bool is_paused_;
 
-  // This is a number updated by client to trace performance.
+  // Number updated by the caller to trace performance.
   int64 sequence_number_;
 
   // An object to schedule capturing.

@@ -22,24 +22,23 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.database.ContentObserver;
-import android.net.Uri;
 import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 import android.os.UserHandle;
-import android.provider.Settings;
 import android.util.Log;
+
 import com.android.nfc.NfcService;
 import com.android.nfc.cardemulation.RegisteredAidCache.AidResolveInfo;
 
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 
 public class HostEmulationManager {
@@ -60,6 +59,9 @@ public class HostEmulationManager {
 
     static final byte INSTR_SELECT = (byte)0xA4;
 
+    static final String ANDROID_HCE_AID = "A000000476416E64726F6964484345";
+    static final byte[] ANDROID_HCE_RESPONSE = {0x14, (byte)0x81, 0x00, 0x00, (byte)0x90, 0x00};
+
     static final byte[] AID_NOT_FOUND = {0x6A, (byte)0x82};
     static final byte[] UNKNOWN_ERROR = {0x6F, 0x00};
 
@@ -70,11 +72,6 @@ public class HostEmulationManager {
     final Object mLock;
 
     // All variables below protected by mLock
-
-    /** Whether we need to clear the "next tap" service at the end
-     *  of this transaction.
-     */
-    boolean mClearNextTapDefault;
 
     // Variables below are for a non-payment service,
     // that is typically only bound in the STATE_XFER state.
@@ -106,36 +103,31 @@ public class HostEmulationManager {
         mAidCache = aidCache;
         mState = STATE_IDLE;
         mKeyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
-        SettingsObserver observer = new SettingsObserver(mHandler);
-        context.getContentResolver().registerContentObserver(
-                Settings.Secure.getUriFor(Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT),
-                true, observer, UserHandle.USER_ALL);
-
-        // Bind to payment default if existing
-        int userId = ActivityManager.getCurrentUser();
-        String name = Settings.Secure.getStringForUser(
-                mContext.getContentResolver(), Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT,
-                userId);
-        if (name != null) {
-            ComponentName serviceComponent = ComponentName.unflattenFromString(name);
-            bindPaymentServiceLocked(userId, serviceComponent);
-        }
     }
 
-    public void setDefaultForNextTap(ComponentName service) {
+    public void onPreferredPaymentServiceChanged(ComponentName service) {
         synchronized (mLock) {
             if (service != null) {
-                bindServiceIfNeededLocked(service);
+                bindPaymentServiceLocked(ActivityManager.getCurrentUser(), service);
             } else {
-                unbindServiceIfNeededLocked();
+                unbindPaymentServiceLocked();
             }
         }
-    }
+     }
 
-    public void notifyHostEmulationActivated() {
+     public void onPreferredForegroundServiceChanged(ComponentName service) {
+         synchronized (mLock) {
+            if (service != null) {
+               bindServiceIfNeededLocked(service);
+            } else {
+               unbindServiceIfNeededLocked();
+            }
+         }
+     }
+
+    public void onHostEmulationActivated() {
         Log.d(TAG, "notifyHostEmulationActivated");
         synchronized (mLock) {
-            mClearNextTapDefault = mAidCache.isNextTapOverriden();
             // Regardless of what happens, if we're having a tap again
             // activity up, close it
             Intent intent = new Intent(TapAgainDialog.ACTION_CLOSE);
@@ -148,7 +140,7 @@ public class HostEmulationManager {
         }
     }
 
-    public void notifyHostEmulationData(byte[] data) {
+    public void onHostEmulationData(byte[] data) {
         Log.d(TAG, "notifyHostEmulationData");
         String selectAid = findSelectAid(data);
         ComponentName resolvedService = null;
@@ -161,28 +153,40 @@ public class HostEmulationManager {
                 return;
             }
             if (selectAid != null) {
-                AidResolveInfo resolveInfo = mAidCache.resolveAidPrefix(selectAid);
+                if (selectAid.equals(ANDROID_HCE_AID)) {
+                    NfcService.getInstance().sendData(ANDROID_HCE_RESPONSE);
+                    return;
+                }
+                AidResolveInfo resolveInfo = mAidCache.resolveAid(selectAid);
                 if (resolveInfo == null || resolveInfo.services.size() == 0) {
                     // Tell the remote we don't handle this AID
                     NfcService.getInstance().sendData(AID_NOT_FOUND);
                     return;
                 }
-                mLastSelectedAid = resolveInfo.aid;
+                mLastSelectedAid = selectAid;
                 if (resolveInfo.defaultService != null) {
                     // Resolve to default
                     // Check if resolvedService requires unlock
-                    if (resolveInfo.defaultService.requiresUnlock() &&
+                    ApduServiceInfo defaultServiceInfo = resolveInfo.defaultService;
+                    if (defaultServiceInfo.requiresUnlock() &&
                             mKeyguard.isKeyguardLocked() && mKeyguard.isKeyguardSecure()) {
-                        String category = mAidCache.getCategoryForAid(resolveInfo.aid);
                         // Just ignore all future APDUs until next tap
                         mState = STATE_W4_DEACTIVATE;
-                        launchTapAgain(resolveInfo.defaultService, category);
+                        launchTapAgain(resolveInfo.defaultService, resolveInfo.category);
                         return;
                     }
-                    resolvedService = resolveInfo.defaultService.getComponent();
+                    // In no circumstance should this be an OffHostService -
+                    // we should never get this AID on the host in the first place
+                    if (!defaultServiceInfo.isOnHost()) {
+                        Log.e(TAG, "AID that was meant to go off-host was routed to host." +
+                                " Check routing table configuration.");
+                        NfcService.getInstance().sendData(AID_NOT_FOUND);
+                        return;
+                    }
+                    resolvedService = defaultServiceInfo.getComponent();
                 } else if (mActiveServiceName != null) {
-                    for (ApduServiceInfo service : resolveInfo.services) {
-                        if (mActiveServiceName.equals(service.getComponent())) {
+                    for (ApduServiceInfo serviceInfo : resolveInfo.services) {
+                        if (mActiveServiceName.equals(serviceInfo.getComponent())) {
                             resolvedService = mActiveServiceName;
                             break;
                         }
@@ -191,11 +195,10 @@ public class HostEmulationManager {
                 if (resolvedService == null) {
                     // We have no default, and either one or more services.
                     // Ask the user to confirm.
-                    // Get corresponding category
-                    String category = mAidCache.getCategoryForAid(resolveInfo.aid);
                     // Just ignore all future APDUs until we resolve to only one
                     mState = STATE_W4_DEACTIVATE;
-                    launchResolver((ArrayList<ApduServiceInfo>)resolveInfo.services, null, category);
+                    launchResolver((ArrayList<ApduServiceInfo>)resolveInfo.services, null,
+                            resolveInfo.category);
                     return;
                 }
             }
@@ -245,14 +248,11 @@ public class HostEmulationManager {
         }
     }
 
-    public void notifyNostEmulationDeactivated() {
+    public void onHostEmulationDeactivated() {
         Log.d(TAG, "notifyHostEmulationDeactivated");
         synchronized (mLock) {
             if (mState == STATE_IDLE) {
                 Log.e(TAG, "Got deactivation event while in idle state");
-            }
-            if (mClearNextTapDefault) {
-                mAidCache.setDefaultForNextTap(ActivityManager.getCurrentUser(), null);
             }
             sendDeactivateToActiveServiceLocked(HostApduService.DEACTIVATION_LINK_LOSS);
             mActiveService = null;
@@ -262,7 +262,7 @@ public class HostEmulationManager {
         }
     }
 
-    public void notifyOffHostAidSelected() {
+    public void onOffHostAidSelected() {
         Log.d(TAG, "notifyOffHostAidSelected");
         synchronized (mLock) {
             if (mState != STATE_XFER || mActiveService == null) {
@@ -274,6 +274,11 @@ public class HostEmulationManager {
             mActiveServiceName = null;
             unbindServiceIfNeededLocked();
             mState = STATE_W4_SELECT;
+
+            //close the TapAgainDialog
+            Intent intent = new Intent(TapAgainDialog.ACTION_CLOSE);
+            intent.setPackage("com.android.nfc");
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
         }
     }
 
@@ -331,33 +336,7 @@ public class HostEmulationManager {
         }
     }
 
-    final Handler mHandler = new Handler(Looper.getMainLooper());
-
-    private final class SettingsObserver extends ContentObserver {
-        public SettingsObserver(Handler handler) {
-            super(handler);
-        }
-
-        @Override
-        public void onChange(boolean selfChange, Uri uri) {
-            super.onChange(selfChange, uri);
-            synchronized (mLock) {
-                // Do it just for the current user. If it was in fact
-                // a change made for another user, we'll sync it down
-                // on user switch.
-                int userId = ActivityManager.getCurrentUser();
-                ComponentName paymentApp = mAidCache.getDefaultServiceForCategory(userId,
-                        CardEmulation.CATEGORY_PAYMENT, true);
-                if (paymentApp != null) {
-                    bindPaymentServiceLocked(userId, paymentApp);
-                } else {
-                    unbindPaymentServiceLocked(userId);
-                }
-            }
-        }
-    };
-
-    void unbindPaymentServiceLocked(int userId) {
+    void unbindPaymentServiceLocked() {
         if (mPaymentServiceBound) {
             mContext.unbindService(mPaymentConnection);
             mPaymentServiceBound = false;
@@ -367,7 +346,7 @@ public class HostEmulationManager {
     }
 
     void bindPaymentServiceLocked(int userId, ComponentName service) {
-        unbindPaymentServiceLocked(userId);
+        unbindPaymentServiceLocked();
 
         Intent intent = new Intent(HostApduService.SERVICE_INTERFACE);
         intent.setComponent(service);
@@ -512,16 +491,11 @@ public class HostEmulationManager {
                 }
             } else if (msg.what == HostApduService.MSG_UNHANDLED) {
                 synchronized (mLock) {
-                    AidResolveInfo resolveInfo = mAidCache.resolveAidPrefix(mLastSelectedAid);
-                    String category = mAidCache.getCategoryForAid(mLastSelectedAid);
+                    AidResolveInfo resolveInfo = mAidCache.resolveAid(mLastSelectedAid);
+                    boolean isPayment = false;
                     if (resolveInfo.services.size() > 0) {
-                        final ArrayList<ApduServiceInfo> services = new ArrayList<ApduServiceInfo>();
-                        for (ApduServiceInfo service : resolveInfo.services) {
-                            if (!service.getComponent().equals(mActiveServiceName)) {
-                                services.add(service);
-                            }
-                        }
-                        launchResolver(services, mActiveServiceName, category);
+                        launchResolver((ArrayList<ApduServiceInfo>)resolveInfo.services,
+                                mActiveServiceName, resolveInfo.category);
                     }
                 }
             }
@@ -538,5 +512,15 @@ public class HostEmulationManager {
             chars[j * 2 + 1] = hexChars[byteValue & 0x0F];
         }
         return new String(chars);
+    }
+
+    public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
+        pw.println("Bound services: ");
+        if (mPaymentServiceBound) {
+            pw.println("    payment: " + mPaymentServiceName);
+        }
+        if (mServiceBound) {
+            pw.println("    other: " + mServiceName);
+        }
     }
 }

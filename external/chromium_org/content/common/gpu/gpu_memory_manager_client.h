@@ -5,13 +5,11 @@
 #ifndef CONTENT_COMMON_GPU_GPU_MEMORY_MANAGER_CLIENT_H_
 #define CONTENT_COMMON_GPU_GPU_MEMORY_MANAGER_CLIENT_H_
 
-#if defined(ENABLE_GPU)
-
 #include <list>
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/gpu_memory_allocation.h"
+#include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "ui/gfx/size.h"
 
@@ -34,7 +32,9 @@ class CONTENT_EXPORT GpuMemoryManagerClient {
 
   // Sets buffer usage depending on Memory Allocation
   virtual void SetMemoryAllocation(
-      const GpuMemoryAllocation& allocation) = 0;
+      const gpu::MemoryAllocation& allocation) = 0;
+
+  virtual void SuggestHaveFrontBuffer(bool suggest_have_frontbuffer) = 0;
 
   // Returns in bytes the total amount of GPU memory for the GPU which this
   // context is currently rendering on. Returns false if no extension exists
@@ -48,7 +48,6 @@ class CONTENT_EXPORT GpuMemoryManagerClientState {
  public:
   ~GpuMemoryManagerClientState();
   void SetVisible(bool visible);
-  void SetManagedMemoryStats(const GpuManagedMemoryStats& stats);
 
  private:
   friend class GpuMemoryManager;
@@ -81,33 +80,11 @@ class CONTENT_EXPORT GpuMemoryManagerClientState {
   std::list<GpuMemoryManagerClientState*>::iterator list_iterator_;
   bool list_iterator_valid_;
 
-  // Statistics about memory usage.
-  GpuManagedMemoryStats managed_memory_stats_;
-  bool managed_memory_stats_received_;
-
-  // When managed_memory_stats_.bytes_nicetohave leaves the range
-  // [low_, high_], then re-adjust memory limits.
-  uint64 bytes_nicetohave_limit_low_;
-  uint64 bytes_nicetohave_limit_high_;
-
-  // The allocation for this client, used transiently during memory policy
-  // calculation.
-  uint64 bytes_allocation_when_visible_;
-  uint64 bytes_allocation_when_nonvisible_;
-
-  // The ideal allocation for this client for three performance levels, used
-  // transiently during memory policy calculation.
-  uint64 bytes_allocation_ideal_nicetohave_;
-  uint64 bytes_allocation_ideal_required_;
-  uint64 bytes_allocation_ideal_minimum_;
-
   // Set to disable allocating a frontbuffer or to disable allocations
   // for clients that don't have surfaces.
   bool hibernated_;
 };
 
 }  // namespace content
-
-#endif
 
 #endif  // CONTENT_COMMON_GPU_GPU_MEMORY_MANAGER_CLIENT_H_

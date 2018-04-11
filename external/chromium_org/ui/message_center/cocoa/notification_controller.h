@@ -37,17 +37,23 @@ MESSAGE_CENTER_EXPORT
   // The button that invokes |-close:|, in the upper-right corner.
   base::scoped_nsobject<HoverImageButton> closeButton_;
 
+  // The small icon associated with the notification, on the bottom right.
+  base::scoped_nsobject<NSImageView> smallImage_;
+
   // The large icon associated with the notification, on the left side.
   base::scoped_nsobject<NSImageView> icon_;
 
   // The title of the message.
-  base::scoped_nsobject<NSTextField> title_;
+  base::scoped_nsobject<NSTextView> title_;
 
   // Body text of the message. Hidden for list notifications.
-  base::scoped_nsobject<NSTextField> message_;
+  base::scoped_nsobject<NSTextView> message_;
 
-  // Container for optional list item views.
-  base::scoped_nsobject<NSView> listItemView_;
+  // Context-giving text of the message.  Alternate font used to distinguish it.
+  base::scoped_nsobject<NSTextView> contextMessage_;
+
+  // Container for optional list view that contains multiple items.
+  base::scoped_nsobject<NSView> listView_;
 
   // Container for optional progress bar view.
   base::scoped_nsobject<NSProgressIndicator> progressBarView_;
@@ -81,6 +87,7 @@ MESSAGE_CENTER_EXPORT
 @end
 
 @interface MCNotificationController (TestingInterface)
+- (NSImageView*)smallImageView;
 - (NSImageView*)iconView;
 @end
 

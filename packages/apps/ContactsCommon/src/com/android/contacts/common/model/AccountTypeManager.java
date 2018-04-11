@@ -35,7 +35,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.provider.ContactsContract;
 import android.text.TextUtils;
@@ -52,7 +51,7 @@ import com.android.contacts.common.model.account.ExternalAccountType;
 import com.android.contacts.common.model.account.FallbackAccountType;
 import com.android.contacts.common.model.account.GoogleAccountType;
 import com.android.contacts.common.model.dataitem.DataKind;
-import com.android.contacts.common.test.NeededForTesting;
+import com.android.contacts.common.testing.NeededForTesting;
 import com.android.contacts.common.util.Constants;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -420,7 +419,6 @@ class AccountTypeManagerImpl extends AccountTypeManager
             } else if (ExchangeAccountType.isExchangeType(type)) {
                 accountType = new ExchangeAccountType(mContext, auth.packageName, type);
             } else {
-                // TODO: use syncadapter package instead, since it provides resources
                 Log.d(TAG, "Registering external account type=" + type
                         + ", packageName=" + auth.packageName);
                 accountType = new ExternalAccountType(mContext, auth.packageName, false);

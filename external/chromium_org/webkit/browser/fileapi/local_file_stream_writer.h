@@ -10,12 +10,16 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "base/task_runner.h"
 #include "webkit/browser/fileapi/file_stream_writer.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
+
+namespace content {
+class LocalFileStreamWriterTest;
+}
 
 namespace net {
 class FileStream;
@@ -24,13 +28,9 @@ class FileStream;
 namespace fileapi {
 
 // This class is a thin wrapper around net::FileStream for writing local files.
-class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE LocalFileStreamWriter
-    : public FileStreamWriter {
+class WEBKIT_STORAGE_BROWSER_EXPORT LocalFileStreamWriter
+    : public NON_EXPORTED_BASE(FileStreamWriter) {
  public:
-  // Creates a writer for the existing file in the path |file_path| starting
-  // from |initial_offset|. Uses |task_runner| for async file operations.
-  LocalFileStreamWriter(base::TaskRunner* task_runner,
-                        const base::FilePath& file_path, int64 initial_offset);
   virtual ~LocalFileStreamWriter();
 
   // FileStreamWriter overrides.
@@ -40,6 +40,13 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE LocalFileStreamWriter
   virtual int Flush(const net::CompletionCallback& callback) OVERRIDE;
 
  private:
+  friend class content::LocalFileStreamWriterTest;
+  friend class FileStreamWriter;
+  LocalFileStreamWriter(base::TaskRunner* task_runner,
+                        const base::FilePath& file_path,
+                        int64 initial_offset,
+                        OpenOrCreate open_or_create);
+
   // Opens |file_path_| and if it succeeds, proceeds to InitiateSeek().
   // If failed, the error code is returned by calling |error_callback|.
   int InitiateOpen(const net::CompletionCallback& error_callback,
@@ -75,6 +82,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE LocalFileStreamWriter
 
   // Initialization parameters.
   const base::FilePath file_path_;
+  OpenOrCreate open_or_create_;
   const int64 initial_offset_;
   scoped_refptr<base::TaskRunner> task_runner_;
 

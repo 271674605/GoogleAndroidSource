@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.web_contents_delegate_android;
 
-import android.graphics.Rect;
 import android.view.KeyEvent;
 
 import org.chromium.base.CalledByNative;
@@ -48,18 +47,14 @@ public class WebContentsDelegateAndroid {
     }
 
     /**
-     * @param disposition The new tab disposition as per the constants in
-     *                    org.chromium.ui.WindowOpenDisposition (See window_open_disposition_list.h
-     *                    for the enumeration definitions).
+     * @param disposition         The new tab disposition as per the constants in
+     *                            org.chromium.ui.WindowOpenDisposition (See
+     *                            window_open_disposition_list.h for the enumeration definitions).
+     * @param isRendererInitiated Whether or not the renderer initiated this action.
      */
     @CalledByNative
-    public void openNewTab(String url, String extraHeaders, byte[] postData, int disposition) {
-    }
-
-    @CalledByNative
-    public boolean addNewContents(int nativeSourceWebContents, int nativeWebContents,
-            int disposition, Rect initialPosition, boolean userGesture) {
-        return false;
+    public void openNewTab(String url, String extraHeaders, byte[] postData, int disposition,
+            boolean isRendererInitiated) {
     }
 
     @CalledByNative
@@ -80,6 +75,10 @@ public class WebContentsDelegateAndroid {
 
     @CalledByNative
     public void navigationStateChanged(int flags) {
+    }
+
+    @CalledByNative
+    public void visibleSSLStateChanged() {
     }
 
     @SuppressWarnings("unused")
@@ -154,14 +153,5 @@ public class WebContentsDelegateAndroid {
     @CalledByNative
     public boolean isFullscreenForTabOrPending() {
         return false;
-    }
-
-    /**
-     * Called from WebKit to request that the top controls be shown or hidden.
-     * The implementation should call ContentViewCore.showTopControls to actually
-     * show or hide the top controls.
-     */
-    @CalledByNative
-    public void didProgrammaticallyScroll(int scrollX, int scrollY) {
     }
 }

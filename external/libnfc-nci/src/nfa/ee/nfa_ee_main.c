@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ const tNFA_EE_SM_ACT nfa_ee_actions[] =
     nfa_ee_api_set_proto_cfg,   /* NFA_EE_API_SET_PROTO_CFG_EVT */
     nfa_ee_api_add_aid      ,   /* NFA_EE_API_ADD_AID_EVT       */
     nfa_ee_api_remove_aid   ,   /* NFA_EE_API_REMOVE_AID_EVT    */
+    nfa_ee_api_lmrt_size    ,   /* NFA_EE_API_LMRT_SIZE_EVT     */
     nfa_ee_api_update_now   ,   /* NFA_EE_API_UPDATE_NOW_EVT    */
     nfa_ee_api_connect      ,   /* NFA_EE_API_CONNECT_EVT       */
     nfa_ee_api_send_data    ,   /* NFA_EE_API_SEND_DATA_EVT     */
@@ -76,6 +77,7 @@ const tNFA_EE_SM_ACT nfa_ee_actions[] =
     nfa_ee_nci_conn         ,   /* NFA_EE_NCI_DATA_EVT          */
     nfa_ee_nci_action_ntf   ,   /* NFA_EE_NCI_ACTION_NTF_EVT    */
     nfa_ee_nci_disc_req_ntf ,   /* NFA_EE_NCI_DISC_REQ_NTF_EVT  */
+    nfa_ee_nci_wait_rsp     ,   /* NFA_EE_NCI_WAIT_RSP_EVT      */
     nfa_ee_rout_timeout     ,   /* NFA_EE_ROUT_TIMEOUT_EVT      */
     nfa_ee_discv_timeout    ,   /* NFA_EE_DISCV_TIMEOUT_EVT     */
     nfa_ee_lmrt_to_nfcc         /* NFA_EE_CFG_TO_NFCC_EVT       */
@@ -124,9 +126,17 @@ void nfa_ee_init (void)
 *******************************************************************************/
 void nfa_ee_sys_enable (void)
 {
-    /* collect NFCEE information */
-    NFC_NfceeDiscover (TRUE);
-    nfa_sys_start_timer (&nfa_ee_cb.discv_timer, NFA_EE_DISCV_TIMEOUT_EVT, NFA_EE_DISCV_TIMEOUT_VAL);
+    if (nfa_ee_max_ee_cfg)
+    {
+        /* collect NFCEE information */
+        NFC_NfceeDiscover (TRUE);
+        nfa_sys_start_timer (&nfa_ee_cb.discv_timer, NFA_EE_DISCV_TIMEOUT_EVT, NFA_EE_DISCV_TIMEOUT_VAL);
+    }
+    else
+    {
+        nfa_ee_cb.em_state = NFA_EE_EM_STATE_INIT_DONE;
+        nfa_sys_cback_notify_enable_complete (NFA_ID_EE);
+    }
 }
 
 /*******************************************************************************
@@ -210,34 +220,37 @@ void nfa_ee_proc_nfcc_power_mode (UINT8 nfcc_power_mode)
     /* if NFCC power state is change to full power */
     if (nfcc_power_mode == NFA_DM_PWR_MODE_FULL)
     {
-        p_cb = nfa_ee_cb.ecb;
-        for (xx = 0; xx < NFA_EE_MAX_EE_SUPPORTED; xx++, p_cb++)
+        if (nfa_ee_max_ee_cfg)
         {
-            p_cb->ee_old_status = 0;
-            if (xx >= nfa_ee_cb.cur_ee)
-                p_cb->nfcee_id = NFA_EE_INVALID;
-
-            if ((p_cb->nfcee_id != NFA_EE_INVALID) && (p_cb->ee_interface[0] != NFC_NFCEE_INTERFACE_HCI_ACCESS) && (p_cb->ee_status  != NFA_EE_STATUS_REMOVED))
+            p_cb = nfa_ee_cb.ecb;
+            for (xx = 0; xx < NFA_EE_MAX_EE_SUPPORTED; xx++, p_cb++)
             {
-                proc_complete       = FALSE;
-                /* NFA_EE_STATUS_RESTORING bit makes sure the ee_status restore to ee_old_status
-                 * NFA_EE_STATUS_RESTORING bit is cleared in ee_status at NFCEE_DISCOVER NTF.
-                 * NFA_EE_STATUS_RESTORING bit is cleared in ee_old_status at restoring the activate/inactive status after NFCEE_DISCOVER NTF */
-                p_cb->ee_status    |= NFA_EE_STATUS_RESTORING;
-                p_cb->ee_old_status = p_cb->ee_status;
-                /* NFA_EE_FLAGS_RESTORE bit makes sure the routing/nci logical connection is restore to prior to entering low power mode */
-                p_cb->ecb_flags    |= NFA_EE_ECB_FLAGS_RESTORE;
+                p_cb->ee_old_status = 0;
+                if (xx >= nfa_ee_cb.cur_ee)
+                    p_cb->nfcee_id = NFA_EE_INVALID;
+
+                if ((p_cb->nfcee_id != NFA_EE_INVALID) && (p_cb->ee_interface[0] != NFC_NFCEE_INTERFACE_HCI_ACCESS) && (p_cb->ee_status  != NFA_EE_STATUS_REMOVED))
+                {
+                    proc_complete       = FALSE;
+                    /* NFA_EE_STATUS_RESTORING bit makes sure the ee_status restore to ee_old_status
+                     * NFA_EE_STATUS_RESTORING bit is cleared in ee_status at NFCEE_DISCOVER NTF.
+                     * NFA_EE_STATUS_RESTORING bit is cleared in ee_old_status at restoring the activate/inactive status after NFCEE_DISCOVER NTF */
+                    p_cb->ee_status    |= NFA_EE_STATUS_RESTORING;
+                    p_cb->ee_old_status = p_cb->ee_status;
+                    /* NFA_EE_FLAGS_RESTORE bit makes sure the routing/nci logical connection is restore to prior to entering low power mode */
+                    p_cb->ecb_flags    |= NFA_EE_ECB_FLAGS_RESTORE;
+                }
             }
+            nfa_ee_cb.em_state          = NFA_EE_EM_STATE_RESTORING;
+            nfa_ee_cb.num_ee_expecting  = 0;
+            if (nfa_sys_is_register (NFA_ID_HCI))
+            {
+                nfa_ee_cb.ee_flags   |= NFA_EE_FLAG_WAIT_HCI;
+                nfa_ee_cb.ee_flags   |= NFA_EE_FLAG_NOTIFY_HCI;
+            }
+            NFC_NfceeDiscover (TRUE);
+            nfa_sys_start_timer (&nfa_ee_cb.discv_timer, NFA_EE_DISCV_TIMEOUT_EVT, NFA_EE_DISCV_TIMEOUT_VAL);
         }
-        nfa_ee_cb.em_state          = NFA_EE_EM_STATE_RESTORING;
-        nfa_ee_cb.num_ee_expecting  = 0;
-        if (nfa_sys_is_register (NFA_ID_HCI))
-        {
-            nfa_ee_cb.ee_flags   |= NFA_EE_FLAG_WAIT_HCI;
-            nfa_ee_cb.ee_flags   |= NFA_EE_FLAG_NOTIFY_HCI;
-        }
-        NFC_NfceeDiscover (TRUE);
-        nfa_sys_start_timer (&nfa_ee_cb.discv_timer, NFA_EE_DISCV_TIMEOUT_EVT, NFA_EE_DISCV_TIMEOUT_VAL);
     }
     else
     {
@@ -310,7 +323,7 @@ void nfa_ee_proc_hci_info_cback (void)
 void nfa_ee_proc_evt (tNFC_RESPONSE_EVT event, void *p_data)
 {
     tNFA_EE_INT_EVT         int_event=0;
-    tNFA_EE_NCI_RESPONSE    cbk;
+    tNFA_EE_NCI_WAIT_RSP    cbk;
     BT_HDR                  *p_hdr;
 
     switch (event)
@@ -335,6 +348,10 @@ void nfa_ee_proc_evt (tNFC_RESPONSE_EVT event, void *p_data)
         int_event   = NFA_EE_NCI_DISC_REQ_NTF_EVT;
         break;
 
+    case NFC_SET_ROUTING_REVT:
+        int_event   = NFA_EE_NCI_WAIT_RSP_EVT;
+        cbk.opcode  = NCI_MSG_RF_SET_ROUTING;
+        break;
     }
 
     NFA_TRACE_DEBUG2 ("nfa_ee_proc_evt: event=0x%02x int_event:0x%x", event, int_event);
@@ -594,6 +611,8 @@ static char *nfa_ee_sm_evt_2_str (UINT16 event)
         return "API_ADD_AID";
     case NFA_EE_API_REMOVE_AID_EVT:
         return "API_REMOVE_AID";
+    case NFA_EE_API_LMRT_SIZE_EVT:
+        return "API_LMRT_SIZE";
     case NFA_EE_API_UPDATE_NOW_EVT:
         return "API_UPDATE_NOW";
     case NFA_EE_API_CONNECT_EVT:
@@ -616,6 +635,8 @@ static char *nfa_ee_sm_evt_2_str (UINT16 event)
         return "NCI_ACTION";
     case NFA_EE_NCI_DISC_REQ_NTF_EVT:
         return "NCI_DISC_REQ";
+    case NFA_EE_NCI_WAIT_RSP_EVT:
+        return "NCI_WAIT_RSP";
     case NFA_EE_ROUT_TIMEOUT_EVT:
         return "ROUT_TIMEOUT";
     case NFA_EE_DISCV_TIMEOUT_EVT:

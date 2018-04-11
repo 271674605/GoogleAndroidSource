@@ -16,13 +16,14 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParser;
 
 import android.app.Activity;
 import android.test.ActivityInstrumentationTestCase;
+import android.test.UiThreadTest;
 import android.util.AttributeSet;
 import android.util.Xml;
 import android.view.View;
@@ -32,11 +33,11 @@ import android.widget.ViewFlipper;
 /**
  * Test {@link ViewFlipper}.
  */
-public class ViewFlipperTest extends ActivityInstrumentationTestCase<ViewFlipperStubActivity> {
+public class ViewFlipperTest extends ActivityInstrumentationTestCase<ViewFlipperCtsActivity> {
     private Activity mActivity;
 
     public ViewFlipperTest() {
-        super("com.android.cts.stub", ViewFlipperStubActivity.class);
+        super("com.android.cts.widget", ViewFlipperCtsActivity.class);
     }
 
     protected void setUp() throws Exception {
@@ -45,6 +46,7 @@ public class ViewFlipperTest extends ActivityInstrumentationTestCase<ViewFlipper
         assertNotNull(mActivity);
     }
 
+    @UiThreadTest
     public void testConstructor() {
         new ViewFlipper(mActivity);
 
@@ -61,6 +63,7 @@ public class ViewFlipperTest extends ActivityInstrumentationTestCase<ViewFlipper
         }
     }
 
+    @UiThreadTest
     public void testSetFlipInterval() {
         ViewFlipper viewFlipper = new ViewFlipper(mActivity);
         viewFlipper.setFlipInterval(0);

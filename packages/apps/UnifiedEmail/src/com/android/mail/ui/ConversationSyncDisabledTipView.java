@@ -148,7 +148,7 @@ public class ConversationSyncDisabledTipView extends FrameLayout
 
     public void bindAccount(Account account, ControllableActivity activity) {
         mAccount = account;
-        mAccountPreferences = AccountPreferences.get(getContext(), account.getEmailAddress());
+        mAccountPreferences = AccountPreferences.get(getContext(), account);
         mActivity = (Activity) activity;
     }
 
@@ -400,5 +400,11 @@ public class ConversationSyncDisabledTipView extends FrameLayout
         } else {
             setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), mAnimatedHeight);
         }
+    }
+
+    @Override
+    public boolean commitLeaveBehindItem() {
+        // This view has no leave-behind
+        return false;
     }
 }

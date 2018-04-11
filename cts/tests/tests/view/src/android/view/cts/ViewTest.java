@@ -16,11 +16,16 @@
 
 package android.view.cts;
 
-import com.android.cts.stub.R;
+import android.content.res.ColorStateList;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.PorterDuff;
+
+import com.android.cts.view.R;
 import com.android.internal.view.menu.ContextMenuBuilder;
 import com.google.android.collect.Lists;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
@@ -48,6 +53,7 @@ import android.view.ContextMenu;
 import android.view.ContextMenu.ContextMenuInfo;
 import android.view.Display;
 import android.view.HapticFeedbackConstants;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SoundEffectConstants;
@@ -75,7 +81,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.cts.StubActivity;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -84,14 +89,14 @@ import java.util.List;
 /**
  * Test {@link View}.
  */
-public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestStubActivity> {
+public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestCtsActivity> {
     public ViewTest() {
-        super(ViewTestStubActivity.class);
+        super(ViewTestCtsActivity.class);
     }
 
     private Resources mResources;
     private MockViewParent mMockParent;
-    private ViewTestStubActivity mActivity;
+    private ViewTestCtsActivity mActivity;
 
     /** timeout delta when wait in case the system is sluggish */
     private static final long TIMEOUT_DELTA = 10000;
@@ -2468,7 +2473,7 @@ public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestStubActiv
         assertFalse(view.hasCalledOnWindowFocusChanged());
         assertFalse(view.hasCalledDispatchWindowFocusChanged());
 
-        StubActivity activity = launchActivity("com.android.cts.stub", StubActivity.class, null);
+        CtsActivity activity = launchActivity("com.android.cts.view", CtsActivity.class, null);
 
         // Wait until the window lost focus.
         new PollingCheck(TIMEOUT_DELTA) {
@@ -2742,6 +2747,136 @@ public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestStubActiv
     public void testIsPaddingOffsetRequired() {
         MockView view = new MockView(mActivity);
         assertFalse(view.isPaddingOffsetRequired());
+    }
+
+    @UiThreadTest
+    public void testPadding() {
+        MockView view = (MockView) mActivity.findViewById(R.id.mock_view_padding_full);
+        Drawable background = view.getBackground();
+        Rect backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a non null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left != 0);
+        assertTrue(backgroundPadding.right != 0);
+        assertTrue(backgroundPadding.top != 0);
+        assertTrue(backgroundPadding.bottom != 0);
+
+        // The XML defines android:padding="0dp" and that should be the resulting padding
+        assertEquals(0, view.getPaddingLeft());
+        assertEquals(0, view.getPaddingTop());
+        assertEquals(0, view.getPaddingRight());
+        assertEquals(0, view.getPaddingBottom());
+
+        // LEFT case
+        view = (MockView) mActivity.findViewById(R.id.mock_view_padding_left);
+        background = view.getBackground();
+        backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a non null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left != 0);
+        assertTrue(backgroundPadding.right != 0);
+        assertTrue(backgroundPadding.top != 0);
+        assertTrue(backgroundPadding.bottom != 0);
+
+        // The XML defines android:paddingLeft="0dp" and that should be the resulting padding
+        assertEquals(0, view.getPaddingLeft());
+        assertEquals(backgroundPadding.top, view.getPaddingTop());
+        assertEquals(backgroundPadding.right, view.getPaddingRight());
+        assertEquals(backgroundPadding.bottom, view.getPaddingBottom());
+
+        // RIGHT case
+        view = (MockView) mActivity.findViewById(R.id.mock_view_padding_right);
+        background = view.getBackground();
+        backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a non null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left != 0);
+        assertTrue(backgroundPadding.right != 0);
+        assertTrue(backgroundPadding.top != 0);
+        assertTrue(backgroundPadding.bottom != 0);
+
+        // The XML defines android:paddingRight="0dp" and that should be the resulting padding
+        assertEquals(backgroundPadding.left, view.getPaddingLeft());
+        assertEquals(backgroundPadding.top, view.getPaddingTop());
+        assertEquals(0, view.getPaddingRight());
+        assertEquals(backgroundPadding.bottom, view.getPaddingBottom());
+
+        // TOP case
+        view = (MockView) mActivity.findViewById(R.id.mock_view_padding_top);
+        background = view.getBackground();
+        backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a non null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left != 0);
+        assertTrue(backgroundPadding.right != 0);
+        assertTrue(backgroundPadding.top != 0);
+        assertTrue(backgroundPadding.bottom != 0);
+
+        // The XML defines android:paddingTop="0dp" and that should be the resulting padding
+        assertEquals(backgroundPadding.left, view.getPaddingLeft());
+        assertEquals(0, view.getPaddingTop());
+        assertEquals(backgroundPadding.right, view.getPaddingRight());
+        assertEquals(backgroundPadding.bottom, view.getPaddingBottom());
+
+        // BOTTOM case
+        view = (MockView) mActivity.findViewById(R.id.mock_view_padding_bottom);
+        background = view.getBackground();
+        backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a non null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left != 0);
+        assertTrue(backgroundPadding.right != 0);
+        assertTrue(backgroundPadding.top != 0);
+        assertTrue(backgroundPadding.bottom != 0);
+
+        // The XML defines android:paddingBottom="0dp" and that should be the resulting padding
+        assertEquals(backgroundPadding.left, view.getPaddingLeft());
+        assertEquals(backgroundPadding.top, view.getPaddingTop());
+        assertEquals(backgroundPadding.right, view.getPaddingRight());
+        assertEquals(0, view.getPaddingBottom());
+
+        // Case for interleaved background/padding changes
+        view = (MockView) mActivity.findViewById(R.id.mock_view_padding_runtime_updated);
+        background = view.getBackground();
+        backgroundPadding = new Rect();
+        background.getPadding(backgroundPadding);
+
+        // There is some background with a null padding
+        assertNotNull(background);
+        assertTrue(backgroundPadding.left == 0);
+        assertTrue(backgroundPadding.right == 0);
+        assertTrue(backgroundPadding.top == 0);
+        assertTrue(backgroundPadding.bottom == 0);
+
+        final int paddingLeft = view.getPaddingLeft();
+        final int paddingRight = view.getPaddingRight();
+        final int paddingTop = view.getPaddingTop();
+        final int paddingBottom = view.getPaddingBottom();
+        assertEquals(8, paddingLeft);
+        assertEquals(0, paddingTop);
+        assertEquals(8, paddingRight);
+        assertEquals(0, paddingBottom);
+
+        // Manipulate background and padding
+        background.setState(view.getDrawableState());
+        background.jumpToCurrentState();
+        view.setBackground(background);
+        view.setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom);
+
+        assertEquals(8, view.getPaddingLeft());
+        assertEquals(0, view.getPaddingTop());
+        assertEquals(8, view.getPaddingRight());
+        assertEquals(0, view.getPaddingBottom());
     }
 
     public void testGetWindowVisibleDisplayFrame() {
@@ -3155,6 +3290,114 @@ public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestStubActiv
         });
     }
 
+    public void testFilterTouchesWhenObscured() throws Throwable {
+        OnTouchListenerImpl touchListener = new OnTouchListenerImpl();
+        View view = new View(mActivity);
+        view.setOnTouchListener(touchListener);
+
+        MotionEvent.PointerProperties[] props = new MotionEvent.PointerProperties[] {
+                new MotionEvent.PointerProperties()
+        };
+        MotionEvent.PointerCoords[] coords = new MotionEvent.PointerCoords[] {
+                new MotionEvent.PointerCoords()
+        };
+        MotionEvent obscuredTouch = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN,
+                1, props, coords, 0, 0, 0, 0, -1, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                MotionEvent.FLAG_WINDOW_IS_OBSCURED);
+        MotionEvent unobscuredTouch = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN,
+                1, props, coords, 0, 0, 0, 0, -1, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                0);
+
+        // Initially filter touches is false so all touches are dispatched.
+        assertFalse(view.getFilterTouchesWhenObscured());
+
+        view.dispatchTouchEvent(unobscuredTouch);
+        assertTrue(touchListener.hasOnTouch());
+        touchListener.reset();
+        view.dispatchTouchEvent(obscuredTouch);
+        assertTrue(touchListener.hasOnTouch());
+        touchListener.reset();
+
+        // Set filter touches to true so only unobscured touches are dispatched.
+        view.setFilterTouchesWhenObscured(true);
+        assertTrue(view.getFilterTouchesWhenObscured());
+
+        view.dispatchTouchEvent(unobscuredTouch);
+        assertTrue(touchListener.hasOnTouch());
+        touchListener.reset();
+        view.dispatchTouchEvent(obscuredTouch);
+        assertFalse(touchListener.hasOnTouch());
+        touchListener.reset();
+
+        // Set filter touches to false so all touches are dispatched.
+        view.setFilterTouchesWhenObscured(false);
+        assertFalse(view.getFilterTouchesWhenObscured());
+
+        view.dispatchTouchEvent(unobscuredTouch);
+        assertTrue(touchListener.hasOnTouch());
+        touchListener.reset();
+        view.dispatchTouchEvent(obscuredTouch);
+        assertTrue(touchListener.hasOnTouch());
+        touchListener.reset();
+    }
+
+    public void testBackgroundTint() {
+        View inflatedView = mActivity.findViewById(R.id.background_tint);
+
+        assertEquals("Background tint inflated correctly",
+                Color.WHITE, inflatedView.getBackgroundTintList().getDefaultColor());
+        assertEquals("Background tint mode inflated correctly",
+                PorterDuff.Mode.SRC_OVER, inflatedView.getBackgroundTintMode());
+
+        MockDrawable bg = new MockDrawable();
+        View view = new View(mActivity);
+
+        view.setBackground(bg);
+        assertFalse("No background tint applied by default", bg.hasCalledSetTint());
+
+        view.setBackgroundTintList(ColorStateList.valueOf(Color.WHITE));
+        assertTrue("Background tint applied when setBackgroundTints() called after setBackground()",
+                bg.hasCalledSetTint());
+
+        bg.reset();
+        view.setBackground(null);
+        view.setBackground(bg);
+        assertTrue("Background tint applied when setBackgroundTints() called before setBackground()",
+                bg.hasCalledSetTint());
+    }
+
+    private static class MockDrawable extends Drawable {
+        private boolean mCalledSetTint = false;
+
+        @Override
+        public void draw(Canvas canvas) {}
+
+        @Override
+        public void setAlpha(int alpha) {}
+
+        @Override
+        public void setColorFilter(ColorFilter cf) {}
+
+        @Override
+        public int getOpacity() {
+            return 0;
+        }
+
+        @Override
+        public void setTintList(ColorStateList tint) {
+            super.setTintList(tint);
+            mCalledSetTint = true;
+        }
+
+        public boolean hasCalledSetTint() {
+            return mCalledSetTint;
+        }
+
+        public void reset() {
+            mCalledSetTint = false;
+        }
+    }
+
     private static class MockEditText extends EditText {
         private boolean mCalledCheckInputConnectionProxy = false;
         private boolean mCalledOnCreateInputConnection = false;
@@ -3390,6 +3633,39 @@ public class ViewTest extends ActivityInstrumentationTestCase2<ViewTestStubActiv
         public void notifySubtreeAccessibilityStateChanged(View child,
             View source, int changeType) {
 
+        }
+
+        @Override
+        public boolean onStartNestedScroll(View child, View target, int nestedScrollAxes) {
+            return false;
+        }
+
+        @Override
+        public void onNestedScrollAccepted(View child, View target, int nestedScrollAxes) {
+        }
+
+        @Override
+        public void onStopNestedScroll(View target) {
+        }
+
+        @Override
+        public void onNestedScroll(View target, int dxConsumed, int dyConsumed,
+                                   int dxUnconsumed, int dyUnconsumed) {
+        }
+
+        @Override
+        public void onNestedPreScroll(View target, int dx, int dy, int[] consumed) {
+        }
+
+        @Override
+        public boolean onNestedFling(View target, float velocityX, float velocityY,
+                boolean consumed) {
+            return false;
+        }
+
+        @Override
+        public boolean onNestedPreFling(View target, float velocityX, float velocityY) {
+            return false;
         }
     }
 

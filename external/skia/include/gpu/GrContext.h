@@ -8,38 +8,44 @@
 #ifndef GrContext_DEFINED
 #define GrContext_DEFINED
 
-#include "GrColor.h"
-#include "GrAARectRenderer.h"
 #include "GrClipData.h"
-#include "SkMatrix.h"
+#include "GrColor.h"
 #include "GrPaint.h"
 #include "GrPathRendererChain.h"
-#include "GrPoint.h"
 #include "GrRenderTarget.h"
-#include "GrRefCnt.h"
 #include "GrTexture.h"
+#include "SkMatrix.h"
+#include "SkPathEffect.h"
+#include "SkTypes.h"
 
+class GrAARectRenderer;
 class GrAutoScratchTexture;
+class GrCacheable;
 class GrDrawState;
 class GrDrawTarget;
 class GrEffect;
 class GrFontCache;
 class GrGpu;
+class GrGpuTraceMarker;
 class GrIndexBuffer;
 class GrIndexBufferAllocPool;
 class GrInOrderDrawBuffer;
+class GrLayerCache;
 class GrOvalRenderer;
+class GrPath;
 class GrPathRenderer;
 class GrResourceEntry;
 class GrResourceCache;
 class GrStencilBuffer;
+class GrTestTarget;
 class GrTextureParams;
 class GrVertexBuffer;
 class GrVertexBufferAllocPool;
+class GrStrokeInfo;
 class GrSoftwarePathRenderer;
 class SkStrokeRec;
 
-class GR_API GrContext : public GrRefCnt {
+class SK_API GrContext : public SkRefCnt {
 public:
     SK_DECLARE_INST_COUNT(GrContext)
 
@@ -47,11 +53,6 @@ public:
      * Creates a GrContext for a backend context.
      */
     static GrContext* Create(GrBackend, GrBackendContext);
-
-    /**
-     * Returns the number of GrContext instances for the current thread.
-     */
-    static int GetThreadInstanceCount();
 
     virtual ~GrContext();
 
@@ -89,8 +90,8 @@ public:
      * buffer, etc. references/IDs are now invalid. Should be called even when
      * GrContext is no longer going to be used for two reasons:
      *  1) ~GrContext will not try to free the objects in the 3D API.
-     *  2) If you've created GrResources that outlive the GrContext they will
-     *     be marked as invalid (GrResource::isValid()) and won't attempt to
+     *  2) If you've created GrGpuObjects that outlive the GrContext they will
+     *     be marked as invalid (GrGpuObjects::isValid()) and won't attempt to
      *     free their underlying resource in the 3D API.
      * Content drawn since the last GrContext::flush() may be lost.
      */
@@ -103,6 +104,62 @@ public:
      */
     void contextDestroyed();
 
+    ///////////////////////////////////////////////////////////////////////////
+    // Resource Cache
+
+    /**
+     *  Return the current GPU resource cache limits.
+     *
+     *  @param maxResources If non-null, returns maximum number of resources that
+     *                      can be held in the cache.
+     *  @param maxResourceBytes If non-null, returns maximum number of bytes of
+     *                          video memory that can be held in the cache.
+     */
+    void getResourceCacheLimits(int* maxResources, size_t* maxResourceBytes) const;
+    SK_ATTR_DEPRECATED("This function has been renamed to getResourceCacheLimits().")
+    void getTextureCacheLimits(int* maxTextures, size_t* maxTextureBytes) const {
+        this->getResourceCacheLimits(maxTextures, maxTextureBytes);
+    }
+
+    /**
+     *  Gets the current GPU resource cache usage.
+     *
+     *  @param resourceCount If non-null, returns the number of resources that are held in the
+     *                       cache.
+     *  @param maxResourceBytes If non-null, returns the total number of bytes of video memory held
+     *                          in the cache.
+     */
+    void getResourceCacheUsage(int* resourceCount, size_t* resourceBytes) const;
+
+    SK_ATTR_DEPRECATED("Use getResourceCacheUsage().")
+    size_t getGpuTextureCacheBytes() const {
+        size_t bytes;
+        this->getResourceCacheUsage(NULL, &bytes);
+        return bytes;
+    }
+
+    SK_ATTR_DEPRECATED("Use getResourceCacheUsage().")
+    int getGpuTextureCacheResourceCount() const {
+        int count;
+        this->getResourceCacheUsage(&count, NULL);
+        return count;
+    }
+
+    /**
+     *  Specify the GPU resource cache limits. If the current cache exceeds either
+     *  of these, it will be purged (LRU) to keep the cache within these limits.
+     *
+     *  @param maxResources The maximum number of resources that can be held in
+     *                      the cache.
+     *  @param maxResourceBytes The maximum number of bytes of video memory
+     *                          that can be held in the cache.
+     */
+    void setResourceCacheLimits(int maxResources, size_t maxResourceBytes);
+    SK_ATTR_DEPRECATED("This function has been renamed to setResourceCacheLimits().")
+    void setTextureCacheLimits(int maxTextures, size_t maxTextureBytes) {
+        this->setResourceCacheLimits(maxTextures, maxTextureBytes);
+    }
+
     /**
      * Frees GPU created by the context. Can be called to reduce GPU memory
      * pressure.
@@ -110,9 +167,32 @@ public:
     void freeGpuResources();
 
     /**
-     * Returns the number of bytes of GPU memory hosted by the texture cache.
+     * This method should be called whenever a GrResource is unreffed or
+     * switched from exclusive to non-exclusive. This
+     * gives the resource cache a chance to discard unneeded resources.
+     * Note: this entry point will be removed once totally ref-driven
+     * cache maintenance is implemented.
      */
-    size_t getGpuTextureCacheBytes() const;
+    void purgeCache();
+
+    /**
+     * Purge all the unlocked resources from the cache.
+     * This entry point is mainly meant for timing texture uploads
+     * and is not defined in normal builds of Skia.
+     */
+    void purgeAllUnlockedResources();
+
+    /**
+     * Stores a custom resource in the cache, based on the specified key.
+     */
+    void addResourceToCache(const GrResourceKey&, GrCacheable*);
+
+    /**
+     * Finds a resource in the cache, based on the specified key. This is intended for use in
+     * conjunction with addResourceToCache(). The return value will be NULL if not found. The
+     * caller must balance with a call to unref().
+     */
+    GrCacheable* findAndRefCachedResource(const GrResourceKey&);
 
     ///////////////////////////////////////////////////////////////////////////
     // Textures
@@ -126,16 +206,19 @@ public:
      *                  for different wrap modes on GPUs with limited NPOT
      *                  texture support). NULL implies clamp wrap modes.
      * @param desc      Description of the texture properties.
-     * @param cacheID Cache-specific properties (e.g., texture gen ID)
+     * @param cacheID   Cache-specific properties (e.g., texture gen ID)
      * @param srcData   Pointer to the pixel values.
      * @param rowBytes  The number of bytes between rows of the texture. Zero
-     *                  implies tightly packed rows.
+     *                  implies tightly packed rows. For compressed pixel configs, this
+     *                  field is ignored.
+     * @param cacheKey  (optional) If non-NULL, we'll write the cache key we used to cacheKey.
      */
     GrTexture* createTexture(const GrTextureParams* params,
                              const GrTextureDesc& desc,
                              const GrCacheID& cacheID,
-                             void* srcData, size_t rowBytes);
-
+                             const void* srcData,
+                             size_t rowBytes,
+                             GrResourceKey* cacheKey = NULL);
     /**
      * Search for an entry based on key and dimensions. If found, ref it and return it. The return
      * value will be NULL if not found. The caller must balance with a call to unref.
@@ -201,15 +284,6 @@ public:
     void unlockScratchTexture(GrTexture* texture);
 
     /**
-     * This method should be called whenever a GrTexture is unreffed or
-     * switched from exclusive to non-exclusive. This
-     * gives the resource cache a chance to discard unneeded textures.
-     * Note: this entry point will be removed once totally ref-driven
-     * cache maintenance is implemented
-     */
-    void purgeCache();
-
-    /**
      * Creates a texture that is outside the cache. Does not count against
      * cache's budget.
      */
@@ -226,27 +300,6 @@ public:
     bool supportsIndex8PixelConfig(const GrTextureParams*,
                                    int width,
                                    int height) const;
-
-    /**
-     *  Return the current texture cache limits.
-     *
-     *  @param maxTextures If non-null, returns maximum number of textures that
-     *                     can be held in the cache.
-     *  @param maxTextureBytes If non-null, returns maximum number of bytes of
-     *                         texture memory that can be held in the cache.
-     */
-    void getTextureCacheLimits(int* maxTextures, size_t* maxTextureBytes) const;
-
-    /**
-     *  Specify the texture cache limits. If the current cache exceeds either
-     *  of these, it will be purged (LRU) to keep the cache within these limits.
-     *
-     *  @param maxTextures The maximum number of textures that can be held in
-     *                     the cache.
-     *  @param maxTextureBytes The maximum number of bytes of texture memory
-     *                         that can be held in the cache.
-     */
-    void setTextureCacheLimits(int maxTextures, size_t maxTextureBytes);
 
     /**
      *  Return the max width or height of a texture supported by the current GPU.
@@ -280,12 +333,10 @@ public:
     const GrRenderTarget* getRenderTarget() const { return fRenderTarget.get(); }
     GrRenderTarget* getRenderTarget() { return fRenderTarget.get(); }
 
-    GrAARectRenderer* getAARectRenderer() { return fAARectRenderer; }
-
     /**
      * Can the provided configuration act as a color render target?
      */
-    bool isConfigRenderable(GrPixelConfig config) const;
+    bool isConfigRenderable(GrPixelConfig config, bool withMSAA) const;
 
     /**
      * Return the max width or height of a render target supported by the
@@ -298,6 +349,19 @@ public:
      * is not supported.
      */
     int getMaxSampleCount() const;
+
+    /**
+     * Returns the recommended sample count for a render target when using this
+     * context.
+     *
+     * @param  config the configuration of the render target.
+     * @param  dpi the display density in dots per inch.
+     *
+     * @return sample count that should be perform well and have good enough
+     *         rendering quality for the display. Alternatively returns 0 if
+     *         MSAA is not supported or recommended to be used by default.
+     */
+    int getRecommendedSampleCount(GrPixelConfig config, SkScalar dpi) const;
 
     ///////////////////////////////////////////////////////////////////////////
     // Backend Surfaces
@@ -375,10 +439,12 @@ public:
      * Clear the entire or rect of the render target, ignoring any clips.
      * @param rect  the rect to clear or the whole thing if rect is NULL.
      * @param color the color to clear to.
+     * @param canIgnoreRect allows partial clears to be converted to whole
+     *                      clears on platforms for which that is cheap
      * @param target if non-NULL, the render target to clear otherwise clear
      *               the current render target
      */
-    void clear(const SkIRect* rect, GrColor color,
+    void clear(const SkIRect* rect, GrColor color, bool canIgnoreRect,
                GrRenderTarget* target = NULL);
 
     /**
@@ -389,17 +455,20 @@ public:
     /**
      *  Draw the rect using a paint.
      *  @param paint        describes how to color pixels.
-     *  @param strokeWidth  If strokeWidth < 0, then the rect is filled, else
-     *                      the rect is mitered stroked based on strokeWidth. If
-     *                      strokeWidth == 0, then the stroke is always a single
-     *                      pixel thick.
+     *  @param strokeInfo   the stroke information (width, join, cap), and.
+     *                      the dash information (intervals, count, phase).
+     *                      If strokeInfo == NULL, then the rect is filled.
+     *                      Otherwise, if stroke width == 0, then the stroke
+     *                      is always a single pixel thick, else the rect is
+     *                      mitered/beveled stroked based on stroke width.
+     *                      If the stroke is dashed the rect is sent to drawPath.
      *  @param matrix       Optional matrix applied to the rect. Applied before
      *                      context's matrix or the paint's matrix.
      *  The rects coords are used to access the paint (through texture matrix)
      */
     void drawRect(const GrPaint& paint,
                   const SkRect&,
-                  SkScalar strokeWidth = -1,
+                  const GrStrokeInfo* strokeInfo = NULL,
                   const SkMatrix* matrix = NULL);
 
     /**
@@ -426,20 +495,32 @@ public:
      *
      *  @param paint        describes how to color pixels.
      *  @param rrect        the roundrect to draw
-     *  @param stroke       the stroke information (width, join, cap)
+     *  @param strokeInfo   the stroke information (width, join, cap) and
+     *                      the dash information (intervals, count, phase).
      */
-    void drawRRect(const GrPaint& paint,
-                   const SkRRect& rrect,
-                   const SkStrokeRec& stroke);
+    void drawRRect(const GrPaint& paint, const SkRRect& rrect, const GrStrokeInfo& strokeInfo);
+
+    /**
+     *  Shortcut for drawing an SkPath consisting of nested rrects using a paint.
+     *  Does not support stroking. The result is undefined if outer does not contain
+     *  inner.
+     *
+     *  @param paint        describes how to color pixels.
+     *  @param outer        the outer roundrect
+     *  @param inner        the inner roundrect
+     */
+    void drawDRRect(const GrPaint& paint, const SkRRect& outer, const SkRRect& inner);
+
 
     /**
      * Draws a path.
      *
      * @param paint         describes how to color pixels.
      * @param path          the path to draw
-     * @param stroke        the stroke information (width, join, cap)
+     * @param strokeInfo    the stroke information (width, join, cap) and
+     *                      the dash information (intervals, count, phase).
      */
-    void drawPath(const GrPaint& paint, const SkPath& path, const SkStrokeRec& stroke);
+    void drawPath(const GrPaint& paint, const SkPath& path, const GrStrokeInfo& strokeInfo);
 
     /**
      * Draws vertices with a paint.
@@ -460,8 +541,8 @@ public:
     void drawVertices(const GrPaint& paint,
                       GrPrimitiveType primitiveType,
                       int vertexCount,
-                      const GrPoint positions[],
-                      const GrPoint texs[],
+                      const SkPoint positions[],
+                      const SkPoint texs[],
                       const GrColor colors[],
                       const uint16_t indices[],
                       int indexCount);
@@ -471,11 +552,12 @@ public:
      *
      * @param paint         describes how to color pixels.
      * @param oval          the bounding rect of the oval.
-     * @param stroke        the stroke information (width, style)
+     * @param strokeInfo    the stroke information (width, join, cap) and
+     *                      the dash information (intervals, count, phase).
      */
     void drawOval(const GrPaint& paint,
                   const SkRect& oval,
-                  const SkStrokeRec& stroke);
+                  const GrStrokeInfo& strokeInfo);
 
     ///////////////////////////////////////////////////////////////////////////
     // Misc.
@@ -602,7 +684,6 @@ public:
                             size_t rowBytes,
                             uint32_t pixelOpsFlags = 0);
 
-
     /**
      * Copies a rectangle of texels from src to dst. The size of dst is the size of the rectangle
      * copied and topLeft is the position of the rect in src. The rectangle is clipped to src's
@@ -625,29 +706,39 @@ public:
      * perform a resolve to a GrTexture used as the source of a draw or before
      * reading pixels back from a GrTexture or GrRenderTarget.
      */
-    void resolveRenderTarget(GrRenderTarget* target);
+    void resolveRenderTarget(GrRenderTarget*);
+
+    /**
+     * Provides a perfomance hint that the render target's contents are allowed
+     * to become undefined.
+     */
+    void discardRenderTarget(GrRenderTarget*);
+
+#ifdef SK_DEVELOPER
+    void dumpFontCache() const;
+#endif
 
     ///////////////////////////////////////////////////////////////////////////
     // Helpers
 
-    class AutoRenderTarget : public ::GrNoncopyable {
+    class AutoRenderTarget : public ::SkNoncopyable {
     public:
         AutoRenderTarget(GrContext* context, GrRenderTarget* target) {
             fPrevTarget = context->getRenderTarget();
-            GrSafeRef(fPrevTarget);
+            SkSafeRef(fPrevTarget);
             context->setRenderTarget(target);
             fContext = context;
         }
         AutoRenderTarget(GrContext* context) {
             fPrevTarget = context->getRenderTarget();
-            GrSafeRef(fPrevTarget);
+            SkSafeRef(fPrevTarget);
             fContext = context;
         }
         ~AutoRenderTarget() {
             if (NULL != fContext) {
                 fContext->setRenderTarget(fPrevTarget);
             }
-            GrSafeUnref(fPrevTarget);
+            SkSafeUnref(fPrevTarget);
         }
     private:
         GrContext*      fContext;
@@ -668,7 +759,7 @@ public:
      * paint if necessary. Hint: use SkTCopyOnFirstWrite if the AutoMatrix is conditionally
      * initialized.
      */
-    class AutoMatrix : GrNoncopyable {
+    class AutoMatrix : public ::SkNoncopyable {
     public:
         AutoMatrix() : fContext(NULL) {}
 
@@ -678,7 +769,7 @@ public:
          * Initializes by pre-concat'ing the context's current matrix with the preConcat param.
          */
         void setPreConcat(GrContext* context, const SkMatrix& preConcat, GrPaint* paint = NULL) {
-            GrAssert(NULL != context);
+            SkASSERT(NULL != context);
 
             this->restore();
 
@@ -692,7 +783,7 @@ public:
          * update a paint but the matrix cannot be inverted.
          */
         bool setIdentity(GrContext* context, GrPaint* paint = NULL) {
-            GrAssert(NULL != context);
+            SkASSERT(NULL != context);
 
             this->restore();
 
@@ -761,7 +852,7 @@ public:
         SkMatrix    fMatrix;
     };
 
-    class AutoClip : GrNoncopyable {
+    class AutoClip : public ::SkNoncopyable {
     public:
         // This enum exists to require a caller of the constructor to acknowledge that the clip will
         // initially be wide open. It also could be extended if there are other desirable initial
@@ -772,7 +863,7 @@ public:
 
         AutoClip(GrContext* context, InitialClip initialState)
         : fContext(context) {
-            GrAssert(kWideOpen_InitialClip == initialState);
+            SkASSERT(kWideOpen_InitialClip == initialState);
             fNewClipData.fClipStack = &fNewClipStack;
 
             fOldClip = context->getClip();
@@ -808,7 +899,7 @@ public:
             , fAutoRT(ctx, rt) {
             fAutoMatrix.setIdentity(ctx);
             // should never fail with no paint param.
-            GrAssert(fAutoMatrix.succeeded());
+            SkASSERT(fAutoMatrix.succeeded());
         }
 
     private:
@@ -822,8 +913,21 @@ public:
     GrGpu* getGpu() { return fGpu; }
     const GrGpu* getGpu() const { return fGpu; }
     GrFontCache* getFontCache() { return fFontCache; }
+    GrLayerCache* getLayerCache() { return fLayerCache.get(); }
     GrDrawTarget* getTextTarget();
     const GrIndexBuffer* getQuadIndexBuffer() const;
+    GrAARectRenderer* getAARectRenderer() { return fAARectRenderer; }
+
+    // Called by tests that draw directly to the context via GrDrawTarget
+    void getTestTarget(GrTestTarget*);
+
+    // Functions for managing gpu trace markers
+    bool isGpuTracingEnabled() const { return fGpuTracingEnabled; }
+    void enableGpuTracing() { fGpuTracingEnabled = true; }
+    void disableGpuTracing() { fGpuTracingEnabled = false; }
+
+    void addGpuTraceMarker(const GrGpuTraceMarker* marker);
+    void removeGpuTraceMarker(const GrGpuTraceMarker* marker);
 
     /**
      * Stencil buffers add themselves to the cache using addStencilBuffer. findStencilBuffer is
@@ -858,8 +962,9 @@ private:
     const GrClipData*               fClip;  // TODO: make this ref counted
     GrDrawState*                    fDrawState;
 
-    GrResourceCache*                fTextureCache;
+    GrResourceCache*                fResourceCache;
     GrFontCache*                    fFontCache;
+    SkAutoTDelete<GrLayerCache>     fLayerCache;
 
     GrPathRendererChain*            fPathRendererChain;
     GrSoftwarePathRenderer*         fSoftwarePathRenderer;
@@ -867,6 +972,9 @@ private:
     GrVertexBufferAllocPool*        fDrawBufferVBAllocPool;
     GrIndexBufferAllocPool*         fDrawBufferIBAllocPool;
     GrInOrderDrawBuffer*            fDrawBuffer;
+
+    // Set by OverbudgetCB() to request that GrContext flush before exiting a draw.
+    bool                            fFlushToReduceCacheSize;
 
     GrAARectRenderer*               fAARectRenderer;
     GrOvalRenderer*                 fOvalRenderer;
@@ -884,28 +992,32 @@ private:
 
     int                             fMaxTextureSizeOverride;
 
+    bool                            fGpuTracingEnabled;
+
     GrContext(); // init must be called after the constructor.
     bool init(GrBackend, GrBackendContext);
 
     void setupDrawBuffer();
 
     class AutoRestoreEffects;
+    class AutoCheckFlush;
     /// Sets the paint and returns the target to draw into. The paint can be NULL in which case the
     /// draw state is left unmodified.
-    GrDrawTarget* prepareToDraw(const GrPaint*, BufferedDraw, AutoRestoreEffects*);
+    GrDrawTarget* prepareToDraw(const GrPaint*, BufferedDraw, AutoRestoreEffects*, AutoCheckFlush*);
 
     void internalDrawPath(GrDrawTarget* target, bool useAA, const SkPath& path,
-                          const SkStrokeRec& stroke);
+                          const GrStrokeInfo& stroke);
 
     GrTexture* createResizedTexture(const GrTextureDesc& desc,
                                     const GrCacheID& cacheID,
-                                    void* srcData,
+                                    const void* srcData,
                                     size_t rowBytes,
                                     bool filter);
 
     // Needed so GrTexture's returnToCache helper function can call
     // addExistingTextureToCache
     friend class GrTexture;
+    friend class GrStencilAndCoverPathRenderer;
 
     // Add an existing texture to the texture cache. This is intended solely
     // for use with textures released from an GrAutoScratchTexture.
@@ -929,14 +1041,23 @@ private:
      */
     static bool OverbudgetCB(void* data);
 
-    typedef GrRefCnt INHERITED;
+    /** Creates a new gpu path, based on the specified path and stroke and returns it.
+     * The caller owns a ref on the returned path which must be balanced by a call to unref.
+     *
+     * @param skPath the path geometry.
+     * @param stroke the path stroke.
+     * @return a new path or NULL if the operation is not supported by the backend.
+     */
+    GrPath* createPath(const SkPath& skPath, const SkStrokeRec& stroke);
+
+    typedef SkRefCnt INHERITED;
 };
 
 /**
  * Gets and locks a scratch texture from a descriptor using either exact or approximate criteria.
  * Unlocks texture in the destructor.
  */
-class GrAutoScratchTexture : ::GrNoncopyable {
+class GrAutoScratchTexture : public ::SkNoncopyable {
 public:
     GrAutoScratchTexture()
         : fContext(NULL)
@@ -986,10 +1107,10 @@ public:
         // The cache also has a ref which we are lending to the caller of detach(). When the caller
         // lets go of the ref and the ref count goes to 0 internal_dispose will see this flag is
         // set and re-ref the texture, thereby restoring the cache's ref.
-        GrAssert(texture->getRefCnt() > 1);
-        texture->setFlag((GrTextureFlags) GrTexture::kReturnToCache_FlagBit);
+        SkASSERT(texture->getRefCnt() > 1);
+        texture->impl()->setFlag((GrTextureFlags) GrTextureImpl::kReturnToCache_FlagBit);
         texture->unref();
-        GrAssert(NULL != texture->getCacheEntry());
+        SkASSERT(NULL != texture->getCacheEntry());
 
         return texture;
     }

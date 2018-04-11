@@ -1,6 +1,355 @@
 Android NDK ChangeLog:
 
 ----------------------------------------------------------------------------
+android-ndk-r9d
+===
+
+IMPORTANT CHANGES:
+---
+
+- Added Clang 3.4; NDK_TOOLCHAIN_VERSION=clang now picks Clang 3.4.
+  GCC 4.6 remains the default.
+
+- For ARM: Added APP_ABI=armeabi-v7a-hard.  All ARM toolchain are rebuilt with
+  additional multilib option -mfloat-abi=hard.  With "APP_ABI=armeabi-v7a-hard",
+>  1. ndk-build add "TARGET_CFLAGS += -mhard-float -D_NDK_MATH_NO_SOFTFP=1" and
+      "TARGET_LDFLAGS += -Wl,--no-warn-mismatch -lm_hard" on top of the existing
+      flags for armeabi-v7a.  The final library is installed at libs/armeabi-v7a,
+      (ie. can't coexist with armeabi-v7a in the same APP_ABI). Also note that APP_ABI=all
+      expands to "armeabi armeabi-v7a x86 mips" as before.
+>  2. make-standalone-toolchain.sh copies additional libaries under /hard directories.
+      Add the above CFLAGS and LFLAGS in your makefile for GCC/clang to link with
+      libraries in /hard
+
+- For X86: Added yasm and LOCAL_ASMFLAGS/EXPORT_ASMFLAGS.
+  ndk-build use prebuilts/*/bin/yasm* to compile source specified in LOCAL_SRC_FILES
+  with .asm extension
+
+- Updated mclinker to 2.6.0 with -gc-sections support
+
+- Added experimental libc++ support (upstream r201101).  To use it:
+>  1. Add "APP_STL := c++_static" or "APP_STL := c++_shared" in Application.mk.
+      You may rebuild from source via "LIBCXX_FORCE_REBUILD := true"
+>  2. "make-standalone-toolchain.sh --stl=libc++" to create standalone
+      toolchain with libc++ headers/lib
+  See b.android.com/36496 and CPLUSPLUS-SUPPORT.html
+
+
+IMPORTANT BUG FIXES:
+---
+
+- Fixed GCC 4.6/4.8 ARM EABI uncaught throw from unexpected exception
+  handler.
+  See http://gcc.gnu.org/bugzilla/show_bug.cgi?id=59392
+
+- Fixed GCC 4.8 not correctly resolve partial specialization of template with
+  dependent non-type template argument.
+  See http://gcc.gnu.org/bugzilla/show_bug.cgi?id=59052
+
+- Added more modules to prebuilt python
+>  1. linux: zlib, nis, crypt, _curses and _curses_panel
+>  2. darwin: zlib, bz2, _curses, _curses_panel, _hashlib, _ssl
+> See b.android.com/59902
+
+- Fixed X86/MIPS' gdbserver event_getmsg_helper
+
+- Fixed numerous issues in the RenderScript NDK toolchain, including issues with
+  compatibility across older devices and C++ reflection.
+
+
+OTHER BUG FIXES:
+---
+
+- Fixed headers
+> 1. Fixed typo in sources/android/support/include/iconv.h.
+     See http://b.android.com/63806
+> 2. Fixed missing #include <sys/types.h> in android/asset_manager.h for API >= 13
+     See http://b.android.com/64988
+> 3. Fixed missing #include <stdint.h> in android/rect_manager.h for API >= 14
+> 4. Added JNICALL to JNI_OnLoad and JNI_OnUnload in jni.h.  Note that JNICALL
+     is defined to __NDK_FPABI__ (see sys/cdefs.h)
+> 5. Fixed the following headers to be inclued alone: android/tts.h, EGL/eglext.h,
+     fts.h GLES/glext.h, GLES2/gl2ext.h, OMXAL/OpenMAXSL_Android.h, SLES/OpenSLES_Android.h,
+     sys/prctl.h, sys/utime.h.  See http://b.android.com/64679
+> 6. Added sys/cachectl.h for all archs.  Only has effect to mips, but
+     developers no longer need to put #ifdef __mips__ around it
+> 7. Fixed platforms/android-18/include/android/input.h by adding
+     __NDK_FPABI__ to functions taking/returning float/double.
+> 8. Fixed MIPS' "struct stat" which was incorrectly set to its 64-bit
+     counterpart for API>=12 (regression in the last r9c release)
+> 9. Define __PTHREAD_MUTEX_INIT_VALUE, __PTHREAD_RECURSIVE_MUTEX_INIT_VALUE,
+     and __PTHREAD_ERRORCHECK_MUTEX_INIT_VALUE for API < 9
+> 10. Added scalbln, scalblnf, and scalblnl to x86's libm.so for API >= 18
+
+- Fixed gabi++ std::unexpected() to call std::terminate() so that
+  user-defined std::terminate() handler have chance to run
+
+- Fixed gabi++ to catch std::nullptr
+
+- Fixed samples Teapot and MoreTeapots to
+>  1. Rendering issue in Tegra2/3.  Now having medium precision for specular
+      variable, so that specular power can be <1.0
+>  2. Workaround an issue where SYSTEM_UI_FLAG_IMMERSIVE_STICKY is invalidated
+      when a volume button is pressed.  Issue remains: Immersive mode still does
+      not recover when the screen has been rotated, due to onSystemUiVisibilityChange
+      is not triggered when screen is rotated.
+
+- Fixed ndk-build to add -rpath-link=$SYSROOT/usr/lib and -rpath-link=$TARGET_OUT
+  for linking executable with ld.bfd.  See b.android.com/64266
+
+- Removed -Bsymbolic from all STL build
+
+- Fixed ndk-gdb-py.cmd by setting SHELL as env. var. instead of passing it to
+  python.exe which can't understand it.
+  See b.android.com/63054
+
+- Fixed "make-standalone-toolchain.sh --stl=stlport" to copy instead of symlink
+  gabi++ headers, otherwise the one created in cygwin wont' be understood by
+  cmd.exe and MinGW shell
+
+
+OTHER CHANGES:
+---
+
+- "chmod a+x" all *cmd scripts previously intended for use in CMD.exe only,
+  in case developers prefer to use ndk-build.cmd in cygwin instead of the
+  recommended ndk-build
+
+- Speed up make-standalone-toolchain.sh by moving instead of copying if
+  destination directory (eg. --install-dir=<dir>) doesn't exist.
+
+
+----------------------------------------------------------------------------
+android-ndk-r9c
+===
+
+IMPORTANT CHANGES:
+---
+
+- This is a bug-fix-only release.
+
+
+IMPORTANT BUG FIXES:
+---
+
+- Fixed GCC 4.8 ARM where stack pointer is restored too early than access
+  to varaible in stack frame via frame pointer.
+  See http://gcc.gnu.org/bugzilla/show_bug.cgi?id=58854
+
+- Fixed GCC 4.8 libstdc++ where the generated code random segfault on std::nth_element
+  See http://b.android.com/62910
+
+- Fixed GCC 4.8 ICE in cc1/cc1plus with -fuse-ld=mcld.  Message reads:
+>  cc1: internal compiler error: in common_handle_option, at opts.c:1774
+
+- Fixed -mhard-float support for __builtin math functions.
+  See http://b.android.com/62496.  Please track comment of http://b.android.com/61784
+  for on-going fixes for -mhard-float with STL
+
+
+OTHER BUG FIXES:
+---
+
+- Fixed headers
+> 1. Fixed prototype of poll to poll(struct pollfd *, nfds_t, int); in poll.h
+> 2. Added utimensat and futimens to libc.so to API level >=12 and >=19, respectively.
+> 3. Added missing clock_settime() and clock_nanosleep() in time.h for API>=8.
+> 4. Added CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE, CLOCK_MONOTONIC_COARSE,
+     CLOCK_BOOTTIME, CLOCK_REALTIME_ALARM, and CLOCK_BOOTTIME_ALARM in time.h.
+     Removed obsolete CLOCK_REALTIME_HR and CLOCK_MONOTONIC_HR.
+
+- Refactored samples Teapot, MoreTeapots and source/android/ndk_helper.
+  Use hard float-abi for armeabi-v7a, added immersive mode in android-19, etc.
+  Also fix crash on X86 device in  /system/lib/libdvm.so Check_ReleaseStringUTFChars
+
+- Fixed ndk-build fails in cygwin if NDK package is referenced via symlink
+
+- Fixed ndk-build.cmd fails in windows cmd.exe if LOCAL_SRC_FILES
+  contain absolute path.
+  See https://android-review.googlesource.com/#/c/69992
+
+- Fixed ndk-stack to proceed even when it can't parse a frame due to
+  unable to locate routine, filename, or line number, in which case "??"
+  is printed.
+
+- Fixed ndk-stack windows-x64_64 erroneously matches frame line with in "stack:"
+  section even when the line has no word "pc", "eip", or "ip" in it, eg.
+>     I/DEBUG   ( 1151):     #00  5f09db68  401f01c4  /system/lib/libc.so
+
+- Fixed gabi++ to not use malloc() to allocate C++ thread-local
+  objects, and avoid dead-lock in gabi++ when libc.debug.malloc is non-zero in
+  userdebug/eng Android platform builds
+
+
+OTHER CHANGES:
+---
+
+- Added LOCAL_EXPORT_LDFLAGS
+
+- Introducing NDK_PROJECT_PATH=null for use in an integrated build system
+  where options are explicitly passed to ndk-build.  With it ndk-build
+  make no attempt to look for NDK_PROJECT_PATH, and as a result the following
+  variables depending on NDK_PROJECT_PATH to be explicitly specified
+  (since they can on longer derive default value from NDK_PROJECT_PATH when it's null):
+  NDK_OUT, NDK_LIBS_OUT, APP_BUILD_SCRIPT, NDK_DEBUG (optional, default to 0),
+  and other APP_* used to be in Application.mk
+
+- Allow APP_ABI to be comma-delimited list, eg. APP_ABI := "armeabi,armeabi-v7a"
+
+- Rebuild all STL with debugging info (ie. "-g") in separate optional package
+  android-ndk-r9c-cxx-stl-libs-with-debugging-info.zip.
+  This helps ndk-stack to provide better stack dump across STL.
+  The code/size of the final stripped shouldn't be affected.
+
+- Enhanced hello-jni samples to report APP_ABI at compilation
+
+- Static libraries are built with Deterministic (option D) mode of ar
+  tool.  See http://b.android.com/60705
+
+
+----------------------------------------------------------------------------
+android-ndk-r9b
+===
+
+IMPORTANT CHANGES:
+---
+
+- Updated include/android/*h and math.h for all API up to 18, add API level 13,
+  15, 16 and 17 in the process.
+  See commit message in https://android-review.googlesource.com/#/c/68012
+  and https://android-review.googlesource.com/#/c/68014 for added APIs.
+  Issues http://b.android.com/47150, http://b.android.com/58528, and
+  http://b.android.com/38423
+
+- Added API19 for Renderscript binding support
+
+- Supported -mhard-float in the existing "armeabi-v7a" ABI.  See
+  tests/device/hard-float/jni/Android.mk for details and current
+  restriction on Clang.
+
+- Rebased GCC 4.8 to 4.8.2, and add diagnostic color support.  To enable
+  it, set -fdiagnostics-color=auto or -fdiagnostics-color=always, or
+  simply export GCC_COLORS, eg.
+>    export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
+
+>  See http://gcc.gnu.org/onlinedocs/gcc/Language-Independent-Options.html
+
+- Added two new samples to demostrate OpenGL ES3 features: Teapot and MoreTeapots.
+  Run on devices with API>=16 (Don't run on emulator)
+
+- Both GCC 4.7 and Clang 3.2 are deprecated, and will be removed from the next release.
+
+
+IMPORTANT BUG FIXES:
+---
+
+- Fixed ARM GCC 4.6 thumb2 fails to generate 16bit relative jump table.
+  See http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48328
+
+- Fixed GCC 4.8 ICE on g++.dg/cpp0x/lambda/lambda-defarg3.C
+  See https://android-review.googlesource.com/#/c/62770 and http://gcc.gnu.org/ml/gcc/2013-07/msg00424.html
+
+- Fixed Windows 32-bit *-gdb.exe fail to launch.
+  See http://b.android.com/58975
+
+- Fixed GCC 4.8 ICE when building bullet library with error message reads:
+>  internal compiler error: verify_flow_info failed
+
+>  See http://b.android.com/58916 and http://gcc.gnu.org/bugzilla/show_bug.cgi?id=58165
+
+- Fixed GDB/ARM to skip ARM.exidx data for unwinding in prologue code.
+  Add a command "set arm exidx-unwinding" to control exidx-based stack
+  unwinding.
+  See http://b.android.com/55826
+
+- Fixed Clang 3.3 MIPS where HI and LO registers are incorrectly reused.
+
+- Fixed MIPS 4.7 ICE with erro reads:
+>  external/icu4c/i18n/decimfmt.cpp:1322:1: internal compiler error: in dbx_reg_number, at dwarf2out.c:10185
+
+>  See http://gcc.gnu.org/ml/gcc-patches/2012-12/msg00830.html
+
+
+OTHER BUG FIXES:
+---
+
+- Fixed headers
+> 1. Fixed ARM's WCHAR_MIN / WCHAR_MAX to be unsigned according to spec.  (X86/MIPS'
+     are signed).  Define _WCHAR_IS_ALWAYS_SIGNED to restore old behavior.
+     See http://b.android.com/57749
+> 2. Fixed include/netinet/tcp.h to contain TCP_INFO state enum.
+     See http://b.android.com/38881
+> 3. Fixed cdefs_elh.h _C_LABEL_STRING macro which causes warnings with gcc 4.8 toolchain in c++11 mode.
+     See http://b.android.com/58135, http://b.android.com/58652
+> 4. Removed non-existence functions imaxabs and imaxdiv from header inttypes.h
+> 5. Marked pthread_exit() as __noreturn, and pthread_self() as __pure2.
+     See http://b.android.com/60686
+> 6. Added missing mkdtemp() already exists in bionic in stdlib.h
+
+- Fixed samples/gles3jni build with Clang at android-11
+
+- Fixed mclinker to allow mulitple occurrences of the following options: -gc-sections and --eh-frame-hdr.
+
+- Fixed mclinker to accept --no-warn-mismatch
+
+- Fixed cpu-features not to assume all VFPv4 devices support IDIV.
+  Now it only adds IDIV to white-listed devices (Nexus 4 at this moment)
+  http://b.android.com/57637
+
+- Fixed android_native_app_glue.c to stop errors being logged erroneously on event predispatch
+
+- Fixed all operations on gabi++ terminate and unexpected_handler to be thread-safe
+
+- More fixes on Clang -integrated-as to pass tests ssax-instructions and fenv
+
+- Fixed GCC 4.6/4.7/4.8 to pass linker option --eh-frame-hdr even for
+  static executable.  See http://gcc.gnu.org/ml/gcc-patches/2012-09/msg00969.html
+
+- Fixed extra apostrophe in docs/CPU-ARCH-ABIS.html
+  See docs/NDK-DEPENDS.html, http://b.android.com/60142
+
+- Fixed extra quotes in ndk-build output on Windows
+  See http://b.android.com/60649
+
+- Fixed Clang 3.3 to compile ARM atomic builtin __atomic_fetch_add/sub/or/...
+
+- Fixed Clang 3.3 ICE on customized vfprintf. See
+  http://llvm.org/bugs/show_bug.cgi?id=16344
+
+
+OTHER CHANGES:
+---
+
+- Enabled OpenMP for all GCC:  Add the following flags: "LOCAL_CFLAGS += -fopenmp"
+  and "LOCAL_LDFLAGS += -fopenmp".
+  Please find examples in tests/device/test-openmp
+
+- Significantly reduced the size of ld.mcld (1.5MB vs. ld.bfd 3.5MB and ld.gold 7.5MB)
+  and result in ~20% speed up too.
+
+- Added LOCAL_CONLYFLAGS and APP_CONLYFLAGS to specify options applicable to C only
+  but not C++.  The reason being that the existing LOCAL_CFLAGS and APP_CFLAGS are
+  also used for C++ compilation (to save trouble of specifying most options twice),
+  option like -std=gnu99 may fail g++ (warning) and clang++ (error).
+
+- Added gabi++ array helper functions
+
+- All libgcc.a in gcc are built with -funwind-tables to allow stack to unwind past __aeabi_idiv0
+  for example
+
+- Added Ingenic MXU support in MIPS GCC 4.6/4.7/4.8 with new option -mmxu
+
+- Extended MIPS GCC 4.6/4.7/4.8 -mldc1-sdc1 to control ldxc1/sdxc1 too
+
+- Added crazy linker. See sources/android/crazy_linker/README.TXT
+
+- Fixed bitmap-plasma to draw on full screen rather than 200x200
+
+- Reduced linux and darwin toolchain size by 25% (by symlink to
+  identical files)
+
+
+----------------------------------------------------------------------------
 android-ndk-r9
 ===
 
@@ -148,10 +497,10 @@ OTHER BUG FIXES:
 
 - Fixed ld.gold to enable "--sort-section=name" option
 
-- Fixed GCC4.4.3/4.6/4.7 to supress -export-dynamic for statically linked
+- Fixed GCC 4.4.3/4.6/4.7 to supress -export-dynamic for statically linked
   programs.  GCC no longer adds .interp section for statically linked programs.
 
-- Fixed GCC4.4.3 stlport compilation error about inconsistent typedef of
+- Fixed GCC 4.4.3 stlport compilation error about inconsistent typedef of
   _Unwind_Control_Block.
   See https://android-review.googlesource.com/#/c/54426
 
@@ -1663,7 +2012,7 @@ IMPORTANT CHANGES:
   Android devices.
 
   Note that by default, code is still generated for ARM-based devices.
-  You can however add 'x86' to your APP_PLATFORM definition in your
+  You can however add 'x86' to your APP_ABI definition in your
   Application.mk. For example, the following line instructs ndk-build
   to build your code for three distinct ABIs:
 

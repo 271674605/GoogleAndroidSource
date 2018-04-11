@@ -19,11 +19,16 @@ package com.squareup.okhttp;
 
 import java.io.IOException;
 import java.net.Proxy;
+import java.net.ResponseCache;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLStreamHandler;
 
 public class HttpHandler extends URLStreamHandler {
+
+    private final ConfigAwareConnectionPool configAwareConnectionPool =
+            ConfigAwareConnectionPool.getInstance();
+
     @Override protected URLConnection openConnection(URL url) throws IOException {
         return newOkHttpClient(null /* proxy */).open(url);
     }
@@ -40,12 +45,29 @@ public class HttpHandler extends URLStreamHandler {
     }
 
     protected OkHttpClient newOkHttpClient(Proxy proxy) {
+        OkHttpClient okHttpClient = createHttpOkHttpClient(proxy);
+        okHttpClient.setConnectionPool(configAwareConnectionPool.get());
+        return okHttpClient;
+    }
+
+    /**
+     * Creates an OkHttpClient suitable for creating {@link java.net.HttpURLConnection} instances on
+     * Android.
+     */
+    public static OkHttpClient createHttpOkHttpClient(Proxy proxy) {
         OkHttpClient client = new OkHttpClient();
         client.setFollowProtocolRedirects(false);
         if (proxy != null) {
             client.setProxy(proxy);
         }
 
+        // Explicitly set the response cache.
+        ResponseCache responseCache = ResponseCache.getDefault();
+        if (responseCache != null) {
+            client.setResponseCache(responseCache);
+        }
+
         return client;
     }
+
 }

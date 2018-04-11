@@ -18,6 +18,10 @@ class URLRequest;
 class URLRequestJob;
 }  // namespace net
 
+namespace content {
+class AppCacheRequestHandlerTest;
+}
+
 namespace appcache {
 
 class AppCacheURLRequestJob;
@@ -45,6 +49,10 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheRequestHandler
       net::URLRequest* request, net::NetworkDelegate* network_delegate);
 
   void GetExtraResponseInfo(int64* cache_id, GURL* manifest_url);
+
+  // Methods to support cross site navigations.
+  void PrepareForCrossSiteTransfer(int old_process_id);
+  void CompleteCrossSiteTransfer(int new_process_id, int new_host_id);
 
   static bool IsMainResourceType(ResourceType::Type type) {
     return ResourceType::IsFrame(type) ||
@@ -131,7 +139,11 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheRequestHandler
   // The job we use to deliver a response.
   scoped_refptr<AppCacheURLRequestJob> job_;
 
-  friend class AppCacheRequestHandlerTest;
+  // During a cross site navigation, we transfer ownership the AppcacheHost
+  // from the old processes structures over to the new structures.
+  scoped_ptr<AppCacheHost> host_for_cross_site_transfer_;
+
+  friend class content::AppCacheRequestHandlerTest;
   DISALLOW_COPY_AND_ASSIGN(AppCacheRequestHandler);
 };
 

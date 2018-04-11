@@ -5,8 +5,10 @@
 #ifndef CHROME_BROWSER_MEDIA_MEDIA_STREAM_DEVICES_CONTROLLER_H_
 #define CHROME_BROWSER_MEDIA_MEDIA_STREAM_DEVICES_CONTROLLER_H_
 
+#include <map>
 #include <string>
 
+#include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "content/public/browser/web_contents_delegate.h"
 
 class Profile;
@@ -20,8 +22,30 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-class MediaStreamDevicesController {
+class MediaStreamDevicesController : public PermissionBubbleRequest {
  public:
+  // Permissions for media stream types.
+  enum Permission {
+    MEDIA_NONE,
+    MEDIA_ALLOWED,
+    MEDIA_BLOCKED_BY_POLICY,
+    MEDIA_BLOCKED_BY_USER_SETTING,
+    MEDIA_BLOCKED_BY_USER,
+  };
+
+  struct MediaStreamTypeSettings {
+    MediaStreamTypeSettings(Permission permission,
+                            const std::string& requested_device_id);
+    MediaStreamTypeSettings();
+    ~MediaStreamTypeSettings();
+
+    Permission permission;
+    std::string requested_device_id;
+  };
+
+  typedef std::map<content::MediaStreamType, MediaStreamTypeSettings>
+      MediaStreamTypeSettingsMap;
+
   MediaStreamDevicesController(content::WebContents* web_contents,
                                const content::MediaStreamRequest& request,
                                const content::MediaResponseCallback& callback);
@@ -41,11 +65,23 @@ class MediaStreamDevicesController {
   bool DismissInfoBarAndTakeActionOnSettings();
 
   // Public methods to be called by MediaStreamInfoBarDelegate;
-  bool has_audio() const { return microphone_requested_; }
-  bool has_video() const { return webcam_requested_; }
+  bool HasAudio() const;
+  bool HasVideo() const;
   const std::string& GetSecurityOriginSpec() const;
   void Accept(bool update_content_setting);
-  void Deny(bool update_content_setting);
+  void Deny(bool update_content_setting,
+            content::MediaStreamRequestResult result);
+
+  // PermissionBubbleRequest:
+  virtual int GetIconID() const OVERRIDE;
+  virtual base::string16 GetMessageText() const OVERRIDE;
+  virtual base::string16 GetMessageTextFragment() const OVERRIDE;
+  virtual bool HasUserGesture() const OVERRIDE;
+  virtual GURL GetRequestingHostname() const OVERRIDE;
+  virtual void PermissionGranted() OVERRIDE;
+  virtual void PermissionDenied() OVERRIDE;
+  virtual void Cancelled() OVERRIDE;
+  virtual void RequestFinished() OVERRIDE;
 
  private:
   enum DevicePolicy {
@@ -91,7 +127,20 @@ class MediaStreamDevicesController {
 
   // Notifies the content setting UI that the media stream access request or
   // part of the request is denied.
-  void NotifyUIRequestDenied() const;
+  void NotifyUIRequestDenied();
+
+  // Return true if the type has been requested and permission is currently set
+  // to allowed. Note that it does not reflect the final permission decision.
+  // This function is called during the filtering steps to check if the type has
+  // been blocked yet or not and the permission may be changed to blocked during
+  // these filterings. See also the initialization in the constructor and
+  // comments on that.
+  bool IsDeviceAudioCaptureRequestedAndAllowed() const;
+  bool IsDeviceVideoCaptureRequestedAndAllowed() const;
+
+  // Returns true if media capture device is allowed to be used. This could
+  // return false when tab goes to background.
+  bool IsCaptureDeviceRequestAllowed() const;
 
   content::WebContents* web_contents_;
 
@@ -112,8 +161,12 @@ class MediaStreamDevicesController {
   // audio/video devices was granted or not.
   content::MediaResponseCallback callback_;
 
-  bool microphone_requested_;
-  bool webcam_requested_;
+  // Holds the requested media types and the permission for each type. It is
+  // passed to the tab specific content settings when the permissions have been
+  // resolved. Currently only used by MEDIA_DEVICE_AUDIO_CAPTURE and
+  // MEDIA_DEVICE_VIDEO_CAPTURE since those are the only types that require
+  // updates in the settings.
+  MediaStreamTypeSettingsMap request_permissions_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamDevicesController);
 };

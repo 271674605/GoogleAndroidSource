@@ -20,7 +20,7 @@
     <string name="download_title_sorted_by_date" msgid="5898014492155434221">"הורדות - ממוינות לפי תאריך"</string>
     <string name="download_title_sorted_by_size" msgid="1417193166677094813">"הורדות - ממוינות לפי גודל"</string>
     <string name="no_downloads" msgid="1029667411186146836">"אין הורדות."</string>
-    <string name="missing_title" msgid="830115697868833773">"&lt;לא ידוע&gt;"</string>
+    <string name="missing_title" msgid="830115697868833773">"‏&lt;לא ידוע&gt;"</string>
     <string name="button_sort_by_size" msgid="7331549713691146251">"מיין לפי גודל"</string>
     <string name="button_sort_by_date" msgid="8800842892684101528">"מיין לפי תאריך"</string>
     <string name="download_queued" msgid="104973307780629904">"בהמתנה בתור"</string>
@@ -43,8 +43,8 @@
     <string name="keep_queued_download" msgid="5144882786014818569">"שמור"</string>
     <string name="cancel_running_download" msgid="5232704030969221112">"ביטול"</string>
     <string name="retry_download" msgid="7617100787922717912">"נסה שוב"</string>
-    <string name="deselect_all" msgid="6348198946254776764">"בטל בחירה של הכול"</string>
-    <string name="select_all" msgid="634074918366265804">"בחר הכול"</string>
+    <string name="deselect_all" msgid="6348198946254776764">"בטל בחירה של הכל"</string>
+    <string name="select_all" msgid="634074918366265804">"בחר הכל"</string>
     <string name="selected_count" msgid="2101564570019753277">"נבחרו <xliff:g id="NUMBER">%1$d</xliff:g> מתוך <xliff:g id="TOTAL">%2$d</xliff:g>"</string>
     <string name="download_share_dialog" msgid="3355867339806448955">"שתף באמצעות"</string>
 </resources>

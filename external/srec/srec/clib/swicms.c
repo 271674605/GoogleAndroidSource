@@ -28,7 +28,7 @@
 #include "IntArrayList.h"
 #include "portable.h"
 
-#define printf_vector(HEAD, FMT, PTR, NN) { int i; LCHAR buffer[256]; sprintf(buffer, HEAD); sprintf(buffer + LSTRLEN(buffer), " %x", (int)PTR); for (i=0; i<(NN); ++i) sprintf(buffer + LSTRLEN(buffer), FMT, PTR[i]); PLogMessage(buffer); }
+#define printf_vector(HEAD, FMT, PTR, NN) { int i; LCHAR buffer[256]; sprintf(buffer, HEAD); sprintf(buffer + LSTRLEN(buffer), " %p", (void *)PTR); for (i=0; i<(NN); ++i) sprintf(buffer + LSTRLEN(buffer), FMT, PTR[i]); PLogMessage(buffer); }
 
 /* Cross-utterance CMN calculation:
    We try to normalize the speech frames before they get to the recognizer.
@@ -427,6 +427,8 @@ ESR_ReturnCode swicms_set_cmn ( swicms_norm_info* swicms, const char *cmn_params
         {
           set_status = ESR_INVALID_ARGUMENT;
         }
+
+        dim_count++;
       }
       if ( set_status == ESR_SUCCESS )
       {

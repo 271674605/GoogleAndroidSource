@@ -31,15 +31,17 @@ import com.android.mail.utils.LogUtils;
  */
 public class PingTask extends AsyncTask<Void, Void, Void> {
     private final EasPing mOperation;
-    private final EmailSyncAdapterService.SyncHandlerSynchronizer mSyncHandlerMap;
+    private final PingSyncSynchronizer mPingSyncSynchronizer;
 
     private static final String TAG = Eas.LOG_TAG;
 
+
     public PingTask(final Context context, final Account account,
             final android.accounts.Account amAccount,
-            final EmailSyncAdapterService.SyncHandlerSynchronizer syncHandlerMap) {
+            final PingSyncSynchronizer pingSyncSynchronizer) {
+        assert pingSyncSynchronizer != null;
         mOperation = new EasPing(context, account, amAccount);
-        mSyncHandlerMap = syncHandlerMap;
+        mPingSyncSynchronizer = pingSyncSynchronizer;
     }
 
     /** Start the ping loop. */
@@ -70,12 +72,11 @@ public class PingTask extends AsyncTask<Void, Void, Void> {
             // If we get any sort of exception here, treat it like the ping returned a connection
             // failure.
             LogUtils.e(TAG, e, "Ping exception for account %d", mOperation.getAccountId());
-            pingStatus = EasOperation.RESULT_REQUEST_FAILURE;
+            pingStatus = EasOperation.RESULT_NETWORK_PROBLEM;
         }
         LogUtils.i(TAG, "Ping task ending with status: %d", pingStatus);
 
-        mSyncHandlerMap.pingComplete(mOperation.getAmAccount(), mOperation.getAccountId(),
-                pingStatus);
+        mPingSyncSynchronizer.pingEnd(mOperation.getAccountId(), mOperation.getAmAccount());
         return null;
     }
 
@@ -84,7 +85,6 @@ public class PingTask extends AsyncTask<Void, Void, Void> {
         // TODO: This is also hacky, should have a separate result code at minimum.
         // If the ping is cancelled, make sure it reports something to the sync adapter.
         LogUtils.w(TAG, "Ping cancelled for %d", mOperation.getAccountId());
-        mSyncHandlerMap.pingComplete(mOperation.getAmAccount(), mOperation.getAccountId(),
-                EasOperation.RESULT_REQUEST_FAILURE);
+        mPingSyncSynchronizer.pingEnd(mOperation.getAccountId(), mOperation.getAmAccount());
     }
 }

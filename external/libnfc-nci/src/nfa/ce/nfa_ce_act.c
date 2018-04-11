@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2011-2013 Broadcom Corporation
+ *  Copyright (C) 2011-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -86,12 +86,14 @@ void nfa_ce_handle_t3t_evt (tCE_EVENT event, tCE_DATA *p_ce_data)
     case CE_T3T_RAW_FRAME_EVT:
         if (p_cb->idx_cur_active == NFA_CE_LISTEN_INFO_IDX_NDEF)
         {
+            conn_evt.data.status = p_ce_data->raw_frame.status;
             conn_evt.data.p_data = (UINT8 *) (p_ce_data->raw_frame.p_data + 1) + p_ce_data->raw_frame.p_data->offset;
             conn_evt.data.len    = p_ce_data->raw_frame.p_data->len;
             (*p_cb->p_active_conn_cback) (NFA_DATA_EVT, &conn_evt);
         }
         else
         {
+            conn_evt.ce_data.status = p_ce_data->raw_frame.status;
             conn_evt.ce_data.handle = (NFA_HANDLE_GROUP_CE | ((tNFA_HANDLE)p_cb->idx_cur_active));
             conn_evt.ce_data.p_data = (UINT8 *) (p_ce_data->raw_frame.p_data + 1) + p_ce_data->raw_frame.p_data->offset;
             conn_evt.ce_data.len    = p_ce_data->raw_frame.p_data->len;
@@ -212,7 +214,8 @@ void nfa_ce_handle_t4t_aid_evt (tCE_EVENT event, tCE_DATA *p_ce_data)
             }
 
             /* Notify app of AID data */
-            conn_evt.ce_data.handle =   NFA_HANDLE_GROUP_CE | ((tNFA_HANDLE)p_cb->idx_cur_active);
+            conn_evt.ce_data.status = p_ce_data->raw_frame.status;
+            conn_evt.ce_data.handle = NFA_HANDLE_GROUP_CE | ((tNFA_HANDLE)p_cb->idx_cur_active);
             conn_evt.ce_data.p_data = (UINT8 *) (p_ce_data->raw_frame.p_data + 1) + p_ce_data->raw_frame.p_data->offset;
             conn_evt.ce_data.len    = p_ce_data->raw_frame.p_data->len;
             (*p_cb->p_active_conn_cback) (NFA_CE_DATA_EVT, &conn_evt);
@@ -931,12 +934,22 @@ BOOLEAN nfa_ce_deactivate_ntf (tNFA_CE_MSG *p_ce_msg)
     if (  (deact_type == NFC_DEACTIVATE_TYPE_SLEEP)
         ||(deact_type == NFC_DEACTIVATE_TYPE_SLEEP_AF)  )
     {
-        /* notify deactivated as sleep and wait for reactivation or deactivation to idle */
-        conn_evt.deactivated.type =  deact_type;
+        if ( nfa_ce_cb.idx_wild_card == NFA_CE_LISTEN_INFO_IDX_INVALID)
+        {
+            /* notify deactivated as sleep and wait for reactivation or deactivation to idle */
+            conn_evt.deactivated.type =  deact_type;
 
-        /* if T4T AID application has not been selected then p_active_conn_cback could be NULL */
-        if (p_cb->p_active_conn_cback)
-            (*p_cb->p_active_conn_cback) (NFA_DEACTIVATED_EVT, &conn_evt);
+            /* if T4T AID application has not been selected then p_active_conn_cback could be NULL */
+            if (p_cb->p_active_conn_cback)
+                (*p_cb->p_active_conn_cback) (NFA_DEACTIVATED_EVT, &conn_evt);
+        }
+        else
+        {
+            conn_evt.ce_deactivated.handle = NFA_HANDLE_GROUP_CE | ((tNFA_HANDLE)nfa_ce_cb.idx_wild_card);
+            conn_evt.ce_deactivated.type   = deact_type;
+            if (p_cb->p_active_conn_cback)
+                (*p_cb->p_active_conn_cback) (NFA_CE_DEACTIVATED_EVT, &conn_evt);
+        }
 
         return TRUE;
     }
@@ -1223,7 +1236,7 @@ BOOLEAN nfa_ce_api_reg_listen (tNFA_CE_MSG *p_ce_msg)
             /* Register this AID with CE_T4T */
             if ((p_cb->listen_info[listen_info_idx].t4t_aid_handle = CE_T4tRegisterAID (p_ce_msg->reg_listen.aid_len,
                                                                                         p_ce_msg->reg_listen.aid,
-                                                                                        nfa_ce_handle_t4t_aid_evt)) == 0xFF)
+                                                                                        nfa_ce_handle_t4t_aid_evt)) == CE_T4T_AID_HANDLE_INVALID)
             {
                 NFA_TRACE_ERROR0 ("Unable to register AID");
                 p_cb->listen_info[listen_info_idx].flags = 0;
@@ -1235,6 +1248,8 @@ BOOLEAN nfa_ce_api_reg_listen (tNFA_CE_MSG *p_ce_msg)
 
                 return TRUE;
             }
+            if (p_cb->listen_info[listen_info_idx].t4t_aid_handle == CE_T4T_WILDCARD_AID_HANDLE)
+                nfa_ce_cb.idx_wild_card     = listen_info_idx;
             break;
 
         case NFA_CE_REG_TYPE_FELICA:
@@ -1344,6 +1359,10 @@ BOOLEAN nfa_ce_api_dereg_listen (tNFA_CE_MSG *p_ce_msg)
     {
         /* Deregistering virtual secure element listen */
         listen_info_idx = p_ce_msg->dereg_listen.handle & NFA_HANDLE_MASK;
+        if (nfa_ce_cb.idx_wild_card == listen_info_idx)
+        {
+            nfa_ce_cb.idx_wild_card     = NFA_CE_LISTEN_INFO_IDX_INVALID;
+        }
 
         if (  (listen_info_idx < NFA_CE_LISTEN_INFO_MAX)
             &&(p_cb->listen_info[listen_info_idx].flags & NFA_CE_LISTEN_INFO_IN_USE))
@@ -1400,4 +1419,3 @@ BOOLEAN nfa_ce_api_cfg_isodep_tech (tNFA_CE_MSG *p_ce_msg)
         nfa_ce_cb.isodep_disc_mask |= NFA_DM_DISC_MASK_LB_ISO_DEP;
     return TRUE;
 }
-

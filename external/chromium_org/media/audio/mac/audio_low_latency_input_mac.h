@@ -39,7 +39,7 @@
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/CoreAudio.h>
 
-#include "base/atomicops.h"
+#include "base/cancelable_callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "media/audio/agc_audio_stream.h"
@@ -49,6 +49,7 @@
 
 namespace media {
 
+class AudioBus;
 class AudioManagerMac;
 class DataBuffer;
 
@@ -57,7 +58,8 @@ class AUAudioInputStream : public AgcAudioStream<AudioInputStream> {
   // The ctor takes all the usual parameters, plus |manager| which is the
   // the audio manager who is creating this object.
   AUAudioInputStream(AudioManagerMac* manager,
-                     const AudioParameters& params,
+                     const AudioParameters& input_params,
+                     const AudioParameters& output_params,
                      AudioDeviceID audio_device_id);
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioInputStream::Close().
@@ -160,6 +162,13 @@ class AUAudioInputStream : public AgcAudioStream<AudioInputStream> {
   // The client requests that the recorded data shall be delivered using
   // OnData() callbacks where each callback contains this amount of bytes.
   int requested_size_bytes_;
+
+  // Used to defer Start() to workaround http://crbug.com/160920.
+  base::CancelableClosure deferred_start_cb_;
+
+  // Extra audio bus used for storage of deinterleaved data for the OnData
+  // callback.
+  scoped_ptr<media::AudioBus> audio_bus_;
 
   DISALLOW_COPY_AND_ASSIGN(AUAudioInputStream);
 };

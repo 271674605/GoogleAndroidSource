@@ -8,11 +8,10 @@
 
 #include "SkPathEffect.h"
 #include "SkPath.h"
-#include "SkFlattenableBuffers.h"
+#include "SkReadBuffer.h"
+#include "SkWriteBuffer.h"
 
 ///////////////////////////////////////////////////////////////////////////////
-
-SK_DEFINE_INST_COUNT(SkPathEffect)
 
 void SkPathEffect::computeFastBounds(SkRect* dst, const SkRect& src) const {
     *dst = src;
@@ -21,6 +20,10 @@ void SkPathEffect::computeFastBounds(SkRect* dst, const SkRect& src) const {
 bool SkPathEffect::asPoints(PointData* results, const SkPath& src,
                     const SkStrokeRec&, const SkMatrix&, const SkRect*) const {
     return false;
+}
+
+SkPathEffect::DashType SkPathEffect::asADash(DashInfo* info) const {
+    return kNone_DashType;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -41,15 +44,15 @@ SkPairPathEffect::~SkPairPathEffect() {
 /*
     Format: [oe0-factory][pe1-factory][pe0-size][pe0-data][pe1-data]
 */
-void SkPairPathEffect::flatten(SkFlattenableWriteBuffer& buffer) const {
+void SkPairPathEffect::flatten(SkWriteBuffer& buffer) const {
     this->INHERITED::flatten(buffer);
     buffer.writeFlattenable(fPE0);
     buffer.writeFlattenable(fPE1);
 }
 
-SkPairPathEffect::SkPairPathEffect(SkFlattenableReadBuffer& buffer) {
-    fPE0 = buffer.readFlattenableT<SkPathEffect>();
-    fPE1 = buffer.readFlattenableT<SkPathEffect>();
+SkPairPathEffect::SkPairPathEffect(SkReadBuffer& buffer) {
+    fPE0 = buffer.readPathEffect();
+    fPE1 = buffer.readPathEffect();
     // either of these may fail, so we have to check for nulls later on
 }
 

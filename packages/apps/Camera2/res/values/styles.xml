@@ -19,7 +19,7 @@
     <style name="Theme.ProxyLauncher" parent="@android:Theme.Translucent.NoTitleBar">
     </style>
 
-    <style name="Theme.Camera" parent="Theme.CameraBase">
+    <style name="Theme.Camera" parent="android:style/Theme.Holo.Light.DarkActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowTitleSize">0dp</item>
@@ -27,18 +27,10 @@
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
         <item name="android:colorBackgroundCacheHint">@android:color/black</item>
-        <item name="android:actionBarStyle">@style/Holo.ActionBar</item>
+        <item name="android:actionBarStyle">@style/Camera.ActionBar</item>
     </style>
-    <style name="Theme.CameraBase" parent="android:Theme.Holo"/>
-    <style name="Theme.Crop" parent="Theme.GalleryBase">
-        <item name="android:displayOptions"></item>
-        <item name="android:windowContentOverlay">@null</item>
-        <item name="android:actionBarStyle">@style/Holo.ActionBar</item>
-        <item name="android:colorBackground">@null</item>
-        <item name="android:colorBackgroundCacheHint">@null</item>
-        <item name="android:windowBackground">@drawable/crop_tiled_background</item>
-    </style>
-    <style name="Holo.ActionBar" parent="android:Widget.Holo.ActionBar">
+
+    <style name="Camera.ActionBar" parent="android:Widget.Holo.Light.ActionBar">
         <item name="android:displayOptions">useLogo|showHome|homeAsUp</item>
         <item name="android:background">@drawable/actionbar_translucent</item>
         <item name="android:backgroundStacked">@null</item>
@@ -72,41 +64,6 @@
         <item name="android:layout_height">2dp</item>
         <item name="android:background">@color/popup_title_color</item>
     </style>
-    <style name="SettingItemList">
-        <item name="android:orientation">vertical</item>
-        <item name="android:paddingBottom">3dp</item>
-        <item name="android:layout_gravity">center</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:listSelector">@drawable/bg_pressed</item>
-    </style>
-    <style name="SettingItemTitle">
-        <item name="android:textSize">@dimen/setting_item_text_size</item>
-        <item name="android:gravity">left|center_vertical</item>
-        <item name="android:textColor">@color/primary_text</item>
-        <item name="android:singleLine">true</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">match_parent</item>
-    </style>
-    <style name="SettingItemText">
-        <item name="android:layout_width">@dimen/setting_item_text_width</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_gravity">center_vertical</item>
-        <item name="android:gravity">center</item>
-        <item name="android:singleLine">true</item>
-        <item name="android:textColor">@color/primary_text</item>
-        <item name="android:textSize">@dimen/setting_item_text_size</item>
-    </style>
-    <style name="SettingRow">
-        <item name="android:gravity">center_vertical</item>
-        <item name="android:orientation">horizontal</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">@dimen/setting_row_height</item>
-        <item name="android:paddingLeft">@dimen/setting_item_list_margin</item>
-        <item name="android:paddingRight">@dimen/setting_item_list_margin</item>
-        <item name="android:background">@drawable/setting_picker</item>
-    </style>
     <style name="OnViewfinderLabel">
         <item name="android:gravity">center</item>
         <item name="android:layout_width">wrap_content</item>
@@ -123,61 +80,6 @@
     </style>
     <style name="PanoCustomDialogText">
         <item name="android:textAppearance">@android:style/TextAppearance.Medium</item>
-    </style>
-    <style name="EffectSettingGrid">
-        <item name="android:layout_marginLeft">@dimen/setting_item_list_margin</item>
-        <item name="android:layout_marginRight">@dimen/setting_item_list_margin</item>
-        <item name="android:paddingBottom">3dp</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:numColumns">3</item>
-        <item name="android:verticalSpacing">3dp</item>
-        <item name="android:horizontalSpacing">3dp</item>
-        <item name="android:choiceMode">singleChoice</item>
-    </style>
-    <style name="EffectSettingItem">
-        <item name="android:orientation">vertical</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingTop">9dp</item>
-        <item name="android:paddingBottom">9dp</item>
-        <item name="android:paddingLeft">2dp</item>
-        <item name="android:paddingRight">2dp</item>
-        <item name="android:background">@drawable/setting_picker</item>
-    </style>
-    <style name="EffectSettingItemTitle">
-        <item name="android:textSize">@dimen/effect_setting_item_text_size</item>
-        <item name="android:gravity">center</item>
-        <item name="android:textColor">@android:color/white</item>
-        <item name="android:singleLine">true</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingTop">1dp</item>
-    </style>
-    <style name="EffectSettingTypeTitle">
-        <item name="android:textSize">@dimen/effect_setting_type_text_size</item>
-        <item name="android:gravity">left|center_vertical</item>
-        <item name="android:textColor">@android:color/white</item>
-        <item name="android:alpha">0.7</item>
-        <item name="android:singleLine">true</item>
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">@dimen/effect_setting_type_text_min_height</item>
-        <item name="android:paddingLeft">@dimen/effect_setting_type_text_left_padding</item>
-    </style>
-    <style name="EffectTypeSeparator">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_marginLeft">8dp</item>
-        <item name="android:layout_marginRight">8dp</item>
-        <item name="android:layout_marginBottom">14dp</item>
-        <item name="android:layout_height">2dp</item>
-        <item name="android:background">#2c2c2c</item>
-    </style>
-    <style name="EffectTitleSeparator">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">2dp</item>
-        <item name="android:paddingBottom">4dp</item>
-        <item name="android:background">@android:drawable/divider_horizontal_dark</item>
     </style>
     <style name="TextAppearance.DialogWindowTitle" parent="">
         <item name="android:textSize">22sp</item>
@@ -241,12 +143,11 @@
         <item name="android:layout_height">match_parent</item>
     </style>
     <style name="UndoBar">
-        <item name="android:layout_marginLeft">4dp</item>
-        <item name="android:layout_marginRight">4dp</item>
+        <item name="android:layout_marginBottom">64dp</item>
         <item name="android:paddingLeft">16dp</item>
-        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">48dp</item>
-        <item name="android:layout_gravity">bottom</item>
+        <item name="android:layout_gravity">bottom|center_horizontal</item>
         <item name="android:background">@drawable/panel_undo_holo</item>
     </style>
     <style name="UndoBarTextAppearance">
@@ -275,5 +176,48 @@
     <style name="PanoViewHorizontalBar">
         <item name="android:background">#000000</item>
         <item name="android:alpha">1.0</item>
+    </style>
+    <style name="FilmstripBottomControlButton">
+        <item name="android:layout_width">@dimen/filmstrip_bottom_control_button_size</item>
+        <item name="android:layout_height">@dimen/filmstrip_bottom_control_button_size</item>
+        <item name="android:background">@drawable/transparent_button_background</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:layout_gravity">center_vertical</item>
+    </style>
+    <style name="FilmstripBottomProgressText">
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:shadowColor">@android:color/black</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">0</item>
+        <item name="android:shadowRadius">2</item>
+    </style>
+    <style name="IndicatorIcon">
+        <item name="android:layout_width">@dimen/indicator_icon_width</item>
+        <item name="android:layout_height">@dimen/indicator_icon_height</item>
+        <item name="android:visibility">gone</item>
+        <item name="android:background">@null</item>
+    </style>
+    <style name="ModeOption">
+      <item name="android:layout_width">@dimen/mode_option_width</item>
+      <item name="android:layout_height">@dimen/mode_option_height</item>
+      <item name="android:layout_margin">6dp</item>
+      <item name="android:background">@null</item>
+    </style>
+    <style name="Theme.CameraSettings" parent="@android:style/Theme.Holo">
+       <item name="android:windowFullscreen">true</item>
+    </style>
+    <style name="start_up_dialog_content">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+    </style>
+    <style name="BlueButton">
+        <item name="android:layout_width">144dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:background">@drawable/button_cling</item>
+        <item name="android:fontFamily">sans-serif-regular</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:padding">12dp</item>
     </style>
 </resources>

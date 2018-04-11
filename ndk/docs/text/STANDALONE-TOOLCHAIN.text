@@ -65,8 +65,15 @@ As you can see, this is rather verbose, but it works!
 IMPORTANT NOTE:
 
 > Using the NDK toolchain directly has a serious limitation:
-  You won't be able to use any C++ STL (either STLport or
+  You won't be able to use any C++ STL (STLport, libc++,
   the GNU libstdc++) with it. Also no exceptions and no RTTI.
+
+> For clang, you need to add correct "-target" for given architecture, and add
+  "-gcc-toolchain" to path of GNU-based toolchain for "as" and "ld", eg.
+
+  1. Add "-target armv7-none-linux-androideabi" for armeabi-v7a, "-target armv5te-none-linux-androideabi"
+     for armeabi, "-target i686-none-linux-android" for x86, "-target mipsel-none-linux-android" for mips, and
+  2. Add "-gcc-toolchain $NDK/toolchains/arm-linux-androideabi-4.8/prebuilt/linux-x86_64"
 
 
 4/ Invoking the compiler (the easy way):
@@ -102,6 +109,9 @@ You may specify --stl=stlport to copy libstlport instead of libgnustl. Note that
 to link against the shared library, you will have to explicitely use -lstlport_shared
 in this case, just like you need to use -lgnustl_shared for the GNU libstdc++ case.
 Static linking doesn't require anything special.
+
+Likewise you may specify --stl=libc++ to copy LLVM libc++ headers and libraries. Note that
+to link against the shared library, you will have to explicitely use -lc++_shared.
 
 You can later use it directly with something like:
 
@@ -167,6 +177,9 @@ subsequent option "`-march=armv7-a`" and/or "`-mthumb`".  ie.
 
 You may override with your own -target if you wish.
 
+There is no need for "-gcc-toolchain" because clang locates "as" and "ld" in
+predefined relative location in standalone package.
+
 Extra efforts have been made to make clang/clang++ easier drop-in
 replacements for gcc/g++ in Makefile.  When in doubt, use the following
 common techniques to check:
@@ -197,7 +210,8 @@ following flags are being used:
 Note: The first flag enables Thumb-2 instructions, and the second one
       enables H/W FPU instructions while ensuring that floating-point
       parameters are passed in core registers, which is critical for
-      ABI compatibility. Do *not* use these flags separately!
+      ABI compatibility. Do *not* use these flags separately before
+      NDK r9b!
 
 If you want to use Neon instructions, you will need to change the -mfpu
 compiler flag:
@@ -214,12 +228,29 @@ Note: The first flag instructs linker to pick libgcc.a, libgcov.a and
       crt*.o tailored for armv7-a.  The 2nd flag is *required* to route
       around a CPU bug in some Cortex-A8 implementations:
 
+Since NDK r9b, all Android native APIs taking or returning double/float
+has __attribute__((pcs("aapcs"))) for ARM.  It's possible to compile
+user code in -mhard-float (which implies -mfloat-abi=hard) and still
+link with Android native APIs which follow softfp ABI.  Please see
+tests/device/hard-float/jni/Android.mk for details.
+
+If you want to use Neon intrinsics on x86 they can be translated to the native
+x86 SSE ones using special C/C++ language header with the same name as
+standard arm neon intrinsics header "arm_neon.h".
+By default x86 ABI supports SIMD up to SSE3 and the header covers ~83% NEON
+functions (1551 of total 1872). It is recommended to use the -mssse3 compiler
+flag which extends SIMD up to SSSE3 and in this case the header will cover
+~98% NEON functions (1827 of total 1872):
+
+        CFLAGS='-mssse3'
+
+To learn more about it, see docs/CPU-X86.html
+
 If none of the above makes sense to you, it's probably better not to use
 the standalone toolchain, and stick to the NDK build system instead, which
 will handle all the details for you.
 
-You don't have to use any specific compiler flag when targeting the x86 ABI
-or the MIPS ABI.
+You don't have to use any specific compiler flag when targeting the MIPS ABI.
 
 7/ Warnings and Limitations:
 --------------------------
@@ -269,13 +300,13 @@ linking binaries, as in:
 
           arm-linux-androideabi-g++ .... -lsupc++
 
-This is not needed when using the STLport library.
+This is not needed when using the STLport or libc++ library.
 
 
 ### 7.4/ C++ STL support:
 
 The standalone toolchain includes a copy of a C++ Standard Template Library
-implementation, either the GNU libstdc++, or STLport, determined by your
+implementation, either the GNU libstdc++, STLport, or libc++, determined by your
 use of the --stl=<name> option described previously. To use this STL
 implementation, you however need to link your project with the proper
 library:
@@ -304,7 +335,7 @@ library:
 > If you cannot comply with its requirements, i.e. you cannot redistribute
   the shared library, do not use it in your project.
 
-  * Use -stlport_shared to link against the _shared_ library version of
+  * Use -lstlport_shared to link against the _shared_ library version of
     STLport. If you use this option, you need to ensure that
     `libstlport_shared.so` is also copied to your device for your code
     to load properly. They are found at the same locations than those

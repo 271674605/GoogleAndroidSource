@@ -16,7 +16,7 @@
 
 package android.view.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.view.R;
 
 import android.app.Instrumentation;
 import android.app.Presentation;
@@ -36,6 +36,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
+import android.test.UiThreadTest;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.ActionMode;
@@ -62,12 +63,13 @@ import android.widget.TextView;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActivity> {
+public class WindowTest extends ActivityInstrumentationTestCase2<WindowCtsActivity> {
     static final String TAG = "WindowTest";
     private Window mWindow;
     private Context mContext;
     private Instrumentation mInstrumentation;
-    private WindowStubActivity mActivity;
+    private WindowCtsActivity mActivity;
+    private SurfaceView surfaceView;
 
     private static final int VIEWGROUP_LAYOUT_HEIGHT = 100;
     private static final int VIEWGROUP_LAYOUT_WIDTH = 200;
@@ -77,7 +79,7 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
     private VirtualDisplay mVirtualDisplay;
 
     public WindowTest() {
-        super("com.android.cts.stub", WindowStubActivity.class);
+        super("com.android.cts.view", WindowCtsActivity.class);
     }
 
     @Override
@@ -97,6 +99,7 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
         super.tearDown();
     }
 
+    @UiThreadTest
     public void testConstructor() throws Exception {
         mWindow = new MockWindow(mContext);
         assertSame(mContext, mWindow.getContext());
@@ -286,8 +289,8 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
         mActivity.getWindowManager().getDefaultDisplay().getMetrics(dm);
         int screenWidth = dm.widthPixels;
         int screenHeight = dm.heightPixels;
-        assertEquals(screenWidth, decor.getWidth());
-        assertEquals(screenHeight, decor.getHeight());
+        assertTrue(decor.getWidth() >= screenWidth);
+        assertTrue(decor.getHeight() >= screenHeight);
         assertSame(mWindow.getContext(), decor.getContext());
     }
 
@@ -652,7 +655,13 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
      * Test setLocalFocus together with injectInputEvent.
      */
     public void testSetLocalFocus() throws Throwable {
-        final SurfaceView surfaceView = new SurfaceView(mContext);
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                surfaceView = new SurfaceView(mContext);
+            }
+        });
+        mInstrumentation.waitForIdleSync();
+
         final Semaphore waitingSemaphore = new Semaphore(0);
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
@@ -676,6 +685,7 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
                 mWindow.setContentView(surfaceView);
             }
         });
+        mInstrumentation.waitForIdleSync();
         assertTrue(waitingSemaphore.tryAcquire(5, TimeUnit.SECONDS));
         assertNotNull(mVirtualDisplay);
         assertNotNull(mPresentation);
@@ -997,6 +1007,24 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
         @Override
         public void takeInputQueue(InputQueue.Callback callback) {
         }
+
+        @Override
+        public void setStatusBarColor(int color) {
+        }
+
+        @Override
+        public int getStatusBarColor() {
+            return 0;
+        }
+
+        @Override
+        public void setNavigationBarColor(int color) {
+        }
+
+        @Override
+        public int getNavigationBarColor() {
+            return 0;
+        }
     }
 
     private class MockWindowCallback implements Window.Callback {
@@ -1087,6 +1115,9 @@ public class WindowTest extends ActivityInstrumentationTestCase2<WindowStubActiv
         }
 
         public void onActionModeFinished(ActionMode mode) {
+        }
+
+        public void onWindowDismissed() {
         }
     }
 }

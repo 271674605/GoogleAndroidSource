@@ -14,6 +14,7 @@ class Rect;
 namespace views {
 
 class Widget;
+class View;
 
 // Observers can listen to various events on the Widgets.
 class VIEWS_EXPORT WidgetObserver {
@@ -35,6 +36,8 @@ class VIEWS_EXPORT WidgetObserver {
   // Invoked after notification is received from the event loop that the native
   // widget has been destroyed.
   virtual void OnWidgetDestroyed(Widget* widget) {}
+
+  virtual void OnWidgetVisibilityChanging(Widget* widget, bool visible) {}
 
   virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) {}
 

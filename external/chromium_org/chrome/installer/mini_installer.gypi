@@ -4,7 +4,6 @@
 {
   'dependencies': [
     '<@(chrome_dll_project)',
-    '../chrome.gyp:app_host',
     '../chrome.gyp:chrome',
     '../chrome.gyp:chrome_nacl_win64',
     '../chrome.gyp:default_extensions',
@@ -48,7 +47,6 @@
     },
     'VCLinkerTool': {
       'OutputFile': '<(output_dir)/mini_installer.exe',
-      'MapFileName': '<(output_dir)/mini_installer.map',
       'RandomizedBaseAddress': '1',
       'DataExecutionPrevention': '0',
       'AdditionalLibraryDirectories': [
@@ -56,21 +54,12 @@
       ],
       'DelayLoadDLLs': [],
       'EntryPointSymbol': 'MainEntryPoint',
-      'GenerateMapFile': 'true',
       'IgnoreAllDefaultLibraries': 'true',
       'OptimizeForWindows98': '1',
       'SubSystem': '2',  # Set /SUBSYSTEM:WINDOWS
       'AdditionalDependencies': [
         'shlwapi.lib',
         'setupapi.lib',
-      ],
-      'conditions': [
-        ['MSVS_VERSION=="2005e"', {
-          'AdditionalDependencies': [  # Must explicitly link in VC2005E
-            'advapi32.lib',
-            'shell32.lib',
-          ],
-        }],
       ],
     },
     'VCManifestTool': {
@@ -166,15 +155,6 @@
             'enable_hidpi_flag': '',
           },
         }],
-        ['enable_touch_ui == 1', {
-          'variables': {
-            'enable_touch_ui_flag': '--enable_touch_ui=1',
-          },
-        }, {
-          'variables': {
-            'enable_touch_ui_flag': '',
-          },
-        }],
         ['target_arch=="x64"', {
           'inputs!': [
             '<(PRODUCT_DIR)/nacl64.exe',
@@ -188,10 +168,18 @@
             'target_arch_flag': '--target_arch=x86',
           },
         }],
+        ['icu_use_data_file_flag == 0', {
+          'inputs': [
+            '<(PRODUCT_DIR)/icudt.dll',
+          ],
+        }, { # else icu_use_data_file_flag != 0
+          'inputs': [
+            '<(PRODUCT_DIR)/icudtl.dat',
+          ],
+        }],
       ],
       'inputs': [
         '<(create_installer_archive_py_path)',
-        '<(PRODUCT_DIR)/app_host.exe',
         '<(PRODUCT_DIR)/chrome.exe',
         '<@(chrome_dll_path)',
         '<(PRODUCT_DIR)/nacl64.exe',
@@ -199,7 +187,6 @@
         '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
         '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
         '<(PRODUCT_DIR)/locales/en-US.pak',
-        '<(PRODUCT_DIR)/icudt.dll',
       ],
       'outputs': [
         'xxx.out',
@@ -217,7 +204,6 @@
         '--input_file=<(RULE_INPUT_PATH)',
         '--resource_file_path=<(INTERMEDIATE_DIR)/packed_files.rc',
         '<(enable_hidpi_flag)',
-        '<(enable_touch_ui_flag)',
         '<(target_arch_flag)',
         # TODO(sgk):  may just use environment variables
         #'--distribution=$(CHROMIUM_BUILD)',
@@ -227,7 +213,7 @@
         #'--setup_exe_format=DIFF',
         #'--diff_algorithm=COURGETTE',
       ],
-      'message': 'Create installer archive'
+      'message': 'Create installer archive',
     },
   ],
   # TODO(mark):  <(branding_dir) should be defined by the

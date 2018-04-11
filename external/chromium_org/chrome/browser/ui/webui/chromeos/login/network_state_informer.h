@@ -13,8 +13,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
+#include "chrome/browser/chromeos/login/ui/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "content/public/browser/notification_observer.h"
@@ -22,8 +22,6 @@
 #include "content/public/browser/notification_service.h"
 
 namespace chromeos {
-
-class NetworkState;
 
 // Class which observes network state changes and calls registered callbacks.
 // State is considered changed if connection or the active network has been
@@ -64,7 +62,6 @@ class NetworkStateInformer
   void RemoveObserver(NetworkStateInformerObserver* observer);
 
   // NetworkStateHandlerObserver implementation:
-  virtual void NetworkManagerChanged() OVERRIDE;
   virtual void DefaultNetworkChanged(const NetworkState* network) OVERRIDE;
 
   // NetworkPortalDetector::Observer implementation:
@@ -84,6 +81,8 @@ class NetworkStateInformer
   std::string network_path() const { return network_path_; }
   std::string network_type() const { return network_type_; }
 
+  static const char* StatusString(State state);
+
  private:
   friend class base::RefCounted<NetworkStateInformer>;
 
@@ -94,9 +93,6 @@ class NetworkStateInformer
   void UpdateStateAndNotify();
 
   void SendStateToObservers(ErrorScreenActor::ErrorReason reason);
-
-  State GetNetworkState(const NetworkState* network);
-  bool IsProxyConfigured(const NetworkState* network);
 
   State state_;
   std::string network_path_;

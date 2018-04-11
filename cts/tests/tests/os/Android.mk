@@ -21,20 +21,24 @@ LOCAL_MODULE_TAGS := optional
 # and when built explicitly put it in the data partition
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_PROGUARD_ENABLED := disabled
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil ctstestrunner guava
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner guava
+LOCAL_JNI_SHARED_LIBRARIES := libcts_jni libctsos_jni
 
 LOCAL_SRC_FILES := $(call all-java-files-under, src) \
-        src/android/os/cts/IParcelFileDescriptorPeer.aidl
+        src/android/os/cts/IParcelFileDescriptorPeer.aidl \
+        src/android/os/cts/IEmptyService.aidl \
+        src/android/os/cts/ISecondary.aidl
 
 LOCAL_PACKAGE_NAME := CtsOsTestCases
 
-LOCAL_INSTRUMENTATION_FOR := CtsTestStubs
-
-# uncomment when dalvik.annotation.Test* are removed or part of SDK
+# uncomment when b/13282254 is fixed
 #LOCAL_SDK_VERSION := current
+LOCAL_JAVA_LIBRARIES += android.test.runner
 
 include $(BUILD_CTS_PACKAGE)
+
+include $(call all-makefiles-under,$(LOCAL_PATH))

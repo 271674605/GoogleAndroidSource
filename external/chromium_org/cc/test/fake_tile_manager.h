@@ -15,13 +15,16 @@ namespace cc {
 class FakeTileManager : public TileManager {
  public:
   explicit FakeTileManager(TileManagerClient* client);
-  FakeTileManager(TileManagerClient* client,
-                  ResourceProvider* resource_provider);
+  FakeTileManager(TileManagerClient* client, ResourcePool* resource_pool);
+  virtual ~FakeTileManager();
 
   bool HasBeenAssignedMemory(Tile* tile);
-  void AssignMemoryToTiles();
+  void AssignMemoryToTiles(
+      const GlobalStateThatImpactsTilePriority& state);
 
-  virtual ~FakeTileManager();
+  void DidFinishRunningTasksForTesting();
+
+  virtual void Release(Tile* tile) OVERRIDE;
 
   std::vector<Tile*> tiles_for_raster;
   PrioritizedTileSet all_tiles;

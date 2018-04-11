@@ -16,6 +16,8 @@
 class BrowserListTabContentsProvider
     : public content::DevToolsHttpHandlerDelegate {
  public:
+  static void EnableTethering();
+
   explicit BrowserListTabContentsProvider(
       chrome::HostDesktopType host_desktop_type);
   virtual ~BrowserListTabContentsProvider();
@@ -25,15 +27,16 @@ class BrowserListTabContentsProvider
   virtual bool BundlesFrontendResources() OVERRIDE;
   virtual base::FilePath GetDebugFrontendDir() OVERRIDE;
   virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE;
-  virtual content::RenderViewHost* CreateNewTarget() OVERRIDE;
-  virtual TargetType GetTargetType(content::RenderViewHost*) OVERRIDE;
-  virtual std::string GetViewDescription(content::RenderViewHost*) OVERRIDE;
-  virtual scoped_refptr<net::StreamListenSocket> CreateSocketForTethering(
+  virtual scoped_ptr<content::DevToolsTarget> CreateNewTarget(
+      const GURL& url) OVERRIDE;
+  virtual void EnumerateTargets(TargetCallback callback) OVERRIDE;
+  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
       net::StreamListenSocket::Delegate* delegate,
       std::string* name) OVERRIDE;
 
  private:
   chrome::HostDesktopType host_desktop_type_;
+  int last_tethering_port_;
   DISALLOW_COPY_AND_ASSIGN(BrowserListTabContentsProvider);
 };
 

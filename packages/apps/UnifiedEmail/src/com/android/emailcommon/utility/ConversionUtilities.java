@@ -27,13 +27,6 @@ import java.util.ArrayList;
 
 public class ConversionUtilities {
     /**
-     * Values for HEADER_ANDROID_BODY_QUOTED_PART to tag body parts
-     */
-    public static final String BODY_QUOTED_PART_REPLY = "quoted-reply";
-    public static final String BODY_QUOTED_PART_FORWARD = "quoted-forward";
-    public static final String BODY_QUOTED_PART_INTRO = "quoted-intro";
-
-    /**
      * Helper function to append text to a StringBuffer, creating it if necessary.
      * Optimization:  The majority of the time we are *not* appending - we should have a path
      * that deals with single strings.
@@ -60,9 +53,6 @@ public class ConversionUtilities {
     public static class BodyFieldData {
         public String textContent;
         public String htmlContent;
-        public String textReply;
-        public String htmlReply;
-        public String introText;
         public String snippet;
         public boolean isQuotedReply;
         public boolean isQuotedForward;
@@ -76,38 +66,11 @@ public class ConversionUtilities {
         final BodyFieldData data = new BodyFieldData();
         StringBuffer sbHtml = null;
         StringBuffer sbText = null;
-        StringBuffer sbHtmlReply = null;
-        StringBuffer sbTextReply = null;
-        StringBuffer sbIntroText = null;
 
         for (Part viewable : viewables) {
             String text = MimeUtility.getTextFromPart(viewable);
-            String[] replyTags = viewable.getHeader(MimeHeader.HEADER_ANDROID_BODY_QUOTED_PART);
-            String replyTag = null;
-            if (replyTags != null && replyTags.length > 0) {
-                replyTag = replyTags[0];
-            }
             // Deploy text as marked by the various tags
             boolean isHtml = "text/html".equalsIgnoreCase(viewable.getMimeType());
-
-            if (replyTag != null) {
-                data.isQuotedReply = BODY_QUOTED_PART_REPLY.equalsIgnoreCase(replyTag);
-                data.isQuotedForward = BODY_QUOTED_PART_FORWARD.equalsIgnoreCase(replyTag);
-                boolean isQuotedIntro = BODY_QUOTED_PART_INTRO.equalsIgnoreCase(replyTag);
-
-                if (data.isQuotedReply || data.isQuotedForward) {
-                    if (isHtml) {
-                        sbHtmlReply = appendTextPart(sbHtmlReply, text);
-                    } else {
-                        sbTextReply = appendTextPart(sbTextReply, text);
-                    }
-                    continue;
-                }
-                if (isQuotedIntro) {
-                    sbIntroText = appendTextPart(sbIntroText, text);
-                    continue;
-                }
-            }
 
             // Most of the time, just process regular body parts
             if (isHtml) {
@@ -129,15 +92,6 @@ public class ConversionUtilities {
             if (data.snippet == null) {
                 data.snippet = TextUtilities.makeSnippetFromHtmlText(text);
             }
-        }
-        if (sbHtmlReply != null && sbHtmlReply.length() != 0) {
-            data.htmlReply = sbHtmlReply.toString();
-        }
-        if (sbTextReply != null && sbTextReply.length() != 0) {
-            data.textReply = sbTextReply.toString();
-        }
-        if (sbIntroText != null && sbIntroText.length() != 0) {
-            data.introText = sbIntroText.toString();
         }
         return data;
     }

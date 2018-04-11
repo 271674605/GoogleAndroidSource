@@ -72,10 +72,6 @@ extern "C" {
 #include "hevc_utils.h"
 #define TIMEOUT 5000
 
-#else //_ANDROID_
-#define DEBUG_PRINT_LOW printf
-#define DEBUG_PRINT_HIGH printf
-#define DEBUG_PRINT_ERROR printf
 #endif // _ANDROID_
 
 
@@ -102,10 +98,10 @@ extern "C" {
 #ifdef MAX_RES_1080P
 #include "mp4_utils.h"
 #endif
-#include <linux/android_pmem.h>
 #include "extra_data_handler.h"
 #include "ts_parser.h"
 #include "vidc_color_converter.h"
+#include "vidc_debug.h"
 extern "C" {
     OMX_API void * get_omx_component_factory_fn(void);
 }

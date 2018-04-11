@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_UNIQUE_GCFACTORY_H
-#define MCLD_UNIQUE_GCFACTORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_UNIQUEGCFACTORY_H
+#define MCLD_SUPPORT_UNIQUEGCFACTORY_H
 
 #include "mcld/Support/GCFactory.h"
 #include <map>

@@ -1,5 +1,5 @@
 // Ceres Solver - A fast non-linear least squares minimizer
-// Copyright 2010, 2011, 2012 Google Inc. All rights reserved.
+// Copyright 2014 Google Inc. All rights reserved.
 // http://code.google.com/p/ceres-solver/
 //
 // Redistribution and use in source and binary forms, with or without
@@ -40,13 +40,14 @@
 #include "ceres/iteration_callback.h"
 #include "ceres/ordered_groups.h"
 #include "ceres/types.h"
+#include "ceres/internal/disable_warnings.h"
 
 namespace ceres {
 
 class Problem;
 
 // Interface for non-linear least squares solvers.
-class Solver {
+class CERES_EXPORT Solver {
  public:
   virtual ~Solver();
 
@@ -55,7 +56,7 @@ class Solver {
   // problems; however, better performance is often obtainable with tweaking.
   //
   // The constants are defined inside types.h
-  struct Options {
+  struct CERES_EXPORT Options {
     // Default constructor that sets up a generic sparse problem.
     Options() {
       minimizer_type = TRUST_REGION;
@@ -91,31 +92,40 @@ class Solver {
       gradient_tolerance = 1e-10;
       parameter_tolerance = 1e-8;
 
-#if defined(CERES_NO_SUITESPARSE) && defined(CERES_NO_CXSPARSE)
+#if defined(CERES_NO_SUITESPARSE) && defined(CERES_NO_CXSPARSE) && !defined(CERES_ENABLE_LGPL_CODE)
       linear_solver_type = DENSE_QR;
 #else
       linear_solver_type = SPARSE_NORMAL_CHOLESKY;
 #endif
 
       preconditioner_type = JACOBI;
-
+      visibility_clustering_type = CANONICAL_VIEWS;
       dense_linear_algebra_library_type = EIGEN;
+
+      // Choose a default sparse linear algebra library in the order:
+      //
+      //   SUITE_SPARSE > CX_SPARSE > EIGEN_SPARSE
+#if !defined(CERES_NO_SUITESPARSE)
       sparse_linear_algebra_library_type = SUITE_SPARSE;
-#if defined(CERES_NO_SUITESPARSE) && !defined(CERES_NO_CXSPARSE)
+#else
+  #if !defined(CERES_NO_CXSPARSE)
       sparse_linear_algebra_library_type = CX_SPARSE;
+  #else
+    #if defined(CERES_USE_EIGEN_SPARSE)
+      sparse_linear_algebra_library_type = EIGEN_SPARSE;
+    #endif
+  #endif
 #endif
 
-
       num_linear_solver_threads = 1;
-      linear_solver_ordering = NULL;
       use_postordering = false;
+      dynamic_sparsity = false;
       min_linear_solver_iterations = 1;
       max_linear_solver_iterations = 500;
       eta = 1e-1;
       jacobi_scaling = true;
       use_inner_iterations = false;
       inner_iteration_tolerance = 1e-3;
-      inner_iteration_ordering = NULL;
       logging_type = PER_MINIMIZER_ITERATION;
       minimizer_progress_to_stdout = false;
       trust_region_problem_dump_directory = "/tmp";
@@ -126,7 +136,11 @@ class Solver {
       update_state_every_iteration = false;
     }
 
-    ~Options();
+    // Returns true if the options struct has a valid
+    // configuration. Returns false otherwise, and fills in *error
+    // with a message describing the problem.
+    bool IsValid(string* error) const;
+
     // Minimizer options ----------------------------------------
 
     // Ceres supports the two major families of optimization strategies -
@@ -367,7 +381,7 @@ class Solver {
 
     // Minimizer terminates when
     //
-    //   max_i |gradient_i| < gradient_tolerance * max_i|initial_gradient_i|
+    //   max_i |x - Project(Plus(x, -g(x))| < gradient_tolerance
     //
     // This value should typically be 1e-4 * function_tolerance.
     double gradient_tolerance;
@@ -384,6 +398,11 @@ class Solver {
 
     // Type of preconditioner to use with the iterative linear solvers.
     PreconditionerType preconditioner_type;
+
+    // Type of clustering algorithm to use for visibility based
+    // preconditioning. This option is used only when the
+    // preconditioner_type is CLUSTER_JACOBI or CLUSTER_TRIDIAGONAL.
+    VisibilityClusteringType visibility_clustering_type;
 
     // Ceres supports using multiple dense linear algebra libraries
     // for dense matrix factorizations. Currently EIGEN and LAPACK are
@@ -475,10 +494,7 @@ class Solver {
     // the parameter blocks into two groups, one for the points and one
     // for the cameras, where the group containing the points has an id
     // smaller than the group containing cameras.
-    //
-    // Once assigned, Solver::Options owns this pointer and will
-    // deallocate the memory when destroyed.
-    ParameterBlockOrdering* linear_solver_ordering;
+    shared_ptr<ParameterBlockOrdering> linear_solver_ordering;
 
     // Sparse Cholesky factorization algorithms use a fill-reducing
     // ordering to permute the columns of the Jacobian matrix. There
@@ -500,6 +516,21 @@ class Solver {
     // performance at the expense of an extra copy of the Jacobian
     // matrix. Setting use_postordering to true enables this tradeoff.
     bool use_postordering;
+
+    // Some non-linear least squares problems are symbolically dense but
+    // numerically sparse. i.e. at any given state only a small number
+    // of jacobian entries are non-zero, but the position and number of
+    // non-zeros is different depending on the state. For these problems
+    // it can be useful to factorize the sparse jacobian at each solver
+    // iteration instead of including all of the zero entries in a single
+    // general factorization.
+    //
+    // If your problem does not have this property (or you do not know),
+    // then it is probably best to keep this false, otherwise it will
+    // likely lead to worse performance.
+
+    // This settings affects the SPARSE_NORMAL_CHOLESKY solver.
+    bool dynamic_sparsity;
 
     // Some non-linear least squares problems have additional
     // structure in the way the parameter blocks interact that it is
@@ -571,7 +602,7 @@ class Solver {
     //    the lower numbered groups are optimized before the higher
     //    number groups. Each group must be an independent set. Not
     //    all parameter blocks need to be present in the ordering.
-    ParameterBlockOrdering* inner_iteration_ordering;
+    shared_ptr<ParameterBlockOrdering> inner_iteration_ordering;
 
     // Generally speaking, inner iterations make significant progress
     // in the early stages of the solve and then their contribution
@@ -692,13 +723,9 @@ class Solver {
     //
     // The solver does NOT take ownership of these pointers.
     vector<IterationCallback*> callbacks;
-
-    // If non-empty, a summary of the execution of the solver is
-    // recorded to this file.
-    string solver_log;
   };
 
-  struct Summary {
+  struct CERES_EXPORT Summary {
     Summary();
 
     // A brief one line description of the state of the solver after
@@ -709,18 +736,22 @@ class Solver {
     // termination.
     string FullReport() const;
 
+    bool IsSolutionUsable() const;
+
     // Minimizer summary -------------------------------------------------
     MinimizerType minimizer_type;
 
-    SolverTerminationType termination_type;
+    TerminationType termination_type;
 
-    // If the solver did not run, or there was a failure, a
-    // description of the error.
-    string error;
+    // Reason why the solver terminated.
+    string message;
 
-    // Cost of the problem before and after the optimization. See
-    // problem.h for definition of the cost of a problem.
+    // Cost of the problem (value of the objective function) before
+    // the optimization.
     double initial_cost;
+
+    // Cost of the problem (value of the objective function) after the
+    // optimization.
     double final_cost;
 
     // The part of the total cost that comes from residual blocks that
@@ -728,10 +759,21 @@ class Solver {
     // blocks that they depend on were fixed.
     double fixed_cost;
 
+    // IterationSummary for each minimizer iteration in order.
     vector<IterationSummary> iterations;
 
+    // Number of minimizer iterations in which the step was
+    // accepted. Unless use_non_monotonic_steps is true this is also
+    // the number of steps in which the objective function value/cost
+    // went down.
     int num_successful_steps;
+
+    // Number of minimizer iterations in which the step was rejected
+    // either because it did not reduce the cost enough or the step
+    // was not numerically valid.
     int num_unsuccessful_steps;
+
+    // Number of times inner iterations were performed.
     int num_inner_iteration_steps;
 
     // All times reported below are wall times.
@@ -753,58 +795,160 @@ class Solver {
     // Some total of all time spent inside Ceres when Solve is called.
     double total_time_in_seconds;
 
+    // Time (in seconds) spent in the linear solver computing the
+    // trust region step.
     double linear_solver_time_in_seconds;
+
+    // Time (in seconds) spent evaluating the residual vector.
     double residual_evaluation_time_in_seconds;
+
+    // Time (in seconds) spent evaluating the jacobian matrix.
     double jacobian_evaluation_time_in_seconds;
+
+    // Time (in seconds) spent doing inner iterations.
     double inner_iteration_time_in_seconds;
 
-    // Preprocessor summary.
+    // Number of parameter blocks in the problem.
     int num_parameter_blocks;
+
+    // Number of parameters in the probem.
     int num_parameters;
+
+    // Dimension of the tangent space of the problem (or the number of
+    // columns in the Jacobian for the problem). This is different
+    // from num_parameters if a parameter block is associated with a
+    // LocalParameterization
     int num_effective_parameters;
+
+    // Number of residual blocks in the problem.
     int num_residual_blocks;
+
+    // Number of residuals in the problem.
     int num_residuals;
 
+    // Number of parameter blocks in the problem after the inactive
+    // and constant parameter blocks have been removed. A parameter
+    // block is inactive if no residual block refers to it.
     int num_parameter_blocks_reduced;
+
+    // Number of parameters in the reduced problem.
     int num_parameters_reduced;
+
+    // Dimension of the tangent space of the reduced problem (or the
+    // number of columns in the Jacobian for the reduced
+    // problem). This is different from num_parameters_reduced if a
+    // parameter block in the reduced problem is associated with a
+    // LocalParameterization.
     int num_effective_parameters_reduced;
+
+    // Number of residual blocks in the reduced problem.
     int num_residual_blocks_reduced;
+
+    //  Number of residuals in the reduced problem.
     int num_residuals_reduced;
 
-    int num_eliminate_blocks_given;
-    int num_eliminate_blocks_used;
-
+    //  Number of threads specified by the user for Jacobian and
+    //  residual evaluation.
     int num_threads_given;
+
+    // Number of threads actually used by the solver for Jacobian and
+    // residual evaluation. This number is not equal to
+    // num_threads_given if OpenMP is not available.
     int num_threads_used;
 
+    //  Number of threads specified by the user for solving the trust
+    // region problem.
     int num_linear_solver_threads_given;
+
+    // Number of threads actually used by the solver for solving the
+    // trust region problem. This number is not equal to
+    // num_threads_given if OpenMP is not available.
     int num_linear_solver_threads_used;
 
+    // Type of the linear solver requested by the user.
     LinearSolverType linear_solver_type_given;
+
+    // Type of the linear solver actually used. This may be different
+    // from linear_solver_type_given if Ceres determines that the
+    // problem structure is not compatible with the linear solver
+    // requested or if the linear solver requested by the user is not
+    // available, e.g. The user requested SPARSE_NORMAL_CHOLESKY but
+    // no sparse linear algebra library was available.
     LinearSolverType linear_solver_type_used;
 
+    // Size of the elimination groups given by the user as hints to
+    // the linear solver.
     vector<int> linear_solver_ordering_given;
+
+    // Size of the parameter groups used by the solver when ordering
+    // the columns of the Jacobian.  This maybe different from
+    // linear_solver_ordering_given if the user left
+    // linear_solver_ordering_given blank and asked for an automatic
+    // ordering, or if the problem contains some constant or inactive
+    // parameter blocks.
     vector<int> linear_solver_ordering_used;
 
+    // True if the user asked for inner iterations to be used as part
+    // of the optimization.
     bool inner_iterations_given;
+
+    // True if the user asked for inner iterations to be used as part
+    // of the optimization and the problem structure was such that
+    // they were actually performed. e.g., in a problem with just one
+    // parameter block, inner iterations are not performed.
     bool inner_iterations_used;
 
+    // Size of the parameter groups given by the user for performing
+    // inner iterations.
     vector<int> inner_iteration_ordering_given;
+
+    // Size of the parameter groups given used by the solver for
+    // performing inner iterations. This maybe different from
+    // inner_iteration_ordering_given if the user left
+    // inner_iteration_ordering_given blank and asked for an automatic
+    // ordering, or if the problem contains some constant or inactive
+    // parameter blocks.
     vector<int> inner_iteration_ordering_used;
 
+    //  Type of preconditioner used for solving the trust region
+    //  step. Only meaningful when an iterative linear solver is used.
     PreconditionerType preconditioner_type;
 
+    // Type of clustering algorithm used for visibility based
+    // preconditioning. Only meaningful when the preconditioner_type
+    // is CLUSTER_JACOBI or CLUSTER_TRIDIAGONAL.
+    VisibilityClusteringType visibility_clustering_type;
+
+    //  Type of trust region strategy.
     TrustRegionStrategyType trust_region_strategy_type;
+
+    //  Type of dogleg strategy used for solving the trust region
+    //  problem.
     DoglegType dogleg_type;
 
+    //  Type of the dense linear algebra library used.
     DenseLinearAlgebraLibraryType dense_linear_algebra_library_type;
+
+    // Type of the sparse linear algebra library used.
     SparseLinearAlgebraLibraryType sparse_linear_algebra_library_type;
 
+    // Type of line search direction used.
     LineSearchDirectionType line_search_direction_type;
+
+    // Type of the line search algorithm used.
     LineSearchType line_search_type;
+
+    //  When performing line search, the degree of the polynomial used
+    //  to approximate the objective function.
     LineSearchInterpolationType line_search_interpolation_type;
+
+    // If the line search direction is NONLINEAR_CONJUGATE_GRADIENT,
+    // then this indicates the particular variant of non-linear
+    // conjugate gradient used.
     NonlinearConjugateGradientType nonlinear_conjugate_gradient_type;
 
+    // If the type of the line search direction is LBFGS, then this
+    // indicates the rank of the Hessian approximation.
     int max_lbfgs_rank;
   };
 
@@ -819,10 +963,12 @@ class Solver {
 };
 
 // Helper function which avoids going through the interface.
-void Solve(const Solver::Options& options,
+CERES_EXPORT void Solve(const Solver::Options& options,
            Problem* problem,
            Solver::Summary* summary);
 
 }  // namespace ceres
+
+#include "ceres/internal/reenable_warnings.h"
 
 #endif  // CERES_PUBLIC_SOLVER_H_

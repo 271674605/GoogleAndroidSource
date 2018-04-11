@@ -4,12 +4,18 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SkBenchmark.h"
+
+#include "Benchmark.h"
 #include "SkCanvas.h"
 #include "SkPaint.h"
 #include "SkRandom.h"
 #include "SkShader.h"
 #include "SkString.h"
+
+#if SK_SUPPORT_GPU
+#include "GrDrawTargetCaps.h"
+#include "GrTest.h"
+#endif
 
 enum Flags {
     kBig_Flag = 1 << 0,
@@ -30,9 +36,9 @@ static const int points[] = {
 
 static const int kMaxPathSize = 10;
 
-class HairlinePathBench : public SkBenchmark {
+class HairlinePathBench : public Benchmark {
 public:
-    HairlinePathBench(void* param, Flags flags) : INHERITED(param), fFlags(flags) {
+    HairlinePathBench(Flags flags) : fFlags(flags) {
         fPaint.setStyle(SkPaint::kStroke_Style);
         fPaint.setStrokeWidth(SkIntToScalar(0));
     }
@@ -49,7 +55,7 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
         SkPaint paint(fPaint);
         this->setupPaint(&paint);
 
@@ -63,8 +69,7 @@ protected:
             path.transform(m);
         }
 
-        int count = N;
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < loops; i++) {
             canvas->drawPath(path, paint);
         }
     }
@@ -73,13 +78,12 @@ private:
     SkPaint     fPaint;
     SkString    fName;
     Flags       fFlags;
-    enum { N = SkBENCHLOOP(200) };
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
 class LinePathBench : public HairlinePathBench {
 public:
-    LinePathBench(void* param, Flags flags) : INHERITED(param, flags) {}
+    LinePathBench(Flags flags) : INHERITED(flags) {}
 
     virtual void appendName(SkString* name) SK_OVERRIDE {
         name->append("line");
@@ -111,7 +115,7 @@ private:
 
 class QuadPathBench : public HairlinePathBench {
 public:
-    QuadPathBench(void* param, Flags flags) : INHERITED(param, flags) {}
+    QuadPathBench(Flags flags) : INHERITED(flags) {}
 
     virtual void appendName(SkString* name) SK_OVERRIDE {
         name->append("quad");
@@ -143,7 +147,7 @@ private:
 
 class ConicPathBench : public HairlinePathBench {
 public:
-    ConicPathBench(void* param, Flags flags) : INHERITED(param, flags) {}
+    ConicPathBench(Flags flags) : INHERITED(flags) {}
 
     virtual void appendName(SkString* name) SK_OVERRIDE {
         name->append("conic");
@@ -172,13 +176,29 @@ public:
                          weight);
         }
     }
+
+    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
+#if SK_SUPPORT_GPU
+        GrContext* context = canvas->getGrContext();
+        // This is a workaround for skbug.com/2078. See also skbug.com/2033.
+        if (NULL != context) {
+            GrTestTarget tt;
+            context->getTestTarget(&tt);
+            if (tt.target()->caps()->pathRenderingSupport()) {
+                return;
+            }
+        }
+#endif
+        INHERITED::onDraw(loops, canvas);
+    }
+
 private:
     typedef HairlinePathBench INHERITED;
 };
 
 class CubicPathBench : public HairlinePathBench {
 public:
-    CubicPathBench(void* param, Flags flags) : INHERITED(param, flags) {}
+    CubicPathBench(Flags flags) : INHERITED(flags) {}
 
     virtual void appendName(SkString* name) SK_OVERRIDE {
         name->append("cubic");
@@ -216,23 +236,23 @@ private:
 // FLAG10 - AA, big
 // FLAG11 - AA, big
 
-DEF_BENCH( return new LinePathBench(p, FLAGS00); )
-DEF_BENCH( return new LinePathBench(p, FLAGS01); )
-DEF_BENCH( return new LinePathBench(p, FLAGS10); )
-DEF_BENCH( return new LinePathBench(p, FLAGS11); )
+DEF_BENCH( return new LinePathBench(FLAGS00); )
+DEF_BENCH( return new LinePathBench(FLAGS01); )
+DEF_BENCH( return new LinePathBench(FLAGS10); )
+DEF_BENCH( return new LinePathBench(FLAGS11); )
 
-DEF_BENCH( return new QuadPathBench(p, FLAGS00); )
-DEF_BENCH( return new QuadPathBench(p, FLAGS01); )
-DEF_BENCH( return new QuadPathBench(p, FLAGS10); )
-DEF_BENCH( return new QuadPathBench(p, FLAGS11); )
+DEF_BENCH( return new QuadPathBench(FLAGS00); )
+DEF_BENCH( return new QuadPathBench(FLAGS01); )
+DEF_BENCH( return new QuadPathBench(FLAGS10); )
+DEF_BENCH( return new QuadPathBench(FLAGS11); )
 
 // Don't have default path renderer for conics yet on GPU, so must use AA
-// DEF_BENCH( return new ConicPathBench(p, FLAGS00); )
-// DEF_BENCH( return new ConicPathBench(p, FLAGS01); )
-DEF_BENCH( return new ConicPathBench(p, FLAGS10); )
-DEF_BENCH( return new ConicPathBench(p, FLAGS11); )
+// DEF_BENCH( return new ConicPathBench(FLAGS00); )
+// DEF_BENCH( return new ConicPathBench(FLAGS01); )
+DEF_BENCH( return new ConicPathBench(FLAGS10); )
+DEF_BENCH( return new ConicPathBench(FLAGS11); )
 
-DEF_BENCH( return new CubicPathBench(p, FLAGS00); )
-DEF_BENCH( return new CubicPathBench(p, FLAGS01); )
-DEF_BENCH( return new CubicPathBench(p, FLAGS10); )
-DEF_BENCH( return new CubicPathBench(p, FLAGS11); )
+DEF_BENCH( return new CubicPathBench(FLAGS00); )
+DEF_BENCH( return new CubicPathBench(FLAGS01); )
+DEF_BENCH( return new CubicPathBench(FLAGS10); )
+DEF_BENCH( return new CubicPathBench(FLAGS11); )

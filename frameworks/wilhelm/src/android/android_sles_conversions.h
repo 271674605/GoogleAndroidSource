@@ -44,20 +44,53 @@ static inline uint32_t sles_to_android_sampleRate(SLuint32 sampleRateMilliHertz)
     return (uint32_t)(sampleRateMilliHertz / 1000);
 }
 
-static inline audio_format_t sles_to_android_sampleFormat(SLuint32 pcmFormat) {
-    switch (pcmFormat) {
-        case SL_PCMSAMPLEFORMAT_FIXED_16:
-            return AUDIO_FORMAT_PCM_16_BIT;
-            break;
-        case SL_PCMSAMPLEFORMAT_FIXED_8:
-            return AUDIO_FORMAT_PCM_8_BIT;
-            break;
-        case SL_PCMSAMPLEFORMAT_FIXED_20:
-        case SL_PCMSAMPLEFORMAT_FIXED_24:
-        case SL_PCMSAMPLEFORMAT_FIXED_28:
-        case SL_PCMSAMPLEFORMAT_FIXED_32:
+static inline audio_format_t sles_to_android_sampleFormat(const SLDataFormat_PCM *df_pcm) {
+    switch (df_pcm->formatType) {
+    case SL_DATAFORMAT_PCM:
+        switch (df_pcm->containerSize) {
+            case 8:
+                return AUDIO_FORMAT_PCM_8_BIT;
+            case 16:
+                return AUDIO_FORMAT_PCM_16_BIT;
+            case 24:
+                return AUDIO_FORMAT_PCM_24_BIT_PACKED;
+            case 32:
+                return AUDIO_FORMAT_PCM_32_BIT;
+            default:
+                return AUDIO_FORMAT_INVALID;
+        }
+    case SL_ANDROID_DATAFORMAT_PCM_EX:
+        switch (((SLAndroidDataFormat_PCM_EX *)df_pcm)->representation) {
+        case SL_ANDROID_PCM_REPRESENTATION_UNSIGNED_INT:
+            switch (df_pcm->containerSize) {
+            case 8:
+                return AUDIO_FORMAT_PCM_8_BIT;
+            default:
+                return AUDIO_FORMAT_INVALID;
+            }
+        case SL_ANDROID_PCM_REPRESENTATION_SIGNED_INT:
+            switch (df_pcm->containerSize) {
+            case 16:
+                return AUDIO_FORMAT_PCM_16_BIT;
+            case 24:
+                return AUDIO_FORMAT_PCM_24_BIT_PACKED;
+            case 32:
+                return AUDIO_FORMAT_PCM_32_BIT;
+            default:
+                return AUDIO_FORMAT_INVALID;
+            }
+        case SL_ANDROID_PCM_REPRESENTATION_FLOAT:
+            switch (df_pcm->containerSize) {
+            case 32:
+                return AUDIO_FORMAT_PCM_FLOAT;
+            default:
+                return AUDIO_FORMAT_INVALID;
+            }
         default:
             return AUDIO_FORMAT_INVALID;
+        }
+    default:
+        return AUDIO_FORMAT_INVALID;
     }
 }
 
@@ -93,6 +126,19 @@ static inline uint32_t channelCountToMask(uint32_t channelCount)
         return SL_SPEAKER_FRONT_LEFT;
     case 2:
         return SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+    // Android-specific
+    case 4:
+        return SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT
+               | SL_SPEAKER_BACK_LEFT | SL_SPEAKER_BACK_RIGHT;
+    case 6:
+        return SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT| SL_SPEAKER_FRONT_CENTER
+               | SL_SPEAKER_LOW_FREQUENCY
+               | SL_SPEAKER_BACK_LEFT | SL_SPEAKER_BACK_RIGHT;
+    case 8:
+        return SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT | SL_SPEAKER_FRONT_CENTER
+               | SL_SPEAKER_LOW_FREQUENCY
+               | SL_SPEAKER_BACK_LEFT | SL_SPEAKER_BACK_RIGHT
+               | SL_SPEAKER_SIDE_LEFT |SL_SPEAKER_SIDE_RIGHT;
     default:
         return UNKNOWN_CHANNELMASK;
     }

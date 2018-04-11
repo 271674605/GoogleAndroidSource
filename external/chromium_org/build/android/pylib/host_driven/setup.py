@@ -9,9 +9,9 @@ import os
 import sys
 import types
 
-import test_case
-import test_info_collection
-import test_runner
+from pylib.host_driven import test_case
+from pylib.host_driven import test_info_collection
+from pylib.host_driven import test_runner
 
 
 def _GetPythonFiles(root, files):
@@ -196,7 +196,6 @@ def InstrumentationSetup(host_driven_test_root, official_build,
     return test_runner.HostDrivenTestRunner(
         device, shard_index,
         instrumentation_options.tool,
-        instrumentation_options.build_type,
         instrumentation_options.push_deps,
         instrumentation_options.cleanup_test_files)
 

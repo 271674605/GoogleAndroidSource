@@ -25,6 +25,7 @@ class SDep;
 class SUnit;
 class TargetRegisterClass;
 class TargetSchedModel;
+struct MachineSchedPolicy;
 template <typename T> class SmallVectorImpl;
 
 //===----------------------------------------------------------------------===//
@@ -55,12 +56,40 @@ public:
     return 0;
   }
 
+  /// \brief Temporary API to test migration to MI scheduler.
+  bool useMachineScheduler() const;
+
   /// \brief True if the subtarget should run MachineScheduler after aggressive
   /// coalescing.
   ///
   /// This currently replaces the SelectionDAG scheduler with the "source" order
   /// scheduler. It does not yet disable the postRA scheduler.
   virtual bool enableMachineScheduler() const;
+
+  /// \brief True if the subtarget should run PostMachineScheduler.
+  ///
+  /// This only takes effect if the target has configured the
+  /// PostMachineScheduler pass to run, or if the global cl::opt flag,
+  /// MISchedPostRA, is set.
+  virtual bool enablePostMachineScheduler() const;
+
+  /// \brief True if the subtarget should run the atomic expansion pass.
+  virtual bool enableAtomicExpandLoadLinked() const;
+
+  /// \brief Override generic scheduling policy within a region.
+  ///
+  /// This is a convenient way for targets that don't provide any custom
+  /// scheduling heuristics (no custom MachineSchedStrategy) to make
+  /// changes to the generic scheduling policy.
+  virtual void overrideSchedPolicy(MachineSchedPolicy &Policy,
+                                   MachineInstr *begin,
+                                   MachineInstr *end,
+                                   unsigned NumRegionInstrs) const {}
+
+  // \brief Perform target specific adjustments to the latency of a schedule
+  // dependency.
+  virtual void adjustSchedDependency(SUnit *def, SUnit *use,
+                                     SDep& dep) const { }
 
   // enablePostRAScheduler - If the target can benefit from post-regalloc
   // scheduling and the specified optimization level meets the requirement
@@ -70,10 +99,19 @@ public:
   virtual bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
                                      AntiDepBreakMode& Mode,
                                      RegClassVector& CriticalPathRCs) const;
-  // adjustSchedDependency - Perform target specific adjustments to
-  // the latency of a schedule dependency.
-  virtual void adjustSchedDependency(SUnit *def, SUnit *use,
-                                     SDep& dep) const { }
+
+  /// \brief True if the subtarget should run the local reassignment
+  /// heuristic of the register allocator.
+  /// This heuristic may be compile time intensive, \p OptLevel provides
+  /// a finer grain to tune the register allocator.
+  virtual bool enableRALocalReassignment(CodeGenOpt::Level OptLevel) const;
+
+  /// \brief Enable use of alias analysis during code generation (during MI
+  /// scheduling, DAGCombine, etc.).
+  virtual bool useAA() const;
+
+  /// \brief Enable the use of the early if conversion pass.
+  virtual bool enableEarlyIfConversion() const { return false; }
 
   /// \brief Reset the features for the subtarget.
   virtual void resetSubtargetFeatures(const MachineFunction *MF) { }

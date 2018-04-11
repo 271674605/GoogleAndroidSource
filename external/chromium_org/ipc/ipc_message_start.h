@@ -10,6 +10,7 @@
 // code to figure out the message class from its ID.
 enum IPCMessageStart {
   AutomationMsgStart = 0,
+  FrameMsgStart,
   ViewMsgStart,
   InputMsgStart,
   PluginMsgStart,
@@ -47,7 +48,7 @@ enum IPCMessageStart {
   DesktopNotificationMsgStart,
   GeolocationMsgStart,
   AudioMsgStart,
-  MIDIMsgStart,
+  MidiMsgStart,
   ChromeMsgStart,
   DragMsgStart,
   PrintMsgStart,
@@ -65,6 +66,7 @@ enum IPCMessageStart {
   GamepadMsgStart,
   ShellMsgStart,
   AccessibilityMsgStart,
+  PrefetchMsgStart,
   PrerenderMsgStart,
   ChromotingMsgStart,
   OldBrowserPluginMsgStart,
@@ -88,7 +90,24 @@ enum IPCMessageStart {
   WebRTCIdentityMsgStart,
   LocalDiscoveryMsgStart,
   PowerMonitorMsgStart,
-  LastIPCMsgStart      // Must come last.
+  EncryptedMediaMsgStart,
+  ServiceWorkerMsgStart,
+  MessagePortMsgStart,
+  EmbeddedWorkerMsgStart,
+  EmbeddedWorkerContextMsgStart,
+  CastMsgStart,
+  CdmMsgStart,
+  ScreenOrientationMsgStart,
+  MediaStreamTrackMetricsHostMsgStart,
+  ChromeExtensionMsgStart,
+  MojoMsgStart,
+  TranslateMsgStart,
+  PushMessagingMsgStart,
+  GinJavaBridgeMsgStart,
+  BatteryStatusMsgStart,
+  UtilityPrintingMsgStart,
+  AecDumpMsgStart,
+  LastIPCMsgStart  // Must come last.
 };
 
 #endif  // IPC_IPC_MESSAGE_START_H_

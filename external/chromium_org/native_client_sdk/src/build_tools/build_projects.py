@@ -6,21 +6,21 @@
 import multiprocessing
 import optparse
 import os
+import posixpath
 import sys
+import urllib2
 
 import buildbot_common
 import build_version
 import generate_make
 import parse_dsc
 
-from build_paths import NACL_DIR, SDK_SRC_DIR, OUT_DIR, SDK_EXAMPLE_DIR
+from build_paths import SDK_SRC_DIR, OUT_DIR, SDK_RESOURCE_DIR
 from build_paths import GSTORE
 from generate_index import LandingPage
 
 sys.path.append(os.path.join(SDK_SRC_DIR, 'tools'))
-sys.path.append(os.path.join(NACL_DIR, 'build'))
 import getos
-import http_download
 
 
 MAKE = 'nacl_sdk/make_3.99.90-26-gf80222c/make.exe'
@@ -29,12 +29,25 @@ LIB_DICT = {
   'mac': [],
   'win': ['x86_32']
 }
-VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
+VALID_TOOLCHAINS = [
+  'bionic',
+  'newlib',
+  'glibc',
+  'pnacl',
+  'win',
+  'linux',
+  'mac',
+]
 
 # Global verbosity setting.
-# If set to try (normally via a command line arg) then build_projects will
+# If set to True (normally via a command line arg) then build_projects will
 # add V=1 to all calls to 'make'
 verbose = False
+
+
+def Trace(msg):
+  if verbose:
+    sys.stderr.write(str(msg) + '\n')
 
 
 def CopyFilesFromTo(filelist, srcdir, dstdir):
@@ -54,14 +67,10 @@ def UpdateHelpers(pepperdir, clobber=False):
     buildbot_common.RemoveDir(exampledir)
   buildbot_common.MakeDir(exampledir)
 
-  # Copy files for individual bild and landing page
-  files = ['favicon.ico', 'httpd.cmd']
-  CopyFilesFromTo(files, SDK_EXAMPLE_DIR, exampledir)
-
-  resourcesdir = os.path.join(SDK_EXAMPLE_DIR, 'resources')
-  files = ['index.css', 'index.js', 'button_close.png',
-      'button_close_hover.png']
-  CopyFilesFromTo(files, resourcesdir, exampledir)
+  # Copy files for individual build and landing page
+  files = ['favicon.ico', 'httpd.cmd', 'index.css', 'index.js',
+      'button_close.png', 'button_close_hover.png']
+  CopyFilesFromTo(files, SDK_RESOURCE_DIR, exampledir)
 
   # Copy tools scripts and make includes
   buildbot_common.CopyDir(os.path.join(SDK_SRC_DIR, 'tools', '*.py'),
@@ -69,11 +78,19 @@ def UpdateHelpers(pepperdir, clobber=False):
   buildbot_common.CopyDir(os.path.join(SDK_SRC_DIR, 'tools', '*.mk'),
       tools_dir)
 
+  # Copy tools/lib scripts
+  tools_lib_dir = os.path.join(pepperdir, 'tools', 'lib')
+  buildbot_common.MakeDir(tools_lib_dir)
+  buildbot_common.CopyDir(os.path.join(SDK_SRC_DIR, 'tools', 'lib', '*.py'),
+      tools_lib_dir)
+
   # On Windows add a prebuilt make
   if getos.GetPlatform() == 'win':
     buildbot_common.BuildStep('Add MAKE')
-    http_download.HttpDownload(GSTORE + MAKE,
-                               os.path.join(tools_dir, 'make.exe'))
+    make_url = posixpath.join(GSTORE, MAKE)
+    make_exe = os.path.join(tools_dir, 'make.exe')
+    with open(make_exe, 'wb') as f:
+      f.write(urllib2.urlopen(make_url).read())
 
 
 def ValidateToolchains(toolchains):
@@ -81,6 +98,26 @@ def ValidateToolchains(toolchains):
   if invalid_toolchains:
     buildbot_common.ErrorExit('Invalid toolchain(s): %s' % (
         ', '.join(invalid_toolchains)))
+
+def GetDeps(projects):
+  out = {}
+
+  # Build list of all project names
+  localtargets = [proj['NAME'] for proj in projects]
+
+  # For each project
+  for proj in projects:
+    deplist = []
+    # generate a list of dependencies
+    for targ in proj.get('TARGETS', []):
+      deplist.extend(targ.get('DEPS', []) + targ.get('LIBS', []))
+
+    # and add dependencies to targets built in this subtree
+    localdeps = [dep for dep in deplist if dep in localtargets]
+    if localdeps:
+      out[proj['NAME']] = localdeps
+
+  return out
 
 
 def UpdateProjects(pepperdir, project_tree, toolchains,
@@ -111,11 +148,12 @@ def UpdateProjects(pepperdir, project_tree, toolchains,
       buildbot_common.RemoveDir(dirpath)
     buildbot_common.MakeDir(dirpath)
     targets = [desc['NAME'] for desc in projects]
+    deps = GetDeps(projects)
 
     # Generate master make for this branch of projects
     generate_make.GenerateMasterMakefile(pepperdir,
                                          os.path.join(pepperdir, branch),
-                                         targets)
+                                         targets, deps)
 
     if branch.startswith('examples') and not landing_page:
       landing_page = LandingPage()
@@ -133,9 +171,7 @@ def UpdateProjects(pepperdir, project_tree, toolchains,
   if landing_page:
     # Generate the landing page text file.
     index_html = os.path.join(pepperdir, 'examples', 'index.html')
-    example_resources_dir = os.path.join(SDK_EXAMPLE_DIR, 'resources')
-    index_template = os.path.join(example_resources_dir,
-                                  'index.html.template')
+    index_template = os.path.join(SDK_RESOURCE_DIR, 'index.html.template')
     with open(index_html, 'w') as fh:
       out = landing_page.GeneratePage(index_template)
       fh.write(out)
@@ -146,7 +182,7 @@ def UpdateProjects(pepperdir, project_tree, toolchains,
   branch_name = 'examples'
   generate_make.GenerateMasterMakefile(pepperdir,
                                        os.path.join(pepperdir, branch_name),
-                                       targets)
+                                       targets, {})
 
 
 def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
@@ -175,6 +211,10 @@ def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
   make_cmd = [make, '-j', jobs]
 
   make_cmd.append('CONFIG='+config)
+  # We always ENABLE_BIONIC in case we need it.  If neither --bionic nor
+  # -t bionic have been provided on the command line, then VALID_TOOLCHAINS
+  # will not contain a bionic target.
+  make_cmd.append('ENABLE_BIONIC=1')
   if not deps:
     make_cmd.append('IGNORE_DEPS=1')
 
@@ -194,7 +234,6 @@ def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
 
 def BuildProjects(pepperdir, project_tree, deps=True,
                   clean=False, config='Debug'):
-
   # Make sure we build libraries (which live in 'src') before
   # any of the examples.
   build_first = [p for p in project_tree if p != 'src']
@@ -204,16 +243,19 @@ def BuildProjects(pepperdir, project_tree, deps=True,
     BuildProjectsBranch(pepperdir, branch, deps, clean, config)
 
 
-def main(args):
+def main(argv):
   parser = optparse.OptionParser()
   parser.add_option('-c', '--clobber',
       help='Clobber project directories before copying new files',
       action='store_true', default=False)
   parser.add_option('-b', '--build',
-      help='Build the projects.', action='store_true')
+      help='Build the projects. Otherwise the projects are only copied.',
+      action='store_true')
   parser.add_option('--config',
       help='Choose configuration to build (Debug or Release).  Builds both '
            'by default')
+  parser.add_option('--bionic',
+      help='Enable bionic projects', action='store_true')
   parser.add_option('-x', '--experimental',
       help='Build experimental projects', action='store_true')
   parser.add_option('-t', '--toolchain',
@@ -222,14 +264,24 @@ def main(args):
   parser.add_option('-d', '--dest',
       help='Select which build destinations (project types) are valid.',
       action='append')
-  parser.add_option('-p', '--project',
-      help='Select which projects are valid.',
-      action='append')
   parser.add_option('-v', '--verbose', action='store_true')
 
-  options, args = parser.parse_args(args[1:])
-  if args:
-    parser.error('Not expecting any arguments.')
+  # To setup bash completion for this command first install optcomplete
+  # and then add this line to your .bashrc:
+  #  complete -F _optcomplete build_projects.py
+  try:
+    import optcomplete
+    optcomplete.autocomplete(parser)
+  except ImportError:
+    pass
+
+  options, args = parser.parse_args(argv[1:])
+
+  global verbose
+  if options.verbose:
+    verbose = True
+
+  buildbot_common.verbose = verbose
 
   if 'NACL_SDK_ROOT' in os.environ:
     # We don't want the currently configured NACL_SDK_ROOT to have any effect
@@ -240,41 +292,45 @@ def main(args):
   pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
 
   if not options.toolchain:
-    options.toolchain = ['newlib', 'glibc', 'pnacl', 'host']
+    # Order matters here: the default toolchain for an example's Makefile will
+    # be the first toolchain in this list that is available in the example.
+    # e.g. If an example supports newlib and glibc, then the default will be
+    # newlib.
+    options.toolchain = ['pnacl', 'newlib', 'glibc', 'host']
+    if options.experimental or options.bionic:
+      options.toolchain.append('bionic')
 
   if 'host' in options.toolchain:
     options.toolchain.remove('host')
     options.toolchain.append(getos.GetPlatform())
-    print 'Adding platform: ' + getos.GetPlatform()
+    Trace('Adding platform: ' + getos.GetPlatform())
 
   ValidateToolchains(options.toolchain)
 
   filters = {}
   if options.toolchain:
     filters['TOOLS'] = options.toolchain
-    print 'Filter by toolchain: ' + str(options.toolchain)
+    Trace('Filter by toolchain: ' + str(options.toolchain))
   if not options.experimental:
     filters['EXPERIMENTAL'] = False
   if options.dest:
     filters['DEST'] = options.dest
-    print 'Filter by type: ' + str(options.dest)
-  if options.project:
-    filters['NAME'] = options.project
-    print 'Filter by name: ' + str(options.project)
+    Trace('Filter by type: ' + str(options.dest))
+  if args:
+    filters['NAME'] = args
+    Trace('Filter by name: ' + str(args))
 
   try:
     project_tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, include=filters)
   except parse_dsc.ValidationError as e:
     buildbot_common.ErrorExit(str(e))
-  parse_dsc.PrintProjectTree(project_tree)
+
+  if verbose:
+    parse_dsc.PrintProjectTree(project_tree)
 
   UpdateHelpers(pepperdir, clobber=options.clobber)
   UpdateProjects(pepperdir, project_tree, options.toolchain,
                  clobber=options.clobber)
-
-  if options.verbose:
-    global verbose
-    verbose = True
 
   if options.build:
     if options.config:
@@ -282,7 +338,7 @@ def main(args):
     else:
       configs = ['Debug', 'Release']
     for config in configs:
-      BuildProjects(pepperdir, project_tree, config=config)
+      BuildProjects(pepperdir, project_tree, config=config, deps=False)
 
   return 0
 

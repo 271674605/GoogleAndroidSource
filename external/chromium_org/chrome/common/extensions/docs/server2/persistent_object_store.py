@@ -2,22 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from appengine_wrappers import db, IsDevServer
+from appengine_wrappers import db
 from datastore_models import PersistentObjectStoreItem
+from environment import IsDevServer
 from future import Future
 from object_store import ObjectStore
 
-class _AsyncGetFuture(object):
-  def __init__(self, object_store, keys):
-    self._futures = dict(
-        (k, db.get_async(
-            PersistentObjectStoreItem.CreateKey(object_store._namespace, k)))
-         for k in keys)
-
-  def Get(self):
-    return dict((key, future.get_result().GetValue())
-                for key, future in self._futures.iteritems()
-                if future.get_result() is not None)
 
 class PersistentObjectStore(ObjectStore):
   '''Stores data persistently using the AppEngine Datastore API.
@@ -36,7 +26,15 @@ class PersistentObjectStore(ObjectStore):
       [future.wait() for future in futures]
 
   def GetMulti(self, keys):
-    return Future(delegate=_AsyncGetFuture(self, keys))
+    db_futures = dict(
+        (k, db.get_async(
+            PersistentObjectStoreItem.CreateKey(self._namespace, k)))
+        for k in keys)
+    def resolve():
+      return dict((key, future.get_result().GetValue())
+                  for key, future in db_futures.iteritems()
+                  if future.get_result() is not None)
+    return Future(callback=resolve)
 
   def DelMulti(self, keys):
     futures = []

@@ -17,11 +17,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "MatchVerifier.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
-#include "MatchVerifier.h"
 
 namespace clang {
 namespace ast_matchers {
@@ -211,6 +211,25 @@ TEST(CXXFunctionalCastExpr, SourceRange) {
       functionalCastExpr(), Lang_CXX11));
 }
 
+TEST(CXXConstructExpr, SourceRange) {
+  RangeVerifier<CXXConstructExpr> Verifier;
+  Verifier.expectRange(3, 14, 3, 19);
+  EXPECT_TRUE(Verifier.match(
+      "struct A { A(int, int); };\n"
+      "void f(A a);\n"
+      "void g() { f({0, 0}); }",
+      constructExpr(), Lang_CXX11));
+}
+
+TEST(CXXTemporaryObjectExpr, SourceRange) {
+  RangeVerifier<CXXTemporaryObjectExpr> Verifier;
+  Verifier.expectRange(2, 6, 2, 12);
+  EXPECT_TRUE(Verifier.match(
+      "struct A { A(int, int); };\n"
+      "A a( A{0, 0} );",
+      temporaryObjectExpr(), Lang_CXX11));
+}
+
 TEST(CXXUnresolvedConstructExpr, SourceRange) {
   RangeVerifier<CXXUnresolvedConstructExpr> Verifier;
   Verifier.expectRange(3, 10, 3, 12);
@@ -242,6 +261,84 @@ TEST(UnresolvedUsingValueDecl, SourceRange) {
       "  B::i;\n"
       "};",
       unresolvedUsingValueDecl()));
+}
+
+TEST(FriendDecl, FriendFunctionLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 13);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendFunctionRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 15);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend void f();\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendClassLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(2, 8);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendClassRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(2, 1, 2, 14);
+  EXPECT_TRUE(Verifier.match("struct A {\n"
+                             "friend class B;\n"
+                             "};\n",
+                             friendDecl()));
+}
+
+TEST(FriendDecl, FriendTemplateParameterLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(3, 8);
+  EXPECT_TRUE(Verifier.match("template <typename T>\n"
+                             "struct A {\n"
+                             "friend T;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendTemplateParameterRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(3, 1, 3, 8);
+  EXPECT_TRUE(Verifier.match("template <typename T>\n"
+                             "struct A {\n"
+                             "friend T;\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendDecltypeLocation) {
+  LocationVerifier<FriendDecl> Verifier;
+  Verifier.expectLocation(4, 8);
+  EXPECT_TRUE(Verifier.match("struct A;\n"
+                             "A foo();\n"
+                             "struct A {\n"
+                             "friend decltype(foo());\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
+}
+
+TEST(FriendDecl, FriendDecltypeRange) {
+  RangeVerifier<FriendDecl> Verifier;
+  Verifier.expectRange(4, 1, 4, 8);
+  EXPECT_TRUE(Verifier.match("struct A;\n"
+                             "A foo();\n"
+                             "struct A {\n"
+                             "friend decltype(foo());\n"
+                             "};\n",
+                             friendDecl(), Lang_CXX11));
 }
 
 TEST(FriendDecl, InstantiationSourceRange) {

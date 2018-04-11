@@ -73,14 +73,26 @@ public class LinkifyTest extends AndroidTestCase {
     }
 
     public void testAddLinks1() {
+        // Verify URLs including the ones that have new gTLDs, and the
+        // ones that look like gTLDs (and so are accepted by linkify)
+        // and the ones that should not be linkified due to non-compliant
+        // gTLDs
+        final String longGTLD =
+                "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc";
         SpannableString spannable = new SpannableString("name@gmail.com, "
-                + "www.google.com, http://www.google.com/language_tools?hl=en, ");
+                + "www.google.com, http://www.google.com/language_tools?hl=en, "
+                + "a.bc, "   // a URL with accepted gTLD so should be linkified
+                + "d.e, f.1, g.12, "  // not valid, so should not be linkified
+                + "h." + longGTLD + " "  // valid, should be linkified
+                + "j." + longGTLD + "a"); // not a valid URL (gtld too long), no linkify
 
         assertTrue(Linkify.addLinks(spannable, Linkify.WEB_URLS));
         URLSpan[] spans = spannable.getSpans(0, spannable.length(), URLSpan.class);
-        assertEquals(2, spans.length);
+        assertEquals(4, spans.length);
         assertEquals("http://www.google.com", spans[0].getURL());
         assertEquals("http://www.google.com/language_tools?hl=en", spans[1].getURL());
+        assertEquals("http://a.bc", spans[2].getURL());
+        assertEquals("http://h." + longGTLD, spans[3].getURL());
 
         assertTrue(Linkify.addLinks(spannable, Linkify.EMAIL_ADDRESSES));
         spans = spannable.getSpans(0, spannable.length(), URLSpan.class);
@@ -303,7 +315,7 @@ public class LinkifyTest extends AndroidTestCase {
         String numbersInvalid = "123456789 not a phone number";
         String numbersUKLocal = "tel:(0812)1234560 (0812)1234561";
         String numbersUSLocal = "tel:(812)1234562 (812)123.4563 "
-                + " tel:(800)5551210 (800) 555-1211 555-1212";
+                + " tel:(800)5551210 (800)555-1211 555-1212";
         String numbersIntl = "tel:+4408121234564 +44-0812-123-4565"
                 + " tel:+18005551213 +1-800-555-1214";
         SpannableString spannable = new SpannableString(

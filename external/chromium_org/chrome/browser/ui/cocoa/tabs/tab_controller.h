@@ -20,10 +20,12 @@ enum TabLoadingState {
   kTabCrashed,
 };
 
+@class MediaIndicatorView;
 @class MenuController;
 namespace TabControllerInternal {
 class MenuDelegate;
 }
+@class SpriteView;
 @class TabView;
 @protocol TabControllerTarget;
 
@@ -40,8 +42,8 @@ class MenuDelegate;
 
 @interface TabController : NSViewController<TabDraggingEventTarget> {
  @private
-  base::scoped_nsobject<NSView> iconView_;
-  base::scoped_nsobject<NSTextField> titleView_;
+  base::scoped_nsobject<SpriteView> iconView_;
+  base::scoped_nsobject<MediaIndicatorView> mediaIndicatorView_;
   base::scoped_nsobject<HoverCloseButton> closeButton_;
 
   NSRect originalIconFrame_;  // frame of iconView_ as loaded from nib
@@ -50,12 +52,10 @@ class MenuDelegate;
   BOOL app_;
   BOOL mini_;
   BOOL pinned_;
-  BOOL projecting_;
   BOOL active_;
   BOOL selected_;
   GURL url_;
   TabLoadingState loadingState_;
-  CGFloat iconTitleXOffset_;  // between left edges of icon and title
   id<TabControllerTarget> target_;  // weak, where actions are sent
   SEL action_;  // selector sent when tab is selected by clicking
   scoped_ptr<ui::SimpleMenuModel> contextMenuModel_;
@@ -69,10 +69,7 @@ class MenuDelegate;
 @property(assign, nonatomic) BOOL app;
 @property(assign, nonatomic) BOOL mini;
 @property(assign, nonatomic) BOOL pinned;
-// A tab is called "projecting" when a video/audio stream of its contents is
-// being captured and perhaps streamed remotely. We add a favicon glow animation
-// in this state to notify the user.
-@property(assign, nonatomic) BOOL projecting;
+@property(assign, nonatomic) NSString* toolTip;
 // Note that |-selected| will return YES if the controller is |-active|, too.
 // |-setSelected:| affects the selection, while |-setActive:| affects the key
 // status/focus of the content.
@@ -80,8 +77,8 @@ class MenuDelegate;
 @property(assign, nonatomic) BOOL selected;
 @property(assign, nonatomic) id target;
 @property(assign, nonatomic) GURL url;
-@property(assign, nonatomic) NSView* iconView;
-@property(readonly, nonatomic) NSTextField* titleView;
+@property(readonly, nonatomic) NSView* iconView;
+@property(assign, nonatomic) MediaIndicatorView* mediaIndicatorView;
 @property(readonly, nonatomic) HoverCloseButton* closeButton;
 
 // Minimum and maximum allowable tab width. The minimum width does not show
@@ -95,6 +92,14 @@ class MenuDelegate;
 
 // The view associated with this controller, pre-casted as a TabView
 - (TabView*)tabView;
+
+// Sets the tab's icon image.
+// |image| must be 16x16 in size.
+// |image| can be a horizontal strip of image sprites which will be animated.
+// Setting |animate| to YES will animate away the old image before animating
+// the new image back to position.
+- (void)setIconImage:(NSImage*)image;
+- (void)setIconImage:(NSImage*)image withToastAnimation:(BOOL)animate;
 
 // Closes the associated TabView by relaying the message to |target_| to
 // perform the close.
@@ -118,9 +123,9 @@ class MenuDelegate;
 @end
 
 @interface TabController(TestingAPI)
-- (NSString*)toolTip;
 - (int)iconCapacity;
 - (BOOL)shouldShowIcon;
+- (BOOL)shouldShowMediaIndicator;
 - (BOOL)shouldShowCloseButton;
 @end  // TabController(TestingAPI)
 

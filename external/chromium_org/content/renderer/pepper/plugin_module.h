@@ -41,16 +41,16 @@ namespace IPC {
 struct ChannelHandle;
 }
 
-namespace WebKit {
+namespace blink {
 class WebPluginContainer;
-}  // namespace WebKit
+}  // namespace blink
 
 namespace content {
 class HostDispatcherWrapper;
 class PepperPluginInstanceImpl;
 class PepperBroker;
 class RendererPpapiHostImpl;
-class RenderViewImpl;
+class RenderFrameImpl;
 struct WebPluginInfo;
 
 // Represents one plugin library loaded into one renderer. This library may
@@ -58,9 +58,8 @@ struct WebPluginInfo;
 //
 // Note: to get from a PP_Instance to a PepperPluginInstance*, use the
 // ResourceTracker.
-class CONTENT_EXPORT PluginModule :
-    public base::RefCounted<PluginModule>,
-    public base::SupportsWeakPtr<PluginModule> {
+class CONTENT_EXPORT PluginModule : public base::RefCounted<PluginModule>,
+                                    public base::SupportsWeakPtr<PluginModule> {
  public:
   typedef std::set<PepperPluginInstanceImpl*> PluginInstanceSet;
 
@@ -138,10 +137,9 @@ class CONTENT_EXPORT PluginModule :
   const base::FilePath& path() const { return path_; }
   const ppapi::PpapiPermissions& permissions() const { return permissions_; }
 
-  PepperPluginInstanceImpl* CreateInstance(
-      RenderViewImpl* render_view,
-      WebKit::WebPluginContainer* container,
-      const GURL& plugin_url);
+  PepperPluginInstanceImpl* CreateInstance(RenderFrameImpl* render_frame,
+                                           blink::WebPluginContainer* container,
+                                           const GURL& plugin_url);
 
   // Returns "some" plugin instance associated with this module. This is not
   // guaranteed to be any one in particular. This is normally used to execute
@@ -178,8 +176,7 @@ class CONTENT_EXPORT PluginModule :
   // it exists to validate the ID. If the callback has not been set (such as
   // for in-process plugins), the Reserve function will assume that the ID is
   // usable and will return true.
-  void SetReserveInstanceIDCallback(
-      PP_Bool (*reserve)(PP_Module, PP_Instance));
+  void SetReserveInstanceIDCallback(PP_Bool (*reserve)(PP_Module, PP_Instance));
   bool ReserveInstanceID(PP_Instance instance);
 
   // These should only be called from the main thread.
@@ -189,7 +186,7 @@ class CONTENT_EXPORT PluginModule :
   // Create a new HostDispatcher for proxying, hook it to the PluginModule,
   // and perform other common initialization.
   RendererPpapiHostImpl* CreateOutOfProcessModule(
-      RenderViewImpl* render_view,
+      RenderFrameImpl* render_frame,
       const base::FilePath& path,
       ppapi::PpapiPermissions permissions,
       const IPC::ChannelHandle& channel_handle,
@@ -212,7 +209,7 @@ class CONTENT_EXPORT PluginModule :
   // the second is that the plugin failed to initialize. In this case,
   // |*pepper_plugin_was_registered| will be set to true and the caller should
   // not fall back on any other plugin types.
-  static scoped_refptr<PluginModule> Create(RenderViewImpl* render_view,
+  static scoped_refptr<PluginModule> Create(RenderFrameImpl* render_frame,
                                             const WebPluginInfo& webplugin_info,
                                             bool* pepper_plugin_was_registered);
 

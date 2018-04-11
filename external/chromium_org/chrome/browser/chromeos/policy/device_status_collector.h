@@ -8,18 +8,19 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/callback_forward.h"
+#include "base/callback_list.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/idle.h"
-#include "chrome/browser/policy/cloud/cloud_policy_client.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "content/public/browser/geolocation_provider.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/common/geoposition.h"
 
 namespace chromeos {
@@ -44,8 +45,7 @@ class PrefService;
 namespace policy {
 
 // Collects and summarizes the status of an enterprised-managed ChromeOS device.
-class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
-                              public content::NotificationObserver {
+class DeviceStatusCollector : public CloudPolicyClient::StatusProvider {
  public:
   // TODO(bartfab): Remove this once crbug.com/125931 is addressed and a proper
   // way to mock geolocation exists.
@@ -93,32 +93,6 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
   unsigned int max_stored_future_activity_days_;
 
  private:
-  // A helper class to manage receiving geolocation notifications on the IO
-  // thread.
-  class Context : public base::RefCountedThreadSafe<Context> {
-   public:
-    Context();
-
-    void GetLocationUpdate(
-        const content::GeolocationProvider::LocationUpdateCallback& callback);
-
-   private:
-    friend class base::RefCountedThreadSafe<Context>;
-
-    ~Context();
-
-    void GetLocationUpdateInternal();
-    void OnLocationUpdate(const content::Geoposition& geoposition);
-    void CallCollector(const content::Geoposition& geoposition);
-
-    // The callback which this class registers with
-    // content::GeolocationProvider.
-    content::GeolocationProvider::LocationUpdateCallback our_callback_;
-
-    // The callback passed in to GetLocationUpdate.
-    content::GeolocationProvider::LocationUpdateCallback owner_callback_;
-  };
-
   // Prevents the local store of activity periods from growing too large by
   // removing entries that are outside the reporting window.
   void PruneStoredActivityPeriods(base::Time base_time);
@@ -147,15 +121,11 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
       enterprise_management::DeviceStatusReportRequest* request);
   void GetNetworkInterfaces(
       enterprise_management::DeviceStatusReportRequest* request);
+  void GetUsers(
+      enterprise_management::DeviceStatusReportRequest* request);
 
   // Update the cached values of the reporting settings.
   void UpdateReportingSettings();
-
-  // content::NotificationObserver interface.
-  virtual void Observe(
-      int type,
-      const content::NotificationSource& source,
-      const content::NotificationDetails& details) OVERRIDE;
 
   void ScheduleGeolocationUpdateRequest();
 
@@ -184,7 +154,7 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
   base::OneShotTimer<DeviceStatusCollector> geolocation_update_timer_;
 
   chromeos::VersionLoader version_loader_;
-  CancelableTaskTracker tracker_;
+  base::CancelableTaskTracker tracker_;
 
   std::string os_version_;
   std::string firmware_version_;
@@ -201,14 +171,29 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
   // way to mock geolocation exists.
   LocationUpdateRequester location_update_requester_;
 
+  scoped_ptr<content::GeolocationProvider::Subscription>
+      geolocation_subscription_;
+
   // Cached values of the reporting settings from the device policy.
   bool report_version_info_;
   bool report_activity_times_;
   bool report_boot_mode_;
   bool report_location_;
   bool report_network_interfaces_;
+  bool report_users_;
 
-  scoped_refptr<Context> context_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      version_info_subscription_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      activity_times_subscription_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      boot_mode_subscription_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      location_subscription_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      network_interfaces_subscription_;
+  scoped_ptr<chromeos::CrosSettings::ObserverSubscription>
+      users_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceStatusCollector);
 };

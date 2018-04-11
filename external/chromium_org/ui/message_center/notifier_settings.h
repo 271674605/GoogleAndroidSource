@@ -7,12 +7,22 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
 #include "ui/gfx/image/image.h"
 #include "ui/message_center/message_center_export.h"
 #include "url/gurl.h"
 
+class MessageCenterTrayBridgeTest;
+
+namespace ash {
+class WebNotificationTrayTest;
+}
+
 namespace message_center {
+namespace test {
+class MessagePopupCollectionTest;
+}
 
 class NotifierSettingsDelegate;
 class NotifierSettingsProvider;
@@ -33,46 +43,57 @@ struct MESSAGE_CENTER_EXPORT NotifierId {
     SYNCED_NOTIFICATION_SERVICE,
   };
 
-  enum SystemComponentNotifierType {
-    NONE,
-    SCREENSHOT,
-  };
-
-  // Constructor for APPLICATION and SYNCED_NOTIFICATION_SERVICE type.
+  // Constructor for non WEB_PAGE type.
   NotifierId(NotifierType type, const std::string& id);
 
   // Constructor for WEB_PAGE type.
   explicit NotifierId(const GURL& url);
 
-  // Constructor for SYSTEM_COMPONENT type.
-  explicit NotifierId(SystemComponentNotifierType type);
-
   bool operator==(const NotifierId& other) const;
+  // Allows NotifierId to be used as a key in std::map.
+  bool operator<(const NotifierId& other) const;
 
   NotifierType type;
 
-  // The identifier of the app notifier. Empty if it's not APPLICATION or
-  // SYNCED_NOTIFICATION_SERVICE.
+  // The identifier of the app notifier. Empty if it's WEB_PAGE.
   std::string id;
 
   // The URL pattern of the notifer.
   GURL url;
 
-  // The type of system component notifier.
-  SystemComponentNotifierType system_component_type;
+  // The identifier of the profile where the notification is created. This is
+  // used for ChromeOS multi-profile support and can be empty.
+  std::string profile_id;
+
+ private:
+  friend class ::MessageCenterTrayBridgeTest;
+  friend class MessageCenterTrayTest;
+  friend class test::MessagePopupCollectionTest;
+  friend class NotificationControllerTest;
+  friend class PopupCollectionTest;
+  friend class TrayViewControllerTest;
+  friend class ash::WebNotificationTrayTest;
+  FRIEND_TEST_ALL_PREFIXES(PopupControllerTest, Creation);
+  FRIEND_TEST_ALL_PREFIXES(NotificationListTest, UnreadCountNoNegative);
+  FRIEND_TEST_ALL_PREFIXES(NotificationListTest, TestHasNotificationOfType);
+
+  // The default constructor which doesn't specify the notifier. Used for tests.
+  NotifierId();
 };
 
 // The struct to hold the information of notifiers. The information will be
 // used by NotifierSettingsView.
 struct MESSAGE_CENTER_EXPORT Notifier {
-  Notifier(const NotifierId& notifier_id, const string16& name, bool enabled);
+  Notifier(const NotifierId& notifier_id,
+           const base::string16& name,
+           bool enabled);
   ~Notifier();
 
   NotifierId notifier_id;
 
   // The human-readable name of the notifier such like the extension name.
   // It can be empty.
-  string16 name;
+  base::string16 name;
 
   // True if the source is allowed to send notifications. True is default.
   bool enabled;
@@ -86,8 +107,8 @@ struct MESSAGE_CENTER_EXPORT Notifier {
 
 struct MESSAGE_CENTER_EXPORT NotifierGroup {
   NotifierGroup(const gfx::Image& icon,
-                const string16& name,
-                const string16& login_info,
+                const base::string16& name,
+                const base::string16& login_info,
                 size_t index);
   ~NotifierGroup();
 
@@ -95,10 +116,10 @@ struct MESSAGE_CENTER_EXPORT NotifierGroup {
   const gfx::Image icon;
 
   // Display name of a notifier group.
-  const string16 name;
+  const base::string16 name;
 
   // More display information about the notifier group.
-  string16 login_info;
+  base::string16 login_info;
 
   // Unique identifier for the notifier group so that they can be selected in
   // the UI.
@@ -107,11 +128,6 @@ struct MESSAGE_CENTER_EXPORT NotifierGroup {
  private:
   DISALLOW_COPY_AND_ASSIGN(NotifierGroup);
 };
-
-MESSAGE_CENTER_EXPORT std::string ToString(
-    NotifierId::SystemComponentNotifierType type);
-MESSAGE_CENTER_EXPORT NotifierId::SystemComponentNotifierType
-    ParseSystemComponentName(const std::string& name);
 
 // An observer class implemented by the view of the NotifierSettings to get
 // notified when the controller has changed data.
@@ -123,6 +139,10 @@ class MESSAGE_CENTER_EXPORT NotifierSettingsObserver {
 
   // Called when any change happens to the set of notifier groups.
   virtual void NotifierGroupChanged() = 0;
+
+  // Called when a notifier is enabled or disabled.
+  virtual void NotifierEnabledChanged(const NotifierId& notifier_id,
+                                      bool enabled) = 0;
 };
 
 // A class used by NotifierSettingsView to integrate with a setting system
@@ -163,6 +183,16 @@ class MESSAGE_CENTER_EXPORT NotifierSettingsProvider {
 
   // Called when the settings window is closed.
   virtual void OnNotifierSettingsClosing() = 0;
+
+  // Called to determine if a particular notifier can respond to a request for
+  // more information.
+  virtual bool NotifierHasAdvancedSettings(const NotifierId& notifier_id)
+      const = 0;
+
+  // Called upon request for more information about a particular notifier.
+  virtual void OnNotifierAdvancedSettingsRequested(
+      const NotifierId& notifier_id,
+      const std::string* notification_id) = 0;
 };
 
 }  // namespace message_center

@@ -16,8 +16,8 @@
 
 package com.android.contacts.common;
 
-import com.android.i18n.phonenumbers.NumberParseException;
-import com.android.i18n.phonenumbers.PhoneNumberUtil;
+import com.google.i18n.phonenumbers.NumberParseException;
+import com.google.i18n.phonenumbers.PhoneNumberUtil;
 
 import android.content.Context;
 import android.content.Intent;
@@ -65,6 +65,7 @@ public class MoreContactUtils {
         return shouldCollapsePhoneNumbers(data1.toString(), data2.toString());
     }
 
+    // TODO: Move this to PhoneDataItem.shouldCollapse override
     private static boolean shouldCollapsePhoneNumbers(String number1, String number2) {
         // Now do the full phone number thing. split into parts, separated by waiting symbol
         // and compare them individually
@@ -169,16 +170,15 @@ public class MoreContactUtils {
      * how the target {@link android.graphics.Rect} is calculated in
      * {@link android.provider.ContactsContract.QuickContact#showQuickContact}.
      */
-    public static Rect getTargetRectFromView(Context context, View view) {
-        final float appScale = context.getResources().getCompatibilityInfo().applicationScale;
+    public static Rect getTargetRectFromView(View view) {
         final int[] pos = new int[2];
         view.getLocationOnScreen(pos);
 
         final Rect rect = new Rect();
-        rect.left = (int) (pos[0] * appScale + 0.5f);
-        rect.top = (int) (pos[1] * appScale + 0.5f);
-        rect.right = (int) ((pos[0] + view.getWidth()) * appScale + 0.5f);
-        rect.bottom = (int) ((pos[1] + view.getHeight()) * appScale + 0.5f);
+        rect.left = pos[0];
+        rect.top = pos[1];
+        rect.right = pos[0] + view.getWidth();
+        rect.bottom = pos[1] + view.getHeight();
         return rect;
     }
 
@@ -186,13 +186,30 @@ public class MoreContactUtils {
      * Returns a header view based on the R.layout.list_separator, where the
      * containing {@link android.widget.TextView} is set using the given textResourceId.
      */
-    public static View createHeaderView(Context context, int textResourceId) {
-        View view = View.inflate(context, R.layout.list_separator, null);
-        TextView textView = (TextView) view.findViewById(R.id.title);
+    public static TextView createHeaderView(Context context, int textResourceId) {
+        final TextView textView = (TextView) View.inflate(context, R.layout.list_separator, null);
         textView.setText(context.getString(textResourceId));
-        textView.setAllCaps(true);
-        return view;
+        return textView;
     }
+
+    /**
+     * Set the top padding on the header view dynamically, based on whether the header is in
+     * the first row or not.
+     */
+    public static void setHeaderViewBottomPadding(Context context, TextView textView,
+            boolean isFirstRow) {
+        final int topPadding;
+        if (isFirstRow) {
+            topPadding = (int) context.getResources().getDimension(
+                    R.dimen.frequently_contacted_title_top_margin_when_first_row);
+        } else {
+            topPadding = (int) context.getResources().getDimension(
+                    R.dimen.frequently_contacted_title_top_margin);
+        }
+        textView.setPaddingRelative(textView.getPaddingStart(), topPadding,
+                textView.getPaddingEnd(), textView.getPaddingBottom());
+    }
+
 
     /**
      * Returns the intent to launch for the given invitable account type and contact lookup URI.

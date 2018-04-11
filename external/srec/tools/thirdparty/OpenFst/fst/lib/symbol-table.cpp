@@ -80,7 +80,7 @@ void SymbolTableImpl::RecomputeCheckSum() const {
 }
 
 int64 SymbolTableImpl::AddSymbol(const string& symbol, int64 key) {
-  hash_map<string, int64>::const_iterator it =
+  std::unordered_map<string, int64>::const_iterator it =
     symbol_map_.find(symbol);
   if (it == symbol_map_.end()) {  // only add if not in table
     check_sum_finalized_ = false;
@@ -134,13 +134,15 @@ bool SymbolTableImpl::Write(ostream &strm) const {
   for (size_t i = 0; i < symbols_.size(); ++i) {
     const string symbol = symbols_[i];
     WriteType(strm, symbol);
-    hash_map<string, int64>::const_iterator it = symbol_map_.find(symbol);
+    std::unordered_map<string, int64>::const_iterator it = symbol_map_.find(symbol);
     WriteType(strm, it->second);
   }
   strm.flush();
-  if (!strm)
+  if (!strm) {
     LOG(ERROR) << "SymbolTable::Write: write failed";
-  return strm;
+    return false;
+  }
+  return true;
 }
 
 bool SymbolTableImpl::WriteText(ostream &strm) const {
@@ -150,9 +152,11 @@ bool SymbolTableImpl::WriteText(ostream &strm) const {
     strm.write(line, strlen(line));
   }
   strm.flush();
-  if (!strm)
+  if (!strm) {
     LOG(ERROR) << "SymbolTable::WriteText: write failed";
-  return strm;
+    return false;
+  }
+  return true;
 }
 
 }  // namespace fst

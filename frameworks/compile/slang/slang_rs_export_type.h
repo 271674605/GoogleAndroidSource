@@ -33,25 +33,39 @@
 
 #include "slang_rs_exportable.h"
 
-#define GET_CANONICAL_TYPE(T) \
-    (((T) == NULL) ? NULL : (T)->getCanonicalTypeInternal().getTypePtr())
-#define UNSAFE_CAST_TYPE(TT, T) \
-    static_cast<TT*>(T->getCanonicalTypeInternal().getTypePtr())
-#define GET_EXT_VECTOR_ELEMENT_TYPE(T) \
-    (((T) == NULL) ? NULL : \
-                     GET_CANONICAL_TYPE((T)->getElementType().getTypePtr()))
-#define GET_POINTEE_TYPE(T) \
-    (((T) == NULL) ? NULL : \
-                     GET_CANONICAL_TYPE((T)->getPointeeType().getTypePtr()))
-#define GET_CONSTANT_ARRAY_ELEMENT_TYPE(T)  \
-    (((T) == NULL) ? NULL : \
-                     GET_CANONICAL_TYPE((T)->getElementType().getTypePtr()))
-#define DUMMY_RS_TYPE_NAME_PREFIX   "<"
-#define DUMMY_RS_TYPE_NAME_POSTFIX  ">"
-#define DUMMY_TYPE_NAME_FOR_RS_CONSTANT_ARRAY_TYPE  \
-    DUMMY_RS_TYPE_NAME_PREFIX"ConstantArray"DUMMY_RS_TYPE_NAME_POSTFIX
 
-union RSType;
+inline const clang::Type* GetCanonicalType(const clang::Type* T) {
+  if (T == NULL) {
+    return  NULL;
+  }
+  return T->getCanonicalTypeInternal().getTypePtr();
+}
+
+inline const clang::Type* GetCanonicalType(clang::QualType QT) {
+  return GetCanonicalType(QT.getTypePtr());
+}
+
+inline const clang::Type* GetExtVectorElementType(const clang::ExtVectorType *T) {
+  if (T == NULL) {
+    return NULL;
+  }
+  return GetCanonicalType(T->getElementType());
+}
+
+inline const clang::Type* GetPointeeType(const clang::PointerType *T) {
+  if (T == NULL) {
+    return NULL;
+  }
+  return GetCanonicalType(T->getPointeeType());
+}
+
+inline const clang::Type* GetConstantArrayElementType(const clang::ConstantArrayType *T) {
+  if (T == NULL) {
+    return NULL;
+  }
+  return GetCanonicalType(T->getElementType());
+}
+
 
 namespace llvm {
   class Type;
@@ -59,9 +73,70 @@ namespace llvm {
 
 namespace slang {
 
-  class RSContext;
+class RSContext;
+
+// Broad grouping of the data types
+enum DataTypeCategory {
+    PrimitiveDataType,
+    MatrixDataType,
+    ObjectDataType
+};
+
+// From graphics/java/android/renderscript/Element.java: Element.DataType
+/* NOTE: The values of the enums are found compiled in the bit code (i.e. as
+ * values, not symbolic.  When adding new types, you must add them to the end.
+ * If removing types, you can't re-use the integer value.
+ *
+ * TODO: but if you do this, you won't be able to keep using First* & Last*
+ * for validation.
+ *
+ * IMPORTANT: This enum should correspond one-for-one to the entries found in the
+ * gReflectionsTypes table (except for the two negative numbers).  Don't edit one without
+ * the other.
+ */
+enum DataType {
+    DataTypeIsStruct = -2,
+    DataTypeUnknown = -1,
+
+    DataTypeFloat16 = 0,
+    DataTypeFloat32 = 1,
+    DataTypeFloat64 = 2,
+    DataTypeSigned8 = 3,
+    DataTypeSigned16 = 4,
+    DataTypeSigned32 = 5,
+    DataTypeSigned64 = 6,
+    DataTypeUnsigned8 = 7,
+    DataTypeUnsigned16 = 8,
+    DataTypeUnsigned32 = 9,
+    DataTypeUnsigned64 = 10,
+    DataTypeBoolean = 11,
+    DataTypeUnsigned565 = 12,
+    DataTypeUnsigned5551 = 13,
+    DataTypeUnsigned4444 = 14,
+
+    DataTypeRSMatrix2x2 = 15,
+    DataTypeRSMatrix3x3 = 16,
+    DataTypeRSMatrix4x4 = 17,
+
+    DataTypeRSElement = 18,
+    DataTypeRSType = 19,
+    DataTypeRSAllocation = 20,
+    DataTypeRSSampler = 21,
+    DataTypeRSScript = 22,
+    DataTypeRSMesh = 23,
+    DataTypeRSPath = 24,
+    DataTypeRSProgramFragment = 25,
+    DataTypeRSProgramVertex = 26,
+    DataTypeRSProgramRaster = 27,
+    DataTypeRSProgramStore = 28,
+    DataTypeRSFont = 29,
+
+    // This should always be last and correspond to the size of the gReflectionTypes table.
+    DataTypeMax
+};
 
 typedef struct {
+    DataTypeCategory category;
     const char * rs_type;
     const char * rs_short_type;
     uint32_t size_in_bits;
@@ -85,6 +160,12 @@ typedef struct RSReflectionTypeData_rec {
     //std::vector< uint32_t> fieldOffsetBytes;
 } RSReflectionTypeData;
 
+// Make a name for types that are too complicated to create the real names.
+std::string CreateDummyName(const char *type, const std::string &name);
+
+inline bool IsDummyName(const llvm::StringRef &Name) {
+  return Name.startswith("<");
+}
 
 class RSExportType : public RSExportable {
   friend class RSExportElement;
@@ -106,8 +187,6 @@ class RSExportType : public RSExportable {
 
   // Cache the result after calling convertToLLVMType() at the first time
   mutable llvm::Type *mLLVMType;
-  // Cache the result after calling convertToSpecType() at the first time
-  mutable union RSType *mSpecType;
 
  protected:
   RSExportType(RSContext *Context,
@@ -142,11 +221,6 @@ class RSExportType : public RSExportable {
     mLLVMType = LLVMType;
   }
 
-  virtual union RSType *convertToSpecType() const = 0;
-  inline void setSpecTypeTemporarily(union RSType *SpecType) const {
-    mSpecType = SpecType;
-  }
-
   virtual ~RSExportType();
 
  public:
@@ -154,21 +228,22 @@ class RSExportType : public RSExportable {
   // If it is not, this function returns false. Otherwise it returns true.
   static bool NormalizeType(const clang::Type *&T,
                             llvm::StringRef &TypeName,
-                            clang::DiagnosticsEngine *Diags,
+                            RSContext *Context,
                             const clang::VarDecl *VD);
 
   // This function checks whether the specified type can be handled by RS/FS.
   // If it cannot, this function returns false. Otherwise it returns true.
   // Filterscript has additional restrictions on supported types.
-  static bool ValidateType(clang::ASTContext &C, clang::QualType QT,
-                           clang::NamedDecl *ND, clang::SourceLocation Loc,
-                           unsigned int TargetAPI, bool IsFilterscript);
+  static bool ValidateType(slang::RSContext *Context, clang::ASTContext &C,
+                           clang::QualType QT, clang::NamedDecl *ND,
+                           clang::SourceLocation Loc, unsigned int TargetAPI,
+                           bool IsFilterscript);
 
   // This function ensures that the VarDecl can be properly handled by RS.
   // If it cannot, this function returns false. Otherwise it returns true.
   // Filterscript has additional restrictions on supported types.
-  static bool ValidateVarDecl(clang::VarDecl *VD, unsigned int TargetAPI,
-                              bool IsFilterscript);
+  static bool ValidateVarDecl(slang::RSContext *Context, clang::VarDecl *VD,
+                              unsigned int TargetAPI, bool IsFilterscript);
 
   // @T may not be normalized
   static RSExportType *Create(RSContext *Context, const clang::Type *T);
@@ -187,17 +262,11 @@ class RSExportType : public RSExportable {
     return mLLVMType;
   }
 
-  inline const union RSType *getSpecType() const {
-    if (mSpecType == NULL)
-      mSpecType = convertToSpecType();
-    return mSpecType;
-  }
+  // Return the maximum number of bytes that may be written when this type is stored.
+  virtual size_t getStoreSize() const;
 
-  // Return the number of bits necessary to hold the specified RSExportType
-  static size_t GetTypeStoreSize(const RSExportType *ET);
-
-  // The size of allocation of specified RSExportType (alignment considered)
-  static size_t GetTypeAllocSize(const RSExportType *ET);
+  // Return the distance in bytes between successive elements of this type; it includes padding.
+  virtual size_t getAllocSize() const;
 
   inline const std::string &getName() const { return mName; }
 
@@ -214,45 +283,12 @@ class RSExportType : public RSExportable {
 class RSExportPrimitiveType : public RSExportType {
   friend class RSExportType;
   friend class RSExportElement;
- public:
-  // From graphics/java/android/renderscript/Element.java: Element.DataType
-  typedef enum {
-    DataTypeIsStruct = -2,
-    DataTypeUnknown = -1,
-
-#define ENUM_PRIMITIVE_DATA_TYPE_RANGE(begin_type, end_type)  \
-    FirstPrimitiveType = DataType ## begin_type,  \
-    LastPrimitiveType = DataType ## end_type,
-
-#define ENUM_RS_MATRIX_DATA_TYPE_RANGE(begin_type, end_type)  \
-    FirstRSMatrixType = DataType ## begin_type,  \
-    LastRSMatrixType = DataType ## end_type,
-
-#define ENUM_RS_OBJECT_DATA_TYPE_RANGE(begin_type, end_type)  \
-    FirstRSObjectType = DataType ## begin_type,  \
-    LastRSObjectType = DataType ## end_type,
-
-#define ENUM_RS_DATA_TYPE(type, cname, bits)  \
-    DataType ## type,
-
-#include "RSDataTypeEnums.inc"
-
-    DataTypeMax
-  } DataType;
-
  private:
-  // NOTE: There's no any instance of RSExportPrimitiveType which mType
-  // is of the value DataTypeRSMatrix*. DataTypeRSMatrix* enumeration here is
-  // only for RSExportPrimitiveType::GetRSObjectType to *recognize* the struct
-  // rs_matrix{2x2, 3x3, 4x4}. These matrix type are represented as
-  // RSExportMatrixType.
   DataType mType;
   bool mNormalized;
 
   typedef llvm::StringMap<DataType> RSSpecificTypeMapTy;
   static llvm::ManagedStatic<RSSpecificTypeMapTy> RSSpecificTypeMap;
-
-  static llvm::Type *RSObjectLLVMType;
 
   static const size_t SizeOfDataTypeInBits[];
   // @T was normalized by calling RSExportType::NormalizeType() before calling
@@ -274,11 +310,9 @@ class RSExportPrimitiveType : public RSExportType {
       : RSExportType(Context, Class, Name),
         mType(DT),
         mNormalized(Normalized) {
-    return;
   }
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
   static DataType GetDataType(RSContext *Context, const clang::Type *T);
 
@@ -308,7 +342,7 @@ class RSExportPrimitiveType : public RSExportType {
 
   inline DataType getType() const { return mType; }
   inline bool isRSObjectType() const {
-    return ((mType >= FirstRSObjectType) && (mType <= LastRSObjectType));
+      return IsRSObjectType(mType);
   }
 
   virtual bool equals(const RSExportable *E) const;
@@ -338,7 +372,6 @@ class RSExportPointerType : public RSExportType {
                       const RSExportType *PointeeType)
       : RSExportType(Context, ExportClassPointer, Name),
         mPointeeType(PointeeType) {
-    return;
   }
 
   // @PT was normalized by calling RSExportType::NormalizeType() before calling
@@ -348,7 +381,6 @@ class RSExportPointerType : public RSExportType {
                                      const llvm::StringRef &TypeName);
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
  public:
   virtual bool keep();
@@ -373,7 +405,6 @@ class RSExportVectorType : public RSExportPrimitiveType {
       : RSExportPrimitiveType(Context, ExportClassVector, Name,
                               DT, Normalized),
         mNumElement(NumElement) {
-    return;
   }
 
   // @EVT was normalized by calling RSExportType::NormalizeType() before
@@ -384,7 +415,6 @@ class RSExportVectorType : public RSExportPrimitiveType {
                                     bool Normalized = false);
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
  public:
   static llvm::StringRef GetTypeName(const clang::ExtVectorType *EVT);
@@ -420,11 +450,9 @@ class RSExportMatrixType : public RSExportType {
                      unsigned Dim)
     : RSExportType(Context, ExportClassMatrix, Name),
       mDim(Dim) {
-    return;
   }
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
  public:
   // @RT was normalized by calling RSExportType::NormalizeType() before
@@ -448,12 +476,9 @@ class RSExportConstantArrayType : public RSExportType {
   RSExportConstantArrayType(RSContext *Context,
                             const RSExportType *ElementType,
                             unsigned Size)
-    : RSExportType(Context,
-                   ExportClassConstantArray,
-                   DUMMY_TYPE_NAME_FOR_RS_CONSTANT_ARRAY_TYPE),
+    : RSExportType(Context, ExportClassConstantArray, "<ConstantArray>"),
       mElementType(ElementType),
       mSize(Size) {
-    return;
   }
 
   // @CAT was normalized by calling RSExportType::NormalizeType() before
@@ -462,7 +487,6 @@ class RSExportConstantArrayType : public RSExportType {
                                            const clang::ConstantArrayType *CAT);
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
  public:
   virtual unsigned getSize() const { return mSize; }
@@ -498,7 +522,6 @@ class RSExportRecordType : public RSExportType {
           mName(Name.data(), Name.size()),
           mParent(Parent),
           mOffset(Offset) {
-      return;
     }
 
     inline const RSExportRecordType *getParent() const { return mParent; }
@@ -522,18 +545,20 @@ class RSExportRecordType : public RSExportType {
   // Artificial export struct type is not exported by user (and thus it won't
   // get reflected)
   bool mIsArtificial;
+  size_t mStoreSize;
   size_t mAllocSize;
 
   RSExportRecordType(RSContext *Context,
                      const llvm::StringRef &Name,
                      bool IsPacked,
                      bool IsArtificial,
+                     size_t StoreSize,
                      size_t AllocSize)
       : RSExportType(Context, ExportClassRecord, Name),
         mIsPacked(IsPacked),
         mIsArtificial(IsArtificial),
+        mStoreSize(StoreSize),
         mAllocSize(AllocSize) {
-    return;
   }
 
   // @RT was normalized by calling RSExportType::NormalizeType() before calling
@@ -546,13 +571,13 @@ class RSExportRecordType : public RSExportType {
                                     bool mIsArtificial = false);
 
   virtual llvm::Type *convertToLLVMType() const;
-  virtual union RSType *convertToSpecType() const;
 
  public:
   inline const std::list<const Field*>& getFields() const { return mFields; }
   inline bool isPacked() const { return mIsPacked; }
   inline bool isArtificial() const { return mIsArtificial; }
-  inline size_t getAllocSize() const { return mAllocSize; }
+  virtual size_t getStoreSize() const { return mStoreSize; }
+  virtual size_t getAllocSize() const { return mAllocSize; }
 
   virtual std::string getElementName() const {
     return "ScriptField_" + getName();
@@ -568,7 +593,6 @@ class RSExportRecordType : public RSExportType {
          I++)
       if (*I != NULL)
         delete *I;
-    return;
   }
 };  // RSExportRecordType
 

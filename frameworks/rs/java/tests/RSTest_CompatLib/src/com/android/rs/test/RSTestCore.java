@@ -57,6 +57,7 @@ public class RSTestCore {
 
         unitTests = new ArrayList<UnitTest>();
 
+        unitTests.add(new UT_apitest(this, mRes, mCtx));
         unitTests.add(new UT_primitives(this, mRes, mCtx));
         unitTests.add(new UT_instance(this, mRes, mCtx));
         unitTests.add(new UT_constant(this, mRes, mCtx));
@@ -106,7 +107,6 @@ public class RSTestCore {
 
         mListAllocs = new ScriptField_ListAllocs_s(mRS, uta.length);
         for (int i = 0; i < uta.length; i++) {
-
             ScriptField_ListAllocs_s.Item listElem = new ScriptField_ListAllocs_s.Item();
             listElem.text = Allocation.createFromString(mRS, uta[i].name, Allocation.USAGE_SCRIPT);
             listElem.result = uta[i].getResult();

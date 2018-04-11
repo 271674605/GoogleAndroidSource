@@ -16,24 +16,43 @@
 
 package com.android.camera.data;
 
-import android.content.ContentResolver;
-import android.content.Context;
 import android.net.Uri;
+import android.os.AsyncTask;
 
-import static com.android.camera.ui.FilmStripView.DataAdapter;
+import com.android.camera.filmstrip.DataAdapter;
+import com.android.camera.util.Callback;
+import com.android.camera.widget.Preloader;
+
+import java.util.List;
 
 /**
- * An interface which extends {@link DataAdapter} and defines operations on
- * the data in the local camera folder.
+ * An interface which extends {@link com.android.camera.filmstrip.DataAdapter}
+ * and defines operations on the data in the local camera folder.
  */
-public interface LocalDataAdapter extends DataAdapter {
+public interface LocalDataAdapter extends DataAdapter,
+        Preloader.ItemLoader<Integer, AsyncTask>, Preloader.ItemSource<Integer> {
+
+    public interface LocalDataListener {
+        /**
+         * Metadata of a {@link com.android.camera.data.LocalData} is loaded on
+         * demand. Once the metadata is loaded this listener is notified.
+         *
+         * @param updatedData The IDs of the data whose metadata has been
+         *            updated.
+         */
+        public void onMetadataUpdated(List<Integer> updatedData);
+    }
+
+    /**
+     * Request for loading any photos that may have been added to the
+     * media store since the last update.
+     */
+    public void requestLoadNewPhotos();
 
     /**
      * Request for loading the local data.
-     *
-     * @param resolver  {@link ContentResolver} used for data loading.
      */
-    public void requestLoad(ContentResolver resolver);
+    public void requestLoad(Callback<Void> doneCallback);
 
     /**
      * Returns the specified {@link LocalData}.
@@ -46,40 +65,31 @@ public interface LocalDataAdapter extends DataAdapter {
     /**
      * Remove the data in the local camera folder.
      *
-     * @param context       {@link Context} used to remove the data.
-     * @param dataID  ID of data to be deleted.
+     * @param dataID ID of data to be deleted.
      */
-    public void removeData(Context context, int dataID);
+    public void removeData(int dataID);
 
     /**
-     * Add new local video data.
+     * Adds new local data. The data is either inserted or updated, depending
+     * on the existence of the Uri.
      *
-     * @param resolver  {@link ContentResolver} used to add the data.
-     * @param uri       {@link Uri} of the video.
+     * @param data The new data.
+     * @return Whether the data is newly inserted.
      */
-    public void addNewVideo(ContentResolver resolver, Uri uri);
-
-    /**
-     * Adds new local photo data.
-     *
-     * @param resolver  {@link ContentResolver} used to add the data.
-     * @param uri       {@link Uri} of the photo.
-     */
-    public void addNewPhoto(ContentResolver resolver, Uri uri);
+    public boolean addData(LocalData data);
 
     /**
      * Refresh the data by {@link Uri}.
      *
-     * @param resolver {@link ContentResolver} used to refresh the data.
      * @param uri The {@link Uri} of the data to refresh.
      */
-    public void refresh(ContentResolver resolver, Uri uri);
+    public void refresh(Uri uri);
 
     /**
      * Finds the {@link LocalData} of the specified content Uri.
      *
-     * @param Uri  The content Uri of the {@link LocalData}.
-     * @return     The index of the data. {@code -1} if not found.
+     * @param uri The content Uri of the {@link LocalData}.
+     * @return The index of the data. {@code -1} if not found.
      */
     public int findDataByContentUri(Uri uri);
 
@@ -89,19 +99,18 @@ public interface LocalDataAdapter extends DataAdapter {
     public void flush();
 
     /**
-     * Executes the deletion task. Delete the data waiting in the deletion queue.
+     * Executes the deletion task. Delete the data waiting in the deletion
+     * queue.
      *
-     * @param context The {@link Context} from the caller.
-     * @return        {@code true} if task has been executed, {@code false}
-     *                otherwise.
+     * @return Whether the task has been executed
      */
-    public boolean executeDeletion(Context context);
+    public boolean executeDeletion();
 
     /**
      * Undo a deletion. If there is any data waiting to be deleted in the queue,
      * move it out of the deletion queue.
      *
-     * @return {@code true} if there are items in the queue, {@code false} otherwise.
+     * @return Whether there are items in the queue.
      */
     public boolean undoDataRemoval();
 
@@ -113,6 +122,22 @@ public interface LocalDataAdapter extends DataAdapter {
      */
     public void updateData(int pos, LocalData data);
 
-    /** Insert a data. */
-    public void insertData(LocalData data);
+    /** Sets the listener for the LocalData change. */
+    public void setLocalDataListener(LocalDataListener listener);
+
+    /**
+     * Updates the metadata in the background. The completion of the updating
+     * will be notified through
+     * {@link com.android.camera.data.LocalDataAdapter.LocalDataListener}.
+     *
+     * @param dataId The ID of the data to update the metadata for.
+     * @return An {@link android.os.AsyncTask} performing the background load
+     *      that can be used to cancel the load if it's no longer needed.
+     */
+    public AsyncTask updateMetadata(int dataId);
+
+    /**
+     * @return whether the metadata is already updated.
+     */
+    public boolean isMetadataUpdated(int dataId);
 }

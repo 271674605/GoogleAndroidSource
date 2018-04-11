@@ -11,37 +11,34 @@
 #include "media/base/media_keys.h"
 
 #if defined(ENABLE_PEPPER_CDMS)
-namespace WebKit {
-class WebFrame;
-class WebMediaPlayerClient;
-}
-#endif  // defined(ENABLE_PEPPER_CDMS)
+#include "content/renderer/media/crypto/pepper_cdm_wrapper.h"
+#endif
+
+class GURL;
 
 namespace content {
 
-class WebMediaPlayerProxyAndroid;
+#if defined(ENABLE_BROWSER_CDMS)
+class RendererCdmManager;
+#endif
 
 class ContentDecryptionModuleFactory {
  public:
+  // |create_pepper_cdm_cb| will be called synchronously if necessary. The other
+  // callbacks can be called asynchronously.
   static scoped_ptr<media::MediaKeys> Create(
       const std::string& key_system,
+      const GURL& security_origin,
 #if defined(ENABLE_PEPPER_CDMS)
-      // TODO(ddorwin): We need different pointers for the WD API.
-      WebKit::WebMediaPlayerClient* web_media_player_client,
-      WebKit::WebFrame* web_frame,
-      const base::Closure& destroy_plugin_cb,
-#elif defined(OS_ANDROID)
-      WebMediaPlayerProxyAndroid* proxy,
-      int media_keys_id,
+      const CreatePepperCdmCB& create_pepper_cdm_cb,
+#elif defined(ENABLE_BROWSER_CDMS)
+      RendererCdmManager* manager,
+      int* cdm_id,  // Output parameter indicating the CDM ID of the MediaKeys.
 #endif  // defined(ENABLE_PEPPER_CDMS)
-      const media::KeyAddedCB& key_added_cb,
-      const media::KeyErrorCB& key_error_cb,
-      const media::KeyMessageCB& key_message_cb);
-
-#if defined(ENABLE_PEPPER_CDMS)
-  static void DestroyHelperPlugin(
-      WebKit::WebMediaPlayerClient* web_media_player_client);
-#endif  // defined(ENABLE_PEPPER_CDMS)
+      const media::SessionMessageCB& session_message_cb,
+      const media::SessionReadyCB& session_ready_cb,
+      const media::SessionClosedCB& session_closed_cb,
+      const media::SessionErrorCB& session_error_cb);
 };
 
 }  // namespace content

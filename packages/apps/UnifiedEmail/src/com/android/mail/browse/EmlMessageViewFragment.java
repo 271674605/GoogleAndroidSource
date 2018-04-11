@@ -17,6 +17,7 @@
 
 package com.android.mail.browse;
 
+import android.app.Activity;
 import android.app.Fragment;
 import android.app.LoaderManager;
 import android.content.CursorLoader;
@@ -26,20 +27,27 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.OpenableColumns;
+import android.support.v7.app.ActionBarActivity;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
+import android.widget.Toast;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.R;
 import com.android.mail.providers.Account;
-import com.android.mail.providers.Address;
 import com.android.mail.ui.AbstractConversationWebViewClient;
 import com.android.mail.ui.ContactLoaderCallbacks;
 import com.android.mail.ui.SecureConversationViewController;
 import com.android.mail.ui.SecureConversationViewControllerCallbacks;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
+import com.android.mail.utils.Utils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
@@ -57,7 +65,6 @@ import java.util.Set;
 public class EmlMessageViewFragment extends Fragment
         implements SecureConversationViewControllerCallbacks {
     private static final String ARG_EML_FILE_URI = "eml_file_uri";
-    private static final String ARG_ACCOUNT_URI = "account_uri";
     private static final String BASE_URI = "x-thread://message/rfc822/";
 
     private static final int MESSAGE_LOADER = 0;
@@ -76,7 +83,8 @@ public class EmlMessageViewFragment extends Fragment
     private final FilenameLoadCallbacks mFilenameLoadCallbacks = new FilenameLoadCallbacks();
 
     private Uri mEmlFileUri;
-    private Uri mAccountUri;
+
+    private boolean mMessageLoadFailed;
 
     /**
      * Cache of email address strings to parsed Address objects.
@@ -90,6 +98,18 @@ public class EmlMessageViewFragment extends Fragment
     private class EmlWebViewClient extends AbstractConversationWebViewClient {
         public EmlWebViewClient(Account account) {
             super(account);
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+            // try to load the url assuming it is a cid url
+            final Uri uri = Uri.parse(url);
+            final WebResourceResponse response = loadCIDUri(uri, mViewController.getMessage());
+            if (response != null) {
+                return response;
+            }
+
+            return super.shouldInterceptRequest(view, url);
         }
 
         @Override
@@ -116,7 +136,7 @@ public class EmlMessageViewFragment extends Fragment
             callbacks.setSenders(emailAddresses);
             getLoaderManager().restartLoader(CONTACT_LOADER, Bundle.EMPTY, callbacks);
         }
-    };
+    }
 
     /**
      * Creates a new instance of {@link EmlMessageViewFragment},
@@ -124,9 +144,8 @@ public class EmlMessageViewFragment extends Fragment
      */
     public static EmlMessageViewFragment newInstance(Uri emlFileUri, Uri accountUri) {
         EmlMessageViewFragment f = new EmlMessageViewFragment();
-        Bundle args = new Bundle();
+        Bundle args = new Bundle(1);
         args.putParcelable(ARG_EML_FILE_URI, emlFileUri);
-        args.putParcelable(ARG_ACCOUNT_URI, accountUri);
         f.setArguments(args);
         return f;
     }
@@ -143,12 +162,11 @@ public class EmlMessageViewFragment extends Fragment
 
         Bundle args = getArguments();
         mEmlFileUri = args.getParcelable(ARG_EML_FILE_URI);
-        mAccountUri = args.getParcelable(ARG_ACCOUNT_URI);
 
         mWebViewClient = new EmlWebViewClient(null);
         mViewController = new SecureConversationViewController(this);
 
-        getActivity().getActionBar().setTitle(R.string.attached_message);
+        setHasOptionsMenu(true);
     }
 
     @Override
@@ -160,8 +178,37 @@ public class EmlMessageViewFragment extends Fragment
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
+        if (mMessageLoadFailed) {
+            bailOutOnLoadError();
+            return;
+        }
         mWebViewClient.setActivity(getActivity());
         mViewController.onActivityCreated(savedInstanceState);
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        if (Utils.isRunningKitkatOrLater()) {
+            inflater.inflate(R.menu.eml_fragment_menu, menu);
+        }
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        final int itemId = item.getItemId();
+        if (itemId == R.id.print_message) {
+            mViewController.printMessage();
+        } else {
+            return super.onOptionsItemSelected(item);
+        }
+
+        return true;
+    }
+
+    private void bailOutOnLoadError() {
+        final Activity activity = getActivity();
+        Toast.makeText(activity, R.string.eml_loader_error_toast, Toast.LENGTH_LONG).show();
+        activity.finish();
     }
 
     // Start SecureConversationViewControllerCallbacks
@@ -232,8 +279,8 @@ public class EmlMessageViewFragment extends Fragment
     }
 
     @Override
-    public Uri getAccountUri() {
-        return mAccountUri;
+    public boolean shouldAlwaysShowImages() {
+        return false;
     }
 
     // End SecureConversationViewControllerCallbacks
@@ -252,6 +299,15 @@ public class EmlMessageViewFragment extends Fragment
 
         @Override
         public void onLoadFinished(Loader<ConversationMessage> loader, ConversationMessage data) {
+            if (data == null) {
+                final Activity activity = getActivity();
+                if (activity != null) {
+                    bailOutOnLoadError();
+                } else {
+                    mMessageLoadFailed = true;
+                }
+                return;
+            }
             mViewController.setSubject(data.subject);
             mViewController.renderMessage(data);
         }
@@ -281,7 +337,7 @@ public class EmlMessageViewFragment extends Fragment
                 return;
             }
 
-            getActivity().getActionBar().setSubtitle(
+            ((ActionBarActivity) getActivity()).getSupportActionBar().setTitle(
                     data.getString(data.getColumnIndex(OpenableColumns.DISPLAY_NAME)));
         }
 

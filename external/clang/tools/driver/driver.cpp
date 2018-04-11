@@ -22,10 +22,10 @@
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Frontend/Utils.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/OwningPtr.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
@@ -37,6 +37,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/Signals.h"
@@ -44,7 +45,8 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include <memory>
+#include <system_error>
 using namespace clang;
 using namespace clang::driver;
 using namespace llvm::opt;
@@ -168,7 +170,7 @@ static void ApplyQAOverride(SmallVectorImpl<const char*> &Args,
     OS = &llvm::nulls();
   }
 
-  *OS << "### QA_OVERRIDE_GCC3_OPTIONS: " << OverrideStr << "\n";
+  *OS << "### CCC_OVERRIDE_OPTIONS: " << OverrideStr << "\n";
 
   // This does not need to be efficient.
 
@@ -212,20 +214,25 @@ static void ParseProgName(SmallVectorImpl<const char *> &ArgVector,
     const char *Suffix;
     const char *ModeFlag;
   } suffixes [] = {
-    { "clang",     0 },
+    { "clang",     nullptr },
     { "clang++",   "--driver-mode=g++" },
     { "clang-c++", "--driver-mode=g++" },
-    { "clang-cc",  0 },
+    { "clang-cc",  nullptr },
     { "clang-cpp", "--driver-mode=cpp" },
     { "clang-g++", "--driver-mode=g++" },
-    { "clang-gcc", 0 },
+    { "clang-gcc", nullptr },
     { "clang-cl",  "--driver-mode=cl"  },
-    { "cc",        0 },
+    { "cc",        nullptr },
     { "cpp",       "--driver-mode=cpp" },
     { "cl" ,       "--driver-mode=cl"  },
     { "++",        "--driver-mode=g++" },
   };
   std::string ProgName(llvm::sys::path::stem(ArgVector[0]));
+#ifdef LLVM_ON_WIN32
+  // Transform to lowercase for case insensitive file systems.
+  std::transform(ProgName.begin(), ProgName.end(), ProgName.begin(),
+                 toLowercase);
+#endif
   StringRef ProgNameRef(ProgName);
   StringRef Prefix;
 
@@ -267,9 +274,10 @@ static void ParseProgName(SmallVectorImpl<const char *> &ArgVector,
     SmallVectorImpl<const char *>::iterator it = ArgVector.begin();
     if (it != ArgVector.end())
       ++it;
-    ArgVector.insert(it, SaveStringInSet(SavedStrings, Prefix));
-    ArgVector.insert(it,
-      SaveStringInSet(SavedStrings, std::string("-target")));
+    const char* Strings[] =
+      { SaveStringInSet(SavedStrings, std::string("-target")),
+        SaveStringInSet(SavedStrings, Prefix) };
+    ArgVector.insert(it, Strings, Strings + llvm::array_lengthof(Strings));
   }
 }
 
@@ -277,7 +285,7 @@ namespace {
   class StringSetSaver : public llvm::cl::StringSaver {
   public:
     StringSetSaver(std::set<std::string> &Storage) : Storage(Storage) {}
-    const char *SaveString(const char *Str) LLVM_OVERRIDE {
+    const char *SaveString(const char *Str) override {
       return SaveStringInSet(Storage, Str);
     }
   private:
@@ -289,8 +297,16 @@ int main(int argc_, const char **argv_) {
   llvm::sys::PrintStackTraceOnErrorSignal();
   llvm::PrettyStackTraceProgram X(argc_, argv_);
 
+  SmallVector<const char *, 256> argv;
+  llvm::SpecificBumpPtrAllocator<char> ArgAllocator;
+  std::error_code EC = llvm::sys::Process::GetArgumentVector(
+      argv, ArrayRef<const char *>(argv_, argc_), ArgAllocator);
+  if (EC) {
+    llvm::errs() << "error: couldn't get arguments: " << EC.message() << '\n';
+    return 1;
+  }
+
   std::set<std::string> SavedStrings;
-  SmallVector<const char*, 256> argv(argv_, argv_ + argc_);
   StringSetSaver Saver(SavedStrings);
   llvm::cl::ExpandResponseFiles(Saver, llvm::cl::TokenizeGNUCommandLine, argv);
 
@@ -318,9 +334,9 @@ int main(int argc_, const char **argv_) {
     }
   }
 
-  // Handle QA_OVERRIDE_GCC3_OPTIONS and CCC_ADD_ARGS, used for editing a
-  // command line behind the scenes.
-  if (const char *OverrideStr = ::getenv("QA_OVERRIDE_GCC3_OPTIONS")) {
+  // Handle CCC_OVERRIDE_OPTIONS, used for editing a command line behind the
+  // scenes.
+  if (const char *OverrideStr = ::getenv("CCC_OVERRIDE_OPTIONS")) {
     // FIXME: Driver shouldn't take extra initial argument.
     ApplyQAOverride(argv, OverrideStr, SavedStrings);
   }
@@ -329,11 +345,10 @@ int main(int argc_, const char **argv_) {
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions;
   {
-    // Note that ParseDiagnosticArgs() uses the cc1 option table.
-    OwningPtr<OptTable> CC1Opts(createDriverOptTable());
+    std::unique_ptr<OptTable> Opts(createDriverOptTable());
     unsigned MissingArgIndex, MissingArgCount;
-    OwningPtr<InputArgList> Args(CC1Opts->ParseArgs(argv.begin()+1, argv.end(),
-                                            MissingArgIndex, MissingArgCount));
+    std::unique_ptr<InputArgList> Args(Opts->ParseArgs(
+        argv.begin() + 1, argv.end(), MissingArgIndex, MissingArgCount));
     // We ignore MissingArgCount and the return value of ParseDiagnosticArgs.
     // Any errors that would be diagnosed here will also be diagnosed later,
     // when the DiagnosticsEngine actually exists.
@@ -343,13 +358,20 @@ int main(int argc_, const char **argv_) {
   // DiagnosticOptions instance.
   TextDiagnosticPrinter *DiagClient
     = new TextDiagnosticPrinter(llvm::errs(), &*DiagOpts);
-  DiagClient->setPrefix(llvm::sys::path::filename(Path));
+
+  // If the clang binary happens to be named cl.exe for compatibility reasons,
+  // use clang-cl.exe as the prefix to avoid confusion between clang and MSVC.
+  StringRef ExeBasename(llvm::sys::path::filename(Path));
+  if (ExeBasename.equals_lower("cl.exe"))
+    ExeBasename = "clang-cl.exe";
+  DiagClient->setPrefix(ExeBasename);
+
   IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
 
   DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagClient);
   ProcessWarningOptions(Diags, *DiagOpts, /*ReportDiags=*/false);
 
-  Driver TheDriver(Path, llvm::sys::getDefaultTargetTriple(), "a.out", Diags);
+  Driver TheDriver(Path, llvm::sys::getDefaultTargetTriple(), Diags);
 
   // Attempt to find the original path used to invoke the driver, to determine
   // the installed path. We do this manually, because we want to support that
@@ -389,7 +411,7 @@ int main(int argc_, const char **argv_) {
   if (TheDriver.CCLogDiagnostics)
     TheDriver.CCLogDiagnosticsFilename = ::getenv("CC_LOG_DIAGNOSTICS_FILE");
 
-  OwningPtr<Compilation> C(TheDriver.BuildCompilation(argv));
+  std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(argv));
   int Res = 0;
   SmallVector<std::pair<int, const Command *>, 4> FailingCommands;
   if (C.get())
@@ -398,7 +420,7 @@ int main(int argc_, const char **argv_) {
   // Force a crash to test the diagnostics.
   if (::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH")) {
     Diags.Report(diag::err_drv_force_crash) << "FORCE_CLANG_DIAGNOSTICS_CRASH";
-    const Command *FailingCommand = 0;
+    const Command *FailingCommand = nullptr;
     FailingCommands.push_back(std::make_pair(-1, FailingCommand));
   }
 
@@ -411,8 +433,13 @@ int main(int argc_, const char **argv_) {
 
     // If result status is < 0, then the driver command signalled an error.
     // If result status is 70, then the driver command reported a fatal error.
-    // In these cases, generate additional diagnostic information if possible.
-    if (CommandRes < 0 || CommandRes == 70) {
+    // On Windows, abort will return an exit code of 3.  In these cases,
+    // generate additional diagnostic information if possible.
+    bool DiagnoseCrash = CommandRes < 0 || CommandRes == 70;
+#ifdef LLVM_ON_WIN32
+    DiagnoseCrash |= CommandRes == 3;
+#endif
+    if (DiagnoseCrash) {
       TheDriver.generateCompilationDiagnostics(*C, FailingCommand);
       break;
     }
@@ -424,7 +451,7 @@ int main(int argc_, const char **argv_) {
   
   llvm::llvm_shutdown();
 
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
   // Exit status should not be negative on Win32, unless abnormal termination.
   // Once abnormal termiation was caught, negative status should not be
   // propagated.

@@ -103,19 +103,19 @@ static int out_dump(const struct audio_stream *stream, int fd)
 {
     struct generic_stream_out *out = (struct generic_stream_out *)stream;
 
-    fdprintf(fd, "\tout_dump:\n"
-                 "\t\tsample rate: %u\n"
-                 "\t\tbuffer size: %u\n"
-                 "\t\tchannel mask: %08x\n"
-                 "\t\tformat: %d\n"
-                 "\t\tdevice: %08x\n"
-                 "\t\taudio dev: %p\n\n",
-                 out_get_sample_rate(stream),
-                 out_get_buffer_size(stream),
-                 out_get_channels(stream),
-                 out_get_format(stream),
-                 out->device,
-                 out->dev);
+    dprintf(fd, "\tout_dump:\n"
+                "\t\tsample rate: %u\n"
+                "\t\tbuffer size: %u\n"
+                "\t\tchannel mask: %08x\n"
+                "\t\tformat: %d\n"
+                "\t\tdevice: %08x\n"
+                "\t\taudio dev: %p\n\n",
+                out_get_sample_rate(stream),
+                out_get_buffer_size(stream),
+                out_get_channels(stream),
+                out_get_format(stream),
+                out->device,
+                out->dev);
 
     return 0;
 }
@@ -259,19 +259,19 @@ static int in_dump(const struct audio_stream *stream, int fd)
 {
     struct generic_stream_in *in = (struct generic_stream_in *)stream;
 
-    fdprintf(fd, "\tin_dump:\n"
-                 "\t\tsample rate: %u\n"
-                 "\t\tbuffer size: %u\n"
-                 "\t\tchannel mask: %08x\n"
-                 "\t\tformat: %d\n"
-                 "\t\tdevice: %08x\n"
-                 "\t\taudio dev: %p\n\n",
-                 in_get_sample_rate(stream),
-                 in_get_buffer_size(stream),
-                 in_get_channels(stream),
-                 in_get_format(stream),
-                 in->device,
-                 in->dev);
+    dprintf(fd, "\tin_dump:\n"
+                "\t\tsample rate: %u\n"
+                "\t\tbuffer size: %u\n"
+                "\t\tchannel mask: %08x\n"
+                "\t\tformat: %d\n"
+                "\t\tdevice: %08x\n"
+                "\t\taudio dev: %p\n\n",
+                in_get_sample_rate(stream),
+                in_get_buffer_size(stream),
+                in_get_channels(stream),
+                in_get_format(stream),
+                in->device,
+                in->dev);
 
     return 0;
 }
@@ -371,7 +371,8 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
                                    audio_devices_t devices,
                                    audio_output_flags_t flags,
                                    struct audio_config *config,
-                                   struct audio_stream_out **stream_out)
+                                   struct audio_stream_out **stream_out,
+                                   const char *address __unused)
 {
     struct generic_audio_device *adev = (struct generic_audio_device *)dev;
     struct generic_stream_out *out;
@@ -523,7 +524,10 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
                                   audio_io_handle_t handle,
                                   audio_devices_t devices,
                                   struct audio_config *config,
-                                  struct audio_stream_in **stream_in)
+                                  struct audio_stream_in **stream_in,
+                                  audio_input_flags_t flags __unused,
+                                  const char *address __unused,
+                                  audio_source_t source __unused)
 {
     struct generic_audio_device *adev = (struct generic_audio_device *)dev;
     struct generic_stream_in *in;
@@ -596,15 +600,15 @@ static int adev_dump(const audio_hw_device_t *dev, int fd)
     const size_t SIZE = 256;
     char buffer[SIZE];
 
-    fdprintf(fd, "\nadev_dump:\n"
-                 "\tfd: %d\n"
-                 "\tmic_mute: %s\n"
-                 "\toutput: %p\n"
-                 "\tinput: %p\n\n",
-                 adev->fd,
-                 adev->mic_mute ? "true": "false",
-                 adev->output,
-                 adev->input);
+    dprintf(fd, "\nadev_dump:\n"
+                "\tfd: %d\n"
+                "\tmic_mute: %s\n"
+                "\toutput: %p\n"
+                "\tinput: %p\n\n",
+                adev->fd,
+                adev->mic_mute ? "true": "false",
+                adev->output,
+                adev->input);
 
     if (adev->output != NULL)
         out_dump((const struct audio_stream *)adev->output, fd);

@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,21 +12,21 @@ Other attributes to use are: wait_for_playing and wait_for_ended, which forces
 the action to wait until playing and ended events get fired respectively.
 """
 
-from telemetry.page.actions.media_action import MediaAction
 from telemetry.core import exceptions
+from telemetry.page.actions import media_action
 from telemetry.page.actions import page_action
 
 
-class PlayAction(MediaAction):
+class PlayAction(media_action.MediaAction):
   def __init__(self, attributes=None):
     super(PlayAction, self).__init__(attributes)
 
-  def WillRunAction(self, page, tab):
+  def WillRunAction(self, tab):
     """Load the media metrics JS code prior to running the action."""
-    super(PlayAction, self).WillRunAction(page, tab)
+    super(PlayAction, self).WillRunAction(tab)
     self.LoadJS(tab, 'play.js')
 
-  def RunAction(self, page, tab, previous_action):
+  def RunAction(self, tab):
     try:
       selector = self.selector if hasattr(self, 'selector') else ''
       tab.ExecuteJavaScript('window.__playMedia("%s");' % selector)

@@ -16,15 +16,17 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import android.content.Context;
+import android.cts.util.WidgetTestUtils;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.test.InstrumentationTestCase;
+import android.test.UiThreadTest;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.SimpleCursorTreeAdapter;
@@ -70,6 +72,7 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
         mContext = getInstrumentation().getTargetContext();
     }
 
+    @UiThreadTest
     public void testConstructor() {
         mGroupCursor = createTestCursor(2, 20, "group");
         new MockSimpleCursorTreeAdapter(mContext, mGroupCursor,
@@ -85,6 +88,7 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
                 CHILD_LAYOUT, CHILD_LAYOUT, COLUMNS_CHILD_FROM, VIEWS_CHILD_TO);
     }
 
+    @UiThreadTest
     public void testBindChildView() {
         mGroupCursor = createTestCursor(2, 20, "group");
         mChildCursor = createTestCursor(3, 4, "child");
@@ -104,6 +108,7 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
     }
 
     // The param context and isExpanded is never readed.
+    @UiThreadTest
     public void testBindGroupView() {
         mGroupCursor = createTestCursor(2, 20, "group");
         mGroupCursor.moveToFirst();
@@ -120,6 +125,7 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
         assertEquals("group11", view.getText().toString());
     }
 
+    @UiThreadTest
     public void testSetViewImage() {
         mGroupCursor = createTestCursor(2, 20, "group");
         mSimpleCursorTreeAdapter = new MockSimpleCursorTreeAdapter(mContext, mGroupCursor,
@@ -130,9 +136,9 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
         ImageView view = new ImageView(mContext);
         assertNull(view.getDrawable());
         mSimpleCursorTreeAdapter.setViewImage(view,
-                String.valueOf(com.android.cts.stub.R.drawable.scenery));
+                String.valueOf(com.android.cts.widget.R.drawable.scenery));
         BitmapDrawable d = (BitmapDrawable) mContext.getResources().getDrawable(
-                com.android.cts.stub.R.drawable.scenery);
+                com.android.cts.widget.R.drawable.scenery);
         WidgetTestUtils.assertEquals(d.getBitmap(),
                 ((BitmapDrawable) view.getDrawable()).getBitmap());
 
@@ -158,10 +164,10 @@ public class SimpleCursorTreeAdapterTest extends InstrumentationTestCase {
         try {
             mSimpleCursorTreeAdapter.setViewImage(view,
                     SimpleCursorAdapterTest.createTestImage(mContext, SAMPLE_IMAGE_NAME,
-                            com.android.cts.stub.R.raw.testimage));
+                            com.android.cts.widget.R.raw.testimage));
             Bitmap actualBitmap = ((BitmapDrawable) view.getDrawable()).getBitmap();
             Bitmap test = WidgetTestUtils.getUnscaledAndDitheredBitmap(mContext.getResources(),
-                    com.android.cts.stub.R.raw.testimage, actualBitmap.getConfig());
+                    com.android.cts.widget.R.raw.testimage, actualBitmap.getConfig());
             WidgetTestUtils.assertEquals(test, actualBitmap);
         } finally {
             SimpleCursorAdapterTest.destroyTestImage(mContext, SAMPLE_IMAGE_NAME);

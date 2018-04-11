@@ -68,11 +68,11 @@ FramebufferSurface::FramebufferSurface(HWComposer& hwc, int disp,
     mConsumer->setDefaultMaxBufferCount(NUM_FRAMEBUFFER_SURFACE_BUFFERS);
 }
 
-status_t FramebufferSurface::beginFrame() {
+status_t FramebufferSurface::beginFrame(bool mustRecompose) {
     return NO_ERROR;
 }
 
-status_t FramebufferSurface::prepareFrame(CompositionType compositionType) {
+status_t FramebufferSurface::prepareFrame(CompositionType /*compositionType*/) {
     return NO_ERROR;
 }
 

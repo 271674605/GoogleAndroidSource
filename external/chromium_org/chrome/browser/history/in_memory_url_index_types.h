@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "chrome/browser/autocomplete/history_provider_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "url/gurl.h"
 
@@ -18,7 +17,7 @@ namespace history {
 
 // The maximum number of characters to consider from an URL and page title
 // while matching user-typed terms.
-const size_t kMaxSignificantChars = 50;
+const size_t kMaxSignificantChars = 200;
 
 // Matches within URL and Title Strings ----------------------------------------
 
@@ -38,20 +37,6 @@ struct TermMatch {
 };
 typedef std::vector<TermMatch> TermMatches;
 
-// Unescapes the URL and lower-cases it, returning the result.  This
-// unescaping makes it possible to match substrings that were
-// originally escaped for navigation; for example, if the user
-// searched for "a&p", the query would be escaped as "a%26p", so
-// without unescaping, an input string of "a&p" would no longer match
-// this URL.  Note that the resulting unescaped URL may not be
-// directly navigable (which is why we escaped it to begin with).
-// |languages| is passed to net::FormatUrl().
-string16 CleanUpUrlForMatching(const GURL& gurl,
-                               const std::string& languages);
-
-// Returns the lower-cased title.
-string16 CleanUpTitleForMatching(const string16& title);
-
 // Returns a TermMatches which has an entry for each occurrence of the
 // string |term| found in the string |cleaned_string|. Use
 // CleanUpUrlForMatching() or CleanUpUrlTitleMatching() before passing
@@ -60,28 +45,33 @@ string16 CleanUpTitleForMatching(const string16& title);
 // with other TermMatches for other terms. Note that only the first
 // 2,048 characters of |string| are considered during the match
 // operation.
-TermMatches MatchTermInString(const string16& term,
-                              const string16& cleaned_string,
+TermMatches MatchTermInString(const base::string16& term,
+                              const base::string16& cleaned_string,
                               int term_num);
 
 // Sorts and removes overlapping substring matches from |matches| and
 // returns the cleaned up matches.
 TermMatches SortAndDeoverlapMatches(const TermMatches& matches);
 
-// Extracts and returns the offsets from |matches|.
+// Extracts and returns the offsets from |matches|.  This includes both
+// the offsets corresponding to the beginning of a match and the offsets
+// corresponding to the end of a match (i.e., offset+length for that match).
 std::vector<size_t> OffsetsFromTermMatches(const TermMatches& matches);
 
-// Replaces the offsets in |matches| with those given in |offsets|, deleting
-// any which are npos, and returns the updated list of matches.
+// Replaces the offsets and lengths in |matches| with those given in |offsets|.
+// |offsets| gives beginning and ending offsets for each match; this function
+// translates (beginning, ending) offset into (beginning offset, length of
+// match).  It deletes any matches for which an endpoint is npos and returns
+// the updated list of matches.
 TermMatches ReplaceOffsetsInTermMatches(const TermMatches& matches,
                                         const std::vector<size_t>& offsets);
 
 // Convenience Types -----------------------------------------------------------
 
-typedef std::vector<string16> String16Vector;
-typedef std::set<string16> String16Set;
-typedef std::set<char16> Char16Set;
-typedef std::vector<char16> Char16Vector;
+typedef std::vector<base::string16> String16Vector;
+typedef std::set<base::string16> String16Set;
+typedef std::set<base::char16> Char16Set;
+typedef std::vector<base::char16> Char16Vector;
 
 // A vector that contains the offsets at which each word starts within a string.
 typedef std::vector<size_t> WordStarts;
@@ -95,7 +85,7 @@ typedef std::vector<size_t> WordStarts;
 // |cleaned_uni_string| at which each word starts onto
 // |word_starts|. These offsets are collected only up to the first
 // kMaxSignificantChars of |cleaned_uni_string|.
-String16Set String16SetFromString16(const string16& cleaned_uni_string,
+String16Set String16SetFromString16(const base::string16& cleaned_uni_string,
                                     WordStarts* word_starts);
 
 // Breaks the |cleaned_uni_string| string down into individual words
@@ -117,9 +107,10 @@ String16Set String16SetFromString16(const string16& cleaned_uni_string,
 //    "http", "www", "google", "com", "harry", "the", "rabbit"
 //   With |break_on_space| true the returned list will contain:
 //    "http://", "www.google.com/", "harry", "the", "rabbit."
-String16Vector String16VectorFromString16(const string16& cleaned_uni_string,
-                                          bool break_on_space,
-                                          WordStarts* word_starts);
+String16Vector String16VectorFromString16(
+    const base::string16& cleaned_uni_string,
+    bool break_on_space,
+    WordStarts* word_starts);
 
 // Breaks the |uni_word| string down into its individual characters.
 // Note that this is temporarily intended to work on a single word, but
@@ -129,7 +120,7 @@ String16Vector String16VectorFromString16(const string16& cleaned_uni_string,
 // and properly handle substring matches, scoring and sorting the results
 // by score. Also, provide the metrics for where the matches occur so that
 // the UI can highlight the matched sections.
-Char16Set Char16SetFromString16(const string16& uni_word);
+Char16Set Char16SetFromString16(const base::string16& uni_word);
 
 // Support for InMemoryURLIndex Private Data -----------------------------------
 
@@ -137,11 +128,11 @@ Char16Set Char16SetFromString16(const string16& uni_word);
 typedef size_t WordID;
 
 // A map allowing a WordID to be determined given a word.
-typedef std::map<string16, WordID> WordMap;
+typedef std::map<base::string16, WordID> WordMap;
 
 // A map from character to the word_ids of words containing that character.
 typedef std::set<WordID> WordIDSet;  // An index into the WordList.
-typedef std::map<char16, WordIDSet> CharWordIDMap;
+typedef std::map<base::char16, WordIDSet> CharWordIDMap;
 
 // A map from word (by word_id) to history items containing that word.
 typedef history::URLID HistoryID;

@@ -6,7 +6,10 @@ LOCAL_MODULE := libaudioutils
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_SRC_FILES:= \
+	channels.c \
 	fixedfft.cpp.arm \
+	format.c \
+	minifloat.c \
 	primitives.c \
 	resampler.c \
 	echo_reference.c
@@ -27,6 +30,9 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libaudioutils
 LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := \
+	channels.c \
+	format.c \
+	minifloat.c \
 	primitives.c
 LOCAL_C_INCLUDES += \
 	$(call include-path-for, audio-utils)
@@ -61,3 +67,6 @@ LOCAL_C_INCLUDES += \
 #LOCAL_SHARED_LIBRARIES := libaudioutils
 
 include $(BUILD_HOST_STATIC_LIBRARY)
+
+include $(call all-makefiles-under,$(LOCAL_PATH))
+

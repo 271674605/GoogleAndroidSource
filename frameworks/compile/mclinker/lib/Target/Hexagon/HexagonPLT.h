@@ -6,13 +6,14 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TARGET_HEXAGON_PLT_H
-#define MCLD_TARGET_HEXAGON_PLT_H
+#ifndef TARGET_HEXAGON_HEXAGONPLT_H
+#define TARGET_HEXAGON_HEXAGONPLT_H
 
 #include "HexagonGOT.h"
 #include "HexagonGOTPLT.h"
 #include <mcld/Target/GOT.h>
 #include <mcld/Target/PLT.h>
+#include <mcld/Support/MemoryRegion.h>
 
 namespace {
 
@@ -28,14 +29,14 @@ const uint8_t hexagon_plt0[] = {
  0x00, 0x00, 0x00, 0x00,
  0x00, 0x00, 0x00, 0x00,
  0x00, 0x00, 0x00, 0x00,
- 0x00, 0x00, 0x00, 0x00,
+ 0x00, 0x00, 0x00, 0x00
 };
 
 const uint8_t hexagon_plt1[] = {
   0x00, 0x40, 0x00, 0x00, // { immext (#0)
   0x0e, 0xc0, 0x49, 0x6a, //   r14 = add (pc, ##GOTn@PCREL) } # address of GOTn
   0x1c, 0xc0, 0x8e, 0x91, // r28 = memw (r14)                 # contents of GOTn
-  0x00, 0xc0, 0x9c, 0x52, // jumpr r28                        # call it
+  0x00, 0xc0, 0x9c, 0x52  // jumpr r28                        # call it
 };
 
 } // anonymous namespace
@@ -44,7 +45,6 @@ namespace mcld {
 
 class GOTEntry;
 class LinkerConfig;
-class MemoryRegion;
 class HexagonPLT1;
 
 //===----------------------------------------------------------------------===//
@@ -76,9 +76,7 @@ public:
   // hasPLT1 - return if this PLT has any PLT1 entry
   bool hasPLT1() const;
 
-  void reserveEntry(size_t pNum = 1) ;
-
-  HexagonPLT1* consume();
+  HexagonPLT1* create();
 
   void applyPLT0();
 
@@ -90,9 +88,6 @@ public:
 
 private:
   HexagonGOTPLT& m_GOTPLT;
-
-  // the last consumed entry.
-  SectionData::iterator m_Last;
 
   const uint8_t *m_PLT0;
   unsigned int m_PLT0Size;

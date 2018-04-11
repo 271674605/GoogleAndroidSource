@@ -8,10 +8,13 @@
 #include <string>
 
 #include "net/quic/crypto/crypto_handshake.h"
+#include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/quic_crypto_client_stream.h"
 #include "net/quic/quic_session.h"
 
 namespace net {
+
+class QuicServerId;
 
 class MockCryptoClientStream : public QuicCryptoClientStream {
  public:
@@ -33,10 +36,12 @@ class MockCryptoClientStream : public QuicCryptoClientStream {
   };
 
   MockCryptoClientStream(
-      const string& server_hostname,
-      QuicSession* session,
+      const QuicServerId& server_id,
+      QuicClientSessionBase* session,
+      ProofVerifyContext* verify_context,
       QuicCryptoClientConfig* crypto_config,
-      HandshakeMode handshake_mode);
+      HandshakeMode handshake_mode,
+      const ProofVerifyDetails* proof_verify_details_);
   virtual ~MockCryptoClientStream();
 
   // CryptoFramerVisitorInterface implementation.
@@ -46,10 +51,19 @@ class MockCryptoClientStream : public QuicCryptoClientStream {
   // QuicCryptoClientStream implementation.
   virtual bool CryptoConnect() OVERRIDE;
 
+  // Invokes the sessions's CryptoHandshakeEvent method with the specified
+  // event.
+  void SendOnCryptoHandshakeEvent(QuicSession::CryptoHandshakeEvent event);
+
   HandshakeMode handshake_mode_;
 
  private:
   void SetConfigNegotiated();
+  QuicClientSessionBase* client_session();
+
+  const ProofVerifyDetails* proof_verify_details_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockCryptoClientStream);
 };
 
 }  // namespace net

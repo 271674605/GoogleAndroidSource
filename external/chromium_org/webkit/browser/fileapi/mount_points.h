@@ -16,6 +16,7 @@
 class GURL;
 
 namespace fileapi {
+class FileSystemMountOption;
 class FileSystemURL;
 }
 
@@ -86,7 +87,9 @@ class WEBKIT_STORAGE_BROWSER_EXPORT MountPoints {
   virtual bool CrackVirtualPath(const base::FilePath& virtual_path,
                                 std::string* mount_name,
                                 FileSystemType* type,
-                                base::FilePath* path) const = 0;
+                                std::string* cracked_id,
+                                base::FilePath* path,
+                                FileSystemMountOption* mount_option) const = 0;
 
  protected:
   friend class FileSystemContext;

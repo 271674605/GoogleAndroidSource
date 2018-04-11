@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_OBJECT_OBJECT_BUILDER_H
-#define MCLD_OBJECT_OBJECT_BUILDER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_OBJECT_OBJECTBUILDER_H
+#define MCLD_OBJECT_OBJECTBUILDER_H
 #include <mcld/LD/LDFileFormat.h>
 #include <mcld/LD/EhFrame.h>
 
@@ -20,13 +17,11 @@
 
 namespace mcld {
 
-class LinkerConfig;
 class Module;
 class LDSection;
 class SectionData;
-class RelocData;
 class Fragment;
-class Relocation;
+class Input;
 
 /** \class ObjectBuilder
  *  \brief ObjectBuilder recieve ObjectAction and build the mcld::Module.
@@ -34,8 +29,7 @@ class Relocation;
 class ObjectBuilder
 {
 public:
-  ObjectBuilder(const LinkerConfig& pConfig,
-                Module& pTheModule);
+  ObjectBuilder(Module& pTheModule);
 
 /// @}
 /// @name Section Methods
@@ -61,19 +55,23 @@ public:
 
   /// MergeSection - merge the pInput section to mcld::Module.
   /// This function moves all fragments in pInputSection to the corresponding
-  /// output section of mcld::Module. 
+  /// output section of mcld::Module.
   ///
   /// @see SectionMap
   /// @param [in] pInputSection The merged input section.
   /// @return The merged output section. If the corresponding output sections
   /// is not defined, return NULL.
-  LDSection* MergeSection(LDSection& pInputSection);
+  LDSection* MergeSection(const Input& pInputFile, LDSection& pInputSection);
 
   /// MoveSectionData - move the fragment of pFrom to pTo section data.
   static bool MoveSectionData(SectionData& pFrom, SectionData& pTo);
 
   /// UpdateSectionAlign - update alignment for input section
   static void UpdateSectionAlign(LDSection& pTo, const LDSection& pFrom);
+
+  /// UpdateSectionAlign - update alignment for the section
+  static void UpdateSectionAlign(LDSection& pSection,
+                                 uint32_t pAlignConstraint);
 
 /// @}
 /// @name Fragment Methods
@@ -93,7 +91,6 @@ public:
                                  uint32_t pAlignConstraint = 1);
 
 private:
-  const LinkerConfig& m_Config;
   Module& m_Module;
 };
 

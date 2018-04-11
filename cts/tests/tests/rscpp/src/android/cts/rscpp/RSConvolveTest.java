@@ -16,8 +16,6 @@
 
 package android.cts.rscpp;
 
-import com.android.cts.stub.R;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.test.AndroidTestCase;
@@ -33,7 +31,7 @@ public class RSConvolveTest extends RSCppTest {
     private final int X = 1024;
     private final int Y = 1024;
 
-    native boolean convolveTest(int X, int Y, byte[] input, byte[] output, float[] coeffs, boolean is3x3);
+    native boolean convolveTest(String path, int X, int Y, byte[] input, byte[] output, float[] coeffs, boolean is3x3);
     public void testConvolve3x3() {
         int[] baseAlloc = new int[X * Y];
         float[] coeffs = new float[9];
@@ -48,7 +46,6 @@ public class RSConvolveTest extends RSCppTest {
         coeffs[8] =  .5f;
 
         RSUtils.genRandom(0x1DEFFD0, 255, 1, -128, baseAlloc);
-        RenderScript mRS = RenderScript.create(getContext());
         byte[] byteAlloc = new byte[X * Y];
         for (int i = 0; i < X * Y; i++) {
             byteAlloc[i] = (byte)baseAlloc[i];
@@ -66,13 +63,12 @@ public class RSConvolveTest extends RSCppTest {
         convolve.forEach(rsOutput);
 
         byte[] nativeByteAlloc = new byte[X * Y];
-        convolveTest(X, Y, byteAlloc, nativeByteAlloc, coeffs, true);
-        rsOutput.copyTo(byteAlloc);
+        convolveTest(this.getContext().getCacheDir().toString(), X, Y, byteAlloc, nativeByteAlloc, coeffs, true);
 
-        for (int i = 0; i < X * Y; i++) {
-            assertTrue(byteAlloc[i] == nativeByteAlloc[i]);
-        }
-
+        Allocation rsCppOutput = Allocation.createTyped(mRS, build.create());
+        rsCppOutput.copyFromUnchecked(nativeByteAlloc);
+        mVerify.invoke_verify(rsOutput, rsCppOutput, rsInput);
+        checkForErrors();
     }
 
     public void testConvolve5x5() {
@@ -124,12 +120,12 @@ public class RSConvolveTest extends RSCppTest {
         convolve.forEach(rsOutput);
 
         byte[] nativeByteAlloc = new byte[X * Y];
-        convolveTest(X, Y, byteAlloc, nativeByteAlloc, coeffs, false);
-        rsOutput.copyTo(byteAlloc);
+        convolveTest(this.getContext().getCacheDir().toString(), X, Y, byteAlloc, nativeByteAlloc, coeffs, false);
 
-        for (int i = 0; i < X * Y; i++) {
-            assertTrue(byteAlloc[i] == nativeByteAlloc[i]);
-        }
+        Allocation rsCppOutput = Allocation.createTyped(mRS, build.create());
+        rsCppOutput.copyFromUnchecked(nativeByteAlloc);
+        mVerify.invoke_verify(rsOutput, rsCppOutput, rsInput);
+        checkForErrors();
 
     }
 

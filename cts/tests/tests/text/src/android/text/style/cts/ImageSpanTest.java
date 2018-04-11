@@ -16,10 +16,11 @@
 
 package android.text.style.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.text.R;
 
 
 import android.content.Context;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -27,7 +28,6 @@ import android.net.Uri;
 import android.test.AndroidTestCase;
 import android.text.style.DynamicDrawableSpan;
 import android.text.style.ImageSpan;
-import android.widget.cts.WidgetTestUtils;
 
 public class ImageSpanTest extends AndroidTestCase {
     public void testConstructor() {

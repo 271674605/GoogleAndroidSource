@@ -16,9 +16,9 @@
 #define LLVM_CLANG_BASIC_TARGETINFO_H
 
 #include "clang/Basic/AddressSpaces.h"
-#include "clang/Basic/TargetCXXABI.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/Specifiers.h"
+#include "clang/Basic/TargetCXXABI.h"
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Basic/VersionTuple.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
@@ -47,7 +47,7 @@ namespace Builtin { struct Info; }
 /// \brief Exposes information about the current target.
 ///
 class TargetInfo : public RefCountedBase<TargetInfo> {
-  IntrusiveRefCntPtr<TargetOptions> TargetOpts;
+  std::shared_ptr<TargetOptions> TargetOpts;
   llvm::Triple Triple;
 protected:
   // Target values set by the ctor of the actual target implementation.  Default
@@ -94,8 +94,9 @@ public:
   /// \param Opts - The options to use to initialize the target. The target may
   /// modify the options to canonicalize the target feature information to match
   /// what the backend expects.
-  static TargetInfo* CreateTargetInfo(DiagnosticsEngine &Diags,
-                                      TargetOptions *Opts);
+  static TargetInfo *
+  CreateTargetInfo(DiagnosticsEngine &Diags,
+                   const std::shared_ptr<TargetOptions> &Opts);
 
   virtual ~TargetInfo();
 
@@ -105,13 +106,11 @@ public:
     return *TargetOpts; 
   }
 
-  void setTargetOpts(TargetOptions *TargetOpts) {
-    this->TargetOpts = TargetOpts;
-  }
-
   ///===---- Target Data Type Query Methods -------------------------------===//
   enum IntType {
     NoInt = 0,
+    SignedChar,
+    UnsignedChar,
     SignedShort,
     UnsignedShort,
     SignedInt,
@@ -123,6 +122,7 @@ public:
   };
 
   enum RealType {
+    NoFloat = 255,
     Float = 0,
     Double,
     LongDouble
@@ -199,6 +199,10 @@ protected:
   /// zero length bitfield, regardless of the zero length bitfield type.
   unsigned ZeroLengthBitfieldBoundary;
 
+  /// \brief Specify if mangling based on address space map should be used or
+  /// not for language specific address spaces
+  bool UseAddrSpaceMapMangling;
+
 public:
   IntType getSizeType() const { return SizeType; }
   IntType getIntMaxType() const { return IntMaxType; }
@@ -207,6 +211,9 @@ public:
     return AddrSpace == 0 ? PtrDiffType : getPtrDiffTypeV(AddrSpace);
   }
   IntType getIntPtrType() const { return IntPtrType; }
+  IntType getUIntPtrType() const {
+    return getIntTypeByWidth(getTypeWidth(IntPtrType), false);
+  }
   IntType getWCharType() const { return WCharType; }
   IntType getWIntType() const { return WIntType; }
   IntType getChar16Type() const { return Char16Type; }
@@ -219,6 +226,15 @@ public:
   ///
   /// For example, SignedInt -> getIntWidth().
   unsigned getTypeWidth(IntType T) const;
+
+  /// \brief Return integer type with specified width.
+  IntType getIntTypeByWidth(unsigned BitWidth, bool IsSigned) const;
+
+  /// \brief Return the smallest integer type with at least the specified width.
+  IntType getLeastIntTypeByWidth(unsigned BitWidth, bool IsSigned) const;
+
+  /// \brief Return floating point type with specified width.
+  RealType getRealTypeByWidth(unsigned BitWidth) const;
 
   /// \brief Return the alignment (in bits) of the specified integer type enum.
   ///
@@ -270,7 +286,7 @@ public:
   unsigned getLongLongAlign() const { return LongLongAlign; }
 
   /// \brief Determine whether the __int128 type is supported on this target.
-  bool hasInt128Type() const { return getPointerWidth(0) >= 64; } // FIXME
+  virtual bool hasInt128Type() const { return getPointerWidth(0) >= 64; } // FIXME
 
   /// \brief Return the alignment that is suitable for storing any
   /// object with a fundamental alignment requirement.
@@ -345,11 +361,11 @@ public:
   unsigned getUnwindWordWidth() const { return getPointerWidth(0); }
 
   /// \brief Return the "preferred" register width on this target.
-  uint64_t getRegisterWidth() const {
+  unsigned getRegisterWidth() const {
     // Currently we assume the register width on the target matches the pointer
     // width, we can introduce a new variable for this if/when some target wants
     // it.
-    return LongWidth; 
+    return PointerWidth;
   }
 
   /// \brief Returns the default value of the __USER_LABEL_PREFIX__ macro,
@@ -420,6 +436,12 @@ public:
   /// of Objective-C message passing on this target.
   bool useObjCFP2RetForComplexLongDouble() const {
     return ComplexLongDoubleUsesFP2Ret;
+  }
+
+  /// \brief Specify if mangling based on address space map should be used or
+  /// not for language specific address spaces
+  bool useAddressSpaceMapMangling() const {
+    return UseAddrSpaceMapMangling;
   }
 
   ///===---- Other target property query methods --------------------------===//
@@ -560,6 +582,7 @@ public:
   }
 
   const char *getTargetDescription() const {
+    assert(DescriptionString);
     return DescriptionString;
   }
 
@@ -585,24 +608,6 @@ public:
   /// either; the entire thing is pretty badly mangled.
   virtual bool hasProtectedVisibility() const { return true; }
 
-  /// \brief Return the section to use for CFString literals, or 0 if no
-  /// special section is used.
-  virtual const char *getCFStringSection() const {
-    return "__DATA,__cfstring";
-  }
-
-  /// \brief Return the section to use for NSString literals, or 0 if no
-  /// special section is used.
-  virtual const char *getNSStringSection() const {
-    return "__OBJC,__cstring_object,regular,no_dead_strip";
-  }
-
-  /// \brief Return the section to use for NSString literals, or 0 if no
-  /// special section is used (NonFragile ABI).
-  virtual const char *getNSStringNonFragileABISection() const {
-    return "__DATA, __objc_stringobj, regular, no_dead_strip";
-  }
-
   /// \brief An optional hook that targets can implement to perform semantic
   /// checking on attribute((section("foo"))) specifiers.
   ///
@@ -622,7 +627,7 @@ public:
   ///
   /// Apply changes to the target information with respect to certain
   /// language options which change the target configuration.
-  virtual void setForcedLangOptions(LangOptions &Opts);
+  virtual void adjust(const LangOptions &Opts);
 
   /// \brief Get the default set of target features for the CPU;
   /// this should include all legal feature strings on the target.
@@ -630,9 +635,7 @@ public:
   }
 
   /// \brief Get the ABI currently in use.
-  virtual const char *getABI() const {
-    return "";
-  }
+  virtual StringRef getABI() const { return StringRef(); }
 
   /// \brief Get the C++ ABI currently in use.
   TargetCXXABI getCXXABI() const {
@@ -650,6 +653,13 @@ public:
   ///
   /// \return False on error (invalid ABI name).
   virtual bool setABI(const std::string &Name) {
+    return false;
+  }
+
+  /// \brief Use the specified unit for FP math.
+  ///
+  /// \return False on error (invalid unit name).
+  virtual bool setFPMath(StringRef Name) {
     return false;
   }
 
@@ -672,12 +682,10 @@ public:
 
   /// \brief Enable or disable a specific target feature;
   /// the feature name must be valid.
-  ///
-  /// \return False on error (invalid feature name).
-  virtual bool setFeatureEnabled(llvm::StringMap<bool> &Features,
+  virtual void setFeatureEnabled(llvm::StringMap<bool> &Features,
                                  StringRef Name,
                                  bool Enabled) const {
-    return false;
+    Features[Name] = Enabled;
   }
 
   /// \brief Perform initialization based on the user configured
@@ -687,7 +695,11 @@ public:
   ///
   /// The target may modify the features list, to change which options are
   /// passed onwards to the backend.
-  virtual void HandleTargetFeatures(std::vector<std::string> &Features) {
+  ///
+  /// \return  False on error.
+  virtual bool handleTargetFeatures(std::vector<std::string> &Features,
+                                    DiagnosticsEngine &Diags) {
+    return true;
   }
 
   /// \brief Determine whether the given target has the given feature.
@@ -724,7 +736,7 @@ public:
 
   /// \brief Return the section to use for C++ static initialization functions.
   virtual const char *getStaticInitSectionSpecifier() const {
-    return 0;
+    return nullptr;
   }
 
   const LangAS::Map &getAddressSpaceMap() const {
@@ -770,7 +782,6 @@ public:
       default:
         return CCCR_Warning;
       case CC_C:
-      case CC_Default:
         return CCCR_OK;
     }
   }
@@ -790,8 +801,8 @@ protected:
   virtual void getGCCRegAliases(const GCCRegAlias *&Aliases,
                                 unsigned &NumAliases) const = 0;
   virtual void getGCCAddlRegNames(const AddlRegName *&Addl,
-				  unsigned &NumAddl) const {
-    Addl = 0;
+                                  unsigned &NumAddl) const {
+    Addl = nullptr;
     NumAddl = 0;
   }
   virtual bool validateAsmConstraint(const char *&Name,

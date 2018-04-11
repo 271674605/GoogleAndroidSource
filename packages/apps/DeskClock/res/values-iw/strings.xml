@@ -19,7 +19,6 @@
     <string name="app_label" msgid="6674495003718166674">"שעון"</string>
     <string name="alarm_list_title" msgid="7589940465292950600">"התראות"</string>
     <string name="add_alarm" msgid="5976616107390962899">"הוסף צלצול"</string>
-    <string name="alarm_timeline_title_text" msgid="595912293949219821">"ההתראות הבאות"</string>
     <string name="menu_desk_clock" msgid="3241995064554071588">"שעון שולחני"</string>
     <string name="menu_edit_alarm" msgid="7204602994918829751">"ערוך התראה"</string>
     <string name="delete_alarm" msgid="3457780990646206817">"מחק התראה"</string>
@@ -36,12 +35,25 @@
     <string name="alert" msgid="6506982899651975645">"צלצול שעון מעורר"</string>
     <string name="ringtone" msgid="9110746249688559579">"רינגטון"</string>
     <string name="time" msgid="8067216534232296518">"שעה"</string>
+    <string name="alarm_tomorrow" msgid="131356848787643420">"מחר"</string>
+    <string name="alarm_today" msgid="7873594221106531654">"היום"</string>
+    <string name="alarm_alert_wake_up" msgid="6790780716498252583">"תתעורר!"</string>
+    <string name="alarm_alert_off_action_text" msgid="2459925305288819812">"כבוי"</string>
     <string name="alarm_alert_dismiss_text" msgid="4942914605480888820">"דחה"</string>
     <string name="alarm_alert_dismiss_now_text" msgid="3272183025444682500">"סגור כעת"</string>
     <string name="alarm_missed_title" msgid="3828345099754063392">"החמצת התראה"</string>
     <string name="alarm_missed_text" msgid="6585658367289194023">"<xliff:g id="ALARM_TIME">%s</xliff:g> ‏- <xliff:g id="ALARM_LABEL">%s</xliff:g>"</string>
+    <string name="alarm_alert_snoozed_text" msgid="7064642998528766113">"מושהית"</string>
+  <plurals name="alarm_alert_snooze_duration">
+    <item quantity="one" msgid="9092917312369131464">"דקה אחת"</item>
+    <item quantity="other" msgid="6731274475422132958">"<xliff:g id="NUMBER">%d</xliff:g> דקות"</item>
+  </plurals>
+    <string name="alarm_alert_off_text" msgid="4472073417593915002">"ההתראה כבויה"</string>
     <string name="alarm_alert_snooze_text" msgid="1774416052207651584">"נודניק"</string>
-    <string name="alarm_alert_snooze_set" msgid="656470966696912087">"עובר למצב נמנום למשך <xliff:g id="MINUTES">%d</xliff:g> דקות."</string>
+  <plurals name="alarm_alert_snooze_set">
+    <item quantity="one" msgid="7884410398338611019">"עובר למצב נודניק למשך דקה."</item>
+    <item quantity="other" msgid="7377899473014259727">"עובר למצב נודניק למשך <xliff:g id="MINUTES">%d</xliff:g> דקות."</item>
+  </plurals>
     <string name="alarm_alert_snooze_until" msgid="6958013659168344550">"מצב נמנום עד <xliff:g id="TIME">%s</xliff:g>"</string>
     <string name="alarm_alert_predismiss_title" msgid="5723945586913705445">"התראה קרובה"</string>
     <string name="missed_alarm_has_been_deleted" msgid="5295473204045979335">"ההתראה שהחמצת נמחקה"</string>
@@ -56,7 +68,7 @@
     <item msgid="6002066367368421848">"ההתראה הוגדרה לעוד <xliff:g id="DAYS">%1$s</xliff:g> מעכשיו."</item>
     <item msgid="8824719306247973774">"ההתראה הוגדרה לעוד <xliff:g id="HOURS">%2$s</xliff:g> מעכשיו."</item>
     <item msgid="8182406852935468862">"ההתראה הוגדרה לעוד <xliff:g id="DAYS">%1$s</xliff:g> ו-<xliff:g id="HOURS">%2$s</xliff:g> מעכשיו."</item>
-    <item msgid="2532279224777213194">"הוגדרה התראה לעוד <xliff:g id="MINUTES">%3$s</xliff:g> דקות."</item>
+    <item msgid="2532279224777213194">"הוגדרה התראה לעוד <xliff:g id="MINUTES">%3$s</xliff:g> מעכשיו."</item>
     <item msgid="5936557894247187717">"ההתראה הוגדרה לעוד <xliff:g id="DAYS">%1$s</xliff:g> ו-<xliff:g id="MINUTES">%3$s</xliff:g> מעכשיו."</item>
     <item msgid="9115697840826129603">"ההתראה הוגדרה לעוד <xliff:g id="HOURS">%2$s</xliff:g> ו-<xliff:g id="MINUTES">%3$s</xliff:g> מעכשיו."</item>
     <item msgid="2332583385137381060">"ההתראה הוגדרה לעוד <xliff:g id="DAYS">%1$s</xliff:g>, <xliff:g id="HOURS">%2$s</xliff:g> ו-<xliff:g id="MINUTES">%3$s</xliff:g> מעכשיו."</item>
@@ -121,7 +133,7 @@
     <string name="ringtone_description" msgid="7580922112921069925">"רינגטון"</string>
     <string name="battery_charging_level" msgid="5251483622085889693">"<xliff:g id="NUMBER">%d</xliff:g><xliff:g id="PERCENT">%%</xliff:g>"</string>
     <string name="weather_fetch_failure" msgid="3425804832021006835">"לא זמינים כרגע נתונים על מזג האוויר."</string>
-    <string name="alarm_klaxon_service_desc" msgid="2147506334302260256">"שירות השמעת צלילים עבור התראות נקבע ב-Clock."</string>
+    <string name="alarm_klaxon_service_desc" msgid="2147506334302260256">"‏שירות השמעת צלילים עבור התראות נקבע ב-Clock."</string>
     <string name="loading_ringtone" msgid="6523322777415268044">"טוען צלצול..."</string>
     <string name="timer_ring_service_desc" msgid="2620214305660322415">"שירות השמעת צלילים עבור טיימרים שהוגדרו ב\'שעון\'."</string>
     <string name="control_set_alarm" msgid="2194676418924016327">"הגדר צלצול"</string>
@@ -131,7 +143,7 @@
     <string name="menu_timer" msgid="6459070074762877114">"טיימר"</string>
     <string name="menu_clock" msgid="5612760670606829805">"שעון"</string>
     <string name="menu_stopwatch" msgid="3396117705293574701">"שעון עצר"</string>
-    <string name="button_alarms" msgid="8016103479617020265">"התראות"</string>
+    <string name="button_alarms" msgid="3907838219512538763">"הוסף התראה"</string>
     <string name="button_cities" msgid="4555761857494501363">"ערים"</string>
     <string name="button_menu" msgid="6050484561842120282">"אפשרויות נוספות"</string>
     <string name="menu_item_settings" msgid="1413723516369078665">"הגדרות"</string>
@@ -179,12 +191,13 @@
     <string name="timer_cancel" msgid="3572868404230815644">"בטל"</string>
     <string name="timer_times_up" msgid="9190440395938519009">"הזמן נגמר"</string>
     <string name="timer_notification_label" msgid="4933184831583137249">"טיימר"</string>
+    <string name="timers_max_count_reached" msgid="9140022846793903813">"4 טיימרים לכל היותר"</string>
   <string-array name="sw_share_strings">
     <item msgid="842841032273927988">"אתה מהיר כשד משחת."</item>
     <item msgid="6332879039890727169">"תיהנה מפירות עמלך."</item>
     <item msgid="815382761274660130">"ידוע שאנדרואידים מהירים, אבל לא מהירים כמוך!"</item>
     <item msgid="7916250650982813737">"אוף."</item>
-    <item msgid="6836603904515182333">"זמני L33t."</item>
+    <item msgid="6836603904515182333">"‏זמני L33t."</item>
     <item msgid="7508085100680861631">"איזו מהירות עצומה."</item>
     <item msgid="5961245252909589573">"Let\'s do the time warp again."</item>
     <item msgid="5211891900854545940">"Just a jump to the left."</item>
@@ -197,7 +210,7 @@
   </plurals>
     <string name="home_label" msgid="4436139365695453870">"מקומי"</string>
     <string name="cities_activity_title" msgid="8552462751129256730">"ערים"</string>
-    <string name="clock_settings" msgid="8887845806151785393">"שעון"</string>
+    <string name="clock_settings" msgid="8317286807280600391">"שעון"</string>
     <string name="clock_style" msgid="2265011060429742344">"סגנון"</string>
   <string-array name="clock_style_entries">
     <item msgid="917900462224167608">"אנלוגי"</item>
@@ -300,20 +313,17 @@
     <item msgid="5911600083231840181">"טונגה"</item>
     <item msgid="5176858645450908751">"ג\'אקארטה"</item>
   </string-array>
-    <string name="alarm_settings" msgid="6049627772103646753">"התראות"</string>
-    <string name="see_all" msgid="775983396630163739">"הצג הכל…"</string>
+    <string name="alarm_settings" msgid="2947147071388290814">"התראות"</string>
     <string name="stopwatch_service_desc" msgid="8416624630388063996">"שירות שעון עצר להפעלת ההתראה."</string>
     <string name="swn_stopped" msgid="783124901663086172">"נעצר"</string>
-    <string name="description_direction_right" msgid="1615911557926085934">"החלק ימינה כדי לסגור"</string>
-    <string name="description_direction_left" msgid="6328816971226781776">"החלק שמאלה כדי לעבור למצב נודניק"</string>
-    <string name="description_direction_up" msgid="7875287578324520904">"החלק מעלה כדי לסגור"</string>
-    <string name="description_direction_down" msgid="8240473964024874053">"החלק מטה כדי לעבור למצב נודניק"</string>
+    <string name="description_direction_right" msgid="5709209043267548985">"החלק ימינה כדי לבטל"</string>
+    <string name="description_direction_left" msgid="7448141043674998679">"החלק שמאלה כדי להפעיל נודניק"</string>
     <string name="timer_stopped" msgid="2730331837832462008">"טיימר נעצר"</string>
     <string name="timers_stopped" msgid="2393640808691864520">"<xliff:g id="NUMBER">%d</xliff:g> טיימרים נעצרו"</string>
     <string name="all_timers_stopped_notif" msgid="278532320068394600">"גע כדי לראות את הטיימרים שלך"</string>
     <string name="timers_in_use" msgid="5570729467344408506">"<xliff:g id="NUMBER">%d</xliff:g> טיימרים"</string>
     <string name="next_timer_notif" msgid="6136454740115613653">"הטיימר הבא: <xliff:g id="TIME_REMAINING">%s</xliff:g>"</string>
-    <string name="screensaver_settings" msgid="7013450738357352801">"הגדרות Dream"</string>
+    <string name="screensaver_settings" msgid="7013450738357352801">"‏הגדרות Dream"</string>
     <string name="night_mode_title" msgid="5983813889469616299">"מצב לילה"</string>
     <string name="night_mode_summary" msgid="1017350187324162631">"תצוגה עמומה מאוד (לחדרים חשוכים)"</string>
     <string name="expand_alarm" msgid="7392616528943305020">"הרחב התראה"</string>
@@ -334,5 +344,6 @@
     <string name="city_delete_confirmation" msgid="1783441538785676299">"האם להסיר את העיר הזאת?"</string>
     <string name="digital_gadget" msgid="2326954556720571358">"שעון דיגיטלי"</string>
     <string name="no_alarms" msgid="6429431324842022917">"ללא התראות"</string>
+    <string name="no_alarms_set" msgid="4887558279496044764">"לא הוגדרו התראות"</string>
     <string name="no_upcoming_alarms" msgid="2889840988069436254">"אין התראות קרובות"</string>
 </resources>

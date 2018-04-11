@@ -36,12 +36,13 @@
 #define CERES_PUBLIC_ITERATION_CALLBACK_H_
 
 #include "ceres/types.h"
+#include "ceres/internal/disable_warnings.h"
 
 namespace ceres {
 
 // This struct describes the state of the optimizer after each
 // iteration of the minimization.
-struct IterationSummary {
+struct CERES_EXPORT IterationSummary {
   IterationSummary()
       : iteration(0),
         step_is_valid(false),
@@ -50,6 +51,7 @@ struct IterationSummary {
         cost(0.0),
         cost_change(0.0),
         gradient_max_norm(0.0),
+        gradient_norm(0.0),
         step_norm(0.0),
         eta(0.0),
         step_size(0.0),
@@ -99,6 +101,9 @@ struct IterationSummary {
 
   // Infinity norm of the gradient vector.
   double gradient_max_norm;
+
+  // 2-norm of the gradient vector.
+  double gradient_norm;
 
   // 2-norm of the size of the step computed by the optimization
   // algorithm.
@@ -207,12 +212,14 @@ struct IterationSummary {
 //     const bool log_to_stdout_;
 //   };
 //
-class IterationCallback {
+class CERES_EXPORT IterationCallback {
  public:
   virtual ~IterationCallback() {}
   virtual CallbackReturnType operator()(const IterationSummary& summary) = 0;
 };
 
 }  // namespace ceres
+
+#include "ceres/internal/reenable_warnings.h"
 
 #endif  // CERES_PUBLIC_ITERATION_CALLBACK_H_

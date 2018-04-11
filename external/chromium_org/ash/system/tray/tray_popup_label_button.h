@@ -11,7 +11,6 @@
 #include "ui/views/controls/button/label_button.h"
 
 namespace ash {
-namespace internal {
 
 // A label button with custom alignment, border and focus border.
 class TrayPopupLabelButton : public views::LabelButton {
@@ -21,13 +20,9 @@ class TrayPopupLabelButton : public views::LabelButton {
   virtual ~TrayPopupLabelButton();
 
  private:
-  // Overridden from views::LabelButton:
-  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
-
   DISALLOW_COPY_AND_ASSIGN(TrayPopupLabelButton);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_TRAY_TRAY_POPUP_LABEL_BUTTON_H_

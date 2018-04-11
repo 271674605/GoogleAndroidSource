@@ -5,36 +5,43 @@
 #ifndef CONTENT_RENDERER_MEDIA_RTC_PEER_CONNECTION_HANDLER_H_
 #define CONTENT_RENDERER_MEDIA_RTC_PEER_CONNECTION_HANDLER_H_
 
+#include <map>
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
-#include "content/renderer/media/peer_connection_handler_base.h"
+#include "content/renderer/media/webrtc/media_stream_track_metrics.h"
 #include "third_party/WebKit/public/platform/WebRTCPeerConnectionHandler.h"
 #include "third_party/WebKit/public/platform/WebRTCStatsRequest.h"
 #include "third_party/WebKit/public/platform/WebRTCStatsResponse.h"
 
-namespace WebKit {
+namespace blink {
 class WebFrame;
 class WebRTCDataChannelHandler;
 }
 
 namespace content {
 
+class PeerConnectionDependencyFactory;
 class PeerConnectionTracker;
+class RemoteMediaStreamImpl;
+class WebRtcMediaStreamAdapter;
 
-// Mockable wrapper for WebKit::WebRTCStatsResponse
+// Mockable wrapper for blink::WebRTCStatsResponse
 class CONTENT_EXPORT LocalRTCStatsResponse
     : public NON_EXPORTED_BASE(talk_base::RefCountInterface) {
  public:
-  explicit LocalRTCStatsResponse(const WebKit::WebRTCStatsResponse& impl)
+  explicit LocalRTCStatsResponse(const blink::WebRTCStatsResponse& impl)
       : impl_(impl) {
   }
 
-  virtual WebKit::WebRTCStatsResponse webKitStatsResponse() const;
-  virtual size_t addReport(WebKit::WebString type, WebKit::WebString id,
+  virtual blink::WebRTCStatsResponse webKitStatsResponse() const;
+  virtual size_t addReport(blink::WebString type, blink::WebString id,
                            double timestamp);
   virtual void addStatistic(size_t report,
-                            WebKit::WebString name, WebKit::WebString value);
+                            blink::WebString name, blink::WebString value);
 
  protected:
   virtual ~LocalRTCStatsResponse() {}
@@ -42,20 +49,19 @@ class CONTENT_EXPORT LocalRTCStatsResponse
   LocalRTCStatsResponse() {}
 
  private:
-  WebKit::WebRTCStatsResponse impl_;
+  blink::WebRTCStatsResponse impl_;
 };
 
-// Mockable wrapper for WebKit::WebRTCStatsRequest
+// Mockable wrapper for blink::WebRTCStatsRequest
 class CONTENT_EXPORT LocalRTCStatsRequest
     : public NON_EXPORTED_BASE(talk_base::RefCountInterface) {
  public:
-  explicit LocalRTCStatsRequest(WebKit::WebRTCStatsRequest impl);
+  explicit LocalRTCStatsRequest(blink::WebRTCStatsRequest impl);
   // Constructor for testing.
   LocalRTCStatsRequest();
 
   virtual bool hasSelector() const;
-  virtual WebKit::WebMediaStream stream() const;
-  virtual WebKit::WebMediaStreamTrack component() const;
+  virtual blink::WebMediaStreamTrack component() const;
   virtual void requestSucceeded(const LocalRTCStatsResponse* response);
   virtual scoped_refptr<LocalRTCStatsResponse> createResponse();
 
@@ -63,7 +69,7 @@ class CONTENT_EXPORT LocalRTCStatsRequest
   virtual ~LocalRTCStatsRequest();
 
  private:
-  WebKit::WebRTCStatsRequest impl_;
+  blink::WebRTCStatsRequest impl_;
   talk_base::scoped_refptr<LocalRTCStatsResponse> response_;
 };
 
@@ -74,63 +80,72 @@ class CONTENT_EXPORT LocalRTCStatsRequest
 // Callbacks to the webrtc::PeerConnectionObserver implementation also occur on
 // the main render thread.
 class CONTENT_EXPORT RTCPeerConnectionHandler
-    : public PeerConnectionHandlerBase,
-      NON_EXPORTED_BASE(public WebKit::WebRTCPeerConnectionHandler) {
+    : NON_EXPORTED_BASE(public blink::WebRTCPeerConnectionHandler),
+      NON_EXPORTED_BASE(public webrtc::PeerConnectionObserver) {
  public:
   RTCPeerConnectionHandler(
-      WebKit::WebRTCPeerConnectionHandlerClient* client,
-      MediaStreamDependencyFactory* dependency_factory);
+      blink::WebRTCPeerConnectionHandlerClient* client,
+      PeerConnectionDependencyFactory* dependency_factory);
   virtual ~RTCPeerConnectionHandler();
 
-  void associateWithFrame(WebKit::WebFrame* frame);
+  // Destroy all existing RTCPeerConnectionHandler objects.
+  static void DestructAllHandlers();
+
+  void associateWithFrame(blink::WebFrame* frame);
 
   // Initialize method only used for unit test.
   bool InitializeForTest(
-      const WebKit::WebRTCConfiguration& server_configuration,
-      const WebKit::WebMediaConstraints& options,
+      const blink::WebRTCConfiguration& server_configuration,
+      const blink::WebMediaConstraints& options,
       PeerConnectionTracker* peer_connection_tracker);
 
-  // WebKit::WebRTCPeerConnectionHandler implementation
+  // blink::WebRTCPeerConnectionHandler implementation
   virtual bool initialize(
-      const WebKit::WebRTCConfiguration& server_configuration,
-      const WebKit::WebMediaConstraints& options) OVERRIDE;
+      const blink::WebRTCConfiguration& server_configuration,
+      const blink::WebMediaConstraints& options) OVERRIDE;
 
   virtual void createOffer(
-      const WebKit::WebRTCSessionDescriptionRequest& request,
-      const WebKit::WebMediaConstraints& options) OVERRIDE;
+      const blink::WebRTCSessionDescriptionRequest& request,
+      const blink::WebMediaConstraints& options) OVERRIDE;
   virtual void createAnswer(
-      const WebKit::WebRTCSessionDescriptionRequest& request,
-      const WebKit::WebMediaConstraints& options) OVERRIDE;
+      const blink::WebRTCSessionDescriptionRequest& request,
+      const blink::WebMediaConstraints& options) OVERRIDE;
 
   virtual void setLocalDescription(
-      const WebKit::WebRTCVoidRequest& request,
-      const WebKit::WebRTCSessionDescription& description) OVERRIDE;
+      const blink::WebRTCVoidRequest& request,
+      const blink::WebRTCSessionDescription& description) OVERRIDE;
   virtual void setRemoteDescription(
-        const WebKit::WebRTCVoidRequest& request,
-        const WebKit::WebRTCSessionDescription& description) OVERRIDE;
+        const blink::WebRTCVoidRequest& request,
+        const blink::WebRTCSessionDescription& description) OVERRIDE;
 
-  virtual WebKit::WebRTCSessionDescription localDescription()
+  virtual blink::WebRTCSessionDescription localDescription()
       OVERRIDE;
-  virtual WebKit::WebRTCSessionDescription remoteDescription()
+  virtual blink::WebRTCSessionDescription remoteDescription()
       OVERRIDE;
+
   virtual bool updateICE(
-      const WebKit::WebRTCConfiguration& server_configuration,
-      const WebKit::WebMediaConstraints& options) OVERRIDE;
+      const blink::WebRTCConfiguration& server_configuration,
+      const blink::WebMediaConstraints& options) OVERRIDE;
   virtual bool addICECandidate(
-      const WebKit::WebRTCICECandidate& candidate) OVERRIDE;
+      const blink::WebRTCICECandidate& candidate) OVERRIDE;
+  virtual bool addICECandidate(
+      const blink::WebRTCVoidRequest& request,
+      const blink::WebRTCICECandidate& candidate) OVERRIDE;
+  virtual void OnaddICECandidateResult(const blink::WebRTCVoidRequest& request,
+                                       bool result);
 
   virtual bool addStream(
-      const WebKit::WebMediaStream& stream,
-      const WebKit::WebMediaConstraints& options) OVERRIDE;
+      const blink::WebMediaStream& stream,
+      const blink::WebMediaConstraints& options) OVERRIDE;
   virtual void removeStream(
-      const WebKit::WebMediaStream& stream) OVERRIDE;
+      const blink::WebMediaStream& stream) OVERRIDE;
   virtual void getStats(
-      const WebKit::WebRTCStatsRequest& request) OVERRIDE;
-  virtual WebKit::WebRTCDataChannelHandler* createDataChannel(
-      const WebKit::WebString& label,
-      const WebKit::WebRTCDataChannelInit& init) OVERRIDE;
-  virtual WebKit::WebRTCDTMFSenderHandler* createDTMFSender(
-      const WebKit::WebMediaStreamTrack& track) OVERRIDE;
+      const blink::WebRTCStatsRequest& request) OVERRIDE;
+  virtual blink::WebRTCDataChannelHandler* createDataChannel(
+      const blink::WebString& label,
+      const blink::WebRTCDataChannelInit& init) OVERRIDE;
+  virtual blink::WebRTCDTMFSenderHandler* createDTMFSender(
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
   virtual void stop() OVERRIDE;
 
   // webrtc::PeerConnectionObserver implementation
@@ -157,21 +172,46 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
 
   // Calls GetStats on |native_peer_connection_|.
   void GetStats(webrtc::StatsObserver* observer,
-                webrtc::MediaStreamTrackInterface* track);
+                webrtc::MediaStreamTrackInterface* track,
+                webrtc::PeerConnectionInterface::StatsOutputLevel level);
 
   PeerConnectionTracker* peer_connection_tracker();
 
+ protected:
+  webrtc::PeerConnectionInterface* native_peer_connection() {
+    return native_peer_connection_.get();
+  }
+
  private:
   webrtc::SessionDescriptionInterface* CreateNativeSessionDescription(
-      const WebKit::WebRTCSessionDescription& description,
+      const blink::WebRTCSessionDescription& description,
       webrtc::SdpParseError* error);
 
   // |client_| is a weak pointer, and is valid until stop() has returned.
-  WebKit::WebRTCPeerConnectionHandlerClient* client_;
+  blink::WebRTCPeerConnectionHandlerClient* client_;
 
-  WebKit::WebFrame* frame_;
+  // |dependency_factory_| is a raw pointer, and is valid for the lifetime of
+  // RenderThreadImpl.
+  PeerConnectionDependencyFactory* dependency_factory_;
+
+  blink::WebFrame* frame_;
+
+  ScopedVector<WebRtcMediaStreamAdapter> local_streams_;
 
   PeerConnectionTracker* peer_connection_tracker_;
+
+  MediaStreamTrackMetrics track_metrics_;
+
+  // Counter for a UMA stat reported at destruction time.
+  int num_data_channels_created_;
+
+  // |native_peer_connection_| is the libjingle native PeerConnection object.
+  scoped_refptr<webrtc::PeerConnectionInterface> native_peer_connection_;
+
+  typedef std::map<webrtc::MediaStreamInterface*,
+      content::RemoteMediaStreamImpl*> RemoteStreamMap;
+  RemoteStreamMap remote_streams_;
+  scoped_refptr<webrtc::UMAObserver> uma_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(RTCPeerConnectionHandler);
 };

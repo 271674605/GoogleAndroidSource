@@ -33,6 +33,28 @@ typedef sl_int64_t             SLAint64;          /* 64 bit signed integer   */
 typedef sl_uint64_t            SLAuint64;         /* 64 bit unsigned integer */
 
 /*---------------------------------------------------------------------------*/
+/* Android PCM Data Format                                                   */
+/*---------------------------------------------------------------------------*/
+
+/* The following pcm representations and data formats map to those in OpenSLES 1.1 */
+#define SL_ANDROID_PCM_REPRESENTATION_SIGNED_INT       ((SLuint32) 0x00000001)
+#define SL_ANDROID_PCM_REPRESENTATION_UNSIGNED_INT     ((SLuint32) 0x00000002)
+#define SL_ANDROID_PCM_REPRESENTATION_FLOAT            ((SLuint32) 0x00000003)
+
+#define SL_ANDROID_DATAFORMAT_PCM_EX    ((SLuint32) 0x00000004)
+
+typedef struct SLAndroidDataFormat_PCM_EX_ {
+    SLuint32         formatType;
+    SLuint32         numChannels;
+    SLuint32         sampleRate;
+    SLuint32         bitsPerSample;
+    SLuint32         containerSize;
+    SLuint32         channelMask;
+    SLuint32         endianness;
+    SLuint32         representation;
+} SLAndroidDataFormat_PCM_EX;
+
+/*---------------------------------------------------------------------------*/
 /* Android Effect interface                                                  */
 /*---------------------------------------------------------------------------*/
 
@@ -341,6 +363,76 @@ typedef struct SLDataLocator_AndroidBufferQueue_ {
  * MIME types required for data in Android Buffer Queues
  */
 #define SL_ANDROID_MIME_AACADTS            ((SLchar *) "audio/vnd.android.aac-adts")
+
+/*---------------------------------------------------------------------------*/
+/* Acoustic Echo Cancellation (AEC) Interface                                */
+/* --------------------------------------------------------------------------*/
+extern SL_API const SLInterfaceID SL_IID_ANDROIDACOUSTICECHOCANCELLATION;
+
+struct SLAndroidAcousticEchoCancellationItf_;
+typedef const struct SLAndroidAcousticEchoCancellationItf_ * const *
+        SLAndroidAcousticEchoCancellationItf;
+
+struct SLAndroidAcousticEchoCancellationItf_ {
+    SLresult (*SetEnabled)(
+        SLAndroidAcousticEchoCancellationItf self,
+        SLboolean enabled
+    );
+    SLresult (*IsEnabled)(
+        SLAndroidAcousticEchoCancellationItf self,
+        SLboolean *pEnabled
+    );
+    SLresult (*IsAvailable)(
+        SLAndroidAcousticEchoCancellationItf self,
+        SLboolean *pEnabled
+    );
+};
+
+/*---------------------------------------------------------------------------*/
+/* Automatic Gain Control (ACC) Interface                                    */
+/* --------------------------------------------------------------------------*/
+extern SL_API const SLInterfaceID SL_IID_ANDROIDAUTOMATICGAINCONTROL;
+
+struct SLAndroidAutomaticGainControlItf_;
+typedef const struct SLAndroidAutomaticGainControlItf_ * const * SLAndroidAutomaticGainControlItf;
+
+struct SLAndroidAutomaticGainControlItf_ {
+    SLresult (*SetEnabled)(
+        SLAndroidAutomaticGainControlItf self,
+        SLboolean enabled
+    );
+    SLresult (*IsEnabled)(
+        SLAndroidAutomaticGainControlItf self,
+        SLboolean *pEnabled
+    );
+    SLresult (*IsAvailable)(
+        SLAndroidAutomaticGainControlItf self,
+        SLboolean *pEnabled
+    );
+};
+
+/*---------------------------------------------------------------------------*/
+/* Noise Suppression Interface                                               */
+/* --------------------------------------------------------------------------*/
+extern SL_API const SLInterfaceID SL_IID_ANDROIDNOISESUPPRESSION;
+
+struct SLAndroidNoiseSuppressionItf_;
+typedef const struct SLAndroidNoiseSuppressionItf_ * const * SLAndroidNoiseSuppressionItf;
+
+struct SLAndroidNoiseSuppressionItf_ {
+    SLresult (*SetEnabled)(
+        SLAndroidNoiseSuppressionItf self,
+        SLboolean enabled
+    );
+    SLresult (*IsEnabled)(
+        SLAndroidNoiseSuppressionItf self,
+        SLboolean *pEnabled
+    );
+    SLresult (*IsAvailable)(
+        SLAndroidNoiseSuppressionItf self,
+        SLboolean *pEnabled
+    );
+};
 
 #ifdef __cplusplus
 }

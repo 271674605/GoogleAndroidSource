@@ -21,11 +21,13 @@ import android.app.Dialog;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.support.annotation.LayoutRes;
 import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
+import android.view.View;
 
 import com.android.mail.ConversationListContext;
 import com.android.mail.browse.ConversationCursor.ConversationListener;
@@ -59,10 +61,9 @@ import com.android.mail.ui.ViewMode.ModeChangeListener;
 public interface ActivityController extends LayoutListener,
         ModeChangeListener, ConversationListCallbacks,
         FolderChangeListener, ConversationSetObserver, ConversationListener, FolderSelector,
-        HelpCallback, UndoListener,
-        ConversationUpdater, ErrorListener, FolderController, AccountController,
+        UndoListener, ConversationUpdater, ErrorListener, FolderController, AccountController,
         ConversationPositionTracker.Callbacks, ConversationListFooterView.FooterViewClickListener,
-        RecentFolderController, UpOrBackController, FragmentLauncher {
+        RecentFolderController, FragmentLauncher, KeyboardNavigationController {
 
     // As far as possible, the methods here that correspond to Activity lifecycle have the same name
     // as their counterpart in the Activity lifecycle.
@@ -325,5 +326,15 @@ public interface ActivityController extends LayoutListener,
      * Currently this is used for when the drawer is open to hide certain
      * items that are not applicable while the drawer is open.
      */
-    public boolean shouldHideMenuItems();
+    boolean shouldHideMenuItems();
+
+    DrawerController getDrawerController();
+
+    /**
+     * Called to determine the layout resource to use for the activity's content view.
+     * @return Resource ID
+     */
+    @LayoutRes int getContentViewResource();
+
+    View.OnClickListener getNavigationViewClickListener();
 }

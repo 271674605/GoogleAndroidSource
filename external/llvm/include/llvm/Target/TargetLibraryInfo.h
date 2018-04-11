@@ -13,6 +13,17 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Pass.h"
 
+// BEGIN ANDROID-SPECIFIC
+#ifdef WIN32
+#ifdef fseeko
+#undef fseeko
+#endif
+#ifdef ftello
+#undef ftello
+#endif
+#endif  // WIN32
+// END ANDROID-SPECIFIC
+
 namespace llvm {
   class Triple;
 
@@ -46,6 +57,10 @@ namespace llvm {
       Znwm,
       /// void *new(unsigned long, nothrow);
       ZnwmRKSt9nothrow_t,
+      /// double __cospi(double x);
+      cospi,
+      /// float __cospif(float x);
+      cospif,
       /// int __cxa_atexit(void (*f)(void *), void *p, void *d);
       cxa_atexit,
       /// void __cxa_guard_abort(guard_t *guard);
@@ -61,6 +76,14 @@ namespace llvm {
       dunder_isoc99_sscanf,
       /// void *__memcpy_chk(void *s1, const void *s2, size_t n, size_t s1size);
       memcpy_chk,
+      /// double __sincospi_stret(double x);
+      sincospi_stret,
+      /// float __sincospif_stret(float x);
+      sincospif_stret,
+      /// double __sinpi(double x);
+      sinpi,
+      /// float __sinpif(float x);
+      sinpif,
       /// double __sqrt_finite(double x);
       sqrt_finite,
       /// float __sqrt_finite(float x);
@@ -239,6 +262,18 @@ namespace llvm {
       floorf,
       /// long double floorl(long double x);
       floorl,
+      /// double fmax(double x, double y);
+      fmax,
+      /// float fmaxf(float x, float y);
+      fmaxf,
+      /// long double fmaxl(long double x, long double y);
+      fmaxl,
+      /// double fmin(double x, double y);
+      fmin,
+      /// float fminf(float x, float y);
+      fminf,
+      /// long double fminl(long double x, long double y);
+      fminl,
       /// double fmod(double x, double y);
       fmod,
       /// float fmodf(float x, float y);
@@ -328,6 +363,12 @@ namespace llvm {
       labs,
       /// int lchown(const char *path, uid_t owner, gid_t group);
       lchown,
+      /// double ldexp(double x, int n);
+      ldexp,
+      /// float ldexpf(float x, int n);
+      ldexpf,
+      /// long double ldexpl(long double x, int n);
+      ldexpl,
       /// long long int llabs(long long int j);
       llabs,
       /// double log(double x);
@@ -691,14 +732,19 @@ public:
     case LibFunc::sqrt:      case LibFunc::sqrtf:      case LibFunc::sqrtl:
     case LibFunc::sqrt_finite: case LibFunc::sqrtf_finite:
                                                   case LibFunc::sqrtl_finite:
+    case LibFunc::fmax:      case LibFunc::fmaxf:      case LibFunc::fmaxl:
+    case LibFunc::fmin:      case LibFunc::fminf:      case LibFunc::fminl:
     case LibFunc::floor:     case LibFunc::floorf:     case LibFunc::floorl:
     case LibFunc::nearbyint: case LibFunc::nearbyintf: case LibFunc::nearbyintl:
     case LibFunc::ceil:      case LibFunc::ceilf:      case LibFunc::ceill:
     case LibFunc::rint:      case LibFunc::rintf:      case LibFunc::rintl:
+    case LibFunc::round:     case LibFunc::roundf:     case LibFunc::roundl:
     case LibFunc::trunc:     case LibFunc::truncf:     case LibFunc::truncl:
     case LibFunc::log2:      case LibFunc::log2f:      case LibFunc::log2l:
     case LibFunc::exp2:      case LibFunc::exp2f:      case LibFunc::exp2l:
-    case LibFunc::memcmp:
+    case LibFunc::memcmp:    case LibFunc::strcmp:     case LibFunc::strcpy:
+    case LibFunc::stpcpy:    case LibFunc::strlen:     case LibFunc::strnlen:
+    case LibFunc::memchr:
       return true;
     }
     return false;

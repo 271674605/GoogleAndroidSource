@@ -16,8 +16,11 @@
 
 package android.webkit.cts;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.cts.util.EvaluateJsResultPollingCheck;
+import android.cts.util.NullWebViewUtils;
 import android.cts.util.PollingCheck;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
@@ -27,8 +30,6 @@ import android.graphics.Color;
 import android.graphics.Picture;
 import android.graphics.Rect;
 import android.net.Uri;
-import android.net.http.SslCertificate;
-import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.Handler;
@@ -56,7 +57,6 @@ import android.webkit.ConsoleMessage;
 import android.webkit.CookieSyncManager;
 import android.webkit.DownloadListener;
 import android.webkit.JavascriptInterface;
-import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
@@ -73,23 +73,37 @@ import android.widget.LinearLayout;
 
 import junit.framework.Assert;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
 import java.util.Collections;
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.http.Header;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpRequest;
+import org.apache.http.util.EncodingUtils;
+import org.apache.http.util.EntityUtils;
 
-public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubActivity> {
-    private static final String LOGTAG = "WebViewTest";
+public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewCtsActivity> {
+    public static final long TEST_TIMEOUT = 20000L;
     private static final int INITIAL_PROGRESS = 100;
-    private static long TEST_TIMEOUT = 20000L;
     private static final String X_REQUESTED_WITH = "X-Requested-With";
     private static final String PRINTER_TEST_FILE = "print.pdf";
     private static final String PDF_PREAMBLE = "%PDF-1";
@@ -114,32 +128,37 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     private WebIconDatabase mIconDb;
 
     public WebViewTest() {
-        super("com.android.cts.stub", WebViewStubActivity.class);
+        super("com.android.cts.webkit", WebViewCtsActivity.class);
     }
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        final WebViewStubActivity activity = getActivity();
-        new PollingCheck() {
-            @Override
-                protected boolean check() {
-                return activity.hasWindowFocus();
-            }
-        }.run();
+        final WebViewCtsActivity activity = getActivity();
         mWebView = activity.getWebView();
-        File f = activity.getFileStreamPath("snapshot");
-        if (f.exists()) {
-            f.delete();
+        if (mWebView != null) {
+            new PollingCheck() {
+                @Override
+                    protected boolean check() {
+                        return activity.hasWindowFocus();
+                }
+            }.run();
+            File f = activity.getFileStreamPath("snapshot");
+            if (f.exists()) {
+                f.delete();
+            }
+
+            mOnUiThread = new WebViewOnUiThread(this, mWebView);
         }
-        mOnUiThread = new WebViewOnUiThread(this, mWebView);
     }
 
     @Override
     protected void tearDown() throws Exception {
-        mOnUiThread.cleanUp();
+        if (mOnUiThread != null) {
+            mOnUiThread.cleanUp();
+        }
         if (mWebServer != null) {
-            mWebServer.shutdown();
+            stopWebServer();
         }
         if (mIconDb != null) {
             mIconDb.removeAllIcons();
@@ -168,6 +187,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testConstructor() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         new WebView(getActivity());
         new WebView(getActivity(), null);
         new WebView(getActivity(), null, 0);
@@ -175,12 +198,19 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testCreatingWebViewCreatesCookieSyncManager() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         new WebView(getActivity());
         assertNotNull(CookieSyncManager.getInstance());
     }
 
     @UiThreadTest
     public void testFindAddress() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         /*
          * Info about USPS
          * http://en.wikipedia.org/wiki/Postal_address#United_States
@@ -196,19 +226,25 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     @SuppressWarnings("deprecation")
     @UiThreadTest
     public void testGetZoomControls() {
-         WebSettings settings = mWebView.getSettings();
-         assertTrue(settings.supportZoom());
-         View zoomControls = mWebView.getZoomControls();
-         assertNotNull(zoomControls);
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+        WebSettings settings = mWebView.getSettings();
+        assertTrue(settings.supportZoom());
+        View zoomControls = mWebView.getZoomControls();
+        assertNotNull(zoomControls);
 
-         // disable zoom support
-         settings.setSupportZoom(false);
-         assertFalse(settings.supportZoom());
-         assertNull(mWebView.getZoomControls());
+        // disable zoom support
+        settings.setSupportZoom(false);
+        assertFalse(settings.supportZoom());
+        assertNull(mWebView.getZoomControls());
     }
 
     @UiThreadTest
     public void testInvokeZoomPicker() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         WebSettings settings = mWebView.getSettings();
         assertTrue(settings.supportZoom());
         startWebServer(false);
@@ -218,6 +254,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testZoom() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         // Pinch zoom is not supported in wrap_content layouts.
         mOnUiThread.setLayoutHeightToMatchParent();
 
@@ -227,6 +267,7 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         mWebServer = new CtsTestServer(getActivity());
         mOnUiThread.loadUrlAndWaitForCompletion(
                 mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL));
+        pollingCheckForCanZoomIn();
 
         WebSettings settings = mOnUiThread.getSettings();
         settings.setSupportZoom(false);
@@ -242,6 +283,20 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertTrue(currScale > previousScale);
 
         assertTrue(mOnUiThread.zoomOut());
+        previousScale = currScale;
+        webViewClient.waitForScaleChanged();
+
+        currScale = mOnUiThread.getScale();
+        assertTrue(currScale < previousScale);
+
+        mOnUiThread.zoomBy(1.25f); // zoom in
+        previousScale = currScale;
+        webViewClient.waitForScaleChanged();
+
+        currScale = mOnUiThread.getScale();
+        assertTrue(currScale > previousScale);
+
+        mOnUiThread.zoomBy(0.8f); // zoom out
         previousScale = currScale;
         webViewClient.waitForScaleChanged();
 
@@ -270,16 +325,17 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         previousScale = currScale;
         // can not zoom in further
         assertFalse(mOnUiThread.zoomIn());
+
         // We sleep to assert to the best of our ability
         // that a scale change does *not* happen.
         Thread.sleep(500);
         currScale = mOnUiThread.getScale();
         assertEquals(currScale, previousScale);
 
-        // zoom out
         assertTrue(mOnUiThread.zoomOut());
         previousScale = currScale;
         webViewClient.waitForScaleChanged();
+
         currScale = mOnUiThread.getScale();
         assertTrue(currScale < previousScale);
 
@@ -299,10 +355,62 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         Thread.sleep(500);
         currScale = mOnUiThread.getScale();
         assertEquals(currScale, previousScale);
+
+        mOnUiThread.zoomBy(1.25f);
+        previousScale = currScale;
+        webViewClient.waitForScaleChanged();
+
+        currScale = mOnUiThread.getScale();
+        assertTrue(currScale > previousScale);
+
+        // zoom in until it reaches maximum scale
+        while (mOnUiThread.canZoomIn()) {
+            previousScale = currScale;
+            mOnUiThread.zoomBy(1.25f);
+            webViewClient.waitForScaleChanged();
+            currScale = mOnUiThread.getScale();
+            assertTrue(currScale > previousScale);
+        }
+
+        previousScale = currScale;
+
+        // We sleep to assert to the best of our ability
+        // that a scale change does *not* happen.
+        Thread.sleep(500);
+        currScale = mOnUiThread.getScale();
+        assertEquals(currScale, previousScale);
+
+        mOnUiThread.zoomBy(0.8f);
+        previousScale = currScale;
+        webViewClient.waitForScaleChanged();
+
+        currScale = mOnUiThread.getScale();
+        assertTrue(currScale < previousScale);
+
+        // zoom out until it reaches minimum scale
+        while (mOnUiThread.canZoomOut()) {
+            previousScale = currScale;
+            mOnUiThread.zoomBy(0.8f);
+            webViewClient.waitForScaleChanged();
+            currScale = mOnUiThread.getScale();
+            assertTrue(currScale < previousScale);
+        }
+
+        previousScale = currScale;
+
+        // We sleep to assert to the best of our ability
+        // that a scale change does *not* happen.
+        Thread.sleep(500);
+        currScale = mOnUiThread.getScale();
+        assertEquals(currScale, previousScale);
     }
 
     @UiThreadTest
     public void testSetScrollBarStyle() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         mWebView.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
         assertFalse(mWebView.overlayHorizontalScrollbar());
         assertFalse(mWebView.overlayVerticalScrollbar());
@@ -322,6 +430,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testScrollBarOverlay() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         mWebView.setHorizontalScrollbarOverlay(true);
         mWebView.setVerticalScrollbarOverlay(false);
         assertTrue(mWebView.overlayHorizontalScrollbar());
@@ -335,6 +447,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testLoadUrl() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         assertNull(mWebView.getUrl());
         assertNull(mWebView.getOriginalUrl());
         assertEquals(INITIAL_PROGRESS, mWebView.getProgress());
@@ -357,7 +473,57 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     @UiThreadTest
+    public void testPostUrlWithNonNetworkUrl() throws Exception {
+        final String nonNetworkUrl = "file:///android_asset/" + TestHtmlConstants.HELLO_WORLD_URL;
+
+        mOnUiThread.postUrlAndWaitForCompletion(nonNetworkUrl, new byte[1]);
+
+        // Test if the nonNetworkUrl is loaded
+        assertEquals(TestHtmlConstants.HELLO_WORLD_TITLE, mWebView.getTitle());
+    }
+
+    @UiThreadTest
+    public void testPostUrlWithNetworkUrl() throws Exception {
+        startWebServer(false);
+        final String networkUrl = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
+        final String postDataString = "username=my_username&password=my_password";
+        final byte[] postData = EncodingUtils.getBytes(postDataString, "BASE64");
+
+        mOnUiThread.postUrlAndWaitForCompletion(networkUrl, postData);
+
+        HttpRequest request = mWebServer.getLastRequest(TestHtmlConstants.HELLO_WORLD_URL);
+        // The last request should be POST
+        assertEquals(request.getRequestLine().getMethod(), "POST");
+
+        // The last request should have a request body
+        assertTrue(request instanceof HttpEntityEnclosingRequest);
+        HttpEntity entity = ((HttpEntityEnclosingRequest) request).getEntity();
+        String entityString = EntityUtils.toString(entity);
+        assertEquals(entityString, postDataString);
+    }
+
+    @UiThreadTest
+    public void testLoadUrlDoesNotStripParamsWhenLoadingContentUrls() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
+        Uri.Builder uriBuilder = new Uri.Builder().scheme(
+                ContentResolver.SCHEME_CONTENT).authority(MockContentProvider.AUTHORITY);
+        uriBuilder.appendPath("foo.html").appendQueryParameter("param","bar");
+        String url = uriBuilder.build().toString();
+        mOnUiThread.loadUrlAndWaitForCompletion(url);
+        // verify the parameter is not stripped.
+        Uri uri = Uri.parse(mWebView.getTitle());
+        assertEquals("bar", uri.getQueryParameter("param"));
+    }
+
+    @UiThreadTest
     public void testAppInjectedXRequestedWithHeaderIsNotOverwritten() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         startWebServer(false);
         String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
         HashMap<String, String> map = new HashMap<String, String>();
@@ -377,6 +543,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testAppCanInjectHeadersViaImmutableMap() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         startWebServer(false);
         String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
         HashMap<String, String> map = new HashMap<String, String>();
@@ -394,9 +564,35 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertEquals(requester, header.getValue());
     }
 
+    public void testCanInjectHeaders() throws Exception {
+        final String X_FOO = "X-foo";
+        final String X_FOO_VALUE = "test";
+
+        final String X_REFERER = "Referer";
+        final String X_REFERER_VALUE = "http://www.example.com/";
+        startWebServer(false);
+        String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
+        HashMap<String, String> map = new HashMap<String, String>();
+        map.put(X_FOO, X_FOO_VALUE);
+        map.put(X_REFERER, X_REFERER_VALUE);
+        mOnUiThread.loadUrlAndWaitForCompletion(url, map);
+
+        HttpRequest request = mWebServer.getLastRequest(TestHtmlConstants.HELLO_WORLD_URL);
+        for (Map.Entry<String,String> value : map.entrySet()) {
+            String header = value.getKey();
+            Header[] matchingHeaders = request.getHeaders(header);
+            assertEquals("header " + header + " not found", 1, matchingHeaders.length);
+            assertEquals(value.getValue(), matchingHeaders[0].getValue());
+        }
+    }
+
     @SuppressWarnings("deprecation")
     @UiThreadTest
     public void testGetVisibleTitleHeight() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         startWebServer(false);
         String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
         mOnUiThread.loadUrlAndWaitForCompletion(url);
@@ -405,6 +601,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testGetOriginalUrl() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         startWebServer(false);
         final String finalUrl = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
         final String redirectUrl =
@@ -425,6 +625,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testStopLoading() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         assertEquals(INITIAL_PROGRESS, mOnUiThread.getProgress());
 
         startWebServer(false);
@@ -460,6 +664,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testGoBackAndForward() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         assertGoBackOrForwardBySteps(false, -1);
         assertGoBackOrForwardBySteps(false, 1);
 
@@ -506,6 +714,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testAddJavascriptInterface() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         WebSettings settings = mWebView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
@@ -548,10 +760,38 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         String url = mWebServer.getAssetUrl(TestHtmlConstants.ADD_JAVA_SCRIPT_INTERFACE_URL);
         mOnUiThread.loadUrlAndWaitForCompletion(url);
         assertEquals("Original title", obj.waitForResult());
+
+        // Verify that only methods annotated with @JavascriptInterface are exposed
+        // on the JavaScript interface object.
+        mOnUiThread.evaluateJavascript("typeof dummy.provideResult",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String result) {
+                        assertEquals("\"function\"", result);
+                    }
+                });
+        mOnUiThread.evaluateJavascript("typeof dummy.wasProvideResultCalled",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String result) {
+                        assertEquals("\"undefined\"", result);
+                    }
+                });
+        mOnUiThread.evaluateJavascript("typeof dummy.getClass",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String result) {
+                        assertEquals("\"undefined\"", result);
+                    }
+                });
     }
 
     @UiThreadTest
     public void testAddJavascriptInterfaceNullObject() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         WebSettings settings = mWebView.getSettings();
         settings.setJavaScriptEnabled(true);
         String setTitleToPropertyTypeHtml = "<html><head></head>" +
@@ -584,6 +824,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testRemoveJavascriptInterface() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         WebSettings settings = mWebView.getSettings();
         settings.setJavaScriptEnabled(true);
         String setTitleToPropertyTypeHtml = "<html><head></head>" +
@@ -603,6 +847,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testUseRemovedJavascriptInterface() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
         class RemovedObject {
             @Override
             @JavascriptInterface
@@ -650,54 +898,197 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertEquals("removedObject", resultObject.getResult());
     }
 
-    public void testCapturePicture() throws Exception, Throwable {
-        startWebServer(false);
-        final String url = mWebServer.getAssetUrl(TestHtmlConstants.BLANK_PAGE_URL);
-        // showing the blank page will make the picture filled with background color
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        getInstrumentation().waitForIdleSync();
+    public void testAddJavascriptInterfaceExceptions() throws Exception {
+        WebSettings settings = mOnUiThread.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
 
-        class PictureRunnable implements Runnable {
-            private Picture mPicture;
-            @Override
-            public void run() {
-                mPicture = mWebView.capturePicture();
-                Bitmap b = Bitmap.createBitmap(mPicture.getWidth(), mPicture.getHeight(),
-                        Config.ARGB_8888);
-                mPicture.draw(new Canvas(b));
-                // default color is white
-                assertBitmapFillWithColor(b, Color.WHITE);
-
-                mWebView.setBackgroundColor(Color.CYAN);
-                mOnUiThread.reloadAndWaitForCompletion();
+        final AtomicBoolean mJsInterfaceWasCalled = new AtomicBoolean(false) {
+            @JavascriptInterface
+            public synchronized void call() {
+                set(true);
+                // The main purpose of this test is to ensure an exception here does not
+                // crash the implementation.
+                throw new RuntimeException("Javascript Interface exception");
             }
-            public Picture getPicture() {
-                return mPicture;
+        };
+
+        mOnUiThread.addJavascriptInterface(mJsInterfaceWasCalled, "dummy");
+
+        mOnUiThread.loadUrlAndWaitForCompletion("about:blank");
+
+        assertFalse(mJsInterfaceWasCalled.get());
+
+        final CountDownLatch resultLatch = new CountDownLatch(1);
+        mOnUiThread.evaluateJavascript(
+                "try {dummy.call(); 'fail'; } catch (exception) { 'pass'; } ",
+                new ValueCallback<String>() {
+                        @Override
+                        public void onReceiveValue(String result) {
+                            assertEquals("\"pass\"", result);
+                            resultLatch.countDown();
+                        }
+                    });
+
+        assertTrue(resultLatch.await(TEST_TIMEOUT, TimeUnit.MILLISECONDS));
+        assertTrue(mJsInterfaceWasCalled.get());
+    }
+
+    public void testJavascriptInterfaceCustomPropertiesClearedOnReload() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
+        mOnUiThread.getSettings().setJavaScriptEnabled(true);
+
+        class DummyJavaScriptInterface {
+        }
+        final DummyJavaScriptInterface obj = new DummyJavaScriptInterface();
+        mOnUiThread.addJavascriptInterface(obj, "dummy");
+        mOnUiThread.loadUrlAndWaitForCompletion("about:blank");
+
+        EvaluateJsResultPollingCheck jsResult;
+        jsResult = new EvaluateJsResultPollingCheck("42");
+        mOnUiThread.evaluateJavascript("dummy.custom_property = 42", jsResult);
+        jsResult.run();
+        jsResult = new EvaluateJsResultPollingCheck("true");
+        mOnUiThread.evaluateJavascript("'custom_property' in dummy", jsResult);
+        jsResult.run();
+
+        mOnUiThread.reload();
+
+        jsResult = new EvaluateJsResultPollingCheck("false");
+        mOnUiThread.evaluateJavascript("'custom_property' in dummy", jsResult);
+        jsResult.run();
+    }
+
+    public void testJavascriptInterfaceForClientPopup() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
+        mOnUiThread.getSettings().setJavaScriptEnabled(true);
+        mOnUiThread.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+        mOnUiThread.getSettings().setSupportMultipleWindows(true);
+
+        class DummyJavaScriptInterface {
+            @JavascriptInterface
+            public int test() {
+                return 42;
             }
         }
-        PictureRunnable runnable = new PictureRunnable();
-        runTestOnUiThread(runnable);
-        getInstrumentation().waitForIdleSync();
+        final DummyJavaScriptInterface obj = new DummyJavaScriptInterface();
 
-        // the content of the picture will not be updated automatically
-        Picture picture = runnable.getPicture();
-        Bitmap b = Bitmap.createBitmap(picture.getWidth(), picture.getHeight(), Config.ARGB_8888);
-        picture.draw(new Canvas(b));
-        assertBitmapFillWithColor(b, Color.WHITE);
+        final WebView childWebView = mOnUiThread.createWebView();
+        WebViewOnUiThread childOnUiThread = new WebViewOnUiThread(this, childWebView);
+        childOnUiThread.getSettings().setJavaScriptEnabled(true);
+        childOnUiThread.addJavascriptInterface(obj, "dummy");
+
+        final boolean[] hadOnCreateWindow = new boolean[1];
+        hadOnCreateWindow[0] = false;
+        mOnUiThread.setWebChromeClient(new WebViewOnUiThread.WaitForProgressClient(mOnUiThread) {
+            @Override
+            public boolean onCreateWindow(
+                WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                getActivity().addContentView(childWebView, new ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.FILL_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(childWebView);
+                resultMsg.sendToTarget();
+                hadOnCreateWindow[0] = true;
+                return true;
+            }
+        });
+
+        startWebServer(false);
+        mOnUiThread.loadUrlAndWaitForCompletion(mWebServer.
+                getAssetUrl(TestHtmlConstants.POPUP_URL));
+        new PollingCheck(TEST_TIMEOUT) {
+            @Override
+            protected boolean check() {
+                return hadOnCreateWindow[0];
+            }
+        }.run();
+
+        childOnUiThread.loadUrlAndWaitForCompletion("about:blank");
+        EvaluateJsResultPollingCheck jsResult;
+        jsResult = new EvaluateJsResultPollingCheck("true");
+        childOnUiThread.evaluateJavascript("'dummy' in window", jsResult);
+        jsResult.run();
+        // Verify that the injected object is functional.
+        jsResult = new EvaluateJsResultPollingCheck("42");
+        childOnUiThread.evaluateJavascript("dummy.test()", jsResult);
+        jsResult.run();
+    }
+
+    private final class TestPictureListener implements PictureListener {
+        public int callCount;
+
+        @Override
+        public void onNewPicture(WebView view, Picture picture) {
+            // Need to inform the listener tracking new picture
+            // for the "page loaded" knowledge since it has been replaced.
+            mOnUiThread.onNewPicture();
+            this.callCount += 1;
+        }
+    }
+
+    private Picture waitForPictureToHaveColor(int color,
+            final TestPictureListener listener) throws Throwable {
+        final int MAX_ON_NEW_PICTURE_ITERATIONS = 5;
+        final AtomicReference<Picture> pictureRef = new AtomicReference<Picture>();
+        for (int i = 0; i < MAX_ON_NEW_PICTURE_ITERATIONS; i++) {
+            final int oldCallCount = listener.callCount;
+            runTestOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    pictureRef.set(mWebView.capturePicture());
+                }
+            });
+            if (isPictureFilledWithColor(pictureRef.get(), color))
+                break;
+            new PollingCheck(TEST_TIMEOUT) {
+                @Override
+                protected boolean check() {
+                    return listener.callCount > oldCallCount;
+                }
+            }.run();
+        }
+        return pictureRef.get();
+    }
+
+    public void testCapturePicture() throws Exception, Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+        final TestPictureListener listener = new TestPictureListener();
+
+        startWebServer(false);
+        final String url = mWebServer.getAssetUrl(TestHtmlConstants.BLANK_PAGE_URL);
+        mOnUiThread.setPictureListener(listener);
+        // Showing the blank page will fill the picture with the background color.
+        mOnUiThread.loadUrlAndWaitForCompletion(url);
+        // The default background color is white.
+        Picture oldPicture = waitForPictureToHaveColor(Color.WHITE, listener);
 
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-                // update the content
-                Picture p = mWebView.capturePicture();
-                Bitmap b = Bitmap.createBitmap(p.getWidth(), p.getHeight(), Config.ARGB_8888);
-                p.draw(new Canvas(b));
-                assertBitmapFillWithColor(b, Color.CYAN);
+                mWebView.setBackgroundColor(Color.CYAN);
             }
         });
+        mOnUiThread.reloadAndWaitForCompletion();
+        waitForPictureToHaveColor(Color.CYAN, listener);
+
+        // The content of the previously captured picture will not be updated automatically.
+        assertTrue(isPictureFilledWithColor(oldPicture, Color.WHITE));
     }
 
     public void testSetPictureListener() throws Exception, Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final class MyPictureListener implements PictureListener {
             public int callCount;
             public WebView webView;
@@ -741,6 +1132,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testAccessHttpAuthUsernamePassword() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         try {
             WebViewDatabase.getInstance(getActivity()).clearHttpAuthUsernamePassword();
 
@@ -802,6 +1196,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testLoadData() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final String HTML_CONTENT =
                 "<html><head><title>Hello,World!</title></head><body></body>" +
                 "</html>";
@@ -830,6 +1227,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testLoadDataWithBaseUrl() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         assertNull(mWebView.getUrl());
         String imgUrl = TestHtmlConstants.SMALL_IMG_URL; // relative
         // Snippet of HTML that will prevent favicon requests to the test server.
@@ -896,6 +1296,94 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertEquals("about:blank", mOnUiThread.getUrl());
     }
 
+    private void deleteIfExists(File file) throws IOException {
+        if (file.exists()) {
+            file.delete();
+        }
+    }
+
+    private String readTextFile(File file, Charset encoding)
+            throws FileNotFoundException, IOException {
+        FileInputStream stream = new FileInputStream(file);
+        byte[] bytes = new byte[(int)file.length()];
+        stream.read(bytes);
+        stream.close();
+        return new String(bytes, encoding);
+    }
+
+    private void doSaveWebArchive(String baseName, boolean autoName, final String expectName)
+            throws Throwable {
+        final Semaphore saving = new Semaphore(0);
+        ValueCallback<String> callback = new ValueCallback<String>() {
+            @Override
+            public void onReceiveValue(String savedName) {
+                assertEquals(expectName, savedName);
+                saving.release();
+            }
+        };
+
+        mOnUiThread.saveWebArchive(baseName, autoName, callback);
+        assertTrue(saving.tryAcquire(TEST_TIMEOUT, TimeUnit.MILLISECONDS));
+    }
+
+    public void testSaveWebArchive() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
+        final String testPage = "testSaveWebArchive test page";
+
+        File dir = getActivity().getFilesDir();
+        String dirStr = dir.toString();
+
+        File test = new File(dir, "test.mht");
+        deleteIfExists(test);
+        String testStr = test.getAbsolutePath();
+
+        File index = new File(dir, "index.mht");
+        deleteIfExists(index);
+        String indexStr = index.getAbsolutePath();
+
+        File index1 = new File(dir, "index-1.mht");
+        deleteIfExists(index1);
+        String index1Str = index1.getAbsolutePath();
+
+        mOnUiThread.loadDataAndWaitForCompletion(testPage, "text/html", "UTF-8");
+
+        try {
+            // Save test.mht
+            doSaveWebArchive(testStr, false, testStr);
+
+            // Check the contents of test.mht
+            String testMhtml = readTextFile(test, StandardCharsets.UTF_8);
+            assertTrue(testMhtml.contains(testPage));
+
+            // Save index.mht
+            doSaveWebArchive(dirStr + "/", true, indexStr);
+
+            // Check the contents of index.mht
+            String indexMhtml = readTextFile(index, StandardCharsets.UTF_8);
+            assertTrue(indexMhtml.contains(testPage));
+
+            // Save index-1.mht since index.mht already exists
+            doSaveWebArchive(dirStr + "/", true, index1Str);
+
+            // Check the contents of index-1.mht
+            String index1Mhtml = readTextFile(index1, StandardCharsets.UTF_8);
+            assertTrue(index1Mhtml.contains(testPage));
+
+            // Try a file in a bogus directory
+            doSaveWebArchive("/bogus/path/test.mht", false, null);
+
+            // Try a bogus directory
+            doSaveWebArchive("/bogus/path/", true, null);
+        } finally {
+            deleteIfExists(test);
+            deleteIfExists(index);
+            deleteIfExists(index1);
+        }
+    }
+
     private static class WaitForFindResultsListener extends FutureTask<Integer>
             implements WebView.FindListener {
         public WaitForFindResultsListener() {
@@ -915,6 +1403,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testFindAll()  throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         // Make the page scrollable, so we can detect the scrolling to make sure the
         // content fully loaded.
         mOnUiThread.setInitialScale(100);
@@ -939,6 +1430,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testFindNext() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         // Reset the scaling so that finding the next "all" text will require scrolling.
         mOnUiThread.setInitialScale(100);
 
@@ -949,10 +1443,14 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
                 "Find all instances of a word on the page and highlight them.</p>";
 
         mOnUiThread.loadDataAndWaitForCompletion("<html><body>" + p + p + "</body></html>", "text/html", null);
+        WaitForFindResultsListener l = new WaitForFindResultsListener();
+        mOnUiThread.setFindListener(l);
 
         // highlight all the strings found
         mOnUiThread.findAll("all");
-        getInstrumentation().waitForIdleSync();
+        // make sure the findAll action is completed before findNext
+        l.get();
+        mOnUiThread.setFindListener(null);
 
         int previousScrollY = mOnUiThread.getScrollY();
 
@@ -995,6 +1493,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testDocumentHasImages() throws Exception, Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final class DocumentHasImageCheckHandler extends Handler {
             private boolean mReceived;
             private int mMsgArg1;
@@ -1044,6 +1545,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testPageScroll() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         DisplayMetrics metrics = mOnUiThread.getDisplayMetrics();
         int dimension = 2 * Math.max(metrics.widthPixels, metrics.heightPixels);
         String p = "<p style=\"height:" + dimension + "px;\">" +
@@ -1088,6 +1592,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testGetContentHeight() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mOnUiThread.loadDataAndWaitForCompletion(
                 "<html><body></body></html>", "text/html", null);
         new PollingCheck() {
@@ -1126,12 +1633,18 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testPlatformNotifications() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         WebView.enablePlatformNotifications();
         WebView.disablePlatformNotifications();
     }
 
     @UiThreadTest
     public void testAccessPluginList() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         assertNotNull(WebView.getPluginList());
 
         // can not find a way to install plugins
@@ -1140,12 +1653,18 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testDestroy() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         // Create a new WebView, since we cannot call destroy() on a view in the hierarchy
         WebView localWebView = new WebView(getActivity());
         localWebView.destroy();
     }
 
     public void testFlingScroll() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         DisplayMetrics metrics = mOnUiThread.getDisplayMetrics();
         final int dimension = 10 * Math.max(metrics.widthPixels, metrics.heightPixels);
         String p = "<p style=\"height:" + dimension + "px;" +
@@ -1175,6 +1694,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testRequestFocusNodeHref() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         startWebServer(false);
         String url1 = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL1);
         String url2 = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL2);
@@ -1242,6 +1764,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testRequestImageRef() throws Exception, Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final class ImageLoaded {
             public boolean mImageLoaded;
 
@@ -1322,10 +1847,16 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testDebugDump() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mWebView.debugDump();
     }
 
     public void testGetHitTestResult() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final String anchor = "<p><a href=\"" + TestHtmlConstants.EXT_WEB_URL1
                 + "\">normal anchor</a></p>";
         final String blankAnchor = "<p><a href=\"\">blank anchor</a></p>";
@@ -1387,6 +1918,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testSetInitialScale() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final String p = "<p style=\"height:1000px;width:1000px\">Test setInitialScale.</p>";
         final float defaultScale =
             getInstrumentation().getTargetContext().getResources().getDisplayMetrics().density;
@@ -1437,17 +1971,10 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     @UiThreadTest
-    public void testGetFavicon() throws Exception {
-        startWebServer(false);
-        String url = mWebServer.getAssetUrl(TestHtmlConstants.TEST_FAVICON_URL);
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        mWebView.getFavicon();
-        // ToBeFixed: Favicon is not loaded automatically.
-        // assertNotNull(mWebView.getFavicon());
-    }
-
-    @UiThreadTest
     public void testClearHistory() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         startWebServer(false);
         String url1 = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL1);
         String url2 = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL2);
@@ -1470,6 +1997,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testSaveAndRestoreState() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         // nothing to save
         assertNull(mWebView.saveState(new Bundle()));
 
@@ -1508,7 +2038,7 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertNotNull(restoreList);
         assertEquals(3, restoreList.getSize());
         assertEquals(2, saveList.getCurrentIndex());
-        /* ToBeFixed: The WebHistoryItems do not get inflated. Uncomment remaining tests when fixed.
+
         // wait for the list items to get inflated
         new PollingCheck(TEST_TIMEOUT) {
             @Override
@@ -1529,10 +2059,12 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertEquals(url1, copyListAfterRestore.getItemAtIndex(0).getUrl());
         assertEquals(url2, copyListAfterRestore.getItemAtIndex(1).getUrl());
         assertEquals(url3, copyListAfterRestore.getItemAtIndex(2).getUrl());
-        */
     }
 
     public void testSetWebViewClient() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final ScaleChangedWebViewClient webViewClient = new ScaleChangedWebViewClient();
         mOnUiThread.setWebViewClient(webViewClient);
         startWebServer(false);
@@ -1540,209 +2072,16 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         assertFalse(webViewClient.onScaleChangedCalled());
         String url1 = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
         mOnUiThread.loadUrlAndWaitForCompletion(url1);
+        pollingCheckForCanZoomIn();
 
-        mOnUiThread.zoomIn();
+        assertTrue(mOnUiThread.zoomIn());
         webViewClient.waitForScaleChanged();
     }
 
-    @UiThreadTest
-    public void testInsecureSiteClearsCertificate() throws Throwable {
-        final class MockWebViewClient extends WaitForLoadedClient {
-            public MockWebViewClient() {
-                super(mOnUiThread);
-            }
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.proceed();
-            }
-        }
-
-        startWebServer(true);
-        mOnUiThread.setWebViewClient(new MockWebViewClient());
-        mOnUiThread.loadUrlAndWaitForCompletion(
-                mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL));
-        SslCertificate cert = mWebView.getCertificate();
-        assertNotNull(cert);
-        assertEquals("Android", cert.getIssuedTo().getUName());
-
-        stopWebServer();
-
-        startWebServer(false);
-        mOnUiThread.loadUrlAndWaitForCompletion(
-                mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL));
-        assertNull(mWebView.getCertificate());
-    }
-
-    @UiThreadTest
-    public void testSecureSiteSetsCertificate() throws Throwable {
-        final class MockWebViewClient extends WaitForLoadedClient {
-            public MockWebViewClient() {
-                super(mOnUiThread);
-            }
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.proceed();
-            }
-        }
-
-        startWebServer(false);
-        mOnUiThread.loadUrlAndWaitForCompletion(
-                mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL));
-        assertNull(mWebView.getCertificate());
-
-        stopWebServer();
-
-        startWebServer(true);
-        mOnUiThread.setWebViewClient(new MockWebViewClient());
-        mOnUiThread.loadUrlAndWaitForCompletion(
-                mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL));
-        SslCertificate cert = mWebView.getCertificate();
-        assertNotNull(cert);
-        assertEquals("Android", cert.getIssuedTo().getUName());
-    }
-
-    @UiThreadTest
-    public void testClearSslPreferences() throws Throwable {
-        // Load the first page. We expect a call to
-        // WebViewClient.onReceivedSslError().
-        final SslErrorWebViewClient webViewClient = new SslErrorWebViewClient();
-        startWebServer(true);
-        final String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
-        mOnUiThread.setWebViewClient(webViewClient);
-        mOnUiThread.clearSslPreferences();
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        assertTrue(webViewClient.wasOnReceivedSslErrorCalled());
-
-        // Load the page again. We expect another call to
-        // WebViewClient.onReceivedSslError() since we cleared sslpreferences.
-        mOnUiThread.clearSslPreferences();
-        webViewClient.resetWasOnReceivedSslErrorCalled();
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        assertTrue(webViewClient.wasOnReceivedSslErrorCalled());
-        assertEquals(TestHtmlConstants.HELLO_WORLD_TITLE, mOnUiThread.getTitle());
-
-        // Load the page once again, without clearing the sslpreferences.
-        // Make sure we do not get the callback.
-        webViewClient.resetWasOnReceivedSslErrorCalled();
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        assertFalse(webViewClient.wasOnReceivedSslErrorCalled());
-        assertEquals(TestHtmlConstants.HELLO_WORLD_TITLE, mOnUiThread.getTitle());
-    }
-
-    public void testOnReceivedSslError() throws Throwable {
-        final class MockWebViewClient extends WaitForLoadedClient {
-            private String mErrorUrl;
-            private WebView mWebView;
-
-            public MockWebViewClient() {
-                super(mOnUiThread);
-            }
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                mWebView = view;
-                mErrorUrl = error.getUrl();
-                handler.proceed();
-            }
-            public String errorUrl() {
-                return mErrorUrl;
-            }
-            public WebView webView() {
-                return mWebView;
-            }
-        }
-
-        startWebServer(true);
-        final String errorUrl = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
-        final MockWebViewClient webViewClient = new MockWebViewClient();
-        mOnUiThread.setWebViewClient(webViewClient);
-        mOnUiThread.clearSslPreferences();
-        mOnUiThread.loadUrlAndWaitForCompletion(errorUrl);
-
-        assertEquals(mWebView, webViewClient.webView());
-        assertEquals(errorUrl, webViewClient.errorUrl());
-    }
-
-    public void testOnReceivedSslErrorProceed() throws Throwable {
-        final class MockWebViewClient extends WaitForLoadedClient {
-            public MockWebViewClient() {
-                super(mOnUiThread);
-            }
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.proceed();
-            }
-        }
-
-        startWebServer(true);
-        final String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
-        mOnUiThread.setWebViewClient(new MockWebViewClient());
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        assertEquals(TestHtmlConstants.HELLO_WORLD_TITLE, mOnUiThread.getTitle());
-    }
-
-    public void testOnReceivedSslErrorCancel() throws Throwable {
-        final class MockWebViewClient extends WaitForLoadedClient {
-            public MockWebViewClient() {
-                super(mOnUiThread);
-            }
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.cancel();
-            }
-        }
-
-        startWebServer(true);
-        final String url = mWebServer.getAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
-        mOnUiThread.setWebViewClient(new MockWebViewClient());
-        mOnUiThread.clearSslPreferences();
-        mOnUiThread.loadUrlAndWaitForCompletion(url);
-        assertFalse(TestHtmlConstants.HELLO_WORLD_TITLE.equals(mOnUiThread.getTitle()));
-    }
-
-    public void testSslErrorProceedResponseReusedForSameHost() throws Throwable {
-        // Load the first page. We expect a call to
-        // WebViewClient.onReceivedSslError().
-        final SslErrorWebViewClient webViewClient = new SslErrorWebViewClient();
-        startWebServer(true);
-        final String firstUrl = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL1);
-        mOnUiThread.setWebViewClient(webViewClient);
-        mOnUiThread.clearSslPreferences();
-        mOnUiThread.loadUrlAndWaitForCompletion(firstUrl);
-        assertTrue(webViewClient.wasOnReceivedSslErrorCalled());
-
-        // Load the second page. We don't expect a call to
-        // WebViewClient.onReceivedSslError(), but the page should load.
-        webViewClient.resetWasOnReceivedSslErrorCalled();
-        final String sameHostUrl = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL2);
-        mOnUiThread.loadUrlAndWaitForCompletion(sameHostUrl);
-        assertFalse(webViewClient.wasOnReceivedSslErrorCalled());
-        assertEquals("Second page", mOnUiThread.getTitle());
-    }
-
-    public void testSslErrorProceedResponseNotReusedForDifferentHost() throws Throwable {
-        // Load the first page. We expect a call to
-        // WebViewClient.onReceivedSslError().
-        final SslErrorWebViewClient webViewClient = new SslErrorWebViewClient();
-        startWebServer(true);
-        final String firstUrl = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL1);
-        mOnUiThread.setWebViewClient(webViewClient);
-        mOnUiThread.clearSslPreferences();
-        mOnUiThread.loadUrlAndWaitForCompletion(firstUrl);
-        assertTrue(webViewClient.wasOnReceivedSslErrorCalled());
-
-        // Load the second page. We expect another call to
-        // WebViewClient.onReceivedSslError().
-        webViewClient.resetWasOnReceivedSslErrorCalled();
-        // The test server uses the host "localhost". "127.0.0.1" works as an
-        // alias, but will be considered unique by the WebView.
-        final String differentHostUrl = mWebServer.getAssetUrl(TestHtmlConstants.HTML_URL2).replace(
-                "localhost", "127.0.0.1");
-        mOnUiThread.loadUrlAndWaitForCompletion(differentHostUrl);
-        assertTrue(webViewClient.wasOnReceivedSslErrorCalled());
-        assertEquals("Second page", mOnUiThread.getTitle());
-    }
-
     public void testRequestChildRectangleOnScreen() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         DisplayMetrics metrics = mOnUiThread.getDisplayMetrics();
         final int dimension = 2 * Math.max(metrics.widthPixels, metrics.heightPixels);
         String p = "<p style=\"height:" + dimension + "px;width:" + dimension + "px\">&nbsp;</p>";
@@ -1766,12 +2105,16 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testSetDownloadListener() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
+
+        final CountDownLatch resultLatch = new CountDownLatch(1);
         final class MyDownloadListener implements DownloadListener {
             public String url;
             public String mimeType;
             public long contentLength;
             public String contentDisposition;
-            public boolean called;
 
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
@@ -1780,7 +2123,7 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
                 this.mimeType = mimetype;
                 this.contentLength = contentLength;
                 this.contentDisposition = contentDisposition;
-                this.called = true;
+                resultLatch.countDown();
             }
         }
 
@@ -1803,21 +2146,18 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         // Wait for layout to complete before setting focus.
         getInstrumentation().waitForIdleSync();
 
-        new PollingCheck(TEST_TIMEOUT) {
-            @Override
-            protected boolean check() {
-                return listener.called;
-            }
-        }.run();
+        assertTrue(resultLatch.await(TEST_TIMEOUT, TimeUnit.MILLISECONDS));
         assertEquals(url, listener.url);
         assertTrue(listener.contentDisposition.contains("test.bin"));
-        // ToBeFixed: uncomment the following tests after fixing the framework
-        // assertEquals(mimeType, listener.mimeType);
-        // assertEquals(length, listener.contentLength);
+        assertEquals(length, listener.contentLength);
+        assertEquals(mimeType, listener.mimeType);
     }
 
     @UiThreadTest
     public void testSetLayoutParams() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(600, 800);
         mWebView.setLayoutParams(params);
         assertSame(params, mWebView.getLayoutParams());
@@ -1825,10 +2165,16 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     @UiThreadTest
     public void testSetMapTrackballToArrowKeys() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mWebView.setMapTrackballToArrowKeys(true);
     }
 
     public void testSetNetworkAvailable() throws Exception {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         WebSettings settings = mOnUiThread.getSettings();
         settings.setJavaScriptEnabled(true);
         startWebServer(false);
@@ -1859,6 +2205,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testSetWebChromeClient() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final class MockWebChromeClient extends WaitForProgressClient {
             private boolean mOnProgressChanged = false;
 
@@ -1896,6 +2245,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testPauseResumeTimers() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         class Monitor {
             private boolean mIsUpdated;
 
@@ -1951,6 +2303,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     // verify query parameters can be passed correctly to android asset files
     public void testAndroidAssetQueryParam() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
 
         WebSettings settings = mOnUiThread.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -1962,6 +2317,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     // verify anchors work correctly for android asset files
     public void testAndroidAssetAnchor() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
 
         WebSettings settings = mOnUiThread.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -1972,6 +2330,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
     }
 
     public void testEvaluateJavascript() {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mOnUiThread.getSettings().setJavaScriptEnabled(true);
         mOnUiThread.loadUrlAndWaitForCompletion("about:blank");
 
@@ -1995,6 +2356,9 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
 
     // Verify Print feature can create a PDF file with a correct preamble.
     public void testPrinting() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mOnUiThread.loadDataAndWaitForCompletion("<html><head></head>" +
                 "<body>foo</body></html>",
                 "text/html", null);
@@ -2005,7 +2369,7 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
                 .setResolution(new PrintAttributes.Resolution("foo", "bar", 300, 300))
                 .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
                 .build();
-        final WebViewStubActivity activity = getActivity();
+        final WebViewCtsActivity activity = getActivity();
         final File file = activity.getFileStreamPath(PRINTER_TEST_FILE);
         final ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(file,
                 ParcelFileDescriptor.parseMode("w"));
@@ -2074,11 +2438,6 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
                         layoutResultCallback, null);
             }
         });
-    }
-
-    @UiThreadTest
-    public void testInternals() {
-        // Do not test these APIs. They are implementation details.
     }
 
     private static class HrefCheckHandler extends Handler {
@@ -2157,55 +2516,21 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         }
     }
 
-    private void assertBitmapFillWithColor(Bitmap bitmap, int color) {
-        for (int i = 0; i < bitmap.getWidth(); i ++)
+    private boolean isPictureFilledWithColor(Picture picture, int color) {
+        if (picture.getWidth() == 0 || picture.getHeight() == 0)
+            return false;
+
+        Bitmap bitmap = Bitmap.createBitmap(picture.getWidth(), picture.getHeight(),
+                Config.ARGB_8888);
+        picture.draw(new Canvas(bitmap));
+
+        for (int i = 0; i < bitmap.getWidth(); i ++) {
             for (int j = 0; j < bitmap.getHeight(); j ++) {
-                assertEquals(color, bitmap.getPixel(i, j));
-            }
-    }
-
-    // Find b1 inside b2
-    private boolean checkBitmapInsideAnother(Bitmap b1, Bitmap b2) {
-        int w = b1.getWidth();
-        int h = b1.getHeight();
-
-        for (int i = 0; i < (b2.getWidth()-w+1); i++) {
-            for (int j = 0; j < (b2.getHeight()-h+1); j++) {
-                if (checkBitmapInsideAnother(b1, b2, i, j))
-                    return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean comparePixel(int p1, int p2, int maxError) {
-        int err;
-        err = Math.abs(((p1&0xff000000)>>>24) - ((p2&0xff000000)>>>24));
-        if (err > maxError)
-            return false;
-
-        err = Math.abs(((p1&0x00ff0000)>>>16) - ((p2&0x00ff0000)>>>16));
-        if (err > maxError)
-            return false;
-
-        err = Math.abs(((p1&0x0000ff00)>>>8) - ((p2&0x0000ff00)>>>8));
-        if (err > maxError)
-            return false;
-
-        err = Math.abs(((p1&0x000000ff)>>>0) - ((p2&0x000000ff)>>>0));
-        if (err > maxError)
-            return false;
-
-        return true;
-    }
-
-    private boolean checkBitmapInsideAnother(Bitmap b1, Bitmap b2, int x, int y) {
-        for (int i = 0; i < b1.getWidth(); i++)
-            for (int j = 0; j < b1.getHeight(); j++) {
-                if (!comparePixel(b1.getPixel(i, j), b2.getPixel(x + i, y + j), 10)) {
+                if (color != bitmap.getPixel(i, j)) {
                     return false;
                 }
             }
+        }
         return true;
     }
 
@@ -2234,49 +2559,13 @@ public class WebViewTest extends ActivityInstrumentationTestCase2<WebViewStubAct
         }
     }
 
-    // Note that this class is not thread-safe.
-    final class SslErrorWebViewClient extends WaitForLoadedClient {
-        private boolean mWasOnReceivedSslErrorCalled;
-        private String mErrorUrl;
-
-        public SslErrorWebViewClient() {
-            super(mOnUiThread);
-        }
-        @Override
-        public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-            mWasOnReceivedSslErrorCalled = true;
-            mErrorUrl = error.getUrl();
-            handler.proceed();
-        }
-        public void resetWasOnReceivedSslErrorCalled() {
-            mWasOnReceivedSslErrorCalled = false;
-        }
-        public boolean wasOnReceivedSslErrorCalled() {
-            return mWasOnReceivedSslErrorCalled;
-        }
-        public String errorUrl() {
-            return mErrorUrl;
-        }
-    }
-
-    private static class EvaluateJsResultPollingCheck  extends PollingCheck
-            implements ValueCallback<String> {
-        private String mActualResult;
-        private String mExpectedResult;
-
-        public EvaluateJsResultPollingCheck(String expected) {
-            mExpectedResult = expected;
-        }
-
-        @Override
-        public synchronized boolean check() {
-            return mExpectedResult.equals(mActualResult);
-        }
-
-        @Override
-        public synchronized void onReceiveValue(String result) {
-            mActualResult = result;
-        }
+    private void pollingCheckForCanZoomIn() {
+        new PollingCheck(TEST_TIMEOUT) {
+            @Override
+            protected boolean check() {
+                return mOnUiThread.canZoomIn();
+            }
+        }.run();
     }
 
     final class ScaleChangedWebViewClient extends WaitForLoadedClient {

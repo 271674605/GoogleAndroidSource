@@ -9,14 +9,12 @@ import os
 import re
 
 from pylib import constants
+from pylib.utils import flakiness_dashboard_results_uploader
 
-import flakiness_dashboard_results_uploader
 
-
-def _LogToFile(results, test_type, suite_name, build_type):
+def _LogToFile(results, test_type, suite_name):
   """Log results to local files which can be used for aggregation later."""
-  log_file_path = os.path.join(constants.DIR_SOURCE_ROOT, 'out',
-                               build_type, 'test_logs')
+  log_file_path = os.path.join(constants.GetOutDirectory(), 'test_logs')
   if not os.path.exists(log_file_path):
     os.mkdir(log_file_path)
   full_file_name = os.path.join(
@@ -48,11 +46,11 @@ def _LogToFlakinessDashboard(results, test_type, test_package,
 
   try:
     if flakiness_server == constants.UPSTREAM_FLAKINESS_SERVER:
-        assert test_package in ['ContentShellTest',
-                                'ChromiumTestShellTest',
-                                'AndroidWebViewTest']
-        dashboard_test_type = ('%s_instrumentation_tests' %
-                               test_package.lower().rstrip('test'))
+      assert test_package in ['ContentShellTest',
+                                'ChromeShellTest',
+                              'AndroidWebViewTest']
+      dashboard_test_type = ('%s_instrumentation_tests' %
+                             test_package.lower().rstrip('test'))
     # Downstream server.
     else:
       dashboard_test_type = 'Chromium_Android_Instrumentation'
@@ -64,7 +62,7 @@ def _LogToFlakinessDashboard(results, test_type, test_package,
 
 
 def LogFull(results, test_type, test_package, annotation=None,
-            build_type='Debug', flakiness_server=None):
+            flakiness_server=None):
   """Log the tests results for the test suite.
 
   The results will be logged three different ways:
@@ -80,7 +78,6 @@ def LogFull(results, test_type, test_package, annotation=None,
                   'ContentShellTest' for instrumentation tests)
     annotation: If instrumenation test type, this is a list of annotations
                 (e.g. ['Smoke', 'SmallTest']).
-    build_type: Release/Debug
     flakiness_server: If provider, upload the results to flakiness dashboard
                       with this URL.
     """
@@ -93,7 +90,7 @@ def LogFull(results, test_type, test_package, annotation=None,
   logging.critical('*' * 80)
   logging.critical('Summary')
   logging.critical('*' * 80)
-  for line in results.GetLongForm().splitlines():
+  for line in results.GetGtestForm().splitlines():
     logging.critical(line)
   logging.critical('*' * 80)
 
@@ -104,7 +101,7 @@ def LogFull(results, test_type, test_package, annotation=None,
       suite_name = annotation[0]
     else:
       suite_name = test_package
-    _LogToFile(results, test_type, suite_name, build_type)
+    _LogToFile(results, test_type, suite_name)
 
     if flakiness_server:
       _LogToFlakinessDashboard(results, test_type, test_package,

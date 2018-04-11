@@ -21,13 +21,16 @@ import com.android.cts.tradefed.result.TestPackageResultTest;
 import com.android.cts.tradefed.result.TestResultsTest;
 import com.android.cts.tradefed.result.TestSummaryXmlTest;
 import com.android.cts.tradefed.result.TestTest;
+import com.android.cts.tradefed.testtype.Abi;
 import com.android.cts.tradefed.testtype.CtsTestTest;
+import com.android.cts.tradefed.testtype.DeqpTestRunnerTest;
 import com.android.cts.tradefed.testtype.JarHostTestTest;
 import com.android.cts.tradefed.testtype.TestFilterTest;
 import com.android.cts.tradefed.testtype.TestPackageDefTest;
 import com.android.cts.tradefed.testtype.TestPackageXmlParserTest;
 import com.android.cts.tradefed.testtype.TestPlanTest;
 import com.android.cts.tradefed.testtype.WrappedGTestResultParserTest;
+import com.android.tradefed.testtype.IAbi;
 
 import junit.framework.Test;
 import junit.framework.TestSuite;
@@ -39,6 +42,8 @@ import junit.framework.TestSuite;
  * (such as a full CTS build with XML etc).
  */
 public class UnitTests extends TestSuite {
+
+    public static final IAbi ABI = new Abi("armeabi-v7a", "32");
 
     public UnitTests() {
         super();
@@ -59,6 +64,7 @@ public class UnitTests extends TestSuite {
         addTestSuite(TestPackageXmlParserTest.class);
         addTestSuite(TestPlanTest.class);
         addTestSuite(WrappedGTestResultParserTest.class);
+        addTestSuite(DeqpTestRunnerTest.class);
     }
 
     public static Test suite() {

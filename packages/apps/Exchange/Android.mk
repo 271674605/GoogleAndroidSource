@@ -32,7 +32,7 @@ LOCAL_AAPT_FLAGS += --extra-packages com.android.emailcommon
 LOCAL_SRC_FILES := $(call all-java-files-under, src)
 LOCAL_SRC_FILES += $(call all-java-files-under, build/src)
 
-LOCAL_STATIC_JAVA_LIBRARIES := android-common com.android.emailcommon com.android.emailsync
+LOCAL_STATIC_JAVA_LIBRARIES := android-common com.android.emailcommon
 LOCAL_STATIC_JAVA_LIBRARIES += calendar-common
 LOCAL_STATIC_JAVA_LIBRARIES += android-support-v4
 
@@ -40,11 +40,11 @@ LOCAL_PACKAGE_NAME := Exchange2
 LOCAL_OVERRIDES_PACKAGES := Exchange
 
 LOCAL_PROGUARD_FLAG_FILES := proguard.flags
-LOCAL_SDK_VERSION := 18
+LOCAL_SDK_VERSION := 19
 
 LOCAL_EMMA_COVERAGE_FILTER += +com.android.exchange.*
 
 include $(BUILD_PACKAGE)
 
 # additionally, build unit tests in a separate .apk
-# include $(call all-makefiles-under,$(LOCAL_PATH))
+include $(call all-makefiles-under,$(LOCAL_PATH))

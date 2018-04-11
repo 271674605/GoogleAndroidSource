@@ -16,21 +16,23 @@
 
 package android.graphics.drawable.cts;
 
-import com.android.cts.stub.R;
-
+import com.android.cts.graphics.R;
 
 import org.xmlpull.v1.XmlPullParserException;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Shader;
 import android.graphics.Bitmap.Config;
+import android.graphics.PorterDuff.Mode;
 import android.graphics.Shader.TileMode;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable.ConstantState;
@@ -240,6 +242,18 @@ public class BitmapDrawableTest extends InstrumentationTestCase {
         assertNull(bitmapDrawable.getPaint().getColorFilter());
     }
 
+    public void testSetTint() {
+        final InputStream source = mContext.getResources().openRawResource(R.raw.testimage);
+        final BitmapDrawable d = new BitmapDrawable(source);
+
+        d.setTint(Color.BLACK);
+        d.setTintMode(Mode.SRC_OVER);
+        assertEquals("Nine-patch is tinted", Color.BLACK, DrawableTestingUtils.getPixel(d, 0, 0));
+
+        d.setTintList(null);
+        d.setTintMode(null);
+    }
+
     public void testGetOpacity() {
         BitmapDrawable bitmapDrawable = new BitmapDrawable();
         assertEquals(Gravity.FILL, bitmapDrawable.getGravity());
@@ -252,6 +266,7 @@ public class BitmapDrawableTest extends InstrumentationTestCase {
         bitmapDrawable.setGravity(Gravity.BOTTOM);
         assertEquals(PixelFormat.TRANSLUCENT, bitmapDrawable.getOpacity());
 
+        source = mContext.getResources().openRawResource(R.raw.testimage);
         bitmapDrawable = new BitmapDrawable(source);
         assertEquals(Gravity.FILL, bitmapDrawable.getGravity());
         assertEquals(PixelFormat.OPAQUE, bitmapDrawable.getOpacity());
@@ -342,6 +357,7 @@ public class BitmapDrawableTest extends InstrumentationTestCase {
         attrs = DrawableTestUtils.getAttributeSet(
                 mContext.getResources().getXml(R.xml.bitmapdrawable), "bitmap_wrongsrc");
         try {
+            bitmapDrawable = new BitmapDrawable();
             bitmapDrawable.inflate(mContext.getResources(), parser, attrs);
             fail("Should throw XmlPullParserException if the bitmap source can't be decoded.");
         } catch (XmlPullParserException e) {
@@ -350,20 +366,23 @@ public class BitmapDrawableTest extends InstrumentationTestCase {
         attrs = DrawableTestUtils.getAttributeSet(
                 mContext.getResources().getXml(R.xml.bitmapdrawable), "bitmap_nosrc");
         try {
+            bitmapDrawable = new BitmapDrawable();
             bitmapDrawable.inflate(mContext.getResources(), parser, attrs);
-            fail("Should throw XmlPullParserException if the bitmap src doesn't be defined.");
+            fail("Should throw XmlPullParserException if the bitmap src is not defined.");
         } catch (XmlPullParserException e) {
         }
 
         attrs = DrawableTestUtils.getAttributeSet(
                 mContext.getResources().getXml(R.xml.bitmapdrawable), "bitmap_allattrs");
         try {
+            bitmapDrawable = new BitmapDrawable();
             bitmapDrawable.inflate(null, parser, attrs);
             fail("Should throw NullPointerException if resource is null");
         } catch (NullPointerException e) {
         }
 
         try {
+            bitmapDrawable = new BitmapDrawable();
             bitmapDrawable.inflate(mContext.getResources(), parser, null);
             fail("Should throw NullPointerException if attribute set is null");
         } catch (NullPointerException e) {

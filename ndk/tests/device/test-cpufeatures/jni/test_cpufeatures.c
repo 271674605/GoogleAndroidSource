@@ -13,7 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define __STDC_FORMAT_MACROS 1
+
 #include <cpu-features.h>
+#include <inttypes.h>
 #include <stdio.h>
 
 int main(void)
@@ -28,6 +31,15 @@ int main(void)
         break;
     case ANDROID_CPU_FAMILY_MIPS:
         printf("CPU family is MIPS\n");
+        break;
+    case ANDROID_CPU_FAMILY_ARM64:
+        printf("CPU family is ARM64\n");
+        break;
+    case ANDROID_CPU_FAMILY_X86_64:
+        printf("CPU family is x86_64\n");
+        break;
+    case ANDROID_CPU_FAMILY_MIPS64:
+        printf("CPU family is MIPS64\n");
         break;
     default:
         fprintf(stderr, "Unsupported CPU family: %d\n", family);
@@ -78,7 +90,21 @@ int main(void)
 #undef CHECK
     }
 
+    int result = 0;
+
+    // Check that the CPU features mask is empty for anything that isn't
+    // 32-bit ARM or 32-bit x86.
+    if (family != ANDROID_CPU_FAMILY_ARM &&
+        family != ANDROID_CPU_FAMILY_X86) {
+        uint64_t features = android_getCpuFeatures();
+        if (features != 0) {
+            printf("ERROR: Unexpected CPU features mask: %016" PRIX64 "\n",
+                   features);
+            result = 1;
+        }
+    }
+
     int count = android_getCpuCount();
     printf( "Number of CPU cores: %d\n", count);
-    return 0;
+    return result;
 }

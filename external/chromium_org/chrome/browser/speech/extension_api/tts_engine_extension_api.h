@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/memory/singleton.h"
-#include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/speech/tts_controller.h"
+#include "extensions/browser/extension_function.h"
 
 class Utterance;
 
@@ -60,7 +60,7 @@ void ExtensionTtsEngineResume(Utterance* utterance);
 class ExtensionTtsEngineSendTtsEventFunction : public SyncExtensionFunction {
  private:
   virtual ~ExtensionTtsEngineSendTtsEventFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION("ttsEngine.sendTtsEvent", TTSENGINE_SENDTTSEVENT)
 };
 

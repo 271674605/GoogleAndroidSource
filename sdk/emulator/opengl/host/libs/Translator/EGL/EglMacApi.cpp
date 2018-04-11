@@ -68,7 +68,15 @@ static EglConfig* pixelFormatToConfig(int index,int renderableType,EGLNativePixe
 
     getPixelFormatAttrib(*frmt,MAC_SAMPLES_PER_PIXEL,&samples);
     getPixelFormatAttrib(*frmt,MAC_COLOR_SIZE,&colorSize);
-    getPixelFormatAttrib(*frmt,MAC_ALPHA_SIZE,&alpha);
+    /* All configs can end up having an alpha channel even if none was requested.
+     * The default config chooser in GLSurfaceView will therefore not find any
+     * matching config. Thus, make sure alpha is zero (or at least signalled as
+     * zero to the calling EGL layer) for the configs where it was intended to
+     * be zero. */
+    if (getPixelFormatDefinitionAlpha(index) == 0)
+        alpha = 0;
+    else
+        getPixelFormatAttrib(*frmt,MAC_ALPHA_SIZE,&alpha);
     getPixelFormatAttrib(*frmt,MAC_DEPTH_SIZE,&depth);
     getPixelFormatAttrib(*frmt,MAC_STENCIL_SIZE,&stencil);
 
@@ -142,11 +150,20 @@ bool checkPixmapPixelFormatMatch(EGLNativeDisplayType dpy,EGLNativePixmapType pi
 EGLNativeSurfaceType createPbufferSurface(EGLNativeDisplayType dpy,EglConfig* cfg,EglPbufferSurface* srfc){
     EGLint width,height,hasMipmap,tmp;
     EGLint target,format;
+    GLenum glTexFormat = GL_RGBA, glTexTarget = GL_TEXTURE_2D;
     srfc->getDim(&width,&height,&tmp);
     srfc->getTexInfo(&format,&target);
+    switch (format) {
+    case EGL_TEXTURE_RGB:
+        glTexFormat = GL_RGB;
+        break;
+    case EGL_TEXTURE_RGBA:
+        glTexFormat = GL_RGBA;
+        break;
+    }
     srfc->getAttrib(EGL_MIPMAP_TEXTURE,&hasMipmap);
     EGLint maxMipmap = hasMipmap ? MAX_PBUFFER_MIPMAP_LEVEL:0;
-    return (EGLNativeSurfaceType)nsCreatePBuffer(target,format,maxMipmap,width,height);
+    return (EGLNativeSurfaceType)nsCreatePBuffer(glTexTarget,glTexFormat,maxMipmap,width,height);
 }
 
 bool releasePbuffer(EGLNativeDisplayType dis,EGLNativeSurfaceType pb) {

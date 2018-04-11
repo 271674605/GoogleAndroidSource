@@ -106,7 +106,10 @@ const signed char MPH_to_AudioRecorder[MPH_MAX] = {
     [MPH_VOLUME] = 8,
 #ifdef ANDROID
     [MPH_ANDROIDSIMPLEBUFFERQUEUE] = 9, // this is not an alias
-    [MPH_ANDROIDCONFIGURATION] = 10
+    [MPH_ANDROIDCONFIGURATION] = 10,
+    [MPH_ANDROIDACOUSTICECHOCANCELLATION] = 11,
+    [MPH_ANDROIDAUTOMATICGAINCONTROL] = 12,
+    [MPH_ANDROIDNOISESUPPRESSION] = 13,
 #endif
 #else
 #include "MPH_to_AudioRecorder.h"

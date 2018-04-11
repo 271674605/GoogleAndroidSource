@@ -65,6 +65,13 @@ struct NavigateParams {
   GURL url;
   content::Referrer referrer;
 
+  // The browser-global ID of the frame to navigate, or -1 for the main frame.
+  int64 frame_tree_node_id;
+
+  // Any redirect URLs that occurred for this navigation before |url|.
+  // Usually empty.
+  std::vector<GURL> redirect_chain;
+
   // Indicates whether this navigation will be sent using POST.
   // The POST method is limited support for basic POST data by leveraging
   // NavigationController::LOAD_TYPE_BROWSER_INITIATED_HTTP_POST.
@@ -118,6 +125,9 @@ struct NavigateParams {
   // |tabstrip_add_types|.
   WindowOpenDisposition disposition;
 
+  // Sets browser->is_trusted_source. Default is false.
+  bool trusted_source;
+
   // The transition type of the navigation. Default is
   // content::PAGE_TRANSITION_LINK when target_contents is specified in the
   // constructor.
@@ -140,9 +150,6 @@ struct NavigateParams {
 
   // If non-empty, the new tab is an app tab.
   std::string extension_app_id;
-
-  // If non-empty, the new tab contents encoding is overriden by this value.
-  std::string override_encoding;
 
   // If non-empty, specifies the desired initial position and size of the
   // window if |disposition| == NEW_POPUP.

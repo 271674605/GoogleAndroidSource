@@ -49,11 +49,10 @@ import android.widget.Toast;
 
 import com.android.contacts.common.database.ContactUpdateUtils;
 import com.android.contacts.common.model.AccountTypeManager;
-import com.android.contacts.model.RawContactDelta;
-import com.android.contacts.model.RawContactDeltaList;
-import com.android.contacts.model.RawContactModifier;
+import com.android.contacts.common.model.RawContactDelta;
+import com.android.contacts.common.model.RawContactDeltaList;
+import com.android.contacts.common.model.RawContactModifier;
 import com.android.contacts.common.model.account.AccountWithDataSet;
-import com.android.contacts.util.CallerInfoCacheUtils;
 import com.android.contacts.util.ContactPhotoUtils;
 
 import com.google.common.collect.Lists;
@@ -188,10 +187,8 @@ public class ContactSaveService extends IntentService {
         String action = intent.getAction();
         if (ACTION_NEW_RAW_CONTACT.equals(action)) {
             createRawContact(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         } else if (ACTION_SAVE_CONTACT.equals(action)) {
             saveContact(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         } else if (ACTION_CREATE_GROUP.equals(action)) {
             createGroup(intent);
         } else if (ACTION_RENAME_GROUP.equals(action)) {
@@ -208,16 +205,12 @@ public class ContactSaveService extends IntentService {
             clearPrimary(intent);
         } else if (ACTION_DELETE_CONTACT.equals(action)) {
             deleteContact(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         } else if (ACTION_JOIN_CONTACTS.equals(action)) {
             joinContacts(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         } else if (ACTION_SET_SEND_TO_VOICEMAIL.equals(action)) {
             setSendToVoicemail(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         } else if (ACTION_SET_RINGTONE.equals(action)) {
             setRingtone(intent);
-            CallerInfoCacheUtils.sendUpdateCallerInfoCacheIntent(this);
         }
     }
 
@@ -410,6 +403,12 @@ public class ContactSaveService extends IntentService {
                 Log.e(TAG, "Problem persisting user edits", e);
                 break;
 
+            } catch (IllegalArgumentException e) {
+                // This is thrown by applyBatch on malformed requests
+                Log.e(TAG, "Problem persisting user edits", e);
+                showToast(R.string.contactSavedErrorToast);
+                break;
+
             } catch (OperationApplicationException e) {
                 // Version consistency failed, re-parent change and try again
                 Log.w(TAG, "Version consistency failed, re-parenting: " + e.toString());
@@ -429,7 +428,8 @@ public class ContactSaveService extends IntentService {
                 sb.append(")");
 
                 if (first) {
-                    throw new IllegalStateException("Version consistency failed for a new contact");
+                    throw new IllegalStateException(
+                            "Version consistency failed for a new contact", e);
                 }
 
                 final RawContactDeltaList newState = RawContactDeltaList.fromQuery(
@@ -822,9 +822,8 @@ public class ContactSaveService extends IntentService {
 
                 // Don't bother undemoting if this contact is the user's profile.
                 if (id < Profile.MIN_ID) {
-                    values.clear();
-                    values.put(String.valueOf(id), PinnedPositions.UNDEMOTE);
-                    getContentResolver().update(PinnedPositions.UPDATE_URI, values, null, null);
+                    getContentResolver().call(ContactsContract.AUTHORITY_URI,
+                            PinnedPositions.UNDEMOTE_METHOD, String.valueOf(id), null);
                 }
             }
         } finally {

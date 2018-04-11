@@ -1,14 +1,19 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import glob
+import imp
 import inspect
+import logging
 import os
 import socket
 import sys
 import time
 
+
 class TimeoutException(Exception):
   pass
+
 
 def GetBaseDir():
   main_module = sys.modules['__main__']
@@ -17,74 +22,88 @@ def GetBaseDir():
   else:
     return os.getcwd()
 
+
 def GetTelemetryDir():
   return os.path.normpath(os.path.join(
       __file__, os.pardir, os.pardir, os.pardir))
 
+
 def GetUnittestDataDir():
   return os.path.join(GetTelemetryDir(), 'unittest_data')
+
 
 def GetChromiumSrcDir():
   return os.path.normpath(os.path.join(GetTelemetryDir(), os.pardir, os.pardir))
 
-def WaitFor(condition,
-            timeout, poll_interval=0.1,
-            pass_time_left_to_func=False):
-  assert isinstance(condition, type(lambda: None))  # is function
+
+def AddDirToPythonPath(*path_parts):
+  path = os.path.abspath(os.path.join(*path_parts))
+  if os.path.isdir(path) and path not in sys.path:
+    sys.path.insert(0, path)
+
+_counter = [0]
+def _GetUniqueModuleName():
+  _counter[0] += 1
+  return "page_set_module_" + str(_counter[0])
+
+def GetPythonPageSetModule(file_path):
+  return imp.load_source(_GetUniqueModuleName(), file_path)
+
+
+def WaitFor(condition, timeout):
+  """Waits for up to |timeout| secs for the function |condition| to return True.
+
+  Polling frequency is (elapsed_time / 10), with a min of .1s and max of 5s.
+
+  Returns:
+    Result of |condition| function (if present).
+  """
+  min_poll_interval =   0.1
+  max_poll_interval =   5
+  output_interval   = 300
+
+  def GetConditionString():
+    if condition.__name__ == '<lambda>':
+      try:
+        return inspect.getsource(condition).strip()
+      except IOError:
+        pass
+    return condition.__name__
+
   start_time = time.time()
+  last_output_time = start_time
   while True:
-    if pass_time_left_to_func:
-      res = condition(max((start_time + timeout) - time.time(), 0.0))
-    else:
-      res = condition()
+    res = condition()
     if res:
-      break
-    if time.time() - start_time > timeout:
-      if condition.__name__ == '<lambda>':
-        try:
-          condition_string = inspect.getsource(condition).strip()
-        except IOError:
-          condition_string = condition.__name__
-      else:
-        condition_string = condition.__name__
+      return res
+    now = time.time()
+    elapsed_time = now - start_time
+    last_output_elapsed_time = now - last_output_time
+    if elapsed_time > timeout:
       raise TimeoutException('Timed out while waiting %ds for %s.' %
-                             (timeout, condition_string))
+                             (timeout, GetConditionString()))
+    if last_output_elapsed_time > output_interval:
+      logging.info('Continuing to wait %ds for %s. Elapsed: %ds.',
+                   timeout, GetConditionString(), elapsed_time)
+      last_output_time = time.time()
+    poll_interval = min(max(elapsed_time / 10., min_poll_interval),
+                        max_poll_interval)
     time.sleep(poll_interval)
 
-def FindElementAndPerformAction(tab, text, callback_code):
-  """JavaScript snippet for finding an element with a given text on a page."""
-  code = """
-      (function() {
-        var callback_function = """ + callback_code + """;
-        function _findElement(element, text) {
-          if (element.innerHTML == text) {
-            callback_function
-            return element;
-          }
-          for (var i in element.childNodes) {
-            var found = _findElement(element.childNodes[i], text);
-            if (found)
-              return found;
-          }
-          return null;
-        }
-        var _element = _findElement(document, \"""" + text + """\");
-        return callback_function(_element);
-      })();"""
-  return tab.EvaluateJavaScript(code)
 
-class PortPair(object):
-  def __init__(self, local_port, remote_port):
-    self.local_port = local_port
-    self.remote_port = remote_port
+def GetUnreservedAvailableLocalPort():
+  """Returns an available port on the system.
 
-def GetAvailableLocalPort():
+  WARNING: This method does not reserve the port it returns, so it may be used
+  by something else before you get to use it. This can lead to flake.
+  """
   tmp = socket.socket()
   tmp.bind(('', 0))
   port = tmp.getsockname()[1]
   tmp.close()
 
   return port
+
 
 def CloseConnections(tab):
   """Closes all TCP sockets held open by the browser."""
@@ -94,11 +113,11 @@ def CloseConnections(tab):
   except Exception:
     pass
 
+
 def GetBuildDirectories():
   """Yields all combination of Chromium build output directories."""
   build_dirs = ['build',
-                'out',
-                'sconsbuild',
+                os.path.basename(os.environ.get('CHROMIUM_OUT_DIR', 'out')),
                 'xcodebuild']
 
   build_types = ['Debug', 'Debug_x64', 'Release', 'Release_x64']
@@ -106,3 +125,20 @@ def GetBuildDirectories():
   for build_dir in build_dirs:
     for build_type in build_types:
       yield build_dir, build_type
+
+def GetSequentialFileName(base_name):
+  """Returns the next sequential file name based on |base_name| and the
+  existing files. base_name should not contain extension.
+  e.g: if base_name is /tmp/test, and /tmp/test_000.json,
+  /tmp/test_001.mp3 exist, this returns /tmp/test_002. In case no
+  other sequential file name exist, this will return /tmp/test_000
+  """
+  name, ext = os.path.splitext(base_name)
+  assert ext == '', 'base_name cannot contain file extension.'
+  index = 0
+  while True:
+    output_name = '%s_%03d' % (name, index)
+    if not glob.glob(output_name + '.*'):
+      break
+    index = index + 1
+  return output_name

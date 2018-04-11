@@ -42,9 +42,7 @@
 #include <unistd.h>
 #if defined(__ANDROID__)
 #include <sys/syscall.h>
-#ifndef ANDROID_NON_SDK_BUILD
 #include <sys/linux-syscalls.h>
-#endif
 #else
 #include <syscall.h>
 #endif
@@ -54,6 +52,9 @@
 
 // SYS_mmap2, SYS_munmap, SYS_mremap and __off64_t are not defined in Android.
 #if defined(__ANDROID__)
+#if defined(__NR_mmap) && !defined(SYS_mmap)
+#define SYS_mmap __NR_mmap
+#endif
 #ifndef SYS_mmap2
 #define SYS_mmap2 __NR_mmap2
 #endif

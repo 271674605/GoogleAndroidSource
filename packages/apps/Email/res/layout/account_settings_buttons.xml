@@ -18,19 +18,20 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:paddingTop="@dimen/settings_buttons_padding_top"
-    android:paddingBottom="@dimen/settings_buttons_padding_bottom"
-    >
+    style="?android:attr/buttonBarStyle" >
+
     <Button
         android:id="@+id/cancel"
-        style="@style/accountSettingsButton"
-        android:layout_width="0dip"
+        android:layout_width="0dp"
+        android:layout_height="48sp"
         android:layout_weight="1"
-        android:text="@string/cancel_action" />
+        android:text="@android:string/cancel"
+        style="?android:attr/buttonBarButtonStyle" />
     <Button
         android:id="@+id/done"
-        style="@style/accountSettingsButton"
-        android:layout_width="0dip"
+        android:layout_width="0dp"
+        android:layout_height="48sp"
         android:layout_weight="1"
-        android:text="@string/done_action" />
+        android:text="@string/done"
+        style="?android:attr/buttonBarButtonStyle" />
 </LinearLayout>

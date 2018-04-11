@@ -12,26 +12,30 @@
 #include "sync/base/sync_export.h"
 #include "sync/engine/all_status.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/engine/sync_engine_event.h"
-#include "sync/engine/traffic_recorder.h"
+#include "sync/engine/sync_engine_event_listener.h"
 #include "sync/internal_api/change_reorder_buffer.h"
 #include "sync/internal_api/debug_info_event_listener.h"
 #include "sync/internal_api/js_mutation_event_observer.h"
 #include "sync/internal_api/js_sync_encryption_handler_observer.h"
 #include "sync/internal_api/js_sync_manager_observer.h"
+#include "sync/internal_api/protocol_event_buffer.h"
+#include "sync/internal_api/public/base/invalidator_state.h"
+#include "sync/internal_api/public/sync_core_proxy.h"
 #include "sync/internal_api/public/sync_manager.h"
 #include "sync/internal_api/public/user_share.h"
 #include "sync/internal_api/sync_encryption_handler_impl.h"
 #include "sync/js/js_backend.h"
 #include "sync/notifier/invalidation_handler.h"
-#include "sync/notifier/invalidator_state.h"
 #include "sync/syncable/directory_change_delegate.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/time.h"
 
 namespace syncer {
 
+class ModelTypeRegistry;
 class SyncAPIServerConnectionManager;
+class SyncCore;
+class TypeDebugInfoObserver;
 class WriteNode;
 class WriteTransaction;
 
@@ -69,7 +73,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
       int sync_server_port,
       bool use_ssl,
       scoped_ptr<HttpPostProviderFactory> post_factory,
-      const std::vector<ModelSafeWorker*>& workers,
+      const std::vector<scoped_refptr<ModelSafeWorker> >& workers,
       ExtensionsActivity* extensions_activity,
       SyncManager::ChangeDelegate* change_delegate,
       const SyncCredentials& credentials,
@@ -81,8 +85,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
       scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
       ReportUnrecoverableErrorFunction
           report_unrecoverable_error_function,
-      bool use_oauth2_token) OVERRIDE;
-  virtual void ThrowUnrecoverableError() OVERRIDE;
+      CancelationSignal* cancelation_signal) OVERRIDE;
   virtual ModelTypeSet InitialSyncEndedTypes() OVERRIDE;
   virtual ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
       ModelTypeSet types) OVERRIDE;
@@ -102,17 +105,29 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
       const ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
+  virtual std::string GetOwnerName() const OVERRIDE;
   virtual void AddObserver(SyncManager::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(SyncManager::Observer* observer) OVERRIDE;
   virtual SyncStatus GetDetailedStatus() const OVERRIDE;
   virtual void SaveChanges() OVERRIDE;
-  virtual void StopSyncingForShutdown() OVERRIDE;
   virtual void ShutdownOnSyncThread() OVERRIDE;
   virtual UserShare* GetUserShare() OVERRIDE;
+  virtual syncer::SyncCoreProxy* GetSyncCoreProxy() OVERRIDE;
   virtual const std::string cache_guid() OVERRIDE;
   virtual bool ReceivedExperiment(Experiments* experiments) OVERRIDE;
   virtual bool HasUnsyncedItems() OVERRIDE;
   virtual SyncEncryptionHandler* GetEncryptionHandler() OVERRIDE;
+  virtual ScopedVector<syncer::ProtocolEvent>
+      GetBufferedProtocolEvents() OVERRIDE;
+  virtual scoped_ptr<base::ListValue> GetAllNodesForType(
+      syncer::ModelType type) OVERRIDE;
+  virtual void RegisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
+  virtual void UnregisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
+  virtual bool HasDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
+  virtual void RequestEmitDebugInfo() OVERRIDE;
 
   // SyncEncryptionHandler::Observer implementation.
   virtual void OnPassphraseRequired(
@@ -136,7 +151,12 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   static int GetPreferencesNudgeDelay();
 
   // SyncEngineEventListener implementation.
-  virtual void OnSyncEngineEvent(const SyncEngineEvent& event) OVERRIDE;
+  virtual void OnSyncCycleEvent(const SyncCycleEvent& event) OVERRIDE;
+  virtual void OnActionableError(const SyncProtocolError& error) OVERRIDE;
+  virtual void OnRetryTimeChanged(base::Time retry_time) OVERRIDE;
+  virtual void OnThrottledTypesChanged(ModelTypeSet throttled_types) OVERRIDE;
+  virtual void OnMigrationRequested(ModelTypeSet types) OVERRIDE;
+  virtual void OnProtocolEvent(const ProtocolEvent& event) OVERRIDE;
 
   // ServerConnectionEventListener implementation.
   virtual void OnServerConnectionEvent(
@@ -145,9 +165,6 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   // JsBackend implementation.
   virtual void SetJsEventHandler(
       const WeakHandle<JsEventHandler>& event_handler) OVERRIDE;
-  virtual void ProcessJsMessage(
-      const std::string& name, const JsArgList& args,
-      const WeakHandle<JsReplyHandler>& reply_handler) OVERRIDE;
 
   // DirectoryChangeDelegate implementation.
   // This listener is called upon completion of a syncable transaction, and
@@ -181,6 +198,11 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
 
   bool GetHasInvalidAuthTokenForTest() const;
 
+ protected:
+  // Helper functions.  Virtual for testing.
+  virtual void NotifyInitializationSuccess();
+  virtual void NotifyInitializationFailure();
+
  private:
   friend class SyncManagerTest;
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, NudgeDelayTest);
@@ -203,10 +225,6 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   base::TimeDelta GetNudgeDelayTimeDelta(const ModelType& model_type);
 
   typedef std::map<ModelType, NotificationInfo> NotificationInfoMap;
-  typedef JsArgList (SyncManagerImpl::*UnboundJsMessageHandler)(
-      const JsArgList&);
-  typedef base::Callback<JsArgList(const JsArgList&)> JsMessageHandler;
-  typedef std::map<std::string, JsMessageHandler> JsMessageHandlerMap;
 
   // Determine if the parents or predecessors differ between the old and new
   // versions of an entry.  Note that a node's index may change without its
@@ -249,34 +267,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
                                 bool existed_before,
                                 bool exists_now);
 
-  // Called for every notification. This updates the notification statistics
-  // to be displayed in about:sync.
-  void UpdateNotificationInfo(
-      const ModelTypeInvalidationMap& invalidation_map);
-
   // Checks for server reachabilty and requests a nudge.
   void OnNetworkConnectivityChangedImpl();
-
-  // Helper function used only by the constructor.
-  void BindJsMessageHandler(
-    const std::string& name, UnboundJsMessageHandler unbound_message_handler);
-
-  // Returned pointer is owned by the caller.
-  static base::DictionaryValue* NotificationInfoToValue(
-      const NotificationInfoMap& notification_info);
-
-  static std::string NotificationInfoToString(
-      const NotificationInfoMap& notification_info);
-
-  // JS message handlers.
-  JsArgList GetNotificationState(const JsArgList& args);
-  JsArgList GetNotificationInfo(const JsArgList& args);
-  JsArgList GetRootNodeDetails(const JsArgList& args);
-  JsArgList GetAllNodes(const JsArgList& args);
-  JsArgList GetNodeSummariesById(const JsArgList& args);
-  JsArgList GetNodeDetailsById(const JsArgList& args);
-  JsArgList GetChildNodeIds(const JsArgList& args);
-  JsArgList GetClientServerTraffic(const JsArgList& args);
 
   syncable::Directory* directory();
 
@@ -285,8 +277,6 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   const std::string name_;
 
   base::ThreadChecker thread_checker_;
-
-  base::WeakPtrFactory<SyncManagerImpl> weak_ptr_factory_;
 
   // Thread-safe handle used by
   // HandleCalculateChangesChangeEventFromSyncApi(), which can be
@@ -312,6 +302,14 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   // The ServerConnectionManager used to abstract communication between the
   // client (the Syncer) and the sync server.
   scoped_ptr<SyncAPIServerConnectionManager> connection_manager_;
+
+  // Maintains state that affects the way we interact with different sync types.
+  // This state changes when entering or exiting a configuration cycle.
+  scoped_ptr<ModelTypeRegistry> model_type_registry_;
+
+  // The main interface for non-blocking sync types and a thread-safe wrapper.
+  scoped_ptr<SyncCore> sync_core_;
+  scoped_ptr<SyncCoreProxy> sync_core_proxy_;
 
   // A container of various bits of information used by the SyncScheduler to
   // create SyncSessions.  Must outlive the SyncScheduler.
@@ -348,8 +346,6 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   NotificationInfoMap notification_info_map_;
 
   // These are for interacting with chrome://sync-internals.
-  JsMessageHandlerMap js_message_handlers_;
-  WeakHandle<JsEventHandler> js_event_handler_;
   JsSyncManagerObserver js_sync_manager_observer_;
   JsMutationEventObserver js_mutation_event_observer_;
   JsSyncEncryptionHandlerObserver js_sync_encryption_handler_observer_;
@@ -357,9 +353,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   // This is for keeping track of client events to send to the server.
   DebugInfoEventListener debug_info_event_listener_;
 
-  TrafficRecorder traffic_recorder_;
+  ProtocolEventBuffer protocol_event_buffer_;
 
-  Encryptor* encryptor_;
   scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler_;
   ReportUnrecoverableErrorFunction report_unrecoverable_error_function_;
 
@@ -367,6 +362,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   // changing passphrases, and in general handles sync-specific interactions
   // with the cryptographer.
   scoped_ptr<SyncEncryptionHandlerImpl> sync_encryption_handler_;
+
+  base::WeakPtrFactory<SyncManagerImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncManagerImpl);
 };

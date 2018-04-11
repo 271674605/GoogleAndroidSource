@@ -42,7 +42,7 @@ LOCAL_CFLAGS += \
 	$(ASR_GLOBAL_DEFINES) \
 	$(ASR_GLOBAL_CPPFLAGS) \
 	-fexceptions \
-	
+
 LOCAL_SHARED_LIBRARIES := \
 	libESR_Shared \
 	libESR_Portable \
@@ -63,6 +63,13 @@ LOCAL_CFLAGS +=	-DOPENFSTSDK
 LOCAL_SHARED_LIBRARIES += libfst
 endif
 
+LOCAL_CLANG := true
+
+LOCAL_CPPFLAGS += -std=c++11
+
+# Workaround clang 3.5 bug: b/15319952
+LOCAL_CFLAGS += -O1
+
 LOCAL_STATIC_LIBRARIES := \
 	libtinyxml \
 
@@ -72,5 +79,9 @@ LOCAL_LDLIBS := \
 	-ldl \
 
 LOCAL_MODULE:= grxmlcompile
+
+LOCAL_32_BIT_ONLY := true
+
+include external/libcxx/libcxx.mk
 
 include $(BUILD_HOST_EXECUTABLE)

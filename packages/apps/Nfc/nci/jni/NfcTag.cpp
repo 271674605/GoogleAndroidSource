@@ -20,6 +20,7 @@
 #include "OverrideLog.h"
 #include "NfcTag.h"
 #include "JavaClassConstants.h"
+#include "config.h"
 #include <ScopedLocalRef.h>
 #include <ScopedPrimitiveArray.h>
 
@@ -48,7 +49,10 @@ NfcTag::NfcTag ()
     mtT1tMaxMessageSize (0),
     mReadCompletedStatus (NFA_STATUS_OK),
     mLastKovioUidLen (0),
-    mNdefDetectionTimedOut (false)
+    mNdefDetectionTimedOut (false),
+    mIsDynamicTagId (false),
+    mPresenceCheckAlgorithm (NFA_RW_PRES_CHK_DEFAULT),
+    mIsFelicaLite(false)
 {
     memset (mTechList, 0, sizeof(mTechList));
     memset (mTechHandles, 0, sizeof(mTechHandles));
@@ -86,6 +90,8 @@ NfcTag& NfcTag::getInstance ()
 *******************************************************************************/
 void NfcTag::initialize (nfc_jni_native_data* native)
 {
+    long num = 0;
+
     mNativeData = native;
     mIsActivated = false;
     mActivationState = Idle;
@@ -94,6 +100,8 @@ void NfcTag::initialize (nfc_jni_native_data* native)
     mtT1tMaxMessageSize = 0;
     mReadCompletedStatus = NFA_STATUS_OK;
     resetTechnologies ();
+    if (GetNumValue(NAME_PRESENCE_CHECK_ALGORITHM, &num, sizeof(num)))
+        mPresenceCheckAlgorithm = num;
 }
 
 
@@ -310,7 +318,7 @@ void NfcTag::discoverTechnologies (tNFA_ACTIVATED& activationData)
         mTechList [mNumTechList] = TARGET_TYPE_ISO14443_3A;  //is TagTechnology.NFC_A by Java API
         // could be MifFare UL or Classic or Kovio
         {
-            // need to look at first byte of uid to find manuf.
+            // need to look at first byte of uid to find Manufacture Byte
             tNFC_RF_TECH_PARAMS tech_params;
             memcpy (&tech_params, &(rfDetail.rf_tech_param), sizeof(rfDetail.rf_tech_param));
 
@@ -332,7 +340,21 @@ void NfcTag::discoverTechnologies (tNFA_ACTIVATED& activationData)
         break;
 
     case NFC_PROTOCOL_T3T:
-        mTechList [mNumTechList] = TARGET_TYPE_FELICA;
+        {
+            UINT8 xx = 0;
+
+            mTechList [mNumTechList] = TARGET_TYPE_FELICA;
+
+            //see if it is Felica Lite.
+            while (xx < activationData.params.t3t.num_system_codes)
+            {
+                if (activationData.params.t3t.p_system_codes[xx++] == T3T_SYSTEM_CODE_FELICA_LITE)
+                {
+                    mIsFelicaLite = true;
+                    break;
+                }
+            }
+        }
         break;
 
     case NFC_PROTOCOL_ISO_DEP: //type-4 tag uses technology ISO-DEP and technology A or B
@@ -371,6 +393,7 @@ void NfcTag::discoverTechnologies (tNFA_ACTIVATED& activationData)
         ALOGD ("%s: Kovio", fn);
         mTechList [mNumTechList] = TARGET_TYPE_KOVIO_BARCODE;
         break;
+
     default:
         ALOGE ("%s: unknown protocol ????", fn);
         mTechList [mNumTechList] = TARGET_TYPE_UNKNOWN;
@@ -423,11 +446,11 @@ void NfcTag::discoverTechnologies (tNFA_DISC_RESULT& discoveryData)
 
     case NFC_PROTOCOL_T2T:
         mTechList [mNumTechList] = TARGET_TYPE_ISO14443_3A;  //is TagTechnology.NFC_A by Java API
-        //type-2 tags are identitical to Mifare Ultralight, so Ultralight is also discovered
+        //type-2 tags are identical to Mifare Ultralight, so Ultralight is also discovered
         if ((discovery_ntf.rf_tech_param.param.pa.sel_rsp == 0) &&
                 (mNumTechList < (MAX_NUM_TECHNOLOGY-1)))
         {
-            // mifare Ultralight
+            // Mifare Ultralight
             mNumTechList++;
             mTechHandles [mNumTechList] = discovery_ntf.rf_disc_id;
             mTechLibNfcTypes [mNumTechList] = discovery_ntf.protocol;
@@ -479,6 +502,7 @@ void NfcTag::discoverTechnologies (tNFA_DISC_RESULT& discoveryData)
     case NFC_PROTOCOL_15693: //is TagTechnology.NFC_V by Java API
         mTechList [mNumTechList] = TARGET_TYPE_ISO15693;
         break;
+
     default:
         ALOGE ("%s: unknown protocol ????", fn);
         mTechList [mNumTechList] = TARGET_TYPE_UNKNOWN;
@@ -634,7 +658,6 @@ void NfcTag::fillNativeNfcTagMembers1 (JNIEnv* e, jclass tag_cls, jobject tag)
 ** Returns:         None
 **
 *******************************************************************************/
-//fill NativeNfcTag's members: mHandle, mConnectedTechnology
 void NfcTag::fillNativeNfcTagMembers2 (JNIEnv* e, jclass tag_cls, jobject tag, tNFA_ACTIVATED& /*activationData*/)
 {
     static const char fn [] = "NfcTag::fillNativeNfcTagMembers2";
@@ -938,6 +961,12 @@ void NfcTag::fillNativeNfcTagMembers5 (JNIEnv* e, jclass tag_cls, jobject tag, t
         uid.reset(e->NewByteArray(len));
         e->SetByteArrayRegion(uid.get(), 0, len,
                 (jbyte*) &mTechParams [0].param.pa.nfcid1);
+        //a tag's NFCID1 can change dynamically at each activation;
+        //only the first byte (0x08) is constant; a dynamic NFCID1's length
+        //must be 4 bytes (see NFC Digitial Protocol,
+        //section 4.7.2 SDD_RES Response, Requirements 20).
+        mIsDynamicTagId = (mTechParams [0].param.pa.nfcid1_len == 4) &&
+                (mTechParams [0].param.pa.nfcid1 [0] == 0x08);
         break;
 
     case NFC_DISCOVERY_TYPE_POLL_B:
@@ -1079,6 +1108,8 @@ void NfcTag::resetTechnologies ()
     memset (mTechHandles, 0, sizeof(mTechHandles));
     memset (mTechLibNfcTypes, 0, sizeof(mTechLibNfcTypes));
     memset (mTechParams, 0, sizeof(mTechParams));
+    mIsDynamicTagId = false;
+    mIsFelicaLite = false;
     resetAllTransceiveTimeouts ();
 }
 
@@ -1203,27 +1234,16 @@ bool NfcTag::isMifareUltralight ()
 
     for (int i =0; i < mNumTechList; i++)
     {
-        if ( (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A) ||
-             (mTechParams[i].mode == NFC_DISCOVERY_TYPE_LISTEN_A) ||
-             (mTechParams[i].mode == NFC_DISCOVERY_TYPE_LISTEN_A_ACTIVE) )
+        if (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A)
         {
             //see NFC Digital Protocol, section 4.6.3 (SENS_RES); section 4.8.2 (SEL_RES).
-            //see Mifare Type Identification Procedure, section 5.1 (ATQA), 5.2 (SAK).
+            //see "MF0ICU1 Functional specification MIFARE Ultralight", Rev. 3.4 - 4 February 2008,
+            //section 6.7.
             if ( (mTechParams[i].param.pa.sens_res[0] == 0x44) &&
-                 (mTechParams[i].param.pa.sens_res[1] == 0) )
+                 (mTechParams[i].param.pa.sens_res[1] == 0) &&
+                 ( (mTechParams[i].param.pa.sel_rsp == 0) || (mTechParams[i].param.pa.sel_rsp == 0x04) ) &&
+                 (mTechParams[i].param.pa.nfcid1[0] == 0x04) )
             {
-                // SyncEventGuard g (mReadCompleteEvent);
-                // mReadCompletedStatus = NFA_STATUS_BUSY;
-                // ALOGD ("%s: read block 0x10", fn);
-                // tNFA_STATUS stat = NFA_RwT2tRead (0x10);
-                // if (stat == NFA_STATUS_OK)
-                    // mReadCompleteEvent.wait ();
-                //
-                // //if read-completion status is failure, then the tag is
-                // //definitely Mifare Ultralight;
-                // //if read-completion status is OK, then the tag is
-                // //definitely Mifare Ultralight C;
-                // retval = (mReadCompletedStatus == NFA_STATUS_FAILED);
                 retval = true;
             }
             break;
@@ -1231,6 +1251,22 @@ bool NfcTag::isMifareUltralight ()
     }
     ALOGD ("%s: return=%u", fn, retval);
     return retval;
+}
+
+
+/*******************************************************************************
+**
+** Function:        isFelicaLite
+**
+** Description:     Whether the currently activated tag is Felica Lite.
+**
+** Returns:         True if tag is Felica Lite.
+**
+*******************************************************************************/
+
+bool NfcTag::isFelicaLite ()
+{
+    return mIsFelicaLite;
 }
 
 
@@ -1347,6 +1383,7 @@ void NfcTag::connectionEventHandler (UINT8 event, tNFA_CONN_EVT_DATA* data)
     }
 }
 
+
 /*******************************************************************************
 **
 ** Function         setActive
@@ -1359,6 +1396,23 @@ void NfcTag::connectionEventHandler (UINT8 event, tNFA_CONN_EVT_DATA* data)
 void NfcTag::setActive(bool active)
 {
     mIsActivated = active;
+}
+
+
+/*******************************************************************************
+**
+** Function:        isDynamicTagId
+**
+** Description:     Whether a tag has a dynamic tag ID.
+**
+** Returns:         True if ID is dynamic.
+**
+*******************************************************************************/
+bool NfcTag::isDynamicTagId ()
+{
+    return mIsDynamicTagId &&
+            (mTechList [0] == TARGET_TYPE_ISO14443_4) &&  //type-4 tag
+            (mTechList [1] == TARGET_TYPE_ISO14443_3A);  //tech A
 }
 
 
@@ -1385,7 +1439,6 @@ void NfcTag::resetAllTransceiveTimeouts ()
     mTechnologyTimeoutsTable [TARGET_TYPE_KOVIO_BARCODE] = 1000; //NfcBarcode
 }
 
-
 /*******************************************************************************
 **
 ** Function:        getTransceiveTimeout
@@ -1400,7 +1453,7 @@ int NfcTag::getTransceiveTimeout (int techId)
 {
     static const char fn [] = "NfcTag::getTransceiveTimeout";
     int retval = 1000;
-    if ((techId >= 0) && (techId < (int) mTechnologyTimeoutsTable.size()))
+    if ((techId > 0) && (techId < (int) mTechnologyTimeoutsTable.size()))
         retval = mTechnologyTimeoutsTable [techId];
     else
         ALOGE ("%s: invalid tech=%d", fn, techId);
@@ -1419,7 +1472,6 @@ int NfcTag::getTransceiveTimeout (int techId)
 ** Returns:         Timeout value.
 **
 *******************************************************************************/
-void setTransceiveTimeout (int techId, int timeout);
 void NfcTag::setTransceiveTimeout (int techId, int timeout)
 {
     static const char fn [] = "NfcTag::setTransceiveTimeout";
@@ -1427,4 +1479,83 @@ void NfcTag::setTransceiveTimeout (int techId, int timeout)
         mTechnologyTimeoutsTable [techId] = timeout;
     else
         ALOGE ("%s: invalid tech=%d", fn, techId);
+}
+
+
+/*******************************************************************************
+**
+** Function:        getPresenceCheckAlgorithm
+**
+** Description:     Get presence-check algorithm from .conf file.
+**
+** Returns:         Presence-check algorithm.
+**
+*******************************************************************************/
+tNFA_RW_PRES_CHK_OPTION NfcTag::getPresenceCheckAlgorithm ()
+{
+    return mPresenceCheckAlgorithm;
+}
+
+
+/*******************************************************************************
+**
+** Function:        isInfineonMyDMove
+**
+** Description:     Whether the currently activated tag is Infineon My-D Move.
+**
+** Returns:         True if tag is Infineon My-D Move.
+**
+*******************************************************************************/
+bool NfcTag::isInfineonMyDMove ()
+{
+    static const char fn [] = "NfcTag::isInfineonMyDMove";
+    bool retval = false;
+
+    for (int i =0; i < mNumTechList; i++)
+    {
+        if (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A)
+        {
+            //see Infineon my-d move, my-d move NFC, SLE 66R01P, SLE 66R01PN,
+            //Short Product Information, 2011-11-24, section 3.5
+            if (mTechParams[i].param.pa.nfcid1[0] == 0x05)
+            {
+                UINT8 highNibble = mTechParams[i].param.pa.nfcid1[1] & 0xF0;
+                if (highNibble == 0x30)
+                    retval = true;
+            }
+            break;
+        }
+    }
+    ALOGD ("%s: return=%u", fn, retval);
+    return retval;
+}
+
+
+/*******************************************************************************
+**
+** Function:        isKovioType2Tag
+**
+** Description:     Whether the currently activated tag is Kovio Type-2 tag.
+**
+** Returns:         True if tag is Kovio Type-2 tag.
+**
+*******************************************************************************/
+bool NfcTag::isKovioType2Tag ()
+{
+    static const char fn [] = "NfcTag::isKovioType2Tag";
+    bool retval = false;
+
+    for (int i =0; i < mNumTechList; i++)
+    {
+        if (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A)
+        {
+            //Kovio 2Kb RFID Tag, Functional Specification,
+            //March 2, 2012, v2.0, section 8.3.
+            if (mTechParams[i].param.pa.nfcid1[0] == 0x37)
+                retval = true;
+            break;
+        }
+    }
+    ALOGD ("%s: return=%u", fn, retval);
+    return retval;
 }

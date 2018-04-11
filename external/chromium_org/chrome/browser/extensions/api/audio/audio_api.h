@@ -6,47 +6,46 @@
 #define CHROME_BROWSER_EXTENSIONS_API_AUDIO_AUDIO_API_H_
 
 #include "chrome/browser/extensions/api/audio/audio_service.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
 
 namespace extensions {
 
 class AudioService;
 
-class AudioAPI : public ProfileKeyedAPI,
-                 public AudioService::Observer {
+class AudioAPI : public BrowserContextKeyedAPI, public AudioService::Observer {
  public:
-  explicit AudioAPI(Profile* profile);
+  explicit AudioAPI(content::BrowserContext* context);
   virtual ~AudioAPI();
 
   AudioService* GetService() const;
 
-  // ProfileKeyedAPI implementation.
-  static ProfileKeyedAPIFactory<AudioAPI>* GetFactoryInstance();
+  // BrowserContextKeyedAPI implementation.
+  static BrowserContextKeyedAPIFactory<AudioAPI>* GetFactoryInstance();
 
   // AudioService::Observer implementation.
   virtual void OnDeviceChanged() OVERRIDE;
 
  private:
-  friend class ProfileKeyedAPIFactory<AudioAPI>;
+  friend class BrowserContextKeyedAPIFactory<AudioAPI>;
 
-  // ProfileKeyedAPI implementation.
+  // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
     return "AudioAPI";
   }
 
-  Profile* const profile_;
+  content::BrowserContext* const browser_context_;
   AudioService* service_;
 };
 
-class AudioGetInfoFunction : public AsyncExtensionFunction {
+class AudioGetInfoFunction : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.getInfo",
                              AUDIO_GETINFO);
 
  protected:
   virtual ~AudioGetInfoFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void OnGetInfoCompleted(const OutputInfo& output_info,
@@ -54,24 +53,24 @@ class AudioGetInfoFunction : public AsyncExtensionFunction {
                           bool success);
 };
 
-class AudioSetActiveDevicesFunction : public SyncExtensionFunction {
+class AudioSetActiveDevicesFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.setActiveDevices",
                              AUDIO_SETACTIVEDEVICES);
 
  protected:
   virtual ~AudioSetActiveDevicesFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class AudioSetPropertiesFunction : public SyncExtensionFunction {
+class AudioSetPropertiesFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.setProperties",
                              AUDIO_SETPROPERTIES);
 
  protected:
   virtual ~AudioSetPropertiesFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 

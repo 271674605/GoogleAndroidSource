@@ -14,7 +14,6 @@
 
 package android.accessibilityservice.cts;
 
-import android.app.Activity;
 import android.os.Bundle;
 
 import com.android.cts.accessibilityservice.R;
@@ -26,7 +25,7 @@ import com.android.cts.accessibilityservice.R;
  * this activity is for verifying the the sync between accessibility
  * and input focus.
  */
-public class AccessibilityFocusAndInputFocusSyncActivity extends Activity {
+public class AccessibilityFocusAndInputFocusSyncActivity extends AccessibilityTestActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

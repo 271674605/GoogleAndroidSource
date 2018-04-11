@@ -8,15 +8,12 @@
 #include <jni.h>
 #include <string>
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-
-class TokenService;
-
 
 // A specialization of ProfileOAuth2TokenService that will be returned by
 // ProfileOAuth2TokenServiceFactory for OS_ANDROID.  This instance uses
@@ -25,53 +22,120 @@ class TokenService;
 // See |ProfileOAuth2TokenService| for usage details.
 //
 // Note: requests should be started from the UI thread. To start a
-// request from other thread, please use ProfileOAuth2TokenServiceRequest.
+// request from other thread, please use OAuth2TokenServiceRequest.
 class AndroidProfileOAuth2TokenService : public ProfileOAuth2TokenService {
  public:
-
-  // Callback from FetchOAuth2Token.
-  // Arguments:
-  // - the error, or NONE if the token fetch was successful.
-  // - the OAuth2 access token.
-  // - the expiry time of the token (may be null, indicating that the expiry
-  //   time is unknown.
-  typedef base::Callback<void(
-      const GoogleServiceAuthError&, const std::string&, const base::Time&)>
-          FetchOAuth2TokenCallback;
-
-  // Start the OAuth2 access token for the given scopes using
-  // ProfileSyncServiceAndroid.
-  virtual scoped_ptr<OAuth2TokenService::Request> StartRequest(
-      const OAuth2TokenService::ScopeSet& scopes,
-      OAuth2TokenService::Consumer* consumer) OVERRIDE;
-
-  // StartRequest() fetches a token for the currently signed-in account; this
-  // version uses the account corresponding to |username|. This allows fetching
-  // tokens before a user is signed-in (e.g. during the sign-in flow).
-  scoped_ptr<OAuth2TokenService::Request> StartRequestForUsername(
-      const std::string& username,
-      const OAuth2TokenService::ScopeSet& scopes,
-      OAuth2TokenService::Consumer* consumer);
-
-  virtual bool RefreshTokenIsAvailable() OVERRIDE;
-  virtual void InvalidateToken(const ScopeSet& scopes,
-                               const std::string& invalid_token) OVERRIDE;
-
   // Registers the AndroidProfileOAuth2TokenService's native methods through
   // JNI.
   static bool Register(JNIEnv* env);
+
+  // Creates a new instance of the AndroidProfileOAuth2TokenService.
+  static AndroidProfileOAuth2TokenService* Create();
+
+  // Returns a reference to the Java instance of this service.
+  static jobject GetForProfile(
+      JNIEnv* env, jclass clazz, jobject j_profile_android);
+
+  // Called by the TestingProfile class to disable account validation in
+  // tests.  This prevents the token service from trying to look up system
+  // accounts which requires special permission.
+  static void set_is_testing_profile() {
+    is_testing_profile_ = true;
+  }
+
+  // ProfileOAuth2TokenService overrides:
+  virtual void Initialize(SigninClient* client) OVERRIDE;
+  virtual bool RefreshTokenIsAvailable(
+      const std::string& account_id) const OVERRIDE;
+  virtual std::vector<std::string> GetAccounts() OVERRIDE;
+
+  // Lists account at the OS level.
+  std::vector<std::string> GetSystemAccounts();
+
+  void ValidateAccounts(JNIEnv* env,
+                        jobject obj,
+                        jstring current_account,
+                        jboolean force_notifications);
+
+  // Takes a the signed in sync account as well as all the other
+  // android account ids and check the token status of each.  If
+  // |force_notifications| is true, TokenAvailable notifications will
+  // be sent anyway, even if the account was already known.
+  void ValidateAccounts(const std::string& signed_in_account,
+                        bool force_notifications);
+
+  // Triggers a notification to all observers of the OAuth2TokenService that a
+  // refresh token is now available. This may cause observers to retry
+  // operations that require authentication.
+  virtual void FireRefreshTokenAvailableFromJava(JNIEnv* env,
+                                                 jobject obj,
+                                                 const jstring account_name);
+  // Triggers a notification to all observers of the OAuth2TokenService that a
+  // refresh token is now available.
+  virtual void FireRefreshTokenRevokedFromJava(JNIEnv* env,
+                                               jobject obj,
+                                               const jstring account_name);
+  // Triggers a notification to all observers of the OAuth2TokenService that all
+  // refresh tokens have now been loaded.
+  virtual void FireRefreshTokensLoadedFromJava(JNIEnv* env, jobject obj);
+
+  // Overridden from OAuth2TokenService to complete signout of all
+  // OA2TService aware accounts.
+  virtual void RevokeAllCredentials() OVERRIDE;
 
  protected:
   friend class ProfileOAuth2TokenServiceFactory;
   AndroidProfileOAuth2TokenService();
   virtual ~AndroidProfileOAuth2TokenService();
 
-  // virtual for testing.
-  virtual void FetchOAuth2Token(const std::string& username,
-                                const std::string& scope,
-                                const FetchOAuth2TokenCallback& callback);
+  // Overridden from OAuth2TokenService to intercept token fetch requests and
+  // redirect them to the Account Manager.
+  virtual void FetchOAuth2Token(RequestImpl* request,
+                                const std::string& account_id,
+                                net::URLRequestContextGetter* getter,
+                                const std::string& client_id,
+                                const std::string& client_secret,
+                                const ScopeSet& scopes) OVERRIDE;
+
+  // Overriden from OAuth2TokenService to avoid compile errors. Has NOTREACHED()
+  // implementation as |AndroidProfileOAuth2TokenService| overrides
+  // |FetchOAuth2Token| and thus bypasses this method entirely.
+  virtual OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
+      const std::string& account_id,
+      net::URLRequestContextGetter* getter,
+      OAuth2AccessTokenConsumer* consumer) OVERRIDE;
+
+  // Overridden from OAuth2TokenService to intercept token fetch requests and
+  // redirect them to the Account Manager.
+  virtual void InvalidateOAuth2Token(const std::string& account_id,
+                                     const std::string& client_id,
+                                     const ScopeSet& scopes,
+                                     const std::string& access_token) OVERRIDE;
+
+  // Called to notify observers when a refresh token is available.
+  virtual void FireRefreshTokenAvailable(
+      const std::string& account_id) OVERRIDE;
+  // Called to notify observers when a refresh token has been revoked.
+  virtual void FireRefreshTokenRevoked(const std::string& account_id) OVERRIDE;
+  // Called to notify observers when refresh tokans have been loaded.
+  virtual void FireRefreshTokensLoaded() OVERRIDE;
+
+  // Return whether |signed_in_account| is valid and we have access
+  // to all the tokens in |curr_account_ids|. If |force_notifications| is true,
+  // TokenAvailable notifications will be sent anyway, even if the account was
+  // already known.
+  bool ValidateAccounts(const std::string& signed_in_account,
+                        const std::vector<std::string>& prev_account_ids,
+                        const std::vector<std::string>& curr_account_ids,
+                        std::vector<std::string>& refreshed_ids,
+                        std::vector<std::string>& revoked_ids,
+                        bool force_notifications);
 
  private:
+  base::android::ScopedJavaGlobalRef<jobject> java_ref_;
+
+  static bool is_testing_profile_;
+
   DISALLOW_COPY_AND_ASSIGN(AndroidProfileOAuth2TokenService);
 };
 

@@ -40,6 +40,8 @@
 #include <cutils/fs.h>
 #include <cutils/log.h>
 
+#include <string>
+
 #include "Volume.h"
 #include "VolumeManager.h"
 #include "ResponseCode.h"
@@ -70,6 +72,7 @@ const char *Volume::SEC_ASECDIR_EXT   = "/mnt/secure/asec";
  * Path to internal storage where *only* root can access ASEC image files
  */
 const char *Volume::SEC_ASECDIR_INT   = "/data/app-asec";
+
 /*
  * Path to where secure containers are mounted
  */
@@ -79,6 +82,8 @@ const char *Volume::ASECDIR           = "/mnt/asec";
  * Path to where OBBs are mounted
  */
 const char *Volume::LOOPDIR           = "/mnt/obb";
+
+const char *Volume::BLKID_PATH = "/system/bin/blkid";
 
 static const char *stateToStr(int state) {
     if (state == Volume::State_Init)
@@ -109,6 +114,8 @@ Volume::Volume(VolumeManager *vm, const fstab_rec* rec, int flags) {
     mVm = vm;
     mDebug = false;
     mLabel = strdup(rec->label);
+    mUuid = NULL;
+    mUserLabel = NULL;
     mState = Volume::State_Init;
     mFlags = flags;
     mCurrentlyMountedKdev = -1;
@@ -118,25 +125,8 @@ Volume::Volume(VolumeManager *vm, const fstab_rec* rec, int flags) {
 
 Volume::~Volume() {
     free(mLabel);
-}
-
-void Volume::protectFromAutorunStupidity() {
-    char filename[255];
-
-    snprintf(filename, sizeof(filename), "%s/autorun.inf", getMountpoint());
-    if (!access(filename, F_OK)) {
-        SLOGW("Volume contains an autorun.inf! - removing");
-        /*
-         * Ensure the filename is all lower-case so
-         * the process killer can find the inode.
-         * Probably being paranoid here but meh.
-         */
-        rename(filename, filename);
-        Process::killProcessesWithOpenFiles(filename, 2);
-        if (unlink(filename)) {
-            SLOGE("Failed to remove %s (%s)", filename, strerror(errno));
-        }
-    }
+    free(mUuid);
+    free(mUserLabel);
 }
 
 void Volume::setDebug(bool enable) {
@@ -157,9 +147,49 @@ void Volume::handleVolumeShared() {
 void Volume::handleVolumeUnshared() {
 }
 
-int Volume::handleBlockEvent(NetlinkEvent *evt) {
+int Volume::handleBlockEvent(NetlinkEvent * /*evt*/) {
     errno = ENOSYS;
     return -1;
+}
+
+void Volume::setUuid(const char* uuid) {
+    char msg[256];
+
+    if (mUuid) {
+        free(mUuid);
+    }
+
+    if (uuid) {
+        mUuid = strdup(uuid);
+        snprintf(msg, sizeof(msg), "%s %s \"%s\"", getLabel(),
+                getFuseMountpoint(), mUuid);
+    } else {
+        mUuid = NULL;
+        snprintf(msg, sizeof(msg), "%s %s", getLabel(), getFuseMountpoint());
+    }
+
+    mVm->getBroadcaster()->sendBroadcast(ResponseCode::VolumeUuidChange, msg,
+            false);
+}
+
+void Volume::setUserLabel(const char* userLabel) {
+    char msg[256];
+
+    if (mUserLabel) {
+        free(mUserLabel);
+    }
+
+    if (userLabel) {
+        mUserLabel = strdup(userLabel);
+        snprintf(msg, sizeof(msg), "%s %s \"%s\"", getLabel(),
+                getFuseMountpoint(), mUserLabel);
+    } else {
+        mUserLabel = NULL;
+        snprintf(msg, sizeof(msg), "%s %s", getLabel(), getFuseMountpoint());
+    }
+
+    mVm->getBroadcaster()->sendBroadcast(ResponseCode::VolumeUserLabelChange,
+            msg, false);
 }
 
 void Volume::setState(int state) {
@@ -220,7 +250,9 @@ int Volume::formatVol(bool wipe) {
     bool formatEntireDevice = (mPartIdx == -1);
     char devicePath[255];
     dev_t diskNode = getDiskDevice();
-    dev_t partNode = MKDEV(MAJOR(diskNode), (formatEntireDevice ? 1 : mPartIdx));
+    dev_t partNode =
+        MKDEV(MAJOR(diskNode),
+              MINOR(diskNode) + (formatEntireDevice ? 1 : mPartIdx));
 
     setState(Volume::State_Formatting);
 
@@ -228,7 +260,7 @@ int Volume::formatVol(bool wipe) {
     // Only initialize the MBR if we are formatting the entire device
     if (formatEntireDevice) {
         sprintf(devicePath, "/dev/block/vold/%d:%d",
-                MAJOR(diskNode), MINOR(diskNode));
+                major(diskNode), minor(diskNode));
 
         if (initializeMbr(devicePath)) {
             SLOGE("Failed to initialize MBR (%s)", strerror(errno));
@@ -237,7 +269,7 @@ int Volume::formatVol(bool wipe) {
     }
 
     sprintf(devicePath, "/dev/block/vold/%d:%d",
-            MAJOR(partNode), MINOR(partNode));
+            major(partNode), minor(partNode));
 
     if (mDebug) {
         SLOGI("Formatting volume %s (%s)", getLabel(), devicePath);
@@ -274,7 +306,6 @@ bool Volume::isMountpointMounted(const char *path) {
             fclose(fp);
             return true;
         }
-
     }
 
     fclose(fp);
@@ -347,14 +378,14 @@ int Volume::mountVol() {
 
        if (n != 1) {
            /* We only expect one device node returned when mounting encryptable volumes */
-           SLOGE("Too many device nodes returned when mounting %d\n", getMountpoint());
+           SLOGE("Too many device nodes returned when mounting %s\n", getMountpoint());
            return -1;
        }
 
        if (cryptfs_setup_volume(getLabel(), MAJOR(deviceNodes[0]), MINOR(deviceNodes[0]),
                                 new_sys_path, sizeof(new_sys_path),
                                 &new_major, &new_minor)) {
-           SLOGE("Cannot setup encryption mapping for %d\n", getMountpoint());
+           SLOGE("Cannot setup encryption mapping for %s\n", getMountpoint());
            return -1;
        }
        /* We now have the new sysfs path for the decrypted block device, and the
@@ -384,8 +415,8 @@ int Volume::mountVol() {
     for (i = 0; i < n; i++) {
         char devicePath[255];
 
-        sprintf(devicePath, "/dev/block/vold/%d:%d", MAJOR(deviceNodes[i]),
-                MINOR(deviceNodes[i]));
+        sprintf(devicePath, "/dev/block/vold/%d:%d", major(deviceNodes[i]),
+                minor(deviceNodes[i]));
 
         SLOGI("%s being considered for volume %s\n", devicePath, getLabel());
 
@@ -413,7 +444,7 @@ int Volume::mountVol() {
             continue;
         }
 
-        protectFromAutorunStupidity();
+        extractMetadata(devicePath);
 
         if (providesAsec && mountAsecExternal() != 0) {
             SLOGE("Failed to mount secure area (%s)", strerror(errno));
@@ -452,6 +483,7 @@ int Volume::mountAsecExternal() {
     }
 
     if (fs_prepare_dir(secure_path, 0770, AID_MEDIA_RW, AID_MEDIA_RW) != 0) {
+        SLOGW("fs_prepare_dir failed: %s", strerror(errno));
         return -1;
     }
 
@@ -550,6 +582,8 @@ int Volume::unmountVol(bool force, bool revert) {
         SLOGI("Encrypted volume %s reverted successfully", getMountpoint());
     }
 
+    setUuid(NULL);
+    setUserLabel(NULL);
     setState(Volume::State_Idle);
     mCurrentlyMountedKdev = -1;
     return 0;
@@ -607,4 +641,57 @@ int Volume::initializeMbr(const char *deviceNode) {
     free(dinfo.part_lst);
 
     return rc;
+}
+
+/*
+ * Use blkid to extract UUID and label from device, since it handles many
+ * obscure edge cases around partition types and formats. Always broadcasts
+ * updated metadata values.
+ */
+int Volume::extractMetadata(const char* devicePath) {
+    int res = 0;
+
+    std::string cmd;
+    cmd = BLKID_PATH;
+    cmd += " -c /dev/null ";
+    cmd += devicePath;
+
+    FILE* fp = popen(cmd.c_str(), "r");
+    if (!fp) {
+        ALOGE("Failed to run %s: %s", cmd.c_str(), strerror(errno));
+        res = -1;
+        goto done;
+    }
+
+    char line[1024];
+    char value[128];
+    if (fgets(line, sizeof(line), fp) != NULL) {
+        ALOGD("blkid identified as %s", line);
+
+        char* start = strstr(line, "UUID=");
+        if (start != NULL && sscanf(start + 5, "\"%127[^\"]\"", value) == 1) {
+            setUuid(value);
+        } else {
+            setUuid(NULL);
+        }
+
+        start = strstr(line, "LABEL=");
+        if (start != NULL && sscanf(start + 6, "\"%127[^\"]\"", value) == 1) {
+            setUserLabel(value);
+        } else {
+            setUserLabel(NULL);
+        }
+    } else {
+        ALOGW("blkid failed to identify %s", devicePath);
+        res = -1;
+    }
+
+    pclose(fp);
+
+done:
+    if (res == -1) {
+        setUuid(NULL);
+        setUserLabel(NULL);
+    }
+    return res;
 }

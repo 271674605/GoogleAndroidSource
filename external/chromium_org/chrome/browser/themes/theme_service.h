@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/theme_provider.h"
@@ -58,7 +58,7 @@ extern "C" NSString* const kBrowserThemeDidChangeNotification;
 
 class ThemeService : public base::NonThreadSafe,
                      public content::NotificationObserver,
-                     public BrowserContextKeyedService,
+                     public KeyedService,
                      public ui::ThemeProvider {
  public:
   // Public constants used in ThemeService and its subclasses:
@@ -76,9 +76,10 @@ class ThemeService : public base::NonThreadSafe,
   virtual gfx::Image GetImageNamed(int id) const;
 
   // Overridden from ui::ThemeProvider:
+  virtual bool UsingSystemTheme() const OVERRIDE;
   virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE;
   virtual SkColor GetColor(int id) const OVERRIDE;
-  virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE;
+  virtual int GetDisplayProperty(int id) const OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual bool HasCustomImage(int id) const OVERRIDE;
   virtual base::RefCountedMemory* GetRawData(
@@ -90,12 +91,6 @@ class ThemeService : public base::NonThreadSafe,
   virtual NSColor* GetNSColor(int id) const OVERRIDE;
   virtual NSColor* GetNSColorTint(int id) const OVERRIDE;
   virtual NSGradient* GetNSGradient(int id) const OVERRIDE;
-#elif defined(OS_POSIX) && !defined(TOOLKIT_VIEWS) && !defined(OS_ANDROID)
-  // This mismatch between what this class defines and whether or not it
-  // overrides ui::ThemeProvider is http://crbug.com/105040 .
-  // GdkPixbufs returned by GetPixbufNamed and GetRTLEnabledPixbufNamed are
-  // shared instances owned by the theme provider and should not be freed.
-  virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const OVERRIDE;
 #endif
 
   // Overridden from content::NotificationObserver:
@@ -111,17 +106,13 @@ class ThemeService : public base::NonThreadSafe,
   // Reset the theme to default.
   virtual void UseDefaultTheme();
 
-  // Set the current theme to the native theme. On some platforms, the native
+  // Set the current theme to the system theme. On some platforms, the system
   // theme is the default theme.
-  virtual void SetNativeTheme();
+  virtual void UseSystemTheme();
 
   // Whether we're using the chrome default theme. Virtual so linux can check
   // if we're using the GTK theme.
   virtual bool UsingDefaultTheme() const;
-
-  // Whether we're using the native theme (which may or may not be the
-  // same as the default theme).
-  virtual bool UsingNativeTheme() const;
 
   // Gets the id of the last installed theme. (The theme may have been further
   // locally customized.)
@@ -135,8 +126,10 @@ class ThemeService : public base::NonThreadSafe,
   // destroyed, uninstalls all themes that aren't the currently selected.
   void OnInfobarDestroyed();
 
-  // Remove preference values for themes that are no longer in use.
-  void RemoveUnusedThemes();
+  // Uninstall theme extensions which are no longer in use. |ignore_infobars| is
+  // whether unused themes should be removed despite a theme infobar being
+  // visible.
+  void RemoveUnusedThemes(bool ignore_infobars);
 
   // Returns the syncable service for syncing theme. The returned service is
   // owned by |this| object.
@@ -150,8 +143,8 @@ class ThemeService : public base::NonThreadSafe,
   virtual void SetCustomDefaultTheme(
       scoped_refptr<CustomThemeSupplier> theme_supplier);
 
-  // Returns true if the ThemeService should use the native theme on startup.
-  virtual bool ShouldInitWithNativeTheme() const;
+  // Returns true if the ThemeService should use the system theme on startup.
+  virtual bool ShouldInitWithSystemTheme() const;
 
   // Get the specified tint - |id| is one of the TINT_* enum values.
   color_utils::HSL GetTint(int id) const;
@@ -190,13 +183,16 @@ class ThemeService : public base::NonThreadSafe,
  private:
   friend class theme_service_internal::ThemeServiceTest;
 
-  // Replaces the current theme supplier with a new one and calls
-  // StopUsingTheme() or StartUsingTheme() as appropriate.
-  void SwapThemeSupplier(scoped_refptr<CustomThemeSupplier> theme_supplier);
+  // Called when the extension service is ready.
+  void OnExtensionServiceReady();
 
   // Migrate the theme to the new theme pack schema by recreating the data pack
   // from the extension.
   void MigrateTheme();
+
+  // Replaces the current theme supplier with a new one and calls
+  // StopUsingTheme() or StartUsingTheme() as appropriate.
+  void SwapThemeSupplier(scoped_refptr<CustomThemeSupplier> theme_supplier);
 
   // Saves the filename of the cached theme pack.
   void SavePackName(const base::FilePath& pack_path);
@@ -208,25 +204,14 @@ class ThemeService : public base::NonThreadSafe,
   // case we don't have a theme pack).
   void BuildFromExtension(const extensions::Extension* extension);
 
-  // Returns true if the profile belongs to a managed user.
-  bool IsManagedUser() const;
+  // Returns true if the profile belongs to a supervised user.
+  bool IsSupervisedUser() const;
 
-  // Sets the current theme to the managed user theme. Should only be used for
-  // managed user profiles.
-  void SetManagedUserTheme();
+  // Sets the current theme to the supervised user theme. Should only be used
+  // for supervised user profiles.
+  void SetSupervisedUserTheme();
 
-  // Sets the managed user theme if the user has no custom theme yet.
-  void OnManagedUserInitialized();
-
-#if defined(TOOLKIT_GTK)
-  // Loads an image and flips it horizontally if |rtl_enabled| is true.
-  GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled) const;
-#endif
-
-#if defined(TOOLKIT_GTK)
-  typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
-  mutable GdkPixbufMap gdk_pixbufs_;
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   // |nsimage_cache_| retains the images it has cached.
   typedef std::map<int, NSImage*> NSImageMap;
   mutable NSImageMap nsimage_cache_;
@@ -243,6 +228,13 @@ class ThemeService : public base::NonThreadSafe,
   Profile* profile_;
 
   scoped_refptr<CustomThemeSupplier> theme_supplier_;
+
+  // The id of the theme extension which has just been installed but has not
+  // been loaded yet. The theme extension with |installed_pending_load_id_| may
+  // never be loaded if the install is due to updating a disabled theme.
+  // |pending_install_id_| should be set to |kDefaultThemeID| if there are no
+  // recently installed theme extensions
+  std::string installed_pending_load_id_;
 
   // The number of infobars currently displayed.
   int number_of_infobars_;

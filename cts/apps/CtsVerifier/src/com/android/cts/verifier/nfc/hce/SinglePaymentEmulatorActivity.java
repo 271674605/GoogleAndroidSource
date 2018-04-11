@@ -1,13 +1,10 @@
 package com.android.cts.verifier.nfc.hce;
 
 import android.annotation.TargetApi;
-import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.nfc.cardemulation.CardEmulation;
 import android.os.Bundle;
-
 import com.android.cts.verifier.R;
 import com.android.cts.verifier.nfc.NfcDialogs;
 
@@ -30,17 +27,17 @@ public class SinglePaymentEmulatorActivity extends BaseEmulatorActivity {
     @Override
     void onServicesSetup(boolean result) {
         // Verify HCE service 1 is the default
-        if (!mCardEmulation.isDefaultServiceForCategory(
-                PaymentService1.COMPONENT, CardEmulation.CATEGORY_PAYMENT)) {
-            // Popup dialog-box, fail test
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Test failed.");
-            builder.setMessage("PaymentService1 is not the default service according " +
-                    "to CardEmulation.getDefaultServiceForCategory(), verify no other " +
-                    "payment HCE apps are installed.");
-            builder.setPositiveButton("OK", null);
-            builder.show();
+        if (makePaymentDefault(PaymentService1.COMPONENT,
+                R.string.nfc_hce_change_preinstalled_wallet)) {
+            // Wait for callback
         } else {
+	        NfcDialogs.createHceTapReaderDialog(this, null).show();
+        }
+    }
+
+    @Override
+    void onPaymentDefaultResult(ComponentName component, boolean success) {
+        if (success) {
 	        NfcDialogs.createHceTapReaderDialog(this, null).show();
         }
     }

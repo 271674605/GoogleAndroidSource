@@ -1,1 +1,1 @@
-include ':HorizontalPaging'
+include 'Application'

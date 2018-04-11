@@ -29,6 +29,16 @@ class EnrollmentScreenActor {
     UI_ERROR_FATAL,
   };
 
+  // Describes the enrollment mode.  Must be kept in sync with
+  // |kEnrollmentModes| in enrollment_screen_handler.cc.
+  enum EnrollmentMode {
+    ENROLLMENT_MODE_MANUAL,    // Manually triggered enrollment.
+    ENROLLMENT_MODE_FORCED,    // Forced enrollment, user can't skip.
+    ENROLLMENT_MODE_AUTO,      // Auto-enrollment during first sign-in.
+    ENROLLMENT_MODE_RECOVERY,  // Recover from "spontaneous unenrollment".
+    ENROLLMENT_MODE_COUNT      // Counter must be last. Not an enrollment mode.
+  };
+
   // This defines the interface for controllers which will be called back when
   // something happens on the UI.
   class Controller {
@@ -47,9 +57,8 @@ class EnrollmentScreenActor {
 
   // Initializes the actor with parameters.
   virtual void SetParameters(Controller* controller,
-                             bool is_auto_enrollment,
-                             bool can_exit_enrollment,
-                             const std::string& user) = 0;
+                             EnrollmentMode enrollment_mode,
+                             const std::string& management_domain) = 0;
 
   // Prepare the contents to showing.
   virtual void PrepareToShow() = 0;

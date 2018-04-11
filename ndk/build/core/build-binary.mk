@@ -60,6 +60,7 @@ system_libs := \
     jnigraphics \
     log \
     m \
+    m_hard \
     stdc++ \
     z \
     EGL \
@@ -67,7 +68,17 @@ system_libs := \
     GLESv2 \
     GLESv3 \
     OpenSLES \
-    OpenMAXAL
+    OpenMAXAL \
+    bcc \
+    bcinfo \
+    cutils \
+    gui \
+    RScpp \
+    RScpp_static \
+    RS \
+    ui \
+    utils \
+    atomic
 
 libs_in_ldflags := $(filter-out $(addprefix -l,$(system_libs)), $(libs_in_ldflags))
 
@@ -108,8 +119,8 @@ cleantarget := clean-$(LOCAL_MODULE)-$(TARGET_ARCH_ABI)
 .PHONY: $(cleantarget)
 clean: $(cleantarget)
 
+$(cleantarget): PRIVATE_ABI         := $(TARGET_ARCH_ABI)
 $(cleantarget): PRIVATE_MODULE      := $(LOCAL_MODULE)
-$(cleantarget): PRIVATE_TEXT        := [$(TARGET_ARCH_ABI)]
 ifneq ($(LOCAL_BUILT_MODULE_NOT_COPIED),true)
 $(cleantarget): PRIVATE_CLEAN_FILES := $(LOCAL_BUILT_MODULE) \
                                        $($(my)OBJS)
@@ -117,7 +128,7 @@ else
 $(cleantarget): PRIVATE_CLEAN_FILES := $($(my)OBJS)
 endif
 $(cleantarget)::
-	@$(HOST_ECHO) "Clean: $(PRIVATE_MODULE) $(PRIVATE_TEXT)"
+	$(call host-echo-build-step,$(PRIVATE_ABI),Clean) "$(PRIVATE_MODULE) [$(PRIVATE_ABI)]"
 	$(hide) $(call host-rmdir,$(PRIVATE_CLEAN_FILES))
 
 ifeq ($(NDK_APP_DEBUGGABLE),true)
@@ -127,17 +138,12 @@ endif
 # list of generated object files
 LOCAL_OBJECTS :=
 
+# list of generated object files from RS files, subset of LOCAL_OBJECTS
+LOCAL_RS_OBJECTS :=
+
 # always define ANDROID when building binaries
 #
 LOCAL_CFLAGS := -DANDROID $(LOCAL_CFLAGS)
-
-# enable PIE for executable beyond certain API level
-ifeq ($(NDK_APP_PIE),true)
-  ifeq ($(call module-get-class,$(LOCAL_MODULE)),EXECUTABLE)
-    LOCAL_CFLAGS += -fPIE
-    LOCAL_LDFLAGS += -fPIE -pie
-  endif
-endif
 
 #
 # Add the default system shared libraries to the build
@@ -149,7 +155,7 @@ else
 endif
 
 #
-# Check LOCAL_CPP_EXTENSION, use '.cpp' by default
+# Check LOCAL_CPP_EXTENSION
 #
 bad_cpp_extensions := $(strip $(filter-out .%,$(LOCAL_CPP_EXTENSION)))
 ifdef bad_cpp_extensions
@@ -160,8 +166,8 @@ LOCAL_CPP_EXTENSION := $(strip $(LOCAL_CPP_EXTENSION))
 ifeq ($(LOCAL_CPP_EXTENSION),)
   # Match the default GCC C++ extensions.
   LOCAL_CPP_EXTENSION := $(default-c++-extensions)
-else
 endif
+LOCAL_RS_EXTENSION := $(default-rs-extensions)
 
 #
 # If LOCAL_ALLOW_UNDEFINED_SYMBOLS is not true, the linker will allow the generation
@@ -197,6 +203,16 @@ ifeq ($(LOCAL_DISABLE_FORMAT_STRING_CHECKS),true)
   LOCAL_CFLAGS += $($(my)DISABLE_FORMAT_STRING_CFLAGS)
 else
   LOCAL_CFLAGS += $($(my)FORMAT_STRING_CFLAGS)
+endif
+
+# enable PIE for executable beyond certain API level, unless "-static"
+ifneq (,$(filter true,$(NDK_APP_PIE) $(TARGET_PIE)))
+  ifeq ($(call module-get-class,$(LOCAL_MODULE)),EXECUTABLE)
+    ifeq (,$(filter -static,$(TARGET_LDFLAGS) $(LOCAL_LDFLAGS) $(NDK_APP_LDFLAGS)))
+      LOCAL_CFLAGS += -fPIE
+      LOCAL_LDFLAGS += -fPIE -pie
+    endif
+  endif
 endif
 
 #
@@ -252,12 +268,16 @@ ifdef LOCAL_ARM_NEON
 endif
 ifeq ($(LOCAL_ARM_NEON),true)
   neon_sources += $(LOCAL_SRC_FILES:%.neon=%)
+  # tag the precompiled header with 'neon' tag if it exists
+  ifneq (,$(LOCAL_PCH))
+    $(call tag-src-files,$(LOCAL_PCH),neon)
+  endif
 endif
 
 neon_sources := $(strip $(neon_sources))
 ifdef neon_sources
-  ifneq ($(TARGET_ARCH_ABI),armeabi-v7a)
-    $(call __ndk_info,NEON support is only possible for armeabi-v7a ABI)
+  ifeq ($(filter $(TARGET_ARCH_ABI), armeabi-v7a armeabi-v7a-hard x86),)
+    $(call __ndk_info,NEON support is only possible for armeabi-v7a ABI, its variant armeabi-v7a-hard and x86 ABI)
     $(call __ndk_info,Please add checks against TARGET_ARCH_ABI in $(LOCAL_MAKEFILE))
     $(call __ndk_error,Aborting)
   endif
@@ -276,6 +296,10 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES:%.arm=%)
 
 ifeq ($(LOCAL_ARM_MODE),arm)
     arm_sources := $(LOCAL_SRC_FILES)
+    # tag the precompiled header with 'arm' tag if it exists
+    ifneq (,$(LOCAL_PCH))
+        $(call tag-src-files,$(LOCAL_PCH),arm)
+    endif
 endif
 ifeq ($(LOCAL_ARM_MODE),thumb)
     arm_sources := $(empty)
@@ -286,12 +310,26 @@ $(call tag-src-files,$(arm_sources),arm)
 #
 ifeq ($(APP_OPTIM),debug)
     $(call tag-src-files,$(LOCAL_SRC_FILES),debug)
+    ifneq (,$(LOCAL_PCH))
+        $(call tag-src-files,$(LOCAL_PCH),debug)
+    endif
+endif
+
+# add PCH to LOCAL_SRC_FILES so that TARGET-process-src-files-tags could process it
+ifneq (,$(LOCAL_PCH))
+    LOCAL_SRC_FILES += $(LOCAL_PCH)
 endif
 
 # Process all source file tags to determine toolchain-specific
 # target compiler flags, and text.
 #
 $(call TARGET-process-src-files-tags)
+
+# now remove PCH from LOCAL_SRC_FILES to prevent getting NDK warning about
+# unsupported source file extensions
+ifneq (,$(LOCAL_PCH))
+    LOCAL_SRC_FILES := $(filter-out $(LOCAL_PCH),$(LOCAL_SRC_FILES))
+endif
 
 # only call dump-src-file-tags during debugging
 #$(dump-src-file-tags)
@@ -300,9 +338,14 @@ LOCAL_DEPENDENCY_DIRS :=
 
 # all_source_patterns contains the list of filename patterns that correspond
 # to source files recognized by our build system
-all_source_extensions := .c .s .S $(LOCAL_CPP_EXTENSION)
+ifeq ($(TARGET_ARCH_ABI),x86)
+all_source_extensions := .c .s .S .asm $(LOCAL_CPP_EXTENSION) $(LOCAL_RS_EXTENSION)
+else
+all_source_extensions := .c .s .S $(LOCAL_CPP_EXTENSION) $(LOCAL_RS_EXTENSION)
+endif
 all_source_patterns   := $(foreach _ext,$(all_source_extensions),%$(_ext))
 all_cpp_patterns      := $(foreach _ext,$(LOCAL_CPP_EXTENSION),%$(_ext))
+all_rs_patterns       := $(foreach _ext,$(LOCAL_RS_EXTENSION),%$(_ext))
 
 unknown_sources := $(strip $(filter-out $(all_source_patterns),$(LOCAL_SRC_FILES)))
 ifdef unknown_sources
@@ -319,7 +362,17 @@ $(foreach _ext,$(all_source_extensions),\
 )
 LOCAL_OBJECTS := $(filter %$(TARGET_OBJ_EXTENSION),$(LOCAL_OBJECTS))
 LOCAL_OBJECTS := $(subst ../,__/,$(LOCAL_OBJECTS))
+LOCAL_OBJECTS := $(subst :,_,$(LOCAL_OBJECTS))
 LOCAL_OBJECTS := $(foreach _obj,$(LOCAL_OBJECTS),$(LOCAL_OBJS_DIR)/$(_obj))
+
+LOCAL_RS_OBJECTS := $(filter $(all_rs_patterns),$(LOCAL_SRC_FILES))
+$(foreach _ext,$(LOCAL_RS_EXTENSION),\
+    $(eval LOCAL_RS_OBJECTS := $$(LOCAL_RS_OBJECTS:%$(_ext)=%$$(TARGET_OBJ_EXTENSION)))\
+)
+LOCAL_RS_OBJECTS := $(filter %$(TARGET_OBJ_EXTENSION),$(LOCAL_RS_OBJECTS))
+LOCAL_RS_OBJECTS := $(subst ../,__/,$(LOCAL_RS_OBJECTS))
+LOCAL_RS_OBJECTS := $(subst :,_,$(LOCAL_RS_OBJECTS))
+LOCAL_RS_OBJECTS := $(foreach _obj,$(LOCAL_RS_OBJECTS),$(LOCAL_OBJS_DIR)/$(_obj))
 
 # If the module has any kind of C++ features, enable them in LOCAL_CPPFLAGS
 #
@@ -339,15 +392,70 @@ ifneq (,$(call module-has-c++-features,$(LOCAL_MODULE),rtti exceptions))
     endif
 endif
 
+# Set include patch for renderscript
+
+
+ifneq ($(LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE),)
+    LOCAL_RENDERSCRIPT_INCLUDES := $(LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE)
+else
+    LOCAL_RENDERSCRIPT_INCLUDES := \
+        $(RENDERSCRIPT_TOOLCHAIN_HEADER) \
+        $(TARGET_C_INCLUDES)/rs/scriptc \
+        $(LOCAL_RENDERSCRIPT_INCLUDES)
+endif
+
+RS_COMPAT :=
+ifneq ($(call module-is-shared-library,$(LOCAL_MODULE)),)
+    RS_COMPAT := true
+endif
+
+
+# Build PCH
+
+get-pch-name = $(strip \
+    $(subst ../,__/,\
+        $(eval __pch := $1)\
+        $(eval __pch := $(__pch:%.h=%.precompiled.h))\
+        $(__pch)\
+    ))
+
+ifneq (,$(LOCAL_PCH))
+    # Build PCH into obj directory
+    LOCAL_BUILT_PCH := $(call get-pch-name,$(LOCAL_PCH))
+
+    # Build PCH
+    $(call compile-cpp-source,$(LOCAL_PCH),$(LOCAL_BUILT_PCH).gch)
+
+    # All obj files are dependent on the PCH
+    $(foreach src,$(filter $(all_cpp_patterns),$(LOCAL_SRC_FILES)),\
+        $(eval $(LOCAL_OBJS_DIR)/$(call get-object-name,$(src)) : $(LOCAL_OBJS_DIR)/$(LOCAL_BUILT_PCH).gch)\
+    )
+
+    # Files from now on build with PCH
+    LOCAL_CPPFLAGS += -Winvalid-pch -include $(LOCAL_BUILT_PCH)
+
+    # Insert PCH dir at beginning of include search path
+    LOCAL_C_INCLUDES := \
+        $(LOCAL_OBJS_DIR) \
+        $(LOCAL_C_INCLUDES)
+endif
+
 # Build the sources to object files
 #
 
 $(foreach src,$(filter %.c,$(LOCAL_SRC_FILES)), $(call compile-c-source,$(src),$(call get-object-name,$(src))))
 $(foreach src,$(filter %.S %.s,$(LOCAL_SRC_FILES)), $(call compile-s-source,$(src),$(call get-object-name,$(src))))
-
 $(foreach src,$(filter $(all_cpp_patterns),$(LOCAL_SRC_FILES)),\
     $(call compile-cpp-source,$(src),$(call get-object-name,$(src)))\
 )
+
+$(foreach src,$(filter $(all_rs_patterns),$(LOCAL_SRC_FILES)),\
+    $(call compile-rs-source,$(src),$(call get-rs-scriptc-name,$(src)),$(call get-rs-bc-name,$(src)),$(call get-rs-so-name,$(src)),$(call get-object-name,$(src)),$(RS_COMPAT))\
+)
+
+ifeq ($(TARGET_ARCH_ABI),x86)
+$(foreach src,$(filter %.asm,$(LOCAL_SRC_FILES)), $(call compile-asm-source,$(src),$(call get-object-name,$(src))))
+endif
 
 #
 # The compile-xxx-source calls updated LOCAL_OBJECTS and LOCAL_DEPENDENCY_DIRS
@@ -365,6 +473,9 @@ CLEAN_OBJS_DIRS     += $(LOCAL_OBJS_DIR)
 #
 ifneq ($(filter -l%,$(LOCAL_LDLIBS)),)
     LOCAL_LDLIBS := -L$(call host-path,$(SYSROOT_LINK)/usr/lib) $(LOCAL_LDLIBS)
+    ifneq ($(filter x86_64 mips64,$(TARGET_ARCH_ABI)),)
+        LOCAL_LDLIBS := -L$(call host-path,$(SYSROOT_LINK)/usr/lib64) $(LOCAL_LDLIBS)
+    endif
 endif
 
 # When LOCAL_SHORT_COMMANDS is defined to 'true' we are going to write the
@@ -427,12 +538,13 @@ ifeq (true,$(thin_archive))
     ar_flags := $(ar_flags)T
 endif
 
+$(LOCAL_BUILT_MODULE): PRIVATE_ABI := $(TARGET_ARCH_ABI)
 $(LOCAL_BUILT_MODULE): PRIVATE_AR := $(TARGET_AR) $(ar_flags)
 $(LOCAL_BUILT_MODULE): PRIVATE_AR_OBJECTS := $(ar_objects)
 $(LOCAL_BUILT_MODULE): PRIVATE_BUILD_STATIC_LIB := $(cmd-build-static-library)
 
 $(LOCAL_BUILT_MODULE): $(LOCAL_OBJECTS)
-	@ $(HOST_ECHO) "StaticLibrary  : $(PRIVATE_NAME)"
+	$(call host-echo-build-step,$(PRIVATE_ABI),StaticLibrary) "$(PRIVATE_NAME)"
 	$(hide) $(call host-rm,$@)
 	$(hide) $(PRIVATE_BUILD_STATIC_LIB)
 
@@ -517,6 +629,7 @@ ifeq ($(LOCAL_SHORT_COMMANDS),true)
 endif
 
 $(LOCAL_BUILT_MODULE): $(shared_libs) $(static_libs) $(whole_static_libs)
+$(LOCAL_BUILT_MODULE): PRIVATE_ABI := $(TARGET_ARCH_ABI)
 $(LOCAL_BUILT_MODULE): PRIVATE_LINKER_OBJECTS_AND_LIBRARIES := $(linker_objects_and_libraries)
 $(LOCAL_BUILT_MODULE): PRIVATE_STATIC_LIBRARIES := $(static_libs)
 $(LOCAL_BUILT_MODULE): PRIVATE_WHOLE_STATIC_LIBRARIES := $(whole_static_libs))
@@ -530,7 +643,7 @@ endif
 ifeq ($(call module-get-class,$(LOCAL_MODULE)),SHARED_LIBRARY)
 $(LOCAL_BUILT_MODULE): PRIVATE_BUILD_SHARED_LIB := $(cmd-build-shared-library)
 $(LOCAL_BUILT_MODULE): $(LOCAL_OBJECTS)
-	@ $(HOST_ECHO) "SharedLibrary  : $(PRIVATE_NAME)"
+	$(call host-echo-build-step,$(PRIVATE_ABI),SharedLibrary) "$(PRIVATE_NAME)"
 	$(hide) $(PRIVATE_BUILD_SHARED_LIB)
 
 ALL_SHARED_LIBRARIES += $(LOCAL_BUILT_MODULE)
@@ -540,9 +653,10 @@ endif
 # If this is an executable module
 #
 ifeq ($(call module-get-class,$(LOCAL_MODULE)),EXECUTABLE)
+$(LOCAL_BUILT_MODULE): PRIVATE_ABI := $(TARGET_ARCH_ABI)
 $(LOCAL_BUILT_MODULE): PRIVATE_BUILD_EXECUTABLE := $(cmd-build-executable)
 $(LOCAL_BUILT_MODULE): $(LOCAL_OBJECTS)
-	@ $(HOST_ECHO) "Executable     : $(PRIVATE_NAME)"
+	$(call host-echo-build-step,$(PRIVATE_ABI),Executable) "$(PRIVATE_NAME)"
 	$(hide) $(PRIVATE_BUILD_EXECUTABLE)
 
 ALL_EXECUTABLES += $(LOCAL_BUILT_MODULE)
@@ -553,7 +667,7 @@ endif
 #
 ifeq ($(call module-is-copyable,$(LOCAL_MODULE)),$(true))
 $(LOCAL_BUILT_MODULE): $(LOCAL_OBJECTS)
-	@ $(HOST_ECHO) "Prebuilt       : $(PRIVATE_NAME) <= $(call pretty-dir,$(dir $<))"
+	$(call host-echo-build-step,$(PRIVATE_ABI),Prebuilt) "$(PRIVATE_NAME) <= $(call pretty-dir,$(dir $<))"
 	$(hide) $(call host-cp,$<,$@)
 endif
 
@@ -561,17 +675,22 @@ endif
 # If this is an installable module
 #
 ifeq ($(call module-is-installable,$(LOCAL_MODULE)),$(true))
-$(LOCAL_INSTALLED): PRIVATE_NAME      := $(notdir $(LOCAL_BUILT_MODULE))
-$(LOCAL_INSTALLED): PRIVATE_SRC       := $(LOCAL_BUILT_MODULE)
-$(LOCAL_INSTALLED): PRIVATE_DST_DIR   := $(NDK_APP_DST_DIR)
-$(LOCAL_INSTALLED): PRIVATE_DST       := $(LOCAL_INSTALLED)
-$(LOCAL_INSTALLED): PRIVATE_STRIP     := $(TARGET_STRIP)
-$(LOCAL_INSTALLED): PRIVATE_STRIP_CMD := $(call cmd-strip, $(PRIVATE_DST))
+$(LOCAL_INSTALLED): PRIVATE_ABI         := $(TARGET_ARCH_ABI)
+$(LOCAL_INSTALLED): PRIVATE_NAME        := $(notdir $(LOCAL_BUILT_MODULE))
+$(LOCAL_INSTALLED): PRIVATE_SRC         := $(LOCAL_BUILT_MODULE)
+$(LOCAL_INSTALLED): PRIVATE_DST_DIR     := $(NDK_APP_DST_DIR)
+$(LOCAL_INSTALLED): PRIVATE_DST         := $(LOCAL_INSTALLED)
+$(LOCAL_INSTALLED): PRIVATE_STRIP       := $(TARGET_STRIP)
+$(LOCAL_INSTALLED): PRIVATE_STRIP_CMD   := $(call cmd-strip, $(PRIVATE_DST))
+$(LOCAL_INSTALLED): PRIVATE_OBJCOPY     := $(TARGET_OBJCOPY)
+$(LOCAL_INSTALLED): PRIVATE_OBJCOPY_CMD := $(call cmd-add-gnu-debuglink, $(PRIVATE_DST), $(PRIVATE_SRC))
 
 $(LOCAL_INSTALLED): $(LOCAL_BUILT_MODULE) clean-installed-binaries
-	@$(HOST_ECHO) "Install        : $(PRIVATE_NAME) => $(call pretty-dir,$(PRIVATE_DST))"
+	$(call host-echo-build-step,$(PRIVATE_ABI),Install) "$(PRIVATE_NAME) => $(call pretty-dir,$(PRIVATE_DST))"
 	$(hide) $(call host-install,$(PRIVATE_SRC),$(PRIVATE_DST))
 	$(hide) $(PRIVATE_STRIP_CMD)
+
+#$(hide) $(PRIVATE_OBJCOPY_CMD)
 
 $(call generate-file-dir,$(LOCAL_INSTALLED))
 

@@ -64,9 +64,11 @@
             'sync_core.gypi',
           ],
           'dependencies': [
+            'sync_notifier',
             'sync_proto',
           ],
           'export_dependent_settings': [
+            'sync_notifier',
             'sync_proto',
           ],
         },
@@ -98,13 +100,11 @@
           'includes': [
             'sync_notifier.gypi',
           ],
-          'dependencies': [
-            'sync_core',
-          ],
         },
 
         # The sync protocol buffer library.
         {
+          # GN version: //sync/protocol
           'target_name': 'sync_proto',
           'type': 'static_library',
           'variables': { 'enable_wexit_time_destructors': 1, },

@@ -17,11 +17,11 @@
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/snippet.h"
-#include "chrome/browser/search_engines/template_url_id.h"
-#include "chrome/common/favicon/favicon_types.h"
 #include "chrome/common/ref_counted_util.h"
-#include "chrome/common/thumbnail_score.h"
+#include "components/favicon_base/favicon_types.h"
+#include "components/history/core/common/thumbnail_score.h"
+#include "components/query_parser/snippet.h"
+#include "components/search_engines/template_url_id.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/size.h"
@@ -44,8 +44,10 @@ typedef std::vector<GURL> RedirectList;
 
 typedef int64 FaviconBitmapID; // Identifier for a bitmap in a favicon.
 typedef int64 SegmentID;  // URL segments for the most visited view.
-typedef int64 SegmentDurationID;  // Unique identifier for segment_duration.
 typedef int64 IconMappingID; // For page url and icon mapping.
+
+// Identifier for a context to scope page ids.
+typedef const void* ContextID;
 
 // URLRow ---------------------------------------------------------------------
 
@@ -86,10 +88,10 @@ class URLRow {
 
   const GURL& url() const { return url_; }
 
-  const string16& title() const {
+  const base::string16& title() const {
     return title_;
   }
-  void set_title(const string16& title) {
+  void set_title(const base::string16& title) {
     // The title is frequently set to the same thing, so we don't bother
     // updating unless the string has changed.
     if (title != title_) {
@@ -173,7 +175,7 @@ class URLRow {
   // the constructor to make a new one.
   GURL url_;
 
-  string16 title_;
+  base::string16 title_;
 
   // Total number of times this URL has been visited.
   int visit_count_;
@@ -285,14 +287,15 @@ class URLResult : public URLRow {
   URLResult(const GURL& url, base::Time visit_time);
   // Constructor that create a URLResult from the specified URL and title match
   // positions from title_matches.
-  URLResult(const GURL& url, const Snippet::MatchPositions& title_matches);
+  URLResult(const GURL& url,
+            const query_parser::Snippet::MatchPositions& title_matches);
   explicit URLResult(const URLRow& url_row);
   virtual ~URLResult();
 
   base::Time visit_time() const { return visit_time_; }
   void set_visit_time(base::Time visit_time) { visit_time_ = visit_time; }
 
-  const Snippet& snippet() const { return snippet_; }
+  const query_parser::Snippet& snippet() const { return snippet_; }
 
   bool blocked_visit() const { return blocked_visit_; }
   void set_blocked_visit(bool blocked_visit) {
@@ -302,7 +305,7 @@ class URLResult : public URLRow {
   // If this is a title match, title_match_positions contains an entry for
   // every word in the title that matched one of the query parameters. Each
   // entry contains the start and end of the match.
-  const Snippet::MatchPositions& title_match_positions() const {
+  const query_parser::Snippet::MatchPositions& title_match_positions() const {
     return title_match_positions_;
   }
 
@@ -317,8 +320,8 @@ class URLResult : public URLRow {
   base::Time visit_time_;
 
   // These values are typically set by HistoryBackend.
-  Snippet snippet_;
-  Snippet::MatchPositions title_match_positions_;
+  query_parser::Snippet snippet_;
+  query_parser::Snippet::MatchPositions title_match_positions_;
 
   // Whether a managed user was blocked when attempting to visit this URL.
   bool blocked_visit_;
@@ -486,7 +489,7 @@ struct KeywordSearchTermVisit {
   KeywordSearchTermVisit();
   ~KeywordSearchTermVisit();
 
-  string16 term;    // The search term that was used.
+  base::string16 term;    // The search term that was used.
   int visits;       // The visit count.
   base::Time time;  // The time of the most recent visit.
 };
@@ -500,7 +503,7 @@ struct KeywordSearchTermRow {
 
   TemplateURLID keyword_id;  // ID of the keyword.
   URLID url_id;              // ID of the url.
-  string16 term;             // The search term that was used.
+  base::string16 term;             // The search term that was used.
 };
 
 // MostVisitedURL --------------------------------------------------------------
@@ -508,11 +511,19 @@ struct KeywordSearchTermRow {
 // Holds the per-URL information of the most visited query.
 struct MostVisitedURL {
   MostVisitedURL();
-  MostVisitedURL(const GURL& url, const string16& title);
+  MostVisitedURL(const GURL& url, const base::string16& title);
+  MostVisitedURL(const GURL& url,
+                 const base::string16& title,
+                 const base::Time& last_forced_time);
   ~MostVisitedURL();
 
   GURL url;
-  string16 title;
+  base::string16 title;
+
+  // If this is a URL for which we want to force a thumbnail, records the last
+  // time it was forced so we can evict it when more recent URLs are requested.
+  // If it's not a forced thumbnail, keep a time of 0.
+  base::Time last_forced_time;
 
   RedirectList redirects;
 
@@ -542,7 +553,7 @@ struct FilteredURL {
   ~FilteredURL();
 
   GURL url;
-  string16 title;
+  base::string16 title;
   double score;
   ExtendedInfo extended_info;
 };
@@ -560,7 +571,7 @@ struct HistoryAddPageArgs {
   HistoryAddPageArgs();
   HistoryAddPageArgs(const GURL& url,
                      base::Time time,
-                     const void* id_scope,
+                     ContextID context_id,
                      int32 page_id,
                      const GURL& referrer,
                      const history::RedirectList& redirects,
@@ -572,7 +583,7 @@ struct HistoryAddPageArgs {
   GURL url;
   base::Time time;
 
-  const void* id_scope;
+  ContextID context_id;
   int32 page_id;
 
   GURL referrer;
@@ -677,13 +688,13 @@ struct IconMapping {
   GURL page_url;
 
   // The unique id of the icon.
-  chrome::FaviconID icon_id;
+  favicon_base::FaviconID icon_id;
 
   // The url of the icon.
   GURL icon_url;
 
   // The type of icon.
-  chrome::IconType icon_type;
+  favicon_base::IconType icon_type;
 };
 
 // Defines a favicon bitmap and its associated pixel size.
@@ -707,7 +718,7 @@ struct FaviconBitmap {
   FaviconBitmapID bitmap_id;
 
   // The id of the favicon to which the bitmap belongs to.
-  chrome::FaviconID icon_id;
+  favicon_base::FaviconID icon_id;
 
   // Time at which |bitmap_data| was last updated.
   base::Time last_updated;

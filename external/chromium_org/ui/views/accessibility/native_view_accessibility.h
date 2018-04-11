@@ -5,7 +5,7 @@
 #ifndef UI_VIEWS_ACCESSIBILITY_NATIVE_VIEW_ACCESSIBILITY_H_
 #define UI_VIEWS_ACCESSIBILITY_NATIVE_VIEW_ACCESSIBILITY_H_
 
-#include "ui/base/accessibility/accessibility_types.h"
+#include "ui/accessibility/ax_enums.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
 
@@ -13,19 +13,12 @@ namespace views {
 
 class View;
 
-class AccessibleWebView {
- public:
-  virtual gfx::NativeViewAccessible AccessibleObjectFromChildId(long child_id)
-      = 0;
-  virtual View* AsView() = 0;
-};
-
 class VIEWS_EXPORT NativeViewAccessibility {
  public:
   static NativeViewAccessibility* Create(View* view);
 
   virtual void NotifyAccessibilityEvent(
-      ui::AccessibilityTypes::Event event_type) {}
+      ui::AXEvent event_type) {}
 
   virtual gfx::NativeViewAccessible GetNativeObject();
 
@@ -33,9 +26,11 @@ class VIEWS_EXPORT NativeViewAccessibility {
   // use reference counting.
   virtual void Destroy();
 
-  static void RegisterWebView(AccessibleWebView* web_view);
-
-  static void UnregisterWebView(AccessibleWebView* web_view);
+  // WebViews need to be registered because they implement their own
+  // tree of accessibility objects, and we need to check them when
+  // mapping a child id to a NativeViewAccessible.
+  static void RegisterWebView(View* web_view);
+  static void UnregisterWebView(View* web_view);
 
  protected:
   NativeViewAccessibility();

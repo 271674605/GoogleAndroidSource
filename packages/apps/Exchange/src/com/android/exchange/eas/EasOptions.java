@@ -16,8 +16,6 @@
 
 package com.android.exchange.eas;
 
-import android.content.SyncResult;
-
 import com.android.exchange.Eas;
 import com.android.exchange.EasResponse;
 import com.android.mail.utils.LogUtils;
@@ -25,7 +23,9 @@ import com.google.common.collect.Sets;
 
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
+import org.apache.http.client.methods.HttpUriRequest;
 
+import java.io.IOException;
 import java.util.HashSet;
 
 /**
@@ -53,11 +53,10 @@ public class EasOptions extends EasOperation {
     /**
      * Perform the server request. If successful, callers should use
      * {@link #getProtocolVersionString} to get the actual protocol version value.
-     * @param syncResult The {@link SyncResult} to use for this operation.
      * @return A result code; {@link #RESULT_OK} is the only value that indicates success.
      */
-    public int getProtocolVersionFromServer(final SyncResult syncResult) {
-        return performOperation(syncResult);
+    public int getProtocolVersionFromServer() {
+        return performOperation();
     }
 
     /**
@@ -82,7 +81,7 @@ public class EasOptions extends EasOperation {
     }
 
     @Override
-    protected int handleResponse(final EasResponse response, final SyncResult syncResult) {
+    protected int handleResponse(final EasResponse response) {
         final Header commands = response.getHeader("MS-ASProtocolCommands");
         final Header versions = response.getHeader("ms-asprotocolversions");
         final boolean hasProtocolVersion;
@@ -105,6 +104,9 @@ public class EasOptions extends EasOperation {
         return null;
     }
 
+    protected HttpUriRequest makeRequest() throws IOException, MessageInvalidException {
+        return mConnection.makeOptions();
+    }
     /**
      * Find the best protocol version to use from the header.
      * @param versionHeader The {@link Header} for the server's supported versions.

@@ -13,29 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+LOCAL_PATH := $(call my-dir)
 
 # The prebuilt tools should be used when we are doing app-only build.
 ifeq ($(TARGET_BUILD_APPS),)
 
-LOCAL_PATH := $(call my-dir)
 
-local_cflags_for_slang := -Wno-sign-promo -Wall -Wno-unused-parameter -Werror
+local_cflags_for_slang := -Wno-sign-promo -Wall -Wno-unused-parameter -Wno-return-type -Werror
 ifeq ($(TARGET_BUILD_VARIANT),eng)
 local_cflags_for_slang += -O0
 else
+ifeq ($(TARGET_BUILD_VARIANT),userdebug)
+else
 local_cflags_for_slang += -D__DISABLE_ASSERTS
+endif
 endif
 local_cflags_for_slang += -DTARGET_BUILD_VARIANT=$(TARGET_BUILD_VARIANT)
 
-ifeq "REL" "$(PLATFORM_VERSION_CODENAME)"
-  RS_VERSION := $(PLATFORM_SDK_VERSION)
-else
-  # Increment by 1 whenever this is not a final release build, since we want to
-  # be able to see the RS version number change during development.
-  # See build/core/version_defaults.mk for more information about this.
-  RS_VERSION := "(1 + $(PLATFORM_SDK_VERSION))"
-endif
-local_cflags_for_slang += -DRS_VERSION=$(RS_VERSION)
+include $(LOCAL_PATH)/rs_version.mk
+local_cflags_for_slang += $(RS_VERSION_DEFINE)
 
 static_libraries_needed_by_slang := \
 	libLLVMBitWriter_2_9 \
@@ -54,6 +50,9 @@ include $(CLANG_ROOT_PATH)/clang.mk
 
 LOCAL_MODULE := libslang
 LOCAL_MODULE_TAGS := optional
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
 
 LOCAL_CFLAGS += $(local_cflags_for_slang)
 
@@ -78,54 +77,14 @@ LOCAL_SRC_FILES :=	\
 LOCAL_C_INCLUDES += frameworks/compile/libbcc/include
 
 LOCAL_LDLIBS := -ldl -lpthread
+ifneq ($(HOST_OS),windows)
+LOCAL_LDLIBS += -lc++
+endif
 
 include $(CLANG_HOST_BUILD_MK)
 include $(CLANG_TBLGEN_RULES_MK)
 include $(LLVM_GEN_INTRINSICS_MK)
 include $(BUILD_HOST_STATIC_LIBRARY)
-
-# Host static library containing rslib.bc
-# ========================================================
-include $(CLEAR_VARS)
-
-input_data_file := frameworks/compile/slang/rslib.bc
-slangdata_output_var_name := rslib_bc
-
-LOCAL_IS_HOST_MODULE := true
-LOCAL_MODULE := librslib
-LOCAL_MODULE_TAGS := optional
-
-LOCAL_MODULE_CLASS := STATIC_LIBRARIES
-
-include $(LOCAL_PATH)/SlangData.mk
-include $(BUILD_HOST_STATIC_LIBRARY)
-
-# Executable slang-data for host
-# ========================================================
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := slang-data
-LOCAL_MODULE_TAGS := optional
-
-LOCAL_MODULE_CLASS := EXECUTABLES
-
-LOCAL_SRC_FILES := slang-data.c
-
-include $(BUILD_HOST_EXECUTABLE)
-
-# Executable rs-spec-gen for host
-# ========================================================
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := rs-spec-gen
-LOCAL_MODULE_TAGS := optional
-
-LOCAL_MODULE_CLASS := EXECUTABLES
-
-LOCAL_SRC_FILES :=	\
-	slang_rs_spec_table.cpp
-
-include $(BUILD_HOST_EXECUTABLE)
 
 # ========================================================
 include $(CLEAR_VARS)
@@ -155,6 +114,9 @@ include $(CLEAR_TBLGEN_VARS)
 
 LOCAL_IS_HOST_MODULE := true
 LOCAL_MODULE := llvm-rs-cc
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_MODULE_CLASS := EXECUTABLES
@@ -174,15 +136,9 @@ TBLGEN_TABLES :=    \
 	StmtNodes.inc	\
 	RSCCOptions.inc
 
-RS_SPEC_TABLES :=	\
-	RSClangBuiltinEnums.inc	\
-	RSDataTypeEnums.inc	\
-	RSDataElementEnums.inc	\
-	RSMatrixTypeEnums.inc	\
-	RSObjectTypeEnums.inc
-
 LOCAL_SRC_FILES :=	\
 	llvm-rs-cc.cpp	\
+	rs_cc_options.cpp \
 	slang_rs.cpp	\
 	slang_rs_ast_replace.cpp	\
 	slang_rs_check_ast.cpp	\
@@ -197,9 +153,9 @@ LOCAL_SRC_FILES :=	\
 	slang_rs_export_foreach.cpp \
 	slang_rs_object_ref_count.cpp	\
 	slang_rs_reflection.cpp \
-	slang_rs_reflection_base.cpp \
 	slang_rs_reflection_cpp.cpp \
-	slang_rs_reflect_utils.cpp
+	slang_rs_reflect_utils.cpp \
+	strip_unknown_attributes.cpp
 
 LOCAL_STATIC_LIBRARIES :=	\
 	libslang \
@@ -216,13 +172,12 @@ else
 endif
 
 # For build RSCCOptions.inc from RSCCOptions.td
-intermediates := $(call local-intermediates-dir)
+intermediates := $(call local-generated-sources-dir)
 LOCAL_GENERATED_SOURCES += $(intermediates)/RSCCOptions.inc
-$(intermediates)/RSCCOptions.inc: $(LOCAL_PATH)/RSCCOptions.td $(LLVM_ROOT_PATH)/include/llvm/Option/OptParser.td $(TBLGEN)
+$(intermediates)/RSCCOptions.inc: $(LOCAL_PATH)/RSCCOptions.td $(LLVM_ROOT_PATH)/include/llvm/Option/OptParser.td $(LLVM_TBLGEN)
 	@echo "Building Renderscript compiler (llvm-rs-cc) Option tables with tblgen"
 	$(call transform-host-td-to-out,opt-parser-defs)
 
-include frameworks/compile/slang/RSSpec.mk
 include $(CLANG_HOST_BUILD_MK)
 include $(CLANG_TBLGEN_RULES_MK)
 include $(BUILD_HOST_EXECUTABLE)

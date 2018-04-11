@@ -17,7 +17,7 @@
 -->
 <resources>
     <!-- Boolean value indicating whether the tablet UI should be used. -->
-    <integer name="use_tablet_ui">0</integer>
+    <bool name="use_tablet_ui">false</bool>
     <integer name="conversation_header_mode">1</integer>
     <integer name="conversation_list_search_header_mode">1</integer>
 
@@ -27,16 +27,10 @@
     <!-- Frequency (in milliseconds) for the refresh of timestamps in conversation list fragments. -->
     <integer name="timestamp_update_interval">60000</integer>
 
-    <!-- Relative weights of the different views.  These three
-         determine how much of the screen width is taken by the
-         different views. For the default layout (phone), these values
-         are equal. These are only used in TwoPaneLayout, so they need
-         to be specified for sw600dp and sw720dp layouts. -->
-    <integer name="folder_list_weight">1</integer>
-    <integer name="conversation_list_weight">1</integer>
-    <integer name="conversation_view_weight">1</integer>
+    <integer name="conversation_list_weight">2</integer>
+    <integer name="conversation_view_weight">3</integer>
     <!-- Max unread count to show for a folder -->
-    <integer name="maxUnreadCount">999</integer>
+    <integer name="maxUnreadCount">99</integer>
     <integer name="swipeScrollSlop">2</integer>
     <integer name="leaveBehindSwipeScrollSlop">25</integer>
     <integer name="widget_refresh_delay_ms">4000</integer>
@@ -50,6 +44,12 @@
     <integer name="show_undo_bar_delay_ms">200</integer>
     <!-- Delay dismissing undo bar after a touch so we know whether to hide the action bar or to reposition it during view mode change -->
     <integer name="dismiss_undo_bar_delay_ms">300</integer>
+    <!-- Amount of time spent animating the popup and push down of the snack bar -->
+    <integer name="toast_bar_animation_duration_ms">300</integer>
+    <!-- The smallest amount of time the toast bar must remain visible -->
+    <integer name="toast_bar_min_duration_ms">500</integer>
+    <!-- The largest amount of time the toast bar can remain visible -->
+    <integer name="toast_bar_max_duration_ms">3000</integer>
     <integer name="conversation_desired_font_size_px">14</integer>
     <!-- matches 'font-size' style in template_conversation_upper.html -->
     <integer name="conversation_unstyled_font_size_px">13</integer>
@@ -61,9 +61,6 @@
     <!-- Whether to show single or 2 pane search results -->
     <bool name="show_two_pane_search_results">false</bool>
 
-    <!-- Whether to show the archive item as disabled rather than hiding it entirely -->
-    <bool name="show_disabled_archive_menu_item">false</bool>
-
     <!-- Amount of memory in bytes allocated for image cache -->
     <integer name="config_image_cache_max_bytes">1500000</integer>
 
@@ -71,7 +68,7 @@
     <integer name="config_image_cache_max_bitmaps">24</integer>
 
     <!-- Whether to display folder colors in the widget -->
-    <bool name="display_folder_colors_in_widget">false</bool>
+    <bool name="display_folder_colors_in_widget">true</bool>
 
     <integer name="max_num_notification_digest_items">10</integer>
 
@@ -79,7 +76,7 @@
     <integer name="conversationview_show_loading_delay">500</integer>
 
     <!-- Wait at least this long to dismiss the spinner when loading a conversation -->
-    <integer name="conversationview_min_show_loading">250</integer>
+    <integer name="conversationview_min_show_loading">500</integer>
 
     <integer name="webview_initial_delay">1000</integer>
 
@@ -101,26 +98,30 @@
 
     <integer name="swipe_senders_length">25</integer>
 
-    <!-- Number of menu items to display in the ActionBar -->
-    <integer name="actionbar_max_items">3</integer>
-
-    <!-- Number of menu items to hide from the ActionBar by subtracting from actionbar_max_items in non-cab mode -->
-    <integer name="actionbar_hidden_non_cab_items_no_physical_button">1</integer>
-
-    <!-- Duration of progress bar animation for attachment previews -->
-    <integer name="ap_progress_animation_duration">4000</integer>
-    <!-- Duration of fade in/out animation for attachment previews -->
-    <integer name="ap_fade_animation_duration">500</integer>
-    <!-- Duration of placeholder pulse animation for attachment previews -->
-    <integer name="ap_placeholder_animation_duration">1000</integer>
-    <!-- Delay before showing progress bar animations for attachment previews that are loading -->
-    <integer name="ap_progress_animation_delay">2000</integer>
-    <!-- Max overflow count to show for attachment previews -->
-    <integer name="ap_overflow_max_count">99</integer>
-
     <!-- Duration of the animations for entering/exiting CAB mode -->
-    <integer name="conv_item_view_cab_anim_duration">350</integer>
+    <integer name="conv_item_view_cab_anim_duration">250</integer>
 
     <!-- Number of nested folders to display in the conversation list, before hiding the remainder under "Show more" -->
     <integer name="nested_folders_collapse_threshold">1</integer>
+
+    <!-- True if messages should show inline images by default. -->
+    <bool name="always_show_images_default">false</bool>
+
+    <!-- Number of characters allowed for a vacation responder subject. -->
+    <integer name="vacation_responder_subject_length">500</integer>
+    <!-- Number of characters allowed for a vacation responder body. -->
+    <integer name="vacation_responder_body_length">1024000</integer>
+
+    <!-- Indicates whether help URLs should be opened by a system browser outside the application or with a webview inside the application -->
+    <bool name="openHelpWithBrowser">true</bool>
+
+    <!-- Used to force 70% of max width in compose for landscape tablet -->
+    <integer name="compose_padding_weight">0</integer>
+    <!-- Whether or not we should scroll down so cc aligns with the top -->
+    <bool name="auto_scroll_cc">true</bool>
+
+    <!-- Maximum number of folders to be displayed in the thread list -->
+    <integer name="conversation_list_max_folder_count">4</integer>
+    <integer name="folder_max_width_proportion">31</integer>
+    <integer name="folder_cell_max_width_proportion">22</integer>
 </resources>

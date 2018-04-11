@@ -6,11 +6,11 @@ include $(CLEAR_VARS)
 include $(CLEAR_TBLGEN_VARS)
 
 TBLGEN_TABLES :=  \
-	AttrExprArgs.inc \
 	AttrList.inc  \
-	AttrLateParsed.inc  \
 	AttrParsedAttrList.inc  \
 	Attrs.inc  \
+        AttrVisitor.inc \
+        AttrParserStringSwitches.inc \
 	CommentCommandList.inc \
 	CommentNodes.inc \
 	DeclNodes.inc  \
@@ -31,6 +31,7 @@ clang_parse_SRC_FILES :=  \
 	ParseOpenMP.cpp  \
 	ParsePragma.cpp  \
 	ParseStmt.cpp  \
+	ParseStmtAsm.cpp  \
 	ParseTemplate.cpp  \
 	ParseTentative.cpp  \
 	Parser.cpp

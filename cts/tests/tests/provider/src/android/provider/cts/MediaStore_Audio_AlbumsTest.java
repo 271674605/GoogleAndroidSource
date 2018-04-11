@@ -16,11 +16,12 @@
 
 package android.provider.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.provider.R;
 
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.res.AssetFileDescriptor;
+import android.cts.util.FileCopyHelper;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;

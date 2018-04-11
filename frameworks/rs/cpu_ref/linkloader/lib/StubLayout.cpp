@@ -61,6 +61,43 @@ size_t StubLayout::calcStubTableSize(size_t count) const {
   return count * getUnitStubSize();
 }
 
+size_t StubLayoutAARCH64::getUnitStubSize() const {
+  return 16;
+}
+
+void StubLayoutAARCH64::setStubAddress(void *stub_, void *addr) {
+  uint8_t *stub = (uint8_t *)stub_;
+
+  // First instruction:
+  // ldr x16,[pc,#8]        LDR literal (pc relative)
+  // +--+---+-+--+-------------------+-----+
+  // |01|011|0|00| (#8 >> 2) = 10    |10000|
+  // +--+---+-+--+-------------------+-----+
+  // 0x58000050
+  // Little endian.
+  stub[0] = 0x50;
+  stub[1] = 0x00;
+  stub[2] = 0x00;
+  stub[3] = 0x58;
+
+  // Next Instruction:
+  // br x16
+  // +-------+--+--+-----+------+-----+-----+
+  // |1101011|00|00|11111|000000|10000|00000|
+  // +-------+--+--+-----+------+-----+-----+
+  // 0xd61f0200
+
+  stub += 4;
+  stub[0] = 0x00;
+  stub[1] = 0x02;
+  stub[2] = 0x1f;
+  stub[3] = 0xd6;
+
+  // Now the absolute address (64 bits).
+  uint64_t *target = reinterpret_cast<uint64_t*>(stub + 4);
+  *target = reinterpret_cast<uint64_t>(addr);
+}
+
 size_t StubLayoutARM::getUnitStubSize() const {
   return 8;
 }
@@ -91,3 +128,36 @@ void StubLayoutMIPS::setStubAddress(void *stub_, void *addr) {
   stub[2] = 0x03200008ul; // jr (jump register)
   stub[3] = 0x00000000ul; // nop
 }
+
+size_t StubLayoutX86::getUnitStubSize() const {
+  return 8;
+}
+
+void StubLayoutX86::setStubAddress(void *stub_, void *addr) {
+  uint8_t *stub = (uint8_t *)stub_;
+  stub[0] = 0xE9; // 32-bit pc-relative jump.
+  void **target = (void **)(stub + 1);
+  *target = addr;
+}
+
+size_t StubLayoutX86_64::getUnitStubSize() const {
+  return 16;
+}
+
+void StubLayoutX86_64::setStubAddress(void *stub_, void *addr) {
+  // x86 doesn't have proper register/mem to store the jump destination
+  // use below instructions to jump to the specified address
+
+  // jmp *0x0(%rip);       jump to the location which is stored in next instruction
+  // addr;                 this is not a real instruction, just an address
+  uint8_t *stub = (uint8_t*)stub_;
+  stub[0] = 0xff;
+  stub[1] = 0x25;
+  stub[2] = 0x0;
+  stub[3] = 0x0;
+  stub[4] = 0x0;
+  stub[5] = 0x0;
+  uint64_t *target = reinterpret_cast<uint64_t*>(stub + 6);
+  *target = reinterpret_cast<uint64_t>(addr);
+}
+

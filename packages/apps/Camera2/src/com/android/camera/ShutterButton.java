@@ -17,10 +17,17 @@
 package com.android.camera;
 
 import android.content.Context;
+import android.text.method.Touch;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.ImageView;
+
+import com.android.camera.debug.Log;
+import com.android.camera.ui.TouchCoordinate;
+
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * A button designed to be used for the on-screen shutter button.
@@ -28,9 +35,11 @@ import android.widget.ImageView;
  * pressed state changes.
  */
 public class ShutterButton extends ImageView {
-
+    private static final Log.Tag TAG = new Log.Tag("ShutterButton");
+    public static final float ALPHA_WHEN_ENABLED = 1f;
+    public static final float ALPHA_WHEN_DISABLED = 0.2f;
     private boolean mTouchEnabled = true;
-
+    private TouchCoordinate mTouchCoordinate;
     /**
      * A callback to be invoked when a ShutterButton's pressed state changes.
      */
@@ -41,23 +50,43 @@ public class ShutterButton extends ImageView {
          * @param pressed The ShutterButton that was pressed.
          */
         void onShutterButtonFocus(boolean pressed);
+        void onShutterCoordinate(TouchCoordinate coord);
         void onShutterButtonClick();
     }
 
-    private OnShutterButtonListener mListener;
+    private List<OnShutterButtonListener> mListeners
+        = new ArrayList<OnShutterButtonListener>();
     private boolean mOldPressed;
 
     public ShutterButton(Context context, AttributeSet attrs) {
         super(context, attrs);
     }
 
-    public void setOnShutterButtonListener(OnShutterButtonListener listener) {
-        mListener = listener;
+    /**
+     * Add an {@link OnShutterButtonListener} to a set of listeners.
+     */
+    public void addOnShutterButtonListener(OnShutterButtonListener listener) {
+        if (!mListeners.contains(listener)) {
+            mListeners.add(listener);
+        }
+    }
+
+    /**
+     * Remove an {@link OnShutterButtonListener} from a set of listeners.
+     */
+    public void removeOnShutterButtonListener(OnShutterButtonListener listener) {
+        if (mListeners.contains(listener)) {
+            mListeners.remove(listener);
+        }
     }
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent m) {
         if (mTouchEnabled) {
+            if (m.getActionMasked() == MotionEvent.ACTION_UP) {
+                mTouchCoordinate = new TouchCoordinate(m.getX(), m.getY(), this.getMeasuredWidth(),
+                        this.getMeasuredHeight());
+            }
             return super.dispatchTouchEvent(m);
         } else {
             return false;
@@ -114,16 +143,20 @@ public class ShutterButton extends ImageView {
     }
 
     private void callShutterButtonFocus(boolean pressed) {
-        if (mListener != null) {
-            mListener.onShutterButtonFocus(pressed);
+        for (OnShutterButtonListener listener : mListeners) {
+            listener.onShutterButtonFocus(pressed);
         }
     }
 
     @Override
     public boolean performClick() {
         boolean result = super.performClick();
-        if (mListener != null && getVisibility() == View.VISIBLE) {
-            mListener.onShutterButtonClick();
+        if (getVisibility() == View.VISIBLE) {
+            for (OnShutterButtonListener listener : mListeners) {
+                listener.onShutterCoordinate(mTouchCoordinate);
+                mTouchCoordinate = null;
+                listener.onShutterButtonClick();
+            }
         }
         return result;
     }

@@ -1,13 +1,14 @@
 page.title=Android Debug Bridge
 parent.title=Tools
 parent.link=index.html
-page.tags="adb"
+page.tags=adb
 @jd:body
 
 <div id="qv-wrapper">
 <div id="qv">
   <h2>In this document</h2>
 <ol>
+  <li><a href="#Enabling">Enabling adb Debugging</a></li>
   <li><a href="#issuingcommands">Syntax</a></li>
   <li><a href="#commandsummary">Commands</a></li>
   <li><a href="#devicestatus">Querying for Emulator/Device Instances</a></li>
@@ -20,12 +21,14 @@ page.tags="adb"
       <li><a href="#am">Using activity manager (am)</a></li>
       <li><a href="#pm">Using package manager (pm)</a></li>
       <li><a href="#sqlite">Examining sqlite3 databases from a remote shell</a></li>
+      <li><a href="#screenrecord">Recording a device screen</a></li>
       <li><a href="#monkey">UI/Application Exerciser Monkey</a></li>
       <li><a href="#othershellcommands">Other shell commands</a></li>
     </ol>
   </li>
   <li><a href="#logcat">Enabling logcat logging</a></li>
   <li><a href="#stopping">Stopping the adb server</a></li>
+  <li><a href="#wireless">Wireless usage</a></li>
 </ol>
 
 </div>
@@ -70,6 +73,19 @@ instances and handles commands from multiple adb clients, you can control any em
 instance from any client (or from a script).</p>
 
 
+<h2 id="Enabling">Enabling adb Debugging</h2>
+
+<p>In order to use adb with a device connected over USB, you must enable
+<strong>USB debugging</strong> in the device system settings, under <strong>
+Developer options</strong>.</p>
+
+<p>On Android 4.2 and higher, the Developer options screen is
+hidden by default. To make it visible, go to
+<b>Settings &gt; About phone</b> and tap <b>Build number</b> seven times. Return to the previous
+screen to find <strong>Developer options</strong> at the bottom.</p>
+
+<p>On some devices, the Developer options screen may be located or named differently.</p>
+
 <p class="note"><strong>Note:</strong> When you connect a device running Android 4.2.2 or higher
 to your computer, the system shows a dialog asking whether to accept an RSA key that allows
 debugging through this computer. This security mechanism protects user devices because it ensures
@@ -77,6 +93,11 @@ that USB debugging and other adb commands cannot be executed unless you're able 
 device and acknowledge the dialog. This requires that you have adb version 1.0.31 (available with
 SDK Platform-tools r16.0.1 and higher) in order to debug on a device running Android 4.2.2 or
 higher.</p>
+
+<p>For more information about connecting to a device over USB, read
+<a href="{@docRoot}tools/device.html">Using Hardware Devices</a>.</p>
+
+
 
 
 <h2 id="issuingcommands">Syntax</h2>
@@ -1106,7 +1127,11 @@ manage SQLite databases created by Android applications. The
 <code>.schema</code> to print the SQL CREATE statement for an existing table.
 The tool also gives you the ability to execute SQLite commands on the fly.</p>
 
-<p>To use <code>sqlite3</code>, enter a remote shell on the emulator instance, as described above, then invoke the tool using the <code>sqlite3</code> command. Optionally, when invoking <code>sqlite3</code> you can specify the full path to the database you want to explore. Emulator/device instances store SQLite3 databases in the folder <code><span chatdir="1"><span chatindex="259474B4B070F261">/data/data/<em>&lt;package_name&gt;</em>/databases</span></span>/</code>. </p>
+<p>To use <code>sqlite3</code>, enter a remote shell on the emulator instance, as described above,
+then invoke the tool using the <code>sqlite3</code> command. Optionally, when invoking
+<code>sqlite3</code> you can specify the full path to the database you want to explore.
+Emulator/device instances store SQLite3 databases in the folder
+<code><span chatdir="1"><span chatindex="259474B4B070F261">/data/data/<em>&lt;package_name&gt;</em>/databases</span></span>/</code>. </p>
 
 <p>Here's an example: </p>
 
@@ -1117,9 +1142,106 @@ Enter &quot;.help&quot; for instructions
 <em>.... enter commands, then quit...</em>
 sqlite&gt; .exit </pre>
 
-<p>Once you've invoked <code>sqlite3</code>, you can issue <code>sqlite3</code> commands in the shell. To exit and return to the adb remote shell, use <code>exit</code> or <code>CTRL+D</code>.
+<p>Once you've invoked <code>sqlite3</code>, you can issue <code>sqlite3</code> commands in the
+shell. To exit and return to the adb remote shell, use <code>exit</code> or <code>CTRL+D</code>.
 
 
+
+
+<h3 id="screenrecord">Recording a device screen</h3>
+
+<p>The {@code screenrecord} command is a shell utility for recording the display of devices
+  running Android 4.4 (API level 19) and higher. The utility records screen activity to an MPEG-4
+  file, which you can then download and use as part of a video presentation. This utility is useful
+  for developers who want to create promotional or training videos without using a separate
+  recording device.</p>
+
+<p>To use the {@code screenrecord} from the command line, type the following:
+
+<pre>
+$ adb shell screenrecord /sdcard/demo.mp4
+</pre>
+
+<p>Stop the screen recording by pressing Ctrl-C, otherwise the recording stops automatically
+at three minutes or the time limit set by {@code --time-limit}.</p>
+
+<p>Here's an example recording session, using the adb shell to record the video and the
+{@code pull} command to download the file from the device:<p>
+
+<pre>
+$ adb shell
+shell@ $ screenrecord --verbose /sdcard/demo.mp4
+(press Ctrl-C to stop)
+shell@ $ exit
+$ adb pull /sdcard/demo.mp4
+</pre>
+
+<p>The {@code screenrecord} utility can record at any supported resolution and bit rate you
+  request, while retaining the aspect ratio of the device display. The utility records at the native
+  display resolution and orientation by default, with a maximum length of three minutes.</p>
+
+<p>There are some known limitations of the {@code screenrecord} utility that you should be aware
+  of when using it:</p>
+
+<ul>
+  <li>Some devices may not be able to record at their native display resolution.
+    If you encounter problems with screen recording, try using a lower screen resolution.</li>
+  <li>Rotation of the screen during recording is not supported. If the screen does rotate during
+    recording, some of the screen is cut off in the recording.</li>
+  <li>Audio is not recorded with the video file.</li>
+</ul>
+
+
+<p class="table-caption"><strong>Table 4.</strong> {@code screenrecord} options</p>
+
+<table>
+  <tr>
+    <th>Options</th>
+    <th>Description</th>
+  </tr>
+
+  <tr>
+    <td><code>--help</code>
+    </td>
+    <td>Displays a usage summary.</td>
+  </tr>
+
+  <tr>
+    <td style="white-space:nowrap">
+      <code>--size &lt;WIDTHxHEIGHT&gt;</code>
+    </td>
+    <td>Sets the video size, for example: {@code 1280x720}. The default value is the device's main
+      display resolution (if supported), 1280x720 if not. For best results, use a size supported
+      by your device's Advanced Video Coding (AVC) encoder.</td>
+  </tr>
+
+  <tr>
+    <td><code>--bit-rate &lt;RATE&gt;</code></td>
+    <td>Sets the video bit rate for the video, in megabits per second. The default value is 4Mbps.
+      You can increase the bit rate to improve video quality or lower it for smaller movie
+      files. The following example sets the recording bit rate to 6Mbps:
+      <pre>screenrecord --bit-rate 6000000 &#47;sdcard&#47;demo.mp4</pre>
+      </td>
+  </tr>
+
+  <tr>
+    <td><code>--time-limit &lt;TIME&gt;</code></td>
+    <td>Sets the maximum recording time, in seconds. The default and maximum value is 180
+      (3 minutes).</td>
+  </tr>
+
+  <tr>
+    <td><code>--rotate</code></td>
+    <td>Rotates the output 90 degrees. This feature is experimental.</td>
+  </tr>
+
+  <tr>
+    <td><code>--verbose</code></td>
+    <td>Displays log information on command line screen. If you do not set this option,
+      the utility does not display any information while running.</td>
+  </tr>
+
+</table>
 
 
 
@@ -1151,9 +1273,9 @@ application and sends 500 pseudo-random events to it.</p>
 
 <p>Help is available for most of the commands. </p>
 
-<p>Table 4 lists some of the more common adb shell commands.</p>
+<p>Table 5 lists some of the more common adb shell commands.</p>
 
-<p class="table-caption"><strong>Table 4.</strong> Some other adb shell commands</p>
+<p class="table-caption"><strong>Table 5.</strong> Some other adb shell commands</p>
 <table>
 <tr>
   <th>Shell Command</th>
@@ -1240,3 +1362,100 @@ application and sends 500 pseudo-random events to it.</p>
 You can then restart the server by issuing any other adb command. </p>
 
 
+<h2 id="wireless">Wireless usage</h2>
+
+<p>
+adb is usually used over USB.  However, it is also possible to use over
+Wi-Fi, as described here.
+</p>
+
+<ol>
+
+<li>
+Connect Android device and adb host computer
+to a common Wi-Fi network accessible to both.
+We have found that not all access points
+are suitable; you may need to use an access point
+whose firewall is configured properly to support adb.
+</li>
+
+<li>
+Connect the device with USB cable to host.
+</li>
+
+<li>
+Make sure adb is running in USB mode on host.
+<pre>
+$ adb usb
+restarting in USB mode
+</pre>
+</li>
+
+<li>
+Connect to the device over USB.
+<pre>
+$ adb devices
+List of devices attached
+######## device
+</pre>
+</li>
+
+<li>
+Restart host adb in tcpip mode.
+<pre>
+$ adb tcpip 5555
+restarting in TCP mode port: 5555
+</pre>
+</li>
+
+<li>
+Find out the IP address of the Android device:
+Settings -> About tablet -> Status -> IP address.
+Remember the IP address, of the form <code>#.#.#.#</code>.
+</li>
+
+<li>
+Connect adb host to device:
+<pre>
+$ adb connect #.#.#.#
+connected to #.#.#.#:5555
+</pre>
+</li>
+
+<li>
+Remove USB cable from device, and confirm you can still access device:
+<pre>
+$ adb devices
+List of devices attached
+#.#.#.#:5555 device
+</pre>
+
+</ol>
+
+<p>
+You're now good to go!
+</p>
+
+<p>
+If the adb connection is ever lost:
+</p>
+
+<ol>
+
+<li>
+Make sure that your host is still connected to the same Wi-Fi network your Android device is.
+</li>
+
+<li>
+Reconnect by executing the "adb connect" step again.
+</li>
+
+<li>
+Or if that doesn't work, reset your adb host:
+<pre>
+adb kill-server
+</pre>
+and then start over from the beginning.
+</li>
+
+</ol>

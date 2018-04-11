@@ -93,7 +93,7 @@ int resampler_resample_from_provider(struct resampler_itfe *resampler,
     }
 
     size_t framesWr = 0;
-    size_t inFrames = 0;
+    spx_uint32_t inFrames = 0;
     while (framesWr < framesRq) {
         if (rsmp->frames_in < rsmp->frames_needed) {
             // make sure that the number of frames present in rsmp->in_buf (rsmp->frames_in) is at
@@ -117,7 +117,7 @@ int resampler_resample_from_provider(struct resampler_itfe *resampler,
             rsmp->provider->release_buffer(rsmp->provider, &buf);
         }
 
-        size_t outFrames = framesRq - framesWr;
+        spx_uint32_t outFrames = framesRq - framesWr;
         inFrames = rsmp->frames_in;
         if (rsmp->channel_count == 1) {
             speex_resampler_process_int(rsmp->speex_resampler,
@@ -136,7 +136,7 @@ int resampler_resample_from_provider(struct resampler_itfe *resampler,
         framesWr += outFrames;
         rsmp->frames_in -= inFrames;
         ALOGW_IF((framesWr != framesRq) && (rsmp->frames_in != 0),
-                "ReSampler::resample() remaining %d frames in and %d frames out",
+                "ReSampler::resample() remaining %zu frames in and %zu frames out",
                 rsmp->frames_in, (framesRq - framesWr));
     }
     if (rsmp->frames_in) {
@@ -170,18 +170,18 @@ int resampler_resample_from_input(struct resampler_itfe *resampler,
         speex_resampler_process_int(rsmp->speex_resampler,
                                     0,
                                     in,
-                                    inFrameCount,
+                                    (spx_uint32_t *)inFrameCount,
                                     out,
-                                    outFrameCount);
+                                    (spx_uint32_t *)outFrameCount);
     } else {
         speex_resampler_process_interleaved_int(rsmp->speex_resampler,
                                                 in,
-                                                inFrameCount,
+                                                (spx_uint32_t *)inFrameCount,
                                                 out,
-                                                outFrameCount);
+                                                (spx_uint32_t *)outFrameCount);
     }
 
-    ALOGV("resampler_resample_from_input() DONE in %d out % d", *inFrameCount, *outFrameCount);
+    ALOGV("resampler_resample_from_input() DONE in %zu out %zu", *inFrameCount, *outFrameCount);
 
     return 0;
 }

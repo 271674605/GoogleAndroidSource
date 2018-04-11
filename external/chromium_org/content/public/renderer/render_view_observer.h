@@ -10,7 +10,7 @@
 #include "content/common/content_export.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
-#include "third_party/WebKit/public/web/WebIconURL.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 
 class GURL;
 
@@ -20,17 +20,17 @@ class PpapiHost;
 }
 }
 
-namespace WebKit {
+namespace blink {
 class WebDataSource;
 class WebFrame;
 class WebFormElement;
 class WebGestureEvent;
-class WebMediaPlayerClient;
+class WebLocalFrame;
 class WebMouseEvent;
 class WebNode;
+class WebString;
 class WebTouchEvent;
 class WebURL;
-struct WebContextMenuData;
 struct WebURLError;
 }
 
@@ -52,47 +52,49 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
   // These match the WebKit API notifications
   virtual void DidStartLoading() {}
   virtual void DidStopLoading() {}
-  virtual void DidFinishDocumentLoad(WebKit::WebFrame* frame) {}
-  virtual void DidFailLoad(WebKit::WebFrame* frame,
-                           const WebKit::WebURLError& error) {}
-  virtual void DidFinishLoad(WebKit::WebFrame* frame) {}
-  virtual void DidStartProvisionalLoad(WebKit::WebFrame* frame) {}
-  virtual void DidFailProvisionalLoad(WebKit::WebFrame* frame,
-                                      const WebKit::WebURLError& error) {}
-  virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
+  virtual void DidFinishDocumentLoad(blink::WebLocalFrame* frame) {}
+  virtual void DidFailLoad(blink::WebLocalFrame* frame,
+                           const blink::WebURLError& error) {}
+  virtual void DidFinishLoad(blink::WebLocalFrame* frame) {}
+  virtual void DidStartProvisionalLoad(blink::WebLocalFrame* frame) {}
+  virtual void DidFailProvisionalLoad(blink::WebLocalFrame* frame,
+                                      const blink::WebURLError& error) {}
+  virtual void DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
                                         bool is_new_navigation) {}
-  virtual void DidClearWindowObject(WebKit::WebFrame* frame) {}
-  virtual void DidCreateDocumentElement(WebKit::WebFrame* frame) {}
-  virtual void FrameCreated(WebKit::WebFrame* parent,
-                            WebKit::WebFrame* frame) {}
-  virtual void FrameDetached(WebKit::WebFrame* frame) {}
-  virtual void FrameWillClose(WebKit::WebFrame* frame) {}
-  virtual void WillSubmitForm(WebKit::WebFrame* frame,
-                              const WebKit::WebFormElement& form) {}
-  virtual void DidCreateDataSource(WebKit::WebFrame* frame,
-                                   WebKit::WebDataSource* ds) {}
-  virtual void PrintPage(WebKit::WebFrame* frame, bool user_initiated) {}
-  virtual void FocusedNodeChanged(const WebKit::WebNode& node) {}
-  virtual void WillCreateMediaPlayer(WebKit::WebFrame* frame,
-                                     WebKit::WebMediaPlayerClient* client) {}
+  virtual void DidClearWindowObject(blink::WebLocalFrame* frame) {}
+  virtual void DidCreateDocumentElement(blink::WebLocalFrame* frame) {}
+  virtual void FrameCreated(blink::WebLocalFrame* parent,
+                            blink::WebFrame* frame) {}
+  virtual void FrameDetached(blink::WebFrame* frame) {}
+  virtual void FrameWillClose(blink::WebFrame* frame) {}
+  virtual void DidMatchCSS(
+      blink::WebLocalFrame* frame,
+      const blink::WebVector<blink::WebString>& newly_matching_selectors,
+      const blink::WebVector<blink::WebString>& stopped_matching_selectors) {}
+  virtual void WillSendSubmitEvent(blink::WebLocalFrame* frame,
+                                   const blink::WebFormElement& form) {}
+  virtual void WillSubmitForm(blink::WebLocalFrame* frame,
+                              const blink::WebFormElement& form) {}
+  virtual void DidCreateDataSource(blink::WebLocalFrame* frame,
+                                   blink::WebDataSource* ds) {}
+  virtual void PrintPage(blink::WebLocalFrame* frame, bool user_initiated) {}
+  virtual void FocusedNodeChanged(const blink::WebNode& node) {}
   virtual void ZoomLevelChanged() {};
-  virtual void DidChangeScrollOffset(WebKit::WebFrame* frame) {}
-  virtual void DraggableRegionsChanged(WebKit::WebFrame* frame) {}
-  virtual void DidRequestShowContextMenu(
-      WebKit::WebFrame* frame,
-      const WebKit::WebContextMenuData& data) {}
+  virtual void DidChangeScrollOffset(blink::WebLocalFrame* frame) {}
+  virtual void DraggableRegionsChanged(blink::WebFrame* frame) {}
   virtual void DidCommitCompositorFrame() {}
   virtual void DidUpdateLayout() {}
 
   // These match the RenderView methods.
-  virtual void DidHandleMouseEvent(const WebKit::WebMouseEvent& event) {}
-  virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) {}
-  virtual void DidHandleGestureEvent(const WebKit::WebGestureEvent& event) {}
-  virtual void DidCreatePepperPlugin(RendererPpapiHost* host) {}
+  virtual void DidHandleMouseEvent(const blink::WebMouseEvent& event) {}
+  virtual void DidHandleTouchEvent(const blink::WebTouchEvent& event) {}
 
   // These match incoming IPCs.
   virtual void Navigate(const GURL& url) {}
   virtual void ClosePage() {}
+  virtual void OrientationChangeEvent() {}
+
+  virtual void OnStop() {}
 
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -106,6 +108,12 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
  protected:
   explicit RenderViewObserver(RenderView* render_view);
   virtual ~RenderViewObserver();
+
+  // Sets |render_view_| to track.
+  // Removes itself of previous (if any) |render_view_| observer list and adds
+  // to the new |render_view|. Since it assumes that observer outlives
+  // render_view, OnDestruct should be overridden.
+  void Observe(RenderView* render_view);
 
  private:
   friend class RenderViewImpl;

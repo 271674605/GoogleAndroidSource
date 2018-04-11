@@ -118,13 +118,13 @@ SkTypeface* FontConfigTypeface::LegacyCreateTypeface(
         return face;
     }
 
-    face = SkNEW_ARGS(FontConfigTypeface, (outStyle, indentity, outFamilyName));
+    face = FontConfigTypeface::Create(outStyle, indentity, outFamilyName);
     SkTypefaceCache::Add(face, style);
 //    SkDebugf("add face <%s> <%s> %p [%d]\n", familyName, outFamilyName.c_str(), face, face->getRefCnt());
     return face;
 }
 
-#ifndef SK_FONTHOST_USES_FONTMGR
+#ifdef SK_FONTHOST_DOES_NOT_USE_FONTMGR
 
 SkTypeface* SkFontHost::CreateTypeface(const SkTypeface* familyFace,
                                        const char familyName[],
@@ -209,8 +209,4 @@ void FontConfigTypeface::onGetFontDescriptor(SkFontDescriptor* desc,
                                              bool* isLocalStream) const {
     desc->setFamilyName(this->getFamilyName());
     *isLocalStream = SkToBool(this->getLocalStream());
-}
-
-SkTypeface* FontConfigTypeface::onRefMatchingStyle(Style style) const {
-    return LegacyCreateTypeface(this, NULL, style);
 }

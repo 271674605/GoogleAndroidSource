@@ -5,10 +5,15 @@
 #ifndef CONTENT_ZYGOTE_ZYGOTE_H_
 #define CONTENT_ZYGOTE_ZYGOTE_H_
 
-#include <string>
-#include <vector>
+#include <stddef.h>
 
-#include "base/containers/hash_tables.h"
+#include <string>
+
+#include "base/containers/small_map.h"
+#include "base/files/scoped_file.h"
+#include "base/memory/scoped_vector.h"
+#include "base/posix/global_descriptors.h"
+#include "base/process/kill.h"
 #include "base/process/process.h"
 
 class Pickle;
@@ -23,16 +28,29 @@ class ZygoteForkDelegate;
 // runs it.
 class Zygote {
  public:
-  Zygote(int sandbox_flags,
-         ZygoteForkDelegate* helper);
+  Zygote(int sandbox_flags, ScopedVector<ZygoteForkDelegate> helpers,
+         const std::vector<base::ProcessHandle>& extra_children,
+         const std::vector<int>& extra_fds);
   ~Zygote();
 
   bool ProcessRequests();
 
-  static const int kBrowserDescriptor = 3;
-  static const int kMagicSandboxIPCDescriptor = 5;
-
  private:
+  struct ZygoteProcessInfo {
+    // Pid from inside the Zygote's PID namespace.
+    base::ProcessHandle internal_pid;
+    // Keeps track of which fork delegate helper the process was started from.
+    ZygoteForkDelegate* started_from_helper;
+  };
+  typedef base::SmallMap< std::map<base::ProcessHandle, ZygoteProcessInfo> >
+      ZygoteProcessMap;
+
+  // Retrieve a ZygoteProcessInfo from the process_info_map_.
+  // Returns true and write to process_info if |pid| can be found, return
+  // false otherwise.
+  bool GetProcessInfo(base::ProcessHandle pid,
+                      ZygoteProcessInfo* process_info);
+
   // Returns true if the SUID sandbox is active.
   bool UsingSUIDSandbox() const;
 
@@ -45,18 +63,30 @@ class Zygote {
 
   void HandleReapRequest(int fd, const Pickle& pickle, PickleIterator iter);
 
+  // Get the termination status of |real_pid|. |real_pid| is the PID as it
+  // appears outside of the sandbox.
+  // Return true if it managed to get the termination status and return the
+  // status in |status| and the exit code in |exit_code|.
+  bool GetTerminationStatus(base::ProcessHandle real_pid, bool known_dead,
+                            base::TerminationStatus* status,
+                            int* exit_code);
+
   void HandleGetTerminationStatus(int fd,
                                   const Pickle& pickle,
                                   PickleIterator iter);
 
   // This is equivalent to fork(), except that, when using the SUID sandbox, it
   // returns the real PID of the child process as it appears outside the
-  // sandbox, rather than returning the PID inside the sandbox. Optionally, it
-  // fills in uma_name et al with a report the helper wants to make via
-  // UMA_HISTOGRAM_ENUMERATION.
+  // sandbox, rather than returning the PID inside the sandbox.  The child's
+  // real PID is determined by having it call content::SendZygoteChildPing(int)
+  // using the |pid_oracle| descriptor.
+  // Finally, when using a ZygoteForkDelegate helper, |uma_name|, |uma_sample|,
+  // and |uma_boundary_value| may be set if the helper wants to make a UMA
+  // report via UMA_HISTOGRAM_ENUMERATION.
   int ForkWithRealPid(const std::string& process_type,
-                      std::vector<int>& fds,
-                      const std::string& channel_switch,
+                      const base::GlobalDescriptors::Mapping& fd_mapping,
+                      const std::string& channel_id,
+                      base::ScopedFD pid_oracle,
                       std::string* uma_name,
                       int* uma_sample,
                       int* uma_boundary_value);
@@ -66,7 +96,7 @@ class Zygote {
   // process and the child process ID to the parent process, like fork().
   base::ProcessId ReadArgsAndFork(const Pickle& pickle,
                                   PickleIterator iter,
-                                  std::vector<int>& fds,
+                                  ScopedVector<base::ScopedFD> fds,
                                   std::string* uma_name,
                                   int* uma_sample,
                                   int* uma_boundary_value);
@@ -78,26 +108,34 @@ class Zygote {
   bool HandleForkRequest(int fd,
                          const Pickle& pickle,
                          PickleIterator iter,
-                         std::vector<int>& fds);
+                         ScopedVector<base::ScopedFD> fds);
 
   bool HandleGetSandboxStatus(int fd,
                               const Pickle& pickle,
                               PickleIterator iter);
 
-  // In the SUID sandbox, we try to use a new PID namespace. Thus the PIDs
-  // fork() returns are not the real PIDs, so we need to map the Real PIDS
-  // into the sandbox PID namespace.
-  typedef base::hash_map<base::ProcessHandle, base::ProcessHandle> ProcessMap;
-  ProcessMap real_pids_to_sandbox_pids;
+  // The Zygote needs to keep some information about each process. Most
+  // notably what the PID of the process is inside the PID namespace of
+  // the Zygote and whether or not a process was started by the
+  // ZygoteForkDelegate helper.
+  ZygoteProcessMap process_info_map_;
 
   const int sandbox_flags_;
-  ZygoteForkDelegate* helper_;
+  ScopedVector<ZygoteForkDelegate> helpers_;
 
-  // These might be set by helper_->InitialUMA. They supply a UMA enumeration
-  // sample we should report on the first fork.
-  std::string initial_uma_name_;
-  int initial_uma_sample_;
-  int initial_uma_boundary_value_;
+  // Count of how many fork delegates for which we've invoked InitialUMA().
+  size_t initial_uma_index_;
+
+  // This vector contains the PIDs of any child processes which have been
+  // created prior to the construction of the Zygote object, and must be reaped
+  // before the Zygote exits. The Zygote will perform a blocking wait on these
+  // children, so they must be guaranteed to be exiting by the time the Zygote
+  // exits.
+  std::vector<base::ProcessHandle> extra_children_;
+
+  // This vector contains the FDs that must be closed before reaping the extra
+  // children.
+  std::vector<int> extra_fds_;
 };
 
 }  // namespace content

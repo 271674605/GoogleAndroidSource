@@ -11,7 +11,6 @@
 import optparse
 import os
 import re
-import subprocess
 import sys
 
 from util import build_device
@@ -21,14 +20,17 @@ from util import md5_check
 BUILD_ANDROID_DIR = os.path.join(os.path.dirname(__file__), '..')
 sys.path.append(BUILD_ANDROID_DIR)
 
+from pylib import constants
 from pylib.utils import apk_helper
 
 def GetNewMetadata(device, apk_package):
   """Gets the metadata on the device for the apk_package apk."""
   output = device.RunShellCommand('ls -l /data/app/')
   # Matches lines like:
-  # -rw-r--r-- system   system    7376582 2013-04-19 16:34 org.chromium.chrome.testshell.apk
-  # -rw-r--r-- system   system    7376582 2013-04-19 16:34 org.chromium.chrome.testshell-1.apk
+  # -rw-r--r-- system   system    7376582 2013-04-19 16:34 \
+  # org.chromium.chrome.shell.apk
+  # -rw-r--r-- system   system    7376582 2013-04-19 16:34 \
+  # org.chromium.chrome.shell-1.apk
   apk_matcher = lambda s: re.match('.*%s(-[0-9]*)?.apk$' % apk_package, s)
   matches = filter(apk_matcher, output)
   return matches[0] if matches else None
@@ -52,7 +54,7 @@ def RecordInstallMetadata(device, apk_package, metadata_path):
     outfile.write(metadata)
 
 
-def main(argv):
+def main():
   parser = optparse.OptionParser()
   parser.add_option('--apk-path',
       help='Path to .apk to install.')
@@ -62,12 +64,16 @@ def main(argv):
       help='Path to build device configuration.')
   parser.add_option('--stamp',
       help='Path to touch on success.')
+  parser.add_option('--configuration-name',
+      help='The build CONFIGURATION_NAME')
   options, _ = parser.parse_args()
 
   device = build_device.GetBuildDeviceFromPath(
       options.build_device_configuration)
   if not device:
     return
+
+  constants.SetBuildType(options.configuration_name)
 
   serial_number = device.GetSerialNumber()
   apk_package = apk_helper.GetPackageName(options.apk_path)
@@ -96,4 +102,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  sys.exit(main())

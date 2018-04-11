@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_ANDROID_OMNIBOX_OMNIBOX_PRERENDER_H_
 #define CHROME_BROWSER_ANDROID_OMNIBOX_OMNIBOX_PRERENDER_H_
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 
@@ -50,9 +50,9 @@ class OmniboxPrerender {
                       jobject obj,
                       jstring j_url,
                       jstring j_current_url,
-                      jint jsource_match,
+                      jlong jsource_match,
                       jobject j_profile_android,
-                      jint native_web_contents);
+                      jobject j_tab);
 
  private:
 

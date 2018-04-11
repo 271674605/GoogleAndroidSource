@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.content.browser;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.RectF;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.KeyEvent;
@@ -52,38 +51,10 @@ public class ContentViewClient {
             float topControlsOffsetYPix, float contentOffsetYPix, float overdrawBottomHeightPix) {
     }
 
-    /**
-     * Notifies the client that the renderer backing the ContentView has crashed.
-     * @param crashedWhileOomProtected True iff the renderer died while being bound with a high
-     * priority binding, which indicates that it was probably an actual crash (as opposed to the
-     * renderer being killed by the OS out-of-memory killer).
-     */
-    public void onRendererCrash(boolean processWasOomProtected) {
-    }
-
     public boolean shouldOverrideKeyEvent(KeyEvent event) {
         int keyCode = event.getKeyCode();
-        // We need to send almost every key to WebKit. However:
-        // 1. We don't want to block the device on the renderer for
-        // some keys like menu, home, call.
-        // 2. There are no WebKit equivalents for some of these keys
-        // (see app/keyboard_codes_win.h)
-        // Note that these are not the same set as KeyEvent.isSystemKey:
-        // for instance, AKEYCODE_MEDIA_* will be dispatched to webkit.
-        if (keyCode == KeyEvent.KEYCODE_MENU ||
-            keyCode == KeyEvent.KEYCODE_HOME ||
-            keyCode == KeyEvent.KEYCODE_BACK ||
-            keyCode == KeyEvent.KEYCODE_CALL ||
-            keyCode == KeyEvent.KEYCODE_ENDCALL ||
-            keyCode == KeyEvent.KEYCODE_POWER ||
-            keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
-            keyCode == KeyEvent.KEYCODE_CAMERA ||
-            keyCode == KeyEvent.KEYCODE_FOCUS ||
-            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-            keyCode == KeyEvent.KEYCODE_VOLUME_MUTE ||
-            keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            return true;
-        }
+
+        if (!shouldPropagateKey(keyCode)) return true;
 
         // We also have to intercept some shortcuts before we send them to the ContentView.
         if (event.isCtrlPressed() && (
@@ -96,8 +67,10 @@ public class ContentViewClient {
         return false;
     }
 
-    // Called when an ImeEvent is sent to the page. Can be used to know when some text is entered
-    // in a page.
+    /**
+     * Called when an ImeEvent is sent to the page. Can be used to know when some text is entered
+     * in a page.
+     */
     public void onImeEvent() {
     }
 
@@ -108,20 +81,6 @@ public class ContentViewClient {
      *                    though).
      */
     public void onImeStateChangeRequested(boolean requestShow) {
-    }
-
-    // TODO (dtrainor): Should expose getScrollX/Y from ContentView or make
-    // computeHorizontalScrollOffset()/computeVerticalScrollOffset() public.
-    /**
-     * Gives the UI the chance to override each scroll event.
-     * @param dx The amount scrolled in the X direction (in physical pixels).
-     * @param dy The amount scrolled in the Y direction (in physical pixels).
-     * @param scrollX The current X scroll offset (in physical pixels).
-     * @param scrollY The current Y scroll offset (in physical pixels).
-     * @return Whether or not the UI consumed and handled this event.
-     */
-    public boolean shouldOverrideScroll(float dx, float dy, float scrollX, float scrollY) {
-        return false;
     }
 
     /**
@@ -145,6 +104,31 @@ public class ContentViewClient {
     }
 
     /**
+     * Perform a search on {@code searchQuery}.  This method is only called if
+     * {@link #doesPerformWebSearch()} returns {@code true}.
+     * @param searchQuery The string to search for.
+     */
+    public void performWebSearch(String searchQuery) {
+    }
+
+    /**
+     * If this returns {@code true} contextual web search attempts will be forwarded to
+     * {@link #performWebSearch(String)}.
+     * @return {@code true} iff this {@link ContentViewClient} wants to consume web search queries
+     *         and override the default intent behavior.
+     */
+    public boolean doesPerformWebSearch() {
+        return false;
+    }
+
+    /**
+     * Notification that the selection has changed.
+     * @param selection The newly established selection.
+     */
+    public void onSelectionChanged(String selection) {
+    }
+
+    /**
      * Called when a new content intent is requested to be started.
      */
     public void onStartContentIntent(Context context, String intentUrl) {
@@ -164,13 +148,44 @@ public class ContentViewClient {
         }
     }
 
-    public void onExternalVideoSurfaceRequested(int playerId) {
-    }
-
-    public void onGeometryChanged(int playerId, RectF rect) {
-    }
-
     public ContentVideoViewClient getContentVideoViewClient() {
         return null;
+    }
+
+    /**
+     * Called when BrowserMediaPlayerManager wants to load a media resource.
+     * @param url the URL of media resource to load.
+     * @return true to prevent the resource from being loaded.
+     */
+    public boolean shouldBlockMediaRequest(String url) {
+        return false;
+    }
+
+    /**
+     * Check whether a key should be propagated to the embedder or not.
+     * We need to send almost every key to Blink. However:
+     * 1. We don't want to block the device on the renderer for
+     * some keys like menu, home, call.
+     * 2. There are no WebKit equivalents for some of these keys
+     * (see app/keyboard_codes_win.h)
+     * Note that these are not the same set as KeyEvent.isSystemKey:
+     * for instance, AKEYCODE_MEDIA_* will be dispatched to webkit*.
+     */
+    public static boolean shouldPropagateKey(int keyCode) {
+        if (keyCode == KeyEvent.KEYCODE_MENU ||
+            keyCode == KeyEvent.KEYCODE_HOME ||
+            keyCode == KeyEvent.KEYCODE_BACK ||
+            keyCode == KeyEvent.KEYCODE_CALL ||
+            keyCode == KeyEvent.KEYCODE_ENDCALL ||
+            keyCode == KeyEvent.KEYCODE_POWER ||
+            keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+            keyCode == KeyEvent.KEYCODE_CAMERA ||
+            keyCode == KeyEvent.KEYCODE_FOCUS ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_MUTE ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            return false;
+        }
+        return true;
     }
 }

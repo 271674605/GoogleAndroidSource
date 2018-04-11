@@ -28,7 +28,7 @@ PROGRAM_DESCRIPTION=\
 
 Where <src-dir> is the location of toolchain sources, <ndk-dir> is
 the top-level NDK installation path and <toolchain> is the name of
-the toolchain to use (e.g. llvm-3.3)."
+the toolchain to use (e.g. llvm-3.4)."
 
 RELEASE=`date +%Y%m%d`
 BUILD_OUT=/tmp/ndk-$USER/build/toolchain
@@ -36,7 +36,6 @@ OPTION_BUILD_OUT=
 register_var_option "--build-out=<path>" OPTION_BUILD_OUT "Set temporary build directory"
 
 # Note: platform API level 9 or higher is needed for proper C++ support
-PLATFORM=$DEFAULT_PLATFORM
 register_var_option "--platform=<name>"  PLATFORM "Specify platform name"
 
 GMP_VERSION=$DEFAULT_GMP_VERSION
@@ -45,9 +44,6 @@ register_var_option "--gmp-version=<version>" GMP_VERSION "Specify gmp version"
 PACKAGE_DIR=
 register_var_option "--package-dir=<path>" PACKAGE_DIR "Create archive tarball in specific directory"
 
-WINE=wine
-register_var_option "--wine=<path>" WINE "WINE needed to run llvm-config.exe for building mclinker with --mingw"
-
 POLLY=no
 do_polly_option () { POLLY=yes; }
 register_option "--with-polly" do_polly_option "Enable Polyhedral optimizations for LLVM"
@@ -55,6 +51,10 @@ register_option "--with-polly" do_polly_option "Enable Polyhedral optimizations 
 CHECK=no
 do_check_option () { CHECK=yes; }
 register_option "--check" do_check_option "Check LLVM"
+
+USE_PYTHON=no
+do_use_python_option () { USE_PYTHON=yes; }
+register_option "--use-python" do_use_python_option "Use python bc2native instead of integrated one"
 
 register_jobs_option
 register_canadian_option
@@ -125,6 +125,10 @@ set_parameters ()
 
 set_parameters $PARAMETERS
 
+if [ -z "$PLATFORM" ]; then
+   PLATFORM="android-"$(get_default_api_level_for_arch $ARCH)
+fi
+
 prepare_target_build
 
 if [ "$PACKAGE_DIR" ]; then
@@ -151,12 +155,13 @@ TOOLCHAIN_BUILD_PREFIX=$BUILD_OUT/prefix
 
 ARCH=$HOST_ARCH
 
-# Note that the following 2 flags only apply for BUILD_CC in canadian cross build
-CFLAGS_FOR_BUILD="-O2 -I$TOOLCHAIN_BUILD_PREFIX/include"
+# Disable futimens@GLIBC_2.6 not available in system on server with very old libc.so
+CFLAGS_FOR_BUILD="-O2 -I$TOOLCHAIN_BUILD_PREFIX/include -DDISABLE_FUTIMENS"
 LDFLAGS_FOR_BUILD="-L$TOOLCHAIN_BUILD_PREFIX/lib"
 
-# Eliminate dependency on libgcc_s_sjlj-1.dll and libstdc++-6.dll on cross builds
-if [ "$DARWIN" = "yes" -o "$MINGW" = "yes" ]; then
+# Statically link stdc++ to eliminate dependency on outdated libctdc++.so in old 32-bit
+# linux system, and libgcc_s_sjlj-1.dll and libstdc++-6.dll on windows
+if [ "$MINGW" = "yes" -o "$HOST_TAG" = "linux-x86" ]; then
     LDFLAGS_FOR_BUILD=$LDFLAGS_FOR_BUILD" -static-libgcc -static-libstdc++"
 fi
 
@@ -239,14 +244,39 @@ LLVM_BUILD_OUT=$BUILD_OUT/llvm
 mkdir -p $LLVM_BUILD_OUT && cd $LLVM_BUILD_OUT
 fail_panic "Couldn't cd into llvm build path: $LLVM_BUILD_OUT"
 
+# Only start using integrated bc2native source >= 3.3 by default
+LLVM_VERSION="`echo $TOOLCHAIN | tr '-' '\n' | tail -n 1`"
+LLVM_VERSION_MAJOR=`echo $LLVM_VERSION | tr '.' '\n' | head -n 1`
+LLVM_VERSION_MINOR=`echo $LLVM_VERSION | tr '.' '\n' | tail -n 1`
+if [ $LLVM_VERSION_MAJOR -lt 3 ]; then
+    USE_PYTHON=yes
+elif [ $LLVM_VERSION_MAJOR -eq 3 ] && [ $LLVM_VERSION_MINOR -lt 3 ]; then
+    USE_PYTHON=yes
+fi
+
+if [ "$USE_PYTHON" != "yes" ]; then
+    # Refresh intermediate source
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.cpp
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.c
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.h
+    run cp -a $NDK_DIR/tests/abcc/jni/*.cpp $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native
+    run cp -a $NDK_DIR/tests/abcc/jni/*.h $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native
+    run cp -a $NDK_DIR/tests/abcc/jni/host/*.cpp $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native
+    run cp -a $NDK_DIR/tests/abcc/jni/host/*.h $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native
+    run cp -a $NDK_DIR/tests/abcc/jni/mman-win32/mman.[ch] $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native
+    export LLVM_TOOLS_FILTER="PARALLEL_DIRS:=\$\$(PARALLEL_DIRS:%=% ndk-bc2native)"
+fi
+
+BINUTILS_VERSION=$(get_default_binutils_version_for_llvm $TOOLCHAIN)
+
 run $SRC_DIR/$TOOLCHAIN/llvm/configure \
     --prefix=$TOOLCHAIN_BUILD_PREFIX \
     --host=$ABI_CONFIGURE_HOST \
     --build=$ABI_CONFIGURE_BUILD \
     --with-bug-report-url=$DEFAULT_ISSUE_TRACKER_URL \
-    --enable-targets=arm,mips,x86 \
+    --enable-targets=arm,mips,x86,aarch64 \
     --enable-optimized \
-    --with-binutils-include=$SRC_DIR/binutils/binutils-$DEFAULT_BINUTILS_VERSION/include \
+    --with-binutils-include=$SRC_DIR/binutils/binutils-$BINUTILS_VERSION/include \
     $EXTRA_CONFIG_FLAGS
 fail_panic "Couldn't configure llvm toolchain"
 
@@ -275,21 +305,25 @@ dump "Install  : llvm toolchain binaries"
 cd $LLVM_BUILD_OUT && run make install $MAKE_FLAGS
 fail_panic "Couldn't install llvm toolchain to $TOOLCHAIN_BUILD_PREFIX"
 
-# create llvm-config wrapper if needed.
-# llvm-config is invoked by other llvm projects (eg. mclinker/configure)
-# to figure out flags and libs dependencies.  Unfortunately in canadian-build
-# llvm-config[.exe] may not run directly.  Create a wrapper.
-LLVM_CONFIG=llvm-config
-if [ "$MINGW" = "yes" ] ; then
-    LLVM_CONFIG=llvm-config.sh
-    cat > $TOOLCHAIN_BUILD_PREFIX/bin/$LLVM_CONFIG <<EOF
-$WINE \`dirname \$0\`/llvm-config.exe "\$@"
-EOF
-    chmod 0755 $TOOLCHAIN_BUILD_PREFIX/bin/$LLVM_CONFIG
+# copy arm_neon_x86.h from GCC
+GCC_SRC_DIR=$SRC_DIR/gcc/gcc-$DEFAULT_GCC32_VERSION
+cp -a $GCC_SRC_DIR/gcc/config/i386/arm_neon.h $TOOLCHAIN_BUILD_PREFIX/lib/clang/$LLVM_VERSION/include/arm_neon_x86.h
+
+# Since r156448, llvm installs a separate llvm-config-host when cross-compiling. Use llvm-config-host if this
+# exists otherwise llvm-config.
+# Note, llvm-config-host should've really been called llvm-config-build and the following changes fix this by
+# doing this rename and also making a proper llvm-config-host;
+# https://android-review.googlesource.com/#/c/64261/
+# https://android-review.googlesource.com/#/c/64263/
+# .. with these fixes in place, Darwin mclinker can be cross-compiled and Wine is not needed for Windows cross
+# To my mind, llvm-config-host is a misnomer and it should be llvm-config-build.
+LLVM_CONFIG=$TOOLCHAIN_BUILD_PREFIX/bin/llvm-config
+if [ -f $TOOLCHAIN_BUILD_PREFIX/bin/llvm-config-host ] ; then
+    LLVM_CONFIG=$TOOLCHAIN_BUILD_PREFIX/bin/llvm-config-host
 fi
 
 # build mclinker only against default the LLVM version, once
-if [ "$TOOLCHAIN" = "llvm-$DEFAULT_LLVM_VERSION" -a "$DARWIN" != "yes" ] ; then
+if [ "$TOOLCHAIN" = "llvm-$DEFAULT_LLVM_VERSION" ] ; then
     dump "Copy     : mclinker source"
     MCLINKER_SRC_DIR=$BUILD_OUT/mclinker
     mkdir -p $MCLINKER_SRC_DIR
@@ -311,12 +345,15 @@ if [ "$TOOLCHAIN" = "llvm-$DEFAULT_LLVM_VERSION" -a "$DARWIN" != "yes" ] ; then
 
     run $MCLINKER_SRC_DIR/configure \
         --prefix=$TOOLCHAIN_BUILD_PREFIX \
-        --with-llvm-config=$TOOLCHAIN_BUILD_PREFIX/bin/$LLVM_CONFIG \
+        --with-llvm-config=$LLVM_CONFIG \
         --host=$ABI_CONFIGURE_HOST \
         --build=$ABI_CONFIGURE_BUILD
     fail_panic "Couldn't configure mclinker"
 
     dump "Building : mclinker"
+    if [ "$MINGW" = "yes" ]; then
+        MAKE_FLAGS="$MAKE_FLAGS LIBS=-lshlwapi" # lib/Object/SectionMap.cpp needs PathMatchSpec to replace fnmatch()
+    fi
     cd $MCLINKER_BUILD_OUT
     run make -j$NUM_JOBS $MAKE_FLAGS CXXFLAGS="$CXXFLAGS"
     fail_panic "Couldn't compile mclinker"
@@ -346,14 +383,20 @@ rm -rf $TOOLCHAIN_BUILD_PREFIX/lib/B*.so
 rm -rf $TOOLCHAIN_BUILD_PREFIX/lib/B*.dylib
 rm -rf $TOOLCHAIN_BUILD_PREFIX/lib/LLVMH*.so
 rm -rf $TOOLCHAIN_BUILD_PREFIX/lib/LLVMH*.dylib
-rm -rf $TOOLCHAIN_BUILD_PREFIX/bin/ld.bcc*
+if [ -f $TOOLCHAIN_BUILD_PREFIX/bin/ld.lite${HOST_EXE} ]; then
+    # rename ld.lite to ld.mcld
+    rm -rf $TOOLCHAIN_BUILD_PREFIX/bin/ld.[bm]*
+    mv -f $TOOLCHAIN_BUILD_PREFIX/bin/ld.lite${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/ld.mcld${HOST_EXE}
+else
+    rm -rf $TOOLCHAIN_BUILD_PREFIX/bin/ld.bcc
+fi
 rm -rf $TOOLCHAIN_BUILD_PREFIX/share
 
 UNUSED_LLVM_EXECUTABLES="
-bugpoint c-index-test clang-check clang-format clang-tblgen lli llvm-as llvm-bcanalyzer
+bugpoint c-index-test clang-check clang-format clang-tblgen lli llvm-bcanalyzer
 llvm-config llvm-config-host llvm-cov llvm-diff llvm-dwarfdump llvm-extract llvm-ld
 llvm-mc llvm-nm llvm-mcmarkup llvm-objdump llvm-prof llvm-ranlib llvm-readobj llvm-rtdyld
-llvm-size llvm-stress llvm-stub llvm-symbolizer llvm-tblgen macho-dump cloog"
+llvm-size llvm-stress llvm-stub llvm-symbolizer llvm-tblgen macho-dump cloog lli-child-target"
 
 for i in $UNUSED_LLVM_EXECUTABLES; do
     rm -f $TOOLCHAIN_BUILD_PREFIX/bin/$i
@@ -366,14 +409,41 @@ find $TOOLCHAIN_BUILD_PREFIX/bin -maxdepth 1 -type f -exec $STRIP {} \;
 # "symbols referenced by indirect symbol table entries that can't be stripped "
 find $TOOLCHAIN_BUILD_PREFIX/lib -maxdepth 1 -type f \( -name "*.dll" -o -name "*.so" \) -exec $STRIP {} \;
 
+# For now, le64-tools is just like le32 ones
+if [ -f "$TOOLCHAIN_BUILD_PREFIX/bin/ndk-link${HOST_EXE}" ]; then
+    run ln -s ndk-link${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le32-none-ndk-link${HOST_EXE}
+    run ln -s ndk-link${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le64-none-ndk-link${HOST_EXE}
+fi
+if [ -f "$TOOLCHAIN_BUILD_PREFIX/bin/ndk-strip${HOST_EXE}" ]; then
+    run ln -s ndk-strip${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le32-none-ndk-strip${HOST_EXE}
+    run ln -s ndk-strip${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le64-none-ndk-strip${HOST_EXE}
+fi
+if [ -f "$TOOLCHAIN_BUILD_PREFIX/bin/ndk-translate${HOST_EXE}" ]; then
+    run ln -s ndk-translate${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le32-none-ndk-translate${HOST_EXE}
+    run ln -s ndk-translate${HOST_EXE} $TOOLCHAIN_BUILD_PREFIX/bin/le64-none-ndk-translate${HOST_EXE}
+fi
+
 # install script
-cp -p "$SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/ndk-bc2native.py" "$TOOLCHAIN_BUILD_PREFIX/bin/"
+if [ "$USE_PYTHON" != "yes" ]; then
+    # Remove those intermediate cpp
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.cpp
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.c
+    rm -f $SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/*.h
+else
+    cp -p "$SRC_DIR/$TOOLCHAIN/llvm/tools/ndk-bc2native/ndk-bc2native.py" "$TOOLCHAIN_BUILD_PREFIX/bin/"
+fi
 
 # copy to toolchain path
 run copy_directory "$TOOLCHAIN_BUILD_PREFIX" "$TOOLCHAIN_PATH"
 
 # create analyzer/++ scripts
-for ABI in $PREBUILT_ABIS; do
+ABIS=$PREBUILT_ABIS
+# temp hack before 64-bit ABIs are part of PREBUILT_ABIS
+if [ "$ABIS" != "${ABIS%%64*}" ]; then
+    ABIS="$PREBUILT_ABIS arm64-v8a x86_64 mips64"
+fi
+ABIS=$ABIS
+for ABI in $ABIS; do
     ANALYZER_PATH="$TOOLCHAIN_PATH/bin/$ABI"
     ANALYZER="$ANALYZER_PATH/analyzer"
     mkdir -p "$ANALYZER_PATH"
@@ -381,14 +451,23 @@ for ABI in $PREBUILT_ABIS; do
       armeabi)
           LLVM_TARGET=armv5te-none-linux-androideabi
           ;;
-      armeabi-v7a)
+      armeabi-v7a|armeabi-v7a-hard)
           LLVM_TARGET=armv7-none-linux-androideabi
+          ;;
+      arm64-v8a)
+          LLVM_TARGET=aarch64-none-linux-android
           ;;
       x86)
           LLVM_TARGET=i686-none-linux-android
           ;;
+      x86_64)
+          LLVM_TARGET=x86_64-none-linux-android
+          ;;
       mips)
           LLVM_TARGET=mipsel-none-linux-android
+          ;;
+      mips64)
+          LLVM_TARGET=mips64el-none-linux-android
           ;;
       *)
         dump "ERROR: Unsupported NDK ABI: $ABI"
@@ -438,8 +517,14 @@ rem target/triple already spelled out.
 if ERRORLEVEL 1 exit /b 1
 :done
 EOF
+        chmod 0755 "${ANALYZER}.cmd" "${ANALYZER}++.cmd"
     fi
 done
+
+# copy SOURCES file if present
+if [ -f "$SRC_DIR/SOURCES" ]; then
+    cp "$SRC_DIR/SOURCES" "$TOOLCHAIN_PATH/SOURCES"
+fi
 
 if [ "$PACKAGE_DIR" ]; then
     ARCHIVE="$TOOLCHAIN-$HOST_TAG.tar.bz2"

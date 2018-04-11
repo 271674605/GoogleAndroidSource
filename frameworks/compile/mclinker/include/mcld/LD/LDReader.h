@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_READER_INTERFACE_H
-#define MCLD_READER_INTERFACE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_LDREADER_H
+#define MCLD_LD_LDREADER_H
 
 #include <llvm/Support/DataTypes.h>
 
@@ -37,7 +34,7 @@ protected:
 public:
   virtual ~LDReader() { }
 
-  virtual bool isMyFormat(Input& pInput) const = 0;
+  virtual bool isMyFormat(Input& pInput, bool &pContinue) const = 0;
 
 };
 

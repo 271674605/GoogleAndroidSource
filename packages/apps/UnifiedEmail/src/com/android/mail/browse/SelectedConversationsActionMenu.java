@@ -20,7 +20,7 @@ package com.android.mail.browse;
 import android.content.Context;
 import android.net.Uri;
 import android.os.AsyncTask;
-import android.view.ActionMode;
+import android.support.v7.view.ActionMode;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -47,7 +47,6 @@ import com.android.mail.ui.ConversationUpdater;
 import com.android.mail.ui.DestructiveAction;
 import com.android.mail.ui.FolderOperation;
 import com.android.mail.ui.FolderSelectionDialog;
-import com.android.mail.ui.MailActionBarView;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.Utils;
@@ -84,8 +83,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
 
     private boolean mActivated = false;
 
-    private Menu mMenu;
-
     /** Object that can update conversation state on our behalf. */
     private final ConversationUpdater mUpdater;
 
@@ -94,6 +91,8 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
     private final Folder mFolder;
 
     private AccountObserver mAccountObserver;
+
+    private MenuItem mDiscardOutboxMenuItem;
 
     public SelectedConversationsActionMenu(
             ControllableActivity activity, ConversationSelectionSet selectionSet, Folder folder) {
@@ -110,7 +109,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         mFolder = folder;
         mContext = mActivity.getActivityContext();
         mUpdater = activity.getConversationUpdater();
-        FolderSelectionDialog.setDialogDismissed();
     }
 
     @Override
@@ -123,31 +121,39 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         Analytics.getInstance().sendMenuItemEvent(Analytics.EVENT_CATEGORY_MENU_ITEM, itemId,
                 "cab_mode", 0);
 
+        UndoCallback undoCallback = null;   // not applicable here (yet)
         if (itemId == R.id.delete) {
             LogUtils.i(LOG_TAG, "Delete selected from CAB menu");
-            performDestructiveAction(R.id.delete);
+            performDestructiveAction(R.id.delete, undoCallback);
         } else if (itemId == R.id.discard_drafts) {
-            performDestructiveAction(R.id.discard_drafts);
+            LogUtils.i(LOG_TAG, "Discard drafts selected from CAB menu");
+            performDestructiveAction(R.id.discard_drafts, undoCallback);
+        } else if (itemId == R.id.discard_outbox) {
+            LogUtils.i(LOG_TAG, "Discard outbox selected from CAB menu");
+            performDestructiveAction(R.id.discard_outbox, undoCallback);
         } else if (itemId == R.id.archive) {
             LogUtils.i(LOG_TAG, "Archive selected from CAB menu");
-            performDestructiveAction(R.id.archive);
+            performDestructiveAction(R.id.archive, undoCallback);
         } else if (itemId == R.id.remove_folder) {
             destroy(R.id.remove_folder, mSelectionSet.values(),
                     mUpdater.getDeferredRemoveFolder(mSelectionSet.values(), mFolder, true,
-                            true, true));
+                            true, true, undoCallback));
         } else if (itemId == R.id.mute) {
-            destroy(R.id.mute, mSelectionSet.values(), mUpdater.getBatchAction(R.id.mute));
+            destroy(R.id.mute, mSelectionSet.values(), mUpdater.getBatchAction(R.id.mute,
+                    undoCallback));
         } else if (itemId == R.id.report_spam) {
             destroy(R.id.report_spam, mSelectionSet.values(),
-                    mUpdater.getBatchAction(R.id.report_spam));
+                    mUpdater.getBatchAction(R.id.report_spam, undoCallback));
         } else if (itemId == R.id.mark_not_spam) {
             // Currently, since spam messages are only shown in list with other spam messages,
             // marking a message not as spam is a destructive action
             destroy (R.id.mark_not_spam,
-                    mSelectionSet.values(), mUpdater.getBatchAction(R.id.mark_not_spam)) ;
+                    mSelectionSet.values(), mUpdater.getBatchAction(R.id.mark_not_spam,
+                            undoCallback)) ;
         } else if (itemId == R.id.report_phishing) {
             destroy(R.id.report_phishing,
-                    mSelectionSet.values(), mUpdater.getBatchAction(R.id.report_phishing));
+                    mSelectionSet.values(), mUpdater.getBatchAction(R.id.report_phishing,
+                            undoCallback));
         } else if (itemId == R.id.read) {
             markConversationsRead(true);
         } else if (itemId == R.id.unread) {
@@ -157,7 +163,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         } else if (itemId == R.id.remove_star) {
             if (mFolder.isType(UIProvider.FolderType.STARRED)) {
                 LogUtils.d(LOG_TAG, "We are in a starred folder, removing the star");
-                performDestructiveAction(R.id.remove_star);
+                performDestructiveAction(R.id.remove_star, undoCallback);
             } else {
                 LogUtils.d(LOG_TAG, "Not in a starred folder.");
                 starConversations(false);
@@ -186,10 +192,10 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             }
             if (!cantMove) {
                 final FolderSelectionDialog dialog = FolderSelectionDialog.getInstance(
-                        mContext, acct, mUpdater, mSelectionSet.values(), true, mFolder,
+                        acct, mSelectionSet.values(), true, mFolder,
                         item.getItemId() == R.id.move_to);
                 if (dialog != null) {
-                    dialog.show();
+                    dialog.show(mActivity.getFragmentManager(), null);
                 }
             }
         } else if (itemId == R.id.move_to_inbox) {
@@ -214,7 +220,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             markConversationsImportant(true);
         } else if (itemId == R.id.mark_not_important) {
             if (mFolder.supportsCapability(UIProvider.FolderCapabilities.ONLY_IMPORTANT)) {
-                performDestructiveAction(R.id.mark_not_important);
+                performDestructiveAction(R.id.mark_not_important, undoCallback);
             } else {
                 markConversationsImportant(false);
             }
@@ -245,7 +251,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         }
     }
 
-    private void performDestructiveAction(final int action) {
+    private void performDestructiveAction(final int action, UndoCallback undoCallback) {
         final Collection<Conversation> conversations = mSelectionSet.values();
         final Settings settings = mAccount.settings;
         final boolean showDialog;
@@ -259,7 +265,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             showDialog = false;
         }
         if (showDialog) {
-            mUpdater.makeDialogListener(action, true /* fromSelectedSet */);
+            mUpdater.makeDialogListener(action, true /* fromSelectedSet */, null /* undoCallback */);
             final int resId;
             if (action == R.id.delete) {
                 resId = R.plurals.confirm_delete_conversation;
@@ -275,7 +281,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             // No need to show the dialog, just make a destructive action and destroy the
             // selected set immediately.
             // TODO(viki): Stop using the deferred action here. Use the registered action.
-            destroy(action, conversations, mUpdater.getDeferredBatchAction(action));
+            destroy(action, conversations, mUpdater.getDeferredBatchAction(action, undoCallback));
         }
     }
 
@@ -343,8 +349,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         final MenuInflater inflater = mActivity.getMenuInflater();
         inflater.inflate(R.menu.conversation_list_selection_actions_menu, menu);
         mActionMode = mode;
-        mMenu = menu;
-        updateCount();
         return true;
     }
 
@@ -357,6 +361,9 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         boolean showMarkImportant = false;
         boolean showMarkNotSpam = false;
         boolean showMarkAsPhishing = false;
+
+        // TODO(shahrk): Clean up these dirty calls using Utils.setMenuItemVisibility(...) or
+        // in another way
 
         for (Conversation conversation : conversations) {
             if (!conversation.starred) {
@@ -390,8 +397,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         // We only ever show one of:
         // 1) remove folder
         // 2) archive
-        // 3) If we show neither archive or remove folder, then show a disabled
-        // archive icon if the setting for that is true.
         final MenuItem removeFolder = menu.findItem(R.id.remove_folder);
         final MenuItem moveTo = menu.findItem(R.id.move_to);
         final MenuItem moveToInbox = menu.findItem(R.id.move_to_inbox);
@@ -407,27 +412,19 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         moveTo.setVisible(showMoveTo);
         moveToInbox.setVisible(showMoveToInbox);
 
+        final MenuItem changeFolders = menu.findItem(R.id.change_folders);
+        changeFolders.setVisible(mAccount.supportsCapability(
+                UIProvider.AccountCapabilities.MULTIPLE_FOLDERS_PER_CONV));
+
         if (mFolder != null && showRemoveFolder) {
             removeFolder.setTitle(mActivity.getActivityContext().getString(R.string.remove_folder,
                     mFolder.name));
         }
         final MenuItem archive = menu.findItem(R.id.archive);
-        final boolean accountSupportsArchive =
-                mAccount.supportsCapability(UIProvider.AccountCapabilities.ARCHIVE);
-        boolean showArchive = accountSupportsArchive
-                && mFolder.supportsCapability(FolderCapabilities.ARCHIVE);
-        if (archive == null) {
-            showArchive = false;
-        } else {
-            archive.setVisible(showArchive);
-        }
-        // We may want to reshow the archive menu item, but only if the account supports archiving
-        if (!showArchive && accountSupportsArchive) {
-            if (!showRemoveFolder &&
-                    Utils.shouldShowDisabledArchiveIcon(mActivity.getActivityContext())) {
-                archive.setEnabled(false);
-                archive.setVisible(true);
-            }
+        if (archive != null) {
+            archive.setVisible(
+                    mAccount.supportsCapability(UIProvider.AccountCapabilities.ARCHIVE) &&
+                    mFolder.supportsCapability(FolderCapabilities.ARCHIVE));
         }
         final MenuItem spam = menu.findItem(R.id.report_spam);
         spam.setVisible(!showMarkNotSpam
@@ -453,7 +450,14 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         final MenuItem markNotImportant = menu.findItem(R.id.mark_not_important);
         markNotImportant.setVisible(!showMarkImportant
                 && mAccount.supportsCapability(UIProvider.AccountCapabilities.MARK_IMPORTANT));
-        final boolean showDelete = mFolder != null
+
+        boolean shouldShowDiscardOutbox = mFolder != null && mFolder.isType(FolderType.OUTBOX);
+        mDiscardOutboxMenuItem = menu.findItem(R.id.discard_outbox);
+        if (mDiscardOutboxMenuItem != null) {
+            mDiscardOutboxMenuItem.setVisible(shouldShowDiscardOutbox);
+            mDiscardOutboxMenuItem.setEnabled(shouldEnableDiscardOutbox(conversations));
+        }
+        final boolean showDelete = mFolder != null && !mFolder.isType(FolderType.OUTBOX)
                 && mFolder.supportsCapability(UIProvider.FolderCapabilities.DELETE);
         final MenuItem trash = menu.findItem(R.id.delete);
         trash.setVisible(showDelete);
@@ -467,10 +471,19 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             discardDrafts.setVisible(showDiscardDrafts);
         }
 
-        MailActionBarView.reorderMenu(mContext, mAccount, menu,
-                mContext.getResources().getInteger(R.integer.actionbar_max_items));
-
         return true;
+    }
+
+    private boolean shouldEnableDiscardOutbox(Collection<Conversation> conversations) {
+        boolean shouldEnableDiscardOutbox = true;
+        // Java should be smart enough to realize that once showDiscardOutbox becomes false it can
+        // just skip everything remaining in the for-loop..
+        for (Conversation conv : conversations) {
+            shouldEnableDiscardOutbox &=
+                    conv.sendingState != UIProvider.ConversationSendingState.SENDING &&
+                    conv.sendingState != UIProvider.ConversationSendingState.RETRYING;
+        }
+        return shouldEnableDiscardOutbox;
     }
 
     @Override
@@ -486,7 +499,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
             // selection state.
             mActivity.getListHandler().commitDestructiveActions(true);
         }
-        mMenu = null;
     }
 
     @Override
@@ -508,15 +520,9 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         if (set.isEmpty()) {
             return;
         }
-        updateCount();
-    }
 
-    /**
-     * Updates the visible count of how many conversations are selected.
-     */
-    private void updateCount() {
-        if (mActionMode != null) {
-            mActionMode.setTitle(mContext.getString(R.string.num_selected, mSelectionSet.size()));
+        if (mFolder.isType(FolderType.OUTBOX) && mDiscardOutboxMenuItem != null) {
+            mDiscardOutboxMenuItem.setEnabled(shouldEnableDiscardOutbox(set.values()));
         }
     }
 
@@ -531,7 +537,7 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         mListController.onCabModeEntered();
         mActivated = true;
         if (mActionMode == null) {
-            mActivity.startActionMode(this);
+            mActivity.startSupportActionMode(this);
         }
     }
 
@@ -564,31 +570,6 @@ public class SelectedConversationsActionMenu implements ActionMode.Callback,
         if (mAccountObserver != null) {
             mAccountObserver.unregisterAndDestroy();
             mAccountObserver = null;
-        }
-    }
-
-    /**
-     * Disable the selected conversations menu item associated with a command
-     * id.
-     */
-    public void disableCommand(int id) {
-        enableMenuItem(id, false);
-    }
-
-    /**
-     * Enable the selected conversations menu item associated with a command
-     * id.
-     */
-    public void enableCommand(int id) {
-        enableMenuItem(id, true);
-    }
-
-    private void enableMenuItem(int id, boolean enable) {
-        if (mActivated) {
-            MenuItem item = mMenu.findItem(id);
-            if (item != null) {
-                item.setEnabled(enable);
-            }
         }
     }
 }

@@ -16,8 +16,6 @@
 
 package android.cts.rscpp;
 
-import com.android.cts.stub.R;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.test.AndroidTestCase;
@@ -33,12 +31,11 @@ public class RSBlendTest extends RSCppTest {
     private static final int X = 256;
     private static final int Y = 256;
 
-    native boolean blendTest(int X, int Y, byte[] input, byte[] output, int optionFlag);
+    native boolean blendTest(String path, int X, int Y, byte[] input, byte[] output, int optionFlag);
     public void testRSBlend() {
         for (int iter = 0; iter < 15; iter++) {
             int[] baseAlloc = new int[X * Y * 4];
             RSUtils.genRandom(0x789321, 255, 1, -128, baseAlloc);
-            RenderScript mRS = RenderScript.create(getContext());
             byte[] byteAlloc = new byte[X * Y * 4];
             for (int i = 0; i < X * Y * 4; i++) {
                 byteAlloc[i] = (byte)baseAlloc[i];
@@ -111,12 +108,12 @@ public class RSBlendTest extends RSCppTest {
                 break;
             }
 
-            blendTest(X, Y, byteAlloc, byteAlloc2, iter);
-            rsOutput.copyTo(byteAlloc);
-            for (int i = 0; i < X * Y * 4; i++) {
-                assertTrue(byteAlloc[i] == byteAlloc2[i]);
-            }
+            blendTest(this.getContext().getCacheDir().toString(), X, Y, byteAlloc, byteAlloc2, iter);
 
+            Allocation rsCppOutput = Allocation.createTyped(mRS, build.create());
+            rsCppOutput.copyFromUnchecked(byteAlloc2);
+            mVerify.invoke_verify(rsOutput, rsCppOutput, rsInput);
+            checkForErrors();
         }
 
     }

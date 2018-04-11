@@ -17,7 +17,8 @@
 
 namespace google_apis {
 class AboutResource;
-class ResourceList;
+class ChangeList;
+class FileList;
 }  // google_apis
 
 namespace drive {
@@ -28,19 +29,67 @@ namespace internal {
 
 class ResourceMetadata;
 
+// Holds information needed to fetch contents of a directory.
+// This object is copyable.
+class DirectoryFetchInfo {
+ public:
+  DirectoryFetchInfo() : changestamp_(0) {}
+  DirectoryFetchInfo(const std::string& local_id,
+                     const std::string& resource_id,
+                     int64 changestamp)
+      : local_id_(local_id),
+        resource_id_(resource_id),
+        changestamp_(changestamp) {
+  }
+
+  // Returns true if the object is empty.
+  bool empty() const { return local_id_.empty(); }
+
+  // Local ID of the directory.
+  const std::string& local_id() const { return local_id_; }
+
+  // Resource ID of the directory.
+  const std::string& resource_id() const { return resource_id_; }
+
+  // Changestamp of the directory. The changestamp is used to determine if
+  // the directory contents should be fetched.
+  int64 changestamp() const { return changestamp_; }
+
+  // Returns a string representation of this object.
+  std::string ToString() const;
+
+ private:
+  const std::string local_id_;
+  const std::string resource_id_;
+  const int64 changestamp_;
+};
+
 // Class to represent a change list.
 class ChangeList {
  public:
-  explicit ChangeList(const google_apis::ResourceList& resource_list);
+  ChangeList();  // For tests.
+  explicit ChangeList(const google_apis::ChangeList& change_list);
+  explicit ChangeList(const google_apis::FileList& file_list);
   ~ChangeList();
 
   const std::vector<ResourceEntry>& entries() const { return entries_; }
   std::vector<ResourceEntry>* mutable_entries() { return &entries_; }
+  const std::vector<std::string>& parent_resource_ids() const {
+    return parent_resource_ids_;
+  }
+  std::vector<std::string>* mutable_parent_resource_ids() {
+    return &parent_resource_ids_;
+  }
   const GURL& next_url() const { return next_url_; }
   int64 largest_changestamp() const { return largest_changestamp_; }
 
+  void set_largest_changestamp(int64 largest_changestamp) {
+    largest_changestamp_ = largest_changestamp;
+  }
+
  private:
   std::vector<ResourceEntry> entries_;
+  std::vector<std::string> parent_resource_ids_;
   GURL next_url_;
   int64 largest_changestamp_;
 
@@ -52,12 +101,6 @@ class ChangeList {
 // updates the resource metadata stored locally.
 class ChangeListProcessor {
  public:
-  typedef std::map<std::string /* resource_id */, ResourceEntry>
-      ResourceEntryMap;
-
-  // Class used to record UMA stats with ConvertToMap().
-  class ChangeListToEntryMapUMAStats;
-
   explicit ChangeListProcessor(ResourceMetadata* resource_metadata);
   ~ChangeListProcessor();
 
@@ -67,53 +110,48 @@ class ChangeListProcessor {
   // it is full resource lists (false) or change lists (true).
   //
   // Must be run on the same task runner as |resource_metadata_| uses.
-  //
-  // TODO(hashimoto): Report error on failures.
-  void Apply(scoped_ptr<google_apis::AboutResource> about_resource,
-             ScopedVector<ChangeList> change_lists,
-             bool is_delta_update);
-
-  // Converts change lists into a ResourceEntryMap.
-  // |uma_stats| may be NULL.
-  static void ConvertToMap(ScopedVector<ChangeList> change_lists,
-                           ResourceEntryMap* entry_map,
-                           ChangeListToEntryMapUMAStats* uma_stats);
+  FileError Apply(scoped_ptr<google_apis::AboutResource> about_resource,
+                  ScopedVector<ChangeList> change_lists,
+                  bool is_delta_update);
 
   // The set of changed directories as a result of change list processing.
   const std::set<base::FilePath>& changed_dirs() const { return changed_dirs_; }
 
- private:
-  // Applies the pre-processed metadata from entry_map_ onto the resource
-  // metadata. If this is not delta update (i.e. |is_delta_update| is false),
-  // |about_resource| must not be null.
-  void ApplyEntryMap(bool is_delta_update,
-                     scoped_ptr<google_apis::AboutResource> about_resource);
+  // Adds or refreshes the child entries from |change_list| to the directory.
+  static FileError RefreshDirectory(
+      ResourceMetadata* resource_metadata,
+      const DirectoryFetchInfo& directory_fetch_info,
+      scoped_ptr<ChangeList> change_list,
+      std::vector<ResourceEntry>* out_refreshed_entries);
 
-  // Apply the next item from entry_map_ to the file system. The async
-  // version posts to the message loop to avoid recursive stack-overflow.
-  void ApplyNextEntry();
+  // Sets |entry|'s parent_local_id.
+  static FileError SetParentLocalIdOfEntry(
+      ResourceMetadata* resource_metadata,
+      ResourceEntry* entry,
+      const std::string& parent_resource_id);
+
+ private:
+  typedef std::map<std::string /* resource_id */, ResourceEntry>
+      ResourceEntryMap;
+  typedef std::map<std::string /* resource_id */,
+                   std::string /* parent_resource_id*/> ParentResourceIdMap;
+
+  // Applies the pre-processed metadata from entry_map_ onto the resource
+  // metadata. |about_resource| must not be null.
+  FileError ApplyEntryMap(
+      int64 changestamp,
+      scoped_ptr<google_apis::AboutResource> about_resource);
 
   // Apply |entry| to resource_metadata_.
-  void ApplyEntry(const ResourceEntry& entry);
+  FileError ApplyEntry(const ResourceEntry& entry);
 
-  // Helper function to add |entry| to its parent. Updates changed_dirs_
-  // as a side effect.
-  void AddEntry(const ResourceEntry& entry);
-
-  // Removes entry pointed to by |resource_id| from its parent. Updates
-  // changed_dirs_ as a side effect.
-  void RemoveEntry(const ResourceEntry& entry);
-
-  // Refreshes ResourceMetadata entry that has the same resource_id as
-  // |entry| with |entry|. Updates changed_dirs_ as a side effect.
-  void RefreshEntry(const ResourceEntry& entry);
-
-  // Updates the root directory entry. changestamp will be updated.
-  void UpdateRootEntry(int64 largest_changestamp);
+  // Adds the directories changed by the update on |entry| to |changed_dirs_|.
+  void UpdateChangedDirs(const ResourceEntry& entry);
 
   ResourceMetadata* resource_metadata_;  // Not owned.
 
   ResourceEntryMap entry_map_;
+  ParentResourceIdMap parent_resource_id_map_;
   std::set<base::FilePath> changed_dirs_;
 
   DISALLOW_COPY_AND_ASSIGN(ChangeListProcessor);

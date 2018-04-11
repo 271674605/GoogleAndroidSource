@@ -158,6 +158,9 @@ public class MtpService extends Service {
                 }
             }
             final StorageVolume primary = StorageManager.getPrimaryVolume(mVolumes);
+            if (mDatabase != null) {
+                mDatabase.setServer(null);
+            }
             mDatabase = new MtpDatabase(this, MediaProvider.EXTERNAL_VOLUME,
                     primary.getPath(), subdirs);
             manageServiceLocked();
@@ -186,6 +189,7 @@ public class MtpService extends Service {
         if (mServer == null && isCurrentUser) {
             Log.d(TAG, "starting MTP server in " + (mPtpMode ? "PTP mode" : "MTP mode"));
             mServer = new MtpServer(mDatabase, mPtpMode);
+            mDatabase.setServer(mServer);
             if (!mMtpDisabled) {
                 addStorageDevicesLocked();
             }
@@ -195,6 +199,7 @@ public class MtpService extends Service {
             // Internally, kernel will close our FD, and server thread will
             // handle cleanup.
             mServer = null;
+            mDatabase.setServer(null);
         }
     }
 
@@ -202,6 +207,9 @@ public class MtpService extends Service {
     public void onDestroy() {
         unregisterReceiver(mReceiver);
         mStorageManager.unregisterListener(mStorageEventListener);
+        if (mDatabase != null) {
+            mDatabase.setServer(null);
+        }
     }
 
     private final IMtpService.Stub mBinder =

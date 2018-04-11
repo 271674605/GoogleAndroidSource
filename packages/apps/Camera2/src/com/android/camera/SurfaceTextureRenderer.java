@@ -18,7 +18,8 @@ package com.android.camera;
 
 import android.graphics.SurfaceTexture;
 import android.os.Handler;
-import android.util.Log;
+
+import com.android.camera.debug.Log;
 
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
@@ -33,7 +34,7 @@ public class SurfaceTextureRenderer {
         public void onDrawFrame(GL10 gl);
     }
 
-    private static final String TAG = "CAM_" + SurfaceTextureRenderer.class.getSimpleName();
+    private static final Log.Tag TAG = new Log.Tag("SurfTexRenderer");
     private static final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
 
     private EGLConfig mEglConfig;
@@ -43,40 +44,25 @@ public class SurfaceTextureRenderer {
     private EGL10 mEgl;
     private GL10 mGl;
 
-    private Handler mEglHandler;
-    private FrameDrawer mFrameDrawer;
+    private volatile boolean mDrawPending = false;
 
-    private Object mRenderLock = new Object();
-    private Runnable mRenderTask = new Runnable() {
+    private final Handler mEglHandler;
+    private final FrameDrawer mFrameDrawer;
+
+    private final Object mRenderLock = new Object();
+    private final Runnable mRenderTask = new Runnable() {
         @Override
         public void run() {
             synchronized (mRenderLock) {
-                mFrameDrawer.onDrawFrame(mGl);
-                mEgl.eglSwapBuffers(mEglDisplay, mEglSurface);
+                if (mEglDisplay != null && mEglSurface != null) {
+                    mFrameDrawer.onDrawFrame(mGl);
+                    mEgl.eglSwapBuffers(mEglDisplay, mEglSurface);
+                    mDrawPending = false;
+                }
                 mRenderLock.notifyAll();
             }
         }
     };
-
-    public class RenderThread extends Thread {
-        private Boolean mRenderStopped = false;
-
-        @Override
-        public void run() {
-            while (true) {
-                synchronized (mRenderStopped) {
-                    if (mRenderStopped) return;
-                }
-                draw(true);
-            }
-        }
-
-        public void stopRender() {
-            synchronized (mRenderStopped) {
-                mRenderStopped = true;
-            }
-        }
-    }
 
     public SurfaceTextureRenderer(SurfaceTexture tex,
             Handler handler, FrameDrawer renderer) {
@@ -84,10 +70,6 @@ public class SurfaceTextureRenderer {
         mFrameDrawer = renderer;
 
         initialize(tex);
-    }
-
-    public RenderThread createRenderThread() {
-        return new RenderThread();
     }
 
     public void release() {
@@ -113,12 +95,15 @@ public class SurfaceTextureRenderer {
      */
     public void draw(boolean sync) {
         synchronized (mRenderLock) {
-            mEglHandler.post(mRenderTask);
-            if (sync) {
-                try {
-                    mRenderLock.wait();
-                } catch (InterruptedException ex) {
-                    Log.v(TAG, "RenderLock.wait() interrupted");
+            if (!mDrawPending) {
+                mEglHandler.post(mRenderTask);
+                mDrawPending = true;
+                if (sync) {
+                    try {
+                        mRenderLock.wait();
+                    } catch (InterruptedException ex) {
+                        Log.v(TAG, "RenderLock.wait() interrupted");
+                    }
                 }
             }
         }

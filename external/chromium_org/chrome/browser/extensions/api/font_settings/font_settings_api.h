@@ -13,11 +13,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
-#include "chrome/browser/extensions/event_router.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/event_router.h"
 
 class Profile;
+
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 
@@ -70,18 +74,18 @@ class FontSettingsEventRouter {
 // The profile-keyed service that manages the font_settings extension API.
 // This is not an EventRouter::Observer (and does not lazily initialize) because
 // doing so caused a regression in perf tests. See crbug.com/163466.
-class FontSettingsAPI : public ProfileKeyedAPI {
+class FontSettingsAPI : public BrowserContextKeyedAPI {
  public:
-  explicit FontSettingsAPI(Profile* profile);
+  explicit FontSettingsAPI(content::BrowserContext* context);
   virtual ~FontSettingsAPI();
 
-  // ProfileKeyedAPI implementation.
-  static ProfileKeyedAPIFactory<FontSettingsAPI>* GetFactoryInstance();
+  // BrowserContextKeyedAPI implementation.
+  static BrowserContextKeyedAPIFactory<FontSettingsAPI>* GetFactoryInstance();
 
  private:
-  friend class ProfileKeyedAPIFactory<FontSettingsAPI>;
+  friend class BrowserContextKeyedAPIFactory<FontSettingsAPI>;
 
-  // ProfileKeyedAPI implementation.
+  // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
     return "FontSettingsAPI";
   }
@@ -91,7 +95,7 @@ class FontSettingsAPI : public ProfileKeyedAPI {
 };
 
 // fontSettings.clearFont API function.
-class FontSettingsClearFontFunction : public SyncExtensionFunction {
+class FontSettingsClearFontFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.clearFont", FONTSETTINGS_CLEARFONT)
 
@@ -101,11 +105,11 @@ class FontSettingsClearFontFunction : public SyncExtensionFunction {
   virtual ~FontSettingsClearFontFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // fontSettings.getFont API function.
-class FontSettingsGetFontFunction : public SyncExtensionFunction {
+class FontSettingsGetFontFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.getFont", FONTSETTINGS_GETFONT)
 
@@ -113,11 +117,11 @@ class FontSettingsGetFontFunction : public SyncExtensionFunction {
   virtual ~FontSettingsGetFontFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // fontSettings.setFont API function.
-class FontSettingsSetFontFunction : public SyncExtensionFunction {
+class FontSettingsSetFontFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.setFont", FONTSETTINGS_SETFONT)
 
@@ -125,11 +129,11 @@ class FontSettingsSetFontFunction : public SyncExtensionFunction {
   virtual ~FontSettingsSetFontFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // fontSettings.getFontList API function.
-class FontSettingsGetFontListFunction : public AsyncExtensionFunction {
+class FontSettingsGetFontListFunction : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.getFontList",
                              FONTSETTINGS_GETFONTLIST)
@@ -138,7 +142,7 @@ class FontSettingsGetFontListFunction : public AsyncExtensionFunction {
   virtual ~FontSettingsGetFontListFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void FontListHasLoaded(scoped_ptr<base::ListValue> list);
@@ -146,12 +150,12 @@ class FontSettingsGetFontListFunction : public AsyncExtensionFunction {
 };
 
 // Base class for extension API functions that clear a browser font pref.
-class ClearFontPrefExtensionFunction : public SyncExtensionFunction {
+class ClearFontPrefExtensionFunction : public ChromeSyncExtensionFunction {
  protected:
   virtual ~ClearFontPrefExtensionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
   // Implementations should return the name of the preference to clear, like
   // "webkit.webprefs.default_font_size".
@@ -159,12 +163,12 @@ class ClearFontPrefExtensionFunction : public SyncExtensionFunction {
 };
 
 // Base class for extension API functions that get a browser font pref.
-class GetFontPrefExtensionFunction : public SyncExtensionFunction {
+class GetFontPrefExtensionFunction : public ChromeSyncExtensionFunction {
  protected:
   virtual ~GetFontPrefExtensionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
   // Implementations should return the name of the preference to get, like
   // "webkit.webprefs.default_font_size".
@@ -176,12 +180,12 @@ class GetFontPrefExtensionFunction : public SyncExtensionFunction {
 };
 
 // Base class for extension API functions that set a browser font pref.
-class SetFontPrefExtensionFunction : public SyncExtensionFunction {
+class SetFontPrefExtensionFunction : public ChromeSyncExtensionFunction {
  protected:
   virtual ~SetFontPrefExtensionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
   // Implementations should return the name of the preference to set, like
   // "webkit.webprefs.default_font_size".

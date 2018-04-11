@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@
 #define RW_T3T_POLL_CMD_TIMEOUT_TICKS                               ((RW_T3T_TOUT_RESP*2*QUICK_TIMER_TICKS_PER_SEC) / 1000)
 #define RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS                            ((RW_T3T_TOUT_RESP*QUICK_TIMER_TICKS_PER_SEC) / 1000)
 #define RW_T3T_RAW_FRAME_CMD_TIMEOUT_TICKS                          (RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS * 4)
+#define RW_T3T_MIN_TIMEOUT_TICKS                                    10
 
 /* Macro to extract major version from NDEF version byte */
 #define T3T_GET_MAJOR_VERSION(ver)      (ver>>4)
@@ -120,6 +121,7 @@ static char *rw_t3t_state_str (UINT8 state_id);
 
 
 /* Local static functions */
+static void rw_t3t_update_ndef_flag (UINT8 *p_flag);
 static tNFC_STATUS rw_t3t_unselect (UINT8 peer_nfcid2[]);
 static BT_HDR *rw_t3t_get_cmd_buf (void);
 static tNFC_STATUS rw_t3t_send_to_lower (BT_HDR *p_msg);
@@ -159,10 +161,61 @@ const UINT8 rw_t3t_default_attrib_info[T3T_MSG_BLOCKSIZE] =
 
 };
 
-/*****************************************************************************
-**  Type3 TAG COMMANDS
-*****************************************************************************/
+/* This is (T/t3t * 4^E) , E is the index of the array. The unit is .0001 ms */
+static const UINT32 rw_t3t_mrti_base [] =
+{
+    302,
+    1208,
+    4832,
+    19328
+};
 
+
+/*******************************************************************************
+**
+** Function         rw_t3t_check_timeout
+**
+** Description      The timeout value is a + b * number_blocks)
+**
+** Returns          timeout value in ticks
+**
+*******************************************************************************/
+static UINT32 rw_t3t_check_timeout (UINT16 num_blocks)
+{
+    tRW_T3T_CB  *p_cb    = &rw_cb.tcb.t3t;
+    UINT32      timeout;
+    UINT32      extra;
+
+    timeout = (p_cb->check_tout_a + num_blocks * p_cb->check_tout_b)*QUICK_TIMER_TICKS_PER_SEC/1000000;
+    /* allow some extra time for driver */
+    extra   = (timeout / 10) + RW_T3T_MIN_TIMEOUT_TICKS;
+    timeout += extra;
+
+    return timeout;
+}
+
+/*******************************************************************************
+**
+** Function         rw_t3t_update_timeout
+**
+** Description      The timeout value is a + b * number_blocks)
+**
+** Returns          timeout value in ticks
+**
+*******************************************************************************/
+static UINT32 rw_t3t_update_timeout (UINT16 num_blocks)
+{
+    tRW_T3T_CB  *p_cb    = &rw_cb.tcb.t3t;
+    UINT32      timeout;
+    UINT32      extra;
+
+    timeout = (p_cb->update_tout_a + num_blocks * p_cb->update_tout_b)*QUICK_TIMER_TICKS_PER_SEC/1000000;
+    /* allow some extra time for driver */
+    extra   = (timeout / 10) + RW_T3T_MIN_TIMEOUT_TICKS;
+    timeout += extra;
+
+    return timeout;
+}
 /*******************************************************************************
 **
 ** Function         rw_t3t_process_error
@@ -236,6 +289,7 @@ void rw_t3t_process_error (tNFC_STATUS status)
             if (evt == RW_T3T_NDEF_DETECT_EVT)
             {
                 evt_data.ndef.flags = RW_NDEF_FL_UNKNOWN;
+                rw_t3t_update_ndef_flag (&evt_data.ndef.flags);
             }
 
             (*(rw_cb.p_cback)) (evt, &evt_data);
@@ -580,7 +634,7 @@ BT_HDR *rw_t3t_get_cmd_buf (void)
 ** Returns          tNFC_STATUS
 **
 *****************************************************************************/
-tNFC_STATUS rw_t3t_send_cmd (tRW_T3T_CB *p_cb, UINT8 rw_t3t_cmd, BT_HDR *p_cmd_buf, UINT32 timeout_ms)
+tNFC_STATUS rw_t3t_send_cmd (tRW_T3T_CB *p_cb, UINT8 rw_t3t_cmd, BT_HDR *p_cmd_buf, UINT32 timeout_ticks)
 {
     tNFC_STATUS retval;
 
@@ -589,13 +643,13 @@ tNFC_STATUS rw_t3t_send_cmd (tRW_T3T_CB *p_cb, UINT8 rw_t3t_cmd, BT_HDR *p_cmd_b
     memcpy (p_cb->p_cur_cmd_buf, p_cmd_buf, sizeof (BT_HDR) + p_cmd_buf->offset + p_cmd_buf->len);
 
     p_cb->cur_cmd = rw_t3t_cmd;
-    p_cb->cur_tout = timeout_ms;
+    p_cb->cur_tout = timeout_ticks;
     p_cb->rw_state = RW_T3T_STATE_COMMAND_PENDING;
 
     if ((retval = rw_t3t_send_to_lower (p_cmd_buf)) == NFC_STATUS_OK)
     {
         /* Start timer for waiting for response */
-        nfc_start_quick_timer (&p_cb->timer, NFC_TTYPE_RW_T3T_RESPONSE, timeout_ms);
+        nfc_start_quick_timer (&p_cb->timer, NFC_TTYPE_RW_T3T_RESPONSE, timeout_ticks);
     }
     else
     {
@@ -603,6 +657,7 @@ tNFC_STATUS rw_t3t_send_cmd (tRW_T3T_CB *p_cb, UINT8 rw_t3t_cmd, BT_HDR *p_cmd_b
         p_cb->rw_state = RW_T3T_STATE_IDLE;
     }
 
+    RW_TRACE_DEBUG3 ("rw_t3t_send_cmd: cur_tout: %d, timeout_ticks: %d ret:%d",p_cb->cur_tout, timeout_ticks, retval);
     return (retval);
 }
 
@@ -686,7 +741,7 @@ tNFC_STATUS rw_t3t_send_update_ndef_attribute_cmd (tRW_T3T_CB *p_cb, BOOLEAN wri
         p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
         /* Send the T3T message */
-        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_UPDATE_NDEF, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS);
+        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_UPDATE_NDEF, p_cmd_buf, rw_t3t_update_timeout(1));
     }
     else
     {
@@ -777,7 +832,7 @@ tNFC_STATUS rw_t3t_send_next_ndef_update_cmd (tRW_T3T_CB *p_cb)
 
         /* Add number of blocks in this UPDATE command */
         UINT8_TO_STREAM (p, ndef_blocks_to_write);   /* Number of blocks to write in this command */
-        timeout = RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS * (UINT32) ndef_blocks_to_write;
+        timeout = rw_t3t_update_timeout(ndef_blocks_to_write);
 
         for (block_id = first_block_to_write; block_id < (first_block_to_write + ndef_blocks_to_write); block_id++)
         {
@@ -894,9 +949,7 @@ tNFC_STATUS rw_t3t_send_next_ndef_check_cmd (tRW_T3T_CB *p_cb)
         RW_TRACE_DEBUG3 ("rw_t3t_send_next_ndef_check_cmd: bytes_remaining: %i, cur_blocks_to_read: %i, is_final: %i",
             ndef_bytes_remaining, cur_blocks_to_read, (p_cb->flags & RW_T3T_FL_IS_FINAL_NDEF_SEGMENT));
 
-        /* Write to command header for UPDATE */
-
-        /* Add UPDATE opcode to message  */
+        /* Add CHECK opcode to message  */
         UINT8_TO_STREAM (p, T3T_MSG_OPC_CHECK_CMD);
 
         /* Add IDm to message */
@@ -915,7 +968,7 @@ tNFC_STATUS rw_t3t_send_next_ndef_check_cmd (tRW_T3T_CB *p_cb)
             UINT16_TO_STREAM (p, T3T_MSG_NDEF_SC_RW);
         }
 
-        /* Add number of blocks in this UPDATE command */
+        /* Add number of blocks in this CHECK command */
         UINT8_TO_STREAM (p, cur_blocks_to_read);     /* Number of blocks to check in this command */
 
         for (block_id = first_block_to_read; block_id < (first_block_to_read + cur_blocks_to_read); block_id++)
@@ -939,7 +992,7 @@ tNFC_STATUS rw_t3t_send_next_ndef_check_cmd (tRW_T3T_CB *p_cb)
         p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
         /* Send the T3T message */
-        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_CHECK_NDEF, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS * (UINT32) cur_blocks_to_read);
+        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_CHECK_NDEF, p_cmd_buf, rw_t3t_check_timeout (cur_blocks_to_read));
     }
     else
     {
@@ -1058,7 +1111,7 @@ tNFC_STATUS rw_t3t_send_check_cmd (tRW_T3T_CB *p_cb, UINT8 num_blocks, tT3T_BLOC
         p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
         /* Send the T3T message */
-        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_CHECK, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS * (UINT32) num_blocks);
+        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_CHECK, p_cmd_buf, rw_t3t_check_timeout(num_blocks));
     }
     else
     {
@@ -1097,7 +1150,7 @@ tNFC_STATUS rw_t3t_send_update_cmd (tRW_T3T_CB *p_cb, UINT8 num_blocks, tT3T_BLO
         p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
         /* Send the T3T message */
-        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_UPDATE, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS * (UINT32) num_blocks);
+        retval = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_UPDATE, p_cmd_buf, rw_t3t_update_timeout(num_blocks));
     }
     else
     {
@@ -1148,7 +1201,7 @@ tNFC_STATUS rw_t3t_check_mc_block (tRW_T3T_CB *p_cb)
         p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
         /* Send the T3T message */
-        return rw_t3t_send_cmd (p_cb, p_cb->cur_cmd, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS);
+        return rw_t3t_send_cmd (p_cb, p_cb->cur_cmd, p_cmd_buf, rw_t3t_check_timeout(1));
     }
     else
     {
@@ -1310,7 +1363,7 @@ void rw_t3t_act_handle_ndef_detect_rsp (tRW_T3T_CB *p_cb, BT_HDR *p_msg_rsp)
     RW_TRACE_DEBUG1 ("RW_T3tDetectNDEF response: %i", evt_data.status);
 
     p_cb->rw_state = RW_T3T_STATE_IDLE;
-
+    rw_t3t_update_ndef_flag (&evt_data.flags);
     /* Notify app of NDEF detection result */
     (*(rw_cb.p_cback)) (RW_T3T_NDEF_DETECT_EVT, (tRW_DATA *) &evt_data);
 
@@ -1409,13 +1462,20 @@ void rw_t3t_act_handle_update_rsp (tRW_T3T_CB *p_cb, BT_HDR *p_msg_rsp)
 ** Returns          Nothing
 **
 *****************************************************************************/
-void rw_t3t_act_handle_raw_senddata_rsp (tRW_T3T_CB *p_cb, BT_HDR *p_msg_rsp)
+void rw_t3t_act_handle_raw_senddata_rsp (tRW_T3T_CB *p_cb, tNFC_DATA_CEVT *p_data)
 {
     tRW_READ_DATA evt_data;
+    BT_HDR        *p_pkt = p_data->p_data;
+
+#if (BT_TRACE_VERBOSE == TRUE)
+        RW_TRACE_DEBUG2 ("RW T3T Raw Frame: Len [0x%X] Status [%s]", p_pkt->len, NFC_GetStatusName (p_data->status));
+#else
+        RW_TRACE_DEBUG2 ("RW T3T Raw Frame: Len [0x%X] Status [0x%X]", p_pkt->len, p_data->status);
+#endif
 
     /* Copy incoming data into buffer */
-    evt_data.status = NFC_STATUS_OK;
-    evt_data.p_data = p_msg_rsp;
+    evt_data.status = p_data->status;
+    evt_data.p_data = p_pkt;
 
     p_cb->rw_state = RW_T3T_STATE_IDLE;
 
@@ -1707,7 +1767,7 @@ static void rw_t3t_handle_ndef_detect_poll_rsp (tRW_T3T_CB *p_cb, UINT8 nci_stat
             p_cmd_buf->len = (UINT16) (p - p_cmd_start);
 
             /* Send the T3T message */
-            if ((evt_data.status = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_DETECT_NDEF, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS)) == NFC_STATUS_OK)
+            if ((evt_data.status = rw_t3t_send_cmd (p_cb, RW_T3T_CMD_DETECT_NDEF, p_cmd_buf, rw_t3t_check_timeout(1))) == NFC_STATUS_OK)
             {
                 /* CHECK command sent. Wait for response */
                 return;
@@ -1720,6 +1780,7 @@ static void rw_t3t_handle_ndef_detect_poll_rsp (tRW_T3T_CB *p_cb, UINT8 nci_stat
     p_cb->rw_state = RW_T3T_STATE_IDLE;
     evt_data.ndef.status = nci_status;
     evt_data.ndef.flags  = RW_NDEF_FL_UNKNOWN;
+    rw_t3t_update_ndef_flag (&evt_data.ndef.flags);
     (*(rw_cb.p_cback)) (RW_T3T_NDEF_DETECT_EVT, &evt_data);
 }
 
@@ -1813,7 +1874,7 @@ tNFC_STATUS rw_t3t_update_block (tRW_T3T_CB *p_cb, UINT8 block_id, UINT8 *p_bloc
         p_cmd_buf->len = (UINT16) (p_dst - p_cmd_start);
 
         /* Send the T3T message */
-        status = rw_t3t_send_cmd (p_cb, p_cb->cur_cmd, p_cmd_buf, RW_T3T_DEFAULT_CMD_TIMEOUT_TICKS);
+        status = rw_t3t_send_cmd (p_cb, p_cb->cur_cmd, p_cmd_buf, rw_t3t_update_timeout(1));
     }
     else
     {
@@ -2168,9 +2229,10 @@ void rw_t3t_act_handle_sro_rsp (tRW_T3T_CB *p_cb, BT_HDR *p_msg_rsp)
 ** Returns          none
 **
 *******************************************************************************/
-void rw_t3t_data_cback (UINT8 conn_id, BT_HDR *p_msg)
+void rw_t3t_data_cback (UINT8 conn_id, tNFC_DATA_CEVT *p_data)
 {
-    tRW_T3T_CB *p_cb = &rw_cb.tcb.t3t;
+    tRW_T3T_CB *p_cb  = &rw_cb.tcb.t3t;
+    BT_HDR     *p_msg = p_data->p_data;
     BOOLEAN free_msg = FALSE;           /* if TRUE, free msg buffer before returning */
     UINT8 *p, sod;
 
@@ -2189,7 +2251,7 @@ void rw_t3t_data_cback (UINT8 conn_id, BT_HDR *p_msg)
         **  This must be raw frame response
         **  send raw frame to app with SoD
         */
-        rw_t3t_act_handle_raw_senddata_rsp (p_cb, p_msg);
+        rw_t3t_act_handle_raw_senddata_rsp (p_cb, p_data);
     }
     /* Sanity check: verify msg len is big enough to contain t3t header */
     else if (p_msg->len < T3T_MSG_RSP_COMMON_HDR_LEN)
@@ -2245,7 +2307,7 @@ void rw_t3t_data_cback (UINT8 conn_id, BT_HDR *p_msg)
                 break;
 
             case RW_T3T_CMD_SEND_RAW_FRAME:
-                rw_t3t_act_handle_raw_senddata_rsp (p_cb, p_msg);
+                rw_t3t_act_handle_raw_senddata_rsp (p_cb, p_data);
                 break;
 
             case RW_T3T_CMD_GET_SYSTEM_CODES:
@@ -2301,9 +2363,10 @@ void rw_t3t_conn_cback (UINT8 conn_id, tNFC_CONN_EVT event, tNFC_CONN *p_data)
         break;
 
     case NFC_DATA_CEVT:     /* check for status in tNFC_CONN */
-        if (p_data->data.status == NFC_STATUS_OK)
+        if (  (p_data->data.status == NFC_STATUS_OK)
+            ||(p_data->data.status == NFC_STATUS_CONTINUE)  )
         {
-            rw_t3t_data_cback (conn_id, p_data->data.p_data);
+            rw_t3t_data_cback (conn_id, &(p_data->data));
             break;
         }
         /* Data event with error status...fall through to NFC_ERROR_CEVT case */
@@ -2331,6 +2394,31 @@ void rw_t3t_conn_cback (UINT8 conn_id, tNFC_CONN_EVT event, tNFC_CONN *p_data)
 
 /*******************************************************************************
 **
+** Function         rw_t3t_mrti_to_a_b
+**
+** Description      Converts the given MRTI (Maximum Response Time Information)
+**                  to the base to calculate timeout value.
+**                  (The timeout value is a + b * number_blocks)
+**
+** Returns          NFC_STATUS_OK
+**
+*******************************************************************************/
+static void rw_t3t_mrti_to_a_b (UINT8 mrti, UINT32 *p_a, UINT32 *p_b)
+{
+    UINT8 a, b, e;
+
+    a = (mrti & 0x7) + 1;   /* A is bit 0 ~ bit 2 */
+    mrti >>=3;
+    b = (mrti & 0x7) + 1;   /* B is bit 3 ~ bit 5 */
+    mrti >>=3;
+    e = mrti & 0x3;         /* E is bit 6 ~ bit 7 */
+    *p_a = rw_t3t_mrti_base[e] * a; /* (A+1) * base (i.e T/t3t * 4^E) */
+    *p_b = rw_t3t_mrti_base[e] * b; /* (B+1) * base (i.e T/t3t * 4^E) */
+}
+
+
+/*******************************************************************************
+**
 ** Function         rw_t3t_select
 **
 ** Description      Called by NFC manager when a Type3 tag has been activated
@@ -2348,6 +2436,8 @@ tNFC_STATUS rw_t3t_select (UINT8 peer_nfcid2[NCI_RF_F_UID_LEN], UINT8 mrti_check
     p_cb->ndef_attrib.status = NFC_STATUS_NOT_INITIALIZED;  /* Indicate that NDEF detection has not been performed yet */
     p_cb->rw_state = RW_T3T_STATE_IDLE;
     p_cb->flags = 0;
+    rw_t3t_mrti_to_a_b (mrti_check, &p_cb->check_tout_a, &p_cb->check_tout_b);
+    rw_t3t_mrti_to_a_b (mrti_update, &p_cb->update_tout_a, &p_cb->update_tout_b);
 
     /* Alloc cmd buf for retransmissions */
     if (p_cb->p_cur_cmd_buf ==  NULL)
@@ -2401,6 +2491,30 @@ static tNFC_STATUS rw_t3t_unselect (UINT8 peer_nfcid2[])
     return NFC_STATUS_OK;
 }
 
+/*******************************************************************************
+**
+** Function         rw_t3t_update_ndef_flag
+**
+** Description      set additional NDEF Flags for felica lite tag
+**
+** Returns          updated NDEF Flag value
+**
+*******************************************************************************/
+static void rw_t3t_update_ndef_flag (UINT8 *p_flag)
+{
+    tRW_T3T_CB *p_cb = &rw_cb.tcb.t3t;
+    UINT8 xx;
+
+    for (xx = 0; xx < p_cb->num_system_codes; xx++)
+    {
+        if (p_cb->system_codes[xx] == T3T_SYSTEM_CODE_FELICA_LITE)
+        {
+            *p_flag &= ~RW_NDEF_FL_UNKNOWN;
+            *p_flag |= (RW_NDEF_FL_SUPPORTED | RW_NDEF_FL_FORMATABLE);
+            break;
+        }
+    }
+}
 
 #if (BT_TRACE_VERBOSE == TRUE)
 /*******************************************************************************

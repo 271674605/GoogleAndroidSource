@@ -9,14 +9,15 @@
 #include <set>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
+#include "components/bookmarks/browser/base_bookmark_model_observer.h"
+#include "components/bookmarks/browser/bookmark_node_data.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
 class BookmarkNode;
 class Browser;
+class ChromeBookmarkClient;
 class Profile;
 
 namespace content {
@@ -53,7 +54,8 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   BookmarkMenuDelegate(Browser* browser,
                        content::PageNavigator* navigator,
                        views::Widget* parent,
-                       int first_menu_id);
+                       int first_menu_id,
+                       int max_menu_id);
   virtual ~BookmarkMenuDelegate();
 
   // Creates the menus from the model.
@@ -62,7 +64,7 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
             const BookmarkNode* node,
             int start_child_index,
             ShowOptions show_options,
-            bookmark_utils::BookmarkLaunchLocation location);
+            BookmarkLaunchLocation location);
 
   // Sets the PageNavigator.
   void SetPageNavigator(content::PageNavigator* navigator);
@@ -74,26 +76,26 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // the first child of |node| to show in the menu.
   void SetActiveMenu(const BookmarkNode* node, int start_index);
 
+  BookmarkModel* GetBookmarkModel();
+  ChromeBookmarkClient* GetChromeBookmarkClient();
+
   // Returns the menu.
-  views::MenuItemView* menu() const { return menu_; }
+  views::MenuItemView* menu() { return menu_; }
 
   // Returns the context menu, or NULL if the context menu isn't showing.
-  views::MenuItemView* context_menu() const {
+  views::MenuItemView* context_menu() {
     return context_menu_.get() ? context_menu_->menu() : NULL;
   }
 
-  Profile* profile() { return profile_; }
-
   views::Widget* parent() { return parent_; }
   const views::Widget* parent() const { return parent_; }
-
 
   // Returns true if we're in the process of mutating the model. This happens
   // when the user deletes menu items using the context menu.
   bool is_mutating_model() const { return is_mutating_model_; }
 
   // MenuDelegate like methods (see class description for details).
-  string16 GetTooltipText(int id, const gfx::Point& p) const;
+  base::string16 GetTooltipText(int id, const gfx::Point& p) const;
   bool IsTriggerableEvent(views::MenuItemView* menu,
                           const ui::Event& e);
   void ExecuteCommand(int id, int mouse_event_flags);
@@ -148,9 +150,13 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // separator is added before the new menu items and |added_separator| is set
   // to true.
   void BuildMenuForPermanentNode(const BookmarkNode* node,
+                                 int icon_resource_id,
                                  views::MenuItemView* menu,
                                  int* next_menu_id,
                                  bool* added_separator);
+
+  void BuildMenuForManagedNode(views::MenuItemView* menu,
+                               int* next_menu_id);
 
   // Creates an entry in menu for each child node of |parent| starting at
   // |start_child_index|.
@@ -158,6 +164,10 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
                  int start_child_index,
                  views::MenuItemView* menu,
                  int* next_menu_id);
+
+  // Returns true if |menu_id_| is outside the range of minimum and maximum menu
+  // ID's allowed.
+  bool IsOutsideMenuIdRange(int menu_id) const;
 
   Browser* browser_;
   Profile* profile_;
@@ -179,9 +189,6 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // Used when a context menu is shown.
   scoped_ptr<BookmarkContextMenu> context_menu_;
 
-  // Is the menu being shown for a drop?
-  bool for_drop_;
-
   // If non-NULL this is the |parent| passed to Init and is NOT owned by us.
   views::MenuItemView* parent_menu_item_;
 
@@ -191,13 +198,17 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // ID of the next menu item.
   int next_menu_id_;
 
+  // Minimum and maximum ID's to use for menu items.
+  const int min_menu_id_;
+  const int max_menu_id_;
+
   views::MenuDelegate* real_delegate_;
 
   // Is the model being changed?
   bool is_mutating_model_;
 
   // The location where this bookmark menu will be displayed (for UMA).
-  bookmark_utils::BookmarkLaunchLocation location_;
+  BookmarkLaunchLocation location_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkMenuDelegate);
 };

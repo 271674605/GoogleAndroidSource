@@ -16,7 +16,13 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.PorterDuff;
+import android.view.LayoutInflater;
+import android.widget.ToggleButton;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParser;
@@ -300,7 +306,7 @@ public class CompoundButtonTest extends AndroidTestCase {
 
         state = compoundButton.onSaveInstanceState();
         assertNotNull(state);
-        assertTrue(compoundButton.getFreezesText());
+        assertFalse(compoundButton.getFreezesText());
 
         compoundButton.setChecked(true);
 
@@ -319,6 +325,65 @@ public class CompoundButtonTest extends AndroidTestCase {
         compoundButton.setButtonDrawable(drawable);
         assertTrue(compoundButton.verifyDrawable(null));
         assertTrue(compoundButton.verifyDrawable(drawable));
+    }
+
+    public void testButtonTint() {
+        LayoutInflater inflater = LayoutInflater.from(mContext);
+        View layout = inflater.inflate(R.layout.togglebutton_layout, null);
+        CompoundButton inflatedView = (CompoundButton) layout.findViewById(R.id.button_tint);
+
+        assertEquals("Button tint inflated correctly",
+                Color.WHITE, inflatedView.getButtonTintList().getDefaultColor());
+        assertEquals("Button tint mode inflated correctly",
+                PorterDuff.Mode.SRC_OVER, inflatedView.getButtonTintMode());
+
+        MockDrawable button = new MockDrawable();
+        CompoundButton view = new ToggleButton(mContext);
+
+        view.setButtonDrawable(button);
+        assertFalse("No button tint applied by default", button.hasCalledSetTint());
+
+        view.setButtonTintList(ColorStateList.valueOf(Color.WHITE));
+        assertTrue("Button tint applied when setButtonTintList() called after setButton()",
+                button.hasCalledSetTint());
+
+        button.reset();
+        view.setButtonDrawable(null);
+        view.setButtonDrawable(button);
+        assertTrue("Button tint applied when setButtonTintList() called before setButton()",
+                button.hasCalledSetTint());
+    }
+
+    private static class MockDrawable extends Drawable {
+        private boolean mCalledSetTint = false;
+
+        @Override
+        public void draw(Canvas canvas) {}
+
+        @Override
+        public void setAlpha(int alpha) {}
+
+        @Override
+        public void setColorFilter(ColorFilter cf) {}
+
+        @Override
+        public void setTintList(ColorStateList tint) {
+            super.setTintList(tint);
+            mCalledSetTint = true;
+        }
+
+        @Override
+        public int getOpacity() {
+            return 0;
+        }
+
+        public boolean hasCalledSetTint() {
+            return mCalledSetTint;
+        }
+
+        public void reset() {
+            mCalledSetTint = false;
+        }
     }
 
     private final class MockCompoundButton extends CompoundButton {

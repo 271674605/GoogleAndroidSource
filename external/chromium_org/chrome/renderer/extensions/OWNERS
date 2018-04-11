@@ -1,11 +1,13 @@
-# This should match chrome/browser/extensions/OWNERS
-asargent@chromium.org
-benwells@chromium.org
-finnur@chromium.org
-jyasskin@chromium.org
-kalman@chromium.org
-koz@chromium.org
+# Extension and apps team owners. Use file history to guide reviewer selection
+# as this list is randomized. If editing, see chrome/browser/extensions/OWNERS
 mek@chromium.org
-miket@chromium.org
-mpcomplete@chromium.org
+kalman@chromium.org
+benwells@chromium.org
+scheib@chromium.org
+koz@chromium.org
+jyasskin@chromium.org
+finnur@chromium.org
+rdevlin.cronin@chromium.org
 yoz@chromium.org
+miket@chromium.org
+asargent@chromium.org

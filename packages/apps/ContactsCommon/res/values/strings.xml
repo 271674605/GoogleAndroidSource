@@ -114,6 +114,9 @@
     <!-- Action string for sending an SMS to a MMS phone number -->
     <string name="sms_mms">Text MMS</string>
 
+    <!-- Description string for an action button to initiate a video call. -->
+    <string name="description_video_call">Make video call</string>
+
     <!-- Title of the confirmation dialog for clearing frequents. [CHAR LIMIT=37] -->
     <string name="clearFrequentsConfirmation_title">Clear frequently contacted?</string>
 
@@ -219,9 +222,9 @@
     <!-- Field title for the full name of a contact [CHAR LIMIT=64]-->
     <string name="full_name">Name</string>
     <!-- Field title for the given name of a contact -->
-    <string name="name_given">Given name</string>
+    <string name="name_given">First name</string>
     <!-- Field title for the family name of a contact -->
-    <string name="name_family">Family name</string>
+    <string name="name_family">Last name</string>
     <!-- Field title for the prefix name of a contact -->
     <string name="name_prefix">Name prefix</string>
     <!-- Field title for the middle name of a contact -->
@@ -233,11 +236,11 @@
     <string name="name_phonetic">Phonetic name</string>
 
     <!-- Field title for the phonetic given name of a contact -->
-    <string name="name_phonetic_given">Phonetic given name</string>
+    <string name="name_phonetic_given">Phonetic first name</string>
     <!-- Field title for the phonetic middle name of a contact -->
     <string name="name_phonetic_middle">Phonetic middle name</string>
     <!-- Field title for the phonetic family name of a contact -->
-    <string name="name_phonetic_family">Phonetic family name</string>
+    <string name="name_phonetic_family">Phonetic last name</string>
 
     <!-- Header that expands to list all of the types of phone numbers when editing or creating a
          phone number for a contact [CHAR LIMIT=20] -->
@@ -284,7 +287,7 @@
     <string name="label_notes">Notes</string>
 
     <!-- The label describing the SIP address field of a contact. [CHAR LIMIT=20] -->
-    <string name="label_sip_address">Internet call</string>
+    <string name="label_sip_address">SIP</string>
 
     <!-- Header that expands to list all website types when editing a website of a contact
          [CHAR LIMIT=20] -->
@@ -417,6 +420,9 @@ a        ren't members of any other group. [CHAR LIMIT=25] -->
 
     <!-- Action string for selecting SIM for importing contacts -->
     <string name="import_from_sim">Import from SIM card</string>
+
+    <!-- Action string for selecting SIM for importing contacts, when more than one SIM card -->
+    <string name="import_from_sim_number">Import from SIM card #<xliff:g id="sim_number" example="2">%d</xliff:g></string>
 
     <!-- Action string for selecting (USB) storage for importing contacts [CHAR LIMIT=30] -->
     <string name="import_from_sdcard" product="default">Import from storage</string>
@@ -649,6 +655,26 @@ a        ren't members of any other group. [CHAR LIMIT=25] -->
     <!-- Action that exports all contacts to (USB) storage [CHAR LIMIT=25] -->
     <string name="export_to_sdcard" product="default">Export to storage</string>
 
+    <!-- Contact preferences related strings -->
+
+    <!-- Label of the "sort by" display option -->
+    <string name="display_options_sort_list_by">Sort by</string>
+
+    <!-- An allowable value for the "sort list by" contact display option  -->
+    <string name="display_options_sort_by_given_name">First name</string>
+
+    <!-- An allowable value for the "sort list by" contact display option  -->
+    <string name="display_options_sort_by_family_name">Last name</string>
+
+    <!-- Label of the "name format" display option [CHAR LIMIT=64]-->
+    <string name="display_options_view_names_as">Name format</string>
+
+    <!-- An allowable value for the "view names as" contact display option  -->
+    <string name="display_options_view_given_name_first">First name first</string>
+
+    <!-- An allowable value for the "view names as" contact display option  -->
+    <string name="display_options_view_family_name_first">Last name first</string>
+
     <!-- Action that shares visible contacts -->
     <string name="share_visible_contacts">Share visible contacts</string>
 
@@ -699,25 +725,42 @@ a        ren't members of any other group. [CHAR LIMIT=25] -->
     <!--  The menu item to clear frequents [CHAR LIMIT=30] -->
     <string name="menu_clear_frequents">Clear frequents</string>
 
+    <!-- Menu item to select SIM card -->
+    <string name="menu_select_sim">Select SIM card</string>
+
     <!-- The menu item to open the list of accounts -->
     <string name="menu_accounts">Accounts</string>
 
     <!-- The menu item to bulk import or bulk export contacts from SIM card or SD card.  [CHAR LIMIT=30]-->
     <string name="menu_import_export">Import/export</string>
 
-    <!-- String describing the button to send a text message on quick contact.
+    <!-- The font-family to use for tab text.
+         Do not translate. -->
+    <string name="tab_font_family">sans-serif</string>
 
-        Note: AccessibilityServices use this attribute to announce what the view represents.
-              This is especially valuable for views without textual representation like ImageView.
-              [CHAR LIMIT=NONE]
-    -->
-    <string name="description_send_message">Send message to <xliff:g id="name">%1$s</xliff:g></string>
+    <!-- Attribution of a contact status update, when the time of update is unknown -->
+    <string name="contact_status_update_attribution">via <xliff:g id="source" example="Google Talk">%1$s</xliff:g></string>
 
-    <!-- String describing the text for a phone number in quick contact.
+    <!-- Attribution of a contact status update, when the time of update is known -->
+    <string name="contact_status_update_attribution_with_date"><xliff:g id="date" example="3 hours ago">%1$s</xliff:g> via <xliff:g id="source" example="Google Talk">%2$s</xliff:g></string>
 
-        Note: AccessibilityServices use this attribute to announce what the view represents.
-              This is especially valuable for views without textual representation like ImageView.
-    -->
-    <string name="description_dial_phone_number">Dial phone <xliff:g id="name">%1$s</xliff:g></string>
+    <!-- Font family used when drawing letters for letter tile avatars.
+         Do not translate. -->
+    <string name="letter_tile_letter_font_family">sans-serif-light</string>
+
+    <!-- Content description for the fake action menu up button as used
+     inside search. [CHAR LIMIT=NONE] -->
+    <string name="action_menu_back_from_search">stop searching</string>
+
+    <!--  String describing the icon used to clear the search field -->
+    <string name="description_clear_search">Clear search</string>
+
+    <!-- The font-family to use for the text inside the searchbox.
+         Do not translate. -->
+    <string name="search_font_family">sans-serif</string>
+
+    <!-- The title of the preference section that allows users to configure how they want their
+         contacts to be displayed. [CHAR LIMIT=128] -->
+    <string name="settings_contact_display_options_title">Contact display options</string>
 
 </resources>

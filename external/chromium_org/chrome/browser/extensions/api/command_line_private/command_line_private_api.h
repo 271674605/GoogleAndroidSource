@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_COMMAND_LINE_PRIVATE_COMMAND_LINE_PRIVATE_API_H__
 #define CHROME_BROWSER_EXTENSIONS_API_COMMAND_LINE_PRIVATE_COMMAND_LINE_PRIVATE_API_H__
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "extensions/browser/extension_function.h"
 
 namespace extensions {
 
@@ -16,7 +16,7 @@ class CommandLinePrivateHasSwitchFunction : public SyncExtensionFunction {
   virtual ~CommandLinePrivateHasSwitchFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

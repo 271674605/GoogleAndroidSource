@@ -9,26 +9,29 @@ from telemetry.core.platform import profiler
 
 class TraceProfiler(profiler.Profiler):
 
-  def __init__(self, browser_backend, platform_backend, output_path):
+  def __init__(self, browser_backend, platform_backend, output_path, state,
+               categories=None):
     super(TraceProfiler, self).__init__(
-        browser_backend, platform_backend, output_path)
+        browser_backend, platform_backend, output_path, state)
     assert self._browser_backend.supports_tracing
-    self._browser_backend.StartTracing(None, 10)
+    # We always want flow events when tracing via telemetry.
+    categories_with_flow = 'disabled-by-default-toplevel.flow'
+    if categories:
+      categories_with_flow = ',%s' % categories
+    self._browser_backend.StartTracing(categories_with_flow, timeout=10)
 
   @classmethod
   def name(cls):
     return 'trace'
 
   @classmethod
-  def is_supported(cls, options):
+  def is_supported(cls, browser_type):
     return True
 
   def CollectProfile(self):
-    self._browser_backend.StopTracing()
-
     print 'Processing trace...'
 
-    trace_result = self._browser_backend.GetTraceResultAndReset()
+    trace_result = self._browser_backend.StopTracing()
 
     trace_file = '%s.json' % self._output_path
 
@@ -39,3 +42,27 @@ class TraceProfiler(profiler.Profiler):
     print 'To view, open in chrome://tracing'
 
     return [trace_file]
+
+
+class TraceDetailedProfiler(TraceProfiler):
+
+  def __init__(self, browser_backend, platform_backend, output_path, state):
+    super(TraceDetailedProfiler, self).__init__(
+        browser_backend, platform_backend, output_path, state,
+        categories='disabled-by-default-cc.debug*')
+
+  @classmethod
+  def name(cls):
+    return 'trace-detailed'
+
+
+class TraceAllProfiler(TraceProfiler):
+
+  def __init__(self, browser_backend, platform_backend, output_path, state):
+    super(TraceAllProfiler, self).__init__(
+        browser_backend, platform_backend, output_path, state,
+        categories='disabled-by-default-*')
+
+  @classmethod
+  def name(cls):
+    return 'trace-all'

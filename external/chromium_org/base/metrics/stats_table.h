@@ -25,26 +25,48 @@
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
+#include "base/memory/shared_memory.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_local_storage.h"
+#include "build/build_config.h"
+
+#if defined(OS_POSIX)
+#include "base/file_descriptor_posix.h"
+#endif
 
 namespace base {
 
 class BASE_EXPORT StatsTable {
  public:
-  // Create a new StatsTable.
-  // If a StatsTable already exists with the specified name, this StatsTable
-  // will use the same shared memory segment as the original.  Otherwise,
-  // a new StatsTable is created and all counters are zeroed.
+  // Identifies a StatsTable. We often want to share these between processes.
   //
-  // name is the name of the StatsTable to use.
+  // On Windows, we use a named shared memory segment so the table identifier
+  // should be a relatively unique string identifying the table to use. An
+  // empty string can be used to use an anonymous shared memory segment for
+  // cases where the table does not need to be shared between processes.
+  //
+  // Posix does not support named memory so we explicitly share file
+  // descriptors. On Posix, pass a default-constructed file descriptor if a
+  // handle doesn't already exist, and a new one will be created.
+  //
+  // If a table doesn't already exist with the given identifier, a new one will
+  // be created with zeroed counters.
+#if defined(OS_POSIX)
+  typedef FileDescriptor TableIdentifier;
+#elif defined(OS_WIN)
+  typedef std::string TableIdentifier;
+#endif
+
+  // Create a new StatsTable.
   //
   // max_threads is the maximum number of threads the table will support.
   // If the StatsTable already exists, this number is ignored.
   //
   // max_counters is the maximum number of counters the table will support.
   // If the StatsTable already exists, this number is ignored.
-  StatsTable(const std::string& name, int max_threads, int max_counters);
+  StatsTable(const TableIdentifier& table,
+             int max_threads,
+             int max_counters);
 
   // Destroys the StatsTable.  When the last StatsTable is destroyed
   // (across all processes), the StatsTable is removed from disk.
@@ -116,6 +138,11 @@ class BASE_EXPORT StatsTable {
   // The maxinum number of threads/columns in the table.
   int GetMaxThreads() const;
 
+#if defined(OS_POSIX)
+  // Get the underlying shared memory handle for the table.
+  base::SharedMemoryHandle GetSharedMemoryHandle() const;
+#endif
+
   // The maximum length (in characters) of a Thread's name including
   // null terminator, as stored in the shared memory.
   static const int kMaxThreadNameLength = 32;
@@ -130,7 +157,7 @@ class BASE_EXPORT StatsTable {
   static int* FindLocation(const char *name);
 
  private:
-  class Private;
+  class Internal;
   struct TLSData;
   typedef hash_map<std::string, int> CountersMap;
 
@@ -172,7 +199,7 @@ class BASE_EXPORT StatsTable {
   // initialized.
   TLSData* GetTLSData() const;
 
-  Private* impl_;
+  Internal* internal_;
 
   // The counters_lock_ protects the counters_ hash table.
   base::Lock counters_lock_;

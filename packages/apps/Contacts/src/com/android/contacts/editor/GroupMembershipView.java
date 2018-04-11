@@ -40,9 +40,9 @@ import com.android.contacts.R;
 import com.android.contacts.common.model.dataitem.DataKind;
 import com.android.contacts.interactions.GroupCreationDialogFragment;
 import com.android.contacts.interactions.GroupCreationDialogFragment.OnGroupCreatedListener;
-import com.android.contacts.model.RawContactDelta;
+import com.android.contacts.common.model.RawContactDelta;
 import com.android.contacts.common.model.ValuesDelta;
-import com.android.contacts.model.RawContactModifier;
+import com.android.contacts.common.model.RawContactModifier;
 import com.android.contacts.util.UiClosables;
 import com.google.common.base.Objects;
 
@@ -188,7 +188,7 @@ public class GroupMembershipView extends LinearLayout
                 // Ensure that the newly created group is checked.
                 int position = mAdapter.getCount() - 2;
                 ListView listView = mPopup.getListView();
-                if (!listView.isItemChecked(position)) {
+                if (listView != null && !listView.isItemChecked(position)) {
                     // Newly created group is not checked, so check it.
                     listView.setItemChecked(position, true);
                     onItemClick(listView, null, position, listView.getItemIdAtPosition(position));
@@ -282,6 +282,7 @@ public class GroupMembershipView extends LinearLayout
     @Override
     public void onClick(View v) {
         if (UiClosables.closeQuietly(mPopup)) {
+            mPopup = null;
             return;
         }
 
@@ -369,7 +370,9 @@ public class GroupMembershipView extends LinearLayout
             long groupId = item.getGroupId();
             if (item.isChecked() && !hasMembership(groupId)) {
                 ValuesDelta entry = RawContactModifier.insertChild(mState, mKind);
-                entry.setGroupRowId(groupId);
+                if (entry != null) {
+                    entry.setGroupRowId(groupId);
+                }
             }
         }
 

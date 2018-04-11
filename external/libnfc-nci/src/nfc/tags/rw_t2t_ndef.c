@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -2669,7 +2669,7 @@ tNFC_STATUS rw_t2t_format_tag (void)
     if ((p_ret = t2t_tag_init_data (p_t2t->tag_hdr[0], FALSE, 0)) == NULL)
     {
         RW_TRACE_WARNING1 ("rw_t2t_format_tag - Unknown Manufacturer ID: %u, Cannot Format the tag!", p_t2t->tag_hdr[0]);
-        return (NFC_STATUS_REJECTED);
+        return (NFC_STATUS_FAILED);
     }
 
     if (p_t2t->tag_hdr[T2T_CC2_TMS_BYTE] != 0)

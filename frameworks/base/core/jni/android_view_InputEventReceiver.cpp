@@ -56,7 +56,8 @@ public:
     status_t initialize();
     void dispose();
     status_t finishInputEvent(uint32_t seq, bool handled);
-    status_t consumeEvents(JNIEnv* env, bool consumeBatches, nsecs_t frameTime);
+    status_t consumeEvents(JNIEnv* env, bool consumeBatches, nsecs_t frameTime,
+            bool* outConsumedBatch);
 
 protected:
     virtual ~NativeInputEventReceiver();
@@ -167,7 +168,7 @@ int NativeInputEventReceiver::handleEvent(int receiveFd, int events, void* data)
 
     if (events & ALOOPER_EVENT_INPUT) {
         JNIEnv* env = AndroidRuntime::getJNIEnv();
-        status_t status = consumeEvents(env, false /*consumeBatches*/, -1);
+        status_t status = consumeEvents(env, false /*consumeBatches*/, -1, NULL);
         mMessageQueue->raiseAndClearException(env, "handleReceiveCallback");
         return status == OK || status == NO_MEMORY ? 1 : 0;
     }
@@ -214,7 +215,7 @@ int NativeInputEventReceiver::handleEvent(int receiveFd, int events, void* data)
 }
 
 status_t NativeInputEventReceiver::consumeEvents(JNIEnv* env,
-        bool consumeBatches, nsecs_t frameTime) {
+        bool consumeBatches, nsecs_t frameTime, bool* outConsumedBatch) {
 #if DEBUG_DISPATCH_CYCLE
     ALOGD("channel '%s' ~ Consuming input events, consumeBatches=%s, frameTime=%lld.",
             getInputChannelName(), consumeBatches ? "true" : "false", frameTime);
@@ -222,6 +223,9 @@ status_t NativeInputEventReceiver::consumeEvents(JNIEnv* env,
 
     if (consumeBatches) {
         mBatchedInputEventPending = false;
+    }
+    if (outConsumedBatch) {
+        *outConsumedBatch = false;
     }
 
     ScopedLocalRef<jobject> receiverObj(env, NULL);
@@ -285,13 +289,17 @@ status_t NativeInputEventReceiver::consumeEvents(JNIEnv* env,
                         static_cast<KeyEvent*>(inputEvent));
                 break;
 
-            case AINPUT_EVENT_TYPE_MOTION:
+            case AINPUT_EVENT_TYPE_MOTION: {
 #if DEBUG_DISPATCH_CYCLE
                 ALOGD("channel '%s' ~ Received motion event.", getInputChannelName());
 #endif
-                inputEventObj = android_view_MotionEvent_obtainAsCopy(env,
-                        static_cast<MotionEvent*>(inputEvent));
+                MotionEvent* motionEvent = static_cast<MotionEvent*>(inputEvent);
+                if ((motionEvent->getAction() & AMOTION_EVENT_ACTION_MOVE) && outConsumedBatch) {
+                    *outConsumedBatch = true;
+                }
+                inputEventObj = android_view_MotionEvent_obtainAsCopy(env, motionEvent);
                 break;
+            }
 
             default:
                 assert(false); // InputConsumer should prevent this from ever happening
@@ -322,7 +330,7 @@ status_t NativeInputEventReceiver::consumeEvents(JNIEnv* env,
 }
 
 
-static jint nativeInit(JNIEnv* env, jclass clazz, jobject receiverWeak,
+static jlong nativeInit(JNIEnv* env, jclass clazz, jobject receiverWeak,
         jobject inputChannelObj, jobject messageQueueObj) {
     sp<InputChannel> inputChannel = android_view_InputChannel_getInputChannel(env,
             inputChannelObj);
@@ -348,17 +356,17 @@ static jint nativeInit(JNIEnv* env, jclass clazz, jobject receiverWeak,
     }
 
     receiver->incStrong(gInputEventReceiverClassInfo.clazz); // retain a reference for the object
-    return reinterpret_cast<jint>(receiver.get());
+    return reinterpret_cast<jlong>(receiver.get());
 }
 
-static void nativeDispose(JNIEnv* env, jclass clazz, jint receiverPtr) {
+static void nativeDispose(JNIEnv* env, jclass clazz, jlong receiverPtr) {
     sp<NativeInputEventReceiver> receiver =
             reinterpret_cast<NativeInputEventReceiver*>(receiverPtr);
     receiver->dispose();
     receiver->decStrong(gInputEventReceiverClassInfo.clazz); // drop reference held by the object
 }
 
-static void nativeFinishInputEvent(JNIEnv* env, jclass clazz, jint receiverPtr,
+static void nativeFinishInputEvent(JNIEnv* env, jclass clazz, jlong receiverPtr,
         jint seq, jboolean handled) {
     sp<NativeInputEventReceiver> receiver =
             reinterpret_cast<NativeInputEventReceiver*>(receiverPtr);
@@ -370,29 +378,33 @@ static void nativeFinishInputEvent(JNIEnv* env, jclass clazz, jint receiverPtr,
     }
 }
 
-static void nativeConsumeBatchedInputEvents(JNIEnv* env, jclass clazz, jint receiverPtr,
+static jboolean nativeConsumeBatchedInputEvents(JNIEnv* env, jclass clazz, jlong receiverPtr,
         jlong frameTimeNanos) {
     sp<NativeInputEventReceiver> receiver =
             reinterpret_cast<NativeInputEventReceiver*>(receiverPtr);
-    status_t status = receiver->consumeEvents(env, true /*consumeBatches*/, frameTimeNanos);
+    bool consumedBatch;
+    status_t status = receiver->consumeEvents(env, true /*consumeBatches*/, frameTimeNanos,
+            &consumedBatch);
     if (status && status != DEAD_OBJECT && !env->ExceptionCheck()) {
         String8 message;
         message.appendFormat("Failed to consume batched input event.  status=%d", status);
         jniThrowRuntimeException(env, message.string());
+        return JNI_FALSE;
     }
+    return consumedBatch ? JNI_TRUE : JNI_FALSE;
 }
 
 
 static JNINativeMethod gMethods[] = {
     /* name, signature, funcPtr */
     { "nativeInit",
-            "(Ljava/lang/ref/WeakReference;Landroid/view/InputChannel;Landroid/os/MessageQueue;)I",
+            "(Ljava/lang/ref/WeakReference;Landroid/view/InputChannel;Landroid/os/MessageQueue;)J",
             (void*)nativeInit },
-    { "nativeDispose", "(I)V",
+    { "nativeDispose", "(J)V",
             (void*)nativeDispose },
-    { "nativeFinishInputEvent", "(IIZ)V",
+    { "nativeFinishInputEvent", "(JIZ)V",
             (void*)nativeFinishInputEvent },
-    { "nativeConsumeBatchedInputEvents", "(IJ)V",
+    { "nativeConsumeBatchedInputEvents", "(JJ)Z",
             (void*)nativeConsumeBatchedInputEvents },
 };
 

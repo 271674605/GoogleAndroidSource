@@ -32,18 +32,18 @@ import com.android.ide.eclipse.adt.internal.preferences.AdtPrefs;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.ide.eclipse.tests.SdkLoadingTestCase;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.util.GrabProcessOutput;
-import com.android.sdklib.util.GrabProcessOutput.IProcessOutput;
-import com.android.sdklib.util.GrabProcessOutput.Wait;
+import com.android.utils.GrabProcessOutput;
+import com.android.utils.GrabProcessOutput.IProcessOutput;
+import com.android.utils.GrabProcessOutput.Wait;
 import com.android.tools.lint.checks.BuiltinIssueRegistry;
-import com.android.tools.lint.checks.ManifestOrderDetector;
+import com.android.tools.lint.checks.ManifestDetector;
 import com.android.tools.lint.checks.SecurityDetector;
 import com.android.tools.lint.client.api.Configuration;
 import com.android.tools.lint.client.api.DefaultConfiguration;
-import com.android.tools.lint.client.api.IDomParser;
-import com.android.tools.lint.client.api.IJavaParser;
+import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.LintDriver;
+import com.android.tools.lint.client.api.XmlParser;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Issue;
@@ -783,7 +783,7 @@ public class TemplateHandlerTest extends SdkLoadingTestCase {
                             return false;
                         }
 
-                        if (issue == ManifestOrderDetector.TARGET_NEWER) {
+                        if (issue == ManifestDetector.TARGET_NEWER) {
                             // Don't complain about targetSdk < latest: we're deliberately
                             // testing that (to make sure templates compile etc in compat
                             // mode)
@@ -831,15 +831,13 @@ public class TemplateHandlerTest extends SdkLoadingTestCase {
 
             @Override
             @Nullable
-            public IJavaParser getJavaParser() {
-                return new EclipseLintClient(null, null, null, false).getJavaParser();
+            public JavaParser getJavaParser(@Nullable Project project) {
+                return new EclipseLintClient(null, null, null, false).getJavaParser(project);
             }
 
             @Override
-            @Nullable
-            public IDomParser getDomParser() {
-                //return new LintCliXmlParser();
-                return new EclipseLintClient(null, null, null, false).getDomParser();
+            public XmlParser getXmlParser() {
+                return new EclipseLintClient(null, null, null, false).getXmlParser();
             }
         });
         File projectDir = AdtUtils.getAbsolutePath(project).toFile();

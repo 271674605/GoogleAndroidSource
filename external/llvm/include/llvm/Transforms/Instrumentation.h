@@ -16,19 +16,24 @@
 
 #include "llvm/ADT/StringRef.h"
 
+#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
+inline void *getDFSanArgTLSPtrForJIT() {
+  extern __thread __attribute__((tls_model("initial-exec")))
+    void *__dfsan_arg_tls;
+  return (void *)&__dfsan_arg_tls;
+}
+
+inline void *getDFSanRetValTLSPtrForJIT() {
+  extern __thread __attribute__((tls_model("initial-exec")))
+    void *__dfsan_retval_tls;
+  return (void *)&__dfsan_retval_tls;
+}
+#endif
+
 namespace llvm {
 
 class ModulePass;
 class FunctionPass;
-
-// Insert edge profiling instrumentation
-ModulePass *createEdgeProfilerPass();
-
-// Insert optimal edge profiling instrumentation
-ModulePass *createOptimalEdgeProfilerPass();
-
-// Insert path profiling instrumentation
-ModulePass *createPathProfilerPass();
 
 // Insert GCOV profiling instrumentation
 struct GCOVOptions {
@@ -59,20 +64,27 @@ ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
                                    GCOVOptions::getDefault());
 
 // Insert AddressSanitizer (address sanity checking) instrumentation
-FunctionPass *createAddressSanitizerFunctionPass(
-    bool CheckInitOrder = true, bool CheckUseAfterReturn = false,
-    bool CheckLifetime = false, StringRef BlacklistFile = StringRef(),
-    bool ZeroBaseShadow = false);
-ModulePass *createAddressSanitizerModulePass(
-    bool CheckInitOrder = true, StringRef BlacklistFile = StringRef(),
-    bool ZeroBaseShadow = false);
+FunctionPass *createAddressSanitizerFunctionPass();
+ModulePass *createAddressSanitizerModulePass();
 
 // Insert MemorySanitizer instrumentation (detection of uninitialized reads)
-FunctionPass *createMemorySanitizerPass(bool TrackOrigins = false,
-                                        StringRef BlacklistFile = StringRef());
+FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0);
 
 // Insert ThreadSanitizer (race detection) instrumentation
-FunctionPass *createThreadSanitizerPass(StringRef BlacklistFile = StringRef());
+FunctionPass *createThreadSanitizerPass();
+
+// Insert DataFlowSanitizer (dynamic data flow analysis) instrumentation
+ModulePass *createDataFlowSanitizerPass(StringRef ABIListFile = StringRef(),
+                                        void *(*getArgTLS)() = nullptr,
+                                        void *(*getRetValTLS)() = nullptr);
+
+#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
+inline ModulePass *createDataFlowSanitizerPassForJIT(StringRef ABIListFile =
+                                                         StringRef()) {
+  return createDataFlowSanitizerPass(ABIListFile, getDFSanArgTLSPtrForJIT,
+                                     getDFSanRetValTLSPtrForJIT);
+}
+#endif
 
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.

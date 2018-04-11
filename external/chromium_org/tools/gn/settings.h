@@ -33,23 +33,32 @@ class Settings {
     WIN
   };
 
-  // Constructs a toolchain settings. The output_subdir_name is the name we
-  // should use for the subdirectory in the build output directory for this
-  // toolchain's outputs. It should have no slashes in it. The default
-  // toolchain should use an empty string.
+  // Constructs a toolchain settings.
+  //
+  // The output_subdir_name is the name we should use for the subdirectory in
+  // the build output directory for this toolchain's outputs. The default
+  // toolchain would use an empty string (it goes in the root build dir).
+  // Otherwise, it must end in a slash.
   Settings(const BuildSettings* build_settings,
-           const Toolchain* toolchain,
            const std::string& output_subdir_name);
   ~Settings();
 
   const BuildSettings* build_settings() const { return build_settings_; }
 
-  // Danger: this must only be used for getting the toolchain label until the
-  // toolchain has been resolved. Otherwise, it will be modified on an
-  // arbitrary thread when the toolchain invocation is found. Generally, you
-  // will only read this from the target generation where we know everything
-  // has been resolved and won't change.
-  const Toolchain* toolchain() const { return toolchain_; }
+  const Label& toolchain_label() const { return toolchain_label_; }
+  void set_toolchain_label(const Label& l) { toolchain_label_ = l; }
+
+  const Label& default_toolchain_label() const {
+    return default_toolchain_label_;
+  }
+  void set_default_toolchain_label(const Label& default_label) {
+    default_toolchain_label_ = default_label;
+  }
+
+  // Indicates if this corresponds to the default toolchain.
+  bool is_default() const {
+    return toolchain_label_ == default_toolchain_label_;
+  }
 
   bool IsMac() const { return target_os_ == MAC; }
   bool IsLinux() const { return target_os_ == LINUX; }
@@ -94,7 +103,8 @@ class Settings {
  private:
   const BuildSettings* build_settings_;
 
-  const Toolchain* toolchain_;
+  Label toolchain_label_;
+  Label default_toolchain_label_;
 
   TargetOS target_os_;
 

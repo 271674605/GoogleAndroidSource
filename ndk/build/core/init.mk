@@ -466,7 +466,7 @@ ifndef NDK_PLATFORMS_ROOT
         $(if $(strip $(wildcard $(NDK_ROOT)/RELEASE.TXT)),\
             $(call __ndk_info,Please define NDK_PLATFORMS_ROOT to point to a valid directory.)\
         ,\
-            $(call __ndk_info,Please run build/tools/build-platforms.sh to build the corresponding directory.)\
+            $(call __ndk_info,Please run build/tools/gen-platforms.sh to build the corresponding directory.)\
         )
         $(call __ndk_error,Aborting)
     endif
@@ -488,14 +488,21 @@ $(foreach _platform,$(NDK_ALL_PLATFORMS),\
 
 # we're going to find the maximum platform number of the form android-<number>
 # ignore others, which could correspond to special and experimental cases
+NDK_PREVIEW_LEVEL := L
 NDK_ALL_PLATFORM_LEVELS := $(filter android-%,$(NDK_ALL_PLATFORMS))
 NDK_ALL_PLATFORM_LEVELS := $(patsubst android-%,%,$(NDK_ALL_PLATFORM_LEVELS))
 $(call ndk_log,Found stable platform levels: $(NDK_ALL_PLATFORM_LEVELS))
 
+# Hack to pull $(NDK_PREVIEW_LEVEL) ahead of all (numeric) level
 NDK_MAX_PLATFORM_LEVEL := 3
+_max_theoretical_api_level := 99
 $(foreach level,$(NDK_ALL_PLATFORM_LEVELS),\
-  $(eval NDK_MAX_PLATFORM_LEVEL := $$(call max,$$(NDK_MAX_PLATFORM_LEVEL),$$(level)))\
+  $(eval NDK_MAX_PLATFORM_LEVEL := $$(if $$(subst $$(NDK_PREVIEW_LEVEL),,$$(level)),$$(call max,$$(NDK_MAX_PLATFORM_LEVEL),$$(level)),$(_max_theoretical_api_level)))\
 )
+ifeq ($(NDK_MAX_PLATFORM_LEVEL),$(_max_theoretical_api_level))
+NDK_MAX_PLATFORM_LEVEL := $(NDK_PREVIEW_LEVEL)
+endif
+
 $(call ndk_log,Found max platform level: $(NDK_MAX_PLATFORM_LEVEL))
 
 # ====================================================================
@@ -517,11 +524,37 @@ $(call ndk_log,Found max platform level: $(NDK_MAX_PLATFORM_LEVEL))
 # the build script to include in each toolchain config.mk
 ADD_TOOLCHAIN := $(BUILD_SYSTEM)/add-toolchain.mk
 
-# the list of known values
-NDK_KNOWN_ABIS     := armeabi-v7a armeabi x86 mips
-NDK_KNOWN_ARCHS    := arm x86 mips
+# the list of known abis and archs
+NDK_KNOWN_DEVICE_ABI64S := arm64-v8a x86_64 mips64
+NDK_KNOWN_DEVICE_ABI32S := armeabi-v7a armeabi x86 mips
+NDK_KNOWN_DEVICE_ABIS := $(NDK_KNOWN_DEVICE_ABI64S) $(NDK_KNOWN_DEVICE_ABI32S)
+NDK_KNOWN_ABIS     := armeabi-v7a-hard $(NDK_KNOWN_DEVICE_ABIS)
+NDK_KNOWN_ABI32S   := armeabi-v7a-hard $(NDK_KNOWN_DEVICE_ABI32S)
+NDK_KNOWN_ARCHS    := arm x86 mips arm64 x86_64 mips64
 _archs := $(sort $(strip $(notdir $(wildcard $(NDK_PLATFORMS_ROOT)/android-*/arch-*))))
 NDK_FOUND_ARCHS    := $(_archs:arch-%=%)
+
+# the list of abis 'APP_ABI=all' is expanded to
+ifneq (,$(filter yes all all32 all64,$(_NDK_TESTING_ALL_)))
+NDK_APP_ABI_ALL_EXPANDED := $(NDK_KNOWN_ABIS)
+NDK_APP_ABI_ALL32_EXPANDED := $(NDK_KNOWN_ABI32S)
+else
+NDK_APP_ABI_ALL_EXPANDED := $(NDK_KNOWN_DEVICE_ABIS)
+NDK_APP_ABI_ALL32_EXPANDED := $(NDK_KNOWN_DEVICE_ABI32S)
+endif
+NDK_APP_ABI_ALL64_EXPANDED := $(NDK_KNOWN_DEVICE_ABI64S)
+
+# For testing purpose
+ifeq ($(_NDK_TESTING_ALL_),all32)
+NDK_APP_ABI_ALL_EXPANDED := $(NDK_APP_ABI_ALL32_EXPANDED)
+else
+ifeq ($(_NDK_TESTING_ALL_),all64)
+NDK_APP_ABI_ALL_EXPANDED := $(NDK_APP_ABI_ALL64_EXPANDED)
+endif
+endif
+
+# The first API level ndk-build enforces -fPIE for executable
+NDK_PIE_PLATFORM_LEVEL := 16
 
 # the list of all toolchains in this NDK
 NDK_ALL_TOOLCHAINS :=
@@ -564,13 +597,13 @@ endif
 # version number. Unlike NDK_TOOLCHAIN, this only changes the suffix of
 # the toolchain path we're using.
 #
-# For example, if GCC 4.6 is the default, defining NDK_TOOLCHAIN_VERSION=4.7
+# For example, if GCC 4.6 is the default, defining NDK_TOOLCHAIN_VERSION=4.8
 # will ensure that ndk-build uses the following toolchains, depending on
 # the target architecture:
 #
-#    arm -> arm-linux-androideabi-4.7
-#    x86 -> x86-android-linux-4.7
-#    mips -> mipsel-linux-android-4.7
+#    arm -> arm-linux-androideabi-4.8
+#    x86 -> x86-android-linux-4.8
+#    mips -> mipsel-linux-android-4.8
 #
 # This is used in setup-toolchain.mk
 #

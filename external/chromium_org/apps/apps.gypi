@@ -15,7 +15,8 @@
       # browser, then we can clean up these dependencies.
       'dependencies': [
         'browser_extensions',
-        'common/extensions/api/api.gyp:api',
+        'common/extensions/api/api.gyp:chrome_api',
+        '../apps/common/api/api.gyp:apps_api',
         '../skia/skia.gyp:skia',
       ],
       'include_dirs': [
@@ -23,10 +24,6 @@
         '<(grit_out_dir)',
       ],
       'sources': [
-        'app_launch_for_metro_restart_win.cc',
-        'app_launch_for_metro_restart_win.h',
-        'app_launcher.cc',
-        'app_launcher.h',
         'app_lifetime_monitor.cc',
         'app_lifetime_monitor.h',
         'app_lifetime_monitor_factory.cc',
@@ -39,25 +36,25 @@
         'app_restore_service.h',
         'app_restore_service_factory.cc',
         'app_restore_service_factory.h',
-        'app_shim/app_shim_handler_mac.cc',
-        'app_shim/app_shim_handler_mac.h',
-        'app_shim/app_shim_host_mac.cc',
-        'app_shim/app_shim_host_mac.h',
-        'app_shim/app_shim_host_manager_mac.h',
-        'app_shim/app_shim_host_manager_mac.mm',
-        'app_shim/app_shim_mac.cc',
-        'app_shim/app_shim_mac.h',
-        'app_shim/chrome_main_app_mode_mac.mm',
-        'app_shim/extension_app_shim_handler_mac.cc',
-        'app_shim/extension_app_shim_handler_mac.h',
+        'app_window.cc',
+        'app_window.h',
         'app_window_contents.cc',
         'app_window_contents.h',
-        'field_trial_names.cc',
-        'field_trial_names.h',
+        'app_window_geometry_cache.cc',
+        'app_window_geometry_cache.h',
+        'app_window_registry.cc',
+        'app_window_registry.h',
+        'apps_client.cc',
+        'apps_client.h',
+        'browser_context_keyed_service_factories.cc',
+        'browser_context_keyed_service_factories.h',
+        'browser/api/app_runtime/app_runtime_api.cc',
+        'browser/api/app_runtime/app_runtime_api.h',
+        'browser/file_handler_util.cc',
+        'browser/file_handler_util.h',
         'launcher.cc',
         'launcher.h',
         'metrics_names.h',
-        'native_app_window.h',
         'pref_names.cc',
         'pref_names.h',
         'prefs.cc',
@@ -66,16 +63,27 @@
         'saved_files_service.h',
         'saved_files_service_factory.cc',
         'saved_files_service_factory.h',
-        'shell_window.cc',
-        'shell_window.h',
-        'shell_window_geometry_cache.cc',
-        'shell_window_geometry_cache.h',
-        'shell_window_registry.cc',
-        'shell_window_registry.h',
+        'size_constraints.cc',
+        'size_constraints.h',
         'switches.cc',
         'switches.h',
+        'ui/native_app_window.h',
+        'ui/views/app_window_frame_view.cc',
+        'ui/views/app_window_frame_view.h',
+        'ui/views/native_app_window_views.cc',
+        'ui/views/native_app_window_views.h',
+        'ui/web_contents_sizer.h',
       ],
       'conditions': [
+        ['OS=="mac"', {
+          'sources': [
+            'ui/web_contents_sizer.mm',
+          ],
+        }, {  # OS!=mac
+          'sources': [
+            'ui/web_contents_sizer.cc',
+          ],
+        }],
         ['chromeos==1',
           {
             'dependencies': [
@@ -86,54 +94,25 @@
         ['enable_extensions==0',
           {
             'sources/': [
-              ['exclude', '^apps/'],
+              ['exclude', '.*'],
+              ['include', 'ui/web_contents_sizer\.cc$'],
+              ['include', 'ui/web_contents_sizer\.mm$'],
             ],
           }
         ],
+        ['toolkit_views==1', {
+          'dependencies': [
+            '../ui/strings/ui_strings.gyp:ui_strings',
+            '../ui/views/views.gyp:views',
+          ],
+        }, {  # toolkit_views==0
+          'sources/': [
+            ['exclude', 'ui/views/'],
+          ],
+        }],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
     },
-  ],
-  'conditions': [
-    ['OS=="win"',
-      {
-        'targets': [
-          {
-            'target_name': 'app_host',
-            'type': 'executable',
-            'include_dirs': [
-              '..',
-            ],
-            'direct_dependent_settings': {
-              'include_dirs': [
-                '..',
-              ],
-            },
-            'dependencies': [
-              '../base/base.gyp:base',
-              '../chrome/chrome.gyp:chrome_version_resources',
-              '../chrome/chrome.gyp:launcher_support',
-              '../google_update/google_update.gyp:google_update',
-            ],
-            'sources': [
-              'app_host/app_host.rc',
-              'app_host/app_host_main.cc',
-              'app_host/app_host_resource.h',
-              'app_host/binaries_installer.cc',
-              'app_host/binaries_installer.h',
-              'app_host/update.cc',
-              'app_host/update.h',
-              '<(SHARED_INTERMEDIATE_DIR)/chrome_version/app_host_exe_version.rc',
-            ],
-            'msvs_settings': {
-              'VCLinkerTool': {
-                'SubSystem': '2',  # Set /SUBSYSTEM:WINDOWS
-              },
-            },
-          },
-        ],
-      },
-    ],  # 'OS=="win"'
-  ],  # 'conditions'
+  ],  # targets
 }

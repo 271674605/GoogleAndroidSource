@@ -67,6 +67,9 @@ register_var_option "--no-makefile" NO_MAKEFILE "Do not use makefile to speed-up
 VISIBLE_LIBGNUSTL_STATIC=
 register_var_option "--visible-libgnustl-static" VISIBLE_LIBGNUSTL_STATIC "Do not use hidden visibility for libgnustl_static.a"
 
+WITH_DEBUG_INFO=
+register_var_option "--with-debug-info" WITH_DEBUG_INFO "Build with -g.  STL is still built with optimization but with debug info"
+
 register_jobs_option
 
 extract_parameters "$@"
@@ -92,6 +95,10 @@ if [ -z "$OPTION_BUILD_DIR" ]; then
 else
     BUILD_DIR=$OPTION_BUILD_DIR
 fi
+
+HOST_TAG_LIST="$HOST_TAG $HOST_TAG32"
+
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 fail_panic "Could not create build directory: $BUILD_DIR"
 
@@ -109,7 +116,7 @@ build_gnustl_for_abi ()
     local GCC_VERSION="$4"
     local THUMB="$5"
     local DSTDIR=$NDK_DIR/$GNUSTL_SUBDIR/$GCC_VERSION/libs/$ABI/$THUMB
-    local SRC OBJ OBJECTS CFLAGS CXXFLAGS
+    local SRC OBJ OBJECTS CFLAGS CXXFLAGS CPPFLAGS
 
     prepare_target_build $ABI $PLATFORM $NDK_DIR
     fail_panic "Could not setup target build."
@@ -120,8 +127,12 @@ build_gnustl_for_abi ()
     mkdir -p $DSTDIR
 
     ARCH=$(convert_abi_to_arch $ABI)
-    BINPREFIX=$NDK_DIR/$(get_toolchain_binprefix_for_arch $ARCH $GCC_VERSION)
-
+    for TAG in $HOST_TAG_LIST; do
+        BINPREFIX=$NDK_DIR/$(get_toolchain_binprefix_for_arch $ARCH $GCC_VERSION $TAG)
+        if [ -f ${BINPREFIX}gcc ]; then
+            break;
+        fi
+    done
     GNUSTL_SRCDIR=$SRCDIR/gcc/gcc-$GCC_VERSION/libstdc++-v3
     # Sanity check
     if [ ! -d "$GNUSTL_SRCDIR" ]; then
@@ -136,36 +147,51 @@ build_gnustl_for_abi ()
     fi
 
     SYSROOT=$NDK_DIR/$(get_default_platform_sysroot_for_arch $ARCH)
+    LDIR=$SYSROOT"/usr/"$(get_default_libdir_for_arch $ARCH)
     # Sanity check
-    if [ ! -f "$SYSROOT/usr/lib/libc.a" ]; then
+    if [ ! -f "$LDIR/libc.a" ]; then
 	echo "ERROR: Empty sysroot! you probably need to run gen-platforms.sh before this script."
 	exit 1
     fi
-    if [ ! -f "$SYSROOT/usr/lib/libc.so" ]; then
+    if [ ! -f "$LDIR/libc.so" ]; then
         echo "ERROR: Sysroot misses shared libraries! you probably need to run gen-platforms.sh"
         echo "*without* the --minimal flag before running this script."
         exit 1
-    fi 
+    fi
 
     case $ARCH in
         arm)
             BUILD_HOST=arm-linux-androideabi
             ;;
+        arm64)
+            BUILD_HOST=aarch64-linux-android
+            ;;
         x86)
             BUILD_HOST=i686-linux-android
+            ;;
+        x86_64)
+            BUILD_HOST=x86_64-linux-android
             ;;
         mips)
             BUILD_HOST=mipsel-linux-android
             ;;
+        mips64)
+            BUILD_HOST=mips64el-linux-android
+            ;;
     esac
 
-    EXTRA_FLAGS=
+    EXTRA_FLAGS="-ffunction-sections -fdata-sections"
     if [ -n "$THUMB" ] ; then
         EXTRA_FLAGS="-mthumb"
     fi
-    export CFLAGS="-fPIC $CFLAGS --sysroot=$SYSROOT -fexceptions -funwind-tables -D__BIONIC__ -O2 $EXTRA_FLAGS"
-    export CXXFLAGS="-fPIC $CXXFLAGS --sysroot=$SYSROOT -fexceptions -frtti -funwind-tables -D__BIONIC__ -O2 $EXTRA_FLAGS"
-    export CPPFLAGS="$CPPFLAGS --sysroot=$SYSROOT"
+    CFLAGS="-fPIC $CFLAGS --sysroot=$SYSROOT -fexceptions -funwind-tables -D__BIONIC__ -O2 $EXTRA_FLAGS"
+    CXXFLAGS="-fPIC $CXXFLAGS --sysroot=$SYSROOT -fexceptions -frtti -funwind-tables -D__BIONIC__ -O2 $EXTRA_FLAGS"
+    CPPFLAGS="$CPPFLAGS --sysroot=$SYSROOT"
+    if [ "$WITH_DEBUG_INFO" ]; then
+        CFLAGS="$CFLAGS -g"
+        CXXFLAGS="$CXXFLAGS -g"
+    fi
+    export CFLAGS CXXFLAGS CPPFLAGS
 
     export CC=${BINPREFIX}gcc
     export CXX=${BINPREFIX}g++
@@ -177,11 +203,17 @@ build_gnustl_for_abi ()
 
     setup_ccache
 
-    export LDFLAGS="-L$SYSROOT/usr/lib -lc $EXTRA_FLAGS"
+    export LDFLAGS="-lc $EXTRA_FLAGS"
 
-    if [ "$ABI" = "armeabi-v7a" ]; then
-        CXXFLAGS=$CXXFLAGS" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16"
+    if [ "$ABI" = "armeabi-v7a" -o "$ABI" = "armeabi-v7a-hard" ]; then
+        CXXFLAGS=$CXXFLAGS" -march=armv7-a -mfpu=vfpv3-d16"
         LDFLAGS=$LDFLAGS" -Wl,--fix-cortex-a8"
+        if [ "$ABI" != "armeabi-v7a-hard" ]; then
+            CXXFLAGS=$CXXFLAGS" -mfloat-abi=softfp"
+        else
+            CXXFLAGS=$CXXFLAGS" -mhard-float -D_NDK_MATH_NO_SOFTFP=1"
+            LDFLAGS=$LDFLAGS" -Wl,--no-warn-mismatch -lm_hard"
+        fi
     fi
 
     LIBTYPE_FLAGS=
@@ -202,6 +234,12 @@ build_gnustl_for_abi ()
         #LDFLAGS=$LDFLAGS" -lsupc++"
     fi
 
+    if [ "$ARCH" == "x86_64" -o "$ARCH" == "mips64" ]; then
+        MULTILIB_FLAGS=  # Both x86_64 and mips64el toolchains are built with multilib options
+    else
+        MULTILIB_FLAGS=--disable-multilib
+    fi
+
     PROJECT="gnustl_$LIBTYPE gcc-$GCC_VERSION $ABI $THUMB"
     echo "$PROJECT: configuring"
     mkdir -p $BUILDDIR && rm -rf $BUILDDIR/* &&
@@ -212,7 +250,7 @@ build_gnustl_for_abi ()
         $LIBTYPE_FLAGS \
         --enable-libstdcxx-time \
         --disable-symvers \
-        --disable-multilib \
+        $MULTILIB_FLAGS \
         --disable-nls \
         --disable-sjlj-exceptions \
         --disable-tls \
@@ -261,24 +299,61 @@ copy_gnustl_libs ()
 
     # Copy the ABI-specific headers
     copy_directory "$SDIR/include/c++/$GCC_VERSION/$PREFIX/bits" "$DDIR/libs/$ABI/include/bits"
+    if [ "$ARCH" = "x86_64" -o "$ARCH" = "mips64" ]; then
+        copy_directory "$SDIR/include/c++/$GCC_VERSION/$PREFIX/32/bits" "$DDIR/libs/$ABI/include/32/bits"
+        if [ "$ARCH" = "x86_64" ]; then
+            copy_directory "$SDIR/include/c++/$GCC_VERSION/$PREFIX/x32/bits" "$DDIR/libs/$ABI/include/x32/bits"
+        else
+            copy_directory "$SDIR/include/c++/$GCC_VERSION/$PREFIX/n32/bits" "$DDIR/libs/$ABI/include/n32/bits"
+        fi
+    fi
+
+    LDIR=lib
+    if [ "$ARCH" != "${ARCH%%64*}" ]; then
+        #Can't call $(get_default_libdir_for_arch $ARCH) which contain hack for arm64 and mips64
+        LDIR=lib64
+    fi
 
     # Copy the ABI-specific libraries
     # Note: the shared library name is libgnustl_shared.so due our custom toolchain patch
-    copy_file_list "$SDIR/lib" "$DDIR/libs/$ABI" libsupc++.a libgnustl_shared.so
+    copy_file_list "$SDIR/$LDIR" "$DDIR/libs/$ABI" libsupc++.a libgnustl_shared.so
     # Note: we need to rename libgnustl_shared.a to libgnustl_static.a
-    cp "$SDIR/lib/libgnustl_shared.a" "$DDIR/libs/$ABI/libgnustl_static.a"
+    cp "$SDIR/$LDIR/libgnustl_shared.a" "$DDIR/libs/$ABI/libgnustl_static.a"
+    if [ "$ARCH" = "x86_64" -o "$ARCH" = "mips64" ]; then
+       # for multilib we copy full set. Keep native libs in $ABI dir for compatibility.
+       # TODO: remove it in $ABI top directory
+       copy_file_list "$SDIR/lib" "$DDIR/libs/$ABI/lib" libsupc++.a libgnustl_shared.so
+       copy_file_list "$SDIR/lib64" "$DDIR/libs/$ABI/lib64" libsupc++.a libgnustl_shared.so
+       cp "$SDIR/lib/libgnustl_shared.a" "$DDIR/libs/$ABI/lib/libgnustl_static.a"
+       cp "$SDIR/lib64/libgnustl_shared.a" "$DDIR/libs/$ABI/lib64/libgnustl_static.a"
+       if [ "$ARCH" = "x86_64" ]; then
+         copy_file_list "$SDIR/libx32" "$DDIR/libs/$ABI/libx32" libsupc++.a libgnustl_shared.so
+         cp "$SDIR/libx32/libgnustl_shared.a" "$DDIR/libs/$ABI/libx32/libgnustl_static.a"
+       else
+         copy_file_list "$SDIR/lib32" "$DDIR/libs/$ABI/lib32" libsupc++.a libgnustl_shared.so
+         cp "$SDIR/lib32/libgnustl_shared.a" "$DDIR/libs/$ABI/lib32/libgnustl_static.a"
+       fi
+    fi
     if [ -d "$SDIR/thumb" ] ; then
-        copy_file_list "$SDIR/thumb/lib" "$DDIR/libs/$ABI/thumb" libsupc++.a libgnustl_shared.so
-        cp "$SDIR/thumb/lib/libgnustl_shared.a" "$DDIR/libs/$ABI/thumb/libgnustl_static.a"
+        copy_file_list "$SDIR/thumb/$LDIR" "$DDIR/libs/$ABI/thumb" libsupc++.a libgnustl_shared.so
+        cp "$SDIR/thumb/$LDIR/libgnustl_shared.a" "$DDIR/libs/$ABI/thumb/libgnustl_static.a"
     fi
 }
 
 GCC_VERSION_LIST=$(commas_to_spaces $GCC_VERSION_LIST)
-for VERSION in $GCC_VERSION_LIST; do
-    for ABI in $ABIS; do
+for ABI in $ABIS; do
+    ARCH=$(convert_abi_to_arch $ABI)
+    DEFAULT_GCC_VERSION=$(get_default_gcc_version_for_arch $ARCH)
+    for VERSION in $GCC_VERSION_LIST; do
+        # Only build for this GCC version if it on or after DEFAULT_GCC_VERSION
+        if [ "${VERSION%%l}" \< "$DEFAULT_GCC_VERSION" ]; then
+            continue
+        fi
+
         build_gnustl_for_abi $ABI "$BUILD_DIR" static $VERSION
         build_gnustl_for_abi $ABI "$BUILD_DIR" shared $VERSION
-        if [ "$ABI" != "${ABI%%arm*}" ] ; then
+        # build thumb version of libraries for 32-bit arm
+        if [ "$ABI" != "${ABI%%arm*}" -a "$ABI" = "${ABI%%64*}" ] ; then
             build_gnustl_for_abi $ABI "$BUILD_DIR" static $VERSION thumb
             build_gnustl_for_abi $ABI "$BUILD_DIR" shared $VERSION thumb
         fi
@@ -296,18 +371,42 @@ if [ -n "$PACKAGE_DIR" ] ; then
 
         # Then, one package per version/ABI for libraries
         for ABI in $ABIS; do
+            if [ ! -d "$NDK_DIR/$GNUSTL_SUBDIR/$VERSION/libs/$ABI" ]; then
+                continue
+            fi
             FILES=""
-            for LIB in include/bits libsupc++.a libgnustl_static.a libgnustl_shared.so; do
+            case "$ABI" in
+                x86_64)
+                    MULTILIB="include/32/bits include/x32/bits
+                              lib/libsupc++.a lib/libgnustl_static.a lib/libgnustl_shared.so
+                              libx32/libsupc++.a libx32/libgnustl_static.a libx32/libgnustl_shared.so
+                              lib64/libsupc++.a lib64/libgnustl_static.a lib64/libgnustl_shared.so"
+                    ;;
+                mips64)
+                    MULTILIB="include/32/bits include/n32/bits
+                              lib/libsupc++.a lib/libgnustl_static.a lib/libgnustl_shared.so
+                              lib32/libsupc++.a lib32/libgnustl_static.a lib32/libgnustl_shared.so
+                              lib64/libsupc++.a lib64/libgnustl_static.a lib64/libgnustl_shared.so"
+                    ;;
+                *)
+                    MULTILIB=
+                    ;;
+            esac
+            for LIB in include/bits $MULTILIB libsupc++.a libgnustl_static.a libgnustl_shared.so; do
                 FILES="$FILES $GNUSTL_SUBDIR/$VERSION/libs/$ABI/$LIB"
                 THUMB_FILE="$GNUSTL_SUBDIR/$VERSION/libs/$ABI/thumb/$LIB"
                 if [ -f "$NDK_DIR/$THUMB_FILE" ] ; then
                     FILES="$FILES $THUMB_FILE"
                 fi
             done
-            PACKAGE="$PACKAGE_DIR/gnu-libstdc++-libs-$VERSION-$ABI.tar.bz2"
+            PACKAGE="$PACKAGE_DIR/gnu-libstdc++-libs-$VERSION-$ABI"
+            if [ "$WITH_DEBUG_INFO" ]; then
+                PACKAGE="${PACKAGE}-g"
+            fi
+            PACKAGE="${PACKAGE}.tar.bz2"
             dump "Packaging: $PACKAGE"
             pack_archive "$PACKAGE" "$NDK_DIR" "$FILES"
-            fail_panic "Could not package $ABI STLport binaries!"
+            fail_panic "Could not package $ABI GNU libstdc++ binaries!"
         done
     done
 fi

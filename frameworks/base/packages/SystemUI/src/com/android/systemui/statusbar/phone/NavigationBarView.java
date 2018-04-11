@@ -17,20 +17,19 @@
 package com.android.systemui.statusbar.phone;
 
 import android.animation.LayoutTransition;
-import android.app.ActivityManagerNative;
+import android.animation.LayoutTransition.TransitionListener;
+import android.animation.ObjectAnimator;
+import android.animation.TimeInterpolator;
+import android.animation.ValueAnimator;
 import android.app.StatusBarManager;
-import android.app.admin.DevicePolicyManager;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Message;
-import android.os.RemoteException;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Display;
@@ -39,25 +38,22 @@ import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.view.accessibility.AccessibilityManager;
-import android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-
 import com.android.systemui.R;
 import com.android.systemui.statusbar.BaseStatusBar;
 import com.android.systemui.statusbar.DelegateViewHelper;
 import com.android.systemui.statusbar.policy.DeadZone;
+import com.android.systemui.statusbar.policy.KeyButtonView;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.ArrayList;
 
 public class NavigationBarView extends LinearLayout {
-    private static final int CAMERA_BUTTON_FADE_DURATION = 200;
     final static boolean DEBUG = false;
     final static String TAG = "PhoneStatusBar/NavigationBarView";
-
-    final static boolean NAVBAR_ALWAYS_AT_RIGHT = true;
 
     // slippery nav bar when everything is disabled, e.g. during setup
     final static boolean SLIPPERY_WHEN_DISABLED = true;
@@ -78,6 +74,7 @@ public class NavigationBarView extends LinearLayout {
     private Drawable mRecentIcon;
     private Drawable mRecentLandIcon;
 
+    private NavigationBarViewTaskSwitchHelper mTaskSwitchHelper;
     private DelegateViewHelper mDelegateHelper;
     private DeadZone mDeadZone;
     private final NavigationBarTransitions mBarTransitions;
@@ -86,37 +83,63 @@ public class NavigationBarView extends LinearLayout {
     final static boolean WORKAROUND_INVALID_LAYOUT = true;
     final static int MSG_CHECK_INVALID_LAYOUT = 8686;
 
-    // used to disable the camera icon in navbar when disabled by DPM
-    private boolean mCameraDisabledByDpm;
+    // performs manual animation in sync with layout transitions
+    private final NavTransitionListener mTransitionListener = new NavTransitionListener();
 
-    // simplified click handler to be used when device is in accessibility mode
-    private final OnClickListener mAccessibilityClickListener = new OnClickListener() {
+    private OnVerticalChangedListener mOnVerticalChangedListener;
+    private boolean mIsLayoutRtl;
+    private boolean mDelegateIntercepted;
+
+    private class NavTransitionListener implements TransitionListener {
+        private boolean mBackTransitioning;
+        private boolean mHomeAppearing;
+        private long mStartDelay;
+        private long mDuration;
+        private TimeInterpolator mInterpolator;
+
         @Override
-        public void onClick(View v) {
-            if (v.getId() == R.id.camera_button) {
-                KeyguardTouchDelegate.getInstance(getContext()).launchCamera();
-            } else if (v.getId() == R.id.search_light) {
-                KeyguardTouchDelegate.getInstance(getContext()).showAssistant();
+        public void startTransition(LayoutTransition transition, ViewGroup container,
+                View view, int transitionType) {
+            if (view.getId() == R.id.back) {
+                mBackTransitioning = true;
+            } else if (view.getId() == R.id.home && transitionType == LayoutTransition.APPEARING) {
+                mHomeAppearing = true;
+                mStartDelay = transition.getStartDelay(transitionType);
+                mDuration = transition.getDuration(transitionType);
+                mInterpolator = transition.getInterpolator(transitionType);
             }
         }
-    };
 
-    private final OnTouchListener mCameraTouchListener = new OnTouchListener() {
         @Override
-        public boolean onTouch(View cameraButtonView, MotionEvent event) {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    // disable search gesture while interacting with camera
-                    mDelegateHelper.setDisabled(true);
-                    transitionCameraAndSearchButtonAlpha(0.0f);
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    mDelegateHelper.setDisabled(false);
-                    transitionCameraAndSearchButtonAlpha(1.0f);
-                    break;
+        public void endTransition(LayoutTransition transition, ViewGroup container,
+                View view, int transitionType) {
+            if (view.getId() == R.id.back) {
+                mBackTransitioning = false;
+            } else if (view.getId() == R.id.home && transitionType == LayoutTransition.APPEARING) {
+                mHomeAppearing = false;
             }
-            return KeyguardTouchDelegate.getInstance(getContext()).dispatch(event);
+        }
+
+        public void onBackAltCleared() {
+            // When dismissing ime during unlock, force the back button to run the same appearance
+            // animation as home (if we catch this condition early enough).
+            if (!mBackTransitioning && getBackButton().getVisibility() == VISIBLE
+                    && mHomeAppearing && getHomeButton().getAlpha() == 0) {
+                getBackButton().setAlpha(0);
+                ValueAnimator a = ObjectAnimator.ofFloat(getBackButton(), "alpha", 0, 1);
+                a.setStartDelay(mStartDelay);
+                a.setDuration(mDuration);
+                a.setInterpolator(mInterpolator);
+                a.start();
+            }
+        }
+    }
+
+    private final OnClickListener mImeSwitcherClickListener = new OnClickListener() {
+        @Override
+        public void onClick(View view) {
+            ((InputMethodManager) mContext.getSystemService(Context.INPUT_METHOD_SERVICE))
+                    .showInputMethodPicker();
         }
     };
 
@@ -149,44 +172,16 @@ public class NavigationBarView extends LinearLayout {
         mDisplay = ((WindowManager)context.getSystemService(
                 Context.WINDOW_SERVICE)).getDefaultDisplay();
 
-        final Resources res = mContext.getResources();
+        final Resources res = getContext().getResources();
         mBarSize = res.getDimensionPixelSize(R.dimen.navigation_bar_size);
         mVertical = false;
         mShowMenu = false;
         mDelegateHelper = new DelegateViewHelper(this);
+        mTaskSwitchHelper = new NavigationBarViewTaskSwitchHelper(context);
 
         getIcons(res);
 
         mBarTransitions = new NavigationBarTransitions(this);
-
-        mCameraDisabledByDpm = isCameraDisabledByDpm();
-        watchForDevicePolicyChanges();
-    }
-
-    protected void transitionCameraAndSearchButtonAlpha(float alpha) {
-        View cameraButtonView = getCameraButton();
-        if (cameraButtonView != null) {
-            cameraButtonView.animate().alpha(alpha).setDuration(CAMERA_BUTTON_FADE_DURATION);
-        }
-        View searchLight = getSearchLight();
-        if (searchLight != null) {
-            searchLight.animate().alpha(alpha).setDuration(CAMERA_BUTTON_FADE_DURATION);
-        }
-    }
-
-    private void watchForDevicePolicyChanges() {
-        final IntentFilter filter = new IntentFilter();
-        filter.addAction(DevicePolicyManager.ACTION_DEVICE_POLICY_MANAGER_STATE_CHANGED);
-        mContext.registerReceiver(new BroadcastReceiver() {
-            public void onReceive(Context context, Intent intent) {
-                post(new Runnable() {
-                    @Override
-                    public void run() {
-                        mCameraDisabledByDpm = isCameraDisabledByDpm();
-                    }
-                });
-            }
-        }, filter);
     }
 
     public BarTransitions getBarTransitions() {
@@ -198,24 +193,51 @@ public class NavigationBarView extends LinearLayout {
     }
 
     public void setBar(BaseStatusBar phoneStatusBar) {
+        mTaskSwitchHelper.setBar(phoneStatusBar);
         mDelegateHelper.setBar(phoneStatusBar);
+    }
+
+    public void setOnVerticalChangedListener(OnVerticalChangedListener onVerticalChangedListener) {
+        mOnVerticalChangedListener = onVerticalChangedListener;
+        notifyVerticalChangedListener(mVertical);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        initDownStates(event);
+        if (!mDelegateIntercepted && mTaskSwitchHelper.onTouchEvent(event)) {
+            return true;
+        }
         if (mDeadZone != null && event.getAction() == MotionEvent.ACTION_OUTSIDE) {
             mDeadZone.poke(event);
         }
-        if (mDelegateHelper != null) {
+        if (mDelegateHelper != null && mDelegateIntercepted) {
             boolean ret = mDelegateHelper.onInterceptTouchEvent(event);
             if (ret) return true;
         }
         return super.onTouchEvent(event);
     }
 
+    private void initDownStates(MotionEvent ev) {
+        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+            mDelegateIntercepted = false;
+        }
+    }
+
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
-        return mDelegateHelper.onInterceptTouchEvent(event);
+        initDownStates(event);
+        boolean intercept = mTaskSwitchHelper.onInterceptTouchEvent(event);
+        if (!intercept) {
+            mDelegateIntercepted = mDelegateHelper.onInterceptTouchEvent(event);
+            intercept = mDelegateIntercepted;
+        } else {
+            MotionEvent cancelEvent = MotionEvent.obtain(event);
+            cancelEvent.setAction(MotionEvent.ACTION_CANCEL);
+            mDelegateHelper.onInterceptTouchEvent(cancelEvent);
+            cancelEvent.recycle();
+        }
+        return intercept;
     }
 
     private H mHandler = new H();
@@ -240,14 +262,8 @@ public class NavigationBarView extends LinearLayout {
         return mCurrentView.findViewById(R.id.home);
     }
 
-    // for when home is disabled, but search isn't
-    public View getSearchLight() {
-        return mCurrentView.findViewById(R.id.search_light);
-    }
-
-    // shown when keyguard is visible and camera is available
-    public View getCameraButton() {
-        return mCurrentView.findViewById(R.id.camera_button);
+    public View getImeSwitchButton() {
+        return mCurrentView.findViewById(R.id.ime_switcher);
     }
 
     private void getIcons(Resources res) {
@@ -261,7 +277,7 @@ public class NavigationBarView extends LinearLayout {
 
     @Override
     public void setLayoutDirection(int layoutDirection) {
-        getIcons(mContext.getResources());
+        getIcons(getContext().getResources());
 
         super.setLayoutDirection(layoutDirection);
     }
@@ -277,28 +293,29 @@ public class NavigationBarView extends LinearLayout {
 
     public void setNavigationIconHints(int hints, boolean force) {
         if (!force && hints == mNavigationIconHints) return;
-
+        final boolean backAlt = (hints & StatusBarManager.NAVIGATION_HINT_BACK_ALT) != 0;
+        if ((mNavigationIconHints & StatusBarManager.NAVIGATION_HINT_BACK_ALT) != 0 && !backAlt) {
+            mTransitionListener.onBackAltCleared();
+        }
         if (DEBUG) {
-            android.widget.Toast.makeText(mContext,
+            android.widget.Toast.makeText(getContext(),
                 "Navigation icon hints = " + hints,
                 500).show();
         }
 
         mNavigationIconHints = hints;
 
-        getBackButton().setAlpha(
-            (0 != (hints & StatusBarManager.NAVIGATION_HINT_BACK_NOP)) ? 0.5f : 1.0f);
-        getHomeButton().setAlpha(
-            (0 != (hints & StatusBarManager.NAVIGATION_HINT_HOME_NOP)) ? 0.5f : 1.0f);
-        getRecentsButton().setAlpha(
-            (0 != (hints & StatusBarManager.NAVIGATION_HINT_RECENT_NOP)) ? 0.5f : 1.0f);
-
-        ((ImageView)getBackButton()).setImageDrawable(
-            (0 != (hints & StatusBarManager.NAVIGATION_HINT_BACK_ALT))
+        ((ImageView)getBackButton()).setImageDrawable(backAlt
                 ? (mVertical ? mBackAltLandIcon : mBackAltIcon)
                 : (mVertical ? mBackLandIcon : mBackIcon));
 
         ((ImageView)getRecentsButton()).setImageDrawable(mVertical ? mRecentLandIcon : mRecentIcon);
+
+        final boolean showImeButton = ((hints & StatusBarManager.NAVIGATION_HINT_IME_SHOWN) != 0);
+        getImeSwitchButton().setVisibility(showImeButton ? View.VISIBLE : View.INVISIBLE);
+        // Update menu button in case the IME state has changed.
+        setMenuVisibility(mShowMenu, true);
+
 
         setDisabledFlags(mDisabledFlags, true);
     }
@@ -322,13 +339,20 @@ public class NavigationBarView extends LinearLayout {
             setSlippery(disableHome && disableRecent && disableBack && disableSearch);
         }
 
-        if (!mScreenOn && mCurrentView != null) {
-            ViewGroup navButtons = (ViewGroup) mCurrentView.findViewById(R.id.nav_buttons);
-            LayoutTransition lt = navButtons == null ? null : navButtons.getLayoutTransition();
+        ViewGroup navButtons = (ViewGroup) mCurrentView.findViewById(R.id.nav_buttons);
+        if (navButtons != null) {
+            LayoutTransition lt = navButtons.getLayoutTransition();
             if (lt != null) {
-                lt.disableTransitionType(
-                        LayoutTransition.CHANGE_APPEARING | LayoutTransition.CHANGE_DISAPPEARING |
-                        LayoutTransition.APPEARING | LayoutTransition.DISAPPEARING);
+                if (!lt.getTransitionListeners().contains(mTransitionListener)) {
+                    lt.addTransitionListener(mTransitionListener);
+                }
+                if (!mScreenOn && mCurrentView != null) {
+                    lt.disableTransitionType(
+                            LayoutTransition.CHANGE_APPEARING |
+                            LayoutTransition.CHANGE_DISAPPEARING |
+                            LayoutTransition.APPEARING |
+                            LayoutTransition.DISAPPEARING);
+                }
             }
         }
 
@@ -336,31 +360,13 @@ public class NavigationBarView extends LinearLayout {
         getHomeButton()   .setVisibility(disableHome       ? View.INVISIBLE : View.VISIBLE);
         getRecentsButton().setVisibility(disableRecent     ? View.INVISIBLE : View.VISIBLE);
 
-        final boolean shouldShowSearch = disableHome && !disableSearch;
-        getSearchLight().setVisibility(shouldShowSearch ? View.VISIBLE : View.GONE);
-        final View cameraButton = getCameraButton();
-        if (cameraButton != null) {
-            cameraButton.setVisibility(
-                    shouldShowSearch && !mCameraDisabledByDpm ? View.VISIBLE : View.GONE);
-        }
+        mBarTransitions.applyBackButtonQuiescentAlpha(mBarTransitions.getMode(), true /*animate*/);
     }
 
-    private boolean isCameraDisabledByDpm() {
-        final DevicePolicyManager dpm =
-                (DevicePolicyManager) mContext.getSystemService(Context.DEVICE_POLICY_SERVICE);
-        if (dpm != null) {
-            try {
-                final int userId = ActivityManagerNative.getDefault().getCurrentUser().id;
-                final int disabledFlags = dpm.getKeyguardDisabledFeatures(null, userId);
-                final  boolean disabledBecauseKeyguardSecure =
-                        (disabledFlags & DevicePolicyManager.KEYGUARD_DISABLE_SECURE_CAMERA) != 0
-                        && KeyguardTouchDelegate.getInstance(getContext()).isSecure();
-                return dpm.getCameraDisabled(null) || disabledBecauseKeyguardSecure;
-            } catch (RemoteException e) {
-                Log.e(TAG, "Can't get userId", e);
-            }
+    private void setVisibleOrGone(View view, boolean visible) {
+        if (view != null) {
+            view.setVisibility(visible ? VISIBLE : GONE);
         }
-        return false;
     }
 
     public void setSlippery(boolean newSlippery) {
@@ -388,7 +394,10 @@ public class NavigationBarView extends LinearLayout {
 
         mShowMenu = show;
 
-        getMenuButton().setVisibility(mShowMenu ? View.VISIBLE : View.INVISIBLE);
+        // Only show Menu if IME switcher not shown.
+        final boolean shouldShow = mShowMenu &&
+                ((mNavigationIconHints & StatusBarManager.NAVIGATION_HINT_IME_SHOWN) == 0);
+        getMenuButton().setVisibility(shouldShow ? View.VISIBLE : View.INVISIBLE);
     }
 
     @Override
@@ -398,56 +407,13 @@ public class NavigationBarView extends LinearLayout {
 
         mRotatedViews[Surface.ROTATION_90] = findViewById(R.id.rot90);
 
-        mRotatedViews[Surface.ROTATION_270] = NAVBAR_ALWAYS_AT_RIGHT
-                                                ? findViewById(R.id.rot90)
-                                                : findViewById(R.id.rot270);
+        mRotatedViews[Surface.ROTATION_270] = mRotatedViews[Surface.ROTATION_90];
 
         mCurrentView = mRotatedViews[Surface.ROTATION_0];
 
-        watchForAccessibilityChanges();
-    }
+        getImeSwitchButton().setOnClickListener(mImeSwitcherClickListener);
 
-    private void watchForAccessibilityChanges() {
-        final AccessibilityManager am =
-                (AccessibilityManager) mContext.getSystemService(Context.ACCESSIBILITY_SERVICE);
-
-        // Set the initial state
-        enableAccessibility(am.isTouchExplorationEnabled());
-
-        // Watch for changes
-        am.addTouchExplorationStateChangeListener(new TouchExplorationStateChangeListener() {
-            @Override
-            public void onTouchExplorationStateChanged(boolean enabled) {
-                enableAccessibility(enabled);
-            }
-        });
-    }
-
-    private void enableAccessibility(boolean touchEnabled) {
-        Log.v(TAG, "touchEnabled:"  + touchEnabled);
-
-        // Add a touch handler or accessibility click listener for camera and search buttons
-        // for all view orientations.
-        final OnClickListener onClickListener = touchEnabled ? mAccessibilityClickListener : null;
-        final OnTouchListener onTouchListener = touchEnabled ? null : mCameraTouchListener;
-        boolean hasCamera = false;
-        for (int i = 0; i < mRotatedViews.length; i++) {
-            final View cameraButton = mRotatedViews[i].findViewById(R.id.camera_button);
-            final View searchLight = mRotatedViews[i].findViewById(R.id.search_light);
-            if (cameraButton != null) {
-                hasCamera = true;
-                cameraButton.setOnTouchListener(onTouchListener);
-                cameraButton.setOnClickListener(onClickListener);
-            }
-            if (searchLight != null) {
-                searchLight.setOnClickListener(onClickListener);
-            }
-        }
-        if (hasCamera) {
-            // Warm up KeyguardTouchDelegate so it's ready by the time the camera button is touched.
-            // This will connect to KeyguardService so that touch events are processed.
-            KeyguardTouchDelegate.getInstance(mContext);
-        }
+        updateRTLOrder();
     }
 
     public boolean isVertical() {
@@ -462,6 +428,8 @@ public class NavigationBarView extends LinearLayout {
         mCurrentView = mRotatedViews[rot];
         mCurrentView.setVisibility(View.VISIBLE);
 
+        getImeSwitchButton().setOnClickListener(mImeSwitcherClickListener);
+
         mDeadZone = (DeadZone) mCurrentView.findViewById(R.id.deadzone);
 
         // force the low profile & disabled states into compliance
@@ -473,7 +441,18 @@ public class NavigationBarView extends LinearLayout {
             Log.d(TAG, "reorient(): rot=" + mDisplay.getRotation());
         }
 
+        // swap to x coordinate if orientation is not in vertical
+        if (mDelegateHelper != null) {
+            mDelegateHelper.setSwapXY(mVertical);
+        }
+        updateTaskSwitchHelper();
+
         setNavigationIconHints(mNavigationIconHints, true);
+    }
+
+    private void updateTaskSwitchHelper() {
+        boolean isRtl = (getLayoutDirection() == View.LAYOUT_DIRECTION_RTL);
+        mTaskSwitchHelper.setBarState(mVertical, isRtl);
     }
 
     @Override
@@ -492,10 +471,68 @@ public class NavigationBarView extends LinearLayout {
             mVertical = newVertical;
             //Log.v(TAG, String.format("onSizeChanged: h=%d, w=%d, vert=%s", h, w, mVertical?"y":"n"));
             reorient();
+            notifyVerticalChangedListener(newVertical);
         }
 
         postCheckForInvalidLayout("sizeChanged");
         super.onSizeChanged(w, h, oldw, oldh);
+    }
+
+    private void notifyVerticalChangedListener(boolean newVertical) {
+        if (mOnVerticalChangedListener != null) {
+            mOnVerticalChangedListener.onVerticalChanged(newVertical);
+        }
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        updateRTLOrder();
+        updateTaskSwitchHelper();
+    }
+
+    /**
+     * In landscape, the LinearLayout is not auto mirrored since it is vertical. Therefore we
+     * have to do it manually
+     */
+    private void updateRTLOrder() {
+        boolean isLayoutRtl = getResources().getConfiguration()
+                .getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+        if (mIsLayoutRtl != isLayoutRtl) {
+
+            // We swap all children of the 90 and 270 degree layouts, since they are vertical
+            View rotation90 = mRotatedViews[Surface.ROTATION_90];
+            swapChildrenOrderIfVertical(rotation90.findViewById(R.id.nav_buttons));
+
+            View rotation270 = mRotatedViews[Surface.ROTATION_270];
+            if (rotation90 != rotation270) {
+                swapChildrenOrderIfVertical(rotation270.findViewById(R.id.nav_buttons));
+            }
+            mIsLayoutRtl = isLayoutRtl;
+        }
+    }
+
+
+    /**
+     * Swaps the children order of a LinearLayout if it's orientation is Vertical
+     *
+     * @param group The LinearLayout to swap the children from.
+     */
+    private void swapChildrenOrderIfVertical(View group) {
+        if (group instanceof LinearLayout) {
+            LinearLayout linearLayout = (LinearLayout) group;
+            if (linearLayout.getOrientation() == VERTICAL) {
+                int childCount = linearLayout.getChildCount();
+                ArrayList<View> childList = new ArrayList<>(childCount);
+                for (int i = 0; i < childCount; i++) {
+                    childList.add(linearLayout.getChildAt(i));
+                }
+                linearLayout.removeAllViews();
+                for (int i = childCount - 1; i >= 0; i--) {
+                    linearLayout.addView(childList.get(i));
+                }
+            }
+        }
     }
 
     /*
@@ -522,7 +559,7 @@ public class NavigationBarView extends LinearLayout {
 
     private String getResourceName(int resId) {
         if (resId != 0) {
-            final android.content.res.Resources res = mContext.getResources();
+            final android.content.res.Resources res = getContext().getResources();
             try {
                 return res.getResourceName(resId);
             } catch (android.content.res.Resources.NotFoundException ex) {
@@ -574,28 +611,32 @@ public class NavigationBarView extends LinearLayout {
                         mVertical ? "true" : "false",
                         mShowMenu ? "true" : "false"));
 
-        final View back = getBackButton();
-        final View home = getHomeButton();
-        final View recent = getRecentsButton();
-        final View menu = getMenuButton();
+        dumpButton(pw, "back", getBackButton());
+        dumpButton(pw, "home", getHomeButton());
+        dumpButton(pw, "rcnt", getRecentsButton());
+        dumpButton(pw, "menu", getMenuButton());
 
-        pw.println("      back: "
-                + PhoneStatusBar.viewInfo(back)
-                + " " + visibilityToString(back.getVisibility())
-                );
-        pw.println("      home: "
-                + PhoneStatusBar.viewInfo(home)
-                + " " + visibilityToString(home.getVisibility())
-                );
-        pw.println("      rcnt: "
-                + PhoneStatusBar.viewInfo(recent)
-                + " " + visibilityToString(recent.getVisibility())
-                );
-        pw.println("      menu: "
-                + PhoneStatusBar.viewInfo(menu)
-                + " " + visibilityToString(menu.getVisibility())
-                );
         pw.println("    }");
     }
 
+    private static void dumpButton(PrintWriter pw, String caption, View button) {
+        pw.print("      " + caption + ": ");
+        if (button == null) {
+            pw.print("null");
+        } else {
+            pw.print(PhoneStatusBar.viewInfo(button)
+                    + " " + visibilityToString(button.getVisibility())
+                    + " alpha=" + button.getAlpha()
+                    );
+            if (button instanceof KeyButtonView) {
+                pw.print(" drawingAlpha=" + ((KeyButtonView)button).getDrawingAlpha());
+                pw.print(" quiescentAlpha=" + ((KeyButtonView)button).getQuiescentAlpha());
+            }
+        }
+        pw.println();
+    }
+
+    public interface OnVerticalChangedListener {
+        void onVerticalChanged(boolean isVertical);
+    }
 }

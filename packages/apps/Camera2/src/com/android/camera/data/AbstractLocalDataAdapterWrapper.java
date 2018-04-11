@@ -16,9 +16,13 @@
 
 package com.android.camera.data;
 
-import android.content.ContentResolver;
 import android.content.Context;
 import android.net.Uri;
+import android.os.AsyncTask;
+
+import com.android.camera.util.Callback;
+
+import java.util.List;
 
 /**
  * An abstract {@link LocalDataAdapter} implementation to wrap another
@@ -31,6 +35,7 @@ import android.net.Uri;
  */
 public abstract class AbstractLocalDataAdapterWrapper implements LocalDataAdapter {
 
+    protected final Context mContext;
     protected final LocalDataAdapter mAdapter;
     protected int mSuggestedWidth;
     protected int mSuggestedHeight;
@@ -38,12 +43,14 @@ public abstract class AbstractLocalDataAdapterWrapper implements LocalDataAdapte
     /**
      * Constructor.
      *
-     * @param wrappedAdapter  The {@link LocalDataAdapter} to be wrapped.
+     * @param context A valid Android context.
+     * @param wrappedAdapter The {@link LocalDataAdapter} to be wrapped.
      */
-    AbstractLocalDataAdapterWrapper(LocalDataAdapter wrappedAdapter) {
+    AbstractLocalDataAdapterWrapper(Context context, LocalDataAdapter wrappedAdapter) {
         if (wrappedAdapter == null) {
             throw new AssertionError("data adapter is null");
         }
+        mContext = context;
         mAdapter = wrappedAdapter;
     }
 
@@ -60,23 +67,23 @@ public abstract class AbstractLocalDataAdapterWrapper implements LocalDataAdapte
     }
 
     @Override
-    public void requestLoad(ContentResolver resolver) {
-        mAdapter.requestLoad(resolver);
+    public void setLocalDataListener(LocalDataListener listener) {
+        mAdapter.setLocalDataListener(listener);
     }
 
     @Override
-    public void addNewVideo(ContentResolver resolver, Uri uri) {
-        mAdapter.addNewVideo(resolver, uri);
+    public void requestLoad(Callback<Void> doneCallback) {
+        mAdapter.requestLoad(doneCallback);
     }
 
     @Override
-    public void addNewPhoto(ContentResolver resolver, Uri uri) {
-        mAdapter.addNewPhoto(resolver, uri);
+    public void requestLoadNewPhotos() {
+        mAdapter.requestLoadNewPhotos();
     }
 
     @Override
-    public void insertData(LocalData data) {
-        mAdapter.insertData(data);
+    public boolean addData(LocalData data) {
+        return mAdapter.addData(data);
     }
 
     @Override
@@ -85,8 +92,8 @@ public abstract class AbstractLocalDataAdapterWrapper implements LocalDataAdapte
     }
 
     @Override
-    public boolean executeDeletion(Context context) {
-        return mAdapter.executeDeletion(context);
+    public boolean executeDeletion() {
+        return mAdapter.executeDeletion();
     }
 
     @Override
@@ -95,7 +102,37 @@ public abstract class AbstractLocalDataAdapterWrapper implements LocalDataAdapte
     }
 
     @Override
-    public void refresh(ContentResolver resolver, Uri uri) {
-        mAdapter.refresh(resolver, uri);
+    public void refresh(Uri uri) {
+        mAdapter.refresh(uri);
+    }
+
+    @Override
+    public AsyncTask updateMetadata(int dataId) {
+        return mAdapter.updateMetadata(dataId);
+    }
+
+    @Override
+    public boolean isMetadataUpdated(int dataId) {
+        return mAdapter.isMetadataUpdated(dataId);
+    }
+
+    @Override
+    public List<AsyncTask> preloadItems(List<Integer> items) {
+        return mAdapter.preloadItems(items);
+    }
+
+    @Override
+    public void cancelItems(List<AsyncTask> loadTokens) {
+        mAdapter.cancelItems(loadTokens);
+    }
+
+    @Override
+    public List<Integer> getItemsInRange(int startPosition, int endPosition) {
+        return mAdapter.getItemsInRange(startPosition, endPosition);
+    }
+
+    @Override
+    public int getCount() {
+        return mAdapter.getCount();
     }
 }

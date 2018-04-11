@@ -14,7 +14,6 @@
 #include "SkStream.h"
 #include "SkStreamHelpers.h"
 #include "SkTDArray.h"
-#include "SkTRegistry.h"
 
 class SkBMPImageDecoder : public SkImageDecoder {
 public:
@@ -35,7 +34,7 @@ private:
 DEFINE_DECODER_CREATOR(BMPImageDecoder);
 ///////////////////////////////////////////////////////////////////////////////
 
-static bool is_bmp(SkStream* stream) {
+static bool is_bmp(SkStreamRewindable* stream) {
     static const char kBmpMagic[] = { 'B', 'M' };
 
 
@@ -45,23 +44,23 @@ static bool is_bmp(SkStream* stream) {
         !memcmp(buffer, kBmpMagic, sizeof(kBmpMagic));
 }
 
-static SkImageDecoder* sk_libbmp_dfactory(SkStream* stream) {
+static SkImageDecoder* sk_libbmp_dfactory(SkStreamRewindable* stream) {
     if (is_bmp(stream)) {
         return SkNEW(SkBMPImageDecoder);
     }
     return NULL;
 }
 
-static SkTRegistry<SkImageDecoder*, SkStream*> gReg(sk_libbmp_dfactory);
+static SkImageDecoder_DecodeReg gReg(sk_libbmp_dfactory);
 
-static SkImageDecoder::Format get_format_bmp(SkStream* stream) {
+static SkImageDecoder::Format get_format_bmp(SkStreamRewindable* stream) {
     if (is_bmp(stream)) {
         return SkImageDecoder::kBMP_Format;
     }
     return SkImageDecoder::kUnknown_Format;
 }
 
-static SkTRegistry<SkImageDecoder::Format, SkStream*> gFormatReg(get_format_bmp);
+static SkImageDecoder_FormatReg gFormatReg(get_format_bmp);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -124,18 +123,17 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
 
     int width = callback.width();
     int height = callback.height();
-    SkBitmap::Config config = this->getPrefConfig(k32Bit_SrcDepth, false);
+    SkColorType colorType = this->getPrefColorType(k32Bit_SrcDepth, false);
 
     // only accept prefConfig if it makes sense for us
-    if (SkBitmap::kARGB_4444_Config != config &&
-            SkBitmap::kRGB_565_Config != config) {
-        config = SkBitmap::kARGB_8888_Config;
+    if (kARGB_4444_SkColorType != colorType && kRGB_565_SkColorType != colorType) {
+        colorType = kN32_SkColorType;
     }
 
     SkScaledBitmapSampler sampler(width, height, getSampleSize());
 
-    bm->setConfig(config, sampler.scaledWidth(), sampler.scaledHeight());
-    bm->setIsOpaque(true);
+    bm->setInfo(SkImageInfo::Make(sampler.scaledWidth(), sampler.scaledHeight(),
+                                  colorType, kOpaque_SkAlphaType));
 
     if (justBounds) {
         return true;

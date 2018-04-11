@@ -26,9 +26,6 @@ class ZygoteHost {
   // Returns the pid of the Zygote process.
   virtual pid_t GetPid() const = 0;
 
-  // Returns the pid of the Sandbox Helper process.
-  virtual pid_t GetSandboxHelperPid() const = 0;
-
   // Returns an int which is a bitmask of kSandboxLinux* values. Only valid
   // after the first render has been forked.
   virtual int GetSandboxStatus() const = 0;
@@ -38,12 +35,6 @@ class ZygoteHost {
   // likely to be killed by the OOM killer.
   virtual void AdjustRendererOOMScore(base::ProcessHandle process_handle,
                                       int score) = 0;
-
-  // Adjust the point at which the low memory notifier in the kernel tells
-  // us that we're low on memory.  When there is less than |margin_mb| left,
-  // then the notifier will notify us.  Set |margin_mb| to -1 to turn off
-  // low memory notification altogether.
-  virtual void AdjustLowMemoryMargin(int64 margin_mb) = 0;
 };
 
 }  // namespace content

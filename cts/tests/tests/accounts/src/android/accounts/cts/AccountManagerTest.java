@@ -28,8 +28,9 @@ import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.StrictMode;
-import android.test.AndroidTestCase;
+import android.test.ActivityInstrumentationTestCase2;
 
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
@@ -41,11 +42,12 @@ import java.util.concurrent.TimeUnit;
  *  adb shell am instrument
  *   -e debug false -w
  *   -e class android.accounts.cts.AccountManagerTest
- * android.accounts.cts/android.test.InstrumentationTestRunner
+ * android.accounts.cts/android.support.test.runner.AndroidJUnitRunner
  */
-public class AccountManagerTest extends AndroidTestCase {
+public class AccountManagerTest extends ActivityInstrumentationTestCase2<AccountDummyActivity> {
 
     public static final String ACCOUNT_NAME = "android.accounts.cts.account.name";
+    public static final String ACCOUNT_NEW_NAME = "android.accounts.cts.account.name.rename";
     public static final String ACCOUNT_NAME_OTHER = "android.accounts.cts.account.name.other";
 
     public static final String ACCOUNT_TYPE = "android.accounts.cts.account.type";
@@ -69,7 +71,6 @@ public class AccountManagerTest extends AndroidTestCase {
 
     public static final String[] REQUIRED_FEATURES = new String[] { FEATURE_1, FEATURE_2 };
 
-    public static final Activity ACTIVITY = new Activity();
     public static final Bundle OPTIONS_BUNDLE = new Bundle();
 
     public static final Bundle USERDATA_BUNDLE = new Bundle();
@@ -93,18 +94,27 @@ public class AccountManagerTest extends AndroidTestCase {
         return mockAuthenticator;
     }
 
+    private Activity mActivity;
+    private Context mContext;
+
+    public AccountManagerTest() {
+        super(AccountDummyActivity.class);
+    }
+
     @Override
     public void setUp() throws Exception {
         super.setUp();
+        mActivity = getActivity();
+        mContext = getInstrumentation().getTargetContext();
 
         OPTIONS_BUNDLE.putString(OPTION_NAME_1, OPTION_VALUE_1);
         OPTIONS_BUNDLE.putString(OPTION_NAME_2, OPTION_VALUE_2);
 
         USERDATA_BUNDLE.putString(USERDATA_NAME_1, USERDATA_VALUE_1);
 
-        getMockAuthenticator(getContext());
+        getMockAuthenticator(mContext);
 
-        am = AccountManager.get(getContext());
+        am = AccountManager.get(mContext);
     }
 
     @Override
@@ -196,6 +206,16 @@ public class AccountManagerTest extends AndroidTestCase {
         return resultBundle;
     }
 
+    private Account renameAccount(AccountManager am, Account account, String newName)
+            throws OperationCanceledException, AuthenticatorException, IOException {
+        AccountManagerFuture<Account> futureAccount = am.renameAccount(
+                account, newName, null /* callback */, null /* handler */);
+        Account renamedAccount = futureAccount.getResult();
+        assertTrue(futureAccount.isDone());
+        assertNotNull(renamedAccount);
+        return renamedAccount;
+    }
+
     private boolean removeAccount(AccountManager am, Account account,
             AccountManagerCallback<Boolean> callback) throws IOException, AuthenticatorException,
                 OperationCanceledException {
@@ -253,7 +273,7 @@ public class AccountManagerTest extends AndroidTestCase {
      * Test singleton
      */
     public void testGet() {
-        assertNotNull(AccountManager.get(getContext()));
+        assertNotNull(AccountManager.get(mContext));
     }
 
     /**
@@ -267,7 +287,7 @@ public class AccountManagerTest extends AndroidTestCase {
                 AUTH_TOKEN_TYPE,
                 REQUIRED_FEATURES,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* callback */,
                 null /* handler */);
 
@@ -291,7 +311,7 @@ public class AccountManagerTest extends AndroidTestCase {
             AuthenticatorException, OperationCanceledException {
 
         testAddAccountWithCallbackAndHandler(null /* handler */);
-        testAddAccountWithCallbackAndHandler(new Handler());
+        testAddAccountWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testAddAccountWithCallbackAndHandler(Handler handler) throws IOException,
@@ -332,7 +352,7 @@ public class AccountManagerTest extends AndroidTestCase {
                 AUTH_TOKEN_TYPE,
                 REQUIRED_FEATURES,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 callback,
                 handler);
 
@@ -345,35 +365,78 @@ public class AccountManagerTest extends AndroidTestCase {
     }
 
     /**
-     * Test addAccountExplicitly() and removeAccount()
+     * Test addAccountExplicitly(), renameAccount() and removeAccount().
      */
     public void testAddAccountExplicitlyAndRemoveAccount() throws IOException,
             AuthenticatorException, OperationCanceledException {
 
-        final int accountsCount = getAccountsCount();
+        final int expectedAccountsCount = getAccountsCount();
 
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         // Assert that we have one more account
         Account[] accounts = am.getAccounts();
         assertNotNull(accounts);
-        assertEquals(1 + accountsCount, accounts.length);
+        assertEquals(1 + expectedAccountsCount, accounts.length);
         assertTrue(isAccountPresent(am.getAccounts(), ACCOUNT));
-
         // Need to clean up
         assertTrue(removeAccount(am, ACCOUNT, null /* callback */));
 
         // and verify that we go back to the initial state
         accounts = am.getAccounts();
         assertNotNull(accounts);
-        assertEquals(accountsCount, accounts.length);
+        assertEquals(expectedAccountsCount, accounts.length);
+    }
+
+    /**
+     * Test setUserData() and getUserData().
+     */
+    public void testAccountRenameAndGetPreviousName()
+            throws OperationCanceledException, AuthenticatorException, IOException {
+        // Add a first account
+        boolean result = am.addAccountExplicitly(ACCOUNT,
+                                ACCOUNT_PASSWORD,
+                                USERDATA_BUNDLE);
+        assertTrue(result);
+
+        // Prior to a renmae, the previous name should be null.
+        String nullName = am.getPreviousName(ACCOUNT);
+        assertNull(nullName);
+
+        final int expectedAccountsCount = getAccountsCount();
+
+        Account renamedAccount = renameAccount(am, ACCOUNT, ACCOUNT_NEW_NAME);
+
+        /*
+         *  Make sure that the resultant renamed account has the correct name
+         *  and is associated with the correct account type.
+         */
+        assertEquals(ACCOUNT_NEW_NAME, renamedAccount.name);
+        assertEquals(ACCOUNT.type, renamedAccount.type);
+
+        // Make sure the total number of accounts is the same.
+        Account[] accounts = am.getAccounts();
+        assertEquals(expectedAccountsCount, accounts.length);
+
+        // Make sure the old account isn't present.
+        assertFalse(isAccountPresent(am.getAccounts(), ACCOUNT));
+
+        // But that the new one is.
+        assertTrue(isAccountPresent(am.getAccounts(), renamedAccount));
+
+        // Check that the UserData is still present.
+        assertEquals(USERDATA_VALUE_1, am.getUserData(renamedAccount, USERDATA_NAME_1));
+
+        assertEquals(ACCOUNT.name, am.getPreviousName(renamedAccount));
+
+       // Need to clean up
+        assertTrue(removeAccount(am, renamedAccount, null /* callback */));
     }
 
     /**
      * Test getAccounts() and getAccountsByType()
      */
-    public void testGetAccountsAndGetAccountsByType() throws IOException, AuthenticatorException,
-            OperationCanceledException {
+    public void testGetAccountsAndGetAccountsByType() {
 
         assertEquals(false, isAccountPresent(am.getAccounts(), ACCOUNT));
         assertEquals(false, isAccountPresent(am.getAccounts(), ACCOUNT_SAME_TYPE));
@@ -495,7 +558,7 @@ public class AccountManagerTest extends AndroidTestCase {
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         testGetAccountsByTypeAndFeaturesWithCallbackAndHandler(null /* handler */);
-        testGetAccountsByTypeAndFeaturesWithCallbackAndHandler(new Handler());
+        testGetAccountsByTypeAndFeaturesWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testGetAccountsByTypeAndFeaturesWithCallbackAndHandler(Handler handler) throws
@@ -648,7 +711,7 @@ public class AccountManagerTest extends AndroidTestCase {
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         testGetAuthTokenWithCallbackAndHandler(null /* handler */);
-        testGetAuthTokenWithCallbackAndHandler(new Handler());
+        testGetAuthTokenWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testGetAuthTokenWithCallbackAndHandler(Handler handler) throws IOException,
@@ -710,7 +773,7 @@ public class AccountManagerTest extends AndroidTestCase {
         AccountManagerFuture<Bundle> futureBundle = am.getAuthToken(ACCOUNT,
                 AUTH_TOKEN_TYPE,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* no callback */,
                 null /* no handler */
         );
@@ -739,7 +802,7 @@ public class AccountManagerTest extends AndroidTestCase {
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         testGetAuthTokenWithOptionsAndCallbackAndHandler(null /* handler */);
-        testGetAuthTokenWithOptionsAndCallbackAndHandler(new Handler());
+        testGetAuthTokenWithOptionsAndCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testGetAuthTokenWithOptionsAndCallbackAndHandler(Handler handler) throws
@@ -773,7 +836,7 @@ public class AccountManagerTest extends AndroidTestCase {
         AccountManagerFuture<Bundle> futureBundle = am.getAuthToken(ACCOUNT,
                 AUTH_TOKEN_TYPE,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 callback,
                 handler
         );
@@ -817,7 +880,7 @@ public class AccountManagerTest extends AndroidTestCase {
         // Now test with existing features and an activity
         resultBundle = getAuthTokenByFeature(
                 new String[] { NON_EXISTING_FEATURE },
-                ACTIVITY
+                mActivity
         );
 
         // Assert returned result
@@ -849,7 +912,7 @@ public class AccountManagerTest extends AndroidTestCase {
         // Now test with existing features and an activity
         resultBundle = getAuthTokenByFeature(
                 REQUIRED_FEATURES,
-                ACTIVITY
+                mActivity
         );
 
         // Assert returned result
@@ -872,7 +935,7 @@ public class AccountManagerTest extends AndroidTestCase {
 
         AccountManagerFuture<Bundle> futureBundle = am.confirmCredentials(ACCOUNT,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* callback*/,
                 null /* handler */);
 
@@ -891,7 +954,7 @@ public class AccountManagerTest extends AndroidTestCase {
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         testConfirmCredentialsWithCallbackAndHandler(null /* handler */);
-        testConfirmCredentialsWithCallbackAndHandler(new Handler());
+        testConfirmCredentialsWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testConfirmCredentialsWithCallbackAndHandler(Handler handler) throws IOException,
@@ -925,7 +988,7 @@ public class AccountManagerTest extends AndroidTestCase {
 
         AccountManagerFuture<Bundle> futureBundle = am.confirmCredentials(ACCOUNT,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 callback,
                 handler);
 
@@ -950,7 +1013,7 @@ public class AccountManagerTest extends AndroidTestCase {
         AccountManagerFuture<Bundle> futureBundle = am.updateCredentials(ACCOUNT,
                 AUTH_TOKEN_TYPE,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* callback*/,
                 null /* handler */);
 
@@ -971,7 +1034,7 @@ public class AccountManagerTest extends AndroidTestCase {
         addAccountExplicitly(ACCOUNT, ACCOUNT_PASSWORD, null /* userData */);
 
         testUpdateCredentialsWithCallbackAndHandler(null /* handler */);
-        testUpdateCredentialsWithCallbackAndHandler(new Handler());
+        testUpdateCredentialsWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testUpdateCredentialsWithCallbackAndHandler(Handler handler) throws IOException,
@@ -1006,7 +1069,7 @@ public class AccountManagerTest extends AndroidTestCase {
         AccountManagerFuture<Bundle> futureBundle = am.updateCredentials(ACCOUNT,
                 AUTH_TOKEN_TYPE,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 callback,
                 handler);
 
@@ -1027,7 +1090,7 @@ public class AccountManagerTest extends AndroidTestCase {
             OperationCanceledException {
 
         AccountManagerFuture<Bundle> futureBundle = am.editProperties(ACCOUNT_TYPE,
-                ACTIVITY,
+                mActivity,
                 null /* callback */,
                 null /* handler*/);
 
@@ -1044,7 +1107,7 @@ public class AccountManagerTest extends AndroidTestCase {
      */
     public void testEditPropertiesWithCallbackAndHandler() {
         testEditPropertiesWithCallbackAndHandler(null /* handler */);
-        testEditPropertiesWithCallbackAndHandler(new Handler());
+        testEditPropertiesWithCallbackAndHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testEditPropertiesWithCallbackAndHandler(Handler handler) {
@@ -1063,7 +1126,7 @@ public class AccountManagerTest extends AndroidTestCase {
         };
 
         AccountManagerFuture<Bundle> futureBundle = am.editProperties(ACCOUNT_TYPE,
-                ACTIVITY,
+                mActivity,
                 callback,
                 handler);
 
@@ -1093,13 +1156,13 @@ public class AccountManagerTest extends AndroidTestCase {
         // Need to cleanup intermediate state
         assertTrue(removeAccount(am, ACCOUNT, null /* callback */));
 
-        testAddOnAccountsUpdatedListenerWithHandler(new Handler(),
+        testAddOnAccountsUpdatedListenerWithHandler(new Handler(Looper.getMainLooper()),
                 false /* updateImmediately */);
 
         // Need to cleanup intermediate state
         assertTrue(removeAccount(am, ACCOUNT, null /* callback */));
 
-        testAddOnAccountsUpdatedListenerWithHandler(new Handler(),
+        testAddOnAccountsUpdatedListenerWithHandler(new Handler(Looper.getMainLooper()),
                 true /* updateImmediately */);
     }
 
@@ -1143,7 +1206,7 @@ public class AccountManagerTest extends AndroidTestCase {
         // Need to cleanup intermediate state
         assertTrue(removeAccount(am, ACCOUNT, null /* callback */));
 
-        testRemoveOnAccountsUpdatedListenerWithHandler(new Handler());
+        testRemoveOnAccountsUpdatedListenerWithHandler(new Handler(Looper.getMainLooper()));
     }
 
     private void testRemoveOnAccountsUpdatedListenerWithHandler(Handler handler) {
@@ -1180,10 +1243,10 @@ public class AccountManagerTest extends AndroidTestCase {
             throws IOException, AuthenticatorException, OperationCanceledException {
 
         assertHasFeature(null /* handler */);
-        assertHasFeature(new Handler());
+        assertHasFeature(new Handler(Looper.getMainLooper()));
 
         assertHasFeatureWithCallback(null /* handler */);
-        assertHasFeatureWithCallback(new Handler());
+        assertHasFeatureWithCallback(new Handler(Looper.getMainLooper()));
     }
 
     private void assertHasFeature(Handler handler)
@@ -1193,7 +1256,7 @@ public class AccountManagerTest extends AndroidTestCase {
                 AUTH_TOKEN_TYPE,
                 REQUIRED_FEATURES,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* callback */,
                 null /* handler */);
 
@@ -1284,7 +1347,7 @@ public class AccountManagerTest extends AndroidTestCase {
                 AUTH_TOKEN_TYPE,
                 REQUIRED_FEATURES,
                 OPTIONS_BUNDLE,
-                ACTIVITY,
+                mActivity,
                 null /* callback */,
                 null /* handler */);
 

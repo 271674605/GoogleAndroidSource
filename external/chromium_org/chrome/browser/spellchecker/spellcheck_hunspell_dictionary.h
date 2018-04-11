@@ -5,19 +5,17 @@
 #ifndef CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_HUNSPELL_DICTIONARY_H_
 #define CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_HUNSPELL_DICTIONARY_H_
 
-#include "chrome/browser/spellchecker/spellcheck_dictionary.h"
-
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/move.h"
 #include "base/observer_list.h"
-#include "base/platform_file.h"
+#include "chrome/browser/spellchecker/spellcheck_dictionary.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 class GURL;
-class Profile;
 class SpellcheckService;
-struct DictionaryFile;
 
 namespace net {
 class URLFetcher;
@@ -62,8 +60,7 @@ class SpellcheckHunspellDictionary
   // Returns true if the dictionary is ready to use.
   virtual bool IsReady() const;
 
-  // TODO(rlp): Return by value.
-  const base::PlatformFile& GetDictionaryFile() const;
+  const base::File& GetDictionaryFile() const;
   const std::string& GetLanguage() const;
   bool IsUsingPlatformChecker() const;
 
@@ -87,6 +84,24 @@ class SpellcheckHunspellDictionary
     DOWNLOAD_FAILED,
   };
 
+  // Dictionary file information to be passed between the FILE and UI threads.
+  struct DictionaryFile {
+    MOVE_ONLY_TYPE_FOR_CPP_03(DictionaryFile, RValue)
+   public:
+    DictionaryFile();
+    ~DictionaryFile();
+
+    // C++03 move emulation of this type.
+    DictionaryFile(RValue other);
+    DictionaryFile& operator=(RValue other);
+
+    // The desired location of the dictionary file, whether or not it exists.
+    base::FilePath path;
+
+    // The dictionary file.
+    base::File file;
+  };
+
   // net::URLFetcherDelegate implementation. Called when dictionary download
   // finishes.
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
@@ -97,9 +112,17 @@ class SpellcheckHunspellDictionary
   // Attempt to download the dictionary.
   void DownloadDictionary(GURL url);
 
+  // Figures out the location for the dictionary, verifies its contents, and
+  // opens it.
+  static DictionaryFile OpenDictionaryFile(const base::FilePath& path);
+
+  // Gets the default location for the dictionary file.
+  static DictionaryFile InitializeDictionaryLocation(
+      const std::string& language);
+
   // The reply point for PostTaskAndReplyWithResult, called after the dictionary
   // file has been initialized.
-  void InitializeDictionaryLocationComplete(scoped_ptr<DictionaryFile> file);
+  void InitializeDictionaryLocationComplete(DictionaryFile file);
 
   // The reply point for PostTaskAndReplyWithResult, called after the dictionary
   // file has been saved.
@@ -124,8 +147,6 @@ class SpellcheckHunspellDictionary
   // Used for downloading the dictionary file.
   scoped_ptr<net::URLFetcher> fetcher_;
 
-  base::WeakPtrFactory<SpellcheckHunspellDictionary> weak_ptr_factory_;
-
   SpellcheckService* spellcheck_service_;
 
   // Observers of Hunspell dictionary events.
@@ -135,7 +156,9 @@ class SpellcheckHunspellDictionary
   DownloadStatus download_status_;
 
   // Dictionary file path and descriptor.
-  scoped_ptr<DictionaryFile> dictionary_file_;
+  DictionaryFile dictionary_file_;
+
+  base::WeakPtrFactory<SpellcheckHunspellDictionary> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellcheckHunspellDictionary);
 };

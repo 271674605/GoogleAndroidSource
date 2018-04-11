@@ -17,11 +17,11 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/BitstreamReader.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
-#include "llvm/GVMaterializer.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include <vector>
 
 namespace llvm {
@@ -131,13 +131,11 @@ class BitcodeReader : public GVMaterializer {
   Module *TheModule;
   MemoryBuffer *Buffer;
   bool BufferOwned;
-  OwningPtr<BitstreamReader> StreamFile;
+  std::unique_ptr<BitstreamReader> StreamFile;
   BitstreamCursor Stream;
   DataStreamer *LazyStreamer;
   uint64_t NextUnreadBit;
   bool SeenValueSymbolTable;
-
-  const char *ErrorString;
 
   std::vector<Type*> TypeList;
   BitcodeReaderValueList ValueList;
@@ -191,12 +189,40 @@ class BitcodeReader : public GVMaterializer {
   /// for compatibility.
   /// FIXME: Remove in LLVM 3.0.
   bool LLVM2_7MetadataDetected;
+  static const std::error_category &BitcodeErrorCategory();
 
 public:
+  enum ErrorType {
+    BitcodeStreamInvalidSize,
+    ConflictingMETADATA_KINDRecords,
+    CouldNotFindFunctionInStream,
+    ExpectedConstant,
+    InsufficientFunctionProtos,
+    InvalidBitcodeSignature,
+    InvalidBitcodeWrapperHeader,
+    InvalidConstantReference,
+    InvalidID, // A read identifier is not found in the table it should be in.
+    InvalidInstructionWithNoBB,
+    InvalidRecord, // A read record doesn't have the expected size or structure
+    InvalidTypeForValue, // Type read OK, but is invalid for its use
+    InvalidTYPETable,
+    InvalidType, // We were unable to read a type
+    MalformedBlock, // We are unable to advance in the stream.
+    MalformedGlobalInitializerSet,
+    InvalidMultipleBlocks, // We found multiple blocks of a kind that should
+                           // have only one
+    NeverResolvedValueFoundInFunction,
+    InvalidValue // Invalid version, inst number, attr number, etc
+  };
+
+  std::error_code Error(ErrorType E) {
+    return std::error_code(E, BitcodeErrorCategory());
+  }
+
   explicit BitcodeReader(MemoryBuffer *buffer, LLVMContext &C)
     : Context(C), TheModule(0), Buffer(buffer), BufferOwned(false),
       LazyStreamer(0), NextUnreadBit(0), SeenValueSymbolTable(false),
-      ErrorString(0), ValueList(C), MDValueList(C),
+      ValueList(C), MDValueList(C),
       SeenFirstFunctionBody(false), LLVM2_7MetadataDetected(false) {
   }
   ~BitcodeReader() {
@@ -209,25 +235,23 @@ public:
   /// when the reader is destroyed.
   void setBufferOwned(bool Owned) { BufferOwned = Owned; }
 
+  void releaseBuffer() {
+    Buffer = nullptr;
+  }
+
   virtual bool isMaterializable(const GlobalValue *GV) const;
   virtual bool isDematerializable(const GlobalValue *GV) const;
-  virtual bool Materialize(GlobalValue *GV, std::string *ErrInfo = 0);
-  virtual bool MaterializeModule(Module *M, std::string *ErrInfo = 0);
+  virtual std::error_code Materialize(GlobalValue *GV);
+  virtual std::error_code MaterializeModule(Module *M);
   virtual void Dematerialize(GlobalValue *GV);
-
-  bool Error(const char *Str) {
-    ErrorString = Str;
-    return true;
-  }
-  const char *getErrorString() const { return ErrorString; }
 
   /// @brief Main interface to parsing a bitcode buffer.
   /// @returns true if an error occurred.
-  bool ParseBitcodeInto(Module *M);
+  std::error_code ParseBitcodeInto(Module *M);
 
   /// @brief Cheap mechanism to just extract module triple
   /// @returns true if an error occurred.
-  bool ParseTriple(std::string &Triple);
+  std::error_code ParseTriple(std::string &Triple);
 
   static uint64_t decodeSignRotatedValue(uint64_t V);
 
@@ -278,25 +302,25 @@ private:
   }
 
 
-  bool ParseModule(bool Resume);
-  bool ParseAttributeBlock();
-  bool ParseTypeTable();
-  bool ParseOldTypeTable();         // FIXME: Remove in LLVM 3.1
-  bool ParseTypeTableBody();
+  std::error_code ParseModule(bool Resume);
+  std::error_code ParseAttributeBlock();
+  std::error_code ParseTypeTable();
+  std::error_code ParseOldTypeTable();         // FIXME: Remove in LLVM 3.1
+  std::error_code ParseTypeTableBody();
 
-  bool ParseOldTypeSymbolTable();   // FIXME: Remove in LLVM 3.1
-  bool ParseValueSymbolTable();
-  bool ParseConstants();
-  bool RememberAndSkipFunctionBody();
-  bool ParseFunctionBody(Function *F);
-  bool GlobalCleanup();
-  bool ResolveGlobalAndAliasInits();
-  bool ParseMetadata();
-  bool ParseMetadataAttachment();
-  bool ParseModuleTriple(std::string &Triple);
-  bool InitStream();
-  bool InitStreamFromBuffer();
-  bool InitLazyStream();
+  std::error_code ParseOldTypeSymbolTable();   // FIXME: Remove in LLVM 3.1
+  std::error_code ParseValueSymbolTable();
+  std::error_code ParseConstants();
+  std::error_code RememberAndSkipFunctionBody();
+  std::error_code ParseFunctionBody(Function *F);
+  std::error_code GlobalCleanup();
+  std::error_code ResolveGlobalAndAliasInits();
+  std::error_code ParseMetadata();
+  std::error_code ParseMetadataAttachment();
+  std::error_code ParseModuleTriple(std::string &Triple);
+  std::error_code InitStream();
+  std::error_code InitStreamFromBuffer();
+  std::error_code InitLazyStream();
 };
 
 } // End llvm_2_7 namespace

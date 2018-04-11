@@ -12,11 +12,8 @@
 #include "content/browser/ssl/ssl_error_handler.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/resource_controller.h"
+#include "content/public/common/signed_certificate_timestamp_id_and_status.h"
 #include "net/url_request/url_request.h"
-
-namespace net {
-class ClientCertStore;
-}
 
 namespace content {
 class ResourceDispatcherHostLoginDelegate;
@@ -42,9 +39,8 @@ class CONTENT_EXPORT ResourceLoader : public net::URLRequest::Delegate,
   void ReportUploadProgress();
 
   bool is_transferring() const { return is_transferring_; }
-  void MarkAsTransferring(const GURL& target_url);
-  void WillCompleteTransfer();
-  void CompleteTransfer(scoped_ptr<ResourceHandler> new_handler);
+  void MarkAsTransferring();
+  void CompleteTransfer();
 
   net::URLRequest* request() { return request_.get(); }
   ResourceRequestInfoImpl* GetRequestInfo();
@@ -57,17 +53,7 @@ class CONTENT_EXPORT ResourceLoader : public net::URLRequest::Delegate,
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourceLoaderTest, ClientCertStoreLookup);
-
-  ResourceLoader(scoped_ptr<net::URLRequest> request,
-                 scoped_ptr<ResourceHandler> handler,
-                 ResourceLoaderDelegate* delegate,
-                 scoped_ptr<net::ClientCertStore> client_cert_store);
-
-  // Initialization logic shared between the public and private constructor.
-  void Init(scoped_ptr<net::URLRequest> request,
-            scoped_ptr<ResourceHandler> handler,
-            ResourceLoaderDelegate* delegate,
-            scoped_ptr<net::ClientCertStore> client_cert_store);
+  FRIEND_TEST_ALL_PREFIXES(ResourceLoaderTest, ClientCertStoreNull);
 
   // net::URLRequest::Delegate implementation:
   virtual void OnReceivedRedirect(net::URLRequest* request,
@@ -80,6 +66,8 @@ class CONTENT_EXPORT ResourceLoader : public net::URLRequest::Delegate,
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      const net::SSLInfo& info,
                                      bool fatal) OVERRIDE;
+  virtual void OnBeforeNetworkStart(net::URLRequest* request,
+                                    bool* defer) OVERRIDE;
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
   virtual void OnReadCompleted(net::URLRequest* request,
                                int bytes_read) OVERRIDE;
@@ -98,21 +86,44 @@ class CONTENT_EXPORT ResourceLoader : public net::URLRequest::Delegate,
 
   void StartRequestInternal();
   void CancelRequestInternal(int error, bool from_renderer);
+  // Stores the SignedCertificateTimestamps held in |sct_list| in the
+  // SignedCertificateTimestampStore singleton, associated with |process_id|.
+  // On return, |sct_ids| contains the assigned ID and verification status of
+  // each SignedCertificateTimestamp.
+  void StoreSignedCertificateTimestamps(
+      const net::SignedCertificateTimestampAndStatusList& sct_list,
+      int process_id,
+      SignedCertificateTimestampIDStatusList* sct_ids);
   void CompleteResponseStarted();
   void StartReading(bool is_continuation);
   void ResumeReading();
   void ReadMore(int* bytes_read);
+  // Passes a read result to the handler.
   void CompleteRead(int bytes_read);
   void ResponseCompleted();
   void CallDidFinishLoading();
+  void RecordHistograms();
 
   bool is_deferred() const { return deferred_stage_ != DEFERRED_NONE; }
+
+  // Used for categorizing loading of prefetches for reporting in histograms.
+  // NOTE: This enumeration is used in histograms, so please do not add entries
+  // in the middle.
+  enum PrefetchStatus {
+    STATUS_UNDEFINED,
+    STATUS_SUCCESS_FROM_CACHE,
+    STATUS_SUCCESS_FROM_NETWORK,
+    STATUS_CANCELED,
+    STATUS_MAX,
+  };
 
   enum DeferredStage {
     DEFERRED_NONE,
     DEFERRED_START,
+    DEFERRED_NETWORK_START,
     DEFERRED_REDIRECT,
     DEFERRED_READ,
+    DEFERRED_RESPONSE_COMPLETE,
     DEFERRED_FINISH
   };
   DeferredStage deferred_stage_;
@@ -133,8 +144,6 @@ class CONTENT_EXPORT ResourceLoader : public net::URLRequest::Delegate,
   // consumer.  We are waiting for a notification to complete the transfer, at
   // which point we'll receive a new ResourceHandler.
   bool is_transferring_;
-
-  scoped_ptr<net::ClientCertStore> client_cert_store_;
 
   base::WeakPtrFactory<ResourceLoader> weak_ptr_factory_;
 

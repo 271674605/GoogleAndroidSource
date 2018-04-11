@@ -46,6 +46,7 @@
 #include <unicode/uidna.h>
 
 #include "base/i18n/number_formatting.h"
+#include "base/lazy_instance.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -104,10 +105,6 @@ std::string ProcessRawBytes(SECItem* data) {
   return x509_certificate_model::ProcessRawBytes(data->data, data->len);
 }
 
-}  // namespace
-
-namespace mozilla_security_manager {
-
 SECOidTag ms_cert_ext_certtype = SEC_OID_UNKNOWN;
 SECOidTag ms_certsrv_ca_version = SEC_OID_UNKNOWN;
 SECOidTag ms_nt_principal_name = SEC_OID_UNKNOWN;
@@ -130,41 +127,48 @@ SECOidTag eku_netscape_international_step_up = SEC_OID_UNKNOWN;
 SECOidTag cert_attribute_business_category = SEC_OID_UNKNOWN;
 SECOidTag cert_attribute_ev_incorporation_country = SEC_OID_UNKNOWN;
 
-void RegisterDynamicOids() {
-  if (ms_cert_ext_certtype != SEC_OID_UNKNOWN)
-    return;
+class DynamicOidRegisterer {
+ public:
+  DynamicOidRegisterer() {
+    ms_cert_ext_certtype = RegisterDynamicOid("1.3.6.1.4.1.311.20.2");
+    ms_certsrv_ca_version = RegisterDynamicOid("1.3.6.1.4.1.311.21.1");
+    ms_nt_principal_name = RegisterDynamicOid("1.3.6.1.4.1.311.20.2.3");
+    ms_ntds_replication = RegisterDynamicOid("1.3.6.1.4.1.311.25.1");
 
-  ms_cert_ext_certtype = RegisterDynamicOid("1.3.6.1.4.1.311.20.2");
-  ms_certsrv_ca_version = RegisterDynamicOid("1.3.6.1.4.1.311.21.1");
-  ms_nt_principal_name = RegisterDynamicOid("1.3.6.1.4.1.311.20.2.3");
-  ms_ntds_replication = RegisterDynamicOid("1.3.6.1.4.1.311.25.1");
+    eku_ms_individual_code_signing = RegisterDynamicOid("1.3.6.1.4.1.311.2.1.21");
+    eku_ms_commercial_code_signing = RegisterDynamicOid("1.3.6.1.4.1.311.2.1.22");
+    eku_ms_trust_list_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.1");
+    eku_ms_time_stamping = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.2");
+    eku_ms_server_gated_crypto = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.3");
+    eku_ms_encrypting_file_system = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.4");
+    eku_ms_file_recovery = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.4.1");
+    eku_ms_windows_hardware_driver_verification = RegisterDynamicOid(
+        "1.3.6.1.4.1.311.10.3.5");
+    eku_ms_qualified_subordination = RegisterDynamicOid(
+        "1.3.6.1.4.1.311.10.3.10");
+    eku_ms_key_recovery = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.11");
+    eku_ms_document_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.12");
+    eku_ms_lifetime_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.13");
+    eku_ms_smart_card_logon = RegisterDynamicOid("1.3.6.1.4.1.311.20.2.2");
+    eku_ms_key_recovery_agent = RegisterDynamicOid("1.3.6.1.4.1.311.21.6");
+    eku_netscape_international_step_up = RegisterDynamicOid(
+        "2.16.840.1.113730.4.1");
 
-  eku_ms_individual_code_signing = RegisterDynamicOid("1.3.6.1.4.1.311.2.1.21");
-  eku_ms_commercial_code_signing = RegisterDynamicOid("1.3.6.1.4.1.311.2.1.22");
-  eku_ms_trust_list_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.1");
-  eku_ms_time_stamping = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.2");
-  eku_ms_server_gated_crypto = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.3");
-  eku_ms_encrypting_file_system = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.4");
-  eku_ms_file_recovery = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.4.1");
-  eku_ms_windows_hardware_driver_verification = RegisterDynamicOid(
-      "1.3.6.1.4.1.311.10.3.5");
-  eku_ms_qualified_subordination = RegisterDynamicOid(
-      "1.3.6.1.4.1.311.10.3.10");
-  eku_ms_key_recovery = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.11");
-  eku_ms_document_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.12");
-  eku_ms_lifetime_signing = RegisterDynamicOid("1.3.6.1.4.1.311.10.3.13");
-  eku_ms_smart_card_logon = RegisterDynamicOid("1.3.6.1.4.1.311.20.2.2");
-  eku_ms_key_recovery_agent = RegisterDynamicOid("1.3.6.1.4.1.311.21.6");
-  eku_netscape_international_step_up = RegisterDynamicOid(
-      "2.16.840.1.113730.4.1");
+    // These two OIDs will be built-in as SEC_OID_BUSINESS_CATEGORY and
+    // SEC_OID_EV_INCORPORATION_COUNTRY starting in NSS 3.13.  Until then,
+    // we need to add them dynamically.
+    cert_attribute_business_category = RegisterDynamicOid("2.5.4.15");
+    cert_attribute_ev_incorporation_country = RegisterDynamicOid(
+        "1.3.6.1.4.1.311.60.2.1.3");
+  }
+};
 
-  // These two OIDs will be built-in as SEC_OID_BUSINESS_CATEGORY and
-  // SEC_OID_EV_INCORPORATION_COUNTRY starting in NSS 3.13.  Until then,
-  // we need to add them dynamically.
-  cert_attribute_business_category = RegisterDynamicOid("2.5.4.15");
-  cert_attribute_ev_incorporation_country = RegisterDynamicOid(
-      "1.3.6.1.4.1.311.60.2.1.3");
-}
+static base::LazyInstance<DynamicOidRegisterer>::Leaky
+    g_dynamic_oid_registerer = LAZY_INSTANCE_INITIALIZER;
+
+}  // namespace
+
+namespace mozilla_security_manager {
 
 std::string DumpOidString(SECItem* oid) {
   char* pr_string = CERT_GetOidString(oid);
@@ -178,6 +182,8 @@ std::string DumpOidString(SECItem* oid) {
 }
 
 std::string GetOIDText(SECItem* oid) {
+  g_dynamic_oid_registerer.Get();
+
   int string_id;
   SECOidTag oid_tag = SECOID_FindOIDTag(oid);
   switch (oid_tag) {
@@ -446,7 +452,7 @@ std::string ProcessBasicConstraints(SECItem* extension_data) {
     rv = l10n_util::GetStringUTF8(IDS_CERT_X509_BASIC_CONSTRAINT_IS_NOT_CA);
   rv += '\n';
   if (value.pathLenConstraint != -1) {
-    string16 depth;
+    base::string16 depth;
     if (value.pathLenConstraint == CERT_UNLIMITED_PATH_CONSTRAINT) {
       depth = l10n_util::GetStringUTF16(
           IDS_CERT_X509_BASIC_CONSTRAINT_PATH_LEN_UNLIMITED);
@@ -469,6 +475,7 @@ std::string ProcessGeneralName(PRArenaPool* arena,
   switch (current->type) {
     case certOtherName: {
       key = GetOIDText(&current->name.OthName.oid);
+      // g_dynamic_oid_registerer.Get() will have been run by GetOIDText.
       SECOidTag oid_tag = SECOID_FindOIDTag(&current->name.OthName.oid);
       if (oid_tag == ms_nt_principal_name) {
         // The type of this name is apparently nowhere explicitly
@@ -537,11 +544,14 @@ std::string ProcessGeneralName(PRArenaPool* arena,
       break;
     case certIPAddress: {
       key = l10n_util::GetStringUTF8(IDS_CERT_GENERAL_NAME_IP_ADDRESS);
+
       net::IPAddressNumber ip(
           current->name.other.data,
           current->name.other.data + current->name.other.len);
-      value = net::IPEndPoint(ip, 0).ToStringWithoutPort();
-      if (value.empty()) {
+
+      if (net::GetAddressFamily(ip) != net::ADDRESS_FAMILY_UNSPECIFIED) {
+        value = net::IPAddressToString(ip);
+      } else {
         // Invalid IP address.
         value = ProcessRawBytes(&current->name.other);
       }
@@ -553,8 +563,8 @@ std::string ProcessGeneralName(PRArenaPool* arena,
       break;
   }
   std::string rv(l10n_util::GetStringFUTF8(IDS_CERT_UNKNOWN_OID_INFO_FORMAT,
-                                           UTF8ToUTF16(key),
-                                           UTF8ToUTF16(value)));
+                                           base::UTF8ToUTF16(key),
+                                           base::UTF8ToUTF16(value)));
   rv += '\n';
   return rv;
 }
@@ -601,7 +611,7 @@ std::string ProcessSubjectKeyId(SECItem* extension_data) {
   }
 
   rv = l10n_util::GetStringFUTF8(IDS_CERT_KEYID_FORMAT,
-                                 ASCIIToUTF16(ProcessRawBytes(&decoded)));
+                                 base::ASCIIToUTF16(ProcessRawBytes(&decoded)));
   return rv;
 }
 
@@ -616,21 +626,23 @@ std::string ProcessAuthKeyId(SECItem* extension_data) {
 
   if (ret->keyID.len > 0) {
     rv += l10n_util::GetStringFUTF8(IDS_CERT_KEYID_FORMAT,
-                                    ASCIIToUTF16(ProcessRawBytes(&ret->keyID)));
+                                    base::ASCIIToUTF16(
+                                        ProcessRawBytes(&ret->keyID)));
     rv += '\n';
   }
 
   if (ret->authCertIssuer) {
     rv += l10n_util::GetStringFUTF8(
         IDS_CERT_ISSUER_FORMAT,
-        UTF8ToUTF16(ProcessGeneralNames(arena.get(), ret->authCertIssuer)));
+        base::UTF8ToUTF16(
+            ProcessGeneralNames(arena.get(), ret->authCertIssuer)));
     rv += '\n';
   }
 
   if (ret->authCertSerialNumber.len > 0) {
     rv += l10n_util::GetStringFUTF8(
         IDS_CERT_SERIAL_NUMBER_FORMAT,
-        ASCIIToUTF16(ProcessRawBytes(&ret->authCertSerialNumber)));
+        base::ASCIIToUTF16(ProcessRawBytes(&ret->authCertSerialNumber)));
     rv += '\n';
   }
 
@@ -666,7 +678,7 @@ std::string ProcessUserNotice(SECItem* der_notice) {
         if (itemList != notice->noticeReference.noticeNumbers)
           rv += ", ";
         rv += '#';
-        rv += UTF16ToUTF8(base::UintToString16(number));
+        rv += base::UTF16ToUTF8(base::UintToString16(number));
       }
       itemList++;
     }
@@ -711,7 +723,7 @@ std::string ProcessCertificatePolicies(SECItem* extension_data) {
     // complicated, since we don't want to do the EV check synchronously.)
     if (policyInfo->policyQualifiers) {
       rv += l10n_util::GetStringFUTF8(IDS_CERT_MULTILINE_INFO_START_FORMAT,
-                                      UTF8ToUTF16(key));
+                                      base::UTF8ToUTF16(key));
     } else {
       rv += key;
     }
@@ -726,7 +738,7 @@ std::string ProcessCertificatePolicies(SECItem* extension_data) {
         CERTPolicyQualifier* policyQualifier = *policyQualifiers++;
         rv += l10n_util::GetStringFUTF8(
             IDS_CERT_MULTILINE_INFO_START_FORMAT,
-            UTF8ToUTF16(GetOIDText(&policyQualifier->qualifierID)));
+            base::UTF8ToUTF16(GetOIDText(&policyQualifier->qualifierID)));
         switch(policyQualifier->oid) {
           case SEC_OID_PKIX_CPS_POINTER_QUALIFIER:
             rv += "    ";
@@ -808,7 +820,8 @@ std::string ProcessCrlDistPoints(SECItem* extension_data) {
     if (point->crlIssuer) {
       rv += l10n_util::GetStringFUTF8(
           IDS_CERT_ISSUER_FORMAT,
-          UTF8ToUTF16(ProcessGeneralNames(arena.get(), point->crlIssuer)));
+          base::UTF8ToUTF16(
+              ProcessGeneralNames(arena.get(), point->crlIssuer)));
     }
   }
   return rv;
@@ -827,8 +840,8 @@ std::string ProcessAuthInfoAccess(SECItem* extension_data) {
 
   while (*aia != NULL) {
     desc = *aia++;
-    string16 location_str = UTF8ToUTF16(ProcessGeneralName(arena.get(),
-                                                           desc->location));
+    base::string16 location_str =
+        base::UTF8ToUTF16(ProcessGeneralName(arena.get(), desc->location));
     switch (SECOID_FindOIDTag(&desc->method)) {
     case SEC_OID_PKIX_OCSP:
       rv += l10n_util::GetStringFUTF8(IDS_CERT_OCSP_RESPONDER_FORMAT,
@@ -840,7 +853,8 @@ std::string ProcessAuthInfoAccess(SECItem* extension_data) {
       break;
     default:
       rv += l10n_util::GetStringFUTF8(IDS_CERT_UNKNOWN_OID_INFO_FORMAT,
-                                      UTF8ToUTF16(GetOIDText(&desc->method)),
+                                      base::UTF8ToUTF16(
+                                          GetOIDText(&desc->method)),
                                       location_str);
       break;
     }
@@ -962,23 +976,27 @@ std::string ProcessExtKeyUsage(SECItem* extension_data) {
     std::string oid_dump = DumpOidString(oid);
     std::string oid_text = GetOIDText(oid);
 
-    // If oid is one we recognize, oid_text will have a text description of the OID,
-    // which we display along with the oid_dump.  If we don't recognize the OID,
-    // GetOIDText will return the same value as DumpOidString, so just display
-    // the OID alone.
+    // If oid is one we recognize, oid_text will have a text description of the
+    // OID, which we display along with the oid_dump.  If we don't recognize the
+    // OID, GetOIDText will return the same value as DumpOidString, so just
+    // display the OID alone.
     if (oid_dump == oid_text)
       rv += oid_dump;
     else
       rv += l10n_util::GetStringFUTF8(IDS_CERT_EXT_KEY_USAGE_FORMAT,
-                                      UTF8ToUTF16(oid_text),
-                                      UTF8ToUTF16(oid_dump));
+                                      base::UTF8ToUTF16(oid_text),
+                                      base::UTF8ToUTF16(oid_dump));
     rv += '\n';
   }
   CERT_DestroyOidSequence(extension_key_usage);
   return rv;
 }
 
-std::string ProcessExtensionData(SECOidTag oid_tag, SECItem* extension_data) {
+std::string ProcessExtensionData(CERTCertExtension* extension) {
+  g_dynamic_oid_registerer.Get();
+  SECOidTag oid_tag = SECOID_FindOIDTag(&extension->id);
+  SECItem* extension_data = &extension->value;
+
   // This (and its sub-functions) are based on the same-named functions in
   // security/manager/ssl/src/nsNSSCertHelper.cpp.
   switch (oid_tag) {
@@ -1030,9 +1048,9 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
         rv = l10n_util::GetStringFUTF8(
             IDS_CERT_RSA_PUBLIC_KEY_DUMP_FORMAT,
             base::UintToString16(key->u.rsa.modulus.len * 8),
-            UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.modulus)),
+            base::UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.modulus)),
             base::UintToString16(key->u.rsa.publicExponent.len * 8),
-            UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.publicExponent)));
+            base::UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.publicExponent)));
         break;
       }
       default:
@@ -1059,7 +1077,7 @@ net::CertType GetCertType(CERTCertificate *cert) {
   // TODO(mattm): http://crbug.com/128633.
   if (trust.sslFlags & CERTDB_TERMINAL_RECORD)
     return net::SERVER_CERT;
-  return net::UNKNOWN_CERT;
+  return net::OTHER_CERT;
 }
 
 }  // namespace mozilla_security_manager

@@ -20,14 +20,13 @@ import android.graphics.Rect;
 import android.os.SystemClock;
 import android.view.ViewConfiguration;
 
-import com.google.android.droiddriver.InputInjector;
 import com.google.android.droiddriver.UiElement;
 import com.google.android.droiddriver.util.Events;
 
 /**
  * An action that does clicks on an UiElement.
  */
-public abstract class ClickAction extends BaseAction {
+public abstract class ClickAction extends EventAction {
 
   public static final ClickAction SINGLE = new SingleClick(1000L);
   public static final ClickAction LONG = new LongClick(1000L);
@@ -42,13 +41,13 @@ public abstract class ClickAction extends BaseAction {
 
     @Override
     public boolean perform(InputInjector injector, UiElement element) {
-      SINGLE.perform(injector, element);
-      SINGLE.perform(injector, element);
+      SINGLE.perform(element);
+      SINGLE.perform(element);
       return true;
     }
   }
 
-  private static class LongClick extends ClickAction {
+  public static class LongClick extends ClickAction {
     public LongClick(long timeoutMillis) {
       super(timeoutMillis);
     }

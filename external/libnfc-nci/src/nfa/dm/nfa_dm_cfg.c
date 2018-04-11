@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2011-2013 Broadcom Corporation
+ *  Copyright (C) 2011-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -97,17 +97,27 @@ UINT8 nfa_dm_num_dm_interface_mapping = 0;
 const tNFA_DM_CFG nfa_dm_cfg =
 {
     NFA_DM_AUTO_DETECT_NDEF,                /* Automatic NDEF detection (when not in exclusive RF mode) */
-    NFA_DM_AUTO_READ_NDEF                   /* Automatic NDEF read (when not in exclusive RF mode)      */
-
+    NFA_DM_AUTO_READ_NDEF,                  /* Automatic NDEF read (when not in exclusive RF mode)      */
+    NFA_DM_AUTO_PRESENCE_CHECK,             /* Automatic presence check                                 */
+    NFA_DM_PRESENCE_CHECK_OPTION,           /* Use sleep/wake(last interface) for ISODEP presence check */
+    NFA_DM_MAX_PRESENCE_CHECK_TIMEOUT       /* Maximum time to wait for presence check response         */
 };
 
 tNFA_DM_CFG *p_nfa_dm_cfg = (tNFA_DM_CFG *) &nfa_dm_cfg;
 
+const UINT8 nfa_hci_whitelist[] =
+{
+    0x02,
+    0x03,
+    0x04
+};
 
 const tNFA_HCI_CFG nfa_hci_cfg =
 {
     NFA_HCI_NETWK_INIT_IDLE_TIMEOUT, /* Max HCI Network IDLE time to wait for EE DISC REQ Ntf(s) */
-    NFA_HCI_RESPONSE_TIMEOUT         /* Maximum HCP Response time to any HCP Command */
+    NFA_HCI_RESPONSE_TIMEOUT,        /* Maximum HCP Response time to any HCP Command */
+    0x03,                            /* Number of host in the whitelist of Terminal host */
+    (UINT8 *) nfa_hci_whitelist      /* Pointer to the Whitelist of Terminal Host */
 };
 
 tNFA_HCI_CFG *p_nfa_hci_cfg = (tNFA_HCI_CFG *) &nfa_hci_cfg;

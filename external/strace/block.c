@@ -26,9 +26,6 @@
  */
 
 #include "defs.h"
-#ifdef LINUX
-#include <stdint.h>
-#include <inttypes.h>
 #include <linux/blkpg.h>
 #include <linux/fs.h>
 #include <linux/hdreg.h>
@@ -54,7 +51,7 @@ struct blk_user_trace_setup {
 #ifndef BLKTRACESTART
 #define BLKTRACESTART _IO(0x12,116)
 #endif
-#ifndef BLKTRACESTART
+#ifndef BLKTRACESTOP
 #define BLKTRACESTOP _IO(0x12,117)
 #endif
 #ifndef BLKTRACETEARDOWN
@@ -82,18 +79,14 @@ struct blk_user_trace_setup {
 #define BLKSECDISCARD _IO(0x12,125)
 #endif
 
-static const struct xlat blkpg_ops[] = {
-	{ BLKPG_ADD_PARTITION,	"BLKPG_ADD_PARTITION", },
-	{ BLKPG_DEL_PARTITION,	"BLKPG_DEL_PARTITION", },
-	{ 0,			NULL },
-};
+#include "xlat/blkpg_ops.h"
 
 static void
 print_blkpg_req(struct tcb *tcp, struct blkpg_ioctl_arg *blkpg)
 {
 	struct blkpg_partition p;
 
-	tprintf("{");
+	tprints("{");
 	printxval(blkpg_ops, blkpg->op, "BLKPG_???");
 
 	tprintf(", flags=%d, datalen=%d, ",
@@ -139,7 +132,7 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 			if (syserror(tcp) || umove(tcp, arg, &val) < 0)
 				tprintf(", %#lx", arg);
 			else
-				tprintf(", %hu", val);
+				tprintf(", %u", (unsigned)val);
 		}
 		break;
 
@@ -191,9 +184,10 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 				tprintf(", %#lx", arg);
 			else
 				tprintf(", %lu", val);
-			}
+		}
 		break;
 
+#ifdef HAVE_BLKGETSIZE64
 	/* return an uint64_t */
 	case BLKGETSIZE64:
 		if (exiting(tcp)) {
@@ -204,6 +198,7 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 				tprintf(", %" PRIu64, val);
 		}
 		break;
+#endif
 
 	/* More complex types */
 	case BLKDISCARD:
@@ -224,10 +219,12 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 			if (syserror(tcp) || umove(tcp, arg, &geo) < 0)
 				tprintf(", %#lx", arg);
 			else
-				tprintf(", {heads=%hhu, sectors=%hhu, "
-					"cylinders=%hu, start=%lu}",
-					geo.heads, geo.sectors,
-					geo.cylinders, geo.start);
+				tprintf(", {heads=%u, sectors=%u, "
+					"cylinders=%u, start=%lu}",
+					(unsigned)geo.heads,
+					(unsigned)geo.sectors,
+					(unsigned)geo.cylinders,
+					geo.start);
 		}
 		break;
 
@@ -237,7 +234,7 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 			if (umove(tcp, arg, &blkpg) < 0)
 				tprintf(", %#lx", arg);
 			else {
-				tprintf(", ");
+				tprints(", ");
 				print_blkpg_req(tcp, &blkpg);
 			}
 		}
@@ -249,10 +246,10 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 			if (umove(tcp, arg, &buts) < 0)
 				tprintf(", %#lx", arg);
 			else
-				tprintf(", {act_mask=%hu, buf_size=%u, "
+				tprintf(", {act_mask=%u, buf_size=%u, "
 					"buf_nr=%u, start_lba=%" PRIu64 ", "
 					"end_lba=%" PRIu64 ", pid=%u}",
-					buts.act_mask, buts.buf_size,
+					(unsigned)buts.act_mask, buts.buf_size,
 					buts.buf_nr, buts.start_lba,
 					buts.end_lba, buts.pid);
 		}
@@ -280,4 +277,3 @@ block_ioctl(struct tcb *tcp, long code, long arg)
 	};
 	return 1;
 }
-#endif /* LINUX */

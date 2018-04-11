@@ -1,3 +1,4 @@
+# GYP for building gpu
 {
   'target_defaults': {
     'conditions': [
@@ -25,31 +26,6 @@
         'sources/': [ ['exclude', '_nacl.(h|cpp)$'],
         ],
       }],
-      [ 'skia_os == "android"', {
-        'defines': [
-          'GR_ANDROID_BUILD=1',
-        ],
-      }],
-      [ 'skia_os == "mac"', {
-        'defines': [
-          'GR_MAC_BUILD=1',
-        ],
-      }],
-      [ 'skia_os == "linux" or skia_os == "chromeos"', {
-        'defines': [
-          'GR_LINUX_BUILD=1',
-        ],
-      }],
-      [ 'skia_os == "ios"', {
-        'defines': [
-          'GR_IOS_BUILD=1',
-        ],
-      }],
-      [ 'skia_os == "win"', {
-        'defines': [
-          'GR_WIN32_BUILD=1',
-        ],
-      }],
       # nullify the targets in this gyp file if skia_gpu is 0
       [ 'skia_gpu == 0', {
         'sources/': [
@@ -75,37 +51,21 @@
           ],
         },
       }],
-      [ 'skia_texture_cache_mb_limit != 0', {
+      [ 'skia_resource_cache_mb_limit != 0', {
         'defines': [
-          'GR_DEFAULT_TEXTURE_CACHE_MB_LIMIT=<(skia_texture_cache_mb_limit)',
+          'GR_DEFAULT_RESOURCE_CACHE_MB_LIMIT=<(skia_resource_cache_mb_limit)',
+        ],
+      }],
+      [ 'skia_resource_cache_count_limit != 0', {
+        'defines': [
+          'GR_DEFAULT_RESOURCE_CACHE_COUNT_LIMIT=<(skia_resource_cache_count_limit)',
         ],
       }],
     ],
     'direct_dependent_settings': {
       'conditions': [
-        [ 'skia_os == "android"', {
-          'defines': [
-            'GR_ANDROID_BUILD=1',
-          ],
-        }],
-        [ 'skia_os == "mac"', {
-          'defines': [
-            'GR_MAC_BUILD=1',
-          ],
-        }],
-        [ 'skia_os == "linux"', {
-          'defines': [
-            'GR_LINUX_BUILD=1',
-          ],
-        }],
-        [ 'skia_os == "ios"', {
-          'defines': [
-            'GR_IOS_BUILD=1',
-          ],
-        }],
         [ 'skia_os == "win"', {
           'defines': [
-            'GR_WIN32_BUILD=1',
             'GR_GL_FUNCTION_TYPE=__stdcall',
           ],
         }],
@@ -114,6 +74,9 @@
         '../include/gpu',
       ],
     },
+    'defines': [
+      'GR_COMPRESS_ALPHA_MASK=0',
+    ],
   },
   'targets': [
     {
@@ -122,9 +85,10 @@
       'type': 'static_library',
       'standalone_static_library': 1,
       'dependencies': [
-        'angle.gyp:*',
         'core.gyp:*',
         'utils.gyp:*',
+        'etc1.gyp:libetc1',
+        'ktx.gyp:libSkKTX',
       ],
       'includes': [
         'gpu.gypi',
@@ -133,9 +97,6 @@
         '../include/gpu',
         '../src/core',
         '../src/gpu',
-      ],
-      'export_dependent_settings': [
-        'angle.gyp:*',
       ],
       'sources': [
         '<@(skgpu_sources)',
@@ -146,15 +107,7 @@
         '<@(skgpu_null_gl_sources)',
         'gpu.gypi', # Makes the gypi appear in IDEs (but does not modify the build).
       ],
-      'defines': [
-        'GR_IMPLEMENTATION=1',
-      ],
       'conditions': [
-        [ 'skia_nv_path_rendering', {
-          'defines': [
-            'GR_GL_USE_NV_PATH_RENDERING=1',
-          ],
-        }],
         [ 'skia_stroke_path_rendering', {
           'sources': [
             '../experimental/StrokePathRenderer/GrStrokePathRenderer.h',
@@ -174,6 +127,15 @@
           ],
           'defines': [
             'GR_ANDROID_PATH_RENDERING=1',
+          ],
+        }],
+        [ 'skia_chrome_utils', {
+          'sources': [
+            '../experimental/ChromeUtils/SkBorder.cpp',
+            '../experimental/ChromeUtils/SkBorder.h',
+          ],
+          'defines': [
+            'GR_CHROME_UTILS=1',
           ],
         }],
         [ 'skia_os == "linux" or skia_os == "chromeos"', {
@@ -236,15 +198,16 @@
             '../src/gpu/gl/GrGLCreateNativeInterface_none.cpp',
           ],
         }],
-        [ 'not skia_angle', {
+        [ 'skia_angle', {
+          'dependencies': [
+            'angle.gyp:*',
+          ],
+          'export_dependent_settings': [
+            'angle.gyp:*',
+          ],
+        }, { # not skia_angle
           'sources!': [
             '<@(skgpu_angle_gl_sources)',
-          ],
-          'dependencies!': [
-            'angle.gyp:*',
-          ],
-          'export_dependent_settings!': [
-            'angle.gyp:*',
           ],
         }],
         [ 'skia_os == "android"', {
@@ -263,9 +226,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

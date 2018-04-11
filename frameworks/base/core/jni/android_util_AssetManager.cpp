@@ -35,7 +35,16 @@
 #include <androidfw/AssetManager.h>
 #include <androidfw/ResourceTypes.h>
 
+#include <private/android_filesystem_config.h> // for AID_SYSTEM
+
 #include <stdio.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <linux/capability.h>
+extern "C" int capget(cap_user_header_t hdrp, cap_user_data_t datap);
+extern "C" int capset(cap_user_header_t hdrp, const cap_user_data_t datap);
+
 
 namespace android {
 
@@ -64,6 +73,13 @@ static struct assetmanager_offsets_t
     jfieldID mObject;
 } gAssetManagerOffsets;
 
+static struct sparsearray_offsets_t
+{
+    jclass classObject;
+    jmethodID constructor;
+    jmethodID put;
+} gSparseArrayOffsets;
+
 jclass g_stringClass = NULL;
 
 // ----------------------------------------------------------------------------
@@ -88,7 +104,7 @@ jint copyValue(JNIEnv* env, jobject outValue, const ResTable* table,
 {
     env->SetIntField(outValue, gTypedValueOffsets.mType, value.dataType);
     env->SetIntField(outValue, gTypedValueOffsets.mAssetCookie,
-                        (jint)table->getTableCookie(block));
+                     static_cast<jint>(table->getTableCookie(block)));
     env->SetIntField(outValue, gTypedValueOffsets.mData, value.data);
     env->SetObjectField(outValue, gTypedValueOffsets.mString, NULL);
     env->SetIntField(outValue, gTypedValueOffsets.mResourceId, ref);
@@ -100,12 +116,70 @@ jint copyValue(JNIEnv* env, jobject outValue, const ResTable* table,
     return block;
 }
 
+// This is called by zygote (running as user root) as part of preloadResources.
+static void verifySystemIdmaps()
+{
+    pid_t pid;
+    char system_id[10];
+
+    snprintf(system_id, sizeof(system_id), "%d", AID_SYSTEM);
+
+    switch (pid = fork()) {
+        case -1:
+            ALOGE("failed to fork for idmap: %s", strerror(errno));
+            break;
+        case 0: // child
+            {
+                struct __user_cap_header_struct capheader;
+                struct __user_cap_data_struct capdata;
+
+                memset(&capheader, 0, sizeof(capheader));
+                memset(&capdata, 0, sizeof(capdata));
+
+                capheader.version = _LINUX_CAPABILITY_VERSION;
+                capheader.pid = 0;
+
+                if (capget(&capheader, &capdata) != 0) {
+                    ALOGE("capget: %s\n", strerror(errno));
+                    exit(1);
+                }
+
+                capdata.effective = capdata.permitted;
+                if (capset(&capheader, &capdata) != 0) {
+                    ALOGE("capset: %s\n", strerror(errno));
+                    exit(1);
+                }
+
+                if (setgid(AID_SYSTEM) != 0) {
+                    ALOGE("setgid: %s\n", strerror(errno));
+                    exit(1);
+                }
+
+                if (setuid(AID_SYSTEM) != 0) {
+                    ALOGE("setuid: %s\n", strerror(errno));
+                    exit(1);
+                }
+
+                execl(AssetManager::IDMAP_BIN, AssetManager::IDMAP_BIN, "--scan",
+                        AssetManager::OVERLAY_DIR, AssetManager::TARGET_PACKAGE_NAME,
+                        AssetManager::TARGET_APK_PATH, AssetManager::IDMAP_DIR, (char*)NULL);
+                ALOGE("failed to execl for idmap: %s", strerror(errno));
+                exit(1); // should never get here
+            }
+            break;
+        default: // parent
+            waitpid(pid, NULL, 0);
+            break;
+    }
+}
+
 // ----------------------------------------------------------------------------
 
 // this guy is exported to other jni routines
 AssetManager* assetManagerForJavaObject(JNIEnv* env, jobject obj)
 {
-    AssetManager* am = (AssetManager*)env->GetIntField(obj, gAssetManagerOffsets.mObject);
+    jlong amHandle = env->GetLongField(obj, gAssetManagerOffsets.mObject);
+    AssetManager* am = reinterpret_cast<AssetManager*>(amHandle);
     if (am != NULL) {
         return am;
     }
@@ -113,7 +187,7 @@ AssetManager* assetManagerForJavaObject(JNIEnv* env, jobject obj)
     return NULL;
 }
 
-static jint android_content_AssetManager_openAsset(JNIEnv* env, jobject clazz,
+static jlong android_content_AssetManager_openAsset(JNIEnv* env, jobject clazz,
                                                 jstring fileName, jint mode)
 {
     AssetManager* am = assetManagerForJavaObject(env, clazz);
@@ -125,6 +199,7 @@ static jint android_content_AssetManager_openAsset(JNIEnv* env, jobject clazz,
 
     ScopedUtfChars fileName8(env, fileName);
     if (fileName8.c_str() == NULL) {
+        jniThrowException(env, "java/lang/IllegalArgumentException", "Empty file name");
         return -1;
     }
 
@@ -143,7 +218,7 @@ static jint android_content_AssetManager_openAsset(JNIEnv* env, jobject clazz,
 
     //printf("Created Asset Stream: %p\n", a);
 
-    return (jint)a;
+    return reinterpret_cast<jlong>(a);
 }
 
 static jobject returnParcelFileDescriptor(JNIEnv* env, Asset* a, jlongArray outOffsets)
@@ -205,7 +280,7 @@ static jobject android_content_AssetManager_openAssetFd(JNIEnv* env, jobject cla
     return returnParcelFileDescriptor(env, a, outOffsets);
 }
 
-static jint android_content_AssetManager_openNonAssetNative(JNIEnv* env, jobject clazz,
+static jlong android_content_AssetManager_openNonAssetNative(JNIEnv* env, jobject clazz,
                                                          jint cookie,
                                                          jstring fileName,
                                                          jint mode)
@@ -229,7 +304,8 @@ static jint android_content_AssetManager_openNonAssetNative(JNIEnv* env, jobject
     }
 
     Asset* a = cookie
-        ? am->openNonAsset((void*)cookie, fileName8.c_str(), (Asset::AccessMode)mode)
+        ? am->openNonAsset(static_cast<int32_t>(cookie), fileName8.c_str(),
+                (Asset::AccessMode)mode)
         : am->openNonAsset(fileName8.c_str(), (Asset::AccessMode)mode);
 
     if (a == NULL) {
@@ -239,7 +315,7 @@ static jint android_content_AssetManager_openNonAssetNative(JNIEnv* env, jobject
 
     //printf("Created Asset Stream: %p\n", a);
 
-    return (jint)a;
+    return reinterpret_cast<jlong>(a);
 }
 
 static jobject android_content_AssetManager_openNonAssetFdNative(JNIEnv* env, jobject clazz,
@@ -260,7 +336,7 @@ static jobject android_content_AssetManager_openNonAssetFdNative(JNIEnv* env, jo
     }
 
     Asset* a = cookie
-        ? am->openNonAsset((void*)cookie, fileName8.c_str(), Asset::ACCESS_RANDOM)
+        ? am->openNonAsset(static_cast<int32_t>(cookie), fileName8.c_str(), Asset::ACCESS_RANDOM)
         : am->openNonAsset(fileName8.c_str(), Asset::ACCESS_RANDOM);
 
     if (a == NULL) {
@@ -319,9 +395,9 @@ static jobjectArray android_content_AssetManager_list(JNIEnv* env, jobject clazz
 }
 
 static void android_content_AssetManager_destroyAsset(JNIEnv* env, jobject clazz,
-                                                   jint asset)
+                                                      jlong assetHandle)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     //printf("Destroying Asset Stream: %p\n", a);
 
@@ -334,9 +410,9 @@ static void android_content_AssetManager_destroyAsset(JNIEnv* env, jobject clazz
 }
 
 static jint android_content_AssetManager_readAssetChar(JNIEnv* env, jobject clazz,
-                                                    jint asset)
+                                                       jlong assetHandle)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     if (a == NULL) {
         jniThrowNullPointerException(env, "asset");
@@ -349,10 +425,10 @@ static jint android_content_AssetManager_readAssetChar(JNIEnv* env, jobject claz
 }
 
 static jint android_content_AssetManager_readAsset(JNIEnv* env, jobject clazz,
-                                                jint asset, jbyteArray bArray,
+                                                jlong assetHandle, jbyteArray bArray,
                                                 jint off, jint len)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     if (a == NULL || bArray == NULL) {
         jniThrowNullPointerException(env, "asset");
@@ -373,7 +449,7 @@ static jint android_content_AssetManager_readAsset(JNIEnv* env, jobject clazz,
     ssize_t res = a->read(b+off, len);
     env->ReleaseByteArrayElements(bArray, b, 0);
 
-    if (res > 0) return res;
+    if (res > 0) return static_cast<jint>(res);
 
     if (res < 0) {
         jniThrowException(env, "java/io/IOException", "");
@@ -382,10 +458,10 @@ static jint android_content_AssetManager_readAsset(JNIEnv* env, jobject clazz,
 }
 
 static jlong android_content_AssetManager_seekAsset(JNIEnv* env, jobject clazz,
-                                                 jint asset,
+                                                 jlong assetHandle,
                                                  jlong offset, jint whence)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     if (a == NULL) {
         jniThrowNullPointerException(env, "asset");
@@ -397,9 +473,9 @@ static jlong android_content_AssetManager_seekAsset(JNIEnv* env, jobject clazz,
 }
 
 static jlong android_content_AssetManager_getAssetLength(JNIEnv* env, jobject clazz,
-                                                      jint asset)
+                                                      jlong assetHandle)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     if (a == NULL) {
         jniThrowNullPointerException(env, "asset");
@@ -410,9 +486,9 @@ static jlong android_content_AssetManager_getAssetLength(JNIEnv* env, jobject cl
 }
 
 static jlong android_content_AssetManager_getAssetRemainingLength(JNIEnv* env, jobject clazz,
-                                                               jint asset)
+                                                               jlong assetHandle)
 {
-    Asset* a = (Asset*)asset;
+    Asset* a = reinterpret_cast<Asset*>(assetHandle);
 
     if (a == NULL) {
         jniThrowNullPointerException(env, "asset");
@@ -435,8 +511,27 @@ static jint android_content_AssetManager_addAssetPath(JNIEnv* env, jobject clazz
         return 0;
     }
 
-    void* cookie;
+    int32_t cookie;
     bool res = am->addAssetPath(String8(path8.c_str()), &cookie);
+
+    return (res) ? static_cast<jint>(cookie) : 0;
+}
+
+static jint android_content_AssetManager_addOverlayPath(JNIEnv* env, jobject clazz,
+                                                     jstring idmapPath)
+{
+    ScopedUtfChars idmapPath8(env, idmapPath);
+    if (idmapPath8.c_str() == NULL) {
+        return 0;
+    }
+
+    AssetManager* am = assetManagerForJavaObject(env, clazz);
+    if (am == NULL) {
+        return 0;
+    }
+
+    int32_t cookie;
+    bool res = am->addOverlayPath(String8(idmapPath8.c_str()), &cookie);
 
     return (res) ? (jint)cookie : 0;
 }
@@ -724,7 +819,11 @@ static jint android_content_AssetManager_loadResourceValue(JNIEnv* env, jobject 
         }
 #endif
     }
-    return block >= 0 ? copyValue(env, outValue, &res, value, ref, block, typeSpecFlags, &config) : block;
+    if (block >= 0) {
+        return copyValue(env, outValue, &res, value, ref, block, typeSpecFlags, &config);
+    }
+
+    return static_cast<jint>(block);
 }
 
 static jint android_content_AssetManager_loadResourceBagValue(JNIEnv* env, jobject clazz,
@@ -758,7 +857,7 @@ static jint android_content_AssetManager_loadResourceBagValue(JNIEnv* env, jobje
     res.unlock();
 
     if (block < 0) {
-        return block;
+        return static_cast<jint>(block);
     }
 
     uint32_t ref = ident;
@@ -771,7 +870,11 @@ static jint android_content_AssetManager_loadResourceBagValue(JNIEnv* env, jobje
         }
 #endif
     }
-    return block >= 0 ? copyValue(env, outValue, &res, value, ref, block, typeSpecFlags) : block;
+    if (block >= 0) {
+        return copyValue(env, outValue, &res, value, ref, block, typeSpecFlags);
+    }
+
+    return static_cast<jint>(block);
 }
 
 static jint android_content_AssetManager_getStringBlockCount(JNIEnv* env, jobject clazz)
@@ -783,14 +886,14 @@ static jint android_content_AssetManager_getStringBlockCount(JNIEnv* env, jobjec
     return am->getResources().getTableCount();
 }
 
-static jint android_content_AssetManager_getNativeStringBlock(JNIEnv* env, jobject clazz,
+static jlong android_content_AssetManager_getNativeStringBlock(JNIEnv* env, jobject clazz,
                                                            jint block)
 {
     AssetManager* am = assetManagerForJavaObject(env, clazz);
     if (am == NULL) {
         return 0;
     }
-    return (jint)am->getResources().getTableStringBlock(block);
+    return reinterpret_cast<jlong>(am->getResources().getTableStringBlock(block));
 }
 
 static jstring android_content_AssetManager_getCookieName(JNIEnv* env, jobject clazz,
@@ -800,7 +903,7 @@ static jstring android_content_AssetManager_getCookieName(JNIEnv* env, jobject c
     if (am == NULL) {
         return NULL;
     }
-    String8 name(am->getAssetPath((void*)cookie));
+    String8 name(am->getAssetPath(static_cast<int32_t>(cookie)));
     if (name.length() == 0) {
         jniThrowException(env, "java/lang/IndexOutOfBoundsException", "Empty cookie name");
         return NULL;
@@ -809,43 +912,63 @@ static jstring android_content_AssetManager_getCookieName(JNIEnv* env, jobject c
     return str;
 }
 
-static jint android_content_AssetManager_newTheme(JNIEnv* env, jobject clazz)
+static jobject android_content_AssetManager_getAssignedPackageIdentifiers(JNIEnv* env, jobject clazz)
 {
     AssetManager* am = assetManagerForJavaObject(env, clazz);
     if (am == NULL) {
         return 0;
     }
-    return (jint)(new ResTable::Theme(am->getResources()));
+
+    const ResTable& res = am->getResources();
+
+    jobject sparseArray = env->NewObject(gSparseArrayOffsets.classObject,
+            gSparseArrayOffsets.constructor);
+    const size_t N = res.getBasePackageCount();
+    for (size_t i = 0; i < N; i++) {
+        const String16 name = res.getBasePackageName(i);
+        env->CallVoidMethod(sparseArray, gSparseArrayOffsets.put, (jint) res.getBasePackageId(i),
+                env->NewString(name, name.size()));
+    }
+    return sparseArray;
+}
+
+static jlong android_content_AssetManager_newTheme(JNIEnv* env, jobject clazz)
+{
+    AssetManager* am = assetManagerForJavaObject(env, clazz);
+    if (am == NULL) {
+        return 0;
+    }
+    return reinterpret_cast<jlong>(new ResTable::Theme(am->getResources()));
 }
 
 static void android_content_AssetManager_deleteTheme(JNIEnv* env, jobject clazz,
-                                                     jint themeInt)
+                                                     jlong themeHandle)
 {
-    ResTable::Theme* theme = (ResTable::Theme*)themeInt;
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeHandle);
     delete theme;
 }
 
 static void android_content_AssetManager_applyThemeStyle(JNIEnv* env, jobject clazz,
-                                                         jint themeInt,
+                                                         jlong themeHandle,
                                                          jint styleRes,
                                                          jboolean force)
 {
-    ResTable::Theme* theme = (ResTable::Theme*)themeInt;
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeHandle);
     theme->applyStyle(styleRes, force ? true : false);
 }
 
 static void android_content_AssetManager_copyTheme(JNIEnv* env, jobject clazz,
-                                                   jint destInt, jint srcInt)
+                                                   jlong destHandle, jlong srcHandle)
 {
-    ResTable::Theme* dest = (ResTable::Theme*)destInt;
-    ResTable::Theme* src = (ResTable::Theme*)srcInt;
+    ResTable::Theme* dest = reinterpret_cast<ResTable::Theme*>(destHandle);
+    ResTable::Theme* src = reinterpret_cast<ResTable::Theme*>(srcHandle);
     dest->setTo(*src);
 }
 
 static jint android_content_AssetManager_loadThemeAttributeValue(
-    JNIEnv* env, jobject clazz, jint themeInt, jint ident, jobject outValue, jboolean resolve)
+    JNIEnv* env, jobject clazz, jlong themeHandle, jint ident, jobject outValue, jboolean resolve)
 {
-    ResTable::Theme* theme = (ResTable::Theme*)themeInt;
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeHandle);
     const ResTable& res(theme->getResTable());
 
     Res_value value;
@@ -866,21 +989,215 @@ static jint android_content_AssetManager_loadThemeAttributeValue(
 }
 
 static void android_content_AssetManager_dumpTheme(JNIEnv* env, jobject clazz,
-                                                   jint themeInt, jint pri,
+                                                   jlong themeHandle, jint pri,
                                                    jstring tag, jstring prefix)
 {
-    ResTable::Theme* theme = (ResTable::Theme*)themeInt;
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeHandle);
     const ResTable& res(theme->getResTable());
 
     // XXX Need to use params.
     theme->dumpToLog();
 }
 
+static jboolean android_content_AssetManager_resolveAttrs(JNIEnv* env, jobject clazz,
+                                                          jlong themeToken,
+                                                          jint defStyleAttr,
+                                                          jint defStyleRes,
+                                                          jintArray inValues,
+                                                          jintArray attrs,
+                                                          jintArray outValues,
+                                                          jintArray outIndices)
+{
+    if (themeToken == 0) {
+        jniThrowNullPointerException(env, "theme token");
+        return JNI_FALSE;
+    }
+    if (attrs == NULL) {
+        jniThrowNullPointerException(env, "attrs");
+        return JNI_FALSE;
+    }
+    if (outValues == NULL) {
+        jniThrowNullPointerException(env, "out values");
+        return JNI_FALSE;
+    }
+
+    DEBUG_STYLES(ALOGI("APPLY STYLE: theme=0x%x defStyleAttr=0x%x defStyleRes=0x%x",
+        themeToken, defStyleAttr, defStyleRes));
+
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeToken);
+    const ResTable& res = theme->getResTable();
+    ResTable_config config;
+    Res_value value;
+
+    const jsize NI = env->GetArrayLength(attrs);
+    const jsize NV = env->GetArrayLength(outValues);
+    if (NV < (NI*STYLE_NUM_ENTRIES)) {
+        jniThrowException(env, "java/lang/IndexOutOfBoundsException", "out values too small");
+        return JNI_FALSE;
+    }
+
+    jint* src = (jint*)env->GetPrimitiveArrayCritical(attrs, 0);
+    if (src == NULL) {
+        return JNI_FALSE;
+    }
+
+    jint* srcValues = (jint*)env->GetPrimitiveArrayCritical(inValues, 0);
+    const jsize NSV = srcValues == NULL ? 0 : env->GetArrayLength(inValues);
+
+    jint* baseDest = (jint*)env->GetPrimitiveArrayCritical(outValues, 0);
+    jint* dest = baseDest;
+    if (dest == NULL) {
+        env->ReleasePrimitiveArrayCritical(attrs, src, 0);
+        return JNI_FALSE;
+    }
+
+    jint* indices = NULL;
+    int indicesIdx = 0;
+    if (outIndices != NULL) {
+        if (env->GetArrayLength(outIndices) > NI) {
+            indices = (jint*)env->GetPrimitiveArrayCritical(outIndices, 0);
+        }
+    }
+
+    // Load default style from attribute, if specified...
+    uint32_t defStyleBagTypeSetFlags = 0;
+    if (defStyleAttr != 0) {
+        Res_value value;
+        if (theme->getAttribute(defStyleAttr, &value, &defStyleBagTypeSetFlags) >= 0) {
+            if (value.dataType == Res_value::TYPE_REFERENCE) {
+                defStyleRes = value.data;
+            }
+        }
+    }
+
+    // Now lock down the resource object and start pulling stuff from it.
+    res.lock();
+
+    // Retrieve the default style bag, if requested.
+    const ResTable::bag_entry* defStyleEnt = NULL;
+    uint32_t defStyleTypeSetFlags = 0;
+    ssize_t bagOff = defStyleRes != 0
+            ? res.getBagLocked(defStyleRes, &defStyleEnt, &defStyleTypeSetFlags) : -1;
+    defStyleTypeSetFlags |= defStyleBagTypeSetFlags;
+    const ResTable::bag_entry* endDefStyleEnt = defStyleEnt +
+        (bagOff >= 0 ? bagOff : 0);;
+
+    // Now iterate through all of the attributes that the client has requested,
+    // filling in each with whatever data we can find.
+    ssize_t block = 0;
+    uint32_t typeSetFlags;
+    for (jsize ii=0; ii<NI; ii++) {
+        const uint32_t curIdent = (uint32_t)src[ii];
+
+        DEBUG_STYLES(ALOGI("RETRIEVING ATTR 0x%08x...", curIdent));
+
+        // Try to find a value for this attribute...  we prioritize values
+        // coming from, first XML attributes, then XML style, then default
+        // style, and finally the theme.
+        value.dataType = Res_value::TYPE_NULL;
+        value.data = 0;
+        typeSetFlags = 0;
+        config.density = 0;
+
+        // Retrieve the current input value if available.
+        if (NSV > 0 && srcValues[ii] != 0) {
+            block = -1;
+            value.dataType = Res_value::TYPE_ATTRIBUTE;
+            value.data = srcValues[ii];
+            DEBUG_STYLES(ALOGI("-> From values: type=0x%x, data=0x%08x",
+                    value.dataType, value.data));
+        }
+
+        // Skip through the default style values until the end or the next possible match.
+        while (defStyleEnt < endDefStyleEnt && curIdent > defStyleEnt->map.name.ident) {
+            defStyleEnt++;
+        }
+        // Retrieve the current default style attribute if it matches, and step to next.
+        if (defStyleEnt < endDefStyleEnt && curIdent == defStyleEnt->map.name.ident) {
+            if (value.dataType == Res_value::TYPE_NULL) {
+                block = defStyleEnt->stringBlock;
+                typeSetFlags = defStyleTypeSetFlags;
+                value = defStyleEnt->map.value;
+                DEBUG_STYLES(ALOGI("-> From def style: type=0x%x, data=0x%08x",
+                        value.dataType, value.data));
+            }
+            defStyleEnt++;
+        }
+
+        uint32_t resid = 0;
+        if (value.dataType != Res_value::TYPE_NULL) {
+            // Take care of resolving the found resource to its final value.
+            ssize_t newBlock = theme->resolveAttributeReference(&value, block,
+                    &resid, &typeSetFlags, &config);
+            if (newBlock >= 0) block = newBlock;
+            DEBUG_STYLES(ALOGI("-> Resolved attr: type=0x%x, data=0x%08x",
+                    value.dataType, value.data));
+        } else {
+            // If we still don't have a value for this attribute, try to find
+            // it in the theme!
+            ssize_t newBlock = theme->getAttribute(curIdent, &value, &typeSetFlags);
+            if (newBlock >= 0) {
+                DEBUG_STYLES(ALOGI("-> From theme: type=0x%x, data=0x%08x",
+                        value.dataType, value.data));
+                newBlock = res.resolveReference(&value, block, &resid,
+                        &typeSetFlags, &config);
+#if THROW_ON_BAD_ID
+                if (newBlock == BAD_INDEX) {
+                    jniThrowException(env, "java/lang/IllegalStateException", "Bad resource!");
+                    return JNI_FALSE;
+                }
+#endif
+                if (newBlock >= 0) block = newBlock;
+                DEBUG_STYLES(ALOGI("-> Resolved theme: type=0x%x, data=0x%08x",
+                        value.dataType, value.data));
+            }
+        }
+
+        // Deal with the special @null value -- it turns back to TYPE_NULL.
+        if (value.dataType == Res_value::TYPE_REFERENCE && value.data == 0) {
+            DEBUG_STYLES(ALOGI("-> Setting to @null!"));
+            value.dataType = Res_value::TYPE_NULL;
+            block = -1;
+        }
+
+        DEBUG_STYLES(ALOGI("Attribute 0x%08x: type=0x%x, data=0x%08x",
+                curIdent, value.dataType, value.data));
+
+        // Write the final value back to Java.
+        dest[STYLE_TYPE] = value.dataType;
+        dest[STYLE_DATA] = value.data;
+        dest[STYLE_ASSET_COOKIE] =
+            block != -1 ? reinterpret_cast<jint>(res.getTableCookie(block)) : (jint)-1;
+        dest[STYLE_RESOURCE_ID] = resid;
+        dest[STYLE_CHANGING_CONFIGURATIONS] = typeSetFlags;
+        dest[STYLE_DENSITY] = config.density;
+
+        if (indices != NULL && value.dataType != Res_value::TYPE_NULL) {
+            indicesIdx++;
+            indices[indicesIdx] = ii;
+        }
+
+        dest += STYLE_NUM_ENTRIES;
+    }
+
+    res.unlock();
+
+    if (indices != NULL) {
+        indices[0] = indicesIdx;
+        env->ReleasePrimitiveArrayCritical(outIndices, indices, 0);
+    }
+    env->ReleasePrimitiveArrayCritical(outValues, baseDest, 0);
+    env->ReleasePrimitiveArrayCritical(inValues, srcValues, 0);
+    env->ReleasePrimitiveArrayCritical(attrs, src, 0);
+
+    return JNI_TRUE;
+}
+
 static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject clazz,
-                                                        jint themeToken,
+                                                        jlong themeToken,
                                                         jint defStyleAttr,
                                                         jint defStyleRes,
-                                                        jint xmlParserToken,
+                                                        jlong xmlParserToken,
                                                         jintArray attrs,
                                                         jintArray outValues,
                                                         jintArray outIndices)
@@ -898,12 +1215,12 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
         return JNI_FALSE;
     }
 
-    DEBUG_STYLES(LOGI("APPLY STYLE: theme=0x%x defStyleAttr=0x%x defStyleRes=0x%x xml=0x%x",
+    DEBUG_STYLES(ALOGI("APPLY STYLE: theme=0x%x defStyleAttr=0x%x defStyleRes=0x%x xml=0x%x",
         themeToken, defStyleAttr, defStyleRes, xmlParserToken));
 
-    ResTable::Theme* theme = (ResTable::Theme*)themeToken;
+    ResTable::Theme* theme = reinterpret_cast<ResTable::Theme*>(themeToken);
     const ResTable& res = theme->getResTable();
-    ResXMLParser* xmlParser = (ResXMLParser*)xmlParserToken;
+    ResXMLParser* xmlParser = reinterpret_cast<ResXMLParser*>(xmlParserToken);
     ResTable_config config;
     Res_value value;
 
@@ -996,7 +1313,7 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
     for (jsize ii=0; ii<NI; ii++) {
         const uint32_t curIdent = (uint32_t)src[ii];
 
-        DEBUG_STYLES(LOGI("RETRIEVING ATTR 0x%08x...", curIdent));
+        DEBUG_STYLES(ALOGI("RETRIEVING ATTR 0x%08x...", curIdent));
 
         // Try to find a value for this attribute...  we prioritize values
         // coming from, first XML attributes, then XML style, then default
@@ -1017,7 +1334,7 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
             xmlParser->getAttributeValue(ix, &value);
             ix++;
             curXmlAttr = xmlParser->getAttributeNameResID(ix);
-            DEBUG_STYLES(LOGI("-> From XML: type=0x%x, data=0x%08x",
+            DEBUG_STYLES(ALOGI("-> From XML: type=0x%x, data=0x%08x",
                     value.dataType, value.data));
         }
 
@@ -1031,7 +1348,7 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
                 block = styleEnt->stringBlock;
                 typeSetFlags = styleTypeSetFlags;
                 value = styleEnt->map.value;
-                DEBUG_STYLES(LOGI("-> From style: type=0x%x, data=0x%08x",
+                DEBUG_STYLES(ALOGI("-> From style: type=0x%x, data=0x%08x",
                         value.dataType, value.data));
             }
             styleEnt++;
@@ -1047,7 +1364,7 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
                 block = defStyleEnt->stringBlock;
                 typeSetFlags = defStyleTypeSetFlags;
                 value = defStyleEnt->map.value;
-                DEBUG_STYLES(LOGI("-> From def style: type=0x%x, data=0x%08x",
+                DEBUG_STYLES(ALOGI("-> From def style: type=0x%x, data=0x%08x",
                         value.dataType, value.data));
             }
             defStyleEnt++;
@@ -1059,14 +1376,14 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
             ssize_t newBlock = theme->resolveAttributeReference(&value, block,
                     &resid, &typeSetFlags, &config);
             if (newBlock >= 0) block = newBlock;
-            DEBUG_STYLES(LOGI("-> Resolved attr: type=0x%x, data=0x%08x",
+            DEBUG_STYLES(ALOGI("-> Resolved attr: type=0x%x, data=0x%08x",
                     value.dataType, value.data));
         } else {
             // If we still don't have a value for this attribute, try to find
             // it in the theme!
             ssize_t newBlock = theme->getAttribute(curIdent, &value, &typeSetFlags);
             if (newBlock >= 0) {
-                DEBUG_STYLES(LOGI("-> From theme: type=0x%x, data=0x%08x",
+                DEBUG_STYLES(ALOGI("-> From theme: type=0x%x, data=0x%08x",
                         value.dataType, value.data));
                 newBlock = res.resolveReference(&value, block, &resid,
                         &typeSetFlags, &config);
@@ -1077,26 +1394,26 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
                 }
 #endif
                 if (newBlock >= 0) block = newBlock;
-                DEBUG_STYLES(LOGI("-> Resolved theme: type=0x%x, data=0x%08x",
+                DEBUG_STYLES(ALOGI("-> Resolved theme: type=0x%x, data=0x%08x",
                         value.dataType, value.data));
             }
         }
 
         // Deal with the special @null value -- it turns back to TYPE_NULL.
         if (value.dataType == Res_value::TYPE_REFERENCE && value.data == 0) {
-            DEBUG_STYLES(LOGI("-> Setting to @null!"));
+            DEBUG_STYLES(ALOGI("-> Setting to @null!"));
             value.dataType = Res_value::TYPE_NULL;
             block = kXmlBlock;
         }
 
-        DEBUG_STYLES(LOGI("Attribute 0x%08x: type=0x%x, data=0x%08x",
+        DEBUG_STYLES(ALOGI("Attribute 0x%08x: type=0x%x, data=0x%08x",
                 curIdent, value.dataType, value.data));
 
         // Write the final value back to Java.
         dest[STYLE_TYPE] = value.dataType;
         dest[STYLE_DATA] = value.data;
         dest[STYLE_ASSET_COOKIE] =
-            block != kXmlBlock ? (jint)res.getTableCookie(block) : (jint)-1;
+            block != kXmlBlock ? reinterpret_cast<jint>(res.getTableCookie(block)) : (jint)-1;
         dest[STYLE_RESOURCE_ID] = resid;
         dest[STYLE_CHANGING_CONFIGURATIONS] = typeSetFlags;
         dest[STYLE_DENSITY] = config.density;
@@ -1122,7 +1439,7 @@ static jboolean android_content_AssetManager_applyStyle(JNIEnv* env, jobject cla
 }
 
 static jboolean android_content_AssetManager_retrieveAttributes(JNIEnv* env, jobject clazz,
-                                                        jint xmlParserToken,
+                                                        jlong xmlParserToken,
                                                         jintArray attrs,
                                                         jintArray outValues,
                                                         jintArray outIndices)
@@ -1239,7 +1556,7 @@ static jboolean android_content_AssetManager_retrieveAttributes(JNIEnv* env, job
         dest[STYLE_TYPE] = value.dataType;
         dest[STYLE_DATA] = value.data;
         dest[STYLE_ASSET_COOKIE] =
-            block != kXmlBlock ? (jint)res.getTableCookie(block) : (jint)-1;
+            block != kXmlBlock ? reinterpret_cast<jint>(res.getTableCookie(block)) : (jint)-1;
         dest[STYLE_RESOURCE_ID] = resid;
         dest[STYLE_CHANGING_CONFIGURATIONS] = typeSetFlags;
         dest[STYLE_DENSITY] = config.density;
@@ -1279,7 +1596,7 @@ static jint android_content_AssetManager_getArraySize(JNIEnv* env, jobject clazz
     ssize_t bagOff = res.getBagLocked(id, &defStyleEnt);
     res.unlock();
 
-    return bagOff;
+    return static_cast<jint>(bagOff);
 }
 
 static jint android_content_AssetManager_retrieveArray(JNIEnv* env, jobject clazz,
@@ -1351,7 +1668,7 @@ static jint android_content_AssetManager_retrieveArray(JNIEnv* env, jobject claz
         // Write the final value back to Java.
         dest[STYLE_TYPE] = value.dataType;
         dest[STYLE_DATA] = value.data;
-        dest[STYLE_ASSET_COOKIE] = (jint)res.getTableCookie(block);
+        dest[STYLE_ASSET_COOKIE] = reinterpret_cast<jint>(res.getTableCookie(block));
         dest[STYLE_RESOURCE_ID] = resid;
         dest[STYLE_CHANGING_CONFIGURATIONS] = typeSetFlags;
         dest[STYLE_DENSITY] = config.density;
@@ -1369,7 +1686,7 @@ static jint android_content_AssetManager_retrieveArray(JNIEnv* env, jobject claz
     return i;
 }
 
-static jint android_content_AssetManager_openXmlAssetNative(JNIEnv* env, jobject clazz,
+static jlong android_content_AssetManager_openXmlAssetNative(JNIEnv* env, jobject clazz,
                                                          jint cookie,
                                                          jstring fileName)
 {
@@ -1385,16 +1702,19 @@ static jint android_content_AssetManager_openXmlAssetNative(JNIEnv* env, jobject
         return 0;
     }
 
-    Asset* a = cookie
-        ? am->openNonAsset((void*)cookie, fileName8.c_str(), Asset::ACCESS_BUFFER)
-        : am->openNonAsset(fileName8.c_str(), Asset::ACCESS_BUFFER);
+    int32_t assetCookie = static_cast<int32_t>(cookie);
+    Asset* a = assetCookie
+        ? am->openNonAsset(assetCookie, fileName8.c_str(), Asset::ACCESS_BUFFER)
+        : am->openNonAsset(fileName8.c_str(), Asset::ACCESS_BUFFER, &assetCookie);
 
     if (a == NULL) {
         jniThrowException(env, "java/io/FileNotFoundException", fileName8.c_str());
         return 0;
     }
 
-    ResXMLTree* block = new ResXMLTree();
+    const DynamicRefTable* dynamicRefTable =
+            am->getResources().getDynamicRefTableForCookie(assetCookie);
+    ResXMLTree* block = new ResXMLTree(dynamicRefTable);
     status_t err = block->setTo(a->getBuffer(true), a->getLength(), true);
     a->close();
     delete a;
@@ -1404,7 +1724,7 @@ static jint android_content_AssetManager_openXmlAssetNative(JNIEnv* env, jobject
         return 0;
     }
 
-    return (jint)block;
+    return reinterpret_cast<jlong>(block);
 }
 
 static jintArray android_content_AssetManager_getArrayStringInfo(JNIEnv* env, jobject clazz,
@@ -1568,8 +1888,42 @@ static jintArray android_content_AssetManager_getArrayIntResource(JNIEnv* env, j
     return array;
 }
 
-static void android_content_AssetManager_init(JNIEnv* env, jobject clazz)
+static jintArray android_content_AssetManager_getStyleAttributes(JNIEnv* env, jobject clazz,
+                                                                 jint styleId)
 {
+    AssetManager* am = assetManagerForJavaObject(env, clazz);
+    if (am == NULL) {
+        return NULL;
+    }
+    const ResTable& res(am->getResources());
+
+    const ResTable::bag_entry* startOfBag;
+    const ssize_t N = res.lockBag(styleId, &startOfBag);
+    if (N < 0) {
+        return NULL;
+    }
+
+    jintArray array = env->NewIntArray(N);
+    if (array == NULL) {
+        res.unlockBag(startOfBag);
+        return NULL;
+    }
+
+    Res_value value;
+    const ResTable::bag_entry* bag = startOfBag;
+    for (size_t i=0; ((ssize_t)i)<N; i++, bag++) {
+        int resourceId = bag->map.name.ident;
+        env->SetIntArrayRegion(array, i, 1, &resourceId);
+    }
+    res.unlockBag(startOfBag);
+    return array;
+}
+
+static void android_content_AssetManager_init(JNIEnv* env, jobject clazz, jboolean isSystem)
+{
+    if (isSystem) {
+        verifySystemIdmaps();
+    }
     AssetManager* am = new AssetManager();
     if (am == NULL) {
         jniThrowException(env, "java/lang/OutOfMemoryError", "");
@@ -1579,17 +1933,17 @@ static void android_content_AssetManager_init(JNIEnv* env, jobject clazz)
     am->addDefaultAssets();
 
     ALOGV("Created AssetManager %p for Java object %p\n", am, clazz);
-    env->SetIntField(clazz, gAssetManagerOffsets.mObject, (jint)am);
+    env->SetLongField(clazz, gAssetManagerOffsets.mObject, reinterpret_cast<jlong>(am));
 }
 
 static void android_content_AssetManager_destroy(JNIEnv* env, jobject clazz)
 {
     AssetManager* am = (AssetManager*)
-        (env->GetIntField(clazz, gAssetManagerOffsets.mObject));
+        (env->GetLongField(clazz, gAssetManagerOffsets.mObject));
     ALOGV("Destroying AssetManager %p for Java object %p\n", am, clazz);
     if (am != NULL) {
         delete am;
-        env->SetIntField(clazz, gAssetManagerOffsets.mObject, 0);
+        env->SetLongField(clazz, gAssetManagerOffsets.mObject, 0);
     }
 }
 
@@ -1623,30 +1977,32 @@ static JNINativeMethod gAssetManagerMethods[] = {
     /* name, signature, funcPtr */
 
     // Basic asset stuff.
-    { "openAsset",      "(Ljava/lang/String;I)I",
+    { "openAsset",      "(Ljava/lang/String;I)J",
         (void*) android_content_AssetManager_openAsset },
     { "openAssetFd",      "(Ljava/lang/String;[J)Landroid/os/ParcelFileDescriptor;",
         (void*) android_content_AssetManager_openAssetFd },
-    { "openNonAssetNative", "(ILjava/lang/String;I)I",
+    { "openNonAssetNative", "(ILjava/lang/String;I)J",
         (void*) android_content_AssetManager_openNonAssetNative },
     { "openNonAssetFdNative", "(ILjava/lang/String;[J)Landroid/os/ParcelFileDescriptor;",
         (void*) android_content_AssetManager_openNonAssetFdNative },
     { "list",           "(Ljava/lang/String;)[Ljava/lang/String;",
         (void*) android_content_AssetManager_list },
-    { "destroyAsset",   "(I)V",
+    { "destroyAsset",   "(J)V",
         (void*) android_content_AssetManager_destroyAsset },
-    { "readAssetChar",  "(I)I",
+    { "readAssetChar",  "(J)I",
         (void*) android_content_AssetManager_readAssetChar },
-    { "readAsset",      "(I[BII)I",
+    { "readAsset",      "(J[BII)I",
         (void*) android_content_AssetManager_readAsset },
-    { "seekAsset",      "(IJI)J",
+    { "seekAsset",      "(JJI)J",
         (void*) android_content_AssetManager_seekAsset },
-    { "getAssetLength", "(I)J",
+    { "getAssetLength", "(J)J",
         (void*) android_content_AssetManager_getAssetLength },
-    { "getAssetRemainingLength", "(I)J",
+    { "getAssetRemainingLength", "(J)J",
         (void*) android_content_AssetManager_getAssetRemainingLength },
     { "addAssetPathNative", "(Ljava/lang/String;)I",
         (void*) android_content_AssetManager_addAssetPath },
+    { "addOverlayPath",   "(Ljava/lang/String;)I",
+        (void*) android_content_AssetManager_addOverlayPath },
     { "isUpToDate",     "()Z",
         (void*) android_content_AssetManager_isUpToDate },
 
@@ -1673,27 +2029,31 @@ static JNINativeMethod gAssetManagerMethods[] = {
         (void*) android_content_AssetManager_loadResourceBagValue },
     { "getStringBlockCount","()I",
         (void*) android_content_AssetManager_getStringBlockCount },
-    { "getNativeStringBlock","(I)I",
+    { "getNativeStringBlock","(I)J",
         (void*) android_content_AssetManager_getNativeStringBlock },
     { "getCookieName","(I)Ljava/lang/String;",
         (void*) android_content_AssetManager_getCookieName },
+    { "getAssignedPackageIdentifiers","()Landroid/util/SparseArray;",
+        (void*) android_content_AssetManager_getAssignedPackageIdentifiers },
 
     // Themes.
-    { "newTheme", "()I",
+    { "newTheme", "()J",
         (void*) android_content_AssetManager_newTheme },
-    { "deleteTheme", "(I)V",
+    { "deleteTheme", "(J)V",
         (void*) android_content_AssetManager_deleteTheme },
-    { "applyThemeStyle", "(IIZ)V",
+    { "applyThemeStyle", "(JIZ)V",
         (void*) android_content_AssetManager_applyThemeStyle },
-    { "copyTheme", "(II)V",
+    { "copyTheme", "(JJ)V",
         (void*) android_content_AssetManager_copyTheme },
-    { "loadThemeAttributeValue", "(IILandroid/util/TypedValue;Z)I",
+    { "loadThemeAttributeValue", "(JILandroid/util/TypedValue;Z)I",
         (void*) android_content_AssetManager_loadThemeAttributeValue },
-    { "dumpTheme", "(IILjava/lang/String;Ljava/lang/String;)V",
+    { "dumpTheme", "(JILjava/lang/String;Ljava/lang/String;)V",
         (void*) android_content_AssetManager_dumpTheme },
-    { "applyStyle","(IIII[I[I[I)Z",
+    { "applyStyle","(JIIJ[I[I[I)Z",
         (void*) android_content_AssetManager_applyStyle },
-    { "retrieveAttributes","(I[I[I[I)Z",
+    { "resolveAttrs","(JII[I[I[I[I)Z",
+        (void*) android_content_AssetManager_resolveAttrs },
+    { "retrieveAttributes","(J[I[I[I)Z",
         (void*) android_content_AssetManager_retrieveAttributes },
     { "getArraySize","(I)I",
         (void*) android_content_AssetManager_getArraySize },
@@ -1701,7 +2061,7 @@ static JNINativeMethod gAssetManagerMethods[] = {
         (void*) android_content_AssetManager_retrieveArray },
 
     // XML files.
-    { "openXmlAssetNative", "(ILjava/lang/String;)I",
+    { "openXmlAssetNative", "(ILjava/lang/String;)J",
         (void*) android_content_AssetManager_openXmlAssetNative },
 
     // Arrays.
@@ -1711,9 +2071,11 @@ static JNINativeMethod gAssetManagerMethods[] = {
         (void*) android_content_AssetManager_getArrayStringInfo },
     { "getArrayIntResource","(I)[I",
         (void*) android_content_AssetManager_getArrayIntResource },
+    { "getStyleAttributes","(I)[I",
+        (void*) android_content_AssetManager_getStyleAttributes },
 
     // Bookkeeping.
-    { "init",           "()V",
+    { "init",           "(Z)V",
         (void*) android_content_AssetManager_init },
     { "destroy",        "()V",
         (void*) android_content_AssetManager_destroy },
@@ -1765,13 +2127,23 @@ int register_android_content_AssetManager(JNIEnv* env)
     jclass assetManager = env->FindClass("android/content/res/AssetManager");
     LOG_FATAL_IF(assetManager == NULL, "Unable to find class android/content/res/AssetManager");
     gAssetManagerOffsets.mObject
-        = env->GetFieldID(assetManager, "mObject", "I");
+        = env->GetFieldID(assetManager, "mObject", "J");
     LOG_FATAL_IF(gAssetManagerOffsets.mObject == NULL, "Unable to find AssetManager.mObject");
 
     jclass stringClass = env->FindClass("java/lang/String");
     LOG_FATAL_IF(stringClass == NULL, "Unable to find class java/lang/String");
     g_stringClass = (jclass)env->NewGlobalRef(stringClass);
     LOG_FATAL_IF(g_stringClass == NULL, "Unable to create global reference for class java/lang/String");
+
+    jclass sparseArrayClass = env->FindClass("android/util/SparseArray");
+    LOG_FATAL_IF(sparseArrayClass == NULL, "Unable to find class android/util/SparseArray");
+    gSparseArrayOffsets.classObject = (jclass) env->NewGlobalRef(sparseArrayClass);
+    gSparseArrayOffsets.constructor =
+            env->GetMethodID(gSparseArrayOffsets.classObject, "<init>", "()V");
+    LOG_FATAL_IF(gSparseArrayOffsets.constructor == NULL, "Unable to find SparseArray.<init>()");
+    gSparseArrayOffsets.put =
+            env->GetMethodID(gSparseArrayOffsets.classObject, "put", "(ILjava/lang/Object;)V");
+    LOG_FATAL_IF(gSparseArrayOffsets.put == NULL, "Unable to find SparseArray.put(int, V)");
 
     return AndroidRuntime::registerNativeMethods(env,
             "android/content/res/AssetManager", gAssetManagerMethods, NELEM(gAssetManagerMethods));

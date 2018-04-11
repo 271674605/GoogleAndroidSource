@@ -7,8 +7,12 @@
 
 #include <string>
 
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/manifest_handler.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/manifest_handler.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace extensions {
 
@@ -31,9 +35,13 @@ struct ManifestURL : public Extension::ManifestData {
 
   // Returns true if this extension's update URL is the extension gallery.
   static bool UpdatesFromGallery(const Extension* extension);
+  static bool UpdatesFromGallery(const base::DictionaryValue* manifest);
 
   // Returns the Options Page for this extension.
   static const GURL& GetOptionsPage(const Extension* extension);
+
+  // Returns the About Page for this extension.
+  static const GURL& GetAboutPage(const Extension* extension);
 
   // Returns the webstore page URL for this extension.
   static const GURL GetDetailsURL(const Extension* extension);
@@ -62,7 +70,7 @@ class DevToolsPageHandler : public ManifestHandler {
   DevToolsPageHandler();
   virtual ~DevToolsPageHandler();
 
-  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
 
  private:
   virtual const std::vector<std::string> Keys() const OVERRIDE;
@@ -76,7 +84,7 @@ class HomepageURLHandler : public ManifestHandler {
   HomepageURLHandler();
   virtual ~HomepageURLHandler();
 
-  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
 
  private:
   virtual const std::vector<std::string> Keys() const OVERRIDE;
@@ -90,7 +98,7 @@ class UpdateURLHandler : public ManifestHandler {
   UpdateURLHandler();
   virtual ~UpdateURLHandler();
 
-  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
 
  private:
   virtual const std::vector<std::string> Keys() const OVERRIDE;
@@ -104,7 +112,7 @@ class OptionsPageHandler : public ManifestHandler {
   OptionsPageHandler();
   virtual ~OptionsPageHandler();
 
-  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
   virtual bool Validate(const Extension* extension,
                         std::string* error,
                         std::vector<InstallWarning>* warnings) const OVERRIDE;
@@ -115,13 +123,34 @@ class OptionsPageHandler : public ManifestHandler {
   DISALLOW_COPY_AND_ASSIGN(OptionsPageHandler);
 };
 
+// Parses the "about_page" manifest key.
+// TODO(sashab): Make this and any other similar handlers extend from the same
+// abstract class, URLManifestHandler, which has pure virtual methods for
+// detecting the required URL type (relative or absolute) and abstracts the
+// URL parsing logic away.
+class AboutPageHandler : public ManifestHandler {
+ public:
+  AboutPageHandler();
+  virtual ~AboutPageHandler();
+
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
+  virtual bool Validate(const Extension* extension,
+                        std::string* error,
+                        std::vector<InstallWarning>* warnings) const OVERRIDE;
+
+ private:
+  virtual const std::vector<std::string> Keys() const OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(AboutPageHandler);
+};
+
 // Parses the "chrome_url_overrides" manifest key.
 class URLOverridesHandler : public ManifestHandler {
  public:
   URLOverridesHandler();
   virtual ~URLOverridesHandler();
 
-  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
 
  private:
   virtual const std::vector<std::string> Keys() const OVERRIDE;

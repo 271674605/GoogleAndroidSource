@@ -186,8 +186,6 @@
 #define NFC_BRCM_VS_INCLUDED    TRUE
 #endif
 
-/* Define to TRUE to include not openned Broadcom Vendor Specific implementation */
-
 /* Define to TRUE if compling for NFC Reader/Writer Only mode */
 #ifndef NFC_RW_ONLY
 #define NFC_RW_ONLY         FALSE
@@ -562,9 +560,19 @@
 #define NFA_DM_AUTO_READ_NDEF        FALSE  /* !!!!! NFC-Android needs FALSE */
 #endif
 
-/* Automatic NDEF read (when not in exclusive RF mode) */
+/* Automatic NDEF presence check (when not in exclusive RF mode) */
 #ifndef NFA_DM_AUTO_PRESENCE_CHECK
 #define NFA_DM_AUTO_PRESENCE_CHECK   FALSE  /* Android requires FALSE */
+#endif
+
+/* Presence check option: 0x01: use sleep/wake for none-NDEF ISO-DEP tags */
+#ifndef NFA_DM_PRESENCE_CHECK_OPTION
+#define NFA_DM_PRESENCE_CHECK_OPTION                0x03  /* !!!!! Android needs value 3 */
+#endif
+
+/* Maximum time to wait for presence check response */
+#ifndef NFA_DM_MAX_PRESENCE_CHECK_TIMEOUT
+#define NFA_DM_MAX_PRESENCE_CHECK_TIMEOUT           500
 #endif
 
 /* Default delay to auto presence check after sending raw frame */
@@ -652,12 +660,12 @@
 
 /* Max number of NFCEE supported */
 #ifndef NFA_EE_MAX_EE_SUPPORTED
-#define NFA_EE_MAX_EE_SUPPORTED         3           /* Modified for NFC-A until we add dynamic support */
+#define NFA_EE_MAX_EE_SUPPORTED         4           /* Modified for NFC-A until we add dynamic support */
 #endif
 
 /* Maximum number of AID entries per target_handle  */
 #ifndef NFA_EE_MAX_AID_ENTRIES
-#define NFA_EE_MAX_AID_ENTRIES      (10)
+#define NFA_EE_MAX_AID_ENTRIES      (32)
 #endif
 
 /* Maximum number of callback functions can be registered through NFA_EeRegister() */
@@ -676,6 +684,23 @@
 *****************************************************************************/
 #ifndef HAL_WRITE
 #define HAL_WRITE(p)    {nfc_cb.p_hal->write(p->len, (UINT8 *)(p+1) + p->offset); GKI_freebuf(p);}
+
+#ifdef NFC_HAL_SHARED_GKI
+
+/* NFC HAL Included if NFC_NFCEE_INCLUDED */
+#if (NFC_NFCEE_INCLUDED == TRUE)
+
+#ifndef NFC_HAL_HCI_INCLUDED
+#define NFC_HAL_HCI_INCLUDED    TRUE
+#endif
+#else /* NFC_NFCEE_INCLUDED == TRUE */
+#ifndef NFC_HAL_HCI_INCLUDED
+#define NFC_HAL_HCI_INCLUDED    FALSE
+#endif
+
+#endif /* NFC_NFCEE_INCLUDED == FALSE */
+
+#endif /* NFC_HAL_SHARED_GKI */
 
 
 

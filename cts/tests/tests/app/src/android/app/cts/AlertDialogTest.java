@@ -45,7 +45,7 @@ public class AlertDialogTest extends ActivityInstrumentationTestCase2<DialogStub
     private Button mNeutralButton;
 
     public AlertDialogTest() {
-        super("com.android.cts.stub", DialogStubActivity.class);
+        super("com.android.cts.app.stub", DialogStubActivity.class);
     }
 
     @Override
@@ -75,17 +75,17 @@ public class AlertDialogTest extends ActivityInstrumentationTestCase2<DialogStub
         mPositiveButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_POSITIVE);
         assertNotNull(mPositiveButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_positive),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_positive),
                 mPositiveButton.getText());
         mNeutralButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_NEUTRAL);
         assertNotNull(mNeutralButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_neutral),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_neutral),
                 mNeutralButton.getText());
         mNegativeButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_NEGATIVE);
         assertNotNull(mNegativeButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_negative),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_negative),
                 mNegativeButton.getText());
 
         assertFalse(mActivity.isPositiveButtonClicked);
@@ -112,17 +112,17 @@ public class AlertDialogTest extends ActivityInstrumentationTestCase2<DialogStub
         mPositiveButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_POSITIVE);
         assertNotNull(mPositiveButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_positive),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_positive),
                 mPositiveButton.getText());
         mNegativeButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_NEGATIVE);
         assertNotNull(mNegativeButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_negative),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_negative),
                 mNegativeButton.getText());
         mNeutralButton = ((AlertDialog) (mActivity.getDialog())).getButton(
                 DialogInterface.BUTTON_NEUTRAL);
         assertNotNull(mNeutralButton);
-        assertEquals(mActivity.getString(com.android.cts.stub.R.string.alert_dialog_neutral),
+        assertEquals(mActivity.getString(com.android.cts.app.stub.R.string.alert_dialog_neutral),
                 mNeutralButton.getText());
 
         DialogStubActivity.buttonIndex = 0;

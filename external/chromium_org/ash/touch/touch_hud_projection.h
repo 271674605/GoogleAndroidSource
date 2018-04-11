@@ -10,20 +10,20 @@
 #include "ash/touch/touch_observer_hud.h"
 
 namespace ash {
-namespace internal {
-
 class TouchPointView;
 
 // A heads-up display to show active touch points on the screen. As a derivative
 // of TouchObserverHUD, objects of this class manage their own lifetime.
 class TouchHudProjection : public TouchObserverHUD {
  public:
-  explicit TouchHudProjection(aura::RootWindow* initial_root);
+  explicit TouchHudProjection(aura::Window* initial_root);
 
   // Overriden from TouchObserverHUD.
   virtual void Clear() OVERRIDE;
 
  private:
+  friend class TouchHudProjectionTest;
+
   virtual ~TouchHudProjection();
 
   // Overriden from TouchObserverHUD.
@@ -38,7 +38,6 @@ class TouchHudProjection : public TouchObserverHUD {
   DISALLOW_COPY_AND_ASSIGN(TouchHudProjection);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_TOUCH_TOUCH_HUD_PROJECTION_H_

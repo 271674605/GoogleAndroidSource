@@ -8,7 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 
+namespace base {
 class CommandLine;
+}
 
 namespace diagnostics {
 
@@ -21,11 +23,12 @@ class DiagnosticsController {
 
   // Entry point for the diagnostics mode. Returns zero if able to run
   // diagnostics successfully, regardless of the results of the diagnostics.
-  int Run(const CommandLine& command_line, DiagnosticsWriter* writer);
+  int Run(const base::CommandLine& command_line, DiagnosticsWriter* writer);
 
   // Entry point for running recovery based on diagnostics that have already
   // been run. In order for this to do anything, Run() must be executed first.
-  int RunRecovery(const CommandLine& command_line, DiagnosticsWriter* writer);
+  int RunRecovery(const base::CommandLine& command_line,
+                  DiagnosticsWriter* writer);
 
   // Returns a model with the results that have accumulated. They can then be
   // queried for their attributes for human consumption later.
@@ -37,6 +40,11 @@ class DiagnosticsController {
   // Clears any results that have accumulated. After calling this, do not call
   // GetResults until after Run is called again.
   void ClearResults();
+
+  // Records UMA statistics indicating that a regular Chrome startup happened,
+  // with no diagnostics or recovery being run.  This is necessary to provide a
+  // denominator for the diagnostics metrics.
+  void RecordRegularStartup();
 
  private:
   friend struct DefaultSingletonTraits<DiagnosticsController>;

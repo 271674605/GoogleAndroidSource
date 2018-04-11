@@ -7,11 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MCLD_ARM_ARMToTHMStub_H
-#define MCLD_ARM_ARMToTHMStub_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_ARM_ARMTOTHMSTUB_H
+#define TARGET_ARM_ARMTOTHMSTUB_H
 
 #include <llvm/Support/DataTypes.h>
 #include <mcld/Fragment/Stub.h>
@@ -64,10 +61,10 @@ private:
   Stub* doClone();
 
 private:
-  std::string m_Name;
   static const uint32_t PIC_TEMPLATE[];
   static const uint32_t TEMPLATE[];
   const uint32_t* m_pData;
+  std::string m_Name;
   size_t m_Size;
 };
 

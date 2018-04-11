@@ -5,33 +5,19 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_IMMERSIVE_MODE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_IMMERSIVE_MODE_CONTROLLER_H_
 
+#include "ash/wm/immersive_revealed_lock.h"
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
+#include "chrome/browser/ui/host_desktop.h"
 
-class BookmarkBarView;
-class FullscreenController;
-
-namespace content {
-class WebContents;
-}
+class BrowserView;
 
 namespace gfx {
 class Rect;
 class Size;
 }
 
-namespace views {
-class View;
-class Widget;
-}
-
-// Base class for a lock which keeps the top-of-window views revealed for the
-// duration of its lifetime. See ImmersiveModeController::GetRevealedLock() for
-// more details.
-class ImmersiveRevealedLock {
- public:
-  virtual ~ImmersiveRevealedLock() {}
-};
+typedef ash::ImmersiveRevealedLock ImmersiveRevealedLock;
 
 // Controller for an "immersive mode" similar to MacOS presentation mode where
 // the top-of-window views are hidden until the mouse hits the top of the
@@ -57,35 +43,11 @@ class ImmersiveModeController {
     virtual ~Observer() {}
   };
 
-  class Delegate {
-   public:
-    // Returns the bookmark bar, or NULL if the window does not support one.
-    virtual BookmarkBarView* GetBookmarkBar() = 0;
-
-    // Returns the browser's FullscreenController.
-    virtual FullscreenController* GetFullscreenController() = 0;
-
-    // Returns the browser's active web contents for the active tab, or NULL if
-    // such does not exist.
-    virtual content::WebContents* GetWebContents() = 0;
-
-    // Notifies the delegate that fullscreen has been entered or exited.
-    virtual void FullscreenStateChanged() = 0;
-
-    // Requests that the tab strip be painted in a short, "light bar" style.
-    virtual void SetImmersiveStyle(bool immersive) = 0;
-
-   protected:
-    virtual ~Delegate() {}
-  };
-
   ImmersiveModeController();
   virtual ~ImmersiveModeController();
 
   // Must initialize after browser view has a Widget and native window.
-  virtual void Init(Delegate* delegate,
-                    views::Widget* widget,
-                    views::View* top_container) = 0;
+  virtual void Init(BrowserView* browser_view) = 0;
 
   // Enables or disables immersive mode.
   virtual void SetEnabled(bool enabled) = 0;
@@ -129,6 +91,11 @@ class ImmersiveModeController {
   virtual void OnFindBarVisibleBoundsChanged(
       const gfx::Rect& new_visible_bounds_in_screen) = 0;
 
+  // Disables animations and moves the mouse so that it is not over the
+  // top-of-window views for the sake of testing. Must be called before
+  // enabling immersive fullscreen.
+  virtual void SetupForTest() = 0;
+
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
 
@@ -142,7 +109,8 @@ class ImmersiveModeController {
 namespace chrome {
 
 // Implemented in immersive_mode_controller_factory.cc.
-ImmersiveModeController* CreateImmersiveModeController();
+ImmersiveModeController* CreateImmersiveModeController(
+    chrome::HostDesktopType host_desktop_type);
 
 }  // namespace chrome
 

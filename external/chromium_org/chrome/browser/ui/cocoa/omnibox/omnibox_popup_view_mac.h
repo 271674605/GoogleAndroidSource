@@ -50,15 +50,6 @@ class OmniboxPopupViewMac : public OmniboxPopupView,
 
   OmniboxPopupMatrix* matrix() { return matrix_; }
 
-  // Applies the given font and colors to the match string based on
-  // classifications.
-  static NSMutableAttributedString* DecorateMatchedString(
-      const string16& match_string,
-      const AutocompleteMatch::ACMatchClassifications& classifications,
-      NSColor* text_color,
-      NSColor* dim_text_color,
-      gfx::Font& font);
-
  protected:
   // Gets the autocomplete results. This is virtual so that it can be overriden
   // by tests.

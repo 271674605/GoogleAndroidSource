@@ -6,16 +6,13 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TYPE_TRAITS_H
-#define MCLD_TYPE_TRAITS_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_TYPETRAITS_H
+#define MCLD_ADT_TYPETRAITS_H
 
 #include <cstdlib>
 
-namespace mcld
-{
+namespace mcld {
+
 template<typename DataType>
 struct NonConstTraits;
 

@@ -64,7 +64,6 @@ public class Hotseat extends FrameLayout {
 
     public void setup(Launcher launcher) {
         mLauncher = launcher;
-        setOnKeyListener(new HotseatIconKeyEventListener());
     }
 
     CellLayout getLayout() {
@@ -95,7 +94,7 @@ public class Hotseat extends FrameLayout {
         return hasVerticalHotseat() ? (mContent.getCountY() - (rank + 1)) : 0;
     }
     public boolean isAllAppsButtonRank(int rank) {
-        if (AppsCustomizePagedView.DISABLE_ALL_APPS) {
+        if (LauncherAppState.isDisableAllApps()) {
             return false;
         } else {
             return rank == mAllAppsButtonRank;
@@ -142,7 +141,7 @@ public class Hotseat extends FrameLayout {
     void resetLayout() {
         mContent.removeAllViewsInLayout();
 
-        if (!AppsCustomizePagedView.DISABLE_ALL_APPS) {
+        if (!LauncherAppState.isDisableAllApps()) {
             // Add the Apps button
             Context context = getContext();
 
@@ -150,21 +149,18 @@ public class Hotseat extends FrameLayout {
             TextView allAppsButton = (TextView)
                     inflater.inflate(R.layout.all_apps_button, mContent, false);
             Drawable d = context.getResources().getDrawable(R.drawable.all_apps_button_icon);
+
             Utilities.resizeIconDrawable(d);
             allAppsButton.setCompoundDrawables(null, d, null, null);
 
             allAppsButton.setContentDescription(context.getString(R.string.all_apps_button_label));
+            allAppsButton.setOnKeyListener(new HotseatIconKeyEventListener());
             if (mLauncher != null) {
                 allAppsButton.setOnTouchListener(mLauncher.getHapticFeedbackTouchListener());
+                mLauncher.setAllAppsButton(allAppsButton);
+                allAppsButton.setOnClickListener(mLauncher);
+                allAppsButton.setOnFocusChangeListener(mLauncher.mFocusHandler);
             }
-            allAppsButton.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(android.view.View v) {
-                    if (mLauncher != null) {
-                        mLauncher.onClickAllAppsButton(v);
-                    }
-                }
-            });
 
             // Note: We do this to ensure that the hotseat is always laid out in the orientation of
             // the hotseat in order regardless of which orientation they were added
@@ -172,7 +168,7 @@ public class Hotseat extends FrameLayout {
             int y = getCellYFromOrder(mAllAppsButtonRank);
             CellLayout.LayoutParams lp = new CellLayout.LayoutParams(x,y,1,1);
             lp.canReorder = false;
-            mContent.addViewToCellLayout(allAppsButton, -1, 0, lp, true);
+            mContent.addViewToCellLayout(allAppsButton, -1, allAppsButton.getId(), lp, true);
         }
     }
 
@@ -180,7 +176,7 @@ public class Hotseat extends FrameLayout {
     public boolean onInterceptTouchEvent(MotionEvent ev) {
         // We don't want any clicks to go through to the hotseat unless the workspace is in
         // the normal state.
-        if (mLauncher.getWorkspace().isSmall()) {
+        if (mLauncher.getWorkspace().workspaceInModalState()) {
             return true;
         }
         return false;
@@ -189,7 +185,7 @@ public class Hotseat extends FrameLayout {
     void addAllAppsFolder(IconCache iconCache,
             ArrayList<AppInfo> allApps, ArrayList<ComponentName> onWorkspace,
             Launcher launcher, Workspace workspace) {
-        if (AppsCustomizePagedView.DISABLE_ALL_APPS) {
+        if (LauncherAppState.isDisableAllApps()) {
             FolderInfo fi = new FolderInfo();
 
             fi.cellX = getCellXFromOrder(mAllAppsButtonRank);
@@ -219,7 +215,7 @@ public class Hotseat extends FrameLayout {
     }
 
     void addAppsToAllAppsFolder(ArrayList<AppInfo> apps) {
-        if (AppsCustomizePagedView.DISABLE_ALL_APPS) {
+        if (LauncherAppState.isDisableAllApps()) {
             View v = mContent.getChildAt(getCellXFromOrder(mAllAppsButtonRank), getCellYFromOrder(mAllAppsButtonRank));
             FolderIcon fi = null;
 

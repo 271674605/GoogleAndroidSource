@@ -26,6 +26,13 @@ LOCAL_SRC_FILES := \
 # Flags passed to both C and C++ files.
 LOCAL_CFLAGS := $(MY_WEBRTC_COMMON_DEFS)
 
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+LOCAL_CFLAGS_x86 := $(MY_WEBRTC_COMMON_DEFS_x86)
+LOCAL_CFLAGS_mips := $(MY_WEBRTC_COMMON_DEFS_mips)
+LOCAL_CFLAGS_arm64 := $(MY_WEBRTC_COMMON_DEFS_arm64)
+LOCAL_CFLAGS_x86_64 := $(MY_WEBRTC_COMMON_DEFS_x86_64)
+LOCAL_CFLAGS_mips64 := $(MY_WEBRTC_COMMON_DEFS_mips64)
+
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/interface \
     $(LOCAL_PATH)/../utility \
@@ -39,7 +46,6 @@ LOCAL_SHARED_LIBRARIES := \
     libcutils \
     libdl
 
-ifndef NDK_ROOT
 ifndef WEBRTC_STL
 LOCAL_SHARED_LIBRARIES += libstlport
 include external/stlport/libstlport.mk
@@ -47,9 +53,6 @@ else
 LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
 LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-endif
-else
-LOCAL_SHARED_LIBRARIES += libstlport
 endif
 
 include $(BUILD_STATIC_LIBRARY)
@@ -74,12 +77,14 @@ LOCAL_CFLAGS := \
     -mfloat-abi=softfp \
     -flax-vector-conversions
 
+LOCAL_MODULE_TARGET_ARCH := arm
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/interface \
     $(LOCAL_PATH)/../../.. \
     $(LOCAL_PATH)/../../../common_audio/signal_processing/include
 
-ifndef NDK_ROOT
 ifndef WEBRTC_STL
 LOCAL_SHARED_LIBRARIES += libstlport
 include external/stlport/libstlport.mk
@@ -87,9 +92,6 @@ else
 LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
 LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-endif
-else
-LOCAL_SHARED_LIBRARIES += libstlport
 endif
 
 include $(BUILD_STATIC_LIBRARY)

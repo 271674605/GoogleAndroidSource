@@ -4,7 +4,7 @@
 /*                                                                         */
 /*    The FreeType glyph rasterizer (body).                                */
 /*                                                                         */
-/*  Copyright 1996-2003, 2005, 2007-2013 by                                */
+/*  Copyright 1996-2003, 2005, 2007-2014 by                                */
 /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
 /*                                                                         */
 /*  This file is part of the FreeType project, and may only be used,       */
@@ -24,8 +24,8 @@
   /*                                                                       */
   /* - copy `src/raster/ftraster.c' (this file) to your current directory  */
   /*                                                                       */
-  /* - copy `include/freetype/ftimage.h' and `src/raster/ftmisc.h'         */
-  /*   to your current directory                                           */
+  /* - copy `include/ftimage.h' and `src/raster/ftmisc.h' to your current  */
+  /*   directory                                                           */
   /*                                                                       */
   /* - compile `ftraster' with the _STANDALONE_ macro defined, as in       */
   /*                                                                       */
@@ -453,8 +453,10 @@
 #define FRAC( x )     ( (x) & ( ras.precision - 1 ) )
 #define SCALED( x )   ( ( (ULong)(x) << ras.scale_shift ) - ras.precision_half )
 
-#define IS_BOTTOM_OVERSHOOT( x )  ( CEILING( x ) - x >= ras.precision_half )
-#define IS_TOP_OVERSHOOT( x )     ( x - FLOOR( x ) >= ras.precision_half )
+#define IS_BOTTOM_OVERSHOOT( x ) \
+          (Bool)( CEILING( x ) - x >= ras.precision_half )
+#define IS_TOP_OVERSHOOT( x )    \
+          (Bool)( x - FLOOR( x ) >= ras.precision_half )
 
   /* The most used variables are positioned at the top of the structure. */
   /* Thus, their offset can be coded with less opcodes, resulting in a   */
@@ -1872,7 +1874,7 @@
         v_start.x = ( v_start.x + v_last.x ) / 2;
         v_start.y = ( v_start.y + v_last.y ) / 2;
 
-        v_last = v_start;
+     /* v_last = v_start; */
       }
       point--;
       tags--;
@@ -2282,6 +2284,8 @@
     Long   e1, e2;
     Byte*  target;
 
+    Int  dropOutControl = left->flags & 7;
+
     FT_UNUSED( y );
     FT_UNUSED( left );
     FT_UNUSED( right );
@@ -2291,7 +2295,8 @@
 
     e1 = TRUNC( CEILING( x1 ) );
 
-    if ( x2 - x1 - ras.precision <= ras.precision_jitter )
+    if ( dropOutControl != 2                             &&
+         x2 - x1 - ras.precision <= ras.precision_jitter )
       e2 = e1;
     else
       e2 = TRUNC( FLOOR( x2 ) );

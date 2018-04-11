@@ -7,54 +7,33 @@
 
 #include <string>
 
-#include "chrome/browser/local_discovery/privet_http.h"
-#include "chrome/browser/signin/oauth2_token_service.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
+#include "base/values.h"
+#include "chrome/browser/local_discovery/gcd_api_flow.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace local_discovery {
 
-// API call flow for server-side communication with cloudprint for registration.
-class PrivetConfirmApiCallFlow : public net::URLFetcherDelegate,
-                                 public OAuth2TokenService::Consumer {
+// API call flow for server-side communication with CloudPrint for registration.
+class PrivetConfirmApiCallFlow : public CloudPrintApiFlowRequest {
  public:
-  // TODO(noamsml): Better error model for this class.
-  enum Status {
-    SUCCESS,
-    ERROR_TOKEN,
-    ERROR_NETWORK,
-    ERROR_HTTP_CODE,
-    ERROR_FROM_SERVER,
-    ERROR_MALFORMED_RESPONSE
-  };
-  typedef base::Callback<void(Status /*success*/)> ResponseCallback;
+  typedef base::Callback<void(GCDApiFlow::Status /*success*/)> ResponseCallback;
 
-  PrivetConfirmApiCallFlow(net::URLRequestContextGetter* request_context,
-                           OAuth2TokenService* token_service_,
-                           const GURL& automated_claim_url,
+  // Create an OAuth2-based confirmation
+  PrivetConfirmApiCallFlow(const std::string& token,
                            const ResponseCallback& callback);
+
   virtual ~PrivetConfirmApiCallFlow();
 
-  void Start();
+  virtual void OnGCDAPIFlowError(GCDApiFlow::Status status) OVERRIDE;
+  virtual void OnGCDAPIFlowComplete(
+      const base::DictionaryValue& value) OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() OVERRIDE;
 
-  // net::URLFetcherDelegate implementation:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-
-  // OAuth2TokenService::Consumer implementation:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  virtual GURL GetURL() OVERRIDE;
 
  private:
-  scoped_ptr<net::URLFetcher> url_fetcher_;
-  scoped_ptr<OAuth2TokenService::Request> oauth_request_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
-  OAuth2TokenService* token_service_;
-  GURL automated_claim_url_;
   ResponseCallback callback_;
+  std::string token_;
 };
 
 }  // namespace local_discovery

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,16 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
-import android.util.Log;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.content.browser.ContentViewCore;
@@ -27,12 +29,16 @@ import org.chromium.content.browser.ContentViewCore;
  */
 public class AwTestContainerView extends FrameLayout {
     private AwContents mAwContents;
+    private AwContents.NativeGLDelegate mNativeGLDelegate;
     private AwContents.InternalAccessDelegate mInternalAccessDelegate;
 
     public AwTestContainerView(Context context) {
         super(context);
+        mNativeGLDelegate = new NativeGLDelegate();
         mInternalAccessDelegate = new InternalAccessAdapter();
         setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
     }
 
     public void initialize(AwContents awContents) {
@@ -45,6 +51,10 @@ public class AwTestContainerView extends FrameLayout {
 
     public AwContents getAwContents() {
         return mAwContents;
+    }
+
+    public AwContents.NativeGLDelegate getNativeGLDelegate() {
+        return mNativeGLDelegate;
     }
 
     public AwContents.InternalAccessDelegate getInternalAccessDelegate() {
@@ -147,6 +157,45 @@ public class AwTestContainerView extends FrameLayout {
         super.onDraw(canvas);
     }
 
+    @Override
+    public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        AccessibilityNodeProvider provider =
+            mAwContents.getAccessibilityNodeProvider();
+        return provider == null ? super.getAccessibilityNodeProvider() : provider;
+    }
+
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        info.setClassName(AwContents.class.getName());
+        mAwContents.onInitializeAccessibilityNodeInfo(info);
+    }
+
+    @Override
+    public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
+        super.onInitializeAccessibilityEvent(event);
+        event.setClassName(AwContents.class.getName());
+        mAwContents.onInitializeAccessibilityEvent(event);
+    }
+
+    @Override
+    public boolean performAccessibilityAction(int action, Bundle arguments) {
+        return mAwContents.performAccessibilityAction(action, arguments);
+    }
+
+    private static class NativeGLDelegate implements AwContents.NativeGLDelegate {
+        @Override
+        public boolean requestDrawGL(Canvas canvas, boolean waitForCompletion,
+                View containerview) {
+            return false;
+        }
+
+        @Override
+        public void detachGLFunctor() {
+            // Intentional no-op.
+        }
+    }
+
     // TODO: AwContents could define a generic class that holds an implementation similar to
     // the one below.
     private class InternalAccessAdapter implements AwContents.InternalAccessDelegate {
@@ -221,11 +270,6 @@ public class AwTestContainerView extends FrameLayout {
         @Override
         public int super_getScrollBarStyle() {
             return AwTestContainerView.super.getScrollBarStyle();
-        }
-
-        @Override
-        public boolean requestDrawGL(Canvas canvas) {
-            return false;
         }
     }
 }

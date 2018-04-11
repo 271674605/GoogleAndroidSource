@@ -13,6 +13,7 @@
 #include "base/synchronization/lock.h"
 #include "webkit/browser/fileapi/mount_points.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
+#include "webkit/common/fileapi/file_system_mount_option.h"
 #include "webkit/common/fileapi/file_system_types.h"
 
 namespace base {
@@ -20,10 +21,8 @@ class FilePath;
 }
 
 namespace fileapi {
-class FileSystemURL;
-}
 
-namespace fileapi {
+class FileSystemURL;
 
 // Manages external filesystem namespaces that are identified by 'mount name'
 // and are persisted until RevokeFileSystem is called.
@@ -52,7 +51,8 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   //
   // Overlapping mount points in a single MountPoints instance are not allowed.
   // Adding mount point whose path overlaps with an existing mount point will
-  // fail.
+  // fail except for media galleries, which do not count toward registered
+  // paths for overlap calculation.
   //
   // If not empty, |path| must be absolute. It is allowed for the path to be
   // empty, but |GetVirtualPath| will not work for those mount points.
@@ -61,6 +61,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   // by calling RevokeFileSystem with |mount_name|.
   bool RegisterFileSystem(const std::string& mount_name,
                           FileSystemType type,
+                          const FileSystemMountOption& mount_option,
                           const base::FilePath& path);
 
   // MountPoints overrides.
@@ -68,10 +69,13 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   virtual bool RevokeFileSystem(const std::string& mount_name) OVERRIDE;
   virtual bool GetRegisteredPath(const std::string& mount_name,
                                  base::FilePath* path) const OVERRIDE;
-  virtual bool CrackVirtualPath(const base::FilePath& virtual_path,
-                                std::string* mount_name,
-                                FileSystemType* type,
-                                base::FilePath* path) const OVERRIDE;
+  virtual bool CrackVirtualPath(
+      const base::FilePath& virtual_path,
+      std::string* mount_name,
+      FileSystemType* type,
+      std::string* cracked_id,
+      base::FilePath* path,
+      FileSystemMountOption* mount_option) const OVERRIDE;
   virtual FileSystemURL CrackURL(const GURL& url) const OVERRIDE;
   virtual FileSystemURL CreateCrackedFileSystemURL(
       const GURL& origin,
@@ -89,6 +93,11 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   // Returns false if the path cannot be resolved (e.g. if the path is not
   // part of any registered filesystem).
   //
+  // Media gallery type file systems do not count for this calculation. i.e.
+  // if only a media gallery is registered for the path, false will be returned.
+  // If a media gallery and another file system are registered for related
+  // paths, only the other registration is taken into account.
+  //
   // Returned virtual_path will have normalized path separators.
   bool GetVirtualPath(const base::FilePath& absolute_path,
                       base::FilePath* virtual_path) const;
@@ -100,6 +109,9 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
       const GURL& origin,
       const std::string& mount_name,
       const base::FilePath& path) const;
+
+  // Revoke all registered filesystems. Used only by testing (for clean-ups).
+  void RevokeAllFileSystems();
 
  private:
   friend class base::RefCountedThreadSafe<ExternalMountPoints>;
@@ -125,10 +137,12 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   //  - there is no registered mount point with mount_name
   //  - path does not contain a reference to a parent
   //  - path is absolute
-  //  - path does not overlap with an existing mount point path.
+  //  - path does not overlap with an existing mount point path unless it is a
+  //    media gallery type.
   //
   // |lock_| should be taken before calling this method.
   bool ValidateNewMountPoint(const std::string& mount_name,
+                             FileSystemType type,
                              const base::FilePath& path);
 
   // This lock needs to be obtained when accessing the instance_map_.
@@ -138,20 +152,6 @@ class WEBKIT_STORAGE_BROWSER_EXPORT ExternalMountPoints
   PathToName path_to_name_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalMountPoints);
-};
-
-// Registers a scoped external filesystem which gets revoked when it scopes out.
-class WEBKIT_STORAGE_BROWSER_EXPORT ScopedExternalFileSystem {
- public:
-  ScopedExternalFileSystem(const std::string& mount_name,
-                           FileSystemType type,
-                           const base::FilePath& path);
-  ~ScopedExternalFileSystem();
-
-  base::FilePath GetVirtualRootPath() const;
-
- private:
-  const std::string mount_name_;
 };
 
 }  // namespace fileapi

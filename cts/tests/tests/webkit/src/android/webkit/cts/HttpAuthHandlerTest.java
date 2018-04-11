@@ -16,6 +16,7 @@
 
 package android.webkit.cts;
 
+import android.cts.util.NullWebViewUtils;
 import android.test.ActivityInstrumentationTestCase2;
 import android.webkit.HttpAuthHandler;
 import android.webkit.WebView;
@@ -24,7 +25,7 @@ import android.webkit.cts.WebViewOnUiThread.WaitForLoadedClient;
 
 import org.apache.http.HttpStatus;
 
-public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebViewStubActivity> {
+public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebViewCtsActivity> {
 
     private static final long TIMEOUT = 10000;
 
@@ -37,18 +38,24 @@ public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebVie
     private WebViewOnUiThread mOnUiThread;
 
     public HttpAuthHandlerTest() {
-        super("com.android.cts.stub", WebViewStubActivity.class);
+        super("com.android.cts.webkit", WebViewCtsActivity.class);
     }
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mOnUiThread = new WebViewOnUiThread(this, getActivity().getWebView());
+        WebView webview = getActivity().getWebView();
+        if (webview != null) {
+            mOnUiThread = new WebViewOnUiThread(this, webview);
+        }
     }
 
     @Override
     protected void tearDown() throws Exception {
-        mOnUiThread.cleanUp();
+        if (mOnUiThread != null) {
+            mOnUiThread.cleanUp();
+        }
+
         if (mWebServer != null) {
             mWebServer.shutdown();
         }
@@ -138,6 +145,9 @@ public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebVie
     }
 
     public void testProceed() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mWebServer = new CtsTestServer(getActivity());
         String url = mWebServer.getAuthAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
 
@@ -147,6 +157,9 @@ public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebVie
     }
 
     public void testCancel() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mWebServer = new CtsTestServer(getActivity());
         String url = mWebServer.getAuthAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
 
@@ -159,6 +172,9 @@ public class HttpAuthHandlerTest extends ActivityInstrumentationTestCase2<WebVie
     }
 
     public void testUseHttpAuthUsernamePassword() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         mWebServer = new CtsTestServer(getActivity());
         String url = mWebServer.getAuthAssetUrl(TestHtmlConstants.HELLO_WORLD_URL);
 

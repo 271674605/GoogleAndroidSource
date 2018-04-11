@@ -14,10 +14,11 @@ body {
 }
 
 img {
-  float: left;
+  flex-shrink: 0;
   height: 16px;
   padding-left: 2px;
   padding-right: 5px;
+  vertical-align: top;
   width: 16px;
 }
 
@@ -39,6 +40,10 @@ img {
   font-size: 150%;
   padding-bottom: 10px;
   padding-left: 20px;
+}
+
+#serviceworker-internals {
+  visibility: hidden;
 }
 
 .tab-header {
@@ -71,7 +76,11 @@ img {
 .content-header {
   border-bottom: 1px solid #eee;
   font-size: 150%;
-  padding-bottom: 4px;
+  padding-bottom: 10px;
+}
+
+#devices-help {
+  margin-top: 10px;
 }
 
 .device-header {
@@ -127,13 +136,71 @@ img {
 }
 
 .browser-header {
+  align-items: center;
+  display: flex;
+  flex-flow: row wrap;
+  min-height: 23px;
+  padding-top: 10px;
+}
+
+.browser-header > .browser-name {
+  font-size: 110%;
   font-weight: bold;
-  margin: 5px 0 0;
-  padding: 2px 0;
 }
 
 .row {
-  padding: 5px 0;
+  padding: 6px 0;
+  position: relative;
+}
+
+.properties-box {
+  display: flex;
+}
+
+.subrow-box {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.subrow {
+  display: flex;
+  flex-flow: row wrap;
+}
+
+.subrow > div {
+  margin-right: 0.5em;
+}
+
+.webview-thumbnail {
+  display: inline-block;
+  margin-right: 5px;
+  overflow: hidden;
+  position: relative;
+  vertical-align: top;
+}
+
+.screen-rect {
+  background-color: #eee;
+  position: absolute;
+}
+
+.view-rect {
+  background-color: #ccc;
+  min-height: 1px;
+  min-width: 1px;
+  position: absolute;
+}
+
+.view-rect.hidden {
+  background-color: #ddd;
+}
+
+.guest {
+  padding-left: 20px;
+}
+
+.invisible-view {
+  color: rgb(151, 156, 160);
 }
 
 .url {
@@ -141,24 +208,30 @@ img {
 }
 
 .list {
-  margin-bottom: 20px;
   margin-top: 5px;
 }
 
-a {
+.action {
   color: rgb(17, 85, 204);
-  padding: 0 3px;
-  text-decoration: none;
+  cursor: pointer;
+  margin-right: 15px;
 }
 
-a.disabled {
+.action:hover {
+  text-decoration: underline;
+}
+
+.browser-header .action {
+  margin-left: 10px;
+}
+
+.list:not(.pages) .subrow {
+  min-height: 19px;
+}
+
+.action.disabled {
   opacity: 0.5;
   pointer-events: none;
-}
-
-.open {
-  margin-bottom: -4px;
-  margin-top: 5px;
 }
 
 .open > input {
@@ -169,14 +242,25 @@ a.disabled {
   padding: 0 2px;
 }
 
+.open > input:focus {
+  -webkit-transition: border-color 200ms;
+  border-color: rgb(77, 144, 254);
+  outline: none;
+}
+
 .open > button {
   line-height: 13px;
 }
 
-#port-forwarding-settings {
-  position: absolute;
-  right: 20px;
-  top: 15px;
+#device-settings {
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  padding: 5px 0;
+}
+
+#device-settings button {
+  margin-left: 15px;
 }
 
 #port-forwarding-overlay {
@@ -191,6 +275,16 @@ a.disabled {
   top: 0;
 }
 
+.warning {
+  background-image: -webkit-image-set(url('chrome://theme/IDR_WARNING') 1x,
+                                      url('chrome://theme/IDR_WARNING@2x') 2x);
+  background-position: 0 center;
+  background-repeat: no-repeat;
+  background-size:24px 21px;
+  margin-left: 3px;
+  padding-left: 25px;
+}
+
 #port-forwarding-overlay:not(.open) {
   display: none;
 }
@@ -200,7 +294,7 @@ a.disabled {
   background: white;
   box-shadow: 0 4px 23px 5px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0,0,0,0.15);
   color: #333;
-  padding: 17px;
+  padding: 17px 17px 12px;
   position: relative;
 }
 
@@ -287,6 +381,16 @@ a.disabled {
   opacity: 0.5;
 }
 
-#port-forwarding-config-buttons > button {
-  float: right;
+#port-forwarding-message {
+  margin-bottom: 12px;
+  width: 20em;
+}
+
+#port-forwarding-config-buttons {
+  align-items: center;
+  display: flex;
+}
+
+#port-forwarding-config-buttons > label {
+  flex-grow: 1
 }

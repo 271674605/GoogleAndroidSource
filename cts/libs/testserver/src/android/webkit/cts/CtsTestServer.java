@@ -59,6 +59,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.net.URLConnection;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
@@ -84,6 +85,7 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.X509TrustManager;
 
@@ -100,19 +102,22 @@ public class CtsTestServer {
     private static final String DOWNLOAD_ID_PARAMETER = "downloadId";
     private static final String NUM_BYTES_PARAMETER = "numBytes";
 
-    public static final String ASSET_PREFIX = "/assets/";
-    public static final String RAW_PREFIX = "raw/";
-    public static final String FAVICON_ASSET_PATH = ASSET_PREFIX + "webkit/favicon.png";
-    public static final String APPCACHE_PATH = "/appcache.html";
-    public static final String APPCACHE_MANIFEST_PATH = "/appcache.manifest";
-    public static final String REDIRECT_PREFIX = "/redirect";
-    public static final String DELAY_PREFIX = "/delayed";
-    public static final String BINARY_PREFIX = "/binary";
-    public static final String COOKIE_PREFIX = "/cookie";
-    public static final String AUTH_PREFIX = "/auth";
-    public static final String SHUTDOWN_PREFIX = "/shutdown";
+    private static final String ASSET_PREFIX = "/assets/";
+    private static final String RAW_PREFIX = "raw/";
+    private static final String FAVICON_ASSET_PATH = ASSET_PREFIX + "webkit/favicon.png";
+    private static final String APPCACHE_PATH = "/appcache.html";
+    private static final String APPCACHE_MANIFEST_PATH = "/appcache.manifest";
+    private static final String REDIRECT_PREFIX = "/redirect";
+    private static final String QUERY_REDIRECT_PATH = "/alt_redirect";
+    private static final String DELAY_PREFIX = "/delayed";
+    private static final String BINARY_PREFIX = "/binary";
+    private static final String SET_COOKIE_PREFIX = "/setcookie";
+    private static final String COOKIE_PREFIX = "/cookie";
+    private static final String LINKED_SCRIPT_PREFIX = "/linkedscriptprefix";
+    private static final String AUTH_PREFIX = "/auth";
+    private static final String SHUTDOWN_PREFIX = "/shutdown";
     public static final String NOLENGTH_POSTFIX = "nolength";
-    public static final int DELAY_MILLIS = 2000;
+    private static final int DELAY_MILLIS = 2000;
 
     public static final String AUTH_REALM = "Android CTS";
     public static final String AUTH_USER = "cts";
@@ -124,6 +129,13 @@ public class CtsTestServer {
     public static final String MESSAGE_403 = "403 forbidden";
     public static final String MESSAGE_404 = "404 not found";
 
+    public enum SslMode {
+        INSECURE,
+        NO_CLIENT_AUTH,
+        WANTS_CLIENT_AUTH,
+        NEEDS_CLIENT_AUTH,
+    }
+
     private static Hashtable<Integer, String> sReasons;
 
     private ServerThread mServerThread;
@@ -131,13 +143,14 @@ public class CtsTestServer {
     private AssetManager mAssets;
     private Context mContext;
     private Resources mResources;
-    private boolean mSsl;
+    private SslMode mSsl;
     private MimeTypeMap mMap;
     private Vector<String> mQueries;
     private ArrayList<HttpEntity> mRequestEntities;
     private final Map<String, HttpRequest> mLastRequestMap = new HashMap<String, HttpRequest>();
     private long mDocValidity;
     private long mDocAge;
+    private X509TrustManager mTrustManager;
 
     /**
      * Create and start a local HTTP server instance.
@@ -166,19 +179,43 @@ public class CtsTestServer {
      * @throws Exception
      */
     public CtsTestServer(Context context, boolean ssl) throws Exception {
+        this(context, ssl ? SslMode.NO_CLIENT_AUTH : SslMode.INSECURE);
+    }
+
+    /**
+     * Create and start a local HTTP server instance.
+     * @param context The application context to use for fetching assets.
+     * @param sslMode Whether to use SSL, and if so, what client auth (if any) to use.
+     * @throws Exception
+     */
+    public CtsTestServer(Context context, SslMode sslMode) throws Exception {
+        this(context, sslMode, new CtsTrustManager());
+    }
+
+    /**
+     * Create and start a local HTTP server instance.
+     * @param context The application context to use for fetching assets.
+     * @param sslMode Whether to use SSL, and if so, what client auth (if any) to use.
+     * @param trustManager the trustManager
+     * @throws Exception
+     */
+    public CtsTestServer(Context context, SslMode sslMode, X509TrustManager trustManager)
+            throws Exception {
         mContext = context;
         mAssets = mContext.getAssets();
         mResources = mContext.getResources();
-        mSsl = ssl;
+        mSsl = sslMode;
         mRequestEntities = new ArrayList<HttpEntity>();
         mMap = MimeTypeMap.getSingleton();
         mQueries = new Vector<String>();
+        mTrustManager = trustManager;
         mServerThread = new ServerThread(this, mSsl);
-        if (mSsl) {
-            mServerUri = "https://localhost:" + mServerThread.mSocket.getLocalPort();
+        if (mSsl == SslMode.INSECURE) {
+            mServerUri = "http:";
         } else {
-            mServerUri = "http://localhost:" + mServerThread.mSocket.getLocalPort();
+            mServerUri = "https:";
         }
+        mServerUri += "//localhost:" + mServerThread.mSocket.getLocalPort();
         mServerThread.start();
     }
 
@@ -217,7 +254,9 @@ public class CtsTestServer {
 
     private URLConnection openConnection(URL url)
             throws IOException, NoSuchAlgorithmException, KeyManagementException {
-        if (mSsl) {
+        if (mSsl == SslMode.INSECURE) {
+            return url.openConnection();
+        } else {
             // Install hostname verifiers and trust managers that don't do
             // anything in order to get around the client not trusting
             // the test server due to a lack of certificates.
@@ -226,13 +265,14 @@ public class CtsTestServer {
             connection.setHostnameVerifier(new CtsHostnameVerifier());
 
             SSLContext context = SSLContext.getInstance("TLS");
-            CtsTrustManager trustManager = new CtsTrustManager();
-            context.init(null, new CtsTrustManager[] {trustManager}, null);
+            try {
+                context.init(ServerThread.getKeyManagers(), getTrustManagers(), null);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
             connection.setSSLSocketFactory(context.getSocketFactory());
 
             return connection;
-        } else {
-            return url.openConnection();
         }
     }
 
@@ -244,7 +284,7 @@ public class CtsTestServer {
      */
     private static class CtsTrustManager implements X509TrustManager {
         public void checkClientTrusted(X509Certificate[] chain, String authType) {
-            // Trust the CtSTestServer...
+            // Trust the CtSTestServer's client...
         }
 
         public void checkServerTrusted(X509Certificate[] chain, String authType) {
@@ -254,6 +294,13 @@ public class CtsTestServer {
         public X509Certificate[] getAcceptedIssuers() {
             return null;
         }
+    }
+
+    /**
+     * @return a trust manager array of size 1.
+     */
+    private X509TrustManager[] getTrustManagers() {
+        return new X509TrustManager[] { mTrustManager };
     }
 
     /**
@@ -291,8 +338,20 @@ public class CtsTestServer {
      * @param path The path of the asset. See {@link AssetManager#open(String)}
      */
     public String getDelayedAssetUrl(String path) {
+        return getDelayedAssetUrl(path, DELAY_MILLIS);
+    }
+
+    /**
+     * Return an artificially delayed absolute URL that refers to the given asset. This can be
+     * used to emulate a slow HTTP server or connection.
+     * @param path The path of the asset. See {@link AssetManager#open(String)}
+     * @param delayMs The number of milliseconds to delay the request
+     */
+    public String getDelayedAssetUrl(String path, int delayMs) {
         StringBuilder sb = new StringBuilder(getBaseUri());
         sb.append(DELAY_PREFIX);
+        sb.append("/");
+        sb.append(delayMs);
         sb.append(ASSET_PREFIX);
         sb.append(path);
         return sb.toString();
@@ -310,7 +369,6 @@ public class CtsTestServer {
         sb.append(path);
         return sb.toString();
     }
-
 
     /**
      * Return an absolute URL that indirectly refers to the given asset.
@@ -336,6 +394,61 @@ public class CtsTestServer {
         }
         sb.append(ASSET_PREFIX);
         sb.append(path);
+        return sb.toString();
+    }
+
+    /**
+     * Return an absolute URL that indirectly refers to the given asset, without having
+     * the destination path be part of the redirecting path.
+     * When a client fetches this URL, the server will respond with a temporary redirect (302)
+     * referring to the absolute URL of the given asset.
+     * @param path The path of the asset. See {@link AssetManager#open(String)}
+     */
+    public String getQueryRedirectingAssetUrl(String path) {
+        StringBuilder sb = new StringBuilder(getBaseUri());
+        sb.append(QUERY_REDIRECT_PATH);
+        sb.append("?dest=");
+        try {
+            sb.append(URLEncoder.encode(getAssetUrl(path), "UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+        }
+        return sb.toString();
+    }
+
+    /**
+     * getSetCookieUrl returns a URL that attempts to set the cookie
+     * "key=value" when fetched.
+     * @param path a suffix to disambiguate mulitple Cookie URLs.
+     * @param key the key of the cookie.
+     * @return the url for a page that attempts to set the cookie.
+     */
+    public String getSetCookieUrl(String path, String key, String value) {
+        StringBuilder sb = new StringBuilder(getBaseUri());
+        sb.append(SET_COOKIE_PREFIX);
+        sb.append(path);
+        sb.append("?key=");
+        sb.append(key);
+        sb.append("&value=");
+        sb.append(value);
+        return sb.toString();
+    }
+
+    /**
+     * getLinkedScriptUrl returns a URL for a page with a script tag where
+     * src equals the URL passed in.
+     * @param path a suffix to disambiguate mulitple Linked Script URLs.
+     * @param url the src of the script tag.
+     * @return the url for the page with the script link in.
+     */
+    public String getLinkedScriptUrl(String path, String url) {
+        StringBuilder sb = new StringBuilder(getBaseUri());
+        sb.append(LINKED_SCRIPT_PREFIX);
+        sb.append(path);
+        sb.append("?url=");
+        try {
+            sb.append(URLEncoder.encode(url, "UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+        }
         return sb.toString();
     }
 
@@ -500,12 +613,14 @@ public class CtsTestServer {
             path = FAVICON_ASSET_PATH;
         }
         if (path.startsWith(DELAY_PREFIX)) {
+            String delayPath = path.substring(DELAY_PREFIX.length() + 1);
+            String delay = delayPath.substring(0, delayPath.indexOf('/'));
+            path = delayPath.substring(delay.length());
             try {
-                Thread.sleep(DELAY_MILLIS);
+                Thread.sleep(Integer.valueOf(delay));
             } catch (InterruptedException ignored) {
                 // ignore
             }
-            path = path.substring(DELAY_PREFIX.length());
         }
         if (path.startsWith(AUTH_PREFIX)) {
             // authentication required
@@ -541,6 +656,8 @@ public class CtsTestServer {
                     response = createResponse(HttpStatus.SC_OK);
                     response.setEntity(entity);
                     response.addHeader("Content-Disposition", "attachment; filename=test.bin");
+                    response.addHeader("Content-Type", mimeType);
+                    response.addHeader("Content-Length", "" + length);
                 } else {
                     // fall through, return 404 at the end
                 }
@@ -585,6 +702,13 @@ public class CtsTestServer {
             String location = getBaseUri() + path.substring(REDIRECT_PREFIX.length());
             Log.i(TAG, "Redirecting to: " + location);
             response.addHeader("Location", location);
+        } else if (path.equals(QUERY_REDIRECT_PATH)) {
+            String location = Uri.parse(uriString).getQueryParameter("dest");
+            if (location != null) {
+                Log.i(TAG, "Redirecting to: " + location);
+                response = createResponse(HttpStatus.SC_MOVED_TEMPORARILY);
+                response.addHeader("Location", location);
+            }
         } else if (path.startsWith(COOKIE_PREFIX)) {
             /*
              * Return a page with a title containing a list of all incoming cookies,
@@ -609,8 +733,20 @@ public class CtsTestServer {
             }
 
             response.addHeader("Set-Cookie", "count=" + count + "; path=" + COOKIE_PREFIX);
-            response.setEntity(createEntity("<html><head><title>" + cookieString +
-                    "</title></head><body>" + cookieString + "</body></html>"));
+            response.setEntity(createPage(cookieString.toString(), cookieString.toString()));
+        } else if (path.startsWith(SET_COOKIE_PREFIX)) {
+            response = createResponse(HttpStatus.SC_OK);
+            Uri parsedUri = Uri.parse(uriString);
+            String key = parsedUri.getQueryParameter("key");
+            String value = parsedUri.getQueryParameter("value");
+            String cookie = key + "=" + value;
+            response.addHeader("Set-Cookie", cookie);
+            response.setEntity(createPage(cookie, cookie));
+        } else if (path.startsWith(LINKED_SCRIPT_PREFIX)) {
+            response = createResponse(HttpStatus.SC_OK);
+            String src = Uri.parse(uriString).getQueryParameter("url");
+            String scriptTag = "<script src=\"" + src + "\"></script>";
+            response.setEntity(createPage("LinkedScript", scriptTag));
         } else if (path.equals(USERAGENT_PATH)) {
             response = createResponse(HttpStatus.SC_OK);
             Header agentHeader = request.getFirstHeader("User-Agent");
@@ -618,8 +754,7 @@ public class CtsTestServer {
             if (agentHeader != null) {
                 agent = agentHeader.getValue();
             }
-            response.setEntity(createEntity("<html><head><title>" + agent + "</title></head>" +
-                    "<body>" + agent + "</body></html>"));
+            response.setEntity(createPage(agent, agent));
         } else if (path.equals(TEST_DOWNLOAD_PATH)) {
             response = createTestDownloadResponse(Uri.parse(uriString));
         } else if (path.equals(SHUTDOWN_PREFIX)) {
@@ -700,12 +835,7 @@ public class CtsTestServer {
         // Fill in error reason. Avoid use of the ReasonPhraseCatalog, which is Locale-dependent.
         String reason = getReasonString(status);
         if (reason != null) {
-            StringBuffer buf = new StringBuffer("<html><head><title>");
-            buf.append(reason);
-            buf.append("</title></head><body>");
-            buf.append(reason);
-            buf.append("</body></html>");
-            response.setEntity(createEntity(buf.toString()));
+            response.setEntity(createPage(reason, reason));
         }
         return response;
     }
@@ -722,6 +852,14 @@ public class CtsTestServer {
             Log.w(TAG, e);
         }
         return null;
+    }
+
+    /**
+     * Create a string entity for a bare bones html page with provided title and body.
+     */
+    private static StringEntity createPage(String title, String bodyContent) {
+        return createEntity("<html><head><title>" + title + "</title></head>" +
+                "<body>" + bodyContent + "</body></html>");
     }
 
     private static HttpResponse createTestDownloadResponse(Uri uri) throws IOException {
@@ -767,7 +905,7 @@ public class CtsTestServer {
     private static class ServerThread extends Thread {
         private CtsTestServer mServer;
         private ServerSocket mSocket;
-        private boolean mIsSsl;
+        private SslMode mSsl;
         private boolean mIsCancelled;
         private SSLContext mSslContext;
         private ExecutorService mExecutorService = Executors.newFixedThreadPool(20);
@@ -802,13 +940,13 @@ public class CtsTestServer {
             "1gaEjsC/0wGmmBDg1dTDH+F1p9TInzr3EFuYD0YiQ7YlAHq3cPuyGoLXJ5dXYuSBfhDXJSeddUkl" +
             "k1ufZyOOcskeInQge7jzaRfmKg3U94r+spMEvb0AzDQVOKvjjo1ivxMSgFRZaDb/4qw=";
 
-        private String PASSWORD = "android";
+        private static final String PASSWORD = "android";
 
         /**
          * Loads a keystore from a base64-encoded String. Returns the KeyManager[]
          * for the result.
          */
-        private KeyManager[] getKeyManagers() throws Exception {
+        private static KeyManager[] getKeyManagers() throws Exception {
             byte[] bytes = Base64.decode(SERVER_KEYS_BKS.getBytes());
             InputStream inputStream = new ByteArrayInputStream(bytes);
 
@@ -824,19 +962,24 @@ public class CtsTestServer {
         }
 
 
-        public ServerThread(CtsTestServer server, boolean ssl) throws Exception {
+        public ServerThread(CtsTestServer server, SslMode sslMode) throws Exception {
             super("ServerThread");
             mServer = server;
-            mIsSsl = ssl;
+            mSsl = sslMode;
             int retry = 3;
             while (true) {
                 try {
-                    if (mIsSsl) {
-                        mSslContext = SSLContext.getInstance("TLS");
-                        mSslContext.init(getKeyManagers(), null, null);
-                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(0);
-                    } else {
+                    if (mSsl == SslMode.INSECURE) {
                         mSocket = new ServerSocket(0);
+                    } else {  // Use SSL
+                        mSslContext = SSLContext.getInstance("TLS");
+                        mSslContext.init(getKeyManagers(), mServer.getTrustManagers(), null);
+                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(0);
+                        if (mSsl == SslMode.WANTS_CLIENT_AUTH) {
+                            ((SSLServerSocket) mSocket).setWantClientAuth(true);
+                        } else if (mSsl == SslMode.NEEDS_CLIENT_AUTH) {
+                            ((SSLServerSocket) mSocket).setNeedClientAuth(true);
+                        }
                     }
                     return;
                 } catch (IOException e) {

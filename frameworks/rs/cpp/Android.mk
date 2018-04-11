@@ -12,18 +12,15 @@ rs_cpp_SRC_FILES := \
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
-ifeq "REL" "$(PLATFORM_VERSION_CODENAME)"
-  RS_VERSION := $(PLATFORM_SDK_VERSION)
-else
-  # Increment by 1 whenever this is not a final release build, since we want to
-  # be able to see the RS version number change during development.
-  # See build/core/version_defaults.mk for more information about this.
-  RS_VERSION := "(1 + $(PLATFORM_SDK_VERSION))"
-endif
-local_cflags_for_rs_cpp += -DRS_VERSION=$(RS_VERSION)
+include frameworks/compile/slang/rs_version.mk
+local_cflags_for_rs_cpp += $(RS_VERSION_DEFINE)
+local_cflags_for_rs_cpp += -Wno-unused-parameter
 
 LOCAL_SRC_FILES := $(rs_cpp_SRC_FILES)
 
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
 LOCAL_CFLAGS += $(local_cflags_for_rs_cpp)
 
 LOCAL_SHARED_LIBRARIES := \
@@ -47,25 +44,34 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
 LOCAL_CFLAGS += $(local_cflags_for_rs_cpp)
+
+ifeq ($(my_32_64_bit_suffix),32)
+LOCAL_SDK_VERSION := 8
+else
+LOCAL_SDK_VERSION := 21
+endif
+LOCAL_CFLAGS += -DRS_COMPATIBILITY_LIB
 
 LOCAL_SRC_FILES := $(rs_cpp_SRC_FILES)
 
-LOCAL_STATIC_LIBRARIES := \
-	libz \
-	libcutils \
-	libutils \
-	liblog \
-	libstlport_static
+LOCAL_SRC_FILES += ../rsCompatibilityLib.cpp
 
-LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_WHOLE_STATIC_LIBRARIES := \
+	libutils \
+	libstlport_static
 
 LOCAL_MODULE:= libRScpp_static
 
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_C_INCLUDES += frameworks/rs
-LOCAL_C_INCLUDES += external/stlport/stlport bionic/ bionic/libstdc++/include
 LOCAL_C_INCLUDES += $(intermediates)
+
+LOCAL_LDFLAGS := -llog -lz -ldl
+LOCAL_NDK_STL_VARIANT := stlport_static
 
 include $(BUILD_STATIC_LIBRARY)

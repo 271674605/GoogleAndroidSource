@@ -67,7 +67,6 @@ InitConfigStatus FBConfig::initConfigList(FrameBuffer *fb)
         return ret;
     }
 
-    const FrameBufferCaps &caps = fb->getCaps();
     EGLDisplay dpy = fb->getDisplay();
 
     if (dpy == EGL_NO_DISPLAY) {
@@ -203,7 +202,9 @@ int FBConfig::chooseConfig(FrameBuffer *fb, EGLint * attribs, uint32_t * configs
     }
 #endif
 
-    s_egl.eglChooseConfig(dpy, newAttribs, matchedConfigs, nConfigs, &nConfigs);
+    if (!s_egl.eglChooseConfig(dpy, newAttribs, matchedConfigs, nConfigs, &nConfigs)) {
+        nConfigs = 0;
+    }
 
     delete[] newAttribs;
 

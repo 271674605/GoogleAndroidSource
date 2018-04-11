@@ -14,14 +14,15 @@ namespace cc {
 class FakePicturePileImpl : public PicturePileImpl {
  public:
   static scoped_refptr<FakePicturePileImpl> CreateFilledPile(
-      gfx::Size tile_size,
-      gfx::Size layer_bounds);
-
+      const gfx::Size& tile_size,
+      const gfx::Size& layer_bounds);
   static scoped_refptr<FakePicturePileImpl> CreateEmptyPile(
-      gfx::Size tile_size,
-      gfx::Size layer_bounds);
-
-  static scoped_refptr<FakePicturePileImpl> CreatePile();
+      const gfx::Size& tile_size,
+      const gfx::Size& layer_bounds);
+  static scoped_refptr<FakePicturePileImpl>
+      CreateEmptyPileThatThinksItHasRecordings(const gfx::Size& tile_size,
+                                               const gfx::Size& layer_bounds);
+  static scoped_refptr<FakePicturePileImpl> CreateInfiniteFilledPile();
 
   TilingData& tiling() { return tiling_; }
 
@@ -29,16 +30,11 @@ class FakePicturePileImpl : public PicturePileImpl {
   void RemoveRecordingAt(int x, int y);
   void RerecordPile();
 
-  void AddPictureToRecording(
-      int x,
-      int y,
-      scoped_refptr<Picture> picture);
-
   void add_draw_rect(const gfx::RectF& rect) {
     client_.add_draw_rect(rect, default_paint_);
   }
 
-  void add_draw_bitmap(const SkBitmap& bitmap, gfx::Point point) {
+  void add_draw_bitmap(const SkBitmap& bitmap, const gfx::Point& point) {
     client_.add_draw_bitmap(bitmap, point, default_paint_);
   }
 
@@ -47,7 +43,7 @@ class FakePicturePileImpl : public PicturePileImpl {
   }
 
   void add_draw_bitmap_with_paint(const SkBitmap& bitmap,
-                                  gfx::Point point,
+                                  const gfx::Point& point,
                                   const SkPaint& paint) {
     client_.add_draw_bitmap(bitmap, point, paint);
   }
@@ -62,6 +58,14 @@ class FakePicturePileImpl : public PicturePileImpl {
 
   void set_contents_opaque(bool contents_opaque) {
     contents_opaque_ = contents_opaque;
+  }
+
+  void set_contents_fill_bounds_completely(bool fills) {
+    contents_fill_bounds_completely_ = fills;
+  }
+
+  void set_clear_canvas_with_debug_color(bool clear) {
+    clear_canvas_with_debug_color_ = clear;
   }
 
  protected:

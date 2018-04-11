@@ -14,12 +14,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "components/autofill/content/browser/autocheckout_statistic.h"
 #include "components/autofill/content/browser/wallet/full_wallet.h"
 #include "components/autofill/content/browser/wallet/wallet_items.h"
-#include "components/autofill/core/browser/autofill_manager_delegate.h"
+#include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
-#include "components/autofill/core/common/autocheckout_status.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "url/gurl.h"
@@ -56,8 +54,6 @@ class WalletClientDelegate;
 //   a) GetFullWallet may return a Risk challenge for the user. In that case,
 //      the user will need to verify who they are by authenticating their
 //      chosen backing instrument through AuthenticateInstrument
-// 4) If the user initiated Autocheckout, SendAutocheckoutStatus to notify
-//    Online Wallet of the status flow to record various metrics.
 //
 // WalletClient is designed so only one request to Online Wallet can be outgoing
 // at any one time. If |HasRequestInProgress()| is true while calling e.g.
@@ -74,7 +70,7 @@ class WalletClient : public net::URLFetcherDelegate {
 
   // The type of error returned by Online Wallet.
   enum ErrorType {
-    // Errors to display to users.
+    // Errors to display to users ----------------------------------------------
     BUYER_ACCOUNT_ERROR,                // Risk deny, unsupported country, or
                                         // account closed.
     BUYER_LEGAL_ADDRESS_NOT_SUPPORTED,  // User's Buyer Legal Address is
@@ -85,18 +81,21 @@ class WalletClient : public net::URLFetcherDelegate {
     UNSUPPORTED_MERCHANT,               // Merchant is blacklisted due to
                                         // compliance violation.
 
-    // API errors.
-    BAD_REQUEST,              // Request was very malformed or sent to the
-                              // wrong endpoint.
-    INVALID_PARAMS,           // API call had missing or invalid parameters.
-    UNSUPPORTED_API_VERSION,  // The server API version of the request is no
-                              // longer supported.
+    // API errors --------------------------------------------------------------
+    // Request was very malformed or sent to the wrong endpoint.
+    BAD_REQUEST,
+    // API call had missing or invalid parameters.
+    INVALID_PARAMS,
+    // The server API version of the request is no longer supported.
+    UNSUPPORTED_API_VERSION,
+    // The user agent is not supported or a bad Google API key was provided.
+    UNSUPPORTED_USER_AGENT_OR_API_KEY,
 
-    // Server errors.
+    // Server errors -----------------------------------------------------------
     INTERNAL_ERROR,           // Unknown server side error.
     SERVICE_UNAVAILABLE,      // Online Wallet is down.
 
-    // Other errors.
+    // Other errors ------------------------------------------------------------
     MALFORMED_RESPONSE,       // The response from Wallet was malformed.
     NETWORK_ERROR,            // The response code of the server was something
                               // other than a 200 or 400.
@@ -108,9 +107,9 @@ class WalletClient : public net::URLFetcherDelegate {
    public:
     FullWalletRequest(const std::string& instrument_id,
                       const std::string& address_id,
-                      const GURL& source_url,
                       const std::string& google_transaction_id,
-                      const std::vector<RiskCapability> risk_capabilities);
+                      const std::vector<RiskCapability> risk_capabilities,
+                      bool new_wallet_user);
     ~FullWalletRequest();
 
     // The ID of the backing instrument. Should have been selected by the user
@@ -121,30 +120,32 @@ class WalletClient : public net::URLFetcherDelegate {
     // in some UI.
     std::string address_id;
 
-    // The URL that Online Wallet usage is being initiated on.
-    GURL source_url;
-
     // The transaction ID from GetWalletItems.
     std::string google_transaction_id;
 
     // The Risk challenges supported by the user of WalletClient
     std::vector<RiskCapability> risk_capabilities;
 
+    // True if the user does not have Wallet profile.
+    bool new_wallet_user;
+
    private:
     DISALLOW_ASSIGN(FullWalletRequest);
   };
 
   // |context_getter| is reference counted so it has no lifetime or ownership
-  // requirements. |delegate| must outlive |this|.
+  // requirements. |delegate| must outlive |this|. |source_url| is the url
+  // of the merchant page.
   WalletClient(net::URLRequestContextGetter* context_getter,
-               WalletClientDelegate* delegate);
+               WalletClientDelegate* delegate,
+               const GURL& source_url);
 
   virtual ~WalletClient();
 
   // GetWalletItems retrieves the user's online wallet. The WalletItems
   // returned may require additional action such as presenting legal documents
   // to the user to be accepted.
-  virtual void GetWalletItems(const GURL& source_url);
+  virtual void GetWalletItems();
 
   // The GetWalletItems call to the Online Wallet backend may require the user
   // to accept various legal documents before a FullWallet can be generated.
@@ -153,8 +154,7 @@ class WalletClient : public net::URLFetcherDelegate {
   // a corresponding |OnDidAcceptLegalDocuments()| call.
   virtual void AcceptLegalDocuments(
       const std::vector<WalletItems::LegalDocument*>& documents,
-      const std::string& google_transaction_id,
-      const GURL& source_url);
+      const std::string& google_transaction_id);
 
   // Authenticates that |card_verification_number| is for the backing instrument
   // with |instrument_id|. |obfuscated_gaia_id| is used as a key when escrowing
@@ -168,61 +168,56 @@ class WalletClient : public net::URLFetcherDelegate {
   virtual void GetFullWallet(const FullWalletRequest& full_wallet_request);
 
   // Saves the data in |instrument| and/or |address| to Wallet. |instrument|
-  // does not have to be complete if its being used to update an existing
+  // does not have to be complete if it's being used to update an existing
   // instrument, like in the case of expiration date or address only updates.
-  virtual void SaveToWallet(scoped_ptr<Instrument> instrument,
-                            scoped_ptr<Address> address,
-                            const GURL& source_url);
-
-  // SendAutocheckoutStatus is used for tracking the success of Autocheckout
-  // flows. |status| is the result of the flow, |source_url| is the domain
-  // where the purchase occured, and |google_transaction_id| is the same as the
-  // one provided by GetWalletItems. |latency_statistics| contain statistics
-  // required to measure Autocheckout process.
-  virtual void SendAutocheckoutStatus(
-      autofill::AutocheckoutStatus status,
-      const GURL& source_url,
-      const std::vector<AutocheckoutStatistic>& latency_statistics,
-      const std::string& google_transaction_id);
+  // |reference_instrument| and |reference_address| are the original instrument
+  // and address to be updated on the server (and should be NULL if |instrument|
+  // or |address| are new data).
+  virtual void SaveToWallet(
+      scoped_ptr<Instrument> instrument,
+      scoped_ptr<Address> address,
+      const WalletItems::MaskedInstrument* reference_instrument,
+      const Address* reference_address);
 
   bool HasRequestInProgress() const;
 
-  // Cancels and clears the current |request_| and |pending_requests_| (if any).
-  void CancelRequests();
+  // Cancels and clears the current |request_|.
+  void CancelRequest();
+
+  // Sets the user index and cancels any pending requests.
+  void SetUserIndex(size_t user_index);
+  size_t user_index() const { return user_index_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WalletClientTest, PendingRequest);
   FRIEND_TEST_ALL_PREFIXES(WalletClientTest, CancelRequests);
 
   enum RequestType {
-    NO_PENDING_REQUEST,
+    NO_REQUEST,
     ACCEPT_LEGAL_DOCUMENTS,
     AUTHENTICATE_INSTRUMENT,
     GET_FULL_WALLET,
     GET_WALLET_ITEMS,
     SAVE_TO_WALLET,
-    SEND_STATUS,
   };
 
   // Like AcceptLegalDocuments, but takes a vector of document ids.
   void DoAcceptLegalDocuments(
       const std::vector<std::string>& document_ids,
-      const std::string& google_transaction_id,
-      const GURL& source_url);
+      const std::string& google_transaction_id);
 
   // Posts |post_body| to |url| with content type |mime_type| and notifies
   // |delegate_| when the request is complete.
   void MakeWalletRequest(const GURL& url,
                          const std::string& post_body,
-                         const std::string& mime_type);
+                         const std::string& mime_type,
+                         RequestType request_type);
 
   // Performs bookkeeping tasks for any invalid requests.
-  void HandleMalformedResponse(net::URLFetcher* request);
+  void HandleMalformedResponse(RequestType request_type,
+                               net::URLFetcher* request);
   void HandleNetworkError(int response_code);
   void HandleWalletError(ErrorType error_type);
-
-  // Start the next pending request (if any).
-  void StartNextPendingRequest();
 
   // net::URLFetcherDelegate:
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
@@ -243,18 +238,22 @@ class WalletClient : public net::URLFetcherDelegate {
   // of a request to Online Wallet.
   WalletClientDelegate* const delegate_;  // must outlive |this|.
 
+  // The index of the user account we're making requests for. The index is into
+  // GAIA's list of signed in users.
+  size_t user_index_;
+
+  // The URL of the page we're making requests on behalf of.
+  GURL source_url_;
+
   // The current request object.
   scoped_ptr<net::URLFetcher> request_;
 
-  // The type of the current request. Must be NO_PENDING_REQUEST for a request
+  // The type of the current request. Must be NO_REQUEST for a request
   // to be initiated as only one request may be running at a given time.
   RequestType request_type_;
 
   // The one time pad used for GetFullWallet encryption.
   std::vector<uint8> one_time_pad_;
-
-  // Requests that are waiting to be run.
-  std::queue<base::Closure> pending_requests_;
 
   // When the current request started. Used to track client side latency.
   base::Time request_started_timestamp_;

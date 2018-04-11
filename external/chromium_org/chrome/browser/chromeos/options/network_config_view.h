@@ -54,7 +54,8 @@ class NetworkConfigView : public views::DialogDelegateView,
   gfx::NativeWindow GetNativeWindow() const;
 
   // views::DialogDelegate methods.
-  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual base::string16 GetDialogButtonLabel(
+      ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -62,11 +63,11 @@ class NetworkConfigView : public views::DialogDelegateView,
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
 
   // views::WidgetDelegate methods.
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
   // views::View overrides.
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
 
   // views::ButtonListener overrides.
   virtual void ButtonPressed(
@@ -79,7 +80,7 @@ class NetworkConfigView : public views::DialogDelegateView,
  protected:
   // views::View overrides:
   virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) OVERRIDE;
 
@@ -87,10 +88,10 @@ class NetworkConfigView : public views::DialogDelegateView,
   NetworkConfigView();
   virtual ~NetworkConfigView();
 
-  // Login dialog for known networks.
-  void InitWithNetworkState(const NetworkState* network);
-  // Login dialog for new/hidden networks.
-  void InitWithType(const std::string& type);
+  // Login dialog for known networks. Returns true if successfully created.
+  bool InitWithNetworkState(const NetworkState* network);
+  // Login dialog for new/hidden networks. Returns true if successfully created.
+  bool InitWithType(const std::string& type);
 
   // Creates and shows a dialog containing this view.
   void ShowDialog(gfx::NativeWindow parent);
@@ -121,7 +122,7 @@ class ChildNetworkConfigView : public views::View {
   virtual ~ChildNetworkConfigView();
 
   // Get the title to show for the dialog.
-  virtual string16 GetTitle() const = 0;
+  virtual base::string16 GetTitle() const = 0;
 
   // Returns view that should be focused on dialog activation.
   virtual views::View* GetInitiallyFocusedView() = 0;
@@ -140,10 +141,16 @@ class ChildNetworkConfigView : public views::View {
   // being active. For example, clicking on "Advanced" button.
   virtual void InitFocus() = 0;
 
+  // Returns 'true' if the dialog is for configuration only (default is false).
+  virtual bool IsConfigureDialog();
+
   // Minimum with of input fields / combo boxes.
   static const int kInputFieldMinWidth;
 
  protected:
+  // Gets the default network share state for the current login state.
+  static void GetShareStateForLoginState(bool* default_value, bool* modifiable);
+
   NetworkConfigView* parent_;
   std::string service_path_;
 
@@ -164,10 +171,8 @@ class ControlledSettingIndicatorView : public views::View {
 
  protected:
   // views::View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
 
  private:
   // Initializes the view.
@@ -175,8 +180,7 @@ class ControlledSettingIndicatorView : public views::View {
 
   bool managed_;
   views::ImageView* image_view_;
-  const gfx::ImageSkia* gray_image_;
-  const gfx::ImageSkia* color_image_;
+  const gfx::ImageSkia* image_;
 
   DISALLOW_COPY_AND_ASSIGN(ControlledSettingIndicatorView);
 };

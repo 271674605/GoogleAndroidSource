@@ -28,8 +28,9 @@ public class DialerPhoneNumberListAdapter extends PhoneNumberListAdapter {
     public final static int SHORTCUT_INVALID = -1;
     public final static int SHORTCUT_DIRECT_CALL = 0;
     public final static int SHORTCUT_ADD_NUMBER_TO_CONTACTS = 1;
+    public final static int SHORTCUT_MAKE_VIDEO_CALL = 2;
 
-    public final static int SHORTCUT_COUNT = 2;
+    public final static int SHORTCUT_COUNT = 3;
 
     private final boolean[] mShortcutEnabled = new boolean[SHORTCUT_COUNT];
 
@@ -139,22 +140,32 @@ public class DialerPhoneNumberListAdapter extends PhoneNumberListAdapter {
         switch (shortcutType) {
             case SHORTCUT_DIRECT_CALL:
                 text = resources.getString(R.string.search_shortcut_call_number, number);
-                drawableId = R.drawable.ic_phone_dk;
+                drawableId = R.drawable.ic_search_phone;
                 break;
             case SHORTCUT_ADD_NUMBER_TO_CONTACTS:
                 text = resources.getString(R.string.search_shortcut_add_to_contacts);
-                drawableId = R.drawable.ic_add_person_dk;
+                drawableId = R.drawable.ic_search_add_contact;
+                break;
+            case SHORTCUT_MAKE_VIDEO_CALL:
+                text = resources.getString(R.string.search_shortcut_make_video_call);
+                drawableId = R.drawable.ic_videocam;
                 break;
             default:
                 throw new IllegalArgumentException("Invalid shortcut type");
         }
-        v.setDrawableResource(R.drawable.list_item_avatar_bg, drawableId);
+        v.setDrawableResource(R.drawable.search_shortcut_background, drawableId);
         v.setDisplayName(text);
         v.setPhotoPosition(super.getPhotoPosition());
+        v.setAdjustSelectionBoundsEnabled(false);
     }
 
-    public void setShortcutEnabled(int shortcutType, boolean visible) {
+    /**
+     * @return True if the shortcut state (disabled vs enabled) was changed by this operation
+     */
+    public boolean setShortcutEnabled(int shortcutType, boolean visible) {
+        final boolean changed = mShortcutEnabled[shortcutType] != visible;
         mShortcutEnabled[shortcutType] = visible;
+        return changed;
     }
 
     public String getFormattedQueryString() {
@@ -164,7 +175,7 @@ public class DialerPhoneNumberListAdapter extends PhoneNumberListAdapter {
     @Override
     public void setQueryString(String queryString) {
         mFormattedQueryString = PhoneNumberUtils.formatNumber(
-                PhoneNumberUtils.convertAndStrip(queryString), mCountryIso);
+                PhoneNumberUtils.normalizeNumber(queryString), mCountryIso);
         super.setQueryString(queryString);
     }
 }

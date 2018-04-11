@@ -69,6 +69,9 @@ class Compilation {
   /// Redirection for stdout, stderr, etc.
   const StringRef **Redirects;
 
+  /// Whether we're compiling for diagnostic purposes.
+  bool ForDiagnostics;
+
 public:
   Compilation(const Driver &D, const ToolChain &DefaultToolChain,
               llvm::opt::InputArgList *Args,
@@ -155,23 +158,6 @@ public:
                       const JobAction *JA,
                       bool IssueErrors = false) const;
 
-  /// PrintJob - Print one job in -### format.
-  ///
-  /// \param OS - The stream to print on.
-  /// \param J - The job to print.
-  /// \param Terminator - A string to print at the end of the line.
-  /// \param Quote - Should separate arguments be quoted.
-  void PrintJob(raw_ostream &OS, const Job &J,
-                const char *Terminator, bool Quote) const;
-
-  /// PrintDiagnosticJob - Print one job in -### format, but with the 
-  /// superfluous options removed, which are not necessary for 
-  /// reproducing the crash.
-  ///
-  /// \param OS - The stream to print on.
-  /// \param J - The job to print.
-  void PrintDiagnosticJob(raw_ostream &OS, const Job &J) const;
-
   /// ExecuteCommand - Execute an actual command.
   ///
   /// \param FailingCommand - For non-zero results, this will be set to the
@@ -190,6 +176,9 @@ public:
   /// so compilation can be reexecuted to generate additional diagnostic
   /// information (e.g., preprocessed source(s)).
   void initCompilationForDiagnostics();
+
+  /// Return true if we're compiling for diagnostics.
+  bool isForDiagnostics() { return ForDiagnostics; }
 };
 
 } // end namespace driver

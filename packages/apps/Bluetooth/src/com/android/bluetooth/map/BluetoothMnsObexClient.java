@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2013 Samsung System LSI
+* Copyright (C) 2014 Samsung System LSI
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
@@ -16,21 +16,17 @@ package com.android.bluetooth.map;
 
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
-import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.os.ParcelUuid;
 import android.util.Log;
+import android.util.SparseBooleanArray;
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import javax.obex.ApplicationParameter;
 import javax.obex.ClientOperation;
 import javax.obex.ClientSession;
 import javax.obex.HeaderSet;
@@ -47,48 +43,46 @@ import javax.obex.ResponseCodes;
 public class BluetoothMnsObexClient {
 
     private static final String TAG = "BluetoothMnsObexClient";
-    private static final boolean D = false;
-    private static final boolean V = false;
+    private static final boolean D = BluetoothMapService.DEBUG;
+    private static final boolean V = BluetoothMapService.VERBOSE;
 
     private ObexTransport mTransport;
-    private Context mContext;
     public Handler mHandler = null;
     private volatile boolean mWaitingForRemote;
     private static final String TYPE_EVENT = "x-bt/MAP-event-report";
     private ClientSession mClientSession;
     private boolean mConnected = false;
     BluetoothDevice mRemoteDevice;
-    private BluetoothMapContentObserver mObserver;
-    private boolean mObserverRegistered = false;
+    private SparseBooleanArray mRegisteredMasIds = new SparseBooleanArray(1);
+
+    private HeaderSet mHsConnect = null;
+    private Handler mCallback = null;
 
     // Used by the MAS to forward notification registrations
     public static final int MSG_MNS_NOTIFICATION_REGISTRATION = 1;
+    public static final int MSG_MNS_SEND_EVENT = 2;
 
 
-    public static final ParcelUuid BluetoothUuid_ObexMns =
+    public static final ParcelUuid BLUETOOTH_UUID_OBEX_MNS =
             ParcelUuid.fromString("00001133-0000-1000-8000-00805F9B34FB");
 
 
-    public BluetoothMnsObexClient(Context context, BluetoothDevice remoteDevice) {
+    public BluetoothMnsObexClient(BluetoothDevice remoteDevice, Handler callback) {
         if (remoteDevice == null) {
             throw new NullPointerException("Obex transport is null");
         }
+        mRemoteDevice = remoteDevice;
         HandlerThread thread = new HandlerThread("BluetoothMnsObexClient");
         thread.start();
+        /* This will block until the looper have started, hence it will be safe to use it,
+           when the constructor completes */
         Looper looper = thread.getLooper();
         mHandler = new MnsObexClientHandler(looper);
-        mContext = context;
-        mRemoteDevice = remoteDevice;
-        mObserver = new BluetoothMapContentObserver(mContext);
-        mObserver.init();
+        mCallback = callback;
     }
 
     public Handler getMessageHandler() {
         return mHandler;
-    }
-
-    public BluetoothMapContentObserver getContentObserver() {
-        return mObserver;
     }
 
     private final class MnsObexClientHandler extends Handler {
@@ -102,6 +96,9 @@ public class BluetoothMnsObexClient {
             case MSG_MNS_NOTIFICATION_REGISTRATION:
                 handleRegistration(msg.arg1 /*masId*/, msg.arg2 /*status*/);
                 break;
+            case MSG_MNS_SEND_EVENT:
+                sendEventHandler((byte[])msg.obj/*byte[]*/, msg.arg1 /*masId*/);
+                break;
             default:
                 break;
             }
@@ -112,7 +109,11 @@ public class BluetoothMnsObexClient {
         return mConnected;
     }
 
-    public void disconnect() {
+    /**
+     * Disconnect the connection to MNS server.
+     * Call this when the MAS client requests a de-registration on events.
+     */
+    public synchronized void disconnect() {
         try {
             if (mClientSession != null) {
                 mClientSession.disconnect(null);
@@ -142,14 +143,15 @@ public class BluetoothMnsObexClient {
                 Log.e(TAG, "mTransport.close error: " + e.getMessage());
             }
         }
-        if(mObserverRegistered) {
-            mObserver.unregisterObserver();
-            mObserverRegistered = false;
-        }
-        if (mObserver != null) {
-            mObserver.deinit();
-            mObserver = null;
-        }
+    }
+
+    /**
+     * Shutdown the MNS.
+     */
+    public void shutdown() {
+        /* should shutdown handler thread first to make sure
+         * handleRegistration won't be called when disconnect
+         */
         if (mHandler != null) {
             // Shut down the thread
             mHandler.removeCallbacksAndMessages(null);
@@ -159,47 +161,54 @@ public class BluetoothMnsObexClient {
             }
             mHandler = null;
         }
+
+        /* Disconnect if connected */
+        disconnect();
+
+        mRegisteredMasIds.clear();
     }
 
-    private HeaderSet hsConnect = null;
-
+    /**
+     * We store a list of registered MasIds only to control connect/disconnect
+     * @param masId
+     * @param notificationStatus
+     */
     public void handleRegistration(int masId, int notificationStatus){
-        Log.d(TAG, "handleRegistration( " + masId + ", " + notificationStatus + ")");
-
-        if((isConnected() == false) &&
-           (notificationStatus == BluetoothMapAppParams.NOTIFICATION_STATUS_YES)) {
-            Log.d(TAG, "handleRegistration: connect");
-            connect();
-        }
+        if(D) Log.d(TAG, "handleRegistration( " + masId + ", " + notificationStatus + ")");
 
         if(notificationStatus == BluetoothMapAppParams.NOTIFICATION_STATUS_NO) {
-            // Unregister - should we disconnect, or keep the connection? - the spec. says nothing about this.
-            if(mObserverRegistered == true) {
-                mObserver.unregisterObserver();
-                mObserverRegistered = false;
-            }
+            mRegisteredMasIds.delete(masId);
         } else if(notificationStatus == BluetoothMapAppParams.NOTIFICATION_STATUS_YES) {
             /* Connect if we do not have a connection, and start the content observers providing
              * this thread as Handler.
              */
-            if(mObserverRegistered == false) {
-                mObserver.registerObserver(this, masId);
-                mObserverRegistered = true;
+            if(isConnected() == false) {
+                if(D) Log.d(TAG, "handleRegistration: connect");
+                connect();
             }
+            mRegisteredMasIds.put(masId, true); // We don't use the value for anything
+        }
+        if(mRegisteredMasIds.size() == 0) {
+            // No more registrations - disconnect
+            if(D) Log.d(TAG, "handleRegistration: disconnect");
+            disconnect();
         }
     }
 
     public void connect() {
-        Log.d(TAG, "handleRegistration: connect 2");
+
+        mConnected = true;
 
         BluetoothSocket btSocket = null;
         try {
+            // TODO: Why insecure? - is it because the link is already encrypted?
             btSocket = mRemoteDevice.createInsecureRfcommSocketToServiceRecord(
-                    BluetoothUuid_ObexMns.getUuid());
+                    BLUETOOTH_UUID_OBEX_MNS.getUuid());
             btSocket.connect();
         } catch (IOException e) {
             Log.e(TAG, "BtSocket Connect error " + e.getMessage(), e);
             // TODO: do we need to report error somewhere?
+            mConnected = false;
             return;
         }
 
@@ -207,12 +216,12 @@ public class BluetoothMnsObexClient {
 
         try {
             mClientSession = new ClientSession(mTransport);
-            mConnected = true;
         } catch (IOException e1) {
             Log.e(TAG, "OBEX session create error " + e1.getMessage());
+            mConnected = false;
         }
         if (mConnected && mClientSession != null) {
-            mConnected = false;
+            boolean connected = false;
             HeaderSet hs = new HeaderSet();
             // bb582b41-420c-11db-b0de-0800200c9a66
             byte[] mnsTarget = { (byte) 0xbb, (byte) 0x58, (byte) 0x2b, (byte) 0x41,
@@ -225,24 +234,48 @@ public class BluetoothMnsObexClient {
                 mWaitingForRemote = true;
             }
             try {
-                hsConnect = mClientSession.connect(hs);
+                mHsConnect = mClientSession.connect(hs);
                 if (D) Log.d(TAG, "OBEX session created");
-                mConnected = true;
+                connected = true;
             } catch (IOException e) {
                 Log.e(TAG, "OBEX session connect error " + e.getMessage());
             }
+            mConnected = connected;
         }
             synchronized (this) {
                 mWaitingForRemote = false;
         }
     }
 
-    public int sendEvent(byte[] eventBytes, int masInstanceId) {
+    /**
+     * Call this method to queue an event report to be send to the MNS server.
+     * @param eventBytes the encoded event data.
+     * @param masInstanceId the MasId of the instance sending the event.
+     */
+    public void sendEvent(byte[] eventBytes, int masInstanceId) {
+        // We need to check for null, to handle shutdown.
+        if(mHandler != null) {
+            Message msg = mHandler.obtainMessage(MSG_MNS_SEND_EVENT, masInstanceId, 0, eventBytes);
+            if(msg != null) {
+                msg.sendToTarget();
+            }
+        }
+        notifyUpdateWakeLock();
+    }
+
+    private int sendEventHandler(byte[] eventBytes, int masInstanceId) {
 
         boolean error = false;
         int responseCode = -1;
         HeaderSet request;
         int maxChunkSize, bytesToWrite, bytesWritten = 0;
+        ClientSession clientSession = mClientSession;
+
+        if ((!mConnected) || (clientSession == null)) {
+            Log.w(TAG, "sendEvent after disconnect:" + mConnected);
+            return responseCode;
+        }
+
         request = new HeaderSet();
         BluetoothMapAppParams appParams = new BluetoothMapAppParams();
         appParams.setMasInstanceId(masInstanceId);
@@ -254,8 +287,12 @@ public class BluetoothMnsObexClient {
             request.setHeader(HeaderSet.TYPE, TYPE_EVENT);
             request.setHeader(HeaderSet.APPLICATION_PARAMETER, appParams.EncodeParams());
 
-            request.mConnectionID = new byte[4];
-            System.arraycopy(hsConnect.mConnectionID, 0, request.mConnectionID, 0, 4);
+            if (mHsConnect.mConnectionID != null) {
+                request.mConnectionID = new byte[4];
+                System.arraycopy(mHsConnect.mConnectionID, 0, request.mConnectionID, 0, 4);
+            } else {
+                Log.w(TAG, "sendEvent: no connection ID");
+            }
 
             synchronized (this) {
                 mWaitingForRemote = true;
@@ -263,7 +300,7 @@ public class BluetoothMnsObexClient {
             // Send the header first and then the body
             try {
                 if (V) Log.v(TAG, "Send headerset Event ");
-                putOperation = (ClientOperation)mClientSession.put(request);
+                putOperation = (ClientOperation)clientSession.put(request);
                 // TODO - Should this be kept or Removed
 
             } catch (IOException e) {
@@ -295,10 +332,8 @@ public class BluetoothMnsObexClient {
 
                 if (bytesWritten == eventBytes.length) {
                     Log.i(TAG, "SendEvent finished send length" + eventBytes.length);
-                    outputStream.close();
                 } else {
                     error = true;
-                    outputStream.close();
                     putOperation.abort();
                     Log.i(TAG, "SendEvent interrupted");
                 }
@@ -311,7 +346,14 @@ public class BluetoothMnsObexClient {
             error = true;
         } finally {
             try {
-                if (!error) {
+                if (outputStream != null) {
+                    outputStream.close();
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "Error when closing stream after send " + e.getMessage());
+            }
+            try {
+                if ((!error) && (putOperation != null)) {
                     responseCode = putOperation.getResponseCode();
                     if (responseCode != -1) {
                         if (V) Log.v(TAG, "Put response code " + responseCode);
@@ -321,7 +363,7 @@ public class BluetoothMnsObexClient {
                     }
                 }
                 if (putOperation != null) {
-                   putOperation.close();
+                    putOperation.close();
                 }
             } catch (IOException e) {
                 Log.e(TAG, "Error when closing stream after send " + e.getMessage());
@@ -333,5 +375,13 @@ public class BluetoothMnsObexClient {
 
     private void handleSendException(String exception) {
         Log.e(TAG, "Error when sending event: " + exception);
+    }
+
+    private void notifyUpdateWakeLock() {
+        if(mCallback != null) {
+            Message msg = Message.obtain(mCallback);
+            msg.what = BluetoothMapService.MSG_ACQUIRE_WAKE_LOCK;
+            msg.sendToTarget();
+        }
     }
 }

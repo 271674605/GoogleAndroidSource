@@ -73,6 +73,9 @@ public:
     AsIntMax,     // 'j'
     AsSizeT,      // 'z'
     AsPtrDiff,    // 't'
+    AsInt32,      // 'I32' (MSVCRT, like __int32)
+    AsInt3264,    // 'I'   (MSVCRT, like __int3264 from MIDL)
+    AsInt64,      // 'I64' (MSVCRT, like __int64)
     AsLongDouble, // 'L'
     AsAllocate,   // for '%as', GNU extension to C90 scanf
     AsMAllocate,  // for '%ms', GNU extension to scanf
@@ -80,7 +83,7 @@ public:
   };
 
   LengthModifier()
-    : Position(0), kind(None) {}
+    : Position(nullptr), kind(None) {}
   LengthModifier(const char *pos, Kind k)
     : Position(pos), kind(k) {}
 
@@ -95,6 +98,9 @@ public:
       case AsLongLong:
       case AsChar:
         return 2;
+      case AsInt32:
+      case AsInt64:
+        return 3;
       case None:
         return 0;
     }
@@ -163,10 +169,11 @@ public:
   };
 
   ConversionSpecifier(bool isPrintf = true)
-    : IsPrintf(isPrintf), Position(0), EndScanList(0), kind(InvalidSpecifier) {}
+    : IsPrintf(isPrintf), Position(nullptr), EndScanList(nullptr),
+      kind(InvalidSpecifier) {}
 
   ConversionSpecifier(bool isPrintf, const char *pos, Kind k)
-    : IsPrintf(isPrintf), Position(pos), EndScanList(0), kind(k) {}
+    : IsPrintf(isPrintf), Position(pos), EndScanList(nullptr), kind(k) {}
 
   const char *getStart() const {
     return Position;
@@ -220,10 +227,11 @@ private:
   const char *Name;
   bool Ptr;
 public:
-  ArgType(Kind k = UnknownTy, const char *n = 0) : K(k), Name(n), Ptr(false) {}
-  ArgType(QualType t, const char *n = 0)
+  ArgType(Kind k = UnknownTy, const char *n = nullptr)
+      : K(k), Name(n), Ptr(false) {}
+  ArgType(QualType t, const char *n = nullptr)
       : K(SpecificTy), T(t), Name(n), Ptr(false) {}
-  ArgType(CanQualType t) : K(SpecificTy), T(t), Name(0), Ptr(false) {}
+  ArgType(CanQualType t) : K(SpecificTy), T(t), Name(nullptr), Ptr(false) {}
 
   static ArgType Invalid() { return ArgType(InvalidTy); }
   bool isValid() const { return K != InvalidTy; }
@@ -256,7 +264,7 @@ public:
   UsesPositionalArg(usesPositionalArg), UsesDotPrefix(0) {}
 
   OptionalAmount(bool valid = true)
-  : start(0),length(0), hs(valid ? NotSpecified : Invalid), amt(0),
+  : start(nullptr),length(0), hs(valid ? NotSpecified : Invalid), amt(0),
   UsesPositionalArg(0), UsesDotPrefix(0) {}
 
   bool isInvalid() const {
@@ -383,7 +391,7 @@ class PrintfConversionSpecifier :
   public analyze_format_string::ConversionSpecifier  {
 public:
   PrintfConversionSpecifier()
-    : ConversionSpecifier(true, 0, InvalidSpecifier) {}
+    : ConversionSpecifier(true, nullptr, InvalidSpecifier) {}
 
   PrintfConversionSpecifier(const char *pos, Kind k)
     : ConversionSpecifier(true, pos, k) {}
@@ -519,7 +527,7 @@ class ScanfConversionSpecifier :
     public analyze_format_string::ConversionSpecifier  {
 public:
   ScanfConversionSpecifier()
-    : ConversionSpecifier(false, 0, InvalidSpecifier) {}
+    : ConversionSpecifier(false, nullptr, InvalidSpecifier) {}
 
   ScanfConversionSpecifier(const char *pos, Kind k)
     : ConversionSpecifier(false, pos, k) {}
@@ -566,7 +574,8 @@ public:
 
   ArgType getArgType(ASTContext &Ctx) const;
 
-  bool fixType(QualType QT, const LangOptions &LangOpt, ASTContext &Ctx);
+  bool fixType(QualType QT, QualType RawQT, const LangOptions &LangOpt,
+               ASTContext &Ctx);
 
   void toString(raw_ostream &os) const;
 

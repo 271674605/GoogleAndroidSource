@@ -71,6 +71,23 @@
             android:textOff="@string/recording_off_label"
             android:textOn="@string/recording_on_label" />
 
+        <Button
+            android:id="@+id/flush_button"
+            android:text="@string/flush_button_label"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            />
+
+        <ToggleButton
+            android:id="@+id/focus_button"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_weight="1"
+            android:textColorLink="@android:color/holo_red_light"
+            android:textOn="@string/focus_unlock_button_label"
+            android:textOff="@string/focus_lock_button_label" />
+
         <View
             android:id="@+id/horizontal_rule_1"
             android:layout_width="fill_parent"
@@ -78,6 +95,20 @@
             android:layout_marginBottom="@dimen/horiz_rule_btm_margin"
             android:layout_marginTop="@dimen/horiz_rule_top_margin"
             android:background="@color/horiz_rule_color" />
+
+        <Spinner
+            android:id="@+id/focus_mode_spinner"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:spinnerMode="dropdown"
+            android:prompt="@string/focus_mode_spinner_prompt"
+            />
+
+        <CheckBox
+            android:id="@+id/use_media_codec"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/use_media_codec_label" />
 
         <ToggleButton
             android:id="@+id/manual_control"
@@ -133,6 +164,26 @@
             android:progress="0"
             style="?android:attr/progressBarStyleHorizontal"
             />
+
+        <RadioGroup
+          android:id="@+id/radio_fmt"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content" >
+
+          <RadioButton
+            android:id="@+id/radio_mp4"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/radio_mp4"
+            android:checked="true" />
+
+          <RadioButton
+            android:id="@+id/radio_webm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/radio_webm" />
+
+        </RadioGroup>
 
         <View
             android:id="@+id/horizontal_rule_2"

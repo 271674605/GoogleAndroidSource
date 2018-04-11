@@ -5,7 +5,6 @@ include_rules = [
   # directories in content/ so we disallow all of them.
   "-content",
   "+content/common",
-  "+content/port/common",
   "+content/public/common",
   "+content/public/test",
   "+content/shell",  # for content_browsertests
@@ -17,13 +16,9 @@ include_rules = [
   "-base/prefs",
 
   "+cc",
-  "-cc/base/thread.h",  # http://crbug.com/249172
-  "!cc/base/thread_impl.h",  # http://crbug.com/249172
   # If you want to use any of these files, move them to src/base first.
-  "-cc/base/hash_pair.h",
   "-cc/base/scoped_ptr_algorithm.h",
   "-cc/base/scoped_ptr_deque.h",
-  "-cc/base/scoped_ptr_hash_map.h",
   "-cc/base/scoped_ptr_vector.h",
 
   "+crypto",
@@ -33,10 +28,16 @@ include_rules = [
   "+grit/ui_strings.h",
   "+grit/webkit_resources.h",
   "+grit/webkit_strings.h",
+  "+grit/webui_resources.h",
   "+grit/webui_resources_map.h",
 
   "+dbus",
   "+gpu",
+  "+mojo/public",
+  "+mojo/bindings/js",
+  "+mojo/common",
+  "+mojo/embedder",
+  "+mojo/service_manager",
   "+net",
   "+ppapi",
   "+printing",
@@ -60,12 +61,12 @@ include_rules = [
   "-tools",
 
   # Allow inclusion of third-party code:
-  "+third_party/angle_dx11",
+  "+third_party/angle",
   "+third_party/flac",
-  "+third_party/gpsd",
   "+third_party/libjingle",
   "+third_party/mozilla",
   "+third_party/npapi/bindings",
+  "+third_party/re2",
   "+third_party/skia",
   "+third_party/sqlite",
   "+third_party/tcmalloc",
@@ -75,17 +76,21 @@ include_rules = [
   "+third_party/WebKit/public/platform",
   "+third_party/WebKit/public/web",
 
+  "+ui/accessibility",
   "+ui/android",
   # Aura is analogous to Win32 or a Gtk, so it is allowed.
   "+ui/aura",
   "+ui/base",
   "+ui/compositor",
+  "+ui/events",
   "+ui/gfx",
   "+ui/gl",
   "+ui/native_theme",
+  "+ui/ozone",
   "+ui/shell_dialogs",
   "+ui/snapshot",
   "+ui/surface",
+  "+ui/wm",
   # Content knows about grd files, but the specifics of how to get a resource
   # given its id is left to the embedder.
   "-ui/base/l10n",

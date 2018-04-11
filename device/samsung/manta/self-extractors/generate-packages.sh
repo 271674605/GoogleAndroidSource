@@ -45,7 +45,7 @@
 # 736095 = JWR66U
 # 737497 = JWR66V
 # end jb-mr2-dev
-BRANCH=jb-mr2-dev
+BRANCH=klp-dev
 if test $BRANCH = jb-mr1-dev
 then
   ZIP=mantaray-ota-527662
@@ -61,11 +61,16 @@ then
   ZIP=mantaray-ota-737497
   BUILD=jwr66v
 fi # jb-mr2-dev
+if test $BRANCH = klp-dev
+then
+  ZIP=mantaray-ota-937116
+  BUILD=kot49h
+fi # klp-dev
 ROOTDEVICE=manta
 DEVICE=manta
 MANUFACTURER=samsung
 
-for COMPANY in audience broadcom # samsung
+for COMPANY in audience broadcom samsung
 do
   echo Processing files from $COMPANY
   rm -rf tmp
@@ -98,6 +103,7 @@ do
             system/vendor/lib/libdrmdecrypt.so \
             system/vendor/lib/libmalicore.bc \
             system/vendor/lib/libRSDriverArm.so \
+            system/vendor/lib/libbccArm.so \
             system/vendor/lib/libstagefright_hdcp.so \
             system/vendor/secapp/00060308060501020000000000000000.tlbin \
             system/vendor/secapp/020a0000000000000000000000000000.drbin \

@@ -17,18 +17,22 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
+#include "components/domain_reliability/clear_mode.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/host_zoom_map.h"
 
 class NetPrefObserver;
 class PrefService;
 class PrefServiceSyncable;
+class ShortcutsBackend;
 class SSLConfigServiceManager;
+class TrackedPreferenceValidationDelegate;
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
-class EnterpriseExtensionObserver;
+class KioskTest;
 class LocaleChangeGuard;
+class ManagedUserTestBase;
 class Preferences;
 }
 #endif
@@ -44,6 +48,7 @@ class ExtensionSystem;
 namespace policy {
 class CloudPolicyManager;
 class ProfilePolicyConnector;
+class SchemaRegistryService;
 }
 
 namespace user_prefs {
@@ -74,27 +79,23 @@ class ProfileImpl : public Profile {
       GetMediaRequestContextForStoragePartition(
           const base::FilePath& partition_path,
           bool in_memory) OVERRIDE;
-  virtual void RequestMIDISysExPermission(
-      int render_process_id,
-      int render_view_id,
-      const GURL& requesting_frame,
-      const MIDISysExPermissionCallback& callback) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
-  virtual content::GeolocationPermissionContext*
-      GetGeolocationPermissionContext() OVERRIDE;
+  virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+  virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
 
   // Profile implementation:
   virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
   // Note that this implementation returns the Google-services username, if any,
   // not the Chrome user's display name.
   virtual std::string GetProfileName() OVERRIDE;
+  virtual ProfileType GetProfileType() const OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
   virtual void DestroyOffTheRecordProfile() OVERRIDE;
   virtual bool HasOffTheRecordProfile() OVERRIDE;
   virtual Profile* GetOriginalProfile() OVERRIDE;
-  virtual bool IsManaged() OVERRIDE;
+  virtual bool IsSupervised() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
@@ -109,16 +110,22 @@ class ProfileImpl : public Profile {
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers,
+      content::URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
-      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers,
+      content::URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
   virtual base::FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
+  virtual DevToolsNetworkController* GetDevToolsNetworkController() OVERRIDE;
   virtual void ClearNetworkingHistorySince(
       base::Time time,
+      const base::Closure& completion) OVERRIDE;
+  virtual void ClearDomainReliabilityMonitor(
+      domain_reliability::DomainReliabilityClearMode mode,
       const base::Closure& completion) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
   virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
@@ -129,13 +136,16 @@ class ProfileImpl : public Profile {
   virtual void ChangeAppLocale(const std::string& locale,
                                AppLocaleChangedVia) OVERRIDE;
   virtual void OnLogin() OVERRIDE;
-  virtual void SetupChromeOSEnterpriseExtensionObserver() OVERRIDE;
   virtual void InitChromeOSPreferences() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
 
   virtual PrefProxyConfigTracker* GetProxyConfigTracker() OVERRIDE;
 
  private:
+#if defined(OS_CHROMEOS)
+  friend class chromeos::KioskTest;
+  friend class chromeos::ManagedUserTestBase;
+#endif
   friend class Profile;
   friend class BetterSessionRestoreCrashTest;
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
@@ -162,13 +172,8 @@ class ProfileImpl : public Profile {
   void OnZoomLevelChanged(
       const content::HostZoomMap::ZoomLevelChange& change);
 
-  void OnInitializationCompleted(PrefService* pref_service,
-                                 bool succeeded);
-
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
-
-  base::FilePath GetPrefFilePath();
 
 #if defined(ENABLE_SESSION_SERVICE)
   void StopCreateSessionServiceTimer();
@@ -181,11 +186,12 @@ class ProfileImpl : public Profile {
     GetRequestContext();
   }
 
-  void UpdateProfileUserNameCache();
-
   // Updates the ProfileInfoCache with data from this profile.
+  void UpdateProfileUserNameCache();
+  void UpdateProfileSupervisedUserIdCache();
   void UpdateProfileNameCache();
   void UpdateProfileAvatarCache();
+  void UpdateProfileIsEphemeralCache();
 
   void GetCacheParameters(bool is_media_context,
                           base::FilePath* cache_path,
@@ -193,7 +199,7 @@ class ProfileImpl : public Profile {
 
   PrefProxyConfigTracker* CreateProxyConfigTracker();
 
-  content::HostZoomMap::ZoomLevelChangedCallback zoom_callback_;
+  scoped_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
   PrefChangeRegistrar pref_change_registrar_;
 
   base::FilePath path_;
@@ -207,12 +213,18 @@ class ProfileImpl : public Profile {
 
   // TODO(mnissler, joaodasilva): The |profile_policy_connector_| provides the
   // PolicyService that the |prefs_| depend on, and must outlive |prefs_|.
-  // This can be removed once |prefs_| becomes a BrowserContextKeyedService too.
-  // |profile_policy_connector_| in turn depends on |cloud_policy_manager_|.
+// This can be removed once |prefs_| becomes a KeyedService too.
+// |profile_policy_connector_| in turn depends on |cloud_policy_manager_|,
+// which depends on |schema_registry_service_|.
 #if defined(ENABLE_CONFIGURATION_POLICY)
+  scoped_ptr<policy::SchemaRegistryService> schema_registry_service_;
   scoped_ptr<policy::CloudPolicyManager> cloud_policy_manager_;
 #endif
   scoped_ptr<policy::ProfilePolicyConnector> profile_policy_connector_;
+
+  // Keep |pref_validation_delegate_| above |prefs_| so that the former outlives
+  // the latter.
+  scoped_ptr<TrackedPreferenceValidationDelegate> pref_validation_delegate_;
 
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
   // |net_pref_observer_|, |io_data_| and others store pointers to |prefs_| and
@@ -226,7 +238,7 @@ class ProfileImpl : public Profile {
   scoped_ptr<NetPrefObserver> net_pref_observer_;
   scoped_ptr<SSLConfigServiceManager> ssl_config_service_manager_;
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
-  scoped_refptr<history::ShortcutsBackend> shortcuts_backend_;
+  scoped_refptr<ShortcutsBackend> shortcuts_backend_;
 
   // Exit type the last time the profile was opened. This is set only once from
   // prefs.
@@ -246,10 +258,9 @@ class ProfileImpl : public Profile {
 #if defined(OS_CHROMEOS)
   scoped_ptr<chromeos::Preferences> chromeos_preferences_;
 
-  scoped_ptr<chromeos::EnterpriseExtensionObserver>
-      chromeos_enterprise_extension_observer_;
-
   scoped_ptr<chromeos::LocaleChangeGuard> locale_change_guard_;
+
+  bool is_login_profile_;
 #endif
 
   scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
@@ -264,9 +275,9 @@ class ProfileImpl : public Profile {
   //
   // and you can read the raw headers here:
   //
-  //   components/browser_context_keyed_service/browser_context_dependency_manager.{h,cc}
-  //   components/browser_context_keyed_service/browser_context_keyed_service.h
-  //   components/browser_context_keyed_service/browser_context_keyed_service_factory.{h,cc}
+  // components/keyed_service/content/browser_context_dependency_manager.*
+  // components/keyed_service/core/keyed_service.h
+  // components/keyed_service/content/browser_context_keyed_service_factory.*
 
   Profile::Delegate* delegate_;
 

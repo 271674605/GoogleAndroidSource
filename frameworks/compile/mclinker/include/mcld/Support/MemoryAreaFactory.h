@@ -6,16 +6,13 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_SUPPORT_MEMORY_AREA_FACTORY_H
-#define MCLD_SUPPORT_MEMORY_AREA_FACTORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_MEMORYAREAFACTORY_H
+#define MCLD_SUPPORT_MEMORYAREAFACTORY_H
 #include <mcld/Support/GCFactory.h>
 #include <mcld/Support/MemoryArea.h>
 #include <mcld/Support/Path.h>
 #include <mcld/Support/FileHandle.h>
-#include <mcld/Support/HandleToArea.h>
+#include <llvm/ADT/StringMap.h>
 
 namespace mcld
 {
@@ -24,7 +21,7 @@ namespace mcld
  *  \brief MemoryAreaFactory avoids creating duplicated MemoryAreas of the
  *   same file.
  *
- *  Users can give duplicated input files on the command line. In order to 
+ *  Users can give duplicated input files on the command line. In order to
  *  prevent opening the same file twice, and create redundant MemoryRegions,
  *  mcld::Input should not create MemoryArea directly. Instead, it should ask
  *  MemoryAreaFactory and get the unique MemoryArea.
@@ -63,12 +60,10 @@ public:
   MemoryArea* produce(int pFD, FileHandle::OpenMode pMode);
 
   void destruct(MemoryArea* pArea);
-
 private:
-  HandleToArea m_HandleToArea;
+  llvm::StringMap<MemoryArea*> m_AreaMap;
 };
 
 } // namespace of mcld
 
 #endif
-

@@ -21,28 +21,27 @@ class CC_EXPORT RenderPassDrawQuad : public DrawQuad {
   virtual ~RenderPassDrawQuad();
 
   void SetNew(const SharedQuadState* shared_quad_state,
-              gfx::Rect rect,
+              const gfx::Rect& rect,
+              const gfx::Rect& visible_rect,
               RenderPass::Id render_pass_id,
               bool is_replica,
               ResourceProvider::ResourceId mask_resource_id,
-              gfx::Rect contents_changed_since_last_frame,
-              gfx::RectF mask_uv_rect,
+              const gfx::Rect& contents_changed_since_last_frame,
+              const gfx::RectF& mask_uv_rect,
               const FilterOperations& filters,
-              skia::RefPtr<SkImageFilter> filter,
               const FilterOperations& background_filters);
 
   void SetAll(const SharedQuadState* shared_quad_state,
-              gfx::Rect rect,
-              gfx::Rect opaque_rect,
-              gfx::Rect visible_rect,
+              const gfx::Rect& rect,
+              const gfx::Rect& opaque_rect,
+              const gfx::Rect& visible_rect,
               bool needs_blending,
               RenderPass::Id render_pass_id,
               bool is_replica,
               ResourceProvider::ResourceId mask_resource_id,
-              gfx::Rect contents_changed_since_last_frame,
-              gfx::RectF mask_uv_rect,
+              const gfx::Rect& contents_changed_since_last_frame,
+              const gfx::RectF& mask_uv_rect,
               const FilterOperations& filters,
-              skia::RefPtr<SkImageFilter> filter,
               const FilterOperations& background_filters);
 
   scoped_ptr<RenderPassDrawQuad> Copy(
@@ -55,11 +54,8 @@ class CC_EXPORT RenderPassDrawQuad : public DrawQuad {
   gfx::Rect contents_changed_since_last_frame;
   gfx::RectF mask_uv_rect;
 
-  // Deprecated post-processing filters, applied to the pixels in the render
-  // pass' texture.
+  // Post-processing filters, applied to the pixels in the render pass' texture.
   FilterOperations filters;
-  // Post-processing filter applied to the pixels in the render pass' texture.
-  skia::RefPtr<SkImageFilter> filter;
 
   // Post-processing filters, applied to the pixels showing through the
   // background of the render pass, from behind it.

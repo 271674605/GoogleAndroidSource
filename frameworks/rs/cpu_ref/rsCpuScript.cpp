@@ -24,9 +24,11 @@
     #include <stdio.h>
     #include <stdlib.h>
     #include <string.h>
+    #include <sys/stat.h>
     #include <unistd.h>
 #else
     #include <bcc/BCCContext.h>
+    #include <bcc/Config/Config.h>
     #include <bcc/Renderscript/RSCompilerDriver.h>
     #include <bcc/Renderscript/RSExecutable.h>
     #include <bcc/Renderscript/RSInfo.h>
@@ -36,6 +38,9 @@
     #include <sys/types.h>
     #include <sys/wait.h>
     #include <unistd.h>
+
+    #include <string>
+    #include <vector>
 #endif
 
 namespace {
@@ -60,6 +65,18 @@ static std::string getRandomString(size_t len) {
     }
     buf[len] = '\0';
     return std::string(buf);
+}
+
+// Check if a path exists and attempt to create it if it doesn't.
+static bool ensureCacheDirExists(const char *path) {
+    if (access(path, R_OK | W_OK | X_OK) == 0) {
+        // Done if we can rwx the directory
+        return true;
+    }
+    if (mkdir(path, 0700) == 0) {
+        return true;
+    }
+    return false;
 }
 
 // Attempt to load the shared library from origName, but then fall back to
@@ -91,9 +108,16 @@ static void *loadSOHelper(const char *origName, const char *cacheDir,
         return loaded;
     }
 
-    // Construct an appropriately randomized filename for the symlink.
     std::string newName(cacheDir);
-    newName.append("/com.android.renderscript.cache/librs.");
+    newName.append("/com.android.renderscript.cache/");
+
+    if (!ensureCacheDirExists(newName.c_str())) {
+        ALOGE("Could not verify or create cache dir: %s", cacheDir);
+        return NULL;
+    }
+
+    // Construct an appropriately randomized filename for the symlink.
+    newName.append("librs.");
     newName.append(resName);
     newName.append("#");
     newName.append(getRandomString(6));  // 62^6 potential filename variants.
@@ -166,8 +190,8 @@ static void *loadSharedLibrary(const char *cacheDir, const char *resName) {
     return loaded;
 }
 
+#else  // RS_COMPATIBILITY_LIB is not defined
 
-#else
 static bool is_force_recompile() {
 #ifdef RS_SERVER
   return false;
@@ -190,50 +214,70 @@ static bool is_force_recompile() {
 #endif  // RS_SERVER
 }
 
-//#define EXTERNAL_BCC_COMPILER 1
-#ifdef EXTERNAL_BCC_COMPILER
 const static char *BCC_EXE_PATH = "/system/bin/bcc";
 
-static bool compileBitcode(const char *cacheDir,
-                           const char *resName,
+static void setCompileArguments(std::vector<const char*>* args, const android::String8& bcFileName,
+                                const char* cacheDir, const char* resName, const char* core_lib,
+                                bool useRSDebugContext, const char* bccPluginName) {
+    rsAssert(cacheDir && resName && core_lib);
+    args->push_back(BCC_EXE_PATH);
+    args->push_back("-o");
+    args->push_back(resName);
+    args->push_back("-output_path");
+    args->push_back(cacheDir);
+    args->push_back("-bclib");
+    args->push_back(core_lib);
+    args->push_back("-mtriple");
+    args->push_back(DEFAULT_TARGET_TRIPLE_STRING);
+
+    // Execute the bcc compiler.
+    if (useRSDebugContext) {
+        args->push_back("-rs-debug-ctx");
+    } else {
+        // Only load additional libraries for compiles that don't use
+        // the debug context.
+        if (bccPluginName && strlen(bccPluginName) > 0) {
+            args->push_back("-load");
+            args->push_back(bccPluginName);
+        }
+    }
+
+    args->push_back(bcFileName.string());
+    args->push_back(NULL);
+}
+
+static bool compileBitcode(const android::String8& bcFileName,
                            const char *bitcode,
                            size_t bitcodeSize,
-                           const char *core_lib) {
-    rsAssert(cacheDir && resName && bitcode && bitcodeSize && core_lib);
+                           const char** compileArguments,
+                           const std::string& compileCommandLine) {
+    rsAssert(bitcode && bitcodeSize);
 
-    android::String8 bcFilename(cacheDir);
-    bcFilename.append("/");
-    bcFilename.append(resName);
-    bcFilename.append(".bc");
-    FILE *bcfile = fopen(bcFilename.string(), "w");
+    FILE *bcfile = fopen(bcFileName.string(), "w");
     if (!bcfile) {
-        ALOGE("Could not write to %s", bcFilename.string());
+        ALOGE("Could not write to %s", bcFileName.string());
         return false;
     }
     size_t nwritten = fwrite(bitcode, 1, bitcodeSize, bcfile);
     fclose(bcfile);
     if (nwritten != bitcodeSize) {
         ALOGE("Could not write %zu bytes to %s", bitcodeSize,
-              bcFilename.string());
+              bcFileName.string());
         return false;
     }
 
     pid_t pid = fork();
+
     switch (pid) {
     case -1: {  // Error occurred (we attempt no recovery)
         ALOGE("Couldn't fork for bcc compiler execution");
         return false;
     }
     case 0: {  // Child process
-        // Execute the bcc compiler.
-        execl(BCC_EXE_PATH,
-              BCC_EXE_PATH,
-              "-o", resName,
-              "-output_path", cacheDir,
-              "-bclib", core_lib,
-              bcFilename.string(),
-              (char *) NULL);
-        ALOGE("execl() failed: %s", strerror(errno));
+        ALOGV("Invoking BCC with: %s", compileCommandLine.c_str());
+        execv(BCC_EXE_PATH, (char* const*)compileArguments);
+
+        ALOGE("execv() failed: %s", strerror(errno));
         abort();
         return false;
     }
@@ -255,7 +299,6 @@ static bool compileBitcode(const char *cacheDir,
     }
     }
 }
-#endif  // EXTERNAL_BCC_COMPILER
 
 #endif  // !defined(RS_COMPATIBILITY_LIB)
 }  // namespace
@@ -263,19 +306,14 @@ static bool compileBitcode(const char *cacheDir,
 namespace android {
 namespace renderscript {
 
-
 #ifdef RS_COMPATIBILITY_LIB
 #define MAXLINE 500
 #define MAKE_STR_HELPER(S) #S
 #define MAKE_STR(S) MAKE_STR_HELPER(S)
 #define EXPORT_VAR_STR "exportVarCount: "
-#define EXPORT_VAR_STR_LEN strlen(EXPORT_VAR_STR)
 #define EXPORT_FUNC_STR "exportFuncCount: "
-#define EXPORT_FUNC_STR_LEN strlen(EXPORT_FUNC_STR)
 #define EXPORT_FOREACH_STR "exportForEachCount: "
-#define EXPORT_FOREACH_STR_LEN strlen(EXPORT_FOREACH_STR)
 #define OBJECT_SLOT_STR "objectSlotCount: "
-#define OBJECT_SLOT_STR_LEN strlen(OBJECT_SLOT_STR)
 
 // Copy up to a newline or size chars from str -> s, updating str
 // Returns s when successful and NULL when '\0' is finally reached.
@@ -320,6 +358,7 @@ RsdCpuScriptImpl::RsdCpuScriptImpl(RsdCpuReferenceImpl *ctx, const Script *s) {
     mExecutable = NULL;
 #endif
 
+
     mRoot = NULL;
     mRootExpand = NULL;
     mInit = NULL;
@@ -334,14 +373,13 @@ RsdCpuScriptImpl::RsdCpuScriptImpl(RsdCpuReferenceImpl *ctx, const Script *s) {
 
 bool RsdCpuScriptImpl::init(char const *resName, char const *cacheDir,
                             uint8_t const *bitcode, size_t bitcodeSize,
-                            uint32_t flags) {
+                            uint32_t flags, char const *bccPluginName) {
     //ALOGE("rsdScriptCreate %p %p %p %p %i %i %p", rsc, resName, cacheDir, bitcode, bitcodeSize, flags, lookupFunc);
     //ALOGE("rsdScriptInit %p %p", rsc, script);
 
     mCtx->lockMutex();
-
 #ifndef RS_COMPATIBILITY_LIB
-    bcc::RSExecutable *exec = NULL;
+    bool useRSDebugContext = false;
 
     mCompilerContext = NULL;
     mCompilerDriver = NULL;
@@ -361,8 +399,11 @@ bool RsdCpuScriptImpl::init(char const *resName, char const *cacheDir,
         return false;
     }
 
-    mCompilerDriver->setRSRuntimeLookupFunction(lookupRuntimeStub);
-    mCompilerDriver->setRSRuntimeLookupContext(this);
+    // Configure symbol resolvers (via compiler-rt and the RS runtime).
+    mRSRuntime.setLookupFunction(lookupRuntimeStub);
+    mRSRuntime.setContext(this);
+    mResolver.chainResolver(mCompilerRuntime);
+    mResolver.chainResolver(mRSRuntime);
 
     // Run any compiler setup functions we have been provided with.
     RSSetupCompilerCallback setupCompilerCallback =
@@ -371,97 +412,83 @@ bool RsdCpuScriptImpl::init(char const *resName, char const *cacheDir,
         setupCompilerCallback(mCompilerDriver);
     }
 
-    const char *core_lib = bcc::RSInfo::LibCLCorePath;
-
-    bcinfo::MetadataExtractor ME((const char *) bitcode, bitcodeSize);
-    if (!ME.extract()) {
+    bcinfo::MetadataExtractor bitcodeMetadata((const char *) bitcode, bitcodeSize);
+    if (!bitcodeMetadata.extract()) {
         ALOGE("Could not extract metadata from bitcode");
-        return false;
-    }
-
-    enum bcinfo::RSFloatPrecision prec = ME.getRSFloatPrecision();
-    switch (prec) {
-    case bcinfo::RS_FP_Imprecise:
-    case bcinfo::RS_FP_Relaxed:
-#if defined(ARCH_ARM_HAVE_NEON)
-        // NEON-capable devices can use an accelerated math library for all
-        // reduced precision scripts.
-        core_lib = bcc::RSInfo::LibCLCoreNEONPath;
-#endif
-        break;
-    case bcinfo::RS_FP_Full:
-        break;
-    default:
-        ALOGE("Unknown precision for bitcode");
-        return false;
-    }
-
-#if defined(ARCH_X86_HAVE_SSE2)
-    // SSE2- or above capable devices will use an optimized library.
-    core_lib = bcc::RSInfo::LibCLCoreX86Path;
-#endif
-
-    RSSelectRTCallback selectRTCallback = mCtx->getSelectRTCallback();
-    if (selectRTCallback != NULL) {
-        core_lib = selectRTCallback((const char *)bitcode, bitcodeSize);
-    }
-
-    if (mCtx->getContext()->getContextType() == RS_CONTEXT_TYPE_DEBUG) {
-        // Use the libclcore_debug.bc instead of the default library.
-        core_lib = bcc::RSInfo::LibCLCoreDebugPath;
-        mCompilerDriver->setDebugContext(true);
-        // Skip the cache lookup
-    } else if (!is_force_recompile()) {
-        // Attempt to just load the script from cache first if we can.
-        exec = mCompilerDriver->loadScript(cacheDir, resName,
-                                           (const char *)bitcode, bitcodeSize);
-    }
-
-    if (exec == NULL) {
-#ifdef EXTERNAL_BCC_COMPILER
-        bool built = compileBitcode(cacheDir, resName, (const char *)bitcode,
-                                    bitcodeSize, core_lib);
-#else
-        bool built = mCompilerDriver->build(*mCompilerContext, cacheDir,
-                                            resName, (const char *)bitcode,
-                                            bitcodeSize, core_lib,
-                                            mCtx->getLinkRuntimeCallback());
-#endif  // EXTERNAL_BCC_COMPILER
-        if (built) {
-            exec = mCompilerDriver->loadScript(cacheDir, resName,
-                                               (const char *)bitcode,
-                                               bitcodeSize);
-        }
-    }
-
-    if (exec == NULL) {
-        ALOGE("bcc: FAILS to prepare executable for '%s'", resName);
         mCtx->unlockMutex();
         return false;
     }
 
-    mExecutable = exec;
+    const char* core_lib = findCoreLib(bitcodeMetadata, (const char*)bitcode, bitcodeSize);
 
-    exec->setThreadable(mIsThreadable);
-    if (!exec->syncInfo()) {
+    if (mCtx->getContext()->getContextType() == RS_CONTEXT_TYPE_DEBUG) {
+        mCompilerDriver->setDebugContext(true);
+        useRSDebugContext = true;
+    }
+
+    android::String8 bcFileName(cacheDir);
+    bcFileName.append("/");
+    bcFileName.append(resName);
+    bcFileName.append(".bc");
+
+    std::vector<const char*> compileArguments;
+    setCompileArguments(&compileArguments, bcFileName, cacheDir, resName, core_lib,
+                        useRSDebugContext, bccPluginName);
+    // The last argument of compileArguments ia a NULL, so remove 1 from the size.
+    std::string compileCommandLine =
+                bcc::getCommandLine(compileArguments.size() - 1, compileArguments.data());
+
+    if (!is_force_recompile()) {
+        // Load the compiled script that's in the cache, if any.
+        mExecutable = bcc::RSCompilerDriver::loadScript(cacheDir, resName, (const char*)bitcode,
+                                                        bitcodeSize, compileCommandLine.c_str(),
+                                                        mResolver);
+    }
+
+    // If we can't, it's either not there or out of date.  We compile the bit code and try loading
+    // again.
+    if (mExecutable == NULL) {
+        if (!compileBitcode(bcFileName, (const char*)bitcode, bitcodeSize, compileArguments.data(),
+                            compileCommandLine)) {
+            ALOGE("bcc: FAILS to compile '%s'", resName);
+            mCtx->unlockMutex();
+            return false;
+        }
+        mExecutable = bcc::RSCompilerDriver::loadScript(cacheDir, resName, (const char*)bitcode,
+                                                        bitcodeSize, compileCommandLine.c_str(),
+                                                        mResolver);
+        if (mExecutable == NULL) {
+            ALOGE("bcc: FAILS to load freshly compiled executable for '%s'", resName);
+            mCtx->unlockMutex();
+            return false;
+        }
+    }
+
+    mExecutable->setThreadable(mIsThreadable);
+    if (!mExecutable->syncInfo()) {
         ALOGW("bcc: FAILS to synchronize the RS info file to the disk");
     }
 
-    mRoot = reinterpret_cast<int (*)()>(exec->getSymbolAddress("root"));
+    mRoot = reinterpret_cast<int (*)()>(mExecutable->getSymbolAddress("root"));
     mRootExpand =
-        reinterpret_cast<int (*)()>(exec->getSymbolAddress("root.expand"));
-    mInit = reinterpret_cast<void (*)()>(exec->getSymbolAddress("init"));
+        reinterpret_cast<int (*)()>(mExecutable->getSymbolAddress("root.expand"));
+    mInit = reinterpret_cast<void (*)()>(mExecutable->getSymbolAddress("init"));
     mFreeChildren =
-        reinterpret_cast<void (*)()>(exec->getSymbolAddress(".rs.dtor"));
+        reinterpret_cast<void (*)()>(mExecutable->getSymbolAddress(".rs.dtor"));
 
 
-    const bcc::RSInfo *info = &mExecutable->getInfo();
-    if (info->getExportVarNames().size()) {
-        mBoundAllocs = new Allocation *[info->getExportVarNames().size()];
-        memset(mBoundAllocs, 0, sizeof(void *) * info->getExportVarNames().size());
+    if (bitcodeMetadata.getExportVarCount()) {
+        mBoundAllocs = new Allocation *[bitcodeMetadata.getExportVarCount()];
+        memset(mBoundAllocs, 0, sizeof(void *) * bitcodeMetadata.getExportVarCount());
     }
 
-#else
+    for (size_t i = 0; i < bitcodeMetadata.getExportForEachSignatureCount(); i++) {
+        char* name = new char[strlen(bitcodeMetadata.getExportForEachNameList()[i]) + 1];
+        mExportedForEachFuncList.push_back(
+                    std::make_pair(name, bitcodeMetadata.getExportForEachSignatureList()[i]));
+    }
+
+#else  // RS_COMPATIBILITY_LIB is defined
 
     mScriptSO = loadSharedLibrary(cacheDir, resName);
 
@@ -660,7 +687,6 @@ bool RsdCpuScriptImpl::init(char const *resName, char const *cacheDir,
         goto error;
     }
 #endif
-
     mCtx->unlockMutex();
     return true;
 
@@ -681,15 +707,58 @@ error:
 #endif
 }
 
+#ifndef RS_COMPATIBILITY_LIB
+
+#ifdef __LP64__
+#define SYSLIBPATH "/system/lib64"
+#else
+#define SYSLIBPATH "/system/lib"
+#endif
+
+const char* RsdCpuScriptImpl::findCoreLib(const bcinfo::MetadataExtractor& ME, const char* bitcode,
+                                          size_t bitcodeSize) {
+    const char* defaultLib = SYSLIBPATH"/libclcore.bc";
+
+    // If we're debugging, use the debug library.
+    if (mCtx->getContext()->getContextType() == RS_CONTEXT_TYPE_DEBUG) {
+        return SYSLIBPATH"/libclcore_debug.bc";
+    }
+
+    // If a callback has been registered to specify a library, use that.
+    RSSelectRTCallback selectRTCallback = mCtx->getSelectRTCallback();
+    if (selectRTCallback != NULL) {
+        return selectRTCallback((const char*)bitcode, bitcodeSize);
+    }
+
+    // Check for a platform specific library
+#if defined(ARCH_ARM_HAVE_NEON) && !defined(DISABLE_CLCORE_NEON)
+    enum bcinfo::RSFloatPrecision prec = ME.getRSFloatPrecision();
+    if (prec == bcinfo::RS_FP_Relaxed) {
+        // NEON-capable ARMv7a devices can use an accelerated math library
+        // for all reduced precision scripts.
+        // ARMv8 does not use NEON, as ASIMD can be used with all precision
+        // levels.
+        return SYSLIBPATH"/libclcore_neon.bc";
+    } else {
+        return defaultLib;
+    }
+#elif defined(__i386__) || defined(__x86_64__)
+    // x86 devices will use an optimized library.
+    return SYSLIBPATH"/libclcore_x86.bc";
+#else
+    return defaultLib;
+#endif
+}
+
+#endif
+
 void RsdCpuScriptImpl::populateScript(Script *script) {
 #ifndef RS_COMPATIBILITY_LIB
-    const bcc::RSInfo *info = &mExecutable->getInfo();
-
     // Copy info over to runtime
-    script->mHal.info.exportedFunctionCount = info->getExportFuncNames().size();
-    script->mHal.info.exportedVariableCount = info->getExportVarNames().size();
-    script->mHal.info.exportedForeachFuncList = info->getExportForeachFuncs().array();
-    script->mHal.info.exportedPragmaCount = info->getPragmas().size();
+    script->mHal.info.exportedFunctionCount = mExecutable->getExportFuncAddrs().size();
+    script->mHal.info.exportedVariableCount = mExecutable->getExportVarAddrs().size();
+    script->mHal.info.exportedForeachFuncList = &mExportedForEachFuncList[0];
+    script->mHal.info.exportedPragmaCount = mExecutable->getPragmaKeys().size();
     script->mHal.info.exportedPragmaKeyList =
         const_cast<const char**>(mExecutable->getPragmaKeys().array());
     script->mHal.info.exportedPragmaValueList =
@@ -737,19 +806,32 @@ void RsdCpuScriptImpl::forEachMtlsSetup(const Allocation * ain, Allocation * aou
         return;
     }
 
-    if (ain) {
-        mtls->fep.dimX = ain->getType()->getDimX();
-        mtls->fep.dimY = ain->getType()->getDimY();
-        mtls->fep.dimZ = ain->getType()->getDimZ();
-        //mtls->dimArray = ain->getType()->getDimArray();
-    } else if (aout) {
-        mtls->fep.dimX = aout->getType()->getDimX();
-        mtls->fep.dimY = aout->getType()->getDimY();
-        mtls->fep.dimZ = aout->getType()->getDimZ();
-        //mtls->dimArray = aout->getType()->getDimArray();
+    if (ain != NULL) {
+        const Type *inType = ain->getType();
+
+        mtls->fep.dimX = inType->getDimX();
+        mtls->fep.dimY = inType->getDimY();
+        mtls->fep.dimZ = inType->getDimZ();
+
+    } else if (aout != NULL) {
+        const Type *outType = aout->getType();
+
+        mtls->fep.dimX = outType->getDimX();
+        mtls->fep.dimY = outType->getDimY();
+        mtls->fep.dimZ = outType->getDimZ();
+
     } else {
         mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT, "rsForEach called with null allocations");
         return;
+    }
+
+    if (ain != NULL && aout != NULL) {
+        if (!ain->hasSameDims(aout)) {
+            mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT,
+              "Failed to launch kernel; dimensions of input and output allocations do not match.");
+
+            return;
+        }
     }
 
     if (!sc || (sc->xEnd == 0)) {
@@ -819,6 +901,147 @@ void RsdCpuScriptImpl::forEachMtlsSetup(const Allocation * ain, Allocation * aou
     }
 }
 
+void RsdCpuScriptImpl::forEachMtlsSetup(const Allocation ** ains, uint32_t inLen,
+                                        Allocation * aout,
+                                        const void * usr, uint32_t usrLen,
+                                        const RsScriptCall *sc,
+                                        MTLaunchStruct *mtls) {
+
+    memset(mtls, 0, sizeof(MTLaunchStruct));
+
+    // possible for this to occur if IO_OUTPUT/IO_INPUT with no bound surface
+    if (ains != NULL) {
+        for (int index = inLen; --index >= 0;) {
+            const Allocation* ain = ains[index];
+
+            if (ain != NULL && (const uint8_t *)ain->mHal.drvState.lod[0].mallocPtr == NULL) {
+                mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT, "rsForEach called with null in allocations");
+                return;
+            }
+        }
+    }
+
+    if (aout && (const uint8_t *)aout->mHal.drvState.lod[0].mallocPtr == NULL) {
+        mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT, "rsForEach called with null out allocations");
+        return;
+    }
+
+    if (ains != NULL) {
+        const Allocation *ain0   = ains[0];
+        const Type       *inType = ain0->getType();
+
+        mtls->fep.dimX = inType->getDimX();
+        mtls->fep.dimY = inType->getDimY();
+        mtls->fep.dimZ = inType->getDimZ();
+
+        for (int Index = inLen; --Index >= 1;) {
+            if (!ain0->hasSameDims(ains[Index])) {
+                mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT,
+                  "Failed to launch kernel; dimensions of input and output allocations do not match.");
+
+                return;
+            }
+        }
+
+    } else if (aout != NULL) {
+        const Type *outType = aout->getType();
+
+        mtls->fep.dimX = outType->getDimX();
+        mtls->fep.dimY = outType->getDimY();
+        mtls->fep.dimZ = outType->getDimZ();
+
+    } else {
+        mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT, "rsForEach called with null allocations");
+        return;
+    }
+
+    if (ains != NULL && aout != NULL) {
+        if (!ains[0]->hasSameDims(aout)) {
+            mCtx->getContext()->setError(RS_ERROR_BAD_SCRIPT,
+              "Failed to launch kernel; dimensions of input and output allocations do not match.");
+
+            return;
+        }
+    }
+
+    if (!sc || (sc->xEnd == 0)) {
+        mtls->xEnd = mtls->fep.dimX;
+    } else {
+        rsAssert(sc->xStart < mtls->fep.dimX);
+        rsAssert(sc->xEnd <= mtls->fep.dimX);
+        rsAssert(sc->xStart < sc->xEnd);
+        mtls->xStart = rsMin(mtls->fep.dimX, sc->xStart);
+        mtls->xEnd = rsMin(mtls->fep.dimX, sc->xEnd);
+        if (mtls->xStart >= mtls->xEnd) return;
+    }
+
+    if (!sc || (sc->yEnd == 0)) {
+        mtls->yEnd = mtls->fep.dimY;
+    } else {
+        rsAssert(sc->yStart < mtls->fep.dimY);
+        rsAssert(sc->yEnd <= mtls->fep.dimY);
+        rsAssert(sc->yStart < sc->yEnd);
+        mtls->yStart = rsMin(mtls->fep.dimY, sc->yStart);
+        mtls->yEnd = rsMin(mtls->fep.dimY, sc->yEnd);
+        if (mtls->yStart >= mtls->yEnd) return;
+    }
+
+    if (!sc || (sc->zEnd == 0)) {
+        mtls->zEnd = mtls->fep.dimZ;
+    } else {
+        rsAssert(sc->zStart < mtls->fep.dimZ);
+        rsAssert(sc->zEnd <= mtls->fep.dimZ);
+        rsAssert(sc->zStart < sc->zEnd);
+        mtls->zStart = rsMin(mtls->fep.dimZ, sc->zStart);
+        mtls->zEnd = rsMin(mtls->fep.dimZ, sc->zEnd);
+        if (mtls->zStart >= mtls->zEnd) return;
+    }
+
+    mtls->xEnd     = rsMax((uint32_t)1, mtls->xEnd);
+    mtls->yEnd     = rsMax((uint32_t)1, mtls->yEnd);
+    mtls->zEnd     = rsMax((uint32_t)1, mtls->zEnd);
+    mtls->arrayEnd = rsMax((uint32_t)1, mtls->arrayEnd);
+
+    rsAssert(!ains || (ains[0]->getType()->getDimZ() == 0));
+
+    mtls->rsc        = mCtx;
+    mtls->ains       = ains;
+    mtls->aout       = aout;
+    mtls->fep.usr    = usr;
+    mtls->fep.usrLen = usrLen;
+    mtls->mSliceSize = 1;
+    mtls->mSliceNum  = 0;
+
+    mtls->fep.ptrIns    = NULL;
+    mtls->fep.eStrideIn = 0;
+    mtls->isThreadable  = mIsThreadable;
+
+    if (ains) {
+        mtls->fep.ptrIns    = new const uint8_t*[inLen];
+        mtls->fep.inStrides = new StridePair[inLen];
+
+        for (int index = inLen; --index >= 0;) {
+            const Allocation *ain = ains[index];
+
+            mtls->fep.ptrIns[index] =
+              (const uint8_t*)ain->mHal.drvState.lod[0].mallocPtr;
+
+            mtls->fep.inStrides[index].eStride =
+              ain->getType()->getElementSizeBytes();
+            mtls->fep.inStrides[index].yStride =
+              ain->mHal.drvState.lod[0].stride;
+        }
+    }
+
+    mtls->fep.ptrOut = NULL;
+    mtls->fep.eStrideOut = 0;
+    if (aout) {
+        mtls->fep.ptrOut     = (uint8_t *)aout->mHal.drvState.lod[0].mallocPtr;
+        mtls->fep.eStrideOut = aout->getType()->getElementSizeBytes();
+        mtls->fep.yStrideOut = aout->mHal.drvState.lod[0].stride;
+    }
+}
+
 
 void RsdCpuScriptImpl::invokeForEach(uint32_t slot,
                                      const Allocation * ain,
@@ -833,6 +1056,24 @@ void RsdCpuScriptImpl::invokeForEach(uint32_t slot,
 
     RsdCpuScriptImpl * oldTLS = mCtx->setTLS(this);
     mCtx->launchThreads(ain, aout, sc, &mtls);
+    mCtx->setTLS(oldTLS);
+}
+
+void RsdCpuScriptImpl::invokeForEachMulti(uint32_t slot,
+                                          const Allocation ** ains,
+                                          uint32_t inLen,
+                                          Allocation * aout,
+                                          const void * usr,
+                                          uint32_t usrLen,
+                                          const RsScriptCall *sc) {
+
+    MTLaunchStruct mtls;
+
+    forEachMtlsSetup(ains, inLen, aout, usr, usrLen, sc, &mtls);
+    forEachKernelSetup(slot, &mtls);
+
+    RsdCpuScriptImpl * oldTLS = mCtx->setTLS(this);
+    mCtx->launchThreads(ains, inLen, aout, sc, &mtls);
     mCtx->setTLS(oldTLS);
 }
 
@@ -928,7 +1169,7 @@ void RsdCpuScriptImpl::getGlobalVar(uint32_t slot, void *data, size_t dataLength
 
 void RsdCpuScriptImpl::setGlobalVarWithElemDims(uint32_t slot, const void *data, size_t dataLength,
                                                 const Element *elem,
-                                                const size_t *dims, size_t dimLength) {
+                                                const uint32_t *dims, size_t dimLength) {
 
 #ifndef RS_COMPATIBILITY_LIB
     int32_t *destPtr = reinterpret_cast<int32_t *>(
@@ -951,14 +1192,14 @@ void RsdCpuScriptImpl::setGlobalVarWithElemDims(uint32_t slot, const void *data,
         // First do the increment loop.
         size_t stride = elem->getSizeBytes();
         const char *cVal = reinterpret_cast<const char *>(data);
-        for (size_t i = 0; i < dims[0]; i++) {
+        for (uint32_t i = 0; i < dims[0]; i++) {
             elem->incRefs(cVal);
             cVal += stride;
         }
 
         // Decrement loop comes after (to prevent race conditions).
         char *oldVal = reinterpret_cast<char *>(destPtr);
-        for (size_t i = 0; i < dims[0]; i++) {
+        for (uint32_t i = 0; i < dims[0]; i++) {
             elem->decRefs(oldVal);
             oldVal += stride;
         }
@@ -996,23 +1237,19 @@ void RsdCpuScriptImpl::setGlobalObj(uint32_t slot, ObjectBase *data) {
     //rsAssert(script->mFieldIsObject[slot]);
     //ALOGE("setGlobalObj %p %p %i %p", dc, script, slot, data);
 
-    //if (mIntrinsicID) {
-        //mIntrinsicFuncs.setVarObj(dc, script, drv->mIntrinsicData, slot, alloc);
-        //return;
-    //}
-
 #ifndef RS_COMPATIBILITY_LIB
     int32_t *destPtr = reinterpret_cast<int32_t *>(
                           mExecutable->getExportVarAddrs()[slot]);
 #else
     int32_t *destPtr = reinterpret_cast<int32_t *>(mFieldAddress[slot]);
 #endif
+
     if (!destPtr) {
         //ALOGV("Calling setVar on slot = %i which is null", slot);
         return;
     }
 
-    rsrSetObject(mCtx->getContext(), (ObjectBase **)destPtr, data);
+    rsrSetObject(mCtx->getContext(), (rs_object_base *)destPtr, data);
 }
 
 RsdCpuScriptImpl::~RsdCpuScriptImpl() {
@@ -1032,10 +1269,10 @@ RsdCpuScriptImpl::~RsdCpuScriptImpl() {
                (is_object_iter != is_object_end)) {
             // The field address can be NULL if the script-side has optimized
             // the corresponding global variable away.
-            ObjectBase **obj_addr =
-                reinterpret_cast<ObjectBase **>(*var_addr_iter);
+            rs_object_base *obj_addr =
+                reinterpret_cast<rs_object_base *>(*var_addr_iter);
             if (*is_object_iter) {
-                if (*var_addr_iter != NULL) {
+                if (*var_addr_iter != NULL && mCtx->getContext() != NULL) {
                     rsrClearObject(mCtx->getContext(), obj_addr);
                 }
             }
@@ -1056,13 +1293,17 @@ RsdCpuScriptImpl::~RsdCpuScriptImpl() {
     if (mBoundAllocs) {
         delete[] mBoundAllocs;
     }
+
+    for (size_t i = 0; i < mExportedForEachFuncList.size(); i++) {
+        delete[] mExportedForEachFuncList[i].first;
+    }
 #else
     if (mFieldIsObject) {
         for (size_t i = 0; i < mExportedVariableCount; ++i) {
             if (mFieldIsObject[i]) {
                 if (mFieldAddress[i] != NULL) {
-                    ObjectBase **obj_addr =
-                        reinterpret_cast<ObjectBase **>(mFieldAddress[i]);
+                    rs_object_base *obj_addr =
+                        reinterpret_cast<rs_object_base *>(mFieldAddress[i]);
                     rsrClearObject(mCtx->getContext(), obj_addr);
                 }
             }

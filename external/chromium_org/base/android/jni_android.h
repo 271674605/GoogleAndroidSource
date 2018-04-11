@@ -8,6 +8,8 @@
 #include <jni.h>
 #include <sys/types.h>
 
+#include <string>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/atomicops.h"
 #include "base/base_export.h"
@@ -25,21 +27,40 @@ struct RegistrationMethod {
   bool (*func)(JNIEnv* env);
 };
 
-// Attach the current thread to the VM (if necessary) and return the JNIEnv*.
+// Attaches the current thread to the VM (if necessary) and return the JNIEnv*.
 BASE_EXPORT JNIEnv* AttachCurrentThread();
 
-// Detach the current thread from VM if it is attached.
+// Same to AttachCurrentThread except that thread name will be set to
+// |thread_name| if it is the first call. Otherwise, thread_name won't be
+// changed. AttachCurrentThread() doesn't regard underlying platform thread
+// name, but just resets it to "Thread-???". This function should be called
+// right after new thread is created if it is important to keep thread name.
+BASE_EXPORT JNIEnv* AttachCurrentThreadWithName(const std::string& thread_name);
+
+// Detaches the current thread from VM if it is attached.
 BASE_EXPORT void DetachFromVM();
 
 // Initializes the global JVM. It is not necessarily called before
 // InitApplicationContext().
 BASE_EXPORT void InitVM(JavaVM* vm);
 
+// Returns true if the global JVM has been initialized.
+BASE_EXPORT bool IsVMInitialized();
+
 // Initializes the global application context object. The |context| can be any
 // valid reference to the application context. Internally holds a global ref to
 // the context. InitVM and InitApplicationContext maybe called in either order.
 BASE_EXPORT void InitApplicationContext(JNIEnv* env,
                                         const JavaRef<jobject>& context);
+
+// Initializes the global ClassLoader used by the GetClass and LazyGetClass
+// methods. This is needed because JNI will use the base ClassLoader when there
+// is no Java code on the stack. The base ClassLoader doesn't know about any of
+// the application classes and will fail to lookup anything other than system
+// classes.
+BASE_EXPORT void InitReplacementClassLoader(
+    JNIEnv* env,
+    const JavaRef<jobject>& class_loader);
 
 // Gets a global ref to the application context set with
 // InitApplicationContext(). Ownership is retained by the function - the caller
@@ -54,8 +75,16 @@ const BASE_EXPORT jobject GetApplicationContext();
 BASE_EXPORT ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env,
                                                 const char* class_name);
 
-// Returns true iff the class |class_name| could be found.
-BASE_EXPORT bool HasClass(JNIEnv* env, const char* class_name);
+// The method will initialize |atomic_class_id| to contain a global ref to the
+// class. And will return that ref on subsequent calls.  It's the caller's
+// responsibility to release the ref when it is no longer needed.
+// The caller is responsible to zero-initialize |atomic_method_id|.
+// It's fine to simultaneously call this on multiple threads referencing the
+// same |atomic_method_id|.
+BASE_EXPORT jclass LazyGetClass(
+    JNIEnv* env,
+    const char* class_name,
+    base::subtle::AtomicWord* atomic_class_id);
 
 // This class is a wrapper for JNIEnv Get(Static)MethodID.
 class BASE_EXPORT MethodID {
@@ -83,39 +112,6 @@ class BASE_EXPORT MethodID {
                            const char* jni_signature,
                            base::subtle::AtomicWord* atomic_method_id);
 };
-
-// Gets the method ID from the class name. Clears the pending Java exception
-// and returns NULL if the method is not found. Caches results. Note that
-// MethodID::Get() above avoids a class lookup, but does not cache results.
-// Strings passed to this function are held in the cache and MUST remain valid
-// beyond the duration of all future calls to this function, across all
-// threads. In practice, this means that the function should only be used with
-// string constants.
-BASE_EXPORT jmethodID GetMethodIDFromClassName(JNIEnv* env,
-                                               const char* class_name,
-                                               const char* method,
-                                               const char* jni_signature);
-
-// Gets the field ID for a class field.
-// This method triggers a fatal assertion if the field could not be found.
-BASE_EXPORT jfieldID GetFieldID(JNIEnv* env,
-                                const JavaRef<jclass>& clazz,
-                                const char* field_name,
-                                const char* jni_signature);
-
-// Returns true if |clazz| as a field with the given name and signature.
-// TODO(jcivelli): Determine whether we explicitly have to pass the environment.
-BASE_EXPORT bool HasField(JNIEnv* env,
-                          const JavaRef<jclass>& clazz,
-                          const char* field_name,
-                          const char* jni_signature);
-
-// Gets the field ID for a static class field.
-// This method triggers a fatal assertion if the field could not be found.
-BASE_EXPORT jfieldID GetStaticFieldID(JNIEnv* env,
-                                      const JavaRef<jclass>& clazz,
-                                      const char* field_name,
-                                      const char* jni_signature);
 
 // Returns true if an exception is pending in the provided JNIEnv*.
 BASE_EXPORT bool HasException(JNIEnv* env);

@@ -6,16 +6,12 @@
 #define ASH_TEST_CURSOR_MANAGER_TEST_API_H_
 
 #include "base/basictypes.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace gfx {
-class Display;
-}
-
-namespace views {
-namespace corewm {
+namespace wm {
 class CursorManager;
-}
 }
 
 namespace ash {
@@ -24,15 +20,16 @@ namespace test {
 // Use the api in this class to test CursorManager.
 class CursorManagerTestApi {
  public:
-  explicit CursorManagerTestApi(views::corewm::CursorManager* cursor_manager);
+  explicit CursorManagerTestApi(::wm::CursorManager* cursor_manager);
   ~CursorManagerTestApi();
 
-  float GetCurrentScale() const;
+  ui::CursorSetType GetCurrentCursorSet() const;
   gfx::NativeCursor GetCurrentCursor() const;
-  gfx::Display GetDisplay() const;
+  gfx::Display::Rotation GetCurrentCursorRotation() const;
+  float GetCurrentCursorScale() const;
 
  private:
-  views::corewm::CursorManager* cursor_manager_;
+  ::wm::CursorManager* cursor_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(CursorManagerTestApi);
 };

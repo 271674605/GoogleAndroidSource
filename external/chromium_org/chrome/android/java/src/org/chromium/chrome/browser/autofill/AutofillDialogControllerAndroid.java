@@ -4,9 +4,11 @@
 
 package org.chromium.chrome.browser.autofill;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
-import org.chromium.ui.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Java-side AutofillDialog and AutofillDialogFactory interfaces, and
@@ -14,9 +16,9 @@ import org.chromium.ui.WindowAndroid;
  */
 @JNINamespace("autofill")
 public class AutofillDialogControllerAndroid {
-    private static AutofillDialogFactory mDialogFactory;
+    private static AutofillDialogFactory sDialogFactory;
 
-    private int mNativeDelegate;  // could be 0 after onDestroy().
+    private long mNativeDelegate;  // could be 0 after onDestroy().
     private AutofillDialog mDialog;
 
     /**
@@ -77,6 +79,8 @@ public class AutofillDialogControllerAndroid {
          * @param initialShippingGuid GUID of the initial shipping address selection in Autofill
          * @param initialCardGuid GUID of the initial credit card selection in Autofill
          * @param merchantDomain Scheme+origin for the originating web page, or null
+         * @param shippingCountries A list of allowed shipping countries, or null
+         * @param creditCardTypes A list of allowed credit card types (e.g. "VISA"), or null
          * @return The Autofill dialog that would later call into the delegate, or null
          */
         AutofillDialog createDialog(
@@ -88,7 +92,9 @@ public class AutofillDialogControllerAndroid {
                 final boolean initialChoiceIsAutofill, final String initialAccountName,
                 final String initialBillingGuid, final String initialShippingGuid,
                 final String initialCardGuid,
-                final String merchantDomain);
+                final String merchantDomain,
+                final String[] shippingCountries,
+                final String[] creditCardTypes);
     }
 
     /**
@@ -96,11 +102,12 @@ public class AutofillDialogControllerAndroid {
      * @param factory An instance of the AutofillDialogFactory that will handle requests.
      */
     public static void setDialogFactory(AutofillDialogFactory factory) {
-        mDialogFactory = factory;
+        sDialogFactory = factory;
     }
 
+    @VisibleForTesting
     private AutofillDialogControllerAndroid(
-            final int nativeAutofillDialogControllerAndroid,
+            final long nativeAutofillDialogControllerAndroid,
             final WindowAndroid windowAndroid,
             final boolean requestFullBillingAddress, final boolean requestShippingAddress,
             final boolean requestPhoneNumbers,
@@ -108,10 +115,12 @@ public class AutofillDialogControllerAndroid {
             final boolean initialChoiceIsAutofill, final String initialWalletAccountName,
             final String initialBillingGuid, final String initialShippingGuid,
             final String initialCardGuid,
-            final String merchantDomain) {
+            final String merchantDomain,
+            final String[] shippingCountries,
+            final String[] creditCardTypes) {
         mNativeDelegate = nativeAutofillDialogControllerAndroid;
 
-        if (mDialogFactory == null) {
+        if (sDialogFactory == null) {
             nativeDialogCancel(mNativeDelegate);
             return;
         }
@@ -134,7 +143,7 @@ public class AutofillDialogControllerAndroid {
             }
         };
 
-        mDialog = mDialogFactory.createDialog(
+        mDialog = sDialogFactory.createDialog(
                 delegate,
                 windowAndroid,
                 requestFullBillingAddress, requestShippingAddress,
@@ -142,7 +151,9 @@ public class AutofillDialogControllerAndroid {
                 incognitoMode,
                 initialChoiceIsAutofill, initialWalletAccountName,
                 initialBillingGuid, initialShippingGuid, initialCardGuid,
-                merchantDomain);
+                merchantDomain,
+                shippingCountries,
+                creditCardTypes);
         if (mDialog == null) {
             nativeDialogCancel(mNativeDelegate);
             return;
@@ -151,7 +162,7 @@ public class AutofillDialogControllerAndroid {
 
     @CalledByNative
     private static AutofillDialogControllerAndroid create(
-            final int nativeAutofillDialogControllerAndroid,
+            final long nativeAutofillDialogControllerAndroid,
             final WindowAndroid windowAndroid,
             final boolean requestFullBillingAddress, final boolean requestShippingAddress,
             final boolean requestPhoneNumbers,
@@ -159,7 +170,9 @@ public class AutofillDialogControllerAndroid {
             final boolean initialChoiceIsAutofill, final String initialWalletAccountName,
             final String initialBillingGuid, final String initialShippingGuid,
             final String initialCreditCardGuid,
-            final String merchantDomain) {
+            final String merchantDomain,
+            final String[] shippingCountries,
+            final String[] creditCardTypes) {
         return new AutofillDialogControllerAndroid(
                 nativeAutofillDialogControllerAndroid, windowAndroid,
                 requestFullBillingAddress, requestShippingAddress, requestPhoneNumbers,
@@ -167,7 +180,16 @@ public class AutofillDialogControllerAndroid {
                 initialChoiceIsAutofill, initialWalletAccountName,
                 initialBillingGuid, initialShippingGuid,
                 initialCreditCardGuid,
-                merchantDomain);
+                merchantDomain,
+                shippingCountries,
+                creditCardTypes);
+    }
+
+    @CalledByNative
+    private static boolean isDialogAllowed(boolean isInvokedFromTheSameOrigin) {
+        // TODO(aruslan): cross-origin invocations should be allowed with a
+        // warning messge.
+        return isInvokedFromTheSameOrigin;
     }
 
     @CalledByNative
@@ -182,8 +204,8 @@ public class AutofillDialogControllerAndroid {
 
     // Calls from Java to C++ AutofillDialogControllerAndroid:
 
-    private native void nativeDialogCancel(int nativeAutofillDialogControllerAndroid);
-    private native void nativeDialogContinue(int nativeAutofillDialogControllerAndroid,
+    private native void nativeDialogCancel(long nativeAutofillDialogControllerAndroid);
+    private native void nativeDialogContinue(long nativeAutofillDialogControllerAndroid,
             Object fullWallet,
             boolean lastUsedChoiceIsAutofill, String lastUsedAccountName,
             String guidLastUsedBilling, String guidLastUsedShipping, String guidLastUsedCard);

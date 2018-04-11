@@ -33,7 +33,7 @@ CodeGenTBAA::CodeGenTBAA(ASTContext &Ctx, llvm::LLVMContext& VMContext,
                          const CodeGenOptions &CGO,
                          const LangOptions &Features, MangleContext &MContext)
   : Context(Ctx), CodeGenOpts(CGO), Features(Features), MContext(MContext),
-    MDHelper(VMContext), Root(0), Char(0) {
+    MDHelper(VMContext), Root(nullptr), Char(nullptr) {
 }
 
 CodeGenTBAA::~CodeGenTBAA() {
@@ -50,16 +50,11 @@ llvm::MDNode *CodeGenTBAA::getRoot() {
   return Root;
 }
 
-// For struct-path aware TBAA, the scalar type has the same format as
-// the struct type: name, offset, pointer to another node in the type DAG.
-// For scalar TBAA, the scalar type is the same as the scalar tag:
-// name and a parent pointer.
+// For both scalar TBAA and struct-path aware TBAA, the scalar type has the
+// same format: name, parent node, and offset.
 llvm::MDNode *CodeGenTBAA::createTBAAScalarType(StringRef Name,
                                                 llvm::MDNode *Parent) {
-  if (CodeGenOpts.StructPathTBAA)
-    return MDHelper.createTBAAScalarTypeNode(Name, Parent);
-  else
-    return MDHelper.createTBAANode(Name, Parent);
+  return MDHelper.createTBAAScalarTypeNode(Name, Parent);
 }
 
 llvm::MDNode *CodeGenTBAA::getChar() {
@@ -91,9 +86,9 @@ static bool TypeHasMayAlias(QualType QTy) {
 
 llvm::MDNode *
 CodeGenTBAA::getTBAAInfo(QualType QTy) {
-  // At -O0 TBAA is not emitted for regular types.
+  // At -O0 or relaxed aliasing, TBAA is not emitted for regular types.
   if (CodeGenOpts.OptimizationLevel == 0 || CodeGenOpts.RelaxedAliasing)
-    return NULL;
+    return nullptr;
 
   // If the type has the may_alias attribute (even on a typedef), it is
   // effectively in the general char alias class.
@@ -157,11 +152,9 @@ CodeGenTBAA::getTBAAInfo(QualType QTy) {
     if (!Features.CPlusPlus || !ETy->getDecl()->isExternallyVisible())
       return MetadataCache[Ty] = getChar();
 
-    // TODO: This is using the RTTI name. Is there a better way to get
-    // a unique string for a type?
     SmallString<256> OutName;
     llvm::raw_svector_ostream Out(OutName);
-    MContext.mangleCXXRTTIName(QualType(ETy, 0), Out);
+    MContext.mangleTypeName(QualType(ETy, 0), Out);
     Out.flush();
     return MetadataCache[Ty] = createTBAAScalarType(OutName, getChar());
   }
@@ -211,8 +204,7 @@ CodeGenTBAA::CollectFields(uint64_t BaseOffset,
   uint64_t Offset = BaseOffset;
   uint64_t Size = Context.getTypeSizeInChars(QTy).getQuantity();
   llvm::MDNode *TBAAInfo = MayAlias ? getChar() : getTBAAInfo(QTy);
-  llvm::MDNode *TBAATag = CodeGenOpts.StructPathTBAA ?
-                          getTBAAScalarTagInfo(TBAAInfo) : TBAAInfo;
+  llvm::MDNode *TBAATag = getTBAAScalarTagInfo(TBAAInfo);
   Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size, TBAATag));
   return true;
 }
@@ -229,7 +221,7 @@ CodeGenTBAA::getTBAAStructInfo(QualType QTy) {
     return MDHelper.createTBAAStructNode(Fields);
 
   // For now, handle any other kind of type conservatively.
-  return StructMetadataCache[Ty] = NULL;
+  return StructMetadataCache[Ty] = nullptr;
 }
 
 /// Check if the given type can be handled by path-aware TBAA.
@@ -269,37 +261,44 @@ CodeGenTBAA::getTBAAStructTypeInfo(QualType QTy) {
       else
         FieldNode = getTBAAInfo(FieldQTy);
       if (!FieldNode)
-        return StructTypeMetadataCache[Ty] = NULL;
+        return StructTypeMetadataCache[Ty] = nullptr;
       Fields.push_back(std::make_pair(
           FieldNode, Layout.getFieldOffset(idx) / Context.getCharWidth()));
     }
 
-    // TODO: This is using the RTTI name. Is there a better way to get
-    // a unique string for a type?
     SmallString<256> OutName;
-    llvm::raw_svector_ostream Out(OutName);
-    MContext.mangleCXXRTTIName(QualType(Ty, 0), Out);
-    Out.flush();
+    if (Features.CPlusPlus) {
+      // Don't use the mangler for C code.
+      llvm::raw_svector_ostream Out(OutName);
+      MContext.mangleTypeName(QualType(Ty, 0), Out);
+      Out.flush();
+    } else {
+      OutName = RD->getName();
+    }
     // Create the struct type node with a vector of pairs (offset, type).
     return StructTypeMetadataCache[Ty] =
       MDHelper.createTBAAStructTypeNode(OutName, Fields);
   }
 
-  return StructMetadataCache[Ty] = NULL;
+  return StructMetadataCache[Ty] = nullptr;
 }
 
+/// Return a TBAA tag node for both scalar TBAA and struct-path aware TBAA.
 llvm::MDNode *
 CodeGenTBAA::getTBAAStructTagInfo(QualType BaseQTy, llvm::MDNode *AccessNode,
                                   uint64_t Offset) {
+  if (!AccessNode)
+    return nullptr;
+
   if (!CodeGenOpts.StructPathTBAA)
-    return AccessNode;
+    return getTBAAScalarTagInfo(AccessNode);
 
   const Type *BTy = Context.getCanonicalType(BaseQTy).getTypePtr();
   TBAAPathTag PathTag = TBAAPathTag(BTy, AccessNode, Offset);
   if (llvm::MDNode *N = StructTagMetadataCache[PathTag])
     return N;
 
-  llvm::MDNode *BNode = 0;
+  llvm::MDNode *BNode = nullptr;
   if (isTBAAPathStruct(BaseQTy))
     BNode  = getTBAAStructTypeInfo(BaseQTy);
   if (!BNode)
@@ -312,6 +311,8 @@ CodeGenTBAA::getTBAAStructTagInfo(QualType BaseQTy, llvm::MDNode *AccessNode,
 
 llvm::MDNode *
 CodeGenTBAA::getTBAAScalarTagInfo(llvm::MDNode *AccessNode) {
+  if (!AccessNode)
+    return nullptr;
   if (llvm::MDNode *N = ScalarTagMetadataCache[AccessNode])
     return N;
 

@@ -13,7 +13,6 @@
 #include "net/base/request_priority.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_controller.h"
-#include "net/http/http_pipelined_host.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/proxy/proxy_service.h"
@@ -74,6 +73,9 @@ class HttpStreamFactoryImpl::Job {
   // Used to detach the Job from |request|.
   void Orphan(const Request* request);
 
+  void SetPriority(RequestPriority priority);
+
+  RequestPriority priority() const { return priority_; }
   bool was_npn_negotiated() const;
   NextProto protocol_negotiated() const;
   bool using_spdy() const;
@@ -88,6 +90,13 @@ class HttpStreamFactoryImpl::Job {
 
   // Indicates whether or not this Job has been orphaned by a Request.
   bool IsOrphaned() const;
+
+  // Called to indicate that this job succeeded, and some other jobs
+  // will be orphaned.
+  void ReportJobSuccededForRequest();
+
+  // Marks that the other |job| has completed.
+  void MarkOtherJobComplete(const Job& job);
 
  private:
   enum State {
@@ -126,8 +135,15 @@ class HttpStreamFactoryImpl::Job {
     STATE_NONE
   };
 
+  enum JobStatus {
+    STATUS_RUNNING,
+    STATUS_FAILED,
+    STATUS_BROKEN,
+    STATUS_SUCCEEDED
+  };
+
   void OnStreamReadyCallback();
-  void OnWebSocketStreamReadyCallback();
+  void OnWebSocketHandshakeStreamReadyCallback();
   // This callback function is called when a new SPDY session is created.
   void OnNewSpdySessionReadyCallback();
   void OnStreamFailedCallback(int result);
@@ -213,7 +229,7 @@ class HttpStreamFactoryImpl::Job {
   // Should we force QUIC for this stream request.
   bool ShouldForceQuic() const;
 
-  bool IsRequestEligibleForPipelining();
+  void MaybeMarkAlternateProtocolBroken();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
@@ -274,11 +290,8 @@ class HttpStreamFactoryImpl::Job {
   bool using_quic_;
   QuicStreamRequest quic_request_;
 
-  // Force spdy for all connections.
-  bool force_spdy_always_;
-
-  // Force spdy only for SSL connections.
-  bool force_spdy_over_ssl_;
+  // True if this job used an existing QUIC session.
+  bool using_existing_quic_session_;
 
   // Force quic for a specific port.
   int force_quic_port_;
@@ -294,7 +307,7 @@ class HttpStreamFactoryImpl::Job {
   bool establishing_tunnel_;
 
   scoped_ptr<HttpStream> stream_;
-  scoped_ptr<WebSocketStreamBase> websocket_stream_;
+  scoped_ptr<WebSocketHandshakeStreamBase> websocket_stream_;
 
   // True if we negotiated NPN.
   bool was_npn_negotiated_;
@@ -315,11 +328,8 @@ class HttpStreamFactoryImpl::Job {
   // Only used if |new_spdy_session_| is non-NULL.
   bool spdy_session_direct_;
 
-  // Key used to identify the HttpPipelinedHost for |request_|.
-  scoped_ptr<HttpPipelinedHost::Key> http_pipelining_key_;
-
-  // True if an existing pipeline can handle this job's request.
-  bool existing_available_pipeline_;
+  JobStatus job_status_;
+  JobStatus other_job_status_;
 
   base::WeakPtrFactory<Job> ptr_factory_;
 

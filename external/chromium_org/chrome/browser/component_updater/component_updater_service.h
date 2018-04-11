@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/version.h"
 #include "url/gurl.h"
+
+class ComponentsUI;
 
 namespace base {
 class DictionaryValue;
@@ -18,15 +21,22 @@ class FilePath;
 
 namespace net {
 class URLRequestContextGetter;
+class URLRequest;
 }
 
-class ComponentPatcher;
+namespace content {
+class ResourceThrottle;
+}
+
+namespace component_updater {
+
+class OnDemandUpdater;
 
 // Component specific installers must derive from this class and implement
 // OnUpdateError() and Install(). A valid instance of this class must be
 // given to ComponentUpdateService::RegisterComponent().
 class ComponentInstaller {
- public :
+ public:
   // Called by the component updater on the UI thread when there was a
   // problem unpacking or verifying the component. |error| is a non-zero
   // value which is only meaningful to the component updater.
@@ -46,51 +56,30 @@ class ComponentInstaller {
   virtual bool GetInstalledFile(const std::string& file,
                                 base::FilePath* installed_file) = 0;
 
- protected:
   virtual ~ComponentInstaller() {}
-};
-
-// Defines an interface to observe a CrxComponent.
-class ComponentObserver {
- public:
-  enum Events {
-    // Sent when the component updater starts doing update checks.
-    COMPONENT_UPDATER_STARTED,
-
-    // Sent when the component updater is going to take a long nap.
-    COMPONENT_UPDATER_SLEEPING,
-
-    // Sent when there is a new version of a registered component. After
-    // the notification is sent the component will be downloaded.
-    COMPONENT_UPDATE_FOUND,
-
-    // Sent when the new component has been downloaded and an installation
-    // or upgrade is about to be attempted.
-    COMPONENT_UPDATE_READY,
-  };
-
-  virtual ~ComponentObserver() {}
-
-  // The component updater service will call this function when an interesting
-  // event happens for a specific component. |extra| is |event| dependent.
-  virtual void OnEvent(Events event, int extra) = 0;
 };
 
 // Describes a particular component that can be installed or updated. This
 // structure is required to register a component with the component updater.
 // |pk_hash| is the SHA256 hash of the component's public key. If the component
 // is to be installed then version should be "0" or "0.0", else it should be
-// the current version. |observer|, |fingerprint|, and |name| are optional.
+// the current version. |fingerprint|, and |name| are optional.
+// |allow_background_download| specifies that the component can be background
+// downloaded in some cases. The default for this value is |true| and the value
+// can be overriden at the registration time. This is a temporary change until
+// the issue 340448 is resolved.
 struct CrxComponent {
   std::vector<uint8> pk_hash;
   ComponentInstaller* installer;
-  ComponentObserver* observer;
   Version version;
   std::string fingerprint;
   std::string name;
+  bool allow_background_download;
   CrxComponent();
   ~CrxComponent();
 };
+
+struct CrxUpdateItem;
 
 // The component update service is in charge of installing or upgrading
 // select parts of chrome. Each part is called a component and managed by
@@ -109,12 +98,7 @@ struct CrxComponent {
 // All methods are safe to call ONLY from chrome's UI thread.
 class ComponentUpdateService {
  public:
-  enum Status {
-    kOk,
-    kReplaced,
-    kInProgress,
-    kError
-  };
+  enum Status { kOk, kReplaced, kInProgress, kError };
   // Controls the component updater behavior.
   class Configurator {
    public:
@@ -125,6 +109,9 @@ class ComponentUpdateService {
     virtual int NextCheckDelay() = 0;
     // Delay in seconds from each task step. Used to smooth out CPU/IO usage.
     virtual int StepDelay() = 0;
+    // Delay in seconds between applying updates for different components, if
+    // several updates are available at a given time.
+    virtual int StepDelayMedium() = 0;
     // Minimum delta time in seconds before checking again the same component.
     virtual int MinimumReCheckWait() = 0;
     // Minimum delta time in seconds before an on-demand check is allowed
@@ -136,19 +123,67 @@ class ComponentUpdateService {
     // pings are disabled.
     virtual GURL PingUrl() = 0;
     // Parameters added to each url request. It can be null if none are needed.
-    virtual const char* ExtraRequestParams() = 0;
+    virtual std::string ExtraRequestParams() = 0;
     // How big each update request can be. Don't go above 2000.
     virtual size_t UrlSizeLimit() = 0;
     // The source of contexts for all the url requests.
     virtual net::URLRequestContextGetter* RequestContext() = 0;
     // True means that all ops are performed in this process.
     virtual bool InProcess() = 0;
-    // Creates a new ComponentPatcher in a platform-specific way. This is useful
-    // for dependency injection.
-    virtual ComponentPatcher* CreateComponentPatcher() = 0;
     // True means that this client can handle delta updates.
     virtual bool DeltasEnabled() const = 0;
+    // True means that the background downloader can be used for downloading
+    // non on-demand components.
+    virtual bool UseBackgroundDownloader() const = 0;
   };
+
+  // Defines an interface to observe ComponentUpdateService. It provides
+  // notifications when state changes occur for the service or for the
+  // registered components.
+  class Observer {
+   public:
+    enum Events {
+      // Sent when the component updater starts doing update checks.
+      COMPONENT_UPDATER_STARTED,
+
+      // Sent when the component updater is going to take a long nap.
+      COMPONENT_UPDATER_SLEEPING,
+
+      // Sent when there is a new version of a registered component. After
+      // the notification is sent the component will be downloaded.
+      COMPONENT_UPDATE_FOUND,
+
+      // Sent when the new component has been downloaded and an installation
+      // or upgrade is about to be attempted.
+      COMPONENT_UPDATE_READY,
+
+      // Sent when a component has been successfully updated.
+      COMPONENT_UPDATED,
+
+      // Sent when a component has not been updated following an update check:
+      // either there was no update available, or an update failed.
+      COMPONENT_NOT_UPDATED,
+
+      // Sent when component bytes are being downloaded.
+      COMPONENT_UPDATE_DOWNLOADING,
+    };
+
+    virtual ~Observer() {}
+
+    // The component updater service will call this function when an interesting
+    // state change happens. If the |id| is specified, then the event is fired
+    // on behalf of a specific component. The implementors of this interface are
+    // expected to filter the relevant events based on the component id.
+    virtual void OnEvent(Events event, const std::string& id) = 0;
+  };
+
+  // Adds an observer for this class. An observer should not be added more
+  // than once. The caller retains the ownership of the observer object.
+  virtual void AddObserver(Observer* observer) = 0;
+
+  // Removes an observer. It is safe for an observer to be removed while
+  // the observers are being notified.
+  virtual void RemoveObserver(Observer* observer) = 0;
 
   // Start doing update checks and installing new versions of registered
   // components after Configurator::InitialDelay() seconds.
@@ -162,23 +197,60 @@ class ComponentUpdateService {
   // before calling Start().
   virtual Status RegisterComponent(const CrxComponent& component) = 0;
 
-  // Ask the component updater to do an update check for a previously
-  // registered component, soon. If an update or check is already in progress,
-  // returns |kInProgress|. The same component cannot be checked repeatedly
-  // in a short interval either (returns |kError| if so).
-  // There is no guarantee that the item will actually be updated,
-  // since another item may be chosen to be updated. Since there is
-  // no time guarantee, there is no notification if the item is not updated.
-  // However, the ComponentInstaller should know if an update succeeded
-  // via the Install() hook.
-  virtual Status CheckForUpdateSoon(const CrxComponent& component) = 0;
+  // Returns a list of registered components.
+  virtual std::vector<std::string> GetComponentIDs() const = 0;
+
+  // Returns an interface for on-demand updates. On-demand updates are
+  // proactively triggered outside the normal component update service schedule.
+  virtual OnDemandUpdater& GetOnDemandUpdater() = 0;
 
   virtual ~ComponentUpdateService() {}
+
+ private:
+  // Returns details about registered component in the |item| parameter. The
+  // function returns true in case of success and false in case of errors.
+  virtual bool GetComponentDetails(const std::string& component_id,
+                                   CrxUpdateItem* item) const = 0;
+
+  friend class ::ComponentsUI;
+  FRIEND_TEST_ALL_PREFIXES(ComponentUpdaterTest, ResourceThrottleLiveNoUpdate);
+};
+
+typedef ComponentUpdateService::Observer ServiceObserver;
+
+class OnDemandUpdater {
+ public:
+  virtual ~OnDemandUpdater() {}
+
+  // Returns a network resource throttle. It means that a component will be
+  // downloaded and installed before the resource is unthrottled. This function
+  // can be called from the IO thread. The function implements a cooldown
+  // interval of 30 minutes. That means it will ineffective to call the
+  // function before the cooldown interval has passed. This behavior is intended
+  // to be defensive against programming bugs, usually triggered by web fetches,
+  // where the on-demand functionality is invoked too often.
+  virtual content::ResourceThrottle* GetOnDemandResourceThrottle(
+      net::URLRequest* request,
+      const std::string& crx_id) = 0;
+
+ private:
+  friend class OnDemandTester;
+  friend class ::ComponentsUI;
+
+  // Triggers an update check for a component. |component_id| is a value
+  // returned by GetCrxComponentID(). If an update for this component is already
+  // in progress, the function returns |kInProgress|. If an update is available,
+  // the update will be applied. The caller can subscribe to component update
+  // service notifications to get an indication about the outcome of the
+  // on-demand update. The function does not implement any cooldown interval.
+  virtual ComponentUpdateService::Status OnDemandUpdate(
+      const std::string& component_id) = 0;
 };
 
 // Creates the component updater. You must pass a valid |config| allocated on
 // the heap which the component updater will own.
 ComponentUpdateService* ComponentUpdateServiceFactory(
     ComponentUpdateService::Configurator* config);
+}  // namespace component_updater
 
 #endif  // CHROME_BROWSER_COMPONENT_UPDATER_COMPONENT_UPDATER_SERVICE_H_

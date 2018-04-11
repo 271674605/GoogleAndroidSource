@@ -63,8 +63,8 @@ public class AsYouTypeFormatter {
   private static final char SEPARATOR_BEFORE_NATIONAL_NUMBER = ' ';
   private static final PhoneMetadata EMPTY_METADATA =
       new PhoneMetadata().setInternationalPrefix("NA");
-  private PhoneMetadata defaultMetaData;
-  private PhoneMetadata currentMetaData;
+  private PhoneMetadata defaultMetadata;
+  private PhoneMetadata currentMetadata;
 
   // A pattern that is used to match character classes in regular expressions. An example of a
   // character class is [1-4].
@@ -111,7 +111,7 @@ public class AsYouTypeFormatter {
   private boolean shouldAddSpaceAfterNationalPrefix = false;
   // This contains the national prefix that has been extracted. It contains only digits without
   // formatting.
-  private String nationalPrefixExtracted = "";
+  private String extractedNationalPrefix = "";
   private StringBuilder nationalNumber = new StringBuilder();
   private List<NumberFormat> possibleFormats = new ArrayList<NumberFormat>();
 
@@ -126,8 +126,8 @@ public class AsYouTypeFormatter {
    */
   AsYouTypeFormatter(String regionCode) {
     defaultCountry = regionCode;
-    currentMetaData = getMetadataForRegion(defaultCountry);
-    defaultMetaData = currentMetaData;
+    currentMetadata = getMetadataForRegion(defaultCountry);
+    defaultMetadata = currentMetadata;
   }
 
   // The metadata needed by this class is the same for all regions sharing the same country calling
@@ -172,12 +172,12 @@ public class AsYouTypeFormatter {
     return false;
   }
 
-  private void getAvailableFormats(String leadingThreeDigits) {
+  private void getAvailableFormats(String leadingDigits) {
     List<NumberFormat> formatList =
-        (isCompleteNumber && currentMetaData.intlNumberFormatSize() > 0)
-        ? currentMetaData.intlNumberFormats()
-        : currentMetaData.numberFormats();
-    boolean nationalPrefixIsUsedByCountry = currentMetaData.hasNationalPrefix();
+        (isCompleteNumber && currentMetadata.intlNumberFormatSize() > 0)
+        ? currentMetadata.intlNumberFormats()
+        : currentMetadata.numberFormats();
+    boolean nationalPrefixIsUsedByCountry = currentMetadata.hasNationalPrefix();
     for (NumberFormat format : formatList) {
       if (!nationalPrefixIsUsedByCountry || isCompleteNumber ||
           format.isNationalPrefixOptionalWhenFormatting() ||
@@ -187,7 +187,7 @@ public class AsYouTypeFormatter {
         }
       }
     }
-    narrowDownPossibleFormats(leadingThreeDigits);
+    narrowDownPossibleFormats(leadingDigits);
   }
 
   private boolean isFormatEligible(String format) {
@@ -199,16 +199,18 @@ public class AsYouTypeFormatter {
     Iterator<NumberFormat> it = possibleFormats.iterator();
     while (it.hasNext()) {
       NumberFormat format = it.next();
-      if (format.leadingDigitsPatternSize() > indexOfLeadingDigitsPattern) {
-        Pattern leadingDigitsPattern =
-            regexCache.getPatternForRegex(
-                format.getLeadingDigitsPattern(indexOfLeadingDigitsPattern));
-        Matcher m = leadingDigitsPattern.matcher(leadingDigits);
-        if (!m.lookingAt()) {
-          it.remove();
-        }
-      } // else the particular format has no more specific leadingDigitsPattern, and it should be
-        // retained.
+      if (format.leadingDigitsPatternSize() == 0) {
+        // Keep everything that isn't restricted by leading digits.
+        continue;
+      }
+      int lastLeadingDigitsPattern =
+          Math.min(indexOfLeadingDigitsPattern, format.leadingDigitsPatternSize() - 1);
+      Pattern leadingDigitsPattern = regexCache.getPatternForRegex(
+          format.getLeadingDigitsPattern(lastLeadingDigitsPattern));
+      Matcher m = leadingDigitsPattern.matcher(leadingDigits);
+      if (!m.lookingAt()) {
+        it.remove();
+      }
     }
   }
 
@@ -267,7 +269,7 @@ public class AsYouTypeFormatter {
     lastMatchPosition = 0;
     currentFormattingPattern = "";
     prefixBeforeNationalNumber.setLength(0);
-    nationalPrefixExtracted = "";
+    extractedNationalPrefix = "";
     nationalNumber.setLength(0);
     ableToFormat = true;
     inputHasFormatting = false;
@@ -277,8 +279,8 @@ public class AsYouTypeFormatter {
     isExpectingCountryCallingCode = false;
     possibleFormats.clear();
     shouldAddSpaceAfterNationalPrefix = false;
-    if (!currentMetaData.equals(defaultMetaData)) {
-      currentMetaData = getMetadataForRegion(defaultCountry);
+    if (!currentMetadata.equals(defaultMetadata)) {
+      currentMetadata = getMetadataForRegion(defaultCountry);
     }
   }
 
@@ -352,7 +354,7 @@ public class AsYouTypeFormatter {
         if (attemptToExtractIdd()) {
           isExpectingCountryCallingCode = true;
         } else {  // No IDD or plus sign is found, might be entering in national format.
-          nationalPrefixExtracted = removeNationalPrefixFromNationalNumber();
+          extractedNationalPrefix = removeNationalPrefixFromNationalNumber();
           return attemptToChooseFormattingPattern();
         }
       default:
@@ -362,7 +364,7 @@ public class AsYouTypeFormatter {
           }
           return prefixBeforeNationalNumber + nationalNumber.toString();
         }
-        if (possibleFormats.size() > 0) {  // The formatting pattern is already chosen.
+        if (possibleFormats.size() > 0) {  // The formatting patterns are already chosen.
           String tempNationalNumber = inputDigitHelper(nextChar);
           // See if the accrued digits can be formatted properly already. If not, use the results
           // from inputDigitHelper, which does formatting based on the formatting pattern chosen.
@@ -390,19 +392,24 @@ public class AsYouTypeFormatter {
     return attemptToChooseFormattingPattern();
   }
 
+  // @VisibleForTesting
+  String getExtractedNationalPrefix() {
+    return extractedNationalPrefix;
+  }
+
   // Some national prefixes are a substring of others. If extracting the shorter NDD doesn't result
   // in a number we can format, we try to see if we can extract a longer version here.
   private boolean ableToExtractLongerNdd() {
-    if (nationalPrefixExtracted.length() > 0) {
+    if (extractedNationalPrefix.length() > 0) {
       // Put the extracted NDD back to the national number before attempting to extract a new NDD.
-      nationalNumber.insert(0, nationalPrefixExtracted);
+      nationalNumber.insert(0, extractedNationalPrefix);
       // Remove the previously extracted NDD from prefixBeforeNationalNumber. We cannot simply set
       // it to empty string because people sometimes incorrectly enter national prefix after the
       // country code, e.g. +44 (0)20-1234-5678.
-      int indexOfPreviousNdd = prefixBeforeNationalNumber.lastIndexOf(nationalPrefixExtracted);
+      int indexOfPreviousNdd = prefixBeforeNationalNumber.lastIndexOf(extractedNationalPrefix);
       prefixBeforeNationalNumber.setLength(indexOfPreviousNdd);
     }
-    return !nationalPrefixExtracted.equals(removeNationalPrefixFromNationalNumber());
+    return !extractedNationalPrefix.equals(removeNationalPrefixFromNationalNumber());
   }
 
   private boolean isDigitOrLeadingPlusSign(char nextChar) {
@@ -473,10 +480,16 @@ public class AsYouTypeFormatter {
    * version of the digits entered so far.
    */
   private String attemptToChooseFormattingPattern() {
-    // We start to attempt to format only when as least MIN_LEADING_DIGITS_LENGTH digits of national
+    // We start to attempt to format only when at least MIN_LEADING_DIGITS_LENGTH digits of national
     // number (excluding national prefix) have been entered.
     if (nationalNumber.length() >= MIN_LEADING_DIGITS_LENGTH) {
-      getAvailableFormats(nationalNumber.substring(0, MIN_LEADING_DIGITS_LENGTH));
+
+      getAvailableFormats(nationalNumber.toString());
+      // See if the accrued digits can be formatted properly already.
+      String formattedNumber = attemptToFormatAccruedDigits();
+      if (formattedNumber.length() > 0) {
+        return formattedNumber;
+      }
       return maybeCreateNewTemplate() ? inputAccruedNationalNumber() : accruedInput.toString();
     } else {
       return appendNationalNumber(nationalNumber.toString());
@@ -509,7 +522,7 @@ public class AsYouTypeFormatter {
     // that national significant numbers in NANPA always start with [2-9] after the national prefix.
     // Numbers beginning with 1[01] can only be short/emergency numbers, which don't need the
     // national prefix.
-    return (currentMetaData.getCountryCode() == 1) && (nationalNumber.charAt(0) == '1') &&
+    return (currentMetadata.getCountryCode() == 1) && (nationalNumber.charAt(0) == '1') &&
            (nationalNumber.charAt(1) != '0') && (nationalNumber.charAt(1) != '1');
   }
 
@@ -520,11 +533,13 @@ public class AsYouTypeFormatter {
       startOfNationalNumber = 1;
       prefixBeforeNationalNumber.append('1').append(SEPARATOR_BEFORE_NATIONAL_NUMBER);
       isCompleteNumber = true;
-    } else if (currentMetaData.hasNationalPrefixForParsing()) {
+    } else if (currentMetadata.hasNationalPrefixForParsing()) {
       Pattern nationalPrefixForParsing =
-          regexCache.getPatternForRegex(currentMetaData.getNationalPrefixForParsing());
+          regexCache.getPatternForRegex(currentMetadata.getNationalPrefixForParsing());
       Matcher m = nationalPrefixForParsing.matcher(nationalNumber);
-      if (m.lookingAt()) {
+      // Since some national prefix patterns are entirely optional, check that a national prefix
+      // could actually be extracted.
+      if (m.lookingAt() && m.end() > 0) {
         // When the national prefix is detected, we use international formatting rules instead of
         // national ones, because national formatting rules could contain local formatting rules
         // for numbers entered without area code.
@@ -548,7 +563,7 @@ public class AsYouTypeFormatter {
   private boolean attemptToExtractIdd() {
     Pattern internationalPrefix =
         regexCache.getPatternForRegex("\\" + PhoneNumberUtil.PLUS_SIGN + "|" +
-            currentMetaData.getInternationalPrefix());
+            currentMetadata.getInternationalPrefix());
     Matcher iddMatcher = internationalPrefix.matcher(accruedInputWithoutFormatting);
     if (iddMatcher.lookingAt()) {
       isCompleteNumber = true;
@@ -586,12 +601,15 @@ public class AsYouTypeFormatter {
     nationalNumber.append(numberWithoutCountryCallingCode);
     String newRegionCode = phoneUtil.getRegionCodeForCountryCode(countryCode);
     if (PhoneNumberUtil.REGION_CODE_FOR_NON_GEO_ENTITY.equals(newRegionCode)) {
-      currentMetaData = phoneUtil.getMetadataForNonGeographicalRegion(countryCode);
+      currentMetadata = phoneUtil.getMetadataForNonGeographicalRegion(countryCode);
     } else if (!newRegionCode.equals(defaultCountry)) {
-      currentMetaData = getMetadataForRegion(newRegionCode);
+      currentMetadata = getMetadataForRegion(newRegionCode);
     }
     String countryCodeString = Integer.toString(countryCode);
     prefixBeforeNationalNumber.append(countryCodeString).append(SEPARATOR_BEFORE_NATIONAL_NUMBER);
+    // When we have successfully extracted the IDD, the previously extracted NDD should be cleared
+    // because it is no longer valid.
+    extractedNationalPrefix = "";
     return true;
   }
 

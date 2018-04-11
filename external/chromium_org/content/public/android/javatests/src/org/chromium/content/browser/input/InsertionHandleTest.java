@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,21 +12,23 @@ import android.test.suitebuilder.annotation.MediumTest;
 import android.text.Editable;
 import android.text.Selection;
 import android.view.KeyEvent;
+import android.view.View;
 
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.RenderCoordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content.browser.test.util.TestTouchUtils;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
+/**
+ * Tests the insertion handle that allows users to paste text.
+ */
 public class InsertionHandleTest extends ContentShellTestBase {
     private static final String META_DISABLE_ZOOM =
         "<meta name=\"viewport\" content=\"" +
@@ -71,7 +73,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
 
         // The TestInputMethodManagerWrapper intercepts showSoftInput so that a keyboard is never
         // brought up.
-        getImeAdapter().setInputMethodManagerWrapper(
+        getContentViewCore().getImeAdapterForTest().setInputMethodManagerWrapper(
                 new TestInputMethodManagerWrapper(getContentViewCore()));
     }
 
@@ -82,13 +84,29 @@ public class InsertionHandleTest extends ContentShellTestBase {
         clickNodeToShowInsertionHandle(TEXTAREA_ID);
 
         // Unselecting should cause the handle to disappear.
-        getImeAdapter().unselect();
+        unselectOnMainSync();
         assertTrue(waitForHandleShowingEquals(false));
     }
 
-
     @MediumTest
     @Feature({"TextSelection", "TextInput", "Main"})
+    public void testUpdateContainerViewAndUnselectHidesHandle() throws Throwable {
+        launchWithUrl(TEXTAREA_DATA_URL);
+        replaceContainerView();
+
+        clickNodeToShowInsertionHandle(TEXTAREA_ID);
+
+        // Unselecting should cause the handle to disappear.
+        unselectOnMainSync();
+        assertTrue(waitForHandleShowingEquals(false));
+    }
+
+    /**
+     * @MediumTest
+     * @Feature({"TextSelection", "TextInput", "Main"})
+     * http://crbug.com/169648
+     */
+    @DisabledTest
     public void testKeyEventHidesHandle() throws Throwable {
         launchWithUrl(TEXTAREA_DATA_URL);
         clickNodeToShowInsertionHandle(TEXTAREA_ID);
@@ -197,7 +215,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
 
         // The input box does not go to the edge of the screen, and neither should the insertion
         // handle.
-        dragToX = getContentView().getWidth();
+        dragToX = getContentViewCore().getContainerView().getWidth();
         dragHandleTo(dragToX, dragToY);
         assertTrue(handle.getPositionX() < dragToX - 100);
     }
@@ -214,19 +232,18 @@ public class InsertionHandleTest extends ContentShellTestBase {
         // click (only if it changes the selection), the insertion handle is displayed. So that the
         // second click changes the selection, the two clicks should be in sufficiently different
         // locations.
-        Rect nodeBounds = DOMUtils.getNodeBounds(getContentView(),
-                new TestCallbackHelperContainer(getContentView()), nodeId);
+        Rect nodeBounds = DOMUtils.getNodeBounds(getContentViewCore(), nodeId);
 
-        RenderCoordinates renderCoordinates = getContentView().getRenderCoordinates();
-        int offsetX = getContentView().getContentViewCore().getViewportSizeOffsetWidthPix();
-        int offsetY = getContentView().getContentViewCore().getViewportSizeOffsetHeightPix();
+        RenderCoordinates renderCoordinates = getContentViewCore().getRenderCoordinates();
+        int offsetX = getContentViewCore().getViewportSizeOffsetWidthPix();
+        int offsetY = getContentViewCore().getViewportSizeOffsetHeightPix();
         float left = renderCoordinates.fromLocalCssToPix(nodeBounds.left) + offsetX;
         float right = renderCoordinates.fromLocalCssToPix(nodeBounds.right) + offsetX;
         float top = renderCoordinates.fromLocalCssToPix(nodeBounds.top) + offsetY;
         float bottom = renderCoordinates.fromLocalCssToPix(nodeBounds.bottom) + offsetY;
 
         TouchCommon touchCommon = new TouchCommon(this);
-        touchCommon.singleClickView(getContentView(),
+        touchCommon.singleClickView(getContentViewCore().getContainerView(),
                 (int)(left + 3 * (right - left) / 4), (int)(top + (bottom - top) / 2));
 
 
@@ -234,7 +251,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
         assertTrue(waitForHasSelectionPosition());
 
         // TODO(cjhopman): Wait for keyboard display finished?
-        touchCommon.singleClickView(getContentView(),
+        touchCommon.singleClickView(getContentViewCore().getContainerView(),
                 (int)(left + (right - left) / 4), (int)(top + (bottom - top) / 2));
         assertTrue(waitForHandleShowingEquals(true));
         assertTrue(waitForHandleViewStopped());
@@ -288,7 +305,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
         HandleView handle = ihc.getHandleViewForTest();
         int initialX = handle.getPositionX();
         int initialY = handle.getPositionY();
-        ContentView view = getContentView();
+        View view = getContentViewCore().getContainerView();
 
         int fromLocation[] = TestTouchUtils.getAbsoluteLocationFromRelative(view, initialX,
                 initialY + VERTICAL_OFFSET);
@@ -358,6 +375,15 @@ public class InsertionHandleTest extends ContentShellTestBase {
         });
     }
 
+    private void unselectOnMainSync() {
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                getContentViewCore().getImeAdapterForTest().unselect();
+            }
+        });
+    }
+
     private int getSelectionStart() {
         return Selection.getSelectionStart(getEditable());
     }
@@ -378,9 +404,5 @@ public class InsertionHandleTest extends ContentShellTestBase {
         ClipboardManager clipMgr =
                 (ClipboardManager) getActivity().getSystemService(Context.CLIPBOARD_SERVICE);
         clipMgr.setPrimaryClip(ClipData.newPlainText(null, text));
-    }
-
-    private ImeAdapter getImeAdapter() {
-        return getContentViewCore().getImeAdapterForTest();
     }
 }

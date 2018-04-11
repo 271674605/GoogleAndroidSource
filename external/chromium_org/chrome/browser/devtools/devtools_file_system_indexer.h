@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file_proxy.h"
 #include "base/memory/ref_counted.h"
-#include "base/platform_file.h"
 
 class Profile;
 
@@ -51,16 +51,14 @@ class DevToolsFileSystemIndexer
     void StopOnFileThread();
     void CollectFilesToIndex();
     void IndexFiles();
-    void StartFileIndexing(base::PlatformFileError error,
-                           base::PassPlatformFile pass_file,
-                           bool);
+    void StartFileIndexing(base::File::Error error);
     void ReadFromFile();
-    void OnRead(base::PlatformFileError error,
+    void OnRead(base::File::Error error,
                 const char* data,
                 int bytes_read);
     void FinishFileIndexing(bool success);
     void CloseFile();
-    void CloseCallback(base::PlatformFileError error);
+    void CloseCallback(base::File::Error error);
     void ReportWorked();
 
     base::FilePath file_system_path_;
@@ -71,7 +69,7 @@ class DevToolsFileSystemIndexer
     typedef std::map<base::FilePath, base::Time> FilePathTimesMap;
     FilePathTimesMap file_path_times_;
     FilePathTimesMap::const_iterator indexing_it_;
-    base::PlatformFile current_file_;
+    base::FileProxy current_file_;
     int64 current_file_offset_;
     typedef int32 Trigram;
     std::vector<Trigram> current_trigrams_;

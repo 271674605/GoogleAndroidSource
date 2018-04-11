@@ -20,7 +20,6 @@ import android.app.Service;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothPan;
 import android.bluetooth.BluetoothProfile;
-import android.bluetooth.BluetoothTetheringDataTracker;
 import android.bluetooth.IBluetooth;
 import android.bluetooth.IBluetoothPan;
 import android.content.Context;
@@ -30,21 +29,20 @@ import android.content.res.Resources.NotFoundException;
 import android.net.ConnectivityManager;
 import android.net.InterfaceConfiguration;
 import android.net.LinkAddress;
-import android.net.LinkProperties;
-import android.net.NetworkStateTracker;
 import android.net.NetworkUtils;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.INetworkManagementService;
 import android.os.Message;
-import android.os.Messenger;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
+
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.bluetooth.Utils;
-import com.android.internal.util.AsyncChannel;
+
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,6 +50,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 
 /**
  * Provides Bluetooth Pan Device profile, as a service in
@@ -76,8 +76,10 @@ public class PanService extends ProfileService {
     private static final int MESSAGE_DISCONNECT = 2;
     private static final int MESSAGE_CONNECT_STATE_CHANGED = 11;
     private boolean mTetherOn = false;
+    private static final String PAN_PREFERENCE_FILE = "PANMGR";
+    private static final String PAN_TETHER_SETTING = "TETHERSTATE";
 
-    AsyncChannel mTetherAc;
+    private BluetoothTetheringNetworkFactory mNetworkFactory;
 
 
     static {
@@ -104,19 +106,18 @@ public class PanService extends ProfileService {
         initializeNative();
         mNativeAvailable=true;
 
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(
-                Context.CONNECTIVITY_SERVICE);
-        cm.supplyMessenger(ConnectivityManager.TYPE_BLUETOOTH, new Messenger(mHandler));
+        mNetworkFactory = new BluetoothTetheringNetworkFactory(getBaseContext(), getMainLooper(),
+                this);
+
+        // Set mTetherOn based on the last saved tethering preference while starting the Pan service
+        SharedPreferences tetherSetting = getSharedPreferences(PAN_PREFERENCE_FILE, 0);
+        mTetherOn = tetherSetting.getBoolean(PAN_TETHER_SETTING, false);
 
         return true;
     }
 
     protected boolean stop() {
         mHandler.removeCallbacksAndMessages(null);
-        if (mTetherAc != null) {
-            mTetherAc.disconnect();
-            mTetherAc = null;
-        }
         return true;
     }
 
@@ -183,28 +184,6 @@ public class PanService extends ProfileService {
                             convertHalState(cs.state), cs.local_role,  cs.remote_role);
                 }
                 break;
-                case AsyncChannel.CMD_CHANNEL_FULL_CONNECTION:
-                {
-                    if (mTetherAc != null) {
-                        mTetherAc.replyToMessage(msg,
-                                AsyncChannel.CMD_CHANNEL_FULLY_CONNECTED,
-                                AsyncChannel.STATUS_FULL_CONNECTION_REFUSED_ALREADY_CONNECTED);
-                    } else {
-                        mTetherAc = new AsyncChannel();
-                        mTetherAc.connected(null, this, msg.replyTo);
-                        mTetherAc.replyToMessage(msg, AsyncChannel.CMD_CHANNEL_FULLY_CONNECTED,
-                                AsyncChannel.STATUS_SUCCESSFUL);
-                    }
-                }
-                break;
-                case AsyncChannel.CMD_CHANNEL_DISCONNECT:
-                {
-                    if (mTetherAc != null) {
-                        mTetherAc.disconnect();
-                        mTetherAc = null;
-                    }
-                }
-                break;
             }
         }
     };
@@ -259,7 +238,6 @@ public class PanService extends ProfileService {
             return service.isPanUOn();
         }
         public boolean isTetheringOn() {
-            // TODO(BT) have a variable marking the on/off state
             PanService service = getService();
             if (service == null) return false;
             return service.isTetheringOn();
@@ -319,14 +297,26 @@ public class PanService extends ProfileService {
         return (getPanLocalRoleNative() & BluetoothPan.LOCAL_PANU_ROLE) != 0;
     }
      boolean isTetheringOn() {
-        // TODO(BT) have a variable marking the on/off state
         return mTetherOn;
     }
 
     void setBluetoothTethering(boolean value) {
         if(DBG) Log.d(TAG, "setBluetoothTethering: " + value +", mTetherOn: " + mTetherOn);
+        ConnectivityManager.enforceTetherChangePermission(getBaseContext());
         enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH_ADMIN permission");
+        UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
+        if (um.hasUserRestriction(UserManager.DISALLOW_CONFIG_TETHERING)) {
+            throw new SecurityException("DISALLOW_CONFIG_TETHERING is enabled for this user.");
+        }
         if(mTetherOn != value) {
+
+            SharedPreferences tetherSetting = getSharedPreferences(PAN_PREFERENCE_FILE, 0);
+            SharedPreferences.Editor editor = tetherSetting.edit();
+
+            editor.putBoolean(PAN_TETHER_SETTING, value);
+
+            // Commit the edit!
+            editor.commit();
             //drop any existing panu or pan-nap connection when changing the tethering state
             mTetherOn = value;
             List<BluetoothDevice> DevList = getConnectedDevices();
@@ -421,6 +411,17 @@ public class PanService extends ProfileService {
             prevState = panDevice.mState;
             ifaceAddr = panDevice.mIfaceAddr;
         }
+
+        // Avoid race condition that gets this class stuck in STATE_DISCONNECTING. While we
+        // are in STATE_CONNECTING, if a BluetoothPan#disconnect call comes in, the original
+        // connect call will put us in STATE_DISCONNECTED. Then, the disconnect completes and
+        // changes the state to STATE_DISCONNECTING. All future calls to BluetoothPan#connect
+        // will fail until the caller explicitly calls BluetoothPan#disconnect.
+        if (prevState == BluetoothProfile.STATE_DISCONNECTED && state == BluetoothProfile.STATE_DISCONNECTING) {
+            Log.d(TAG, "Ignoring state change from " + prevState + " to " + state);
+            return;
+        }
+
         Log.d(TAG, "handlePanDeviceStateChange preState: " + prevState + " state: " + state);
         if (prevState == state) return;
         if (remote_role == BluetoothPan.LOCAL_PANU_ROLE) {
@@ -441,20 +442,16 @@ public class PanService extends ProfileService {
                     ifaceAddr = null;
                 }
             }
-        } else if (mTetherAc != null) {
+        } else if (mNetworkFactory != null) {
             // PANU Role = reverse Tether
             Log.d(TAG, "handlePanDeviceStateChange LOCAL_PANU_ROLE:REMOTE_NAP_ROLE state = " +
                     state + ", prevState = " + prevState);
             if (state == BluetoothProfile.STATE_CONNECTED) {
-                LinkProperties lp = new LinkProperties();
-                lp.setInterfaceName(iface);
-                mTetherAc.sendMessage(NetworkStateTracker.EVENT_NETWORK_CONNECTED, lp);
+                mNetworkFactory.startReverseTether(iface);
            } else if (state == BluetoothProfile.STATE_DISCONNECTED &&
                    (prevState == BluetoothProfile.STATE_CONNECTED ||
                    prevState == BluetoothProfile.STATE_DISCONNECTING)) {
-                LinkProperties lp = new LinkProperties();
-                lp.setInterfaceName(iface);
-                mTetherAc.sendMessage(NetworkStateTracker.EVENT_NETWORK_DISCONNECTED, lp);
+                mNetworkFactory.stopReverseTether();
             }
         }
 

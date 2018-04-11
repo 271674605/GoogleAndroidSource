@@ -22,9 +22,6 @@ class CHROMEOS_EXPORT NetworkStateHandlerObserver {
   NetworkStateHandlerObserver();
   virtual ~NetworkStateHandlerObserver();
 
-  // Called when one or more network manager properties changes.
-  virtual void NetworkManagerChanged();
-
   // The list of networks changed.
   virtual void NetworkListChanged();
 
@@ -46,6 +43,10 @@ class CHROMEOS_EXPORT NetworkStateHandlerObserver {
   // connection state property changes. Use this to track properties like
   // wifi strength.
   virtual void NetworkPropertiesUpdated(const NetworkState* network);
+
+  // Called just before NetworkStateHandler is destroyed so that observers
+  // can safely stop observing.
+  virtual void IsShuttingDown();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkStateHandlerObserver);

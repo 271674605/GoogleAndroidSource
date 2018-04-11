@@ -20,6 +20,7 @@ import android.content.Context;
 import android.hardware.ConsumerIrManager;
 import android.util.Log;
 import android.content.pm.PackageManager;
+import android.os.SystemClock;
 import android.test.AndroidTestCase;
 import java.io.IOException;
 
@@ -68,6 +69,41 @@ public class ConsumerIrTest extends AndroidTestCase {
         }
     }
 
+    public void test_timing() {
+        if (!mHasConsumerIr) {
+            // Skip the test if consumer IR is not present.
+            return;
+        }
+
+        ConsumerIrManager.CarrierFrequencyRange[] freqs = mCIR.getCarrierFrequencies();
+        // Transmit two seconds for min and max for each frequency range
+        int[] pattern = {11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999};
+        long totalXmitTimeNanos = 0; // get the length of the pattern
+        for (int slice : pattern) {
+            totalXmitTimeNanos += slice * 1000; // add the time in nanoseconds
+        }
+        double margin = 0.5; // max fraction xmit is allowed to be off timing
+
+        for (ConsumerIrManager.CarrierFrequencyRange range : freqs) {
+            // test min freq
+            long currentTime = SystemClock.elapsedRealtimeNanos();
+            mCIR.transmit(range.getMinFrequency(), pattern);
+            long newTime = SystemClock.elapsedRealtimeNanos();
+            String msg = String.format("Pattern length pattern:%d, actual:%d",
+                    totalXmitTimeNanos, newTime - currentTime);
+            assertTrue(msg, newTime - currentTime >= totalXmitTimeNanos * (1.0 - margin));
+            assertTrue(msg, newTime - currentTime <= totalXmitTimeNanos * (1.0 + margin));
+
+            // test max freq
+            currentTime = SystemClock.elapsedRealtimeNanos();
+            mCIR.transmit(range.getMaxFrequency(), pattern);
+            newTime = SystemClock.elapsedRealtimeNanos();
+            msg = String.format("Pattern length pattern:%d, actual:%d",
+                    totalXmitTimeNanos, newTime - currentTime);
+            assertTrue(msg, newTime - currentTime >= totalXmitTimeNanos * (1.0 - margin));
+            assertTrue(msg, newTime - currentTime <= totalXmitTimeNanos * (1.0 + margin));
+        }
+    }
 
     public void test_transmit() {
         if (!mHasConsumerIr) {

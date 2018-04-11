@@ -27,11 +27,11 @@ HTML_TEMPLATE = '''\
 Sample html container for embedded NaCl module.  This file was auto-generated
 by the create_html tool which is part of the NaCl SDK.
 
-The embed tag is setup with ps_stdout and ps_stderr attributes which, for
-applications linked with ppapi_simple, will cause stdout and stderr to be sent
-to javascript via postMessage.  Also, the postMessage listener assumes that
-all messages sent via postMessage are strings to be displayed in the output
-textarea.
+The embed tag is setup with PS_STDOUT, PS_STDERR and PS_TTY_PREFIX attributes
+which, for applications linked with ppapi_simple, will cause stdout and stderr
+to be sent to javascript via postMessage.  Also, the postMessage listener
+assumes that all messages sent via postMessage are strings to be displayed in
+the output textarea.
 -->
 <html>
 <head>
@@ -46,8 +46,10 @@ textarea.
 
   <div id="listener">
     <embed id="nacl_module" name="%(module_name)s" src="%(nmf)s"
-           type="application/x-nacl" ps_stdout="/dev/tty" ps_stderr="/dev/tty"
-           width=640 height=480 />
+           type="application/x-nacl" width=640 height=480
+           PS_TTY_PREFIX="tty:"
+           PS_STDOUT="/dev/tty"
+           PS_STDERR="/dev/tty" >/
   </div>
 
   <p>Standard output/error:</p>
@@ -69,7 +71,11 @@ function addToStdout(message) {
 }
 
 function handleMessage(message) {
-  addToStdout(message.data)
+  var payload = message.data;
+  var prefix = "tty:";
+  if (typeof(payload) == 'string' && payload.indexOf(prefix) == 0) {
+    addToStdout(payload.slice(prefix.length));
+  }
 }
 
 function handleCrash(event) {
@@ -155,9 +161,8 @@ def CreateHTML(filenames, options):
 
 def main(argv):
   usage = 'Usage: %prog [options] <.nexe/.pexe or .nmf>'
-  description = __doc__
   epilog = 'Example: create_html.py -o index.html my_nexe.nexe'
-  parser = optparse.OptionParser(usage, description=description, epilog=epilog)
+  parser = optparse.OptionParser(usage, description=__doc__, epilog=epilog)
   parser.add_option('-v', '--verbose', action='store_true',
                     help='Verbose output')
   parser.add_option('-d', '--debug-libs', action='store_true',
@@ -166,6 +171,15 @@ def main(argv):
                     help='Name of html file to write (default is '
                          'input name with .html extension)',
                     metavar='FILE')
+
+  # To enable bash completion for this command first install optcomplete
+  # and then add this line to your .bashrc:
+  #  complete -F _optcomplete create_html.py
+  try:
+    import optcomplete
+    optcomplete.autocomplete(parser)
+  except ImportError:
+    pass
 
   options, args = parser.parse_args(argv)
 

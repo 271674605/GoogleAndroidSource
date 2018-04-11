@@ -24,8 +24,8 @@
 #include "build/build_config.h"
 
 namespace base {
+
 class FilePath;
-}
 
 class BASE_EXPORT CommandLine {
  public:
@@ -45,13 +45,24 @@ class BASE_EXPORT CommandLine {
   explicit CommandLine(NoProgram no_program);
 
   // Construct a new command line with |program| as argv[0].
-  explicit CommandLine(const base::FilePath& program);
+  explicit CommandLine(const FilePath& program);
 
   // Construct a new command line from an argument list.
   CommandLine(int argc, const CharType* const* argv);
   explicit CommandLine(const StringVector& argv);
 
   ~CommandLine();
+
+#if defined(OS_WIN)
+  // By default this class will treat command-line arguments beginning with
+  // slashes as switches on Windows, but not other platforms.
+  //
+  // If this behavior is inappropriate for your application, you can call this
+  // function BEFORE initializing the current process' global command line
+  // object and the behavior will be the same as Posix systems (only hyphens
+  // begin switches, everything else will be an arg).
+  static void set_slash_is_not_a_switch();
+#endif
 
   // Initialize the current process CommandLine singleton. On Windows, ignores
   // its arguments (we instead parse GetCommandLineW() directly) because we
@@ -97,8 +108,8 @@ class BASE_EXPORT CommandLine {
   const StringVector& argv() const { return argv_; }
 
   // Get and Set the program part of the command line string (the first item).
-  base::FilePath GetProgram() const;
-  void SetProgram(const base::FilePath& program);
+  FilePath GetProgram() const;
+  void SetProgram(const FilePath& program);
 
   // Returns true if this command line contains the given switch.
   // (Switch names are case-insensitive).
@@ -107,7 +118,7 @@ class BASE_EXPORT CommandLine {
   // Returns the value associated with the given switch. If the switch has no
   // value or isn't present, this method returns the empty string.
   std::string GetSwitchValueASCII(const std::string& switch_string) const;
-  base::FilePath GetSwitchValuePath(const std::string& switch_string) const;
+  FilePath GetSwitchValuePath(const std::string& switch_string) const;
   StringType GetSwitchValueNative(const std::string& switch_string) const;
 
   // Get a copy of all switches, along with their values.
@@ -117,7 +128,7 @@ class BASE_EXPORT CommandLine {
   // Note: Switches will precede arguments regardless of appending order.
   void AppendSwitch(const std::string& switch_string);
   void AppendSwitchPath(const std::string& switch_string,
-                        const base::FilePath& path);
+                        const FilePath& path);
   void AppendSwitchNative(const std::string& switch_string,
                           const StringType& value);
   void AppendSwitchASCII(const std::string& switch_string,
@@ -137,7 +148,7 @@ class BASE_EXPORT CommandLine {
   // AppendArg is primarily for ASCII; non-ASCII input is interpreted as UTF-8.
   // Note: Switches will precede arguments regardless of appending order.
   void AppendArg(const std::string& value);
-  void AppendArgPath(const base::FilePath& value);
+  void AppendArgPath(const FilePath& value);
   void AppendArgNative(const StringType& value);
 
   // Append the switches and arguments from another command line to this one.
@@ -174,5 +185,10 @@ class BASE_EXPORT CommandLine {
   // The index after the program and switches, any arguments start here.
   size_t begin_args_;
 };
+
+}  // namespace base
+
+// TODO(brettw) remove once all callers specify the namespace properly.
+using base::CommandLine;
 
 #endif  // BASE_COMMAND_LINE_H_

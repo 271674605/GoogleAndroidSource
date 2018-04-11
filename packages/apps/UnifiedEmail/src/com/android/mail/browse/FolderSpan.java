@@ -20,6 +20,7 @@ package com.android.mail.browse;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Paint.FontMetricsInt;
+import android.graphics.RectF;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.TextUtils;
@@ -35,6 +36,10 @@ import android.text.style.ReplacementSpan;
 public class FolderSpan extends ReplacementSpan {
 
     public interface FolderSpanDimensions {
+
+        /**
+         * Returns the padding value used for the label inside of its background.
+         */
         int getPadding();
 
         /**
@@ -46,16 +51,38 @@ public class FolderSpan extends ReplacementSpan {
         /**
          * Returns the padding value for the space between folders.
          */
-        int getPaddingBefore();
+        int getPaddingAfter();
 
         /**
-         * Returns the spacing above each line outside of the .
+         * Returns the maximum width the span is allowed to use.
          */
-        int getPaddingAbove();
         int getMaxWidth();
+
+        /**
+         * Returns the radius to use for the rounded corners on the background rect.
+         */
+        float getRoundedCornerRadius();
+
+        /**
+         * Returns the size of the text.
+         */
+        float getFolderSpanTextSize();
+
+        /**
+         * Returns the margin above the span that should be used.
+         * It is used to enable the appearance of line spacing.
+         */
+        int getMarginTop();
+
+        /**
+         * Returns {@link true} if the span should format itself in RTL mode.
+         */
+        boolean isRtl();
     }
 
-    private TextPaint mWorkPaint = new TextPaint();
+    private final TextPaint mWorkPaint = new TextPaint();
+    private final FontMetricsInt mFontMetrics = new FontMetricsInt();
+
     /**
      * A reference to the enclosing Spanned object to collect other CharacterStyle spans and take
      * them into account when drawing.
@@ -70,26 +97,26 @@ public class FolderSpan extends ReplacementSpan {
 
     @Override
     public int getSize(Paint paint, CharSequence text, int start, int end, FontMetricsInt fm) {
+        setupFontMetrics(start, end, fm, paint);
         if (fm != null) {
-            final int paddingV = mDims.getPadding();
-            paint.getFontMetricsInt(fm);
-            // The magic set of measurements to vertically center text within a colored region!
-            fm.ascent -= paddingV;
+            final int padding = mDims.getPadding();
+            final int margin = mDims.getMarginTop();
+            fm.ascent = Math.min(fm.top, fm.ascent - padding) - margin;
+            fm.descent = Math.max(fm.bottom, padding);
             fm.top = fm.ascent;
-            fm.bottom += paddingV;
-            fm.descent += paddingV;
+            fm.bottom = fm.descent;
         }
-        return measureWidth(paint, text, start, end, true);
+        return measureWidth(mWorkPaint, text, start, end, true);
     }
 
     private int measureWidth(Paint paint, CharSequence text, int start, int end,
-            boolean includePaddingBefore) {
+            boolean includePaddingAfter) {
         final int paddingW = mDims.getPadding() + mDims.getPaddingExtraWidth();
         final int maxWidth = mDims.getMaxWidth();
 
         int w = (int) paint.measureText(text, start, end) + 2 * paddingW;
-        if (includePaddingBefore) {
-            w += mDims.getPaddingBefore();
+        if (includePaddingAfter) {
+            w += mDims.getPaddingAfter();
         }
         // TextView doesn't handle spans that are wider than the view very well, so cap their widths
         if (w > maxWidth) {
@@ -98,25 +125,37 @@ public class FolderSpan extends ReplacementSpan {
         return w;
     }
 
-    @Override
-    public void draw(Canvas canvas, CharSequence text, int start, int end, float x, int top,
-            int y, int bottom, Paint paint) {
-
-        final int paddingW = mDims.getPadding() + mDims.getPaddingExtraWidth();
-        final int paddingBefore = mDims.getPaddingBefore();
-        final int paddingAbove = mDims.getPaddingAbove();
-        final int maxWidth = mDims.getMaxWidth();
-
-        mWorkPaint.set(paint);
-
-        // take into account the foreground/background color spans when painting
+    private void setupFontMetrics(int start, int end, FontMetricsInt fm, Paint p) {
+        mWorkPaint.set(p);
+        // take into account the style spans when painting
         final CharacterStyle[] otherSpans = mSpanned.getSpans(start, end, CharacterStyle.class);
         for (CharacterStyle otherSpan : otherSpans) {
             otherSpan.updateDrawState(mWorkPaint);
         }
+        mWorkPaint.setTextSize(mDims.getFolderSpanTextSize());
+        if (fm != null) {
+            mWorkPaint.getFontMetricsInt(fm);
+        }
+    }
 
+    @Override
+    public void draw(Canvas canvas, CharSequence text, int start, int end, float x, int top,
+            int y, int bottom, Paint paint) {
+
+        final int padding = mDims.getPadding();
+        final int paddingW = padding + mDims.getPaddingExtraWidth();
+        final int maxWidth = mDims.getMaxWidth();
+
+        setupFontMetrics(start, end, mFontMetrics, paint);
         final int bgWidth = measureWidth(mWorkPaint, text, start, end, false);
+        mFontMetrics.top = Math.min(mFontMetrics.top, mFontMetrics.ascent - padding);
+        mFontMetrics.bottom = Math.max(mFontMetrics.bottom, padding);
+        top = y + mFontMetrics.top - mFontMetrics.bottom;
+        bottom = y;
+        y =  bottom - mFontMetrics.bottom;
 
+        final boolean isRtl = mDims.isRtl();
+        final int paddingAfter = mDims.getPaddingAfter();
         // paint a background if present
         if (mWorkPaint.bgColor != 0) {
             final int prevColor = mWorkPaint.getColor();
@@ -124,8 +163,16 @@ public class FolderSpan extends ReplacementSpan {
 
             mWorkPaint.setColor(mWorkPaint.bgColor);
             mWorkPaint.setStyle(Paint.Style.FILL);
-            canvas.drawRect(x + paddingBefore, top + paddingAbove, x + bgWidth + paddingBefore, bottom,
-                    mWorkPaint);
+            final float left;
+            if (isRtl) {
+                left = x + paddingAfter;
+            } else {
+                left = x;
+            }
+            final float right = left + bgWidth;
+            final RectF rect = new RectF(left, top, right, bottom);
+            final float radius = mDims.getRoundedCornerRadius();
+            canvas.drawRoundRect(rect, radius, radius, mWorkPaint);
 
             mWorkPaint.setColor(prevColor);
             mWorkPaint.setStyle(prevStyle);
@@ -138,7 +185,11 @@ public class FolderSpan extends ReplacementSpan {
             start = 0;
             end = text.length();
         }
-        canvas.drawText(text, start, end, x + paddingW + paddingBefore, y + paddingAbove, mWorkPaint);
+        float textX = x + paddingW;
+        if (isRtl) {
+            textX += paddingAfter;
+        }
+        canvas.drawText(text, start, end, textX, y, mWorkPaint);
     }
 
 }

@@ -15,10 +15,11 @@
 #include "chrome/test/chromedriver/chrome/chrome.h"
 
 class AutomationExtension;
+struct BrowserInfo;
 class DevToolsEventListener;
 class DevToolsHttpClient;
 class JavaScriptDialogManager;
-class Log;
+class PortReservation;
 class Status;
 class WebView;
 class WebViewImpl;
@@ -28,23 +29,27 @@ class ChromeImpl : public Chrome {
   virtual ~ChromeImpl();
 
   // Overridden from Chrome:
-  virtual std::string GetVersion() OVERRIDE;
-  virtual int GetBuildNo() OVERRIDE;
+  virtual ChromeDesktopImpl* GetAsDesktop() OVERRIDE;
+  virtual const BrowserInfo* GetBrowserInfo() OVERRIDE;
+  virtual bool HasCrashedWebView() OVERRIDE;
   virtual Status GetWebViewIds(std::list<std::string>* web_view_ids) OVERRIDE;
   virtual Status GetWebViewById(const std::string& id,
                                 WebView** web_view) OVERRIDE;
   virtual Status CloseWebView(const std::string& id) OVERRIDE;
-  virtual Status GetAutomationExtension(
-      AutomationExtension** extension) OVERRIDE;
+  virtual Status ActivateWebView(const std::string& id) OVERRIDE;
+  virtual bool IsMobileEmulationEnabled() const OVERRIDE;
+  virtual Status Quit() OVERRIDE;
 
  protected:
   ChromeImpl(
       scoped_ptr<DevToolsHttpClient> client,
       ScopedVector<DevToolsEventListener>& devtools_event_listeners,
-      Log* log);
+      scoped_ptr<PortReservation> port_reservation);
 
+  virtual Status QuitImpl() = 0;
+
+  bool quit_;
   scoped_ptr<DevToolsHttpClient> devtools_http_client_;
-  Log* log_;
 
  private:
   typedef std::list<linked_ptr<WebViewImpl> > WebViewList;
@@ -52,6 +57,7 @@ class ChromeImpl : public Chrome {
   // Web views in this list are in the same order as they are opened.
   WebViewList web_views_;
   ScopedVector<DevToolsEventListener> devtools_event_listeners_;
+  scoped_ptr<PortReservation> port_reservation_;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_CHROME_IMPL_H_

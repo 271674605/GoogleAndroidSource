@@ -13,17 +13,18 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/gpu_memory_manager.h"
 #include "content/common/gpu/gpu_memory_manager_client.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "media/base/video_decoder_config.h"
-#include "ui/base/latency_info.h"
+#include "ui/events/latency_info.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 #include "ui/gl/gl_surface.h"
@@ -31,6 +32,7 @@
 #include "url/gurl.h"
 
 namespace gpu {
+class GpuControlService;
 struct Mailbox;
 namespace gles2 {
 class ImageManager;
@@ -42,7 +44,9 @@ namespace content {
 
 class GpuChannel;
 class GpuVideoDecodeAccelerator;
+class GpuVideoEncodeAccelerator;
 class GpuWatchdog;
+struct WaitForCommandState;
 
 class GpuCommandBufferStub
     : public GpuMemoryManagerClient,
@@ -59,7 +63,7 @@ class GpuCommandBufferStub
     virtual ~DestructionObserver() {}
   };
 
-  typedef base::Callback<void(const ui::LatencyInfo&)>
+  typedef base::Callback<void(const std::vector<ui::LatencyInfo>&)>
       LatencyInfoCallback;
 
   GpuCommandBufferStub(
@@ -70,7 +74,6 @@ class GpuCommandBufferStub
       gpu::gles2::ImageManager* image_manager,
       const gfx::Size& size,
       const gpu::gles2::DisallowedFeatures& disallowed_features,
-      const std::string& allowed_extensions,
       const std::vector<int32>& attribs,
       gfx::GpuPreference gpu_preference,
       bool use_virtualized_gl_context,
@@ -92,7 +95,8 @@ class GpuCommandBufferStub
   virtual gfx::Size GetSurfaceSize() const OVERRIDE;
   virtual gpu::gles2::MemoryTracker* GetMemoryTracker() const OVERRIDE;
   virtual void SetMemoryAllocation(
-      const GpuMemoryAllocation& allocation) OVERRIDE;
+      const gpu::MemoryAllocation& allocation) OVERRIDE;
+  virtual void SuggestHaveFrontBuffer(bool suggest_have_frontbuffer) OVERRIDE;
   virtual bool GetTotalGpuMemory(uint64* bytes) OVERRIDE;
 
   // Whether this command buffer can currently handle IPC messages.
@@ -119,6 +123,8 @@ class GpuCommandBufferStub
 
   gfx::GpuPreference gpu_preference() { return gpu_preference_; }
 
+  int32 GetRequestedAttribute(int attr) const;
+
   // Sends a message to the console.
   void SendConsoleMessage(int32 id, const std::string& message);
 
@@ -139,8 +145,10 @@ class GpuCommandBufferStub
 
   void MarkContextLost();
 
+  uint64 GetMemoryUsage() const;
+
  private:
-  GpuMemoryManager* GetMemoryManager();
+  GpuMemoryManager* GetMemoryManager() const;
   bool MakeCurrent();
   void Destroy();
 
@@ -153,7 +161,12 @@ class GpuCommandBufferStub
   void OnSetGetBuffer(int32 shm_id, IPC::Message* reply_message);
   void OnProduceFrontBuffer(const gpu::Mailbox& mailbox);
   void OnGetState(IPC::Message* reply_message);
-  void OnGetStateFast(IPC::Message* reply_message);
+  void OnWaitForTokenInRange(int32 start,
+                             int32 end,
+                             IPC::Message* reply_message);
+  void OnWaitForGetOffsetInRange(int32 start,
+                                 int32 end,
+                                 IPC::Message* reply_message);
   void OnAsyncFlush(int32 put_offset, uint32 flush_count);
   void OnEcho(const IPC::Message& message);
   void OnRescheduled();
@@ -163,13 +176,18 @@ class GpuCommandBufferStub
   void OnDestroyTransferBuffer(int32 id);
   void OnGetTransferBuffer(int32 id, IPC::Message* reply_message);
 
-  void OnCreateVideoDecoder(
-      media::VideoCodecProfile profile,
-      IPC::Message* reply_message);
+  void OnCreateVideoDecoder(media::VideoCodecProfile profile,
+                            int32 route_id,
+                            IPC::Message* reply_message);
+  void OnCreateVideoEncoder(media::VideoFrame::Format input_format,
+                            const gfx::Size& input_visible_size,
+                            media::VideoCodecProfile output_profile,
+                            uint32 initial_bitrate,
+                            int32 route_id,
+                            IPC::Message* reply_message);
 
   void OnSetSurfaceVisible(bool visible);
 
-  void OnDiscardBackbuffer();
   void OnEnsureBackbuffer();
 
   void OnRetireSyncPoint(uint32 sync_point);
@@ -179,12 +197,20 @@ class GpuCommandBufferStub
   void OnSignalSyncPointAck(uint32 id);
   void OnSignalQuery(uint32 query, uint32 id);
 
-  void OnReceivedClientManagedMemoryStats(const GpuManagedMemoryStats& stats);
   void OnSetClientHasMemoryAllocationChangedCallback(bool has_callback);
+
+  void OnRegisterGpuMemoryBuffer(int32 id,
+                                 gfx::GpuMemoryBufferHandle gpu_memory_buffer,
+                                 uint32 width,
+                                 uint32 height,
+                                 uint32 internalformat);
+  void OnDestroyGpuMemoryBuffer(int32 id);
 
   void OnCommandProcessed();
   void OnParseError();
-  void OnSetLatencyInfo(const ui::LatencyInfo& latency_info);
+  void OnSetLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info);
+  void OnCreateStreamTexture(
+      uint32 texture_id, int32 stream_id, bool* succeeded);
 
   void ReportState();
 
@@ -200,6 +226,7 @@ class GpuCommandBufferStub
   void ScheduleDelayedWork(int64 delay);
 
   bool CheckContextLost();
+  void CheckCompleteWaits();
 
   // The lifetime of objects of this class is managed by a GpuChannel. The
   // GpuChannels destroy all the GpuCommandBufferStubs that they own when they
@@ -212,7 +239,6 @@ class GpuCommandBufferStub
   gfx::GLSurfaceHandle handle_;
   gfx::Size initial_size_;
   gpu::gles2::DisallowedFeatures disallowed_features_;
-  std::string allowed_extensions_;
   std::vector<int32> requested_attribs_;
   gfx::GpuPreference gpu_preference_;
   bool use_virtualized_gl_context_;
@@ -225,12 +251,13 @@ class GpuCommandBufferStub
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
   scoped_ptr<gpu::GpuScheduler> scheduler_;
   scoped_refptr<gfx::GLSurface> surface_;
+  scoped_ptr<gpu::GpuControlService> gpu_control_service_;
 
   scoped_ptr<GpuMemoryManagerClientState> memory_manager_client_state_;
   // The last memory allocation received from the GpuMemoryManager (used to
   // elide redundant work).
   bool last_memory_allocation_valid_;
-  GpuMemoryAllocation last_memory_allocation_;
+  gpu::MemoryAllocation last_memory_allocation_;
 
   GpuWatchdog* watchdog_;
 
@@ -252,6 +279,8 @@ class GpuCommandBufferStub
   size_t active_url_hash_;
 
   size_t total_gpu_memory_;
+  scoped_ptr<WaitForCommandState> wait_for_token_;
+  scoped_ptr<WaitForCommandState> wait_for_get_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };

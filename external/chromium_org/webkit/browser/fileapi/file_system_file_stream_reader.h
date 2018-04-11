@@ -6,8 +6,8 @@
 #define WEBKIT_BROWSER_FILEAPI_FILE_SYSTEM_FILE_STREAM_READER_H_
 
 #include "base/bind.h"
+#include "base/files/file.h"
 #include "base/memory/ref_counted.h"
-#include "base/platform_file.h"
 #include "base/time/time.h"
 #include "webkit/browser/blob/file_stream_reader.h"
 #include "webkit/browser/fileapi/file_system_url.h"
@@ -19,30 +19,22 @@ class FilePath;
 class SequencedTaskRunner;
 }
 
-namespace webkit_blob {
-class LocalFileStreamReader;
+namespace content {
+class FileSystemFileStreamReaderTest;
 }
 
 namespace fileapi {
 
 class FileSystemContext;
 
-// TODO(kinaba,satorux): This generic implementation would work for any
-// filesystems but remote filesystem should implement its own reader
-// rather than relying on FileSystemOperation::GetSnapshotFile() which
-// may force downloading the entire contents for remote files.
+// Generic FileStreamReader implementation for FileSystem files.
+// Note: This generic implementation would work for any filesystems but
+// remote filesystem should implement its own reader rather than relying
+// on FileSystemOperation::GetSnapshotFile() which may force downloading
+// the entire contents for remote files.
 class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE FileSystemFileStreamReader
-    : public webkit_blob::FileStreamReader {
+    : public NON_EXPORTED_BASE(webkit_blob::FileStreamReader) {
  public:
-  // Creates a new FileReader for a filesystem URL |url| form |initial_offset|.
-  // |expected_modification_time| specifies the expected last modification if
-  // the value is non-null, the reader will check the underlying file's actual
-  // modification time to see if the file has been modified, and if it does any
-  // succeeding read operations should fail with ERR_UPLOAD_FILE_CHANGED error.
-  FileSystemFileStreamReader(FileSystemContext* file_system_context,
-                             const FileSystemURL& url,
-                             int64 initial_offset,
-                             const base::Time& expected_modification_time);
   virtual ~FileSystemFileStreamReader();
 
   // FileStreamReader overrides.
@@ -52,13 +44,21 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE FileSystemFileStreamReader
       const net::Int64CompletionCallback& callback) OVERRIDE;
 
  private:
+  friend class webkit_blob::FileStreamReader;
+  friend class content::FileSystemFileStreamReaderTest;
+
+  FileSystemFileStreamReader(FileSystemContext* file_system_context,
+                             const FileSystemURL& url,
+                             int64 initial_offset,
+                             const base::Time& expected_modification_time);
+
   int CreateSnapshot(const base::Closure& callback,
                      const net::CompletionCallback& error_callback);
   void DidCreateSnapshot(
       const base::Closure& callback,
       const net::CompletionCallback& error_callback,
-      base::PlatformFileError file_error,
-      const base::PlatformFileInfo& file_info,
+      base::File::Error file_error,
+      const base::File::Info& file_info,
       const base::FilePath& platform_path,
       const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
 
@@ -66,7 +66,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE FileSystemFileStreamReader
   FileSystemURL url_;
   const int64 initial_offset_;
   const base::Time expected_modification_time_;
-  scoped_ptr<webkit_blob::LocalFileStreamReader> local_file_reader_;
+  scoped_ptr<webkit_blob::FileStreamReader> local_file_reader_;
   scoped_refptr<webkit_blob::ShareableFileReference> snapshot_ref_;
   bool has_pending_create_snapshot_;
   base::WeakPtrFactory<FileSystemFileStreamReader> weak_factory_;

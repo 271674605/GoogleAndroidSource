@@ -14,6 +14,20 @@
         'use_snappy': 0,
       },
     }],
+    ['OS=="android"', {
+      'targets': [{
+        'target_name': 'env_chromium_unittests_apk',
+        'type': 'none',
+        'dependencies': [
+          '<(DEPTH)/base/base.gyp:base_java',
+          'env_chromium_unittests',
+        ],
+        'variables': {
+          'test_suite_name': 'env_chromium_unittests',
+        },
+        'includes': [ '../../build/apk_test.gypi' ],
+      }],
+    }],
   ],
   'target_defaults': {
     'defines': [
@@ -25,11 +39,6 @@
       'src/include/',
     ],
     'conditions': [
-      ['OS == "win"', {
-        'include_dirs': [
-          'src/port/win',
-        ],
-      }],
       ['use_snappy', {
         'defines': [
           'USE_SNAPPY=1',
@@ -42,16 +51,22 @@
       'target_name': 'leveldatabase',
       'type': 'static_library',
       'dependencies': [
+        '../../third_party/re2/re2.gyp:re2',
         '../../base/base.gyp:base',
         # base::LazyInstance is a template that pulls in dynamic_annotations so
         # we need to explictly link in the code for dynamic_annotations.
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../re2/re2.gyp:re2',
       ],
       'conditions': [
         ['use_snappy', {
           'dependencies': [
             '../../third_party/snappy/snappy.gyp:snappy',
+          ],
+        }],
+        ['OS=="win"', {
+          'sources': [
+            'env_chromium_win.cc',
+            'env_chromium_win.h',
           ],
         }],
       ],
@@ -60,13 +75,6 @@
           'src/include/',
           'src/',
           '.',
-        ],
-        'conditions': [
-          ['OS == "win"', {
-            'include_dirs': [
-              'src/port/win',
-            ],
-          }],
         ],
       },
       # Patch posted for upstream, can be removed once that's landed and
@@ -84,6 +92,8 @@
         # they don't build.
         'env_chromium.cc',
         'env_chromium.h',
+        'env_chromium_stdio.cc',
+        'env_chromium_stdio.h',
         'env_idb.h',
         'port/port_chromium.cc',
         'port/port_chromium.h',
@@ -183,6 +193,15 @@
       ],
       'sources': [
         'env_chromium_unittest.cc',
+      ],
+      'conditions': [
+        ['OS=="android"', {
+          'type': 'shared_library',
+          'dependencies': [
+            '../../testing/android/native_test.gyp:native_test_native_code',
+            '../../tools/android/forwarder2/forwarder.gyp:forwarder2',
+          ],
+        }],
       ],
     },
     {
@@ -374,6 +393,16 @@
       ],
       'sources': [
         'src/db/write_batch_test.cc',
+      ],
+    },
+    {
+      'target_name': 'leveldb_main',
+      'type': 'executable',
+      'dependencies': [
+        'leveldb_testutil',
+      ],
+      'sources': [
+        'src/db/leveldb_main.cc',
       ],
     },
   ],

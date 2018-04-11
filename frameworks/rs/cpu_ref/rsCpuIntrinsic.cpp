@@ -54,7 +54,7 @@ void RsdCpuScriptIntrinsic::setGlobalVar(uint32_t slot, const void *data, size_t
 
 void RsdCpuScriptIntrinsic::setGlobalVarWithElemDims(uint32_t slot, const void *data,
                                                      size_t dataLength, const Element *e,
-                                                     const size_t *dims, size_t dimLength) {
+                                                     const uint32_t *dims, size_t dimLength) {
     mCtx->getContext()->setError(RS_ERROR_FATAL_DRIVER,
                                  "Unexpected RsdCpuScriptIntrinsic::setGlobalVarWithElemDims");
 }
@@ -107,6 +107,35 @@ void RsdCpuScriptIntrinsic::invokeForEach(uint32_t slot,
     postLaunch(slot, ain, aout, usr, usrLen, sc);
 }
 
+void RsdCpuScriptIntrinsic::invokeForEachMulti(uint32_t slot,
+                                               const Allocation ** ains,
+                                               uint32_t inLen,
+                                               Allocation * aout,
+                                               const void * usr,
+                                               uint32_t usrLen,
+                                               const RsScriptCall *sc) {
+
+    MTLaunchStruct mtls;
+    /*
+     * FIXME: Possibly create new preLaunch and postLaunch functions that take
+     *        all of the input allocation pointers.
+     */
+    preLaunch(slot, ains[0], aout, usr, usrLen, sc);
+
+    forEachMtlsSetup(ains, inLen, aout, usr, usrLen, sc, &mtls);
+    mtls.script = this;
+    mtls.fep.slot = slot;
+
+    mtls.kernel = (void (*)())mRootPtr;
+    mtls.fep.usr = this;
+
+    RsdCpuScriptImpl * oldTLS = mCtx->setTLS(this);
+    mCtx->launchThreads(ains, inLen, aout, sc, &mtls);
+    mCtx->setTLS(oldTLS);
+
+    postLaunch(slot, ains[0], aout, usr, usrLen, sc);
+}
+
 void RsdCpuScriptIntrinsic::forEachKernelSetup(uint32_t slot, MTLaunchStruct *mtls) {
 
     mtls->script = this;
@@ -114,6 +143,3 @@ void RsdCpuScriptIntrinsic::forEachKernelSetup(uint32_t slot, MTLaunchStruct *mt
     mtls->kernel = (void (*)())mRootPtr;
     mtls->fep.usr = this;
 }
-
-
-

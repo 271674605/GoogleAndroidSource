@@ -37,8 +37,8 @@ class HeaderSearch;
 class ModuleMapParser;
   
 class ModuleMap {
-  SourceManager *SourceMgr;
-  IntrusiveRefCntPtr<DiagnosticsEngine> Diags;
+  SourceManager &SourceMgr;
+  DiagnosticsEngine &Diags;
   const LangOptions &LangOpts;
   const TargetInfo *Target;
   HeaderSearch &HeaderInfo;
@@ -55,6 +55,12 @@ class ModuleMap {
   // The module that we are building; related to \c LangOptions::CurrentModule.
   Module *CompilingModule;
 
+public:
+  // The module that the .cc source file is associated with.
+  Module *SourceModule;
+  std::string SourceModuleName;
+
+private:
   /// \brief The top-level modules that are known.
   llvm::StringMap<Module *> Modules;
 
@@ -80,7 +86,7 @@ public:
     llvm::PointerIntPair<Module *, 2, ModuleHeaderRole> Storage;
 
   public:
-    KnownHeader() : Storage(0, NormalHeader) { }
+    KnownHeader() : Storage(nullptr, NormalHeader) { }
     KnownHeader(Module *M, ModuleHeaderRole Role) : Storage(M, Role) { }
 
     /// \brief Retrieve the module the header is stored in.
@@ -96,11 +102,14 @@ public:
 
     // \brief Whether this known header is valid (i.e., it has an
     // associated module).
-    LLVM_EXPLICIT operator bool() const { return Storage.getPointer() != 0; }
+    LLVM_EXPLICIT operator bool() const {
+      return Storage.getPointer() != nullptr;
+    }
   };
 
 private:
-  typedef llvm::DenseMap<const FileEntry *, KnownHeader> HeadersMap;
+  typedef llvm::DenseMap<const FileEntry *, SmallVector<KnownHeader, 1> >
+  HeadersMap;
 
   /// \brief Mapping from each header to the module that owns the contents of
   /// that header.
@@ -123,6 +132,10 @@ private:
 
     /// \brief Whether the modules we infer are [system] modules.
     unsigned InferSystemModules : 1;
+
+    /// \brief If \c InferModules is non-zero, the module map file that allowed
+    /// inferred modules.  Otherwise, nullptr.
+    const FileEntry *ModuleMapFile;
 
     /// \brief The names of modules that cannot be inferred within this
     /// directory.
@@ -168,20 +181,42 @@ private:
   /// resolved.
   Module *resolveModuleId(const ModuleId &Id, Module *Mod, bool Complain) const;
 
+  /// \brief Looks up the modules that \p File corresponds to.
+  ///
+  /// If \p File represents a builtin header within Clang's builtin include
+  /// directory, this also loads all of the module maps to see if it will get
+  /// associated with a specific module (e.g. in /usr/include).
+  HeadersMap::iterator findKnownHeader(const FileEntry *File);
+
+  /// \brief Searches for a module whose umbrella directory contains \p File.
+  ///
+  /// \param File The header to search for.
+  ///
+  /// \param IntermediateDirs On success, contains the set of directories
+  /// searched before finding \p File.
+  KnownHeader findHeaderInUmbrellaDirs(const FileEntry *File,
+                    SmallVectorImpl<const DirectoryEntry *> &IntermediateDirs);
+
+  /// \brief A convenience method to determine if \p File is (possibly nested)
+  /// in an umbrella directory.
+  bool isHeaderInUmbrellaDirs(const FileEntry *File) {
+    SmallVector<const DirectoryEntry *, 2> IntermediateDirs;
+    return static_cast<bool>(findHeaderInUmbrellaDirs(File, IntermediateDirs));
+  }
+
 public:
   /// \brief Construct a new module map.
   ///
-  /// \param FileMgr The file manager used to find module files and headers.
-  /// This file manager should be shared with the header-search mechanism, since
-  /// they will refer to the same headers.
+  /// \param SourceMgr The source manager used to find module files and headers.
+  /// This source manager should be shared with the header-search mechanism,
+  /// since they will refer to the same headers.
   ///
-  /// \param DC A diagnostic consumer that will be cloned for use in generating
-  /// diagnostics.
+  /// \param Diags A diagnostic engine used for diagnostics.
   ///
   /// \param LangOpts Language options for this translation unit.
   ///
   /// \param Target The target for this translation unit.
-  ModuleMap(FileManager &FileMgr, DiagnosticConsumer &DC,
+  ModuleMap(SourceManager &SourceMgr, DiagnosticsEngine &Diags,
             const LangOptions &LangOpts, const TargetInfo *Target,
             HeaderSearch &HeaderInfo);
 
@@ -202,14 +237,37 @@ public:
   ///
   /// \param File The header file that is likely to be included.
   ///
+  /// \param RequestingModule Specifies the module the header is intended to be
+  /// used from.  Used to disambiguate if a header is present in multiple
+  /// modules.
+  ///
   /// \returns The module KnownHeader, which provides the module that owns the
   /// given header file.  The KnownHeader is default constructed to indicate
   /// that no module owns this header file.
-  KnownHeader findModuleForHeader(const FileEntry *File);
+  KnownHeader findModuleForHeader(const FileEntry *File,
+                                  Module *RequestingModule = nullptr);
+
+  /// \brief Reports errors if a module must not include a specific file.
+  ///
+  /// \param RequestingModule The module including a file.
+  ///
+  /// \param FilenameLoc The location of the inclusion's filename.
+  ///
+  /// \param Filename The included filename as written.
+  ///
+  /// \param File The included file.
+  void diagnoseHeaderInclusion(Module *RequestingModule,
+                               SourceLocation FilenameLoc, StringRef Filename,
+                               const FileEntry *File);
 
   /// \brief Determine whether the given header is part of a module
   /// marked 'unavailable'.
   bool isHeaderInUnavailableModule(const FileEntry *Header) const;
+
+  /// \brief Determine whether the given header is unavailable as part
+  /// of the specified module.
+  bool isHeaderUnavailableInModule(const FileEntry *Header,
+                                   const Module *RequestingModule) const;
 
   /// \brief Retrieve a module with the given name.
   ///
@@ -248,13 +306,17 @@ public:
   /// \param Parent The module that will act as the parent of this submodule,
   /// or NULL to indicate that this is a top-level module.
   ///
+  /// \param ModuleMap The module map that defines or allows the inference of
+  /// this module.
+  ///
   /// \param IsFramework Whether this is a framework module.
   ///
   /// \param IsExplicit Whether this is an explicit submodule.
   ///
   /// \returns The found or newly-created module, along with a boolean value
   /// that will be true if the module is newly-created.
-  std::pair<Module *, bool> findOrCreateModule(StringRef Name, Module *Parent, 
+  std::pair<Module *, bool> findOrCreateModule(StringRef Name, Module *Parent,
+                                               const FileEntry *ModuleMap,
                                                bool IsFramework,
                                                bool IsExplicit);
 
@@ -298,6 +360,16 @@ public:
   /// \returns true if any errors were encountered while resolving exports,
   /// false otherwise.
   bool resolveExports(Module *Mod, bool Complain);
+
+  /// \brief Resolve all of the unresolved uses in the given module.
+  ///
+  /// \param Mod The module whose uses should be resolved.
+  ///
+  /// \param Complain Whether to emit diagnostics for failures.
+  ///
+  /// \returns true if any errors were encountered while resolving uses,
+  /// false otherwise.
+  bool resolveUses(Module *Mod, bool Complain);
 
   /// \brief Resolve all of the unresolved conflicts in the given module.
   ///

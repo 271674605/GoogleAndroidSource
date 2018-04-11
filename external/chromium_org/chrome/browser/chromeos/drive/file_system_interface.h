@@ -10,46 +10,39 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_metadata.h"
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/google_apis/base_requests.h"
+#include "google_apis/drive/base_requests.h"
 
 namespace drive {
 
 class FileSystemObserver;
 
-typedef std::vector<ResourceEntry> ResourceEntryVector;
-
 // Information about search result returned by Search Async callback.
 // This is data needed to create a file system entry that will be used by file
 // browser.
 struct SearchResultInfo {
-  SearchResultInfo(const base::FilePath& path,
-                   const ResourceEntry& entry)
+  SearchResultInfo(const base::FilePath& path, bool is_directory)
       : path(path),
-        entry(entry) {
+        is_directory(is_directory) {
   }
 
   base::FilePath path;
-  ResourceEntry entry;
+  bool is_directory;
 };
 
 // Struct to represent a search result for SearchMetadata().
 struct MetadataSearchResult {
-  MetadataSearchResult(const ResourceEntry& in_entry,
+  MetadataSearchResult(const base::FilePath& in_path,
+                       bool is_directory,
                        const std::string& in_highlighted_base_name)
-      : entry(in_entry),
-        highlighted_base_name(in_highlighted_base_name) {
-    // Note: |path| is set separately from |entry| or other fields, because
-    // getting path typically takes longer time hence we want to fill it only
-    // when it is necessary. (I.e., not for temporary candidates, just for
-    // final user visible results.)
-  }
+      : path(in_path),
+        is_directory(is_directory),
+        highlighted_base_name(in_highlighted_base_name) {}
 
   // The two members are used to create FileEntry object.
   base::FilePath path;
-  ResourceEntry entry;
+  bool is_directory;
 
   // The base name to be displayed in the UI. The parts matched the search
   // query are highlighted with <b> tag. Meta characters are escaped like &lt;
@@ -65,6 +58,12 @@ struct MetadataSearchResult {
 
 typedef std::vector<MetadataSearchResult> MetadataSearchResultVector;
 
+// Used to get a resource entry from the file system.
+// If |error| is not FILE_ERROR_OK, |entry_info| is set to NULL.
+typedef base::Callback<void(FileError error,
+                            scoped_ptr<ResourceEntry> entry)>
+    GetResourceEntryCallback;
+
 // Used to get files from the file system.
 typedef base::Callback<void(FileError error,
                             const base::FilePath& file_path,
@@ -72,22 +71,22 @@ typedef base::Callback<void(FileError error,
 
 // Used to get file content from the file system.
 // If the file content is available in local cache, |local_file| is filled with
-// the path to the cache file and |cancel_download_closure| is null. If the file
-// content starts to be downloaded from the server, |local_file| is empty and
-// |cancel_download_closure| is filled with a closure by calling which the
-// download job can be cancelled.
-// |cancel_download_closure| must be called on the UI thread.
+// the path to the cache file. If the file content starts to be downloaded from
+// the server, |local_file| is empty.
 typedef base::Callback<void(FileError error,
-                            scoped_ptr<ResourceEntry> entry,
                             const base::FilePath& local_file,
-                            const base::Closure& cancel_download_closure)>
+                            scoped_ptr<ResourceEntry> entry)>
     GetFileContentInitializedCallback;
+
+// Used to get list of entries under a directory.
+typedef base::Callback<void(scoped_ptr<ResourceEntryVector> entries)>
+    ReadDirectoryEntriesCallback;
 
 // Used to get drive content search results.
 // If |error| is not FILE_ERROR_OK, |result_paths| is empty.
 typedef base::Callback<void(
     FileError error,
-    const GURL& next_url,
+    const GURL& next_link,
     scoped_ptr<std::vector<SearchResultInfo> > result_paths)> SearchCallback;
 
 // Callback for SearchMetadata(). On success, |error| is FILE_ERROR_OK, and
@@ -125,6 +124,10 @@ typedef base::Callback<void(FileError error,
                             const base::FilePath& file_path)>
     MarkMountedCallback;
 
+// Used to get file path.
+typedef base::Callback<void(FileError error, const base::FilePath& file_path)>
+    GetFilePathCallback;
+
 // The mode of opening a file.
 enum OpenMode {
   // Open the file if exists. If not, failed.
@@ -135,19 +138,6 @@ enum OpenMode {
 
   // Open the file if exists. If not, create a new file and then open it.
   OPEN_OR_CREATE_FILE,
-};
-
-// Priority of a job.  Higher values are lower priority.
-enum ContextType {
-  USER_INITIATED,
-  BACKGROUND,
-  // Indicates the number of values of this enum.
-  NUM_CONTEXT_TYPES,
-};
-
-struct ClientContext {
-  explicit ClientContext(ContextType in_type) : type(in_type) {}
-  ContextType type;
 };
 
 // Option enum to control eligible entries for SearchMetadata().
@@ -171,26 +161,12 @@ class FileSystemInterface {
  public:
   virtual ~FileSystemInterface() {}
 
-  // Initializes the object. This function should be called before any
-  // other functions.
-  virtual void Initialize() = 0;
-
   // Adds and removes the observer.
   virtual void AddObserver(FileSystemObserver* observer) = 0;
   virtual void RemoveObserver(FileSystemObserver* observer) = 0;
 
   // Checks for updates on the server.
   virtual void CheckForUpdates() = 0;
-
-  // Initiates transfer of |remote_src_file_path| to |local_dest_file_path|.
-  // |remote_src_file_path| is the virtual source path on the Drive file system.
-  // |local_dest_file_path| is the destination path on the local file system.
-  //
-  // |callback| must not be null.
-  virtual void TransferFileFromRemoteToLocal(
-      const base::FilePath& remote_src_file_path,
-      const base::FilePath& local_dest_file_path,
-      const FileOperationCallback& callback) = 0;
 
   // Initiates transfer of |local_src_file_path| to |remote_dest_file_path|.
   // |local_src_file_path| must be a file from the local file system.
@@ -207,10 +183,14 @@ class FileSystemInterface {
   // onto the cache, and mark it dirty. The local path to the cache file is
   // returned to |callback|. After opening the file, both read and write
   // on the file can be done with normal local file operations.
+  // If |mime_type| is set and the file is newly created, the mime type is
+  // set to the specified value. If |mime_type| is empty, it is guessed from
+  // |file_path|.
   //
   // |callback| must not be null.
   virtual void OpenFile(const base::FilePath& file_path,
                         OpenMode open_mode,
+                        const std::string& mime_type,
                         const OpenFileCallback& callback) = 0;
 
   // Copies |src_file_path| to |dest_file_path| on the file system.
@@ -218,6 +198,9 @@ class FileSystemInterface {
   // |dest_file_path| is expected to be of the same type of |src_file_path|
   // (i.e. if |src_file_path| is a file, |dest_file_path| will be created as
   // a file).
+  // If |preserve_last_modified| is set to true, the last modified time will be
+  // preserved. This feature is only supported on Drive API v2 protocol because
+  // GData WAPI doesn't support updating modification time.
   //
   // This method also has the following assumptions/limitations that may be
   // relaxed or addressed later:
@@ -233,6 +216,7 @@ class FileSystemInterface {
   // |callback| must not be null.
   virtual void Copy(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
+                    bool preserve_last_modified,
                     const FileOperationCallback& callback) = 0;
 
   // Moves |src_file_path| to |dest_file_path| on the file system.
@@ -281,10 +265,14 @@ class FileSystemInterface {
   // error is raised when a file already exists at the path. It is
   // an error if a directory or a hosted document is already present at the
   // path, or the parent directory of the path is not present yet.
+  // If |mime_type| is set and the file is newly created, the mime type is
+  // set to the specified value. If |mime_type| is empty, it is guessed from
+  // |file_path|.
   //
   // |callback| must not be null.
   virtual void CreateFile(const base::FilePath& file_path,
                           bool is_exclusive,
+                          const std::string& mime_type,
                           const FileOperationCallback& callback) = 0;
 
   // Touches the file at |file_path| by updating the timestamp to
@@ -323,8 +311,8 @@ class FileSystemInterface {
   // needs to be present in the file system.
   //
   // Returns the cache path and entry info to |callback|. It must not be null.
-  virtual void GetFileByPath(const base::FilePath& file_path,
-                             const GetFileCallback& callback) = 0;
+  virtual void GetFile(const base::FilePath& file_path,
+                       const GetFileCallback& callback) = 0;
 
   // Makes sure that |file_path| in the file system is available in the local
   // cache, and mark it as dirty. The next modification to the cache file is
@@ -332,10 +320,11 @@ class FileSystemInterface {
   // present in the file system, it is created.
   //
   // Returns the cache path and entry info to |callback|. It must not be null.
-  virtual void GetFileByPathForSaving(const base::FilePath& file_path,
-                                      const GetFileCallback& callback) = 0;
+  virtual void GetFileForSaving(const base::FilePath& file_path,
+                                const GetFileCallback& callback) = 0;
 
-  // Gets a file by the given |file_path|.
+  // Gets a file by the given |file_path| and returns a closure to cancel the
+  // task.
   // Calls |initialized_callback| when either:
   //   1) The cached file (or JSON file for hosted file) is found, or
   //   2) Starting to download the file from drive server.
@@ -346,7 +335,7 @@ class FileSystemInterface {
   // is successfully done.
   // |initialized_callback|, |get_content_callback| and |completion_callback|
   // must not be null.
-  virtual void GetFileContentByPath(
+  virtual base::Closure GetFileContent(
       const base::FilePath& file_path,
       const GetFileContentInitializedCallback& initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
@@ -356,26 +345,28 @@ class FileSystemInterface {
   // retrieve and refresh file system content from server and disk cache.
   //
   // |callback| must not be null.
-  virtual void GetResourceEntryByPath(
-      const base::FilePath& file_path,
-      const GetResourceEntryCallback& callback) = 0;
+  virtual void GetResourceEntry(const base::FilePath& file_path,
+                                const GetResourceEntryCallback& callback) = 0;
 
   // Finds and reads a directory by |file_path|. This call will also retrieve
   // and refresh file system content from server and disk cache.
+  // |entries_callback| can be a null callback when not interested in entries.
   //
-  // |callback| must not be null.
-  virtual void ReadDirectoryByPath(
+  // |completion_callback| must not be null.
+  virtual void ReadDirectory(
       const base::FilePath& file_path,
-      const ReadDirectoryCallback& callback) = 0;
+      const ReadDirectoryEntriesCallback& entries_callback,
+      const FileOperationCallback& completion_callback) = 0;
 
   // Does server side content search for |search_query|.
-  // If |next_url| is set, this is the search result url that will be fetched.
-  // Search results will be returned as a list of results' |SearchResultInfo|
-  // structs, which contains file's path and is_directory flag.
+  // If |next_link| is set, this is the search result url that will be
+  // fetched. Search results will be returned as a list of results'
+  // |SearchResultInfo| structs, which contains file's path and is_directory
+  // flag.
   //
   // |callback| must not be null.
   virtual void Search(const std::string& search_query,
-                      const GURL& next_url,
+                      const GURL& next_link,
                       const SearchCallback& callback) = 0;
 
   // Searches the local resource metadata, and returns the entries
@@ -420,16 +411,19 @@ class FileSystemInterface {
       const base::FilePath& cache_file_path,
       const FileOperationCallback& callback) = 0;
 
-  // Gets the cache entry for file corresponding to |resource_id| and runs
-  // |callback| with true and the found entry if the entry exists in the cache
-  // map. Otherwise, runs |callback| with false.
+  // Adds permission as |role| to |email| for the entry at |drive_file_path|.
   // |callback| must not be null.
-  virtual void GetCacheEntryByResourceId(
-      const std::string& resource_id,
-      const GetCacheEntryCallback& callback) = 0;
+  virtual void AddPermission(const base::FilePath& drive_file_path,
+                             const std::string& email,
+                             google_apis::drive::PermissionRole role,
+                             const FileOperationCallback& callback) = 0;
 
-  // Reloads the resource metadata from the server.
-  virtual void Reload() = 0;
+  // Resets local data.
+  virtual void Reset(const FileOperationCallback& callback) = 0;
+
+  // Finds a path of an entry (a file or a directory) by |resource_id|.
+  virtual void GetPathFromResourceId(const std::string& resource_id,
+                                     const GetFilePathCallback& callback) = 0;
 };
 
 }  // namespace drive

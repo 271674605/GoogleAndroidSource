@@ -24,53 +24,44 @@
 // formated text and icon data.
 class Notification : public message_center::Notification {
  public:
-  // Initializes a notification with HTML content.
-  Notification(const GURL& origin_url,
-               const GURL& content_url,
-               const string16& display_source,
-               const string16& replace_id,
-               NotificationDelegate* delegate);
-
   // Initializes a notification with text content. On non-ash platforms, this
   // creates an HTML representation using a data: URL for display.
   Notification(const GURL& origin_url,
                const GURL& icon_url,
-               const string16& title,
-               const string16& body,
-               WebKit::WebTextDirection dir,
-               const string16& display_source,
-               const string16& replace_id,
+               const base::string16& title,
+               const base::string16& body,
+               blink::WebTextDirection dir,
+               const base::string16& display_source,
+               const base::string16& replace_id,
                NotificationDelegate* delegate);
 
   // Initializes a notification with text content and an icon image. Currently
   // only used on Ash. Does not generate content_url_.
   Notification(const GURL& origin_url,
                const gfx::Image& icon,
-               const string16& title,
-               const string16& body,
-               WebKit::WebTextDirection dir,
-               const string16& display_source,
-               const string16& replace_id,
+               const base::string16& title,
+               const base::string16& body,
+               blink::WebTextDirection dir,
+               const base::string16& display_source,
+               const base::string16& replace_id,
                NotificationDelegate* delegate);
 
   Notification(
       message_center::NotificationType type,
       const GURL& origin_url,
-      const string16& title,
-      const string16& body,
+      const base::string16& title,
+      const base::string16& body,
       const gfx::Image& icon,
-      WebKit::WebTextDirection dir,
-      const string16& display_source,
-      const string16& replace_id,
+      blink::WebTextDirection dir,
+      const message_center::NotifierId& notifier_id,
+      const base::string16& display_source,
+      const base::string16& replace_id,
       const message_center::RichNotificationData& rich_notification_data,
       NotificationDelegate* delegate);
 
   Notification(const Notification& notification);
   virtual ~Notification();
   Notification& operator=(const Notification& notification);
-
-  // If this is a HTML notification.
-  bool is_html() const { return is_html_; }
 
   // The URL (may be data:) containing the contents for the notification.
   const GURL& content_url() const { return content_url_; }
@@ -82,7 +73,7 @@ class Notification : public message_center::Notification {
   const GURL& icon_url() const { return icon_url_; }
 
   // A unique identifier used to update (replace) or remove a notification.
-  const string16& replace_id() const { return replace_id_; }
+  const base::string16& replace_id() const { return replace_id_; }
 
   // A url for the button icons to be shown (optional).
   const GURL& button_one_icon_url() const { return button_one_icon_url_; }
@@ -91,11 +82,12 @@ class Notification : public message_center::Notification {
   // A url for the image to be shown (optional).
   const GURL& image_url() const { return image_url_; }
 
-  std::string notification_id() const { return delegate()->id(); }
+  // Id of the delegate embedded inside this instance.
+  std::string delegate_id() const { return delegate()->id(); }
   int process_id() const { return delegate()->process_id(); }
 
-  content::RenderViewHost* GetRenderViewHost() const {
-    return delegate()->GetRenderViewHost();
+  content::WebContents* GetWebContents() const {
+    return delegate()->GetWebContents();
   }
   void DoneRendering() { delegate()->ReleaseRenderViewHost(); }
 
@@ -109,10 +101,6 @@ class Notification : public message_center::Notification {
   // to have a non NULL RenderViewHost.
   GURL icon_url_;
 
-  // If this is a HTML notification, the content is in |content_url_|. If
-  // false, the data is in |title_| and |message_|.
-  bool is_html_;
-
   // The URL of the HTML content of the toast (may be a data: URL for simple
   // string-based notifications).
   GURL content_url_;
@@ -124,8 +112,11 @@ class Notification : public message_center::Notification {
   // The URL of a large image to be displayed for a a rich notification.
   GURL image_url_;
 
+  // The URL of a small image to be displayed for a a rich notification.
+  GURL small_image_url_;
+
   // The user-supplied replace ID for the notification.
-  string16 replace_id_;
+  base::string16 replace_id_;
 
   // A proxy object that allows access back to the JavaScript object that
   // represents the notification, for firing events.

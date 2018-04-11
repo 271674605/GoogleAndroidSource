@@ -26,13 +26,14 @@ import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.utility.Utility;
 import com.android.exchange.Eas;
 import com.android.exchange.adapter.AbstractSyncAdapter.Operation;
-import com.android.exchange.service.EasCalendarSyncHandler;
+import com.android.exchange.eas.EasSyncCalendar;
 import com.android.exchange.utility.CalendarUtilities;
 import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.GregorianCalendar;
 import java.util.Map.Entry;
@@ -445,10 +446,18 @@ public class CalendarSyncParser extends AbstractSyncParser {
                     cv.put(Events.EVENT_TIMEZONE, timeZone.getID());
                     break;
                 case Tags.CALENDAR_START_TIME:
-                    startTime = Utility.parseDateTimeToMillis(getValue());
+                    try {
+                        startTime = Utility.parseDateTimeToMillis(getValue());
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for CALENDAR_START_TIME tag.", e);
+                    }
                     break;
                 case Tags.CALENDAR_END_TIME:
-                    endTime = Utility.parseDateTimeToMillis(getValue());
+                    try {
+                        endTime = Utility.parseDateTimeToMillis(getValue());
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for CALENDAR_END_TIME tag.", e);
+                    }
                     break;
                 case Tags.CALENDAR_EXCEPTIONS:
                     // For exceptions to show the organizer, the organizer must be added before
@@ -781,15 +790,20 @@ public class CalendarSyncParser extends AbstractSyncParser {
         cv.put(Events.ORIGINAL_SYNC_ID, parentCv.getAsString(Events._SYNC_ID));
 
         String exceptionStartTime = "_noStartTime";
-        while (nextTag(Tags.SYNC_APPLICATION_DATA) != END) {
+        while (nextTag(Tags.CALENDAR_EXCEPTION) != END) {
             switch (tag) {
                 case Tags.CALENDAR_ATTACHMENTS:
                     attachmentsParser();
                     break;
                 case Tags.CALENDAR_EXCEPTION_START_TIME:
-                    exceptionStartTime = getValue();
-                    cv.put(Events.ORIGINAL_INSTANCE_TIME,
-                            Utility.parseDateTimeToMillis(exceptionStartTime));
+                    final String valueStr = getValue();
+                    try {
+                        cv.put(Events.ORIGINAL_INSTANCE_TIME,
+                                Utility.parseDateTimeToMillis(valueStr));
+                        exceptionStartTime = valueStr;
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for CALENDAR_EXCEPTION_START_TIME tag.", e);
+                    }
                     break;
                 case Tags.CALENDAR_EXCEPTION_IS_DELETED:
                     if (getValueInt() == 1) {
@@ -807,10 +821,18 @@ public class CalendarSyncParser extends AbstractSyncParser {
                     cv.put(Events.DESCRIPTION, getValue());
                     break;
                 case Tags.CALENDAR_START_TIME:
-                    startTime = Utility.parseDateTimeToMillis(getValue());
+                    try {
+                        startTime = Utility.parseDateTimeToMillis(getValue());
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for CALENDAR_START_TIME tag.", e);
+                    }
                     break;
                 case Tags.CALENDAR_END_TIME:
-                    endTime = Utility.parseDateTimeToMillis(getValue());
+                    try {
+                        endTime = Utility.parseDateTimeToMillis(getValue());
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for CALENDAR_END_TIME tag.", e);
+                    }
                     break;
                 case Tags.CALENDAR_LOCATION:
                     cv.put(Events.EVENT_LOCATION, getValue());
@@ -1231,9 +1253,14 @@ public class CalendarSyncParser extends AbstractSyncParser {
             final String authority, final ArrayList<ContentProviderOperation> ops)
             throws RemoteException, OperationApplicationException {
         if (!ops.isEmpty()) {
-            ContentProviderResult[] result = contentResolver.applyBatch(authority, ops);
-            //mService.userLog("Results: " + result.length);
-            return result;
+            try {
+                ContentProviderResult[] result = contentResolver.applyBatch(authority, ops);
+                //mService.userLog("Results: " + result.length);
+                return result;
+            } catch (IllegalArgumentException e) {
+                // Thrown when Calendar Provider is disabled
+                LogUtils.e(TAG, "Error executing operation; provider is disabled.", e);
+            }
         }
         return new ContentProviderResult[0];
     }
@@ -1357,7 +1384,7 @@ public class CalendarSyncParser extends AbstractSyncParser {
     @Override
     protected void wipe() {
         LogUtils.w(TAG, "Wiping calendar for account %d", mAccount.mId);
-        EasCalendarSyncHandler.wipeAccountFromContentProvider(mContext,
+        EasSyncCalendar.wipeAccountFromContentProvider(mContext,
                 mAccount.mEmailAddress);
     }
 }

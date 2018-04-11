@@ -30,14 +30,11 @@ import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.CharacterStyle;
 import android.text.style.TextAppearanceSpan;
-import android.text.util.Rfc822Token;
-import android.text.util.Rfc822Tokenizer;
 
 import com.android.mail.R;
-import com.android.mail.providers.Address;
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.ConversationInfo;
-import com.android.mail.providers.MessageInfo;
+import com.android.mail.providers.ParticipantInfo;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.ui.DividedImageCanvas;
 import com.android.mail.utils.ObjectCache;
@@ -45,31 +42,29 @@ import com.google.common.base.Objects;
 import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
-import java.util.Locale;
 import java.util.Map;
 
-import java.util.regex.Pattern;
-
 public class SendersView {
-    public static final int DEFAULT_FORMATTING = 0;
-    public static final int MERGED_FORMATTING = 1;
     private static final Integer DOES_NOT_EXIST = -5;
     // FIXME(ath): make all of these statics instance variables, and have callers hold onto this
     // instance as long as appropriate (e.g. activity lifetime).
     // no need to listen for configuration changes.
     private static String sSendersSplitToken;
-    public static String SENDERS_VERSION_SEPARATOR = "^**^";
-    public static Pattern SENDERS_VERSION_SEPARATOR_PATTERN = Pattern.compile("\\^\\*\\*\\^");
     private static CharSequence sDraftSingularString;
     private static CharSequence sDraftPluralString;
     private static CharSequence sSendingString;
+    private static CharSequence sRetryingString;
+    private static CharSequence sFailedString;
     private static String sDraftCountFormatString;
     private static CharacterStyle sDraftsStyleSpan;
     private static CharacterStyle sSendingStyleSpan;
+    private static CharacterStyle sRetryingStyleSpan;
+    private static CharacterStyle sFailedStyleSpan;
     private static TextAppearanceSpan sUnreadStyleSpan;
     private static CharacterStyle sReadStyleSpan;
-    private static String sMeString;
-    private static Locale sMeStringLocale;
+    private static String sMeSubjectString;
+    private static String sMeObjectString;
+    private static String sToHeaderString;
     private static String sMessageCountSpacerString;
     public static CharSequence sElidedString;
     private static BroadcastReceiver sConfigurationChangedReceiver;
@@ -120,16 +115,23 @@ public class SendersView {
             sDraftSingularString = res.getQuantityText(R.plurals.draft, 1);
             sDraftPluralString = res.getQuantityText(R.plurals.draft, 2);
             sDraftCountFormatString = res.getString(R.string.draft_count_format);
+            sMeSubjectString = res.getString(R.string.me_subject_pronoun);
+            sMeObjectString = res.getString(R.string.me_object_pronoun);
+            sToHeaderString = res.getString(R.string.to_heading);
             sMessageInfoUnreadStyleSpan = new TextAppearanceSpan(context,
                     R.style.MessageInfoUnreadTextAppearance);
             sMessageInfoReadStyleSpan = new TextAppearanceSpan(context,
                     R.style.MessageInfoReadTextAppearance);
             sDraftsStyleSpan = new TextAppearanceSpan(context, R.style.DraftTextAppearance);
-            sUnreadStyleSpan = new TextAppearanceSpan(context, R.style.SendersUnreadTextAppearance);
+            sUnreadStyleSpan = new TextAppearanceSpan(context, R.style.SendersAppearanceUnreadStyle);
             sSendingStyleSpan = new TextAppearanceSpan(context, R.style.SendingTextAppearance);
-            sReadStyleSpan = new TextAppearanceSpan(context, R.style.SendersReadTextAppearance);
+            sRetryingStyleSpan = new TextAppearanceSpan(context, R.style.RetryingTextAppearance);
+            sFailedStyleSpan = new TextAppearanceSpan(context, R.style.FailedTextAppearance);
+            sReadStyleSpan = new TextAppearanceSpan(context, R.style.SendersAppearanceReadStyle);
             sMessageCountSpacerString = res.getString(R.string.message_count_spacer);
             sSendingString = res.getString(R.string.sending);
+            sRetryingString = res.getString(R.string.message_retrying);
+            sFailedString = res.getString(R.string.message_failed);
             sBidiFormatter = BidiFormatter.getInstance();
         }
     }
@@ -144,56 +146,68 @@ public class SendersView {
             boolean hasSenders = false;
             // This covers the case where the sender is "me" and this is a draft
             // message, which means this will only run once most of the time.
-            for (MessageInfo m : conversationInfo.messageInfos) {
-                if (!TextUtils.isEmpty(m.sender)) {
+            for (ParticipantInfo p : conversationInfo.participantInfos) {
+                if (!TextUtils.isEmpty(p.name)) {
                     hasSenders = true;
                     break;
                 }
             }
             getSenderResources(context, resourceCachingRequired);
-            if (conversationInfo != null) {
-                int count = conversationInfo.messageCount;
-                int draftCount = conversationInfo.draftCount;
-                boolean showSending = sendingStatus == UIProvider.ConversationSendingState.SENDING;
-                if (count > 1) {
-                    messageInfo.append(count + "");
+            int count = conversationInfo.messageCount;
+            int draftCount = conversationInfo.draftCount;
+            if (count > 1) {
+                messageInfo.append(count + "");
+            }
+            messageInfo.setSpan(CharacterStyle.wrap(
+                    conv.read ? sMessageInfoReadStyleSpan : sMessageInfoUnreadStyleSpan),
+                    0, messageInfo.length(), 0);
+            if (draftCount > 0) {
+                // If we are showing a message count or any draft text and there
+                // is at least 1 sender, prepend the sending state text with a
+                // comma.
+                if (hasSenders || count > 1) {
+                    messageInfo.append(sSendersSplitToken);
                 }
-                messageInfo.setSpan(CharacterStyle.wrap(
-                        conv.read ? sMessageInfoReadStyleSpan : sMessageInfoUnreadStyleSpan),
-                        0, messageInfo.length(), 0);
-                if (draftCount > 0) {
-                    // If we are showing a message count or any draft text and there
-                    // is at least 1 sender, prepend the sending state text with a
-                    // comma.
-                    if (hasSenders || count > 1) {
-                        messageInfo.append(sSendersSplitToken);
-                    }
-                    SpannableStringBuilder draftString = new SpannableStringBuilder();
-                    if (draftCount == 1) {
-                        draftString.append(sDraftSingularString);
-                    } else {
-                        draftString.append(sDraftPluralString
-                                + String.format(sDraftCountFormatString, draftCount));
-                    }
-                    draftString.setSpan(CharacterStyle.wrap(sDraftsStyleSpan), 0,
-                            draftString.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    messageInfo.append(draftString);
+                SpannableStringBuilder draftString = new SpannableStringBuilder();
+                if (draftCount == 1) {
+                    draftString.append(sDraftSingularString);
+                } else {
+                    draftString.append(sDraftPluralString).append(
+                            String.format(sDraftCountFormatString, draftCount));
                 }
-                if (showSending) {
-                    // If we are showing a message count or any draft text, prepend
-                    // the sending state text with a comma.
-                    if (count > 1 || draftCount > 0) {
-                        messageInfo.append(sSendersSplitToken);
-                    }
-                    SpannableStringBuilder sending = new SpannableStringBuilder();
-                    sending.append(sSendingString);
-                    sending.setSpan(sSendingStyleSpan, 0, sending.length(), 0);
-                    messageInfo.append(sending);
+                draftString.setSpan(CharacterStyle.wrap(sDraftsStyleSpan), 0,
+                        draftString.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                messageInfo.append(draftString);
+            }
+
+            boolean showState = sendingStatus == UIProvider.ConversationSendingState.SENDING ||
+                    sendingStatus == UIProvider.ConversationSendingState.RETRYING ||
+                    sendingStatus == UIProvider.ConversationSendingState.SEND_ERROR;
+            if (showState) {
+                // If we are showing a message count or any draft text, prepend
+                // the sending state text with a comma.
+                if (count > 1 || draftCount > 0) {
+                    messageInfo.append(sSendersSplitToken);
                 }
-                // Prepend a space if we are showing other message info text.
-                if (count > 1 || (draftCount > 0 && hasSenders) || showSending) {
-                    messageInfo.insert(0, sMessageCountSpacerString);
+
+                SpannableStringBuilder stateSpan = new SpannableStringBuilder();
+
+                if (sendingStatus == UIProvider.ConversationSendingState.SENDING) {
+                    stateSpan.append(sSendingString);
+                    stateSpan.setSpan(sSendingStyleSpan, 0, stateSpan.length(), 0);
+                } else if (sendingStatus == UIProvider.ConversationSendingState.RETRYING) {
+                    stateSpan.append(sRetryingString);
+                    stateSpan.setSpan(sRetryingStyleSpan, 0, stateSpan.length(), 0);
+                } else if (sendingStatus == UIProvider.ConversationSendingState.SEND_ERROR) {
+                    stateSpan.append(sFailedString);
+                    stateSpan.setSpan(sFailedStyleSpan, 0, stateSpan.length(), 0);
                 }
+                messageInfo.append(stateSpan);
+            }
+
+            // Prepend a space if we are showing other message info text.
+            if (count > 1 || (draftCount > 0 && hasSenders) || showState) {
+                messageInfo.insert(0, sMessageCountSpacerString);
             }
         } finally {
             if (!resourceCachingRequired) {
@@ -207,12 +221,12 @@ public class SendersView {
     public static void format(Context context, ConversationInfo conversationInfo,
             String messageInfo, int maxChars, ArrayList<SpannableString> styledSenders,
             ArrayList<String> displayableSenderNames, ArrayList<String> displayableSenderEmails,
-            String account, final boolean resourceCachingRequired) {
+            String account, final boolean showToHeader, final boolean resourceCachingRequired) {
         try {
             getSenderResources(context, resourceCachingRequired);
             format(context, conversationInfo, messageInfo, maxChars, styledSenders,
                     displayableSenderNames, displayableSenderEmails, account,
-                    sUnreadStyleSpan, sReadStyleSpan, resourceCachingRequired);
+                    sUnreadStyleSpan, sReadStyleSpan, showToHeader, resourceCachingRequired);
         } finally {
             if (!resourceCachingRequired) {
                 clearResourceCache();
@@ -224,12 +238,13 @@ public class SendersView {
             String messageInfo, int maxChars, ArrayList<SpannableString> styledSenders,
             ArrayList<String> displayableSenderNames, ArrayList<String> displayableSenderEmails,
             String account, final TextAppearanceSpan notificationUnreadStyleSpan,
-            final CharacterStyle notificationReadStyleSpan, final boolean resourceCachingRequired) {
+            final CharacterStyle notificationReadStyleSpan, final boolean showToHeader,
+            final boolean resourceCachingRequired) {
         try {
             getSenderResources(context, resourceCachingRequired);
-            handlePriority(context, maxChars, messageInfo, conversationInfo, styledSenders,
+            handlePriority(maxChars, messageInfo, conversationInfo, styledSenders,
                     displayableSenderNames, displayableSenderEmails, account,
-                    notificationUnreadStyleSpan, notificationReadStyleSpan);
+                    notificationUnreadStyleSpan, notificationReadStyleSpan, showToHeader);
         } finally {
             if (!resourceCachingRequired) {
                 clearResourceCache();
@@ -237,11 +252,11 @@ public class SendersView {
         }
     }
 
-    public static void handlePriority(Context context, int maxChars, String messageInfoString,
+    private static void handlePriority(int maxChars, String messageInfoString,
             ConversationInfo conversationInfo, ArrayList<SpannableString> styledSenders,
             ArrayList<String> displayableSenderNames, ArrayList<String> displayableSenderEmails,
             String account, final TextAppearanceSpan unreadStyleSpan,
-            final CharacterStyle readStyleSpan) {
+            final CharacterStyle readStyleSpan, final boolean showToHeader) {
         boolean shouldAddPhotos = displayableSenderEmails != null;
         int maxPriorityToInclude = -1; // inclusive
         int numCharsUsed = messageInfoString.length(); // draft, number drafts,
@@ -257,8 +272,9 @@ public class SendersView {
         try {
             priorityToLength.clear();
             int senderLength;
-            for (MessageInfo info : conversationInfo.messageInfos) {
-                senderLength = !TextUtils.isEmpty(info.sender) ? info.sender.length() : 0;
+            for (ParticipantInfo info : conversationInfo.participantInfos) {
+                final String senderName = info.name;
+                senderLength = !TextUtils.isEmpty(senderName) ? senderName.length() : 0;
                 priorityToLength.put(info.priority, senderLength);
                 maxFoundPriority = Math.max(maxFoundPriority, info.priority);
             }
@@ -284,48 +300,52 @@ public class SendersView {
         // We want to include this entry if
         // 1) The onlyShowUnread flags is not set
         // 2) The above flag is set, and the message is unread
-        MessageInfo currentMessage;
+        ParticipantInfo currentParticipant;
         SpannableString spannableDisplay;
-        String nameString;
         CharacterStyle style;
         boolean appendedElided = false;
         Map<String, Integer> displayHash = Maps.newHashMap();
         String firstDisplayableSenderEmail = null;
         String firstDisplayableSender = null;
-        for (int i = 0; i < conversationInfo.messageInfos.size(); i++) {
-            currentMessage = conversationInfo.messageInfos.get(i);
-            nameString = !TextUtils.isEmpty(currentMessage.sender) ? currentMessage.sender : "";
+        for (int i = 0; i < conversationInfo.participantInfos.size(); i++) {
+            currentParticipant = conversationInfo.participantInfos.get(i);
+            final String currentEmail = currentParticipant.email;
+
+            final String currentName = currentParticipant.name;
+            String nameString = !TextUtils.isEmpty(currentName) ? currentName : "";
             if (nameString.length() == 0) {
-                nameString = getMe(context);
+                // if we're showing the To: header, show the object version of me.
+                nameString = getMe(showToHeader /* useObjectMe */);
             }
             if (numCharsToRemovePerWord != 0) {
                 nameString = nameString.substring(0,
                         Math.max(nameString.length() - numCharsToRemovePerWord, 0));
             }
-            final int priority = currentMessage.priority;
-            style = !currentMessage.read ? getWrappedStyleSpan(unreadStyleSpan)
-                    : getWrappedStyleSpan(readStyleSpan);
+
+            final int priority = currentParticipant.priority;
+            style = CharacterStyle.wrap(currentParticipant.readConversation ? readStyleSpan :
+                    unreadStyleSpan);
             if (priority <= maxPriorityToInclude) {
                 spannableDisplay = new SpannableString(sBidiFormatter.unicodeWrap(nameString));
                 // Don't duplicate senders; leave the first instance, unless the
                 // current instance is also unread.
-                int oldPos = displayHash.containsKey(currentMessage.sender) ? displayHash
-                        .get(currentMessage.sender) : DOES_NOT_EXIST;
+                int oldPos = displayHash.containsKey(currentName) ? displayHash
+                        .get(currentName) : DOES_NOT_EXIST;
                 // If this sender doesn't exist OR the current message is
                 // unread, add the sender.
-                if (oldPos == DOES_NOT_EXIST || !currentMessage.read) {
+                if (oldPos == DOES_NOT_EXIST || !currentParticipant.readConversation) {
                     // If the sender entry already existed, and is right next to the
                     // current sender, remove the old entry.
                     if (oldPos != DOES_NOT_EXIST && i > 0 && oldPos == i - 1
                             && oldPos < styledSenders.size()) {
                         // Remove the old one!
                         styledSenders.set(oldPos, null);
-                        if (shouldAddPhotos && !TextUtils.isEmpty(currentMessage.senderEmail)) {
-                            displayableSenderEmails.remove(currentMessage.senderEmail);
-                            displayableSenderNames.remove(currentMessage.sender);
+                        if (shouldAddPhotos && !TextUtils.isEmpty(currentEmail)) {
+                            displayableSenderEmails.remove(currentEmail);
+                            displayableSenderNames.remove(currentName);
                         }
                     }
-                    displayHash.put(currentMessage.sender, i);
+                    displayHash.put(currentName, i);
                     spannableDisplay.setSpan(style, 0, spannableDisplay.length(), 0);
                     styledSenders.add(spannableDisplay);
                 }
@@ -338,14 +358,13 @@ public class SendersView {
                 }
             }
             if (shouldAddPhotos) {
-                String senderEmail = TextUtils.isEmpty(currentMessage.sender) ?
+                String senderEmail = TextUtils.isEmpty(currentName) ?
                         account :
-                            TextUtils.isEmpty(currentMessage.senderEmail) ?
-                                    currentMessage.sender : currentMessage.senderEmail;
+                            TextUtils.isEmpty(currentEmail) ? currentName : currentEmail;
                 if (i == 0) {
                     // Always add the first sender!
                     firstDisplayableSenderEmail = senderEmail;
-                    firstDisplayableSender = currentMessage.sender;
+                    firstDisplayableSender = currentName;
                 } else {
                     if (!Objects.equal(firstDisplayableSenderEmail, senderEmail)) {
                         int indexOf = displayableSenderEmails.indexOf(senderEmail);
@@ -354,7 +373,7 @@ public class SendersView {
                             displayableSenderNames.remove(indexOf);
                         }
                         displayableSenderEmails.add(senderEmail);
-                        displayableSenderNames.add(currentMessage.sender);
+                        displayableSenderNames.add(currentName);
                         if (displayableSenderEmails.size() > DividedImageCanvas.MAX_DIVISIONS) {
                             displayableSenderEmails.remove(0);
                             displayableSenderNames.remove(0);
@@ -374,76 +393,23 @@ public class SendersView {
         }
     }
 
-    private static CharacterStyle getWrappedStyleSpan(final CharacterStyle characterStyle) {
-        return CharacterStyle.wrap(characterStyle);
+    static String getMe(boolean useObjectMe) {
+        return useObjectMe ? sMeObjectString : sMeSubjectString;
     }
 
-    static String getMe(Context context) {
-        final Resources resources = context.getResources();
-        final Locale locale = resources.getConfiguration().locale;
-
-        if (sMeString == null || !locale.equals(sMeStringLocale)) {
-            sMeString = resources.getString(R.string.me_subject_pronun);
-            sMeStringLocale = locale;
-        }
-        return sMeString;
+    public static SpannableString getFormattedToHeader() {
+        final SpannableString formattedToHeader = new SpannableString(sToHeaderString);
+        final CharacterStyle readStyle = CharacterStyle.wrap(sReadStyleSpan);
+        formattedToHeader.setSpan(readStyle, 0, formattedToHeader.length(), 0);
+        return formattedToHeader;
     }
 
-    private static void formatDefault(ConversationItemViewModel header, String sendersString,
-            Context context, final CharacterStyle readStyleSpan,
-            final boolean resourceCachingRequired) {
-        try {
-            getSenderResources(context, resourceCachingRequired);
-            // Clear any existing sender fragments; we must re-make all of them.
-            header.senderFragments.clear();
-            // TODO: unify this with ConversationItemView.calculateTextsAndBitmaps's tokenization
-            final Rfc822Token[] senders = Rfc822Tokenizer.tokenize(sendersString);
-            final String[] namesOnly = new String[senders.length];
-            String display;
-            for (int i = 0; i < senders.length; i++) {
-                display = Address.decodeAddressName(senders[i].getName());
-                if (TextUtils.isEmpty(display)) {
-                    display = senders[i].getAddress();
-                }
-                namesOnly[i] = display;
-            }
-            generateSenderFragments(header, namesOnly, readStyleSpan);
-        } finally {
-            if (!resourceCachingRequired) {
-                clearResourceCache();
-            }
-        }
-    }
-
-    private static void generateSenderFragments(ConversationItemViewModel header, String[] names,
-            final CharacterStyle readStyleSpan) {
-        header.sendersText = TextUtils.join(Address.ADDRESS_DELIMETER + " ", names);
-        header.addSenderFragment(0, header.sendersText.length(), getWrappedStyleSpan(readStyleSpan),
-                true);
-    }
-
-    public static void formatSenders(ConversationItemViewModel header, Context context,
-            final boolean resourceCachingRequired) {
-        try {
-            getSenderResources(context, resourceCachingRequired);
-            formatSenders(header, context, sReadStyleSpan, resourceCachingRequired);
-        } finally {
-            if (!resourceCachingRequired) {
-                clearResourceCache();
-            }
-        }
-    }
-
-    public static void formatSenders(ConversationItemViewModel header, Context context,
-            final CharacterStyle readStyleSpan, final boolean resourceCachingRequired) {
-        try {
-            formatDefault(header, header.conversation.senders, context, readStyleSpan,
-                    resourceCachingRequired);
-        } finally {
-            if (!resourceCachingRequired) {
-                clearResourceCache();
-            }
-        }
+    public static SpannableString getSingularDraftString(Context context) {
+        getSenderResources(context, true /* resourceCachingRequired */);
+        final SpannableString formattedDraftString = new SpannableString(sDraftSingularString);
+        final CharacterStyle readStyle = CharacterStyle.wrap(sDraftsStyleSpan);
+        formattedDraftString.setSpan(readStyle, 0, formattedDraftString.length(), 0);
+        return formattedDraftString;
     }
 
     private static void clearResourceCache() {

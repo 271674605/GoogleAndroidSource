@@ -20,6 +20,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import com.android.internal.util.FastXmlSerializer;
 
 import org.xmlpull.v1.XmlSerializer;
 
@@ -29,6 +30,8 @@ import android.util.Xml;
 public class BluetoothMapMessageListing {
     private boolean hasUnread = false;
     private static final String TAG = "BluetoothMapMessageListing";
+    private static final boolean D = BluetoothMapService.DEBUG;
+
     private List<BluetoothMapMessageListingElement> list;
 
     public BluetoothMapMessageListing(){
@@ -37,7 +40,7 @@ public class BluetoothMapMessageListing {
     public void add(BluetoothMapMessageListingElement element) {
         list.add(element);
         /* update info regarding whether the list contains unread messages */
-        if (element.getRead().equalsIgnoreCase("no"))
+        if (element.getReadBool())
         {
             hasUnread = true;
         }
@@ -64,6 +67,15 @@ public class BluetoothMapMessageListing {
         return hasUnread;
     }
 
+
+    /**
+     *  returns the entire list as a list
+     * @return list
+     */
+    public List<BluetoothMapMessageListingElement> getList(){
+        return list;
+    }
+
     /**
      * Encode the list of BluetoothMapMessageListingElement(s) into a UTF-8
      * formatted XML-string in a trimmed byte array
@@ -72,26 +84,27 @@ public class BluetoothMapMessageListing {
      * @throws UnsupportedEncodingException
      *             if UTF-8 encoding is unsupported on the platform.
      */
-    public byte[] encode() throws UnsupportedEncodingException {
+    public byte[] encode(boolean includeThreadId) throws UnsupportedEncodingException {
         StringWriter sw = new StringWriter();
-        XmlSerializer xmlMsgElement = Xml.newSerializer();
+        XmlSerializer xmlMsgElement = new FastXmlSerializer();
         try {
             xmlMsgElement.setOutput(sw);
-            xmlMsgElement.startDocument(null, null);
-            xmlMsgElement.startTag("", "MAP-msg-listing");
-            xmlMsgElement.attribute("", "version", "1.0");
+            xmlMsgElement.startDocument("UTF-8", true);
+            xmlMsgElement.setFeature("http://xmlpull.org/v1/doc/features.html#indent-output", true);
+            xmlMsgElement.startTag(null, "MAP-msg-listing");
+            xmlMsgElement.attribute(null, "version", "1.0");
             // Do the XML encoding of list
             for (BluetoothMapMessageListingElement element : list) {
-                element.encode(xmlMsgElement); // Append the list element
+                element.encode(xmlMsgElement, includeThreadId); // Append the list element
             }
-            xmlMsgElement.endTag("", "MAP-msg-listing");
+            xmlMsgElement.endTag(null, "MAP-msg-listing");
             xmlMsgElement.endDocument();
         } catch (IllegalArgumentException e) {
-            Log.w(TAG, e.toString());
+            Log.w(TAG, e);
         } catch (IllegalStateException e) {
-            Log.w(TAG, e.toString());
+            Log.w(TAG, e);
         } catch (IOException e) {
-            Log.w(TAG, e.toString());
+            Log.w(TAG, e);
         }
         return sw.toString().getBytes("UTF-8");
     }
@@ -101,11 +114,19 @@ public class BluetoothMapMessageListing {
     }
 
     public void segment(int count, int offset) {
-        count = Math.min(count, list.size());
-        if (offset + count <= list.size()) {
+        count = Math.min(count, list.size() - offset);
+        if (count > 0) {
             list = list.subList(offset, offset + count);
+            if(list == null) {
+                list = new ArrayList<BluetoothMapMessageListingElement>(); // Return an empty list
+            }
         } else {
-            list = null;
+            if(offset > list.size()) {
+               list = new ArrayList<BluetoothMapMessageListingElement>();
+               Log.d(TAG, "offset greater than list size. Returning empty list");
+            } else {
+               list = list.subList(offset, list.size());
+            }
         }
     }
 }

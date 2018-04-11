@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
+#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
@@ -19,6 +20,7 @@
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/ppb_console.h"
 #include "ppapi/proxy/dispatcher.h"
+#include "ppapi/proxy/message_handler.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 #include "ppapi/shared_impl/singleton_resource_id.h"
@@ -39,8 +41,6 @@ class ResourceCreationAPI;
 }
 
 namespace proxy {
-
-class ResourceMessageReplyParams;
 
 // Used to keep track of per-instance data.
 struct InstanceData {
@@ -63,6 +63,10 @@ struct InstanceData {
   // calling when we shouldn't).
   bool is_request_surrounding_text_pending;
   bool should_do_request_surrounding_text;
+
+  // The message handler which should handle JavaScript->Plugin messages, if
+  // one has been registered, otherwise NULL.
+  scoped_ptr<MessageHandler> message_handler;
 };
 
 class PPAPI_PROXY_EXPORT PluginDispatcher
@@ -163,13 +167,6 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   uint32 plugin_dispatcher_id() const { return plugin_dispatcher_id_; }
   bool incognito() const { return incognito_; }
 
-  // Dispatches the given resource message to the appropriate resource in the
-  // plugin process. This should be wired to the various channels that messages
-  // come in from various other processes.
-  static void DispatchResourceReply(
-      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
-      const IPC::Message& nested_msg);
-
  private:
   friend class PluginDispatcherTest;
 
@@ -178,16 +175,8 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   void ForceFreeAllInstances();
 
   // IPC message handlers.
-  void OnMsgResourceReply(
-      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
-      const IPC::Message& nested_msg);
   void OnMsgSupportsInterface(const std::string& interface_name, bool* result);
   void OnMsgSetPreferences(const Preferences& prefs);
-
-  // Internal backed for DispatchResourceReply.
-  static void LockedDispatchResourceReply(
-      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
-      const IPC::Message& nested_msg);
 
   virtual bool SendMessage(IPC::Message* msg);
 
@@ -200,7 +189,7 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   typedef base::hash_map<std::string, const void*> InterfaceMap;
   InterfaceMap plugin_interfaces_;
 
-  typedef base::hash_map<PP_Instance, InstanceData> InstanceDataMap;
+  typedef base::ScopedPtrHashMap<PP_Instance, InstanceData> InstanceDataMap;
   InstanceDataMap instance_map_;
 
   // The preferences sent from the host. We only want to set this once, which

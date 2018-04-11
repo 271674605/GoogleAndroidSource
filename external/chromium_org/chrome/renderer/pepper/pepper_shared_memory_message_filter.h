@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/platform_file.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/host/instance_message_filter.h"
 
@@ -20,8 +19,6 @@ namespace proxy {
 class SerializedHandle;
 }
 }
-
-namespace chrome {
 
 // Implements the backend for shared memory messages from a plugin process.
 class PepperSharedMemoryMessageFilter
@@ -47,7 +44,5 @@ class PepperSharedMemoryMessageFilter
 
   DISALLOW_COPY_AND_ASSIGN(PepperSharedMemoryMessageFilter);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_RENDERER_PEPPER_PEPPER_SHARED_MEMORY_MESSAGE_FILTER_H_

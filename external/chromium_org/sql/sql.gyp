@@ -62,6 +62,8 @@
         'test/error_callback_support.h',
         'test/scoped_error_ignorer.cc',
         'test/scoped_error_ignorer.h',
+        'test/test_helpers.cc',
+        'test/test_helpers.h',
       ],
       'include_dirs': [
         '..',
@@ -78,13 +80,14 @@
       'dependencies': [
         'sql',
         'test_support_sql',
+        '../base/base.gyp:run_all_unittests',
         '../base/base.gyp:test_support_base',
         '../testing/gtest.gyp:gtest',
         '../third_party/sqlite/sqlite.gyp:sqlite',
       ],
       'sources': [
-        'run_all_unittests.cc',
         'connection_unittest.cc',
+        'meta_table_unittest.cc',
         'recovery_unittest.cc',
         'sqlite_features_unittest.cc',
         'statement_unittest.cc',
@@ -96,14 +99,14 @@
       'conditions': [
         ['os_posix==1 and OS!="mac" and OS!="ios"', {
           'conditions': [
-            ['linux_use_tcmalloc==1', {
+            ['use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
             }],
           ],
         }],
-        ['OS == "android" and gtest_target_type == "shared_library"', {
+        ['OS == "android"', {
           'dependencies': [
             '../testing/android/native_test.gyp:native_test_native_code',
           ],
@@ -114,9 +117,7 @@
     },
   ],
   'conditions': [
-    # Special target to wrap a gtest_target_type==shared_library
-    # sql_unittests into an android apk for execution.
-    ['OS == "android" and gtest_target_type == "shared_library"', {
+    ['OS == "android"', {
       'targets': [
         {
           'target_name': 'sql_unittests_apk',
@@ -126,7 +127,6 @@
           ],
           'variables': {
             'test_suite_name': 'sql_unittests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)sql_unittests<(SHARED_LIB_SUFFIX)',
           },
           'includes': [ '../build/apk_test.gypi' ],
         },

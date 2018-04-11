@@ -16,14 +16,12 @@ namespace content {
 class WebContents;
 }
 
-// Androidimplementation of the website settings UI.
+// Android implementation of the website settings UI.
 class WebsiteSettingsPopupAndroid : public WebsiteSettingsUI {
  public:
-  static void Show(JNIEnv* env,
-                   jobject context,
-                   jobject java_content_view,
-                   content::WebContents* web_contents);
-
+  WebsiteSettingsPopupAndroid(JNIEnv* env,
+                              jobject java_website_settings,
+                              content::WebContents* web_contents);
   virtual ~WebsiteSettingsPopupAndroid();
   void Destroy(JNIEnv* env, jobject obj);
 
@@ -32,17 +30,12 @@ class WebsiteSettingsPopupAndroid : public WebsiteSettingsUI {
   virtual void SetPermissionInfo(
       const PermissionInfoList& permission_info_list) OVERRIDE;
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) OVERRIDE;
-  virtual void SetFirstVisit(const string16& first_visit) OVERRIDE;
+  virtual void SetFirstVisit(const base::string16& first_visit) OVERRIDE;
   virtual void SetSelectedTab(WebsiteSettingsUI::TabId tab_id) OVERRIDE;
 
   static bool RegisterWebsiteSettingsPopupAndroid(JNIEnv* env);
 
  private:
-  WebsiteSettingsPopupAndroid(JNIEnv* env,
-                              jobject context,
-                              jobject java_content_view,
-                              content::WebContents* web_contents);
-
   // The presenter that controlls the Website Settings UI.
   scoped_ptr<WebsiteSettings> presenter_;
 

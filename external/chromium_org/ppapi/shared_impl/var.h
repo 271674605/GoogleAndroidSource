@@ -10,7 +10,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/shared_memory.h"
-#include "base/platform_file.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
@@ -22,6 +21,7 @@ class ArrayVar;
 class DictionaryVar;
 class NPObjectVar;
 class ProxyObjectVar;
+class ResourceVar;
 class StringVar;
 class VarTracker;
 
@@ -30,8 +30,6 @@ class VarTracker;
 // Represents a non-POD var.
 class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
  public:
-  virtual ~Var();
-
   // Returns a string representing the given var for logging purposes.
   static std::string PPVarToLogString(PP_Var var);
 
@@ -41,6 +39,7 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   virtual ProxyObjectVar* AsProxyObjectVar();
   virtual ArrayVar* AsArrayVar();
   virtual DictionaryVar* AsDictionaryVar();
+  virtual ResourceVar* AsResourceVar();
 
   // Creates a PP_Var corresponding to this object. The return value will have
   // one reference addrefed on behalf of the caller.
@@ -58,9 +57,11 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   int32 GetExistingVarID() const;
 
  protected:
+  friend class base::RefCounted<Var>;
   friend class VarTracker;
 
   Var();
+  virtual ~Var();
 
   // Returns the unique ID associated with this string or object, creating it
   // if necessary. The return value will be 0 if the string or object is
@@ -170,10 +171,9 @@ class PPAPI_SHARED_EXPORT ArrayBufferVar : public Var {
   //
   // Returns true if creating the shared memory (and copying) is successful,
   // false otherwise.
-  virtual bool CopyToNewShmem(
-      PP_Instance instance,
-      int *host_shm_handle_id,
-      base::SharedMemoryHandle *plugin_shm_handle) = 0;
+  virtual bool CopyToNewShmem(PP_Instance instance,
+                              int* host_shm_handle_id,
+                              base::SharedMemoryHandle* plugin_shm_handle) = 0;
 
   // Var override.
   virtual ArrayBufferVar* AsArrayBufferVar() OVERRIDE;

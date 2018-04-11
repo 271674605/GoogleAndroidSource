@@ -56,10 +56,12 @@ class NET_EXPORT DatagramServerSocket : public DatagramSocket {
                      const CompletionCallback& callback) = 0;
 
   // Set the receive buffer size (in bytes) for the socket.
-  virtual bool SetReceiveBufferSize(int32 size) = 0;
+  // Returns a net error code.
+  virtual int SetReceiveBufferSize(int32 size) = 0;
 
   // Set the send buffer size (in bytes) for the socket.
-  virtual bool SetSendBufferSize(int32 size) = 0;
+  // Returns a net error code.
+  virtual int SetSendBufferSize(int32 size) = 0;
 
   // Allow the socket to share the local address to which the socket will
   // be bound with other processes. Should be called before Listen().
@@ -80,6 +82,12 @@ class NET_EXPORT DatagramServerSocket : public DatagramSocket {
   // Returns a network error code.
   virtual int LeaveGroup(const IPAddressNumber& group_address) const = 0;
 
+  // Set interface to use for multicast. If |interface_index| set to 0, default
+  // interface is used.
+  // Should be called before Bind().
+  // Returns a network error code.
+  virtual int SetMulticastInterface(uint32 interface_index) = 0;
+
   // Set the time-to-live option for UDP packets sent to the multicast
   // group address. The default value of this option is 1.
   // Cannot be negative or more than 255.
@@ -93,6 +101,13 @@ class NET_EXPORT DatagramServerSocket : public DatagramSocket {
   // Should be called before Bind().
   // Returns a network error code.
   virtual int SetMulticastLoopbackMode(bool loopback) = 0;
+
+  // Set the Differentiated Services Code Point. May do nothing on
+  // some platforms. Returns a network error code.
+  virtual int SetDiffServCodePoint(DiffServCodePoint dscp) = 0;
+
+  // Resets the thread to be used for thread-safety checks.
+  virtual void DetachFromThread() = 0;
 };
 
 }  // namespace net

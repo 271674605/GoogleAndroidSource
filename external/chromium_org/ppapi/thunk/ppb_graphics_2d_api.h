@@ -32,8 +32,6 @@ class PPAPI_THUNK_EXPORT PPB_Graphics2D_API {
                       const PP_Point* amount) = 0;
   virtual void ReplaceContents(PP_Resource image_data) = 0;
   virtual int32_t Flush(scoped_refptr<TrackedCallback> callback) = 0;
-
-  // Dev interface.
   virtual PP_Bool SetScale(float scale) = 0;
   virtual float GetScale() = 0;
 

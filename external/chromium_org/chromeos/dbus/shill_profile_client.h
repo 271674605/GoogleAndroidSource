@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "chromeos/chromeos_export.h"
-#include "chromeos/dbus/dbus_client_implementation_type.h"
+#include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/shill_client_helper.h"
 
 namespace base {
@@ -22,7 +22,6 @@ class DictionaryValue;
 
 namespace dbus {
 
-class Bus;
 class ObjectPath;
 
 }  // namespace dbus
@@ -34,7 +33,7 @@ class ShillPropertyChangedObserver;
 // ShillProfileClient is used to communicate with the Shill Profile
 // service.  All methods should be called from the origin thread which
 // initializes the DBusThreadManager instance.
-class CHROMEOS_EXPORT ShillProfileClient {
+class CHROMEOS_EXPORT ShillProfileClient : public DBusClient {
  public:
   typedef ShillClientHelper::PropertyChangedHandler PropertyChangedHandler;
   typedef ShillClientHelper::DictionaryValueCallbackWithoutStatus
@@ -59,13 +58,30 @@ class CHROMEOS_EXPORT ShillProfileClient {
                           const base::DictionaryValue& properties) = 0;
 
     // Adds a service to the profile, copying properties from the
-    // ShillServiceClient entry (which must be present). Also sets the Profile
-    // property of the service in ShillServiceClient.
+    // ShillServiceClient entry matching |service_path|. Returns false if no
+    // Service entry exists or if a Profile entry already exists. Also sets
+    // the Profile property of the service in ShillServiceClient.
     virtual bool AddService(const std::string& profile_path,
                             const std::string& service_path) = 0;
 
+    // Copies properties from the ShillServiceClient entry matching
+    // |service_path| to the profile entry matching |profile_path|. Returns
+    // false if no Service entry exits or if no Profile entry exists.
+    virtual bool UpdateService(const std::string& profile_path,
+                               const std::string& service_path) = 0;
+
     // Sets |profiles| to the current list of profile paths.
     virtual void GetProfilePaths(std::vector<std::string>* profiles) = 0;
+
+    // Sets |properties| to the entry for |service_path|, sets |profile_path|
+    // to the path of the profile with the entry, and returns true if the
+    // service exists in any profile.
+    virtual bool GetService(const std::string& service_path,
+                            std::string* profile_path,
+                            base::DictionaryValue* properties) = 0;
+
+    // Remove all profile entries.
+    virtual void ClearProfiles() = 0;
 
    protected:
     virtual ~TestInterface() {}
@@ -75,8 +91,10 @@ class CHROMEOS_EXPORT ShillProfileClient {
 
   // Factory function, creates a new instance which is owned by the caller.
   // For normal usage, access the singleton via DBusThreadManager::Get().
-  static ShillProfileClient* Create(DBusClientImplementationType type,
-                                    dbus::Bus* bus);
+  static ShillProfileClient* Create();
+
+  // Returns the shared profile path.
+  static std::string GetSharedProfilePath();
 
   // Adds a property changed |observer| for the profile at |profile_path|.
   virtual void AddPropertyChangedObserver(
@@ -113,6 +131,8 @@ class CHROMEOS_EXPORT ShillProfileClient {
   virtual TestInterface* GetTestInterface() = 0;
 
  protected:
+  friend class ShillProfileClientTest;
+
   // Create() should be used instead.
   ShillProfileClient();
 

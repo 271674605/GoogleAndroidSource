@@ -51,10 +51,15 @@ class HostVarTracker : public ppapi::VarTracker {
 
   // Returns the number of NPObjectVar's associated with the given instance.
   // Returns 0 if the instance isn't known.
-  CONTENT_EXPORT int GetLiveNPObjectVarsForInstance(
-      PP_Instance instance) const;
+  CONTENT_EXPORT int GetLiveNPObjectVarsForInstance(PP_Instance instance) const;
 
   // VarTracker public implementation.
+  virtual PP_Var MakeResourcePPVarFromMessage(
+      PP_Instance instance,
+      const IPC::Message& creation_message,
+      int pending_renderer_id,
+      int pending_browser_id) OVERRIDE;
+  virtual ppapi::ResourceVar* MakeResourceVar(PP_Resource pp_resource) OVERRIDE;
   virtual void DidDeleteInstance(PP_Instance instance) OVERRIDE;
 
   virtual int TrackSharedMemoryHandle(PP_Instance instance,
@@ -67,10 +72,11 @@ class HostVarTracker : public ppapi::VarTracker {
 
  private:
   // VarTracker private implementation.
-  virtual ppapi::ArrayBufferVar* CreateArrayBuffer(
-      uint32 size_in_bytes) OVERRIDE;
+  virtual ppapi::ArrayBufferVar* CreateArrayBuffer(uint32 size_in_bytes)
+      OVERRIDE;
   virtual ppapi::ArrayBufferVar* CreateShmArrayBuffer(
-      uint32 size_in_bytes, base::SharedMemoryHandle handle) OVERRIDE;
+      uint32 size_in_bytes,
+      base::SharedMemoryHandle handle) OVERRIDE;
 
   // Clear the reference count of the given object and remove it from
   // live_vars_.

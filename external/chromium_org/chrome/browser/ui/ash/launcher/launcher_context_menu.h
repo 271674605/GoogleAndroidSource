@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_UI_ASH_LAUNCHER_LAUNCHER_CONTEXT_MENU_H_
 #define CHROME_BROWSER_UI_ASH_LAUNCHER_LAUNCHER_CONTEXT_MENU_H_
 
-#include "ash/launcher/launcher_alignment_menu.h"
-#include "ash/launcher/launcher_types.h"
+#include "ash/shelf/shelf_alignment_menu.h"
+#include "ash/shelf/shelf_item_types.h"
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -14,8 +14,12 @@
 
 class ChromeLauncherController;
 
+namespace ash {
+class ShelfItemDelegate;
+}
+
 namespace aura {
-class RootWindow;
+class Window;
 }
 
 namespace extensions {
@@ -29,23 +33,31 @@ class LauncherContextMenu : public ui::SimpleMenuModel,
   // |item| is NULL if the context menu is for the launcher (the user right
   // |clicked on an area with no icons).
   LauncherContextMenu(ChromeLauncherController* controller,
-                      const ash::LauncherItem* item,
-                      aura::RootWindow* root_window);
+                      const ash::ShelfItem* item,
+                      aura::Window* root_window);
+
+  // Creates a menu used by item created by ShelfWindowWatcher.
+  LauncherContextMenu(ChromeLauncherController* controller,
+                      ash::ShelfItemDelegate* item_delegate,
+                      ash::ShelfItem* item,
+                      aura::Window* root_window);
+
   // Creates a menu used as a desktop context menu on |root_window|.
   LauncherContextMenu(ChromeLauncherController* controller,
-                      aura::RootWindow* root_window);
+                      aura::Window* root_window);
   virtual ~LauncherContextMenu();
 
   void Init();
 
   // ID of the item we're showing the context menu for.
-  ash::LauncherID id() const { return item_.id; }
+  ash::ShelfID id() const { return item_.id; }
 
   // ui::SimpleMenuModel::Delegate overrides:
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
@@ -58,11 +70,15 @@ class LauncherContextMenu : public ui::SimpleMenuModel,
   FRIEND_TEST_ALL_PREFIXES(
       LauncherContextMenuTest,
       NewWindowMenuIsDisabledWhenIncognitoModeForced);
+  FRIEND_TEST_ALL_PREFIXES(
+      LauncherContextMenuTest,
+      AutoHideOptionInMaximizedMode);
 
   enum MenuItem {
     MENU_OPEN_NEW,
     MENU_CLOSE,
     MENU_PIN,
+    MENU_INSTALL,
     LAUNCH_TYPE_PINNED_TAB,
     LAUNCH_TYPE_REGULAR_TAB,
     LAUNCH_TYPE_FULLSCREEN,
@@ -82,13 +98,16 @@ class LauncherContextMenu : public ui::SimpleMenuModel,
 
   ChromeLauncherController* controller_;
 
-  ash::LauncherItem item_;
+  ash::ShelfItem item_;
 
-  ash::LauncherAlignmentMenu launcher_alignment_menu_;
+  ash::ShelfAlignmentMenu shelf_alignment_menu_;
 
   scoped_ptr<extensions::ContextMenuMatcher> extension_items_;
 
-  aura::RootWindow* root_window_;
+  aura::Window* root_window_;
+
+  // Not owned.
+  ash::ShelfItemDelegate* item_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherContextMenu);
 };

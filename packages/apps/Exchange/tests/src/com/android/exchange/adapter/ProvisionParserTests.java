@@ -20,6 +20,7 @@ import com.android.emailcommon.provider.Policy;
 import com.android.exchange.adapter.ProvisionParser;
 
 import android.content.Context;
+import android.test.AndroidTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import java.io.ByteArrayInputStream;
@@ -30,9 +31,12 @@ import java.io.IOException;
  *   runtest -c com.android.exchange.adapter.ProvisionParserTests exchange
  */
 @SmallTest
-public class ProvisionParserTests extends SyncAdapterTestCase {
+public class ProvisionParserTests extends AndroidTestCase {
+    // <Sync><Status>1</Status></Sync>
+    private final byte[] wbxmlBytes = new byte[] {
+        0x03, 0x01, 0x6A, 0x00, 0x45, 0x4E, 0x03, 0x31, 0x00, 0x01, 0x01};
     private final ByteArrayInputStream mTestInputStream =
-        new ByteArrayInputStream("ABCDEFG".getBytes());
+        new ByteArrayInputStream(wbxmlBytes);
 
     // A good sample of an Exchange 2003 (WAP) provisioning document for end-to-end testing
     private String mWapProvisioningDoc1 =

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@ package org.chromium.content.browser;
  * Unless stated otherwise, all coordinates are in CSS (document) coordinate space.
  */
 public class RenderCoordinates {
+
     // Scroll offset from the native in CSS.
     private float mScrollXCss;
     private float mScrollYCss;
@@ -264,11 +265,6 @@ public class RenderCoordinates {
      * @return Current device scale factor (maps DIP pixels to physical pixels).
      */
     public float getDeviceScaleFactor() { return mDeviceScaleFactor; }
-
-    /**
-     * @return True if the page doesn't allow zoom-in/zoom-out.
-     */
-    public boolean hasFixedPageScale() { return mMinPageScaleFactor == mMaxPageScaleFactor; }
 
     /**
      * @return Maximum possible horizontal scroll in physical pixels.

@@ -5,27 +5,29 @@
 #ifndef CHROME_BROWSER_SYNC_FILE_SYSTEM_SYNC_FILE_SYSTEM_SERVICE_H_
 #define CHROME_BROWSER_SYNC_FILE_SYSTEM_SYNC_FILE_SYSTEM_SERVICE_H_
 
-#include <set>
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync_file_system/conflict_resolution_policy.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
-#include "chrome/browser/sync_file_system/local/local_file_sync_service.h"
 #include "chrome/browser/sync_file_system/remote_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_callbacks.h"
 #include "chrome/browser/sync_file_system/sync_service_state.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "chrome/browser/sync_file_system/task_logger.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "url/gurl.h"
 
+class Profile;
 class ProfileSyncServiceBase;
 
 namespace fileapi {
@@ -34,20 +36,24 @@ class FileSystemContext;
 
 namespace sync_file_system {
 
+class LocalFileSyncService;
+class LocalSyncRunner;
+class RemoteSyncRunner;
 class SyncEventObserver;
+class SyncProcessRunner;
 
 class SyncFileSystemService
-    : public BrowserContextKeyedService,
+    : public KeyedService,
       public ProfileSyncServiceObserver,
-      public LocalFileSyncService::Observer,
-      public RemoteFileSyncService::Observer,
       public FileStatusObserver,
       public content::NotificationObserver,
       public base::SupportsWeakPtr<SyncFileSystemService> {
  public:
-  typedef base::Callback<void(const base::ListValue* files)> DumpFilesCallback;
+  typedef base::Callback<void(const base::ListValue&)> DumpFilesCallback;
+  typedef base::Callback<void(const RemoteFileSyncService::OriginStatusMap&)>
+      ExtensionStatusMapCallback;
 
-  // BrowserContextKeyedService overrides.
+  // KeyedService overrides.
   virtual void Shutdown() OVERRIDE;
 
   void InitializeForApp(
@@ -56,8 +62,9 @@ class SyncFileSystemService
       const SyncStatusCallback& callback);
 
   SyncServiceState GetSyncServiceState();
-  void GetExtensionStatusMap(std::map<GURL, std::string>* status_map);
+  void GetExtensionStatusMap(const ExtensionStatusMapCallback& callback);
   void DumpFiles(const GURL& origin, const DumpFilesCallback& callback);
+  void DumpDatabase(const DumpFilesCallback& callback);
 
   // Returns the file |url|'s sync status.
   void GetFileSyncStatus(
@@ -67,13 +74,18 @@ class SyncFileSystemService
   void AddSyncEventObserver(SyncEventObserver* observer);
   void RemoveSyncEventObserver(SyncEventObserver* observer);
 
-  ConflictResolutionPolicy GetConflictResolutionPolicy() const;
-  SyncStatusCode SetConflictResolutionPolicy(ConflictResolutionPolicy policy);
+  LocalChangeProcessor* GetLocalChangeProcessor(const GURL& origin);
+
+  void OnSyncIdle();
+
+  TaskLogger* task_logger() { return &task_logger_; }
 
  private:
   friend class SyncFileSystemServiceFactory;
   friend class SyncFileSystemServiceTest;
   friend struct base::DefaultDeleter<SyncFileSystemService>;
+  friend class LocalSyncRunner;
+  friend class RemoteSyncRunner;
 
   explicit SyncFileSystemService(Profile* profile);
   virtual ~SyncFileSystemService();
@@ -92,40 +104,33 @@ class SyncFileSystemService
   void DidInitializeFileSystemForDump(const GURL& app_origin,
                                       const DumpFilesCallback& callback,
                                       SyncStatusCode status);
+  void DidDumpFiles(const GURL& app_origin,
+                    const DumpFilesCallback& callback,
+                    scoped_ptr<base::ListValue> files);
+
+  void DidDumpDatabase(const DumpFilesCallback& callback,
+                       scoped_ptr<base::ListValue> list);
+  void DidDumpV2Database(const DumpFilesCallback& callback,
+                         scoped_ptr<base::ListValue> v1list,
+                         scoped_ptr<base::ListValue> v2list);
+
+  void DidGetExtensionStatusMap(
+      const ExtensionStatusMapCallback& callback,
+      scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map);
+  void DidGetV2ExtensionStatusMap(
+      const ExtensionStatusMapCallback& callback,
+      scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map_v1,
+      scoped_ptr<RemoteFileSyncService::OriginStatusMap> status_map_v2);
 
   // Overrides sync_enabled_ setting. This should be called only by tests.
   void SetSyncEnabledForTesting(bool enabled);
-
-  // Called when following observer methods are called:
-  // - OnLocalChangeAvailable()
-  // - OnRemoteChangeAvailable()
-  // - OnRemoteServiceStateUpdated()
-  void MaybeStartSync();
-
-  // Called from MaybeStartSync(). (Should not be called from others)
-  void StartRemoteSync();
-  void StartLocalSync();
-
-  // Callbacks for remote/local sync.
-  void DidProcessRemoteChange(SyncStatusCode status,
-                              const fileapi::FileSystemURL& url);
-  void DidProcessLocalChange(SyncStatusCode status,
-                             const fileapi::FileSystemURL& url);
 
   void DidGetLocalChangeStatus(const SyncFileStatusCallback& callback,
                                SyncStatusCode status,
                                bool has_pending_local_changes);
 
-  void OnSyncEnabledForRemoteSync();
-
-  // RemoteFileSyncService::Observer overrides.
-  virtual void OnLocalChangeAvailable(int64 pending_changes) OVERRIDE;
-
-  // LocalFileSyncService::Observer overrides.
-  virtual void OnRemoteChangeQueueUpdated(int64 pending_changes) OVERRIDE;
-  virtual void OnRemoteServiceStateUpdated(
-      RemoteServiceState state,
-      const std::string& description) OVERRIDE;
+  void OnRemoteServiceStateUpdated(RemoteServiceState state,
+                                   const std::string& description);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -155,29 +160,33 @@ class SyncFileSystemService
   // |profile_sync_service| must be non-null.
   void UpdateSyncEnabledStatus(ProfileSyncServiceBase* profile_sync_service);
 
+  // Runs the SyncProcessRunner method of all sync runners (e.g. for Local sync
+  // and Remote sync).
+  void RunForEachSyncRunners(void(SyncProcessRunner::*method)());
+
+  // Returns the appropriate RemoteFileSyncService for the given origin/app.
+  // (crbug.com/324215)
+  RemoteFileSyncService* GetRemoteService(const GURL& origin);
+
   Profile* profile_;
   content::NotificationRegistrar registrar_;
 
-  int64 pending_local_changes_;
-  int64 pending_remote_changes_;
+  scoped_ptr<LocalFileSyncService> local_service_;
+  scoped_ptr<RemoteFileSyncService> remote_service_;
 
-  scoped_ptr<LocalFileSyncService> local_file_service_;
-  scoped_ptr<RemoteFileSyncService> remote_file_service_;
+  // Holds v2 RemoteFileSyncService, gets created lazily
+  // in case we need to run multiple remote services depending on origin/app.
+  // (crbug.com/324215)
+  scoped_ptr<RemoteFileSyncService> v2_remote_service_;
 
-  bool local_sync_running_;
-  bool remote_sync_running_;
-
-  // If a remote sync is returned with SYNC_STATUS_FILE_BUSY we mark this
-  // true and register the busy file URL to wait for a sync enabled event
-  // for the URL. When this flag is set to true it won't be worth trying
-  // another remote sync.
-  bool is_waiting_remote_sync_enabled_;
+  // Holds all SyncProcessRunners.
+  ScopedVector<SyncProcessRunner> local_sync_runners_;
+  ScopedVector<SyncProcessRunner> remote_sync_runners_;
 
   // Indicates if sync is currently enabled or not.
   bool sync_enabled_;
 
-  base::OneShotTimer<SyncFileSystemService> sync_retry_timer_;
-
+  TaskLogger task_logger_;
   ObserverList<SyncEventObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncFileSystemService);

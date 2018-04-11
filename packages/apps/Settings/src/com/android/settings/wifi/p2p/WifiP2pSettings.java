@@ -16,7 +16,6 @@
 
 package com.android.settings.wifi.p2p;
 
-import android.app.ActionBar;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -34,40 +33,32 @@ import android.net.wifi.p2p.WifiP2pDeviceList;
 import android.net.wifi.p2p.WifiP2pGroup;
 import android.net.wifi.p2p.WifiP2pGroupList;
 import android.net.wifi.p2p.WifiP2pManager;
-import android.net.wifi.p2p.WifiP2pManager.GroupInfoListener;
+import android.net.wifi.p2p.WifiP2pManager.PeerListListener;
 import android.net.wifi.p2p.WifiP2pManager.PersistentGroupInfoListener;
 import android.net.wifi.WpsInfo;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.SystemProperties;
 import android.preference.Preference;
-import android.preference.PreferenceActivity;
 import android.preference.PreferenceCategory;
 import android.preference.PreferenceGroup;
 import android.preference.PreferenceScreen;
 import android.text.InputFilter;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.EditText;
-import android.widget.Switch;
 import android.widget.Toast;
 
 import com.android.settings.R;
 import com.android.settings.SettingsPreferenceFragment;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Collection;
-
 /*
  * Displays Wi-fi p2p settings UI
  */
 public class WifiP2pSettings extends SettingsPreferenceFragment
-        implements PersistentGroupInfoListener, GroupInfoListener {
+        implements PersistentGroupInfoListener, PeerListListener {
 
     private static final String TAG = "WifiP2pSettings";
     private static final boolean DBG = false;
@@ -89,7 +80,6 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
     private boolean mWifiP2pEnabled;
     private boolean mWifiP2pSearching;
     private int mConnectedDevices;
-    private WifiP2pGroup mConnectedGroup;
     private boolean mLastGroupFormed = false;
 
     private PreferenceGroup mPeersGroup;
@@ -129,9 +119,6 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
                         WifiP2pManager.EXTRA_NETWORK_INFO);
                 WifiP2pInfo wifip2pinfo = (WifiP2pInfo) intent.getParcelableExtra(
                         WifiP2pManager.EXTRA_WIFI_P2P_INFO);
-                if (mWifiP2pManager != null) {
-                    mWifiP2pManager.requestGroupInfo(mChannel, WifiP2pSettings.this);
-                }
                 if (networkInfo.isConnected()) {
                     if (DBG) Log.d(TAG, "Connected");
                 } else if (mLastGroupFormed != true) {
@@ -298,16 +285,20 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
 
         final PreferenceScreen preferenceScreen = getPreferenceScreen();
         preferenceScreen.removeAll();
-
         preferenceScreen.setOrderingAsAdded(true);
+
         mThisDevicePref = new Preference(getActivity());
+        mThisDevicePref.setPersistent(false);
+        mThisDevicePref.setSelectable(false);
         preferenceScreen.addPreference(mThisDevicePref);
 
         mPeersGroup = new PreferenceCategory(getActivity());
         mPeersGroup.setTitle(R.string.wifi_p2p_peer_devices);
+        preferenceScreen.addPreference(mPeersGroup);
 
         mPersistentGroup = new PreferenceCategory(getActivity());
         mPersistentGroup.setTitle(R.string.wifi_p2p_remembered_groups);
+        preferenceScreen.addPreference(mPersistentGroup);
 
         super.onActivityCreated(savedInstanceState);
     }
@@ -316,12 +307,17 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
     public void onResume() {
         super.onResume();
         getActivity().registerReceiver(mReceiver, mIntentFilter);
+        if (mWifiP2pManager != null) {
+            mWifiP2pManager.requestPeers(mChannel, WifiP2pSettings.this);
+        }
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        mWifiP2pManager.stopPeerDiscovery(mChannel, null);
+        if (mWifiP2pManager != null) {
+            mWifiP2pManager.stopPeerDiscovery(mChannel, null);
+        }
         getActivity().unregisterReceiver(mReceiver);
     }
 
@@ -506,6 +502,7 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
         if (DBG) Log.d(TAG, " mConnectedDevices " + mConnectedDevices);
     }
 
+    @Override
     public void onPersistentGroupInfoAvailable(WifiP2pGroupList groups) {
         mPersistentGroup.removeAll();
 
@@ -528,27 +525,18 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
         }
     }
 
-    public void onGroupInfoAvailable(WifiP2pGroup group) {
-        if (DBG) Log.d(TAG, " group " + group);
-        mConnectedGroup = group;
-        updateDevicePref();
+    @Override
+    public void onPeersAvailable(WifiP2pDeviceList peers) {
+        if (DBG) Log.d(TAG, "Requested peers are available");
+        mPeers = peers;
+        handlePeersChanged();
     }
 
     private void handleP2pStateChanged() {
         updateSearchMenu(false);
-        if (mWifiP2pEnabled) {
-            final PreferenceScreen preferenceScreen = getPreferenceScreen();
-            preferenceScreen.removeAll();
-
-            preferenceScreen.setOrderingAsAdded(true);
-            preferenceScreen.addPreference(mThisDevicePref);
-
-            mPeersGroup.setEnabled(true);
-            preferenceScreen.addPreference(mPeersGroup);
-
-            mPersistentGroup.setEnabled(true);
-            preferenceScreen.addPreference(mPersistentGroup);
-        }
+        mThisDevicePref.setEnabled(mWifiP2pEnabled);
+        mPeersGroup.setEnabled(mWifiP2pEnabled);
+        mPersistentGroup.setEnabled(mWifiP2pEnabled);
     }
 
     private void updateSearchMenu(boolean searching) {
@@ -576,10 +564,6 @@ public class WifiP2pSettings extends SettingsPreferenceFragment
             } else {
                 mThisDevicePref.setTitle(mThisDevice.deviceName);
             }
-
-            mThisDevicePref.setPersistent(false);
-            mThisDevicePref.setEnabled(true);
-            mThisDevicePref.setSelectable(false);
         }
     }
 }

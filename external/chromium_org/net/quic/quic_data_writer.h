@@ -43,8 +43,12 @@ class NET_EXPORT_PRIVATE QuicDataWriter {
   bool WriteUInt32(uint32 value);
   bool WriteUInt48(uint64 value);
   bool WriteUInt64(uint64 value);
-  bool WriteUInt128(uint128 value);
+  // Write unsigned floating point corresponding to the value. Large values are
+  // clamped to the maximum representable (kUFloat16MaxValue). Values that can
+  // not be represented directly are rounded down.
+  bool WriteUFloat16(uint64 value);
   bool WriteStringPiece16(base::StringPiece val);
+  bool WriteIOVector(const IOVector& data);
   bool WriteBytes(const void* data, size_t data_len);
   bool WriteRepeatedByte(uint8 byte, size_t count);
   // Fills the remaining buffer with null characters.
@@ -61,9 +65,6 @@ class NET_EXPORT_PRIVATE QuicDataWriter {
     return capacity_;
   }
 
- protected:
-  const char* end_of_payload() const { return buffer_ + length_; }
-
  private:
   // Returns the location that the data should be written at, or NULL if there
   // is not enough room. Call EndWrite with the returned offset and the given
@@ -73,6 +74,8 @@ class NET_EXPORT_PRIVATE QuicDataWriter {
   char* buffer_;
   size_t capacity_;  // Allocation size of payload (or -1 if buffer is const).
   size_t length_;    // Current length of the buffer.
+
+  DISALLOW_COPY_AND_ASSIGN(QuicDataWriter);
 };
 
 }  // namespace net

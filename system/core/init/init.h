@@ -29,10 +29,14 @@ struct command
     struct listnode clist;
 
     int (*func)(int nargs, char **args);
+
+    int line;
+    const char *filename;
+
     int nargs;
     char *args[1];
 };
-    
+
 struct action {
         /* node in list of all actions */
     struct listnode alist;
@@ -43,7 +47,7 @@ struct action {
 
     unsigned hash;
     const char *name;
-    
+
     struct listnode commands;
     struct command *current;
 };
@@ -55,6 +59,7 @@ struct socketinfo {
     uid_t uid;
     gid_t gid;
     int perm;
+    const char *socketcon;
 };
 
 struct svcenvinfo {
@@ -73,6 +78,7 @@ struct svcenvinfo {
                                  so it can be restarted with its class */
 #define SVC_RC_DISABLED 0x80  /* Remember if the disabled flag was set in the rc script */
 #define SVC_RESTART     0x100 /* Use to safely restart (stop, wait, start) a service */
+#define SVC_DISABLED_START 0x200 /* a start was requested but it was disabled at the time */
 
 #define NR_SVC_SUPP_GIDS 12    /* twelve supplementary groups */
 
@@ -131,10 +137,6 @@ void service_reset(struct service *svc);
 void service_restart(struct service *svc);
 void service_start(struct service *svc, const char *dynamic_args);
 void property_changed(const char *name, const char *value);
-
-#define INIT_IMAGE_FILE	"/initlogo.rle"
-
-int load_565rle_image( char *file_name );
 
 extern struct selabel_handle *sehandle;
 extern struct selabel_handle *sehandle_prop;

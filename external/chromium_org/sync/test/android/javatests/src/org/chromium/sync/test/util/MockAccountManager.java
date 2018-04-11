@@ -22,7 +22,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 
-import org.chromium.base.ThreadUtils;
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
+
 import org.chromium.sync.signin.AccountManagerDelegate;
 import org.chromium.sync.signin.AccountManagerHelper;
 
@@ -66,7 +67,7 @@ public class MockAccountManager implements AccountManagerDelegate {
 
     private static final String TAG = "MockAccountManager";
 
-    private static final int WAIT_TIME_FOR_GRANT_BROADCAST_MS = 20000;
+    private static final long WAIT_TIME_FOR_GRANT_BROADCAST_MS = scaleTimeout(20000);
 
     static final String MUTEX_WAIT_ACTION =
             "org.chromium.sync.test.util.MockAccountManager.MUTEX_WAIT_ACTION";
@@ -88,7 +89,7 @@ public class MockAccountManager implements AccountManagerDelegate {
         // The manifest that is backing testContext needs to provide the
         // MockGrantCredentialsPermissionActivity.
         mTestContext = testContext;
-        mMainHandler = new Handler(ThreadUtils.getUiThreadLooper());
+        mMainHandler = new Handler(mContext.getMainLooper());
         mExecutor = new SingleThreadedExecutor();
         mAccounts = new HashSet<AccountHolder>();
         mAccountPermissionPreparations = new LinkedList<AccountAuthTokenPreparation>();
@@ -112,7 +113,7 @@ public class MockAccountManager implements AccountManagerDelegate {
 
     @Override
     public Account[] getAccountsByType(@Nullable String type) {
-        if(!AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(type)) {
+        if (!AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(type)) {
             throw new IllegalArgumentException("Invalid account type: " + type);
         }
         if (mAccounts == null) {
@@ -136,6 +137,12 @@ public class MockAccountManager implements AccountManagerDelegate {
 
     public boolean addAccountHolderExplicitly(AccountHolder accountHolder) {
         boolean result = mAccounts.add(accountHolder);
+        postAsyncAccountChangedEvent();
+        return result;
+    }
+
+    public boolean removeAccountHolderExplicitly(AccountHolder accountHolder) {
+        boolean result = mAccounts.remove(accountHolder);
         postAsyncAccountChangedEvent();
         return result;
     }
@@ -286,7 +293,7 @@ public class MockAccountManager implements AccountManagerDelegate {
 
     @Override
     public void invalidateAuthToken(String accountType, String authToken) {
-        if(!AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(accountType)) {
+        if (!AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(accountType)) {
             throw new IllegalArgumentException("Invalid account type: " + accountType);
         }
         if (authToken == null) {

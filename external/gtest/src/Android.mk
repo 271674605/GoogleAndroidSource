@@ -29,12 +29,15 @@
 LOCAL_PATH := $(call my-dir)
 
 libgtest_target_includes := \
-    $(LOCAL_PATH)/.. \
-    $(LOCAL_PATH)/../include
+  $(LOCAL_PATH)/.. \
+  $(LOCAL_PATH)/../include \
 
 libgtest_host_includes := \
   $(LOCAL_PATH)/.. \
-  $(LOCAL_PATH)/../include
+  $(LOCAL_PATH)/../include \
+
+libgtest_cflags := \
+  -Wno-missing-field-initializers \
 
 #######################################################################
 # gtest lib host
@@ -42,14 +45,11 @@ libgtest_host_includes := \
 include $(CLEAR_VARS)
 
 LOCAL_CPP_EXTENSION := .cc
-
 LOCAL_SRC_FILES := gtest-all.cc
-
 LOCAL_C_INCLUDES := $(libgtest_host_includes)
-
-LOCAL_CFLAGS += -O0
-
+LOCAL_CFLAGS += $(libgtest_cflags)
 LOCAL_MODULE := libgtest_host
+LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_STATIC_LIBRARY)
 
@@ -59,14 +59,11 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_CPP_EXTENSION := .cc
-
 LOCAL_SRC_FILES := gtest_main.cc
-
 LOCAL_C_INCLUDES := $(libgtest_host_includes)
-
-LOCAL_CFLAGS += -O0
-
+LOCAL_CFLAGS += $(libgtest_cflags)
 LOCAL_MODULE := libgtest_main_host
+LOCAL_MULTILIB := both
 
 include $(BUILD_HOST_STATIC_LIBRARY)
 
@@ -75,21 +72,13 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
-ifeq ($(TARGET_ARCH), arm)
-   LOCAL_SDK_VERSION := 8
-else
-# NDK support of other archs (ie. x86 and mips) are only available after android-9
-   LOCAL_SDK_VERSION := 9
-endif
-
+LOCAL_SDK_VERSION := 9
 LOCAL_NDK_STL_VARIANT := stlport_static
 
 LOCAL_CPP_EXTENSION := .cc
-
 LOCAL_SRC_FILES := gtest-all.cc
-
 LOCAL_C_INCLUDES := $(libgtest_target_includes)
-
+LOCAL_CFLAGS += $(libgtest_cflags)
 LOCAL_MODULE := libgtest
 
 include $(BUILD_STATIC_LIBRARY)
@@ -99,21 +88,81 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
-ifeq ($(TARGET_ARCH), arm)
-   LOCAL_SDK_VERSION := 8
-else
-# NDK support of other archs (ie. x86 and mips) are only available after android-9
-   LOCAL_SDK_VERSION := 9
-endif
-
+LOCAL_SDK_VERSION := 9
 LOCAL_NDK_STL_VARIANT := stlport_static
 
 LOCAL_CPP_EXTENSION := .cc
-
 LOCAL_SRC_FILES := gtest_main.cc
-
 LOCAL_C_INCLUDES := $(libgtest_target_includes)
-
+LOCAL_CFLAGS += $(libgtest_cflags)
 LOCAL_MODULE := libgtest_main
 
 include $(BUILD_STATIC_LIBRARY)
+
+# Don't build for unbundled branches
+ifeq (,$(TARGET_BUILD_APPS))
+#######################################################################
+# libc++
+
+#######################################################################
+# gtest lib host
+
+include $(CLEAR_VARS)
+
+LOCAL_CLANG := true
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_SRC_FILES := gtest-all.cc
+LOCAL_C_INCLUDES := $(libgtest_host_includes)
+LOCAL_CFLAGS += $(libgtest_cflags)
+LOCAL_MODULE := libgtest_libc++_host
+LOCAL_MULTILIB := both
+
+include external/libcxx/libcxx.mk
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+#######################################################################
+# gtest_main lib host
+
+include $(CLEAR_VARS)
+
+LOCAL_CLANG := true
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_SRC_FILES := gtest_main.cc
+LOCAL_C_INCLUDES := $(libgtest_host_includes)
+LOCAL_CFLAGS += $(libgtest_cflags)
+LOCAL_MODULE := libgtest_main_libc++_host
+LOCAL_MULTILIB := both
+
+include external/libcxx/libcxx.mk
+include $(BUILD_HOST_STATIC_LIBRARY)
+
+#######################################################################
+# gtest lib target
+
+include $(CLEAR_VARS)
+
+LOCAL_CLANG := true
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_SRC_FILES := gtest-all.cc
+LOCAL_C_INCLUDES := $(libgtest_target_includes)
+LOCAL_CFLAGS += $(libgtest_cflags)
+LOCAL_MODULE := libgtest_libc++
+
+include external/libcxx/libcxx.mk
+include $(BUILD_STATIC_LIBRARY)
+
+#######################################################################
+# gtest_main lib target
+
+include $(CLEAR_VARS)
+
+LOCAL_CLANG := true
+LOCAL_CPP_EXTENSION := .cc
+LOCAL_SRC_FILES := gtest_main.cc
+LOCAL_C_INCLUDES := $(libgtest_target_includes)
+LOCAL_CFLAGS += $(libgtest_cflags)
+LOCAL_MODULE := libgtest_main_libc++
+
+include external/libcxx/libcxx.mk
+include $(BUILD_STATIC_LIBRARY)
+endif

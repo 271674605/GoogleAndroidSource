@@ -1,23 +1,32 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
+from telemetry.page import profile_creator
 
-from telemetry.core import profile_creator
-from telemetry.page import page_set
+import page_sets
+
 
 class SmallProfileCreator(profile_creator.ProfileCreator):
   """
   Runs a browser through a series of operations to fill in a small test profile.
   """
 
-  def CreateProfile(self):
-    top_25 = os.path.join(os.path.dirname(__file__),
-                          '..', 'page_sets', 'top_25.json')
-    pages_to_load = page_set.PageSet.FromFile(top_25)
-    tab = self._browser.tabs[0]
-    for page in pages_to_load:
-      tab.Navigate(page.url)
-      tab.WaitForDocumentReadyStateToBeComplete()
-    tab.Disconnect()
+  def __init__(self):
+    super(SmallProfileCreator, self).__init__()
+    self._page_set = page_sets.Typical25PageSet()
+
+    # Open all links in the same tab save for the last _NUM_TABS links which
+    # are each opened in a new tab.
+    self._NUM_TABS = 5
+
+  def TabForPage(self, page, browser):
+    idx = page.page_set.pages.index(page)
+    # The last _NUM_TABS pages open a new tab.
+    if idx <= (len(page.page_set.pages) - self._NUM_TABS):
+      return browser.tabs[0]
+    else:
+      return browser.tabs.New()
+
+  def MeasurePage(self, _, tab, results):
+    tab.WaitForDocumentReadyStateToBeComplete()

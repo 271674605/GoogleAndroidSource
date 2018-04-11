@@ -21,7 +21,11 @@ LOCAL_MODULE_TAGS := optional
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_SRC_FILES := $(call all-java-files-under, src)
+LOCAL_MULTILIB := both
+
+LOCAL_SRC_FILES := $(call all-java-files-under, src) $(call all-Iaidl-files-under, src)
+
+LOCAL_STATIC_JAVA_LIBRARIES := cts-sensors-tests ctstestrunner
 
 LOCAL_PACKAGE_NAME := CtsVerifier
 
@@ -39,7 +43,7 @@ include $(BUILD_PACKAGE)
 # Builds and launches CTS Verifier on a device.
 .PHONY: cts-verifier
 cts-verifier: CtsVerifier adb
-	adb install -r $(PRODUCT_OUT)/data/app/CtsVerifier.apk \
+	adb install -r $(PRODUCT_OUT)/data/app/CtsVerifier/CtsVerifier.apk \
 		&& adb shell "am start -n com.android.cts.verifier/.CtsVerifierActivity"
 
 #
@@ -56,6 +60,19 @@ verifier-dir-name := android-cts-verifier
 verifier-dir := $(cts-dir)/$(verifier-dir-name)
 verifier-zip-name := $(verifier-dir-name).zip
 verifier-zip := $(cts-dir)/$(verifier-zip-name)
+
+# turned off sensor power tests in initial L release
+#$(PRODUCT_OUT)/data/app/CtsVerifier.apk $(verifier-zip): $(verifier-dir)/power/execute_power_tests.py
+#$(PRODUCT_OUT)/data/app/CtsVerifier.apk $(verifier-zip): $(verifier-dir)/power/power_monitors/monsoon.py
+
+# Copy the necessary host-side scripts to include in the zip file:
+#$(verifier-dir)/power/power_monitors/monsoon.py: cts/apps/CtsVerifier/assets/scripts/power_monitors/monsoon.py | $(ACP)
+#	$(hide) mkdir -p $(verifier-dir)/power/power_monitors
+#	$(hide) $(ACP) -fp cts/apps/CtsVerifier/assets/scripts/power_monitors/*.py $(verifier-dir)/power/power_monitors/.
+#
+#$(verifier-dir)/power/execute_power_tests.py: cts/apps/CtsVerifier/assets/scripts/execute_power_tests.py | $(ACP)
+#	$(hide) mkdir -p $(verifier-dir)/power
+#	$(hide) $(ACP) -fp cts/apps/CtsVerifier/assets/scripts/execute_power_tests.py $@
 
 cts : $(verifier-zip)
 ifeq ($(HOST_OS),linux)

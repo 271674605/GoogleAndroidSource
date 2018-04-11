@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -204,8 +204,9 @@ BOOLEAN nfa_dm_is_protocol_supported (tNFC_PROTOCOL protocol, UINT8 sel_res)
 *******************************************************************************/
 BOOLEAN nfa_dm_is_active (void)
 {
+    NFA_TRACE_DEBUG1 ("nfa_dm_is_active () flags:0x%x", nfa_dm_cb.flags);
     if (  (nfa_dm_cb.flags  & NFA_DM_FLAGS_DM_IS_ACTIVE)
-        &&((nfa_dm_cb.flags & (NFA_DM_FLAGS_ENABLE_EVT_PEND | NFA_DM_FLAGS_NFCC_IS_RESTORING)) == 0)  )
+        &&((nfa_dm_cb.flags & (NFA_DM_FLAGS_ENABLE_EVT_PEND | NFA_DM_FLAGS_NFCC_IS_RESTORING | NFA_DM_FLAGS_POWER_OFF_SLEEP)) == 0)  )
     {
         return TRUE;
     }

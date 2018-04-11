@@ -22,12 +22,14 @@ import com.android.dex.ClassDef;
 import com.android.dex.Code;
 import com.android.dex.Dex;
 import com.android.dex.DexException;
+import com.android.dex.DexIndexOverflowException;
 import com.android.dex.FieldId;
 import com.android.dex.MethodId;
 import com.android.dex.ProtoId;
 import com.android.dex.SizeOf;
 import com.android.dex.TableOfContents;
 import com.android.dex.TypeList;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -408,7 +410,7 @@ public final class DexMerger {
 
             @Override void updateIndex(int offset, IndexMap indexMap, int oldIndex, int newIndex) {
                 if (newIndex < 0 || newIndex > 0xffff) {
-                    throw new IllegalArgumentException("type ID not in [0, 0xffff]: " + newIndex);
+                    throw new DexIndexOverflowException("type ID not in [0, 0xffff]: " + newIndex);
                 }
                 indexMap.typeIds[oldIndex] = (short) newIndex;
             }
@@ -451,7 +453,7 @@ public final class DexMerger {
 
             @Override void updateIndex(int offset, IndexMap indexMap, int oldIndex, int newIndex) {
                 if (newIndex < 0 || newIndex > 0xffff) {
-                    throw new IllegalArgumentException("proto ID not in [0, 0xffff]: " + newIndex);
+                    throw new DexIndexOverflowException("proto ID not in [0, 0xffff]: " + newIndex);
                 }
                 indexMap.protoIds[oldIndex] = (short) newIndex;
             }
@@ -474,7 +476,7 @@ public final class DexMerger {
 
             @Override void updateIndex(int offset, IndexMap indexMap, int oldIndex, int newIndex) {
                 if (newIndex < 0 || newIndex > 0xffff) {
-                    throw new IllegalArgumentException("field ID not in [0, 0xffff]: " + newIndex);
+                    throw new DexIndexOverflowException("field ID not in [0, 0xffff]: " + newIndex);
                 }
                 indexMap.fieldIds[oldIndex] = (short) newIndex;
             }
@@ -497,7 +499,8 @@ public final class DexMerger {
 
             @Override void updateIndex(int offset, IndexMap indexMap, int oldIndex, int newIndex) {
                 if (newIndex < 0 || newIndex > 0xffff) {
-                    throw new IllegalArgumentException("method ID not in [0, 0xffff]: " + newIndex);
+                    throw new DexIndexOverflowException(
+                        "method ID not in [0, 0xffff]: " + newIndex);
                 }
                 indexMap.methodIds[oldIndex] = (short) newIndex;
             }
@@ -1049,7 +1052,12 @@ public final class DexMerger {
                     + contents.methodIds.size * SizeOf.MEMBER_ID_ITEM
                     + contents.classDefs.size * SizeOf.CLASS_DEF_ITEM;
             mapList = SizeOf.UINT + (contents.sections.length * SizeOf.MAP_ITEM);
-            typeList += contents.typeLists.byteCount;
+            typeList += fourByteAlign(contents.typeLists.byteCount); // We count each dex's
+            // typelists section as realigned on 4 bytes, because each typelist of each dex's
+            // typelists section is aligned on 4 bytes. If we didn't, there is a case where each
+            // size of both dex's typelists section is a multiple of 2 but not a multiple of 4,
+            // and the sum of both sizes is a multiple of 4 but would not be sufficient to write
+            // each typelist aligned on 4 bytes.
             stringData += contents.stringDatas.byteCount;
             annotationsDirectory += contents.annotationsDirectories.byteCount;
             annotationsSet += contents.annotationSets.byteCount;

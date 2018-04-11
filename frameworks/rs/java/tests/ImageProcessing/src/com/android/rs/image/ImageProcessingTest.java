@@ -303,8 +303,8 @@ public class ImageProcessingTest extends ActivityInstrumentationTestCase2<ImageP
     // Test case 27: Mandelbrot
     @LargeTest
     public void testMandelbrot() {
-        TestAction ta = new TestAction(TestName.MANDELBROT);
-        runTest(ta, TestName.MANDELBROT.name());
+        TestAction ta = new TestAction(TestName.MANDELBROT_FLOAT);
+        runTest(ta, TestName.MANDELBROT_FLOAT.name());
     }
 
     // Test case 28: Intrinsics Blend
@@ -375,5 +375,33 @@ public class ImageProcessingTest extends ActivityInstrumentationTestCase2<ImageP
     public void testColorCube3DIntrinsic() {
         TestAction ta = new TestAction(TestName.COLOR_CUBE_3D_INTRINSIC);
         runTest(ta, TestName.COLOR_CUBE_3D_INTRINSIC.name());
+    }
+
+    // Test case 38: Usage io
+    @LargeTest
+    public void testUsageIO() {
+        TestAction ta = new TestAction(TestName.USAGE_IO);
+        runTest(ta, TestName.USAGE_IO.name());
+    }
+
+    // Test case 39: Artistic 1
+    @LargeTest
+    public void testArtistic1() {
+        TestAction ta = new TestAction(TestName.ARTISTIC_1);
+        runTest(ta, TestName.ARTISTIC_1.name());
+    }
+
+    // Test case 40 Histogram
+    @LargeTest
+    public void testHistogram() {
+        TestAction ta = new TestAction(TestName.HISTOGRAM);
+        runTest(ta, TestName.HISTOGRAM.name());
+    }
+
+    // Test case 41: Mandelbrot fp64
+    @LargeTest
+    public void testMandelbrotfp64() {
+        TestAction ta = new TestAction(TestName.MANDELBROT_DOUBLE);
+        runTest(ta, TestName.MANDELBROT_DOUBLE.name());
     }
 }

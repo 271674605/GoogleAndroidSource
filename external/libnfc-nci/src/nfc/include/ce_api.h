@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -87,6 +87,7 @@ typedef void (tCE_CBACK) (tCE_EVENT event, tCE_DATA *p_data);
 /* T4T definitions */
 typedef UINT8 tCE_T4T_AID_HANDLE;           /* Handle for AID registration  */
 #define CE_T4T_AID_HANDLE_INVALID   0xFF    /* Invalid tCE_T4T_AID_HANDLE               */
+#define CE_T4T_WILDCARD_AID_HANDLE  (CE_T4T_MAX_REG_AID)    /* reserved handle for wildcard aid */
 
 /*******************************************************************************
 **

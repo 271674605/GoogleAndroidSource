@@ -258,13 +258,14 @@ install_host_gdb ()
             # ${DSTDIR}/bin/$(bh_tag_to_config_triplet $2)-gdb.exe (2) because
             # the final layout is to (1) which is a folder deeper than (2).
             # Sample (1):
-            #  $NDK/gdb-arm-linux-androideabi-7.6/prebuilt/windows/bin/arm-linux-androideabi-gdb.exe
+            #  $NDK/gdb-arm-linux-androideabi-4.8/prebuilt/windows/bin/arm-linux-androideabi-gdb.exe
             # Sample (2):
-            #  $NDK/toolchains/arm-linux-androideabi-4.7/prebuilt/windows/bin/arm-linux-androideabi-gdb.exe
+            #  $NDK/toolchains/arm-linux-androideabi-4.8/prebuilt/windows/bin/arm-linux-androideabi-gdb.exe
             run $NDK_BUILDTOOLS_PATH/build-gdb-stub.sh \
                 --gdb-executable-path=${DSTDIR}/bin/$(bh_tag_to_config_triplet $2)-gdb.exe \
                 --python-prefix-dir=${PYDIR} \
                 --mingw-w64-gcc=${GCC_FOR_STUB}
+            fail_panic "Failed to build gdb-sutb"
             ;;
         *)
             ;;

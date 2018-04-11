@@ -7,7 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 #include <mcld/GeneralOptions.h>
-#include <mcld/MC/MCLDInput.h>
+#include <mcld/MC/Input.h>
+#include <mcld/MC/ZOption.h>
+#include <cassert>
 
 using namespace mcld;
 
@@ -15,19 +17,18 @@ using namespace mcld;
 // GeneralOptions
 //===----------------------------------------------------------------------===//
 GeneralOptions::GeneralOptions()
-  : m_pDefaultBitcode(NULL),
-    m_Verbose(-1),
+  : m_Verbose(-1),
     m_MaxErrorNum(-1),
     m_MaxWarnNum(-1),
     m_ExecStack(Unknown),
+    m_NoUndefined(Unknown),
+    m_MulDefs(Unknown),
     m_CommPageSize(0x0),
     m_MaxPageSize(0x0),
     m_bCombReloc(true),
-    m_bNoUndefined(false),
     m_bInitFirst(false),
     m_bInterPose(false),
     m_bLoadFltr(false),
-    m_bMulDefs(false),
     m_bNoCopyReloc(false),
     m_bNoDefaultLib(false),
     m_bNoDelete(false),
@@ -52,26 +53,19 @@ GeneralOptions::GeneralOptions()
     m_bFatalWarnings(false),
     m_bNewDTags(false),
     m_bNoStdlib(false),
+    m_bWarnMismatch(true),
+    m_bGCSections(false),
+    m_bPrintGCSections(false),
+    m_bGenUnwindInfo(true),
+    m_bPrintICFSections(false),
+    m_ICF(ICF_None),
+    m_ICFIterations(0) ,
     m_GPSize(8),
     m_StripSymbols(KeepAllSymbols),
     m_HashStyle(SystemV) {
 }
 
 GeneralOptions::~GeneralOptions()
-{
-}
-
-bool GeneralOptions::hasDefaultLDScript() const
-{
-  return true;
-}
-
-const char* GeneralOptions::defaultLDScript() const
-{
-  return NULL;
-}
-
-void GeneralOptions::setDefaultLDScript(const std::string& pFilename)
 {
 }
 
@@ -94,7 +88,7 @@ void GeneralOptions::addZOption(const ZOption& pOption)
       m_bCombReloc = false;
       break;
     case ZOption::Defs:
-      m_bNoUndefined = true;
+      m_NoUndefined = YES;
       break;
     case ZOption::ExecStack:
       m_ExecStack = YES;
@@ -112,7 +106,7 @@ void GeneralOptions::addZOption(const ZOption& pOption)
       m_bLoadFltr = true;
       break;
     case ZOption::MulDefs:
-      m_bMulDefs = true;
+      m_MulDefs = YES;
       break;
     case ZOption::NoCopyReloc:
       m_bNoCopyReloc = true;
@@ -155,4 +149,27 @@ void GeneralOptions::addZOption(const ZOption& pOption)
       assert(false && "Not a recognized -z option.");
       break;
   }
+}
+
+bool GeneralOptions::isInExcludeLIBS(const Input& pInput) const
+{
+  assert(pInput.type() == Input::Archive);
+
+  if (m_ExcludeLIBS.empty()) {
+    return false;
+  }
+
+  // Specifying "--exclude-libs ALL" excludes symbols in all archive libraries
+  // from automatic export.
+  if (m_ExcludeLIBS.count("ALL") != 0) {
+    return true;
+  }
+
+  std::string name(pInput.name());
+  name.append(".a");
+  if (m_ExcludeLIBS.count(name) != 0) {
+    return true;
+  }
+
+  return false;
 }

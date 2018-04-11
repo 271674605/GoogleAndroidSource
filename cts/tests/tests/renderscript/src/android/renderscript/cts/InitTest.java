@@ -19,7 +19,6 @@ package android.renderscript.cts;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.RSRuntimeException;
-import com.android.cts.stub.R;
 
 public class InitTest extends RSBaseCompute {
     private Allocation mIn;
@@ -32,7 +31,7 @@ public class InitTest extends RSBaseCompute {
     }
 
     public void testInitTest() {
-        script = new ScriptC_init_test(mRS, mRes, R.raw.init_test);
+        script = new ScriptC_init_test(mRS);
         float[] ref = new float[INPUTSIZE];
         float[] in = new float[INPUTSIZE];
         float[] out = new float[INPUTSIZE];
@@ -46,7 +45,7 @@ public class InitTest extends RSBaseCompute {
         mIn.copy1DRangeFrom(0, INPUTSIZE, in);
 
         try {
-            RSUtils.forEach(this, 0, mIn, mOut);
+            forEach(0, mIn, mOut);
         } catch (RSRuntimeException e) {
         }
         mOut.copyTo(out);

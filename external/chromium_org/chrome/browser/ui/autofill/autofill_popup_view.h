@@ -23,9 +23,6 @@ class AutofillPopupController;
 // AutofillPopupView.
 class AutofillPopupView {
  public:
-  // The size of the border around the entire results popup, in pixels.
-  static const int kBorderThickness = 1;
-
   // The minimum amount of padding between the Autofill name and subtext,
   // in pixels.
   static const size_t kNamePadding = 15;
@@ -41,12 +38,6 @@ class AutofillPopupView {
 
   // Width of the delete icon in pixels.
   static const int kDeleteIconWidth = 16;
-
-  // Height of the Autofill icons in pixels.
-  static const int kAutofillIconHeight = 16;
-
-  // Width of the Autofill icons in pixels.
-  static const int kAutofillIconWidth = 25;
 
   // Displays the Autofill popup and fills it in with data from the controller.
   virtual void Show() = 0;

@@ -6,32 +6,44 @@
 #define CHROME_BROWSER_EXTENSIONS_API_TAB_CAPTURE_TAB_CAPTURE_REGISTRY_H_
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/memory/scoped_vector.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/common/extensions/api/tab_capture.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/media_request_state.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_registry_observer.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 
 struct TabCaptureRequest;
+class ExtensionRegistry;
 class FullscreenObserver;
 
-namespace tab_capture = extensions::api::tab_capture;
+namespace tab_capture = api::tab_capture;
 
-class TabCaptureRegistry : public BrowserContextKeyedService,
+class TabCaptureRegistry : public BrowserContextKeyedAPI,
                            public content::NotificationObserver,
+                           public ExtensionRegistryObserver,
                            public MediaCaptureDevicesDispatcher::Observer {
  public:
   typedef std::vector<std::pair<int, tab_capture::TabCaptureState> >
       RegistryCaptureInfo;
 
-  explicit TabCaptureRegistry(Profile* profile);
+  static TabCaptureRegistry* Get(content::BrowserContext* context);
+
+  // Used by BrowserContextKeyedAPI.
+  static BrowserContextKeyedAPIFactory<TabCaptureRegistry>*
+      GetFactoryInstance();
 
   // List all pending, active and stopped capture requests.
   const RegistryCaptureInfo GetCapturedTabs(
@@ -50,14 +62,30 @@ class TabCaptureRegistry : public BrowserContextKeyedService,
   bool VerifyRequest(int render_process_id, int render_view_id);
 
  private:
+  friend class BrowserContextKeyedAPIFactory<TabCaptureRegistry>;
   friend class FullscreenObserver;
 
+  explicit TabCaptureRegistry(content::BrowserContext* context);
   virtual ~TabCaptureRegistry();
+
+  // Used by BrowserContextKeyedAPI.
+  static const char* service_name() {
+    return "TabCaptureRegistry";
+  }
+
+  static const bool kServiceIsCreatedWithBrowserContext = false;
+  static const bool kServiceRedirectedInIncognito = true;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // ExtensionRegistryObserver implementation.
+  virtual void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const Extension* extension,
+      UnloadedExtensionInfo::Reason reason) OVERRIDE;
 
   // MediaCaptureDevicesDispatcher::Observer implementation.
   virtual void OnRequestUpdate(
@@ -74,12 +102,15 @@ class TabCaptureRegistry : public BrowserContextKeyedService,
   void DeleteCaptureRequest(int render_process_id, int render_view_id);
 
   content::NotificationRegistrar registrar_;
-  Profile* const profile_;
+  content::BrowserContext* const browser_context_;
   ScopedVector<TabCaptureRequest> requests_;
+
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TabCaptureRegistry);
 };
 
-}  // namespace extension
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_TAB_CAPTURE_TAB_CAPTURE_REGISTRY_H_

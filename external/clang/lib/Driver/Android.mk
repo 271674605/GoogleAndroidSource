@@ -6,20 +6,22 @@ include $(CLEAR_VARS)
 include $(CLEAR_TBLGEN_VARS)
 
 TBLGEN_TABLES := \
+  AttrVisitor.inc \
   DiagnosticCommonKinds.inc \
   DiagnosticDriverKinds.inc \
+  DiagnosticSemaKinds.inc \
   Options.inc \
-  CC1Options.inc \
-  CC1AsOptions.inc
+  CC1Options.inc
 
 clang_driver_SRC_FILES := \
   Action.cpp \
-  CC1AsOptions.cpp \
   Compilation.cpp \
   Driver.cpp \
   DriverOptions.cpp \
   Job.cpp \
+  Multilib.cpp \
   Phases.cpp \
+  SanitizerArgs.cpp \
   Tool.cpp \
   ToolChain.cpp \
   ToolChains.cpp \

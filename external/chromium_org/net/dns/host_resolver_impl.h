@@ -14,10 +14,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
-#include "net/base/capturing_net_log.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
-#include "net/base/prioritized_dispatcher.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/host_resolver_proc.h"
@@ -98,21 +96,17 @@ class NET_EXPORT HostResolverImpl
     uint32 retry_factor;
   };
 
-  // Creates a HostResolver that first uses the local cache |cache|, and then
-  // falls back to |proc_params.resolver_proc|.
+  // Creates a HostResolver as specified by |options|.
   //
-  // If |cache| is NULL, then no caching is used. Otherwise we take
-  // ownership of the |cache| pointer, and will free it during destruction.
+  // If Options.enable_caching is true, a cache is created using
+  // HostCache::CreateDefaultCache(). Otherwise no cache is used.
   //
-  // |job_limits| specifies the maximum number of jobs that the resolver will
-  // run at once. This upper-bounds the total number of outstanding
-  // DNS transactions (not counting retransmissions and retries).
+  // Options.GetDispatcherLimits() determines the maximum number of jobs that
+  // the resolver will run at once. This upper-bounds the total number of
+  // outstanding DNS transactions (not counting retransmissions and retries).
   //
   // |net_log| must remain valid for the life of the HostResolverImpl.
-  HostResolverImpl(scoped_ptr<HostCache> cache,
-                   const PrioritizedDispatcher::Limits& job_limits,
-                   const ProcTaskParams& proc_params,
-                   NetLog* net_log);
+  HostResolverImpl(const Options& options, NetLog* net_log);
 
   // If any completion callbacks are pending when the resolver is destroyed,
   // the host resolutions are cancelled, and the completion callbacks will not
@@ -131,6 +125,7 @@ class NET_EXPORT HostResolverImpl
 
   // HostResolver methods:
   virtual int Resolve(const RequestInfo& info,
+                      RequestPriority priority,
                       AddressList* addresses,
                       const CompletionCallback& callback,
                       RequestHandle* out_req,
@@ -145,6 +140,10 @@ class NET_EXPORT HostResolverImpl
   virtual HostCache* GetHostCache() OVERRIDE;
   virtual base::Value* GetDnsConfigAsValue() const OVERRIDE;
 
+  void set_proc_params_for_test(const ProcTaskParams& proc_params) {
+    proc_params_ = proc_params;
+  }
+
  private:
   friend class HostResolverImplTest;
   class Job;
@@ -155,6 +154,10 @@ class NET_EXPORT HostResolverImpl
   typedef HostCache::Key Key;
   typedef std::map<Key, Job*> JobMap;
   typedef ScopedVector<Request> RequestsList;
+
+  // Number of consecutive failures of DnsTask (with successful fallback to
+  // ProcTask) before the DnsClient is disabled until the next DNS change.
+  static const unsigned kMaximumDnsFailures;
 
   // Helper used by |Resolve()| and |ResolveFromCache()|.  Performs IP
   // literal, cache and HOSTS lookup (if enabled), returns OK if successful,
@@ -207,6 +210,11 @@ class NET_EXPORT HostResolverImpl
   // requests. Might start new jobs.
   void AbortAllInProgressJobs();
 
+  // Aborts all in progress DnsTasks. In-progress jobs will fall back to
+  // ProcTasks. Might start new jobs, if any jobs were taking up two dispatcher
+  // slots.
+  void AbortDnsTasks();
+
   // Attempts to serve each Job in |jobs_| from the HOSTS file if we have
   // a DnsClient with a valid DnsConfig.
   void TryServingAllJobsFromHosts();
@@ -224,9 +232,11 @@ class NET_EXPORT HostResolverImpl
   // and resulted in |net_error|.
   void OnDnsTaskResolve(int net_error);
 
-  // Allows the tests to catch slots leaking out of the dispatcher.
-  size_t num_running_jobs_for_tests() const {
-    return dispatcher_.num_running_jobs();
+  // Allows the tests to catch slots leaking out of the dispatcher.  One
+  // HostResolverImpl::Job could occupy multiple PrioritizedDispatcher job
+  // slots.
+  size_t num_running_dispatcher_jobs_for_tests() const {
+    return dispatcher_->num_running_jobs();
   }
 
   // Cache of host resolution results.
@@ -236,7 +246,7 @@ class NET_EXPORT HostResolverImpl
   JobMap jobs_;
 
   // Starts Jobs according to their priority and the configured limits.
-  PrioritizedDispatcher dispatcher_;
+  scoped_ptr<PrioritizedDispatcher> dispatcher_;
 
   // Limit on the maximum number of jobs queued in |dispatcher_|.
   size_t max_queued_jobs_;
@@ -248,10 +258,6 @@ class NET_EXPORT HostResolverImpl
 
   // Address family to use when the request doesn't specify one.
   AddressFamily default_address_family_;
-
-  base::WeakPtrFactory<HostResolverImpl> weak_ptr_factory_;
-
-  base::WeakPtrFactory<HostResolverImpl> probe_weak_ptr_factory_;
 
   // If present, used by DnsTask and ServeFromHosts to resolve requests.
   scoped_ptr<DnsClient> dns_client_;
@@ -267,6 +273,10 @@ class NET_EXPORT HostResolverImpl
   // explicit setting in |default_address_family_| is used.
   bool probe_ipv6_support_;
 
+  // True if DnsConfigService detected that system configuration depends on
+  // local IPv6 connectivity. Disables probing.
+  bool use_local_ipv6_;
+
   // True iff ProcTask has successfully resolved a hostname known to have IPv6
   // addresses using ADDRESS_FAMILY_UNSPECIFIED. Reset on IP address change.
   bool resolved_known_ipv6_hostname_;
@@ -276,6 +286,10 @@ class NET_EXPORT HostResolverImpl
 
   // Allow fallback to ProcTask if DnsTask fails.
   bool fallback_to_proctask_;
+
+  base::WeakPtrFactory<HostResolverImpl> weak_ptr_factory_;
+
+  base::WeakPtrFactory<HostResolverImpl> probe_weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HostResolverImpl);
 };

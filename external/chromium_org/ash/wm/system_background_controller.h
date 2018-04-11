@@ -13,16 +13,11 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_observer.h"
 
-namespace aura {
-class RootWindow;
-}
-
 namespace ui {
 class Layer;
 }
 
 namespace ash {
-namespace internal {
 
 // SystemBackgroundController manages a ui::Layer that's stacked at the bottom
 // of an aura::RootWindow's children.  It exists solely to obscure portions of
@@ -32,7 +27,7 @@ namespace internal {
 // It should never be transformed or restacked.
 class SystemBackgroundController : public aura::WindowObserver {
  public:
-  SystemBackgroundController(aura::RootWindow* root_window, SkColor color);
+  SystemBackgroundController(aura::Window* root_window, SkColor color);
   virtual ~SystemBackgroundController();
 
   void SetColor(SkColor color);
@@ -45,14 +40,13 @@ class SystemBackgroundController : public aura::WindowObserver {
  private:
   class HostContentLayerDelegate;
 
-  aura::RootWindow* root_window_;  // not owned
+  aura::Window* root_window_;  // not owned
 
   scoped_ptr<ui::Layer> layer_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemBackgroundController);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_WM_SYSTEM_BACKGROUND_CONTROLLER_H_

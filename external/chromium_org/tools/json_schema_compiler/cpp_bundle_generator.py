@@ -12,8 +12,6 @@ import json
 import os
 import re
 
-# TODO(miket/asargent) - parameterize this.
-SOURCE_BASE_PATH = 'chrome/common/extensions/api'
 
 def _RemoveDescriptions(node):
   """Returns a copy of |schema| with "description" fields removed.
@@ -31,16 +29,26 @@ def _RemoveDescriptions(node):
     return [_RemoveDescriptions(v) for v in node]
   return node
 
+
 class CppBundleGenerator(object):
   """This class contains methods to generate code based on multiple schemas.
   """
 
-  def __init__(self, root, model, api_defs, cpp_type_generator, cpp_namespace):
-    self._root = root;
+  def __init__(self,
+               root,
+               model,
+               api_defs,
+               cpp_type_generator,
+               cpp_namespace,
+               source_file_dir,
+               impl_dir):
+    self._root = root
     self._model = model
     self._api_defs = api_defs
     self._cpp_type_generator = cpp_type_generator
     self._cpp_namespace = cpp_namespace
+    self._source_file_dir = source_file_dir
+    self._impl_dir = impl_dir
 
     self.api_cc_generator = _APICCGenerator(self)
     self.api_h_generator = _APIHGenerator(self)
@@ -56,8 +64,8 @@ class CppBundleGenerator(object):
     c = code.Code()
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
-    c.Append(cpp_util.GENERATED_BUNDLE_FILE_MESSAGE % SOURCE_BASE_PATH)
-    ifndef_name = cpp_util.GenerateIfndefName(SOURCE_BASE_PATH, file_base)
+    c.Append(cpp_util.GENERATED_BUNDLE_FILE_MESSAGE % self._source_file_dir)
+    ifndef_name = cpp_util.GenerateIfndefName(self._source_file_dir, file_base)
     c.Append()
     c.Append('#ifndef %s' % ifndef_name)
     c.Append('#define %s' % ifndef_name)
@@ -78,9 +86,15 @@ class CppBundleGenerator(object):
     for platform in model_object.platforms:
       if platform == Platforms.CHROMEOS:
         ifdefs.append('defined(OS_CHROMEOS)')
+      elif platform == Platforms.LINUX:
+        ifdefs.append('defined(OS_LINUX)')
+      elif platform == Platforms.MAC:
+        ifdefs.append('defined(OS_MACOSX)')
+      elif platform == Platforms.WIN:
+        ifdefs.append('defined(OS_WIN)')
       else:
         raise ValueError("Unsupported platform ifdef: %s" % platform.name)
-    return ' and '.join(ifdefs)
+    return ' || '.join(ifdefs)
 
   def _GenerateRegisterFunctions(self, namespace_name, function):
     c = code.Code()
@@ -127,6 +141,7 @@ class CppBundleGenerator(object):
     c.Eblock("}")
     return c
 
+
 class _APIHGenerator(object):
   """Generates the header for API registration / declaration"""
   def __init__(self, cpp_bundle):
@@ -147,10 +162,11 @@ class _APIHGenerator(object):
     c.Sblock(' public:')
     c.Append('static void RegisterAll('
                  'ExtensionFunctionRegistry* registry);')
-    c.Eblock('};');
+    c.Eblock('};')
     c.Append()
     c.Concat(cpp_util.CloseNamespace(self._bundle._cpp_namespace))
     return self._bundle._GenerateHeader('generated_api', c)
+
 
 class _APICCGenerator(object):
   """Generates a code.Code object for the generated API .cc file"""
@@ -162,15 +178,16 @@ class _APICCGenerator(object):
     c = code.Code()
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
-    c.Append('#include "%s"' % (os.path.join(SOURCE_BASE_PATH,
+    c.Append('#include "%s"' % (os.path.join(self._bundle._source_file_dir,
                                              'generated_api.h')))
     c.Append()
     for namespace in self._bundle._model.namespaces.values():
       namespace_name = namespace.unix_name.replace("experimental_", "")
       implementation_header = namespace.compiler_options.get(
           "implemented_in",
-          "chrome/browser/extensions/api/%s/%s_api.h" % (namespace_name,
-                                                         namespace_name))
+          "%s/%s/%s_api.h" % (self._bundle._impl_dir,
+                              namespace_name,
+                              namespace_name))
       if not os.path.exists(
           os.path.join(self._bundle._root,
                        os.path.normpath(implementation_header))):
@@ -189,7 +206,7 @@ class _APICCGenerator(object):
         c.Append("#endif  // %s" % ifdefs, indent_level=0)
     c.Append()
     c.Append('#include '
-                 '"chrome/browser/extensions/extension_function_registry.h"')
+                 '"extensions/browser/extension_function_registry.h"')
     c.Append()
     c.Concat(cpp_util.OpenNamespace(self._bundle._cpp_namespace))
     c.Append()
@@ -198,6 +215,7 @@ class _APICCGenerator(object):
     c.Concat(cpp_util.CloseNamespace(self._bundle._cpp_namespace))
     c.Append()
     return c
+
 
 class _SchemasHGenerator(object):
   """Generates a code.Code object for the generated schemas .h file"""
@@ -208,7 +226,7 @@ class _SchemasHGenerator(object):
     c = code.Code()
     c.Append('#include <map>')
     c.Append('#include <string>')
-    c.Append();
+    c.Append()
     c.Append('#include "base/strings/string_piece.h"')
     c.Append()
     c.Concat(cpp_util.OpenNamespace(self._bundle._cpp_namespace))
@@ -220,10 +238,11 @@ class _SchemasHGenerator(object):
     c.Append()
     c.Append('// Gets the API schema named |name|.')
     c.Append('static base::StringPiece Get(const std::string& name);')
-    c.Eblock('};');
+    c.Eblock('};')
     c.Append()
     c.Concat(cpp_util.CloseNamespace(self._bundle._cpp_namespace))
     return self._bundle._GenerateHeader('generated_schemas', c)
+
 
 def _FormatNameAsConstant(name):
   """Formats a name to be a C++ constant of the form kConstantName"""
@@ -231,6 +250,7 @@ def _FormatNameAsConstant(name):
   return 'k%s' % re.sub('_[a-z]',
                         lambda m: m.group(0)[1].upper(),
                         name.replace('.', '_'))
+
 
 class _SchemasCCGenerator(object):
   """Generates a code.Code object for the generated schemas .cc file"""
@@ -242,7 +262,7 @@ class _SchemasCCGenerator(object):
     c = code.Code()
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
-    c.Append('#include "%s"' % (os.path.join(SOURCE_BASE_PATH,
+    c.Append('#include "%s"' % (os.path.join(self._bundle._source_file_dir,
                                              'generated_schemas.h')))
     c.Append()
     c.Append('#include "base/lazy_instance.h"')
@@ -254,10 +274,15 @@ class _SchemasCCGenerator(object):
       json_content = json.dumps([_RemoveDescriptions(api)],
                                 separators=(',', ':'))
       # Escape all double-quotes and backslashes. For this to output a valid
-      # JSON C string, we need to escape \ and ".
-      json_content = json_content.replace('\\', '\\\\').replace('"', '\\"')
+      # JSON C string, we need to escape \ and ". Note that some schemas are
+      # too large to compile on windows. Split the JSON up into several
+      # strings, since apparently that helps.
+      max_length = 8192
+      segments = [json_content[i:i + max_length].replace('\\', '\\\\')
+                                                .replace('"', '\\"')
+                  for i in xrange(0, len(json_content), max_length)]
       c.Append('const char %s[] = "%s";' %
-          (_FormatNameAsConstant(namespace.name), json_content))
+          (_FormatNameAsConstant(namespace.name), '" "'.join(segments)))
     c.Append('}')
     c.Concat(cpp_util.OpenNamespace(self._bundle._cpp_namespace))
     c.Append()
@@ -267,10 +292,10 @@ class _SchemasCCGenerator(object):
       namespace = self._bundle._model.namespaces[api.get('namespace')]
       c.Append('schemas["%s"] = %s;' % (namespace.name,
                                         _FormatNameAsConstant(namespace.name)))
-    c.Eblock('}');
+    c.Eblock('}')
     c.Append()
     c.Append('std::map<std::string, const char*> schemas;')
-    c.Eblock('};');
+    c.Eblock('};')
     c.Append()
     c.Append('base::LazyInstance<Static> g_lazy_instance;')
     c.Append()

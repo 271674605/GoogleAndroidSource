@@ -16,12 +16,13 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParserException;
 
 import android.content.res.XmlResourceParser;
+import android.cts.util.WidgetTestUtils;
 import android.test.AndroidTestCase;
 import android.widget.Gallery.LayoutParams;
 

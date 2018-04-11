@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef DARWINLDBACKEND_H
-#define DARWINLDBACKEND_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_TARGET_DARWINLDBACKEND_H
+#define MCLD_TARGET_DARWINLDBACKEND_H
 
 namespace mcld
 {

@@ -7,6 +7,8 @@
 
 #include <map>
 
+#include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "content/public/browser/notification_observer.h"
@@ -26,7 +28,7 @@ namespace printing {
 // the initiator, and the constrained dialog that shows the print preview is the
 // print preview dialog.
 // This class manages print preview dialog creation and destruction, and keeps
-// track of the 1:1 relationship between initiatora tabs and print preview
+// track of the 1:1 relationship between initiator tabs and print preview
 // dialogs.
 class PrintPreviewDialogController
     : public base::RefCounted<PrintPreviewDialogController>,
@@ -54,6 +56,10 @@ class PrintPreviewDialogController
   // Returns the initiator for |preview_dialog|.
   // Returns NULL if no initiator exists for |preview_dialog|.
   content::WebContents* GetInitiator(content::WebContents* preview_dialog);
+
+  // Run |callback| on the dialog of each active print preview operation.
+  void ForEachPreviewDialog(
+      base::Callback<void(content::WebContents*)> callback);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -116,7 +122,7 @@ class PrintPreviewDialogController
   // Mapping between print preview dialog and the corresponding initiator.
   PrintPreviewDialogMap preview_dialog_map_;
 
-  // A registrar for listening notifications.
+  // A registrar for listening to notifications.
   content::NotificationRegistrar registrar_;
 
   // True if the controller is waiting for a new preview dialog via

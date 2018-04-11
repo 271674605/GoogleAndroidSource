@@ -5,6 +5,7 @@ clang_static_analyzer_checkers_TBLGEN_TABLES := \
   AttrList.inc \
   AttrParsedAttrList.inc \
   Attrs.inc \
+  AttrVisitor.inc \
   Checkers.inc \
   CommentCommandList.inc \
   CommentNodes.inc \
@@ -13,6 +14,7 @@ clang_static_analyzer_checkers_TBLGEN_TABLES := \
   StmtNodes.inc
 
 clang_static_analyzer_checkers_SRC_FILES := \
+  AllocationDiagnostics.cpp \
   AnalyzerStatsChecker.cpp \
   ArrayBoundChecker.cpp \
   ArrayBoundCheckerV2.cpp \
@@ -31,7 +33,6 @@ clang_static_analyzer_checkers_SRC_FILES := \
   CheckerDocumentation.cpp \
   ChrootChecker.cpp \
   ClangCheckers.cpp \
-  CommonBugCategories.cpp \
   DeadStoresChecker.cpp \
   DebugCheckers.cpp \
   DereferenceChecker.cpp \
@@ -41,7 +42,7 @@ clang_static_analyzer_checkers_SRC_FILES := \
   ExprInspectionChecker.cpp \
   FixedAddressChecker.cpp \
   GenericTaintChecker.cpp \
-  IdempotentOperationChecker.cpp \
+  IdenticalExprChecker.cpp \
   IvarInvalidationChecker.cpp \
   LLVMConventionsChecker.cpp \
   MacOSKeychainAPIChecker.cpp \
@@ -69,6 +70,7 @@ clang_static_analyzer_checkers_SRC_FILES := \
   StackAddrEscapeChecker.cpp \
   StreamChecker.cpp \
   TaintTesterChecker.cpp \
+  TestAfterDivZeroChecker.cpp \
   TraversalChecker.cpp \
   UndefBranchChecker.cpp \
   UndefCapturedBlockVarChecker.cpp \

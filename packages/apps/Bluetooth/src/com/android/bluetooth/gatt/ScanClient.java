@@ -16,26 +16,74 @@
 
 package com.android.bluetooth.gatt;
 
+import android.bluetooth.le.ResultStorageDescriptor;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanSettings;
+
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * Helper class identifying a client that has requested LE scan results.
+ *
  * @hide
  */
-/*package*/ class ScanClient {
-    int appIf;
+/* package */class ScanClient {
+    int clientIf;
     boolean isServer;
     UUID[] uuids;
+    ScanSettings settings;
+    List<ScanFilter> filters;
+    List<List<ResultStorageDescriptor>> storages;
+    // App associated with the scan client died.
+    boolean appDied;
+
+    private static final ScanSettings DEFAULT_SCAN_SETTINGS = new ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
 
     ScanClient(int appIf, boolean isServer) {
-        this.appIf = appIf;
-        this.isServer = isServer;
-        this.uuids = new UUID[0];
+        this(appIf, isServer, new UUID[0], DEFAULT_SCAN_SETTINGS, null, null);
     }
 
     ScanClient(int appIf, boolean isServer, UUID[] uuids) {
-        this.appIf = appIf;
+        this(appIf, isServer, uuids, DEFAULT_SCAN_SETTINGS, null, null);
+    }
+
+    ScanClient(int appIf, boolean isServer, ScanSettings settings,
+            List<ScanFilter> filters) {
+        this(appIf, isServer, new UUID[0], settings, filters, null);
+    }
+
+    ScanClient(int appIf, boolean isServer, ScanSettings settings,
+            List<ScanFilter> filters, List<List<ResultStorageDescriptor>> storages) {
+        this(appIf, isServer, new UUID[0], settings, filters, storages);
+    }
+
+    private ScanClient(int appIf, boolean isServer, UUID[] uuids, ScanSettings settings,
+            List<ScanFilter> filters, List<List<ResultStorageDescriptor>> storages) {
+        this.clientIf = appIf;
         this.isServer = isServer;
         this.uuids = uuids;
+        this.settings = settings;
+        this.filters = filters;
+        this.storages = storages;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        ScanClient other = (ScanClient) obj;
+        return clientIf == other.clientIf;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(clientIf);
     }
 }

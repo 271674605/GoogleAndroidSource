@@ -7,6 +7,26 @@
 
 namespace chrome_common_net {
 
+// Network error page events.  Used for UMA statistics.
+enum NetworkErrorPageEvent {
+  NETWORK_ERROR_PAGE_SHOWN,                      // Error pages shown.
+
+  NETWORK_ERROR_PAGE_RELOAD_BUTTON_SHOWN,        // Reload buttons shown.
+  NETWORK_ERROR_PAGE_RELOAD_BUTTON_CLICKED,      // Reload button clicked.
+  NETWORK_ERROR_PAGE_RELOAD_BUTTON_ERROR,        // Reload button clicked
+                                                 // -> error.
+
+  NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_SHOWN,    // Load stale buttons shown.
+  NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_CLICKED,  // Load stale button clicked.
+  NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_ERROR,    // Load stale buttons -> error.
+
+  NETWORK_ERROR_PAGE_MORE_BUTTON_CLICKED,        // More button clicked.
+
+  NETWORK_ERROR_PAGE_BROWSER_INITIATED_RELOAD,   // Reload from browser.
+
+  NETWORK_ERROR_PAGE_EVENT_MAX,
+};
+
 // The status of a DNS probe that the NetErrorTabHelper may or may not have
 // started.
 //
@@ -62,10 +82,8 @@ const char* DnsProbeStatusToString(int status);
 // Returns true if |status| is one of the DNS_PROBE_FINISHED_* statuses.
 bool DnsProbeStatusIsFinished(DnsProbeStatus status);
 
-// Checks the --force-dns-probes command line option and the DnsProbe-Enable
-// field trial.  If the command-line option is found, return what it says,
-// otherwise return true if and only if the field trial has group "enabled".
-bool DnsProbesEnabled();
+// Record specific error page events.
+void RecordEvent(NetworkErrorPageEvent event);
 
 // The error domain used to pass DNS probe statuses to the localized error
 // code.

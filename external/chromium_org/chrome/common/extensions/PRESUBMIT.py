@@ -25,6 +25,8 @@ LOCAL_PUBLIC_TEMPLATES_PATH = os.path.join('docs',
                                            'templates',
                                            'public')
 
+EXTENSIONS_TO_REMOVE_FOR_CLEAN_URLS = ('.md', '.html')
+
 def _ReadFile(filename):
   with open(filename) as f:
     return f.read()
@@ -48,7 +50,13 @@ def _FindMatchingTemplates(template_name, template_path_list):
   unix_name = _UnixName(template_name)
   for template in template_path_list:
     if unix_name == _UnixName(template.split(os.sep)[-1]):
-      matches.append(template)
+      basename, ext = os.path.splitext(template)
+      # The docserver expects clean (extensionless) template URLs, so we
+      # strip some extensions here when generating the list of matches.
+      if ext in EXTENSIONS_TO_REMOVE_FOR_CLEAN_URLS:
+        matches.append(basename)
+      else:
+        matches.append(template)
   return matches
 
 def _SanitizeAPIName(name, api_path):
@@ -144,11 +152,19 @@ def _CheckChange(input_api, output_api):
                                     cwd=input_api.PresubmitLocalPath())
   except input_api.subprocess.CalledProcessError:
     results.append(output_api.PresubmitError('IntegrationTest failed!'))
-  _CheckLinks(input_api, output_api, results)
+
+  # TODO(kalman): Re-enable this check, or decide to delete it forever. Now
+  # that we have multiple directories it no longer works.
+  # See http://crbug.com/297178.
+  #_CheckLinks(input_api, output_api, results)
+
   return results
 
 def CheckChangeOnUpload(input_api, output_api):
-  return _CheckChange(input_api, output_api)
+  results = []
+  results += input_api.canned_checks.CheckPatchFormatted(input_api, output_api)
+  results += _CheckChange(input_api, output_api)
+  return results
 
 def CheckChangeOnCommit(input_api, output_api):
   return _CheckChange(input_api, output_api)

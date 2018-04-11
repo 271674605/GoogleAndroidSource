@@ -16,16 +16,6 @@
 
 package com.android.email.provider;
 
-import com.android.email.AttachmentInfo;
-import com.android.email.R;
-import com.android.emailcommon.mail.MessagingException;
-import com.android.emailcommon.provider.Account;
-import com.android.emailcommon.provider.EmailContent;
-import com.android.emailcommon.provider.EmailContent.Attachment;
-import com.android.emailcommon.provider.EmailContent.Message;
-import com.android.emailcommon.provider.Mailbox;
-import com.android.emailcommon.utility.AttachmentUtilities;
-
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
@@ -35,6 +25,17 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.test.ProviderTestCase2;
 import android.test.mock.MockContentResolver;
+import android.test.suitebuilder.annotation.Suppress;
+
+import com.android.email.AttachmentInfo;
+import com.android.email.R;
+import com.android.emailcommon.mail.MessagingException;
+import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.provider.EmailContent;
+import com.android.emailcommon.provider.EmailContent.Attachment;
+import com.android.emailcommon.provider.EmailContent.Message;
+import com.android.emailcommon.provider.Mailbox;
+import com.android.emailcommon.utility.AttachmentUtilities;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -47,6 +48,7 @@ import java.io.IOException;
  * You can run this entire test case with:
  *   runtest -c com.android.email.provider.AttachmentProviderTests email
  */
+@Suppress
 public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvider> {
 
     EmailProvider mEmailProvider;
@@ -54,7 +56,7 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
     ContentResolver mMockResolver;
 
     public AttachmentProviderTests() {
-        super(AttachmentProvider.class, AttachmentUtilities.AUTHORITY);
+        super(AttachmentProvider.class, Attachment.ATTACHMENT_PROVIDER_LEGACY_URI_PREFIX);
     }
 
     @Override
@@ -72,18 +74,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
     }
 
     /**
-     * test delete() - should do nothing
-     * test update() - should do nothing
-     * test insert() - should do nothing
-     */
-    public void testUnimplemented() {
-        assertEquals(0, mMockResolver.delete(AttachmentUtilities.CONTENT_URI, null, null));
-        assertEquals(0, mMockResolver.update(AttachmentUtilities.CONTENT_URI, null, null,
-                null));
-        assertEquals(null, mMockResolver.insert(AttachmentUtilities.CONTENT_URI, null));
-    }
-
-    /**
      * test query()
      *  - item found
      *  - item not found
@@ -91,7 +81,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testQuery() throws MessagingException {
         Account account1 = ProviderTestUtils.setupAccount("attachment-query", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;
         long attachment1Id = 1;
@@ -117,22 +106,22 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
         // sample the files, so we won't bother creating the files
         Attachment newAttachment1 = ProviderTestUtils.setupAttachment(message1Id, "file1", 100,
                 false, mMockContext);
-        newAttachment1.mContentUri =
-            AttachmentUtilities.getAttachmentUri(account1.mId, attachment1Id).toString();
+        newAttachment1.setContentUri(
+            AttachmentUtilities.getAttachmentUri(account1.mId, attachment1Id).toString());
         attachment1Id = addAttachmentToDb(account1, newAttachment1);
         assertEquals("Broken test:  Unexpected id assignment", 1, attachment1Id);
 
         Attachment newAttachment2 = ProviderTestUtils.setupAttachment(message1Id, "file2", 200,
                 false, mMockContext);
-        newAttachment2.mContentUri =
-            AttachmentUtilities.getAttachmentUri(account1.mId, attachment2Id).toString();
+        newAttachment2.setContentUri(
+            AttachmentUtilities.getAttachmentUri(account1.mId, attachment2Id).toString());
         attachment2Id = addAttachmentToDb(account1, newAttachment2);
         assertEquals("Broken test:  Unexpected id assignment", 2, attachment2Id);
 
         Attachment newAttachment3 = ProviderTestUtils.setupAttachment(message1Id, "file3", 300,
                 false, mMockContext);
-        newAttachment3.mContentUri =
-            AttachmentUtilities.getAttachmentUri(account1.mId, attachment3Id).toString();
+        newAttachment3.setContentUri(
+            AttachmentUtilities.getAttachmentUri(account1.mId, attachment3Id).toString());
         attachment3Id = addAttachmentToDb(account1, newAttachment3);
         assertEquals("Broken test:  Unexpected id assignment", 3, attachment3Id);
 
@@ -261,7 +250,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testGetType() throws MessagingException {
         Account account1 = ProviderTestUtils.setupAccount("get-type", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;
         long attachment1Id = 1;
@@ -340,7 +328,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testOpenFile() throws MessagingException, IOException {
         Account account1 = ProviderTestUtils.setupAccount("open-file", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;
         long attachment1Id = 1;
@@ -381,9 +368,9 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
         Attachment newAttachment2 = ProviderTestUtils.setupAttachment(message1Id, "file", 100,
                 false, mMockContext);
         newAttachment2.mContentId = null;
-        newAttachment2.mContentUri =
+        newAttachment2.setContentUri(
                 AttachmentUtilities.getAttachmentUri(account1.mId, attachment2Id)
-                .toString();
+                .toString());
         newAttachment2.mMimeType = "image/png";
         attachment2Id = addAttachmentToDb(account1, newAttachment2);
         assertEquals("Broken test:  Unexpected id assignment", 2, attachment2Id);
@@ -406,7 +393,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testOpenThumbnail() throws MessagingException, IOException {
         Account account1 = ProviderTestUtils.setupAccount("open-thumbnail", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;
         long attachment1Id = 1;
@@ -440,9 +426,9 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
         Attachment newAttachment2 = ProviderTestUtils.setupAttachment(message1Id, "file", 100,
                 false, mMockContext);
         newAttachment2.mContentId = null;
-        newAttachment2.mContentUri =
+        newAttachment2.setContentUri(
                 AttachmentUtilities.getAttachmentUri(account1.mId, attachment2Id)
-                .toString();
+                .toString());
         newAttachment2.mMimeType = "image/png";
         attachment2Id = addAttachmentToDb(account1, newAttachment2);
         assertEquals("Broken test:  Unexpected id assignment", 2, attachment2Id);
@@ -458,7 +444,7 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
         // Add an attachment entry.
         Attachment newAttachment = ProviderTestUtils.setupAttachment(messageId, "file", 100,
                 false, mMockContext);
-        newAttachment.mContentUri = contentUriStr;
+        newAttachment.setContentUri(contentUriStr);
         long attachmentId = addAttachmentToDb(account, newAttachment);
         Uri attachmentUri = AttachmentUtilities.getAttachmentUri(account.mId, attachmentId);
         return attachmentUri;
@@ -473,7 +459,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testResolveAttachmentIdToContentUri() throws MessagingException {
         Account account1 = ProviderTestUtils.setupAccount("attachment-query", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;
         // We use attachmentId == 1 but any other id would do
@@ -514,7 +499,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testDeleteFiles() throws IOException {
         Account account1 = ProviderTestUtils.setupAccount("attachment-query", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         final long message1Id = 1;      // 1 attachment, 1 file
         final long message2Id = 2;      // 2 attachments, 2 files
@@ -569,7 +553,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testDeleteMailbox() throws IOException {
         Account account1 = ProviderTestUtils.setupAccount("attach-mbox-del", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         long account1Id = account1.mId;
         Mailbox mailbox1 = ProviderTestUtils.setupMailbox("mbox1", account1Id, true, mMockContext);
@@ -602,7 +585,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
      */
     public void testDeleteAccount() throws IOException {
         Account account1 = ProviderTestUtils.setupAccount("attach-acct-del1", false, mMockContext);
-        account1.mCompatibilityUuid = "test-UUID";
         account1.save(mMockContext);
         long account1Id = account1.mId;
         Mailbox mailbox1 = ProviderTestUtils.setupMailbox("mbox1", account1Id, true, mMockContext);
@@ -612,7 +594,6 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
 
         // Repeat for account #2
         Account account2 = ProviderTestUtils.setupAccount("attach-acct-del2", false, mMockContext);
-        account2.mCompatibilityUuid = "test-UUID-2";
         account2.save(mMockContext);
         long account2Id = account2.mId;
         Mailbox mailbox3 = ProviderTestUtils.setupMailbox("mbox3", account2Id, true, mMockContext);
@@ -678,7 +659,7 @@ public class AttachmentProviderTests extends ProviderTestCase2<AttachmentProvide
     private String createAttachmentFile(Account forAccount, long id) throws IOException {
         File outFile = getAttachmentFile(forAccount, id);
         Bitmap bitmap = BitmapFactory.decodeResource(getContext().getResources(),
-                R.drawable.ic_attachment_holo_light);
+                R.drawable.ic_attach_file_20dp);
         FileOutputStream out = new FileOutputStream(outFile);
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
         out.close();

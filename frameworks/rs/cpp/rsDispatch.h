@@ -20,9 +20,9 @@
 #include "rsDefines.h"
 
 typedef const void* (*AllocationGetTypeFnPtr)(RsContext con, RsAllocation va);
-typedef void (*TypeGetNativeDataFnPtr)(RsContext, RsType, uint32_t *typeData, uint32_t typeDataSize);
-typedef void (*ElementGetNativeDataFnPtr)(RsContext, RsElement, uint32_t *elemData, uint32_t elemDataSize);
-typedef void (*ElementGetSubElementsFnPtr)(RsContext, RsElement, uint32_t *ids, const char **names, uint32_t *arraySizes, uint32_t dataSize);
+typedef void (*TypeGetNativeDataFnPtr)(RsContext, RsType, uintptr_t *typeData, uint32_t typeDataSize);
+typedef void (*ElementGetNativeDataFnPtr)(RsContext, RsElement, uintptr_t *elemData, uint32_t elemDataSize);
+typedef void (*ElementGetSubElementsFnPtr)(RsContext, RsElement, uintptr_t *ids, const char **names, uint32_t *arraySizes, uint32_t dataSize);
 typedef RsDevice (*DeviceCreateFnPtr) ();
 typedef void (*DeviceDestroyFnPtr) (RsDevice dev);
 typedef void (*DeviceSetConfigFnPtr) (RsDevice dev, RsDeviceParam p, int32_t value);
@@ -74,7 +74,7 @@ typedef void (*ScriptSetVarFFnPtr) (RsContext, RsScript, uint32_t, float);
 typedef void (*ScriptSetVarDFnPtr) (RsContext, RsScript, uint32_t, double);
 typedef void (*ScriptSetVarVFnPtr) (RsContext, RsScript, uint32_t, const void*, size_t);
 typedef void (*ScriptGetVarVFnPtr) (RsContext, RsScript, uint32_t, void*, size_t);
-typedef void (*ScriptSetVarVEFnPtr) (RsContext, RsScript, uint32_t, const void*, size_t, RsElement, const size_t*, size_t);
+typedef void (*ScriptSetVarVEFnPtr) (RsContext, RsScript, uint32_t, const void*, size_t, RsElement, const uint32_t*, size_t);
 typedef RsScript (*ScriptCCreateFnPtr) (RsContext, const char*, size_t, const char*, size_t, const char*, size_t);
 typedef RsScript (*ScriptIntrinsicCreateFnPtr) (RsContext, uint32_t id, RsElement);
 typedef RsScriptKernelID (*ScriptKernelIDCreateFnPtr) (RsContext, RsScript, int, int);
@@ -85,6 +85,7 @@ typedef void (*ScriptGroupSetInputFnPtr) (RsContext, RsScriptGroup, RsScriptKern
 typedef void (*ScriptGroupExecuteFnPtr) (RsContext, RsScriptGroup);
 typedef void (*AllocationIoSendFnPtr) (RsContext, RsAllocation);
 typedef void (*AllocationIoReceiveFnPtr) (RsContext, RsAllocation);
+typedef void * (*AllocationGetPointerFnPtr) (RsContext, RsAllocation, uint32_t lod, RsAllocationCubemapFace face, uint32_t z, uint32_t array, size_t *stride);
 
 typedef struct {
     // inserted by hand from rs.h
@@ -156,6 +157,7 @@ typedef struct {
     ScriptGroupExecuteFnPtr ScriptGroupExecute;
     AllocationIoSendFnPtr AllocationIoSend;
     AllocationIoReceiveFnPtr AllocationIoReceive;
+    AllocationGetPointerFnPtr AllocationGetPointer;
 } dispatchTable;
 
 #endif

@@ -8,7 +8,10 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/observer_list.h"
+#include "base/strings/string16.h"
 
+class UndoManagerObserver;
 class UndoOperation;
 
 // UndoGroup ------------------------------------------------------------------
@@ -26,8 +29,19 @@ class UndoGroup {
   }
   void Undo();
 
+  // The resource string id describing the undo and redo action.
+  int get_undo_label_id() const { return undo_label_id_; }
+  void set_undo_label_id(int label_id) { undo_label_id_ = label_id; }
+
+  int get_redo_label_id() const { return redo_label_id_; }
+  void set_redo_label_id(int label_id) { redo_label_id_ = label_id; }
+
  private:
   ScopedVector<UndoOperation> operations_;
+
+  // The resource string id describing the undo and redo action.
+  int undo_label_id_;
+  int redo_label_id_;
 
   DISALLOW_COPY_AND_ASSIGN(UndoGroup);
 };
@@ -47,6 +61,9 @@ class UndoManager {
 
   size_t undo_count() const { return undo_actions_.size(); }
   size_t redo_count() const { return redo_actions_.size(); }
+
+  base::string16 GetUndoLabel() const;
+  base::string16 GetRedoLabel() const;
 
   void AddUndoOperation(scoped_ptr<UndoOperation> operation);
 
@@ -68,10 +85,17 @@ class UndoManager {
   // suspension of undo tracking states are left unchanged.
   void RemoveAllOperations();
 
+  // Observers are notified when the internal state of this class changes.
+  void AddObserver(UndoManagerObserver* observer);
+  void RemoveObserver(UndoManagerObserver* observer);
+
  private:
   void Undo(bool* performing_indicator,
             ScopedVector<UndoGroup>* active_undo_group);
   bool is_user_action() const { return !performing_undo_ && !performing_redo_; }
+
+  // Notifies the observers that the undo manager's state has changed.
+  void NotifyOnUndoManagerStateChange();
 
   // Handle the addition of |new_undo_group| to the active undo group container.
   void AddUndoGroup(UndoGroup* new_undo_group);
@@ -84,11 +108,17 @@ class UndoManager {
   ScopedVector<UndoGroup> undo_actions_;
   ScopedVector<UndoGroup> redo_actions_;
 
+  // The observers to notify when internal state changes.
+  ObserverList<UndoManagerObserver> observers_;
+
   // Supports grouping operations into a single undo action.
   int group_actions_count_;
 
   // The container that is used when actions are grouped.
   scoped_ptr<UndoGroup> pending_grouped_action_;
+
+  // The action that is in the process of being undone.
+  UndoGroup* undo_in_progress_action_;
 
   // Supports the suspension of undo tracking.
   int undo_suspended_count_;

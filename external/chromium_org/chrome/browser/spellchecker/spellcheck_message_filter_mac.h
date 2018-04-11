@@ -21,8 +21,7 @@ class SpellCheckMessageFilterMac : public content::BrowserMessageFilter {
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       content::BrowserThread::ID* thread) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Adjusts remote_results by examining local_results. Any result that's both
   // local and remote stays type SPELLING, all others are flagged GRAMMAR.
@@ -37,14 +36,14 @@ class SpellCheckMessageFilterMac : public content::BrowserMessageFilter {
 
   virtual ~SpellCheckMessageFilterMac();
 
-  void OnCheckSpelling(const string16& word, int route_id, bool* correct);
-  void OnFillSuggestionList(const string16& word,
-                            std::vector<string16>* suggestions);
+  void OnCheckSpelling(const base::string16& word, int route_id, bool* correct);
+  void OnFillSuggestionList(const base::string16& word,
+                            std::vector<base::string16>* suggestions);
   void OnShowSpellingPanel(bool show);
-  void OnUpdateSpellingPanelWithMisspelledWord(const string16& word);
+  void OnUpdateSpellingPanelWithMisspelledWord(const base::string16& word);
   void OnRequestTextCheck(int route_id,
                           int identifier,
-                          const string16& text,
+                          const base::string16& text,
                           std::vector<SpellCheckMarker> markers);
 
   int ToDocumentTag(int route_id);

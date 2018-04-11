@@ -10,8 +10,6 @@
 #include "base/memory/scoped_ptr.h"
 
 namespace ash {
-namespace internal {
-
 class TrayNetworkStateObserver;
 
 namespace tray {
@@ -30,12 +28,9 @@ class TrayVPN : public SystemTrayItem,
   virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
   virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
   virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE;
   virtual void DestroyTrayView() OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
   virtual void DestroyDetailedView() OVERRIDE;
-  virtual void DestroyNotificationView() OVERRIDE;
   virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
   virtual void UpdateAfterShelfAlignmentChange(
       ShelfAlignment alignment) OVERRIDE;
@@ -53,7 +48,6 @@ class TrayVPN : public SystemTrayItem,
   DISALLOW_COPY_AND_ASSIGN(TrayVPN);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_CHROMEOS_NETWORK_TRAY_VPN_H

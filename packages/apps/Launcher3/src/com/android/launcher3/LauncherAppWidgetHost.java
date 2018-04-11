@@ -20,6 +20,9 @@ import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.Context;
+import android.os.TransactionTooLargeException;
+
+import java.util.ArrayList;
 
 /**
  * Specific {@link AppWidgetHost} that creates our {@link LauncherAppWidgetHostView}
@@ -27,6 +30,8 @@ import android.content.Context;
  * always pick up and move widgets.
  */
 public class LauncherAppWidgetHost extends AppWidgetHost {
+
+    private final ArrayList<Runnable> mProviderChangeListeners = new ArrayList<Runnable>();
 
     Launcher mLauncher;
 
@@ -42,14 +47,42 @@ public class LauncherAppWidgetHost extends AppWidgetHost {
     }
 
     @Override
+    public void startListening() {
+        try {
+            super.startListening();
+        } catch (Exception e) {
+            if (e.getCause() instanceof TransactionTooLargeException) {
+                // We're willing to let this slide. The exception is being caused by the list of
+                // RemoteViews which is being passed back. The startListening relationship will
+                // have been established by this point, and we will end up populating the
+                // widgets upon bind anyway. See issue 14255011 for more context.
+            } else {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Override
     public void stopListening() {
         super.stopListening();
         clearViews();
+    }
+
+    public void addProviderChangeListener(Runnable callback) {
+        mProviderChangeListeners.add(callback);
+    }
+
+    public void removeProviderChangeListener(Runnable callback) {
+        mProviderChangeListeners.remove(callback);
     }
 
     protected void onProvidersChanged() {
         // Once we get the message that widget packages are updated, we need to rebind items
         // in AppsCustomize accordingly.
         mLauncher.bindPackagesUpdated(LauncherModel.getSortedWidgetsAndShortcuts(mLauncher));
+
+        for (Runnable callback : mProviderChangeListeners) {
+            callback.run();
+        }
     }
 }

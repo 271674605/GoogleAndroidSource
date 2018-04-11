@@ -15,6 +15,8 @@
 #include "GrConfig.h"
 #include "SkMath.h"
 
+//#define SK_SUPPORT_LEGACY_GRTYPES
+
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -50,6 +52,7 @@
     friend X operator & (X a, T b); \
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifdef SK_SUPPORT_LEGACY_GRTYPES
 
 /**
  *  Macro to round n up to the next multiple of 4, or return it unchanged if
@@ -66,6 +69,31 @@ template <typename T> const T& GrMax(const T& a, const T& b) {
     return (b < a) ? a : b;
 }
 
+/**
+ *  Count elements in an array
+ */
+#define GR_ARRAY_COUNT(array)  SK_ARRAY_COUNT(array)
+
+/**
+ *  16.16 fixed point type
+ */
+typedef int32_t GrFixed;
+
+#ifdef SK_DEBUG
+
+static inline int16_t GrToS16(intptr_t x) {
+    SkASSERT((int16_t)x == x);
+    return (int16_t)x;
+}
+
+#else
+
+#define GrToS16(x)  x
+
+#endif
+
+#endif
+
 // compile time versions of min/max
 #define GR_CT_MAX(a, b) (((b) < (a)) ? (a) : (b))
 #define GR_CT_MIN(a, b) (((b) < (a)) ? (b) : (a))
@@ -74,7 +102,7 @@ template <typename T> const T& GrMax(const T& a, const T& b) {
  *  divide, rounding up
  */
 static inline int32_t GrIDivRoundUp(int x, int y) {
-    GrAssert(y > 0);
+    SkASSERT(y > 0);
     return (x + (y-1)) / y;
 }
 static inline uint32_t GrUIDivRoundUp(uint32_t x, uint32_t y) {
@@ -120,29 +148,7 @@ static inline size_t GrSizeAlignDown(size_t x, uint32_t alignment) {
     return (x / alignment) * alignment;
 }
 
-/**
- *  Count elements in an array
- */
-#define GR_ARRAY_COUNT(array)  SK_ARRAY_COUNT(array)
-
-//!< allocate a block of memory, will never return NULL
-extern void* GrMalloc(size_t bytes);
-
-//!< free block allocated by GrMalloc. ptr may be NULL
-extern void GrFree(void* ptr);
-
-static inline void Gr_bzero(void* dst, size_t size) {
-    memset(dst, 0, size);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
-
-/**
- *  Return true if n is a power of 2
- */
-static inline bool GrIsPow2(unsigned n) {
-    return n && 0 == (n & (n - 1));
-}
 
 /**
  *  Return the next power of 2 >= n.
@@ -152,30 +158,9 @@ static inline uint32_t GrNextPow2(uint32_t n) {
 }
 
 static inline int GrNextPow2(int n) {
-    GrAssert(n >= 0); // this impl only works for non-neg.
+    SkASSERT(n >= 0); // this impl only works for non-neg.
     return n ? (1 << (32 - SkCLZ(n - 1))) : 1;
 }
-
-///////////////////////////////////////////////////////////////////////////////
-
-/**
- *  16.16 fixed point type
- */
-typedef int32_t GrFixed;
-
-#if GR_DEBUG
-
-static inline int16_t GrToS16(intptr_t x) {
-    GrAssert((int16_t)x == x);
-    return (int16_t)x;
-}
-
-#else
-
-#define GrToS16(x)  x
-
-#endif
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -248,19 +233,25 @@ enum GrMaskFormat {
     kA8_GrMaskFormat,    //!< 1-byte per pixel
     kA565_GrMaskFormat,  //!< 2-bytes per pixel
     kA888_GrMaskFormat,  //!< 4-bytes per pixel
+    kARGB_GrMaskFormat,  //!< 4-bytes per pixel, color format
 
-    kCount_GrMaskFormats //!< used to allocate arrays sized for mask formats
+    kLast_GrMaskFormat = kARGB_GrMaskFormat
 };
+static const int kMaskFormatCount = kLast_GrMaskFormat + 1;
 
 /**
  *  Return the number of bytes-per-pixel for the specified mask format.
  */
 static inline int GrMaskFormatBytesPerPixel(GrMaskFormat format) {
-    GrAssert((unsigned)format <= 2);
+    SkASSERT((unsigned)format <= 3);
     // kA8   (0) -> 1
     // kA565 (1) -> 2
     // kA888 (2) -> 4
-    return 1 << (int)format;
+    // kARGB (3) -> 4
+    static const int sBytesPerPixel[] = { 1, 2, 4, 4 };
+    SK_COMPILE_ASSERT(SK_ARRAY_COUNT(sBytesPerPixel) == kMaskFormatCount, array_size_mismatch);
+
+    return sBytesPerPixel[(int) format];
 }
 
 /**
@@ -283,8 +274,16 @@ enum GrPixelConfig {
      * Premultiplied. Byte order is b,g,r,a.
      */
     kBGRA_8888_GrPixelConfig,
+    /** 
+     * ETC1 Compressed Data
+     */
+    kETC1_GrPixelConfig,
+    /**
+     * LATC/RGTC/3Dc/BC4 Compressed Data
+     */
+    kLATC_GrPixelConfig,
 
-    kLast_GrPixelConfig = kBGRA_8888_GrPixelConfig
+    kLast_GrPixelConfig = kLATC_GrPixelConfig
 };
 static const int kGrPixelConfigCnt = kLast_GrPixelConfig + 1;
 
@@ -299,6 +298,18 @@ static const int kGrPixelConfigCnt = kLast_GrPixelConfig + 1;
 #else
     #error "SK_*32_SHIFT values must correspond to GL_BGRA or GL_RGBA format."
 #endif
+
+// Returns true if the pixel config is a GPU-specific compressed format
+// representation.
+static inline bool GrPixelConfigIsCompressed(GrPixelConfig config) {
+    switch (config) {
+        case kETC1_GrPixelConfig:
+        case kLATC_GrPixelConfig:
+            return true;
+        default:
+            return false;
+    }
+}
 
 // Returns true if the pixel config is 32 bits per pixel
 static inline bool GrPixelConfigIs8888(GrPixelConfig config) {
@@ -342,6 +353,7 @@ static inline size_t GrBytesPerPixel(GrPixelConfig config) {
 
 static inline bool GrPixelConfigIsOpaque(GrPixelConfig config) {
     switch (config) {
+        case kETC1_GrPixelConfig:
         case kRGB_565_GrPixelConfig:
             return true;
         default:
@@ -351,6 +363,7 @@ static inline bool GrPixelConfigIsOpaque(GrPixelConfig config) {
 
 static inline bool GrPixelConfigIsAlphaOnly(GrPixelConfig config) {
     switch (config) {
+        case kLATC_GrPixelConfig:
         case kAlpha_8_GrPixelConfig:
             return true;
         default:
@@ -472,7 +485,7 @@ public:
      * Initialize the cache ID to a domain and key.
      */
     GrCacheID(Domain domain, const Key& key) {
-        GrAssert(kInvalid_Domain != domain);
+        SkASSERT(kInvalid_Domain != domain);
         this->reset(domain, key);
     }
 
@@ -484,8 +497,8 @@ public:
     /** Has this been initialized to a valid domain */
     bool isValid() const { return kInvalid_Domain != fDomain; }
 
-    const Key& getKey() const { GrAssert(this->isValid()); return fKey; }
-    Domain getDomain() const { GrAssert(this->isValid()); return fDomain; }
+    const Key& getKey() const { SkASSERT(this->isValid()); return fKey; }
+    Domain getDomain() const { SkASSERT(this->isValid()); return fDomain; }
 
     /** Creates a new unique ID domain. */
     static Domain GenerateDomain();
@@ -615,10 +628,31 @@ enum GrGLBackendState {
     kStencil_GrGLBackendState          = 1 << 6,
     kPixelStore_GrGLBackendState       = 1 << 7,
     kProgram_GrGLBackendState          = 1 << 8,
-    kPathStencil_GrGLBackendState      = 1 << 9,
+    kFixedFunction_GrGLBackendState    = 1 << 9,
     kMisc_GrGLBackendState             = 1 << 10,
+    kPathRendering_GrGLBackendState    = 1 << 11,
     kALL_GrGLBackendState              = 0xffff
 };
+
+/**
+ * Returns the data size for the given compressed pixel config
+ */ 
+static inline size_t GrCompressedFormatDataSize(GrPixelConfig config,
+                                                int width, int height) {
+    SkASSERT(GrPixelConfigIsCompressed(config));
+
+    switch (config) {
+        case kLATC_GrPixelConfig:
+        case kETC1_GrPixelConfig:
+            SkASSERT((width & 3) == 0);
+            SkASSERT((height & 3) == 0);
+            return (width >> 2) * (height >> 2) * 8;
+
+        default:
+            SkFAIL("Unknown compressed pixel config");
+            return 4 * width * height;
+    }
+}
 
 /**
  * This value translates to reseting all the context state for any backend.

@@ -14,11 +14,17 @@ struct ThemeBackgroundInfo;
 class InstantServiceObserver {
  public:
   // Indicates that the user's custom theme has changed in some way.
-  virtual void ThemeInfoChanged(const ThemeBackgroundInfo&) = 0;
+  virtual void ThemeInfoChanged(const ThemeBackgroundInfo&);
 
   // Indicates that the most visited items has changed.
   virtual void MostVisitedItemsChanged(
-      const std::vector<InstantMostVisitedItem>&) = 0;
+      const std::vector<InstantMostVisitedItem>&);
+
+  // Indicates that the default search provider changed.
+  virtual void DefaultSearchProviderChanged();
+
+  // Indicates that the omnibox start margin has changed.
+  virtual void OmniboxStartMarginChanged(int omnibox_start_margin);
 
  protected:
   virtual ~InstantServiceObserver() {}

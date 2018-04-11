@@ -31,12 +31,12 @@ class GeneratedCreditCardBubbleViews : public GeneratedCreditCardBubbleView,
   virtual bool IsHiding() const OVERRIDE;
 
   // views::BubbleDelegateView:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual void Init() OVERRIDE;
 
   // views::StyledLabelListener:
-  virtual void StyledLabelLinkClicked(const ui::Range& range, int event_flags)
+  virtual void StyledLabelLinkClicked(const gfx::Range& range, int event_flags)
       OVERRIDE;
 
  private:
@@ -50,7 +50,7 @@ class GeneratedCreditCardBubbleViews : public GeneratedCreditCardBubbleView,
   // Controller that drives this bubble. May be invalid when hiding.
   base::WeakPtr<GeneratedCreditCardBubbleController> controller_;
 
-  base::WeakPtrFactory<GeneratedCreditCardBubbleView> weak_ptr_factory_;
+  base::WeakPtrFactory<GeneratedCreditCardBubbleViews> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GeneratedCreditCardBubbleViews);
 };

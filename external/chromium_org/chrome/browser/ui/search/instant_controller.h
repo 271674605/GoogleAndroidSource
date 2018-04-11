@@ -15,26 +15,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/search/instant_page.h"
-#include "chrome/common/instant_types.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_types.h"
-#include "content/public/common/page_transition_types.h"
-#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
-#include "url/gurl.h"
 
 class BrowserInstantController;
+class GURL;
 class InstantService;
 class InstantTab;
 class Profile;
 
 namespace content {
 class WebContents;
-}
-
-namespace gfx {
-class Rect;
 }
 
 // Macro used for logging debug events. |message| should be a std::string.
@@ -55,23 +46,10 @@ class InstantController : public InstantPage::Delegate {
   explicit InstantController(BrowserInstantController* browser);
   virtual ~InstantController();
 
-  // Sets the stored start-edge margin and width of the omnibox.
-  void SetOmniboxBounds(const gfx::Rect& bounds);
-
-  // Notifies |instant_Tab_| to toggle voice search.
-  void ToggleVoiceSearch();
-
   // Called if the browser is navigating to a search URL for |search_terms| with
   // search-term-replacement enabled. If |instant_tab_| can be used to process
   // the search, this does so and returns true. Else, returns false.
-  bool SubmitQuery(const string16& search_terms);
-
-  // Called to indicate that the omnibox focus state changed with the given
-  // |reason|. If |focus_state| is FOCUS_NONE, |view_gaining_focus| is set to
-  // the view gaining focus.
-  void OmniboxFocusChanged(OmniboxFocusState focus_state,
-                           OmniboxFocusChangeReason reason,
-                           gfx::NativeView view_gaining_focus);
+  bool SubmitQuery(const base::string16& search_terms);
 
   // The search mode in the active tab has changed. Bind |instant_tab_| if the
   // |new_mode| reflects an Instant search results page.
@@ -97,11 +75,6 @@ class InstantController : public InstantPage::Delegate {
     return debug_events_;
   }
 
-  // Gets the stored start-edge margin and width of the omnibox.
-  const gfx::Rect omnibox_bounds() {
-    return omnibox_bounds_;
-  }
-
   // Used by BrowserInstantController to notify InstantController about the
   // instant support change event for the active web contents.
   void InstantSupportChanged(InstantSupportState instant_support);
@@ -118,18 +91,9 @@ class InstantController : public InstantPage::Delegate {
 
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ExtendedModeIsOn);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, MostVisited);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, NTPIsPreloaded);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPIsUsedInNewTab);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPIsUsedInSameTab);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPForWrongProvider);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPRenderProcessGone);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           PreloadedNTPDoesntSupportInstant);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ProcessIsolation);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, UnrelatedSiteInstance);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OnDefaultSearchProviderChanged);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedNetworkTest,
-                           NTPReactsToNetworkChanges);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
                            AcceptingURLSearchDoesNotNavigate);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, AcceptingJSSearchDoesNotRunJS);
@@ -156,29 +120,6 @@ class InstantController : public InstantPage::Delegate {
   virtual void InstantPageAboutToNavigateMainFrame(
       const content::WebContents* contents,
       const GURL& url) OVERRIDE;
-  virtual void FocusOmnibox(const content::WebContents* contents,
-                            OmniboxFocusState state) OVERRIDE;
-  virtual void NavigateToURL(
-      const content::WebContents* contents,
-      const GURL& url,
-      content::PageTransition transition,
-      WindowOpenDisposition disposition,
-      bool is_search_type) OVERRIDE;
-  virtual void PasteIntoOmnibox(const content::WebContents* contents,
-                                const string16& text) OVERRIDE;
-  virtual void InstantPageLoadFailed(content::WebContents* contents) OVERRIDE;
-
-  // Invoked by the InstantLoader when the Instant page wants to delete a
-  // Most Visited item.
-  virtual void DeleteMostVisitedItem(const GURL& url) OVERRIDE;
-
-  // Invoked by the InstantLoader when the Instant page wants to undo a
-  // Most Visited deletion.
-  virtual void UndoMostVisitedDeletion(const GURL& url) OVERRIDE;
-
-  // Invoked by the InstantLoader when the Instant page wants to undo all
-  // Most Visited deletions.
-  virtual void UndoAllMostVisitedDeletions() OVERRIDE;
 
   // Helper function to navigate the given contents to the local fallback
   // Instant URL and trim the history correctly.
@@ -191,15 +132,8 @@ class InstantController : public InstantPage::Delegate {
   // point to it. Else, deletes any existing |instant_tab_|.
   void ResetInstantTab();
 
-  // Sends theme info, omnibox bounds, font info, etc. down to the Instant tab.
+  // Sends theme info, omnibox bounds, etc. down to the Instant tab.
   void UpdateInfoForInstantTab();
-
-  // Returns whether input is in progress, i.e. if the omnibox has focus and the
-  // active tab is in mode SEARCH_SUGGESTIONS.
-  bool IsInputInProgress() const;
-
-  // Returns true if the local page is being used.
-  bool UsingLocalPage() const;
 
   // Returns the InstantService for the browser profile.
   InstantService* GetInstantService() const;
@@ -209,18 +143,8 @@ class InstantController : public InstantPage::Delegate {
   // The instance of InstantPage maintained by InstantController.
   scoped_ptr<InstantTab> instant_tab_;
 
-  // Omnibox focus state.
-  OmniboxFocusState omnibox_focus_state_;
-
-  // The reason for the most recent omnibox focus change.
-  OmniboxFocusChangeReason omnibox_focus_change_reason_;
-
   // The search model mode for the active tab.
   SearchMode search_mode_;
-
-  // The start-edge margin and width of the omnibox, used by the page to align
-  // its suggestions with the omnibox.
-  gfx::Rect omnibox_bounds_;
 
   // List of events and their timestamps, useful in debugging Instant behaviour.
   mutable std::list<std::pair<int64, std::string> > debug_events_;

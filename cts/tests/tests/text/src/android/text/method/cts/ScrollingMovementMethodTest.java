@@ -18,6 +18,7 @@ package android.text.method.cts;
 
 import dalvik.annotation.KnownFailure;
 
+import android.cts.util.WidgetTestUtils;
 import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
 import android.text.Layout;
@@ -33,7 +34,6 @@ import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.widget.TextView;
 import android.widget.TextView.BufferType;
-import android.widget.cts.WidgetTestUtils;
 
 /**
  * Test {@link ScrollingMovementMethod}. The class is an implementation of interface
@@ -43,7 +43,7 @@ import android.widget.cts.WidgetTestUtils;
  *
  * @see android.widget.cts.TextViewTest
  */
-public class ScrollingMovementMethodTest extends ActivityInstrumentationTestCase2<StubActivity> {
+public class ScrollingMovementMethodTest extends ActivityInstrumentationTestCase2<CtsActivity> {
     private static final int LITTLE_SPACE = 20;
 
     private static final String THREE_LINES_TEXT = "first line\nsecond line\nlast line";
@@ -55,7 +55,7 @@ public class ScrollingMovementMethodTest extends ActivityInstrumentationTestCase
     private int mScaledTouchSlop;
 
     public ScrollingMovementMethodTest() {
-        super("com.android.cts.stub", StubActivity.class);
+        super("com.android.cts.text", CtsActivity.class);
     }
 
     @Override

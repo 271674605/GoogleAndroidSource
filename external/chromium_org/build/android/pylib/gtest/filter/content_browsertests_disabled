@@ -2,20 +2,19 @@
 # Timeouts
 Http/MediaTest.*
 File/MediaTest.*
-ExternalClearKey/EncryptedMediaTest.*
-ClearKey/EncryptedMediaTest.*
 WorkerTest.*
 MediaTest.*
-MediaSourceTest.*
+MediaSourceTest.ConfigChangeVideo
 WebGLConformanceTest.*
 MessagePortTest.Tests
-EncryptedMediaTest.*
 CrossPlatformAccessibilityBrowserTest.*
 DatabaseTest.*
 ResourceDispatcherHostBrowserTest.SyncXMLHttpRequest_DuringUnload
 
 # Crashes
 ResourceDispatcherHostBrowserTest.CrossSiteAfterCrash
+RenderFrameHostManagerTest.IgnoreRendererDebugURLsWhenCrashed
+RenderFrameHostManagerTest.ProcessExitWithSwappedOutViews
 
 # Failures
 RenderViewHostTest.BaseURLParam
@@ -30,6 +29,7 @@ ChildProcessSecurityPolicyInProcessBrowserTest.NoLeak
 SecurityExploitBrowserTest.SetWebUIProperty
 
 # Plugins are not supported.
+BrowserPluginThreadedCompositorPixelTest.*
 BrowserPluginHostTest.*
 BrowserPluginTest.*
 PluginTest.*
@@ -37,6 +37,19 @@ PluginTest.*
 # These used to be test_shell_tests and were ported to content_browsertests in
 # https://codereview.chromium.org/14304004/. Investigate more.
 DomSerializerTests.*
+
+# http://crbug.com/297230
+DumpAccessibilityTreeTest.AccessibilityAriaLevel
+DumpAccessibilityTreeTest.AccessibilityAriaProgressbar
+DumpAccessibilityTreeTest.AccessibilityListMarkers
+DumpAccessibilityTreeTest.AccessibilityUl
+DumpAccessibilityTreeTest.AccessibilityCanvas
+RendererAccessibilityTest.DetachAccessibilityObject
+RendererAccessibilityTest.EditableTextModeFocusEvents
+DumpAccessibilityTreeTest.AccessibilityDialog
+DumpAccessibilityTreeTest.AccessibilityModalDialogClosed
+DumpAccessibilityTreeTest.AccessibilityModalDialogInIframeOpened
+RendererAccessibilityTest.EventOnObjectNotInTree
 
 # http://crbug.com/187500
 RenderViewImplTest.*
@@ -48,9 +61,6 @@ RenderWidgetTest.OnMsgPaintAtSize
 PasswordFormConversionUtilsTest.ValidWebFormElementToPasswordForm
 PasswordFormConversionUtilsTest.InvalidWebFormElementToPasswordForm
 
-# Multiple test servers support: http://crbug/187570
-RenderViewHostManagerTest.*
-
 # http://crbug.com/215894
 DownloadContentTest.CancelInterruptedDownload
 DownloadContentTest.CancelResumingDownload
@@ -61,22 +71,6 @@ DownloadContentTest.ResumeInterruptedDownloadNoRange
 DownloadContentTest.ResumeInterruptedDownloadNoVerifiers
 DownloadContentTest.ResumeInterruptedDownloadBadPrecondition
 DownloadContentTest.ResumeWithDeletedFile
-
-# http://crbug.com/181069
-WebrtcBrowserTest.CanSetupVideoCall
-WebrtcBrowserTest.CanSetupAudioAndVideoCall
-WebrtcBrowserTest.CanSetupAudioAndVideoCallWithoutMsidAndBundle
-WebrtcBrowserTest.CallWithDataOnly
-WebrtcBrowserTest.CallWithDataAndMedia
-WebrtcBrowserTest.CanMakeEmptyCallThenAddStreamsAndRenegotiate
-WebrtcBrowserTest.CallWithNewVideoMediaStream
-WebrtcBrowserTest.GetAudioAndVideoStreamAndClone
-WebrtcBrowserTest.GetAudioAndVideoStreamAndStop
-WebrtcBrowserTest.GetVideoStreamAndStop
-WebRTCInternalsBrowserTest.WithRealPeerConnectionCall
-
-# http://crbug.com/175683
-WebrtcBrowserTest.CallWithDataAndLaterAddMedia
 
 # http://crbug.com/224134
 RenderWidgetHostBrowserTest.GetSnapshotFromRendererTest
@@ -93,11 +87,37 @@ IndexedDBBrowserTestWithCorruptLevelDB.DestroyTest
 
 BookmarkletTest.NonEmptyResult
 
-# http://crbug.com/248796
-ResourceFetcherTests.ResourceFetcher404
-ResourceFetcherTests.ResourceFetcherDeletedInCallback
-ResourceFetcherTests.ResourceFetcherTimeout
-ResourceFetcherTests.ResourceFetcherDownload
-
 # http://crbug.com/256238
 SignalTest.*
+
+# http://crbug.com/311344
+BrowserGpuChannelHostFactoryTest.AlreadyEstablished
+BrowserGpuChannelHostFactoryTest.Basic
+BrowserGpuChannelHostFactoryTest.CrashAndRecover
+BrowserGpuChannelHostFactoryTest.EstablishAndTerminate
+
+# http://crbug.com/338011
+TouchInputBrowserTest.MultiPointTouchPress
+TouchInputBrowserTest.TouchHandlerConsume
+TouchInputBrowserTest.TouchHandlerNoConsume
+TouchInputBrowserTest.TouchNoHandler
+TouchActionBrowserTest.*
+
+# http://crbug.com/338408
+TracingControllerTest.EnableCaptureAndDisableMonitoring
+
+# http://crbug.com/338023
+SecurityExploitBrowserTest.AttemptDuplicateRenderViewHost
+SecurityExploitBrowserTest.AttemptDuplicateRenderWidgetHost
+
+# http://crbug.com/338411
+FrameTreeBrowserTest.NavigateWithLeftoverFrames
+
+# http://crbug.com/338421
+GinBrowserTest.GinAndGarbageCollection
+
+# http://crbug.com/341995
+TracingControllerTest.EnableCaptureAndDisableMonitoringWithFilePath
+
+# http://crbug.com/343604
+MSE_ClearKey/EncryptedMediaTest.ConfigChangeVideo/0

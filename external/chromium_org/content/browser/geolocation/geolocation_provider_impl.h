@@ -19,41 +19,20 @@
 template<typename Type> struct DefaultSingletonTraits;
 
 namespace content {
-class GeolocationArbitrator;
-class GeolocationProviderTest;
+class LocationArbitrator;
 
-// This is the main API to the geolocation subsystem. The application will hold
-// a single instance of this class and can register multiple clients to be
-// notified of location changes:
-// * Observers are registered by AddLocationUpdateCallback() and will keep
-//   receiving updates
-//   until unregistered by RemoveLocationUpdateCallback().
-// * Callbacks are registered by RequestCallback() and will be called exactly
-//   once when the next update becomes available.
-// The application must instantiate the GeolocationProvider on the IO thread and
-// must communicate with it on the same thread.
-// The underlying location arbitrator will only be enabled whilst there is at
-// least one registered observer or pending callback. The arbitrator and the
-// location providers it uses run on a separate Geolocation thread.
 class CONTENT_EXPORT GeolocationProviderImpl
     : public NON_EXPORTED_BASE(GeolocationProvider),
       public base::Thread {
  public:
   // GeolocationProvider implementation:
-  virtual void AddLocationUpdateCallback(const LocationUpdateCallback& callback,
-                                         bool use_high_accuracy) OVERRIDE;
-  virtual bool RemoveLocationUpdateCallback(
-      const LocationUpdateCallback& callback) OVERRIDE;
+  virtual scoped_ptr<GeolocationProvider::Subscription>
+      AddLocationUpdateCallback(const LocationUpdateCallback& callback,
+                                bool use_high_accuracy) OVERRIDE;
   virtual void UserDidOptIntoLocationServices() OVERRIDE;
+  virtual void OverrideLocationForTesting(const Geoposition& position) OVERRIDE;
 
-  bool LocationServicesOptedIn() const;
-
-  // Overrides the location for automation/testing. Suppresses any further
-  // updates from the actual providers and sends an update with the overridden
-  // position to all registered clients.
-  void OverrideLocationForTesting(const Geoposition& override_position);
-
-  // Callback from the GeolocationArbitrator. Public for testing.
+  // Callback from the LocationArbitrator. Public for testing.
   void OnLocationUpdate(const Geoposition& position);
 
   // Gets a pointer to the singleton instance of the location relayer, which
@@ -62,18 +41,19 @@ class CONTENT_EXPORT GeolocationProviderImpl
   // instantiated on the same thread. Ownership is NOT returned.
   static GeolocationProviderImpl* GetInstance();
 
+  bool user_did_opt_into_location_services_for_testing() {
+    return user_did_opt_into_location_services_;
+  }
+
  protected:
   friend struct DefaultSingletonTraits<GeolocationProviderImpl>;
   GeolocationProviderImpl();
   virtual ~GeolocationProviderImpl();
 
   // Useful for injecting mock geolocation arbitrator in tests.
-  virtual GeolocationArbitrator* CreateArbitrator();
+  virtual LocationArbitrator* CreateArbitrator();
 
  private:
-  typedef std::pair<LocationUpdateCallback, bool> LocationUpdateInfo;
-  typedef std::list<LocationUpdateInfo> CallbackList;
-
   bool OnGeolocationThread() const;
 
   // Start and stop providers as needed when clients are added or removed.
@@ -98,8 +78,9 @@ class CONTENT_EXPORT GeolocationProviderImpl
   virtual void Init() OVERRIDE;
   virtual void CleanUp() OVERRIDE;
 
-  // Only used on the IO thread
-  CallbackList callbacks_;
+  base::CallbackList<void(const Geoposition&)> high_accuracy_callbacks_;
+  base::CallbackList<void(const Geoposition&)> low_accuracy_callbacks_;
+
   bool user_did_opt_into_location_services_;
   Geoposition position_;
 
@@ -107,7 +88,7 @@ class CONTENT_EXPORT GeolocationProviderImpl
   bool ignore_location_updates_;
 
   // Only to be used on the geolocation thread.
-  GeolocationArbitrator* arbitrator_;
+  LocationArbitrator* arbitrator_;
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationProviderImpl);
 };

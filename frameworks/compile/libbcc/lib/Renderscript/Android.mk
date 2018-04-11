@@ -36,7 +36,7 @@ libbcc_renderscript_SRC_FILES := \
 #=====================================================================
 # Device Static Library: libbccRenderscript
 #=====================================================================
-
+ifneq (true,$(DISABLE_LLVM_DEVICE_BUILDS))
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libbccRenderscript
@@ -46,10 +46,9 @@ LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_SRC_FILES := $(libbcc_renderscript_SRC_FILES)
 
 include $(LIBBCC_DEVICE_BUILD_MK)
-include $(LIBBCC_GEN_CONFIG_MK)
 include $(LLVM_DEVICE_BUILD_MK)
 include $(BUILD_STATIC_LIBRARY)
-
+endif
 
 #=====================================================================
 # Host Static Library: libbccRenderscript
@@ -65,6 +64,5 @@ LOCAL_IS_HOST_MODULE := true
 LOCAL_SRC_FILES := $(libbcc_renderscript_SRC_FILES)
 
 include $(LIBBCC_HOST_BUILD_MK)
-include $(LIBBCC_GEN_CONFIG_MK)
 include $(LLVM_HOST_BUILD_MK)
 include $(BUILD_HOST_STATIC_LIBRARY)

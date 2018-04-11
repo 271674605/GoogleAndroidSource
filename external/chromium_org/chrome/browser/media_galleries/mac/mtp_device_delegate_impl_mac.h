@@ -10,12 +10,10 @@
 #include <vector>
 
 #include "base/containers/hash_tables.h"
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
-
-namespace chrome {
 
 // Delegate for presenting an Image Capture device through the filesystem
 // API. The synthetic filesystem will be rooted at the constructed location,
@@ -51,15 +49,21 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
       const base::FilePath& local_path,
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback) OVERRIDE;
+  virtual bool IsStreaming() OVERRIDE;
+  virtual void ReadBytes(
+      const base::FilePath& device_file_path,
+      net::IOBuffer* buf, int64 offset, int buf_len,
+      const ReadBytesSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) OVERRIDE;
   virtual void CancelPendingTasksAndDeleteDelegate() OVERRIDE;
 
   // Forward delegates for ImageCaptureDeviceListener. These are
   // invoked in callbacks of the ImageCapture library on the UI thread.
   virtual void ItemAdded(const std::string& name,
-                         const base::PlatformFileInfo& info);
+                         const base::File::Info& info);
   virtual void NoMoreItems();
   virtual void DownloadedFile(const std::string& name,
-                              base::PlatformFileError error);
+                              base::File::Error error);
 
   // Scheduled when early directory reads are requested. The
   // timeout will signal an ABORT error to the caller if the
@@ -73,8 +77,8 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
 
   // Delegate for GetFileInfo, called on the UI thread.
   void GetFileInfoImpl(const base::FilePath& file_path,
-                       base::PlatformFileInfo* file_info,
-                       base::PlatformFileError* error);
+                       base::File::Info* file_info,
+                       base::File::Error* error);
 
   // Delegate for ReadDirectory, called on the UI thread.
   void ReadDirectoryImpl(
@@ -108,7 +112,7 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
 
   // Stores a map from filename to file metadata received from the camera.
   base::hash_map<base::FilePath::StringType,
-                 base::PlatformFileInfo> file_info_;
+                 base::File::Info> file_info_;
 
   // List of filenames received from the camera.
   std::vector<base::FilePath> file_paths_;
@@ -152,7 +156,5 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(MTPDeviceDelegateImplMac);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_MAC_MTP_DEVICE_DELEGATE_IMPL_MAC_H_

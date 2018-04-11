@@ -1,1 +1,1 @@
-include ':BasicSyncAdapter'
+include 'Application'

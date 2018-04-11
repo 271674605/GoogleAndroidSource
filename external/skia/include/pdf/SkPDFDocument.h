@@ -13,7 +13,7 @@
 #include "SkAdvancedTypefaceMetrics.h"
 #include "SkRefCnt.h"
 #include "SkTDArray.h"
-#include "SkTScopedPtr.h"
+#include "SkTemplates.h"
 
 class SkPDFCatalog;
 class SkPDFDevice;
@@ -69,12 +69,20 @@ public:
     SK_API bool appendPage(SkPDFDevice* pdfDevice);
 
     /** Get the count of unique font types used in the document.
+     * DEPRECATED.
      */
     SK_API void getCountOfFontTypes(
-        int counts[SkAdvancedTypefaceMetrics::kNotEmbeddable_Font + 1]) const;
+        int counts[SkAdvancedTypefaceMetrics::kOther_Font + 2]) const;
+
+    /** Get the count of unique font types used in the document.
+     */
+    SK_API void getCountOfFontTypes(
+        int counts[SkAdvancedTypefaceMetrics::kOther_Font + 1],
+        int* notSubsettableCount,
+        int* notEmbedddableCount) const;
 
 private:
-    SkTScopedPtr<SkPDFCatalog> fCatalog;
+    SkAutoTDelete<SkPDFCatalog> fCatalog;
     int64_t fXRefFileOffset;
 
     SkTDArray<SkPDFPage*> fPages;

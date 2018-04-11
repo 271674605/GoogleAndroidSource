@@ -15,48 +15,59 @@
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamCenter.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
+#include "third_party/WebKit/public/platform/WebMediaStreamTrackSourcesRequest.h"
 
-namespace WebKit {
+namespace blink {
+class WebAudioSourceProvider;
 class WebMediaStreamCenterClient;
 }
 
 namespace content {
-class MediaStreamDependencyFactory;
+class PeerConnectionDependencyFactory;
 
 class CONTENT_EXPORT MediaStreamCenter
-    : NON_EXPORTED_BASE(public WebKit::WebMediaStreamCenter),
+    : NON_EXPORTED_BASE(public blink::WebMediaStreamCenter),
       public RenderProcessObserver {
  public:
-  MediaStreamCenter(WebKit::WebMediaStreamCenterClient* client,
-                    MediaStreamDependencyFactory* factory);
+  MediaStreamCenter(blink::WebMediaStreamCenterClient* client,
+                    PeerConnectionDependencyFactory* factory);
   virtual ~MediaStreamCenter();
 
+ private:
   virtual bool getMediaStreamTrackSources(
-      const WebKit::WebMediaStreamTrackSourcesRequest& request);
+      const blink::WebMediaStreamTrackSourcesRequest& request) OVERRIDE;
+
+  virtual void didCreateMediaStreamTrack(
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
 
   virtual void didEnableMediaStreamTrack(
-      const WebKit::WebMediaStream& stream,
-      const WebKit::WebMediaStreamTrack& component);
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
 
   virtual void didDisableMediaStreamTrack(
-      const WebKit::WebMediaStream& stream,
-      const WebKit::WebMediaStreamTrack& component);
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
 
   virtual void didStopLocalMediaStream(
-      const WebKit::WebMediaStream& stream);
+      const blink::WebMediaStream& stream) OVERRIDE;
+
+  virtual bool didStopMediaStreamTrack(
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
+
+  virtual blink::WebAudioSourceProvider*
+      createWebAudioSourceFromMediaStreamTrack(
+          const blink::WebMediaStreamTrack& track) OVERRIDE;
+
 
   virtual void didCreateMediaStream(
-      WebKit::WebMediaStream& stream);
+      blink::WebMediaStream& stream) OVERRIDE;
 
   virtual bool didAddMediaStreamTrack(
-      const WebKit::WebMediaStream& stream,
-      const WebKit::WebMediaStreamTrack& track);
+      const blink::WebMediaStream& stream,
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
 
   virtual bool didRemoveMediaStreamTrack(
-      const WebKit::WebMediaStream& stream,
-      const WebKit::WebMediaStreamTrack& track);
+      const blink::WebMediaStream& stream,
+      const blink::WebMediaStreamTrack& track) OVERRIDE;
 
- private:
   // RenderProcessObserver implementation.
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
@@ -65,13 +76,13 @@ class CONTENT_EXPORT MediaStreamCenter
 
   // |rtc_factory_| is a weak pointer and is owned by the RenderThreadImpl.
   // It is valid as long as  RenderThreadImpl exist.
-  MediaStreamDependencyFactory* rtc_factory_;
+  PeerConnectionDependencyFactory* rtc_factory_;
 
   // A strictly increasing id that's used to label incoming GetSources()
   // requests.
   int next_request_id_;
 
-  typedef std::map<int, WebKit::WebMediaStreamTrackSourcesRequest> RequestMap;
+  typedef std::map<int, blink::WebMediaStreamTrackSourcesRequest> RequestMap;
   // Maps request ids to request objects.
   RequestMap requests_;
 

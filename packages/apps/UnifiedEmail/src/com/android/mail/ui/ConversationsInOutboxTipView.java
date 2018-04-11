@@ -101,7 +101,7 @@ public class ConversationsInOutboxTipView extends FrameLayout
 
     public void bind(final Account account, final FolderSelector folderSelector) {
         mAccount = account;
-        mAccountPreferences = AccountPreferences.get(getContext(), account.getEmailAddress());
+        mAccountPreferences = AccountPreferences.get(getContext(), account);
         mFolderSelector = folderSelector;
     }
 
@@ -355,5 +355,11 @@ public class ConversationsInOutboxTipView extends FrameLayout
         } else {
             setMeasuredDimension(View.MeasureSpec.getSize(widthMeasureSpec), mAnimatedHeight);
         }
+    }
+
+    @Override
+    public boolean commitLeaveBehindItem() {
+        // This view has no leave-behind
+        return false;
     }
 }

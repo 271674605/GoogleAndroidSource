@@ -1,82 +1,113 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Ceres Solver - A fast non-linear least squares minimizer
+// Copyright 2013 Google Inc. All rights reserved.
+// http://code.google.com/p/ceres-solver/
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// * Redistributions of source code must retain the above copyright notice,
+//   this list of conditions and the following disclaimer.
+// * Redistributions in binary form must reproduce the above copyright notice,
+//   this list of conditions and the following disclaimer in the documentation
+//   and/or other materials provided with the distribution.
+// * Neither the name of Google Inc. nor the names of its contributors may be
+//   used to endorse or promote products derived from this software without
+//   specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
 // Author: settinger@google.com (Scott Ettinger)
-
-// Simplified Google3 style logging with Android support.
-// Supported macros are : LOG(INFO), LOG(WARNING), LOG(ERROR), LOG(FATAL),
-//                        and VLOG(n).
+//         mierle@gmail.com (Keir Mierle)
 //
-// Portions of this code are taken from the GLOG package.  This code
-// is only a small subset of the GLOG functionality. And like GLOG,
-// higher levels are more verbose.
+// Simplified Glog style logging with Android support. Supported macros in
+// decreasing severity level per line:
 //
-// Notable differences from GLOG :
+//   VLOG(2), VLOG(N)
+//   VLOG(1),
+//   LOG(INFO), VLOG(0), LG
+//   LOG(WARNING),
+//   LOG(ERROR),
+//   LOG(FATAL),
 //
-// 1. lack of support for displaying unprintable characters and lack
-// of stack trace information upon failure of the CHECK macros.
-// 2. All output is tagged with the string "native".
-// 3. While there is no runtime flag filtering logs (-v, -vmodule), the
-//    compile time define MAX_LOG_LEVEL can be used to silence any
-//    logging above the given level.
+// With VLOG(n), the output is directed to one of the 5 Android log levels:
 //
-// -------------------------------- Usage ------------------------------------
-// Basic usage :
-// LOG(<severity level>) acts as a c++ stream to the Android logcat output.
-// e.g. LOG(INFO) << "Value of counter = " << counter;
+//   2 - Verbose
+//   1 - Debug
+//   0 - Info
+//  -1 - Warning
+//  -2 - Error
+//  -3 - Fatal
 //
-// Valid severity levels include INFO, WARNING, ERROR, FATAL.
-// The various severity levels are routed to the corresponding Android logcat
-// output.
-// LOG(FATAL) outputs to the log and then terminates.
+// Any logging of level 2 and above is directed to the Verbose level. All
+// Android log output is tagged with the string "native".
 //
-// VLOG(<severity level>) can also be used.
-// VLOG(n) output is directed to the Android logcat levels as follows :
-//  >=2 - Verbose
-//    1 - Debug
-//    0 - Info
-//   -1 - Warning
-//   -2 - Error
-// <=-3 - Fatal
-// Note that VLOG(FATAL) will terminate the program.
+// If the symbol ANDROID is not defined, all output goes to std::cerr.
+// This allows code to be built on a different system for debug.
 //
-// CHECK macros are defined to test for conditions within code.  Any CHECK
-// that fails will log the failure and terminate the application.
+// Portions of this code are taken from the GLOG package.  This code is only a
+// small subset of the GLOG functionality. Notable differences from GLOG
+// behavior include lack of support for displaying unprintable characters and
+// lack of stack trace information upon failure of the CHECK macros.  On
+// non-Android systems, log output goes to std::cerr and is not written to a
+// file.
+//
+// CHECK macros are defined to test for conditions within code.  Any CHECK that
+// fails will log the failure and terminate the application.
 // e.g. CHECK_GE(3, 2) will pass while CHECK_GE(3, 4) will fail after logging
 //      "Check failed 3 >= 4".
-// The following CHECK macros are defined :
 //
-// CHECK(condition) - fails if condition is false and logs condition.
-// CHECK_NOTNULL(variable) - fails if the variable is NULL.
+// The following CHECK macros are defined:
+//
+//   CHECK(condition)        - fails if condition is false and logs condition.
+//   CHECK_NOTNULL(variable) - fails if the variable is NULL.
 //
 // The following binary check macros are also defined :
-//    Macro                 operator applied
-// ------------------------------------------
-// CHECK_EQ(val1, val2)      val1 == val2
-// CHECK_NE(val1, val2)      val1 != val2
-// CHECK_GT(val1, val2)      val1 > val2
-// CHECK_GE(val1, val2)      val1 >= val2
-// CHECK_LT(val1, val2)      val1 < val2
-// CHECK_LE(val1, val2)      val1 <= val2
+//
+//   Macro                     Operator equivalent
+//   --------------------      -------------------
+//   CHECK_EQ(val1, val2)      val1 == val2
+//   CHECK_NE(val1, val2)      val1 != val2
+//   CHECK_GT(val1, val2)      val1 > val2
+//   CHECK_GE(val1, val2)      val1 >= val2
+//   CHECK_LT(val1, val2)      val1 < val2
+//   CHECK_LE(val1, val2)      val1 <= val2
 //
 // Debug only versions of all of the check macros are also defined.  These
 // macros generate no code in a release build, but avoid unused variable
 // warnings / errors.
-// To use the debug only versions, Prepend a D to the normal check macros.
-// e.g. DCHECK_EQ(a, b);
+//
+// To use the debug only versions, prepend a D to the normal check macros, e.g.
+// DCHECK_EQ(a, b).
 
-#ifndef MOBILE_BASE_LOGGING_H_
-#define MOBILE_BASE_LOGGING_H_
+#ifndef CERCES_INTERNAL_MINIGLOG_GLOG_LOGGING_H_
+#define CERCES_INTERNAL_MINIGLOG_GLOG_LOGGING_H_
 
-// Definitions for building on an Android system.
-#include <android/log.h>
-#include <time.h>
+#ifdef ANDROID
+#  include <android/log.h>
+#endif  // ANDROID
 
 #include <algorithm>
-#include <iostream>
-#include <string>
+#include <ctime>
 #include <fstream>
+#include <iostream>
 #include <set>
 #include <sstream>
+#include <string>
 #include <vector>
+
+// For appropriate definition of CERES_EXPORT macro.
+#include "ceres/internal/port.h"
+#include "ceres/internal/disable_warnings.h"
 
 // Log severity level constants.
 const int FATAL   = -3;
@@ -94,26 +125,29 @@ const int WARNING = ::WARNING;
 const int ERROR   = ::ERROR;
 const int FATAL   = ::FATAL;
 
-#ifdef ENABLE_LOG_SINKS
-
-// Sink class used for integration with mock and test functions.
-// If sinks are added, all log output is also sent to each sink through
-// the send function.  In this implementation, WaitTillSent() is called
-// immediately after the send.
+// Sink class used for integration with mock and test functions. If sinks are
+// added, all log output is also sent to each sink through the send function.
+// In this implementation, WaitTillSent() is called immediately after the send.
 // This implementation is not thread safe.
-class LogSink {
+class CERES_EXPORT LogSink {
  public:
   virtual ~LogSink() {}
-  virtual void send(LogSeverity severity, const char* full_filename,
-                    const char* base_filename, int line,
+  virtual void send(LogSeverity severity,
+                    const char* full_filename,
+                    const char* base_filename,
+                    int line,
                     const struct tm* tm_time,
-                    const char* message, size_t message_len) = 0;
+                    const char* message,
+                    size_t message_len) = 0;
   virtual void WaitTillSent() = 0;
 };
 
-// Global set of log sinks.
-// TODO(settinger): Move this into a .cc file.
-static std::set<LogSink *> log_sinks_global;
+// Global set of log sinks. The actual object is defined in logging.cc.
+extern CERES_EXPORT std::set<LogSink *> log_sinks_global;
+
+inline void InitGoogleLogging(char *argv) {
+  // Do nothing; this is ignored.
+}
 
 // Note: the Log sink functions are not thread safe.
 inline void AddLogSink(LogSink *sink) {
@@ -124,20 +158,17 @@ inline void RemoveLogSink(LogSink *sink) {
   log_sinks_global.erase(sink);
 }
 
-#endif  // #ifdef ENABLE_LOG_SINKS
-
-inline void InitGoogleLogging(char *argv) {}
-
 }  // namespace google
 
 // ---------------------------- Logger Class --------------------------------
 
 // Class created for each use of the logging macros.
 // The logger acts as a stream and routes the final stream contents to the
-// Android logcat output at the proper filter level.  This class should not
+// Android logcat output at the proper filter level.  If ANDROID is not
+// defined, output is directed to std::cerr.  This class should not
 // be directly instantiated in code, rather it should be invoked through the
-// use of the log macros LOG, or VLOG.
-class MessageLogger {
+// use of the log macros LG, LOG, or VLOG.
+class CERES_EXPORT MessageLogger {
  public:
   MessageLogger(const char *file, int line, const char *tag, int severity)
     : file_(file), line_(line), tag_(tag), severity_(severity) {
@@ -148,17 +179,14 @@ class MessageLogger {
 
   // Output the contents of the stream to the proper channel on destruction.
   ~MessageLogger() {
-#ifdef MAX_LOG_LEVEL
-    if (severity_ > MAX_LOG_LEVEL && severity_ > FATAL) {
-      return;
-    }
-#endif
     stream_ << "\n";
+
+#ifdef ANDROID
     static const int android_log_levels[] = {
         ANDROID_LOG_FATAL,    // LOG(FATAL)
         ANDROID_LOG_ERROR,    // LOG(ERROR)
         ANDROID_LOG_WARN,     // LOG(WARNING)
-        ANDROID_LOG_INFO,     // LOG(INFO), VLOG(0)
+        ANDROID_LOG_INFO,     // LOG(INFO), LG, VLOG(0)
         ANDROID_LOG_DEBUG,    // VLOG(1)
         ANDROID_LOG_VERBOSE,  // VLOG(2) .. VLOG(N)
     };
@@ -178,13 +206,13 @@ class MessageLogger {
                           tag_.c_str(),
                           "terminating.\n");
     }
-
-#ifdef ENABLE_LOG_SINKS
+#else
+    // If not building on Android, log all output to std::cerr.
+    std::cerr << stream_.str();
+#endif  // ANDROID
 
     LogToSinks(severity_);
     WaitForSinks();
-
-#endif  // #ifdef ENABLE_LOG_SINKS
 
     // Android logging at level FATAL does not terminate execution, so abort()
     // is still required to stop the program.
@@ -197,41 +225,49 @@ class MessageLogger {
   std::stringstream &stream() { return stream_; }
 
  private:
-#ifdef ENABLE_LOG_SINKS
-
   void LogToSinks(int severity) {
     time_t rawtime;
-    struct tm * timeinfo;
+    time (&rawtime);
 
-    time ( &rawtime );
-    timeinfo = localtime ( &rawtime );
-    std::set<google::LogSink *>::iterator iter;
+    struct tm* timeinfo;
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
+    // On Windows, use secure localtime_s not localtime.
+    struct tm windows_timeinfo;
+    timeinfo = &windows_timeinfo;
+    localtime_s(timeinfo, &rawtime);
+#else
+    timeinfo = localtime(&rawtime);
+#endif
+
+    std::set<google::LogSink*>::iterator iter;
     // Send the log message to all sinks.
     for (iter = google::log_sinks_global.begin();
-         iter != google::log_sinks_global.end(); ++iter)
+         iter != google::log_sinks_global.end(); ++iter) {
       (*iter)->send(severity, file_.c_str(), filename_only_.c_str(), line_,
                     timeinfo, stream_.str().c_str(), stream_.str().size());
+    }
   }
 
   void WaitForSinks() {
-    // TODO(settinger): add locks for thread safety.
+    // TODO(settinger): Add locks for thread safety.
     std::set<google::LogSink *>::iterator iter;
+
     // Call WaitTillSent() for all sinks.
     for (iter = google::log_sinks_global.begin();
-         iter != google::log_sinks_global.end(); ++iter)
+         iter != google::log_sinks_global.end(); ++iter) {
       (*iter)->WaitTillSent();
+    }
   }
 
-#endif // #ifdef ENABLE_LOG_SINKS
-
   void StripBasename(const std::string &full_path, std::string *filename) {
-    // TODO(settinger): add support for OS with different path separators.
+    // TODO(settinger): Add support for OSs with different path separators.
     const char kSeparator = '/';
     size_t pos = full_path.rfind(kSeparator);
-    if (pos != std::string::npos)
+    if (pos != std::string::npos) {
       *filename = full_path.substr(pos + 1, std::string::npos);
-    else
+    } else {
       *filename = full_path;
+    }
   }
 
   std::string file_;
@@ -247,7 +283,7 @@ class MessageLogger {
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
 // is not used" and "statement has no effect".
-class LoggerVoidify {
+class CERES_EXPORT LoggerVoidify {
  public:
   LoggerVoidify() { }
   // This has to be an operator with a precedence lower than << but
@@ -257,8 +293,8 @@ class LoggerVoidify {
 
 // Log only if condition is met.  Otherwise evaluates to void.
 #define LOG_IF(severity, condition) \
-  !(condition) ? (void) 0 : LoggerVoidify() & \
-    MessageLogger((char *)__FILE__, __LINE__, "native", severity).stream()
+    !(condition) ? (void) 0 : LoggerVoidify() & \
+      MessageLogger((char *)__FILE__, __LINE__, "native", severity).stream()
 
 // Log only if condition is NOT met.  Otherwise evaluates to void.
 #define LOG_IF_FALSE(severity, condition) LOG_IF(severity, !(condition))
@@ -267,30 +303,31 @@ class LoggerVoidify {
 // google3 code is discouraged and the following shortcut exists for
 // backward compatibility with existing code.
 #ifdef MAX_LOG_LEVEL
-#define LOG(n) LOG_IF(n, n <= MAX_LOG_LEVEL)
-#define VLOG(n) LOG_IF(n, n <= MAX_LOG_LEVEL)
-#define LG LOG_IF(INFO, INFO <= MAX_LOG_LEVEL)
+#  define LOG(n)  LOG_IF(n, n <= MAX_LOG_LEVEL)
+#  define VLOG(n) LOG_IF(n, n <= MAX_LOG_LEVEL)
+#  define LG      LOG_IF(INFO, INFO <= MAX_LOG_LEVEL)
+#  define VLOG_IF(n, condition) LOG_IF(n, (n <= MAX_LOG_LEVEL) && condition)
 #else
-#define LOG(n) MessageLogger((char *)__FILE__, __LINE__, "native", n).stream()
-#define VLOG(n) MessageLogger((char *)__FILE__, __LINE__, "native", n).stream()
-#define LG MessageLogger((char *)__FILE__, __LINE__, "native", INFO).stream()
+#  define LOG(n)  MessageLogger((char *)__FILE__, __LINE__, "native", n).stream()    // NOLINT
+#  define VLOG(n) MessageLogger((char *)__FILE__, __LINE__, "native", n).stream()    // NOLINT
+#  define LG      MessageLogger((char *)__FILE__, __LINE__, "native", INFO).stream() // NOLINT
+#  define VLOG_IF(n, condition) LOG_IF(n, condition)
 #endif
 
 // Currently, VLOG is always on for levels below MAX_LOG_LEVEL.
 #ifndef MAX_LOG_LEVEL
-#define VLOG_IS_ON(x) (1)
+#  define VLOG_IS_ON(x) (1)
 #else
-#define VLOG_IS_ON(x) (x <= MAX_LOG_LEVEL)
+#  define VLOG_IS_ON(x) (x <= MAX_LOG_LEVEL)
 #endif
 
 #ifndef NDEBUG
-#define DLOG LOG
+#  define DLOG LOG
 #else
-#define DLOG(severity) true ? (void) 0 : LoggerVoidify() & \
-    MessageLogger((char *)__FILE__, __LINE__, "native", severity).stream()
+#  define DLOG(severity) true ? (void) 0 : LoggerVoidify() & \
+      MessageLogger((char *)__FILE__, __LINE__, "native", severity).stream()
 #endif
 
-// ---------------------------- CHECK helpers --------------------------------
 
 // Log a message and terminate.
 template<class T>
@@ -307,19 +344,19 @@ void LogMessageFatal(const char *file, int line, const T &message) {
 
 #ifndef NDEBUG
 // Debug only version of CHECK
-#define DCHECK(condition) LOG_IF_FALSE(FATAL, condition) \
-        << "Check failed: " #condition " "
+#  define DCHECK(condition) LOG_IF_FALSE(FATAL, condition) \
+          << "Check failed: " #condition " "
 #else
 // Optimized version - generates no code.
-#define DCHECK(condition) if (false) LOG_IF_FALSE(FATAL, condition) \
-        << "Check failed: " #condition " "
+#  define DCHECK(condition) if (false) LOG_IF_FALSE(FATAL, condition) \
+          << "Check failed: " #condition " "
 #endif  // NDEBUG
 
 // ------------------------- CHECK_OP macros ---------------------------------
 
 // Generic binary operator check macro. This should not be directly invoked,
 // instead use the binary comparison macros defined below.
-#define CHECK_OP(val1, val2, op) LOG_IF_FALSE(FATAL, (val1 op val2)) \
+#define CHECK_OP(val1, val2, op) LOG_IF_FALSE(FATAL, ((val1) op (val2))) \
   << "Check failed: " #val1 " " #op " " #val2 " "
 
 // Check_op macro definitions
@@ -332,20 +369,20 @@ void LogMessageFatal(const char *file, int line, const T &message) {
 
 #ifndef NDEBUG
 // Debug only versions of CHECK_OP macros.
-#define DCHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
-#define DCHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
-#define DCHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
-#define DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
-#define DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
-#define DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
+#  define DCHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
+#  define DCHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
+#  define DCHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
+#  define DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
+#  define DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
+#  define DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
 #else
 // These versions generate no code in optimized mode.
-#define DCHECK_EQ(val1, val2) if (false) CHECK_OP(val1, val2, ==)
-#define DCHECK_NE(val1, val2) if (false) CHECK_OP(val1, val2, !=)
-#define DCHECK_LE(val1, val2) if (false) CHECK_OP(val1, val2, <=)
-#define DCHECK_LT(val1, val2) if (false) CHECK_OP(val1, val2, <)
-#define DCHECK_GE(val1, val2) if (false) CHECK_OP(val1, val2, >=)
-#define DCHECK_GT(val1, val2) if (false) CHECK_OP(val1, val2, >)
+#  define DCHECK_EQ(val1, val2) if (false) CHECK_OP(val1, val2, ==)
+#  define DCHECK_NE(val1, val2) if (false) CHECK_OP(val1, val2, !=)
+#  define DCHECK_LE(val1, val2) if (false) CHECK_OP(val1, val2, <=)
+#  define DCHECK_LT(val1, val2) if (false) CHECK_OP(val1, val2, <)
+#  define DCHECK_GE(val1, val2) if (false) CHECK_OP(val1, val2, >=)
+#  define DCHECK_GT(val1, val2) if (false) CHECK_OP(val1, val2, >)
 #endif  // NDEBUG
 
 // ---------------------------CHECK_NOTNULL macros ---------------------------
@@ -384,8 +421,6 @@ T& CheckNotNull(const char *file, int line, const char *names, T& t) {
   CheckNotNull(__FILE__, __LINE__, "'" #val "' Must be non NULL", (val))
 #endif  // NDEBUG
 
-inline void PrintAndroid(const char *msg) {
-  __android_log_write(ANDROID_LOG_VERBOSE, "native", msg);
-}
+#include "ceres/internal/reenable_warnings.h"
 
-#endif  // MOBILE_BASE_LOGGING_H_
+#endif  // CERCES_INTERNAL_MINIGLOG_GLOG_LOGGING_H_

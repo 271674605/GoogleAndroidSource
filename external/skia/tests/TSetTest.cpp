@@ -4,8 +4,9 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "Test.h"
+
 #include "SkTSet.h"
+#include "Test.h"
 
 // Tests the SkTSet<T> class template.
 // Functions that just call SkTDArray are not tested.
@@ -127,11 +128,8 @@ static void TestTSet_merge(skiatest::Reporter* reporter) {
 #endif
 }
 
-static void TestTSet(skiatest::Reporter* reporter) {
+DEF_TEST(TSet, reporter) {
     TestTSet_basic(reporter);
     TestTSet_advanced(reporter);
     TestTSet_merge(reporter);
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("TSet", TSetTest, TestTSet)

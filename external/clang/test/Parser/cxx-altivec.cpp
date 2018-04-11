@@ -1,4 +1,6 @@
-// RUN: %clang_cc1 -triple=powerpc-apple-darwin8 -faltivec -fsyntax-only -verify %s
+// RUN: %clang_cc1 -triple=powerpc-apple-darwin8 -faltivec -fsyntax-only -verify -std=c++11 %s
+// RUN: %clang_cc1 -triple=powerpc64-unknown-linux-gnu -faltivec -fsyntax-only -verify -std=c++11 %s
+// RUN: %clang_cc1 -triple=powerpc64le-unknown-linux-gnu -faltivec -fsyntax-only -verify -std=c++11 %s
 
 __vector char vv_c;
 __vector signed char vv_sc;
@@ -93,8 +95,8 @@ void f() {
   gccvector unsigned int gv = v;
   gccvector int gvi = (gccvector int)v;
   __attribute__((vector_size(8))) unsigned int gv8;
-  gv8 = gccv;     // expected-error {{assigning to '__attribute__((__vector_size__(2 * sizeof(unsigned int)))) unsigned int' from incompatible type '__attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int'}}
-  av = gv8;       // expected-error {{assigning to '__vector unsigned int' from incompatible type '__attribute__((__vector_size__(2 * sizeof(unsigned int)))) unsigned int'}}
+  gv8 = gccv;     // expected-error {{assigning to '__attribute__((__vector_size__(2 * sizeof(unsigned int)))) unsigned int' (vector of 2 'unsigned int' values) from incompatible type '__attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int' (vector of 4 'unsigned int' values)}}
+  av = gv8;       // expected-error {{assigning to '__vector unsigned int' (vector of 4 'unsigned int' values) from incompatible type '__attribute__((__vector_size__(2 * sizeof(unsigned int)))) unsigned int' (vector of 2 'unsigned int' values)}}
 
   v = gccv;
   __vector unsigned int tv = gccv;
@@ -168,3 +170,7 @@ public:
 	__vector float xyzw;
 	__vector float abcd;
 } __attribute__((vecreturn));     // expected-error {{the vecreturn attribute can only be used on a class or structure with one member, which must be a vector}}
+
+template<typename... Args> void PR16874() {
+	(void) (Args::foo()...); // expected-error {{expression contains unexpanded parameter pack 'Args'}} expected-error {{expected ')'}} expected-note {{to match this '('}}
+}

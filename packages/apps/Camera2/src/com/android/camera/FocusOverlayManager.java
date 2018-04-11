@@ -21,14 +21,22 @@ import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.hardware.Camera.Area;
-import android.hardware.Camera.Parameters;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.util.Log;
 
+import com.android.camera.app.AppController;
+import com.android.camera.app.MotionManager;
+import com.android.camera.debug.Log;
+import com.android.camera.one.Settings3A;
+import com.android.camera.settings.Keys;
+import com.android.camera.settings.SettingsManager;
+import com.android.camera.ui.PreviewStatusListener;
+import com.android.camera.ui.TouchCoordinate;
 import com.android.camera.util.CameraUtil;
+import com.android.camera.util.UsageStatistics;
+import com.android.ex.camera2.portability.CameraCapabilities;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,11 +63,16 @@ import java.util.List;
  * (10) The camera has no autofocus and supports metering area. Touch the screen
  *     to change metering area.
  */
-public class FocusOverlayManager {
-    private static final String TAG = "CAM_FocusManager";
+public class FocusOverlayManager implements PreviewStatusListener.PreviewAreaChangedListener,
+        MotionManager.MotionListener {
+    private static final Log.Tag TAG = new Log.Tag("FocusOverlayMgr");
 
     private static final int RESET_TOUCH_FOCUS = 0;
-    private static final int RESET_TOUCH_FOCUS_DELAY = 3000;
+
+    private static final int RESET_TOUCH_FOCUS_DELAY_MILLIS = Settings3A.getFocusHoldMillis();
+
+    public static final float AF_REGION_BOX = Settings3A.getAutoFocusRegionWidth();
+    public static final float AE_REGION_BOX = Settings3A.getMeteringRegionWidth();
 
     private int mState = STATE_IDLE;
     private static final int STATE_IDLE = 0; // Focus is not active.
@@ -74,33 +87,39 @@ public class FocusOverlayManager {
     private boolean mMeteringAreaSupported;
     private boolean mLockAeAwbNeeded;
     private boolean mAeAwbLock;
-    private Matrix mMatrix;
+    private final Matrix mMatrix;
 
-    private int mPreviewWidth; // The width of the preview frame layout.
-    private int mPreviewHeight; // The height of the preview frame layout.
     private boolean mMirror; // true if the camera is front-facing.
     private int mDisplayOrientation;
-    private List<Object> mFocusArea; // focus area in driver format
-    private List<Object> mMeteringArea; // metering area in driver format
-    private String mFocusMode;
-    private String[] mDefaultFocusModes;
-    private String mOverrideFocusMode;
-    private Parameters mParameters;
-    private ComboPreferences mPreferences;
-    private Handler mHandler;
+    private List<Area> mFocusArea; // focus area in driver format
+    private List<Area> mMeteringArea; // metering area in driver format
+    private CameraCapabilities.FocusMode mFocusMode;
+    private final List<CameraCapabilities.FocusMode> mDefaultFocusModes;
+    private CameraCapabilities.FocusMode mOverrideFocusMode;
+    private CameraCapabilities mCapabilities;
+    private final AppController mAppController;
+    private final SettingsManager mSettingsManager;
+    private final Handler mHandler;
     Listener mListener;
     private boolean mPreviousMoving;
-    private boolean mFocusDefault;
+    private final FocusUI mUI;
+    private final Rect mPreviewRect = new Rect(0, 0, 0, 0);
+    private boolean mFocusLocked;
 
-    private FocusUI mUI;
+    /** Manual tap to focus parameters */
+    private TouchCoordinate mTouchCoordinate;
+    private long mTouchTime;
 
     public  interface FocusUI {
         public boolean hasFaces();
         public void clearFocus();
-        public void setFocusPosition(int x, int y);
+        public void setFocusPosition(int x, int y, boolean isPassiveScan, int aFsize, int aEsize);
+        public void setFocusPosition(int x, int y, boolean isPassiveScan);
         public void onFocusStarted();
-        public void onFocusSucceeded(boolean timeOut);
-        public void onFocusFailed(boolean timeOut);
+        public void onFocusSucceeded();
+        public void onFocusFailed();
+        public void setPassiveFocusSuccess(boolean success);
+        public void showDebugMessage(String message);
         public void pauseFaceDetection();
         public void resumeFaceDetection();
     }
@@ -131,39 +150,53 @@ public class FocusOverlayManager {
         }
     }
 
-    public FocusOverlayManager(ComboPreferences preferences, String[] defaultFocusModes,
-            Parameters parameters, Listener listener,
-            boolean mirror, Looper looper, FocusUI ui) {
+    public FocusOverlayManager(AppController appController,
+            List<CameraCapabilities.FocusMode> defaultFocusModes, CameraCapabilities capabilities,
+            Listener listener, boolean mirror, Looper looper, FocusUI ui) {
+        mAppController = appController;
+        mSettingsManager = appController.getSettingsManager();
         mHandler = new MainHandler(looper);
         mMatrix = new Matrix();
-        mPreferences = preferences;
-        mDefaultFocusModes = defaultFocusModes;
-        setParameters(parameters);
+        mDefaultFocusModes = new ArrayList<CameraCapabilities.FocusMode>(defaultFocusModes);
+        updateCapabilities(capabilities);
         mListener = listener;
         setMirror(mirror);
-        mFocusDefault = true;
         mUI = ui;
+        mFocusLocked = false;
     }
 
-    public void setParameters(Parameters parameters) {
-        // parameters can only be null when onConfigurationChanged is called
+    public void updateCapabilities(CameraCapabilities capabilities) {
+        // capabilities can only be null when onConfigurationChanged is called
         // before camera is open. We will just return in this case, because
-        // parameters will be set again later with the right parameters after
+        // capabilities will be set again later with the right capabilities after
         // camera is open.
-        if (parameters == null) return;
-        mParameters = parameters;
-        mFocusAreaSupported = CameraUtil.isFocusAreaSupported(parameters);
-        mMeteringAreaSupported = CameraUtil.isMeteringAreaSupported(parameters);
-        mLockAeAwbNeeded = (CameraUtil.isAutoExposureLockSupported(mParameters) ||
-                CameraUtil.isAutoWhiteBalanceLockSupported(mParameters));
+        if (capabilities == null) {
+            return;
+        }
+        mCapabilities = capabilities;
+        mFocusAreaSupported = mCapabilities.supports(CameraCapabilities.Feature.FOCUS_AREA);
+        mMeteringAreaSupported = mCapabilities.supports(CameraCapabilities.Feature.METERING_AREA);
+        mLockAeAwbNeeded = (mCapabilities.supports(CameraCapabilities.Feature.AUTO_EXPOSURE_LOCK)
+                || mCapabilities.supports(CameraCapabilities.Feature.AUTO_WHITE_BALANCE_LOCK));
     }
 
-    public void setPreviewSize(int previewWidth, int previewHeight) {
-        if (mPreviewWidth != previewWidth || mPreviewHeight != previewHeight) {
-            mPreviewWidth = previewWidth;
-            mPreviewHeight = previewHeight;
+    /** This setter should be the only way to mutate mPreviewRect. */
+    public void setPreviewRect(Rect previewRect) {
+        if (!mPreviewRect.equals(previewRect)) {
+            mPreviewRect.set(previewRect);
             setMatrix();
         }
+    }
+
+    @Override
+    public void onPreviewAreaChanged(RectF previewArea) {
+        setPreviewRect(CameraUtil.rectFToRect(previewArea));
+    }
+
+    /** Returns a copy of mPreviewRect so that outside class cannot modify preview
+     *  rect except deliberately doing so through the setter. */
+    public Rect getPreviewRect() {
+        return new Rect(mPreviewRect);
     }
 
     public void setMirror(boolean mirror) {
@@ -177,10 +210,9 @@ public class FocusOverlayManager {
     }
 
     private void setMatrix() {
-        if (mPreviewWidth != 0 && mPreviewHeight != 0) {
+        if (mPreviewRect.width() != 0 && mPreviewRect.height() != 0) {
             Matrix matrix = new Matrix();
-            CameraUtil.prepareMatrix(matrix, mMirror, mDisplayOrientation,
-                    mPreviewWidth, mPreviewHeight);
+            CameraUtil.prepareMatrix(matrix, mMirror, mDisplayOrientation, getPreviewRect());
             // In face detection, the matrix converts the driver coordinates to UI
             // coordinates. In tap focus, the inverted matrix converts the UI
             // coordinates to driver coordinates.
@@ -203,25 +235,12 @@ public class FocusOverlayManager {
         }
     }
 
-    public void onShutterDown() {
-        if (!mInitialized) return;
-
-        boolean autoFocusCalled = false;
-        if (needAutoFocusCall()) {
-            // Do not focus if touch focus has been triggered.
-            if (mState != STATE_SUCCESS && mState != STATE_FAIL) {
-                autoFocus();
-                autoFocusCalled = true;
-            }
+    public void onShutterUp(CameraCapabilities.FocusMode currentFocusMode) {
+        if (!mInitialized) {
+            return;
         }
 
-        if (!autoFocusCalled) lockAeAwbIfNeeded();
-    }
-
-    public void onShutterUp() {
-        if (!mInitialized) return;
-
-        if (needAutoFocusCall()) {
+        if (needAutoFocusCall(currentFocusMode)) {
             // User releases half-pressed focus key.
             if (mState == STATE_FOCUSING || mState == STATE_SUCCESS
                     || mState == STATE_FAIL) {
@@ -234,25 +253,22 @@ public class FocusOverlayManager {
         unlockAeAwbIfNeeded();
     }
 
-    public void doSnap() {
-        if (!mInitialized) return;
+    public void focusAndCapture(CameraCapabilities.FocusMode currentFocusMode) {
+        if (!mInitialized) {
+            return;
+        }
 
-        // If the user has half-pressed the shutter and focus is completed, we
-        // can take the photo right away. If the focus mode is infinity, we can
-        // also take the photo.
-        if (!needAutoFocusCall() || (mState == STATE_SUCCESS || mState == STATE_FAIL)) {
+        if (!needAutoFocusCall(currentFocusMode)) {
+            // Focus is not needed.
+            capture();
+        } else if (mState == STATE_SUCCESS || mState == STATE_FAIL) {
+            // Focus is done already.
             capture();
         } else if (mState == STATE_FOCUSING) {
-            // Half pressing the shutter (i.e. the focus button event) will
-            // already have requested AF for us, so just request capture on
-            // focus here.
+            // Still focusing and will not trigger snap upon finish.
             mState = STATE_FOCUSING_SNAP_ON_FINISH;
         } else if (mState == STATE_IDLE) {
-            // We didn't do focus. This can happen if the user press focus key
-            // while the snapshot is still in progress. The user probably wants
-            // the next snapshot as soon as possible, so we just do a snapshot
-            // without focusing again.
-            capture();
+            autoFocusAndCapture();
         }
     }
 
@@ -280,8 +296,9 @@ public class FocusOverlayManager {
             updateFocusUI();
             // If this is triggered by touch focus, cancel focus after a
             // while.
-            if (!mFocusDefault) {
-                mHandler.sendEmptyMessageDelayed(RESET_TOUCH_FOCUS, RESET_TOUCH_FOCUS_DELAY);
+            if (mFocusArea != null) {
+                mFocusLocked = true;
+                mHandler.sendEmptyMessageDelayed(RESET_TOUCH_FOCUS, RESET_TOUCH_FOCUS_DELAY_MILLIS);
             }
             if (shutterButtonPressed) {
                 // Lock AE & AWB so users can half-press shutter and recompose.
@@ -294,7 +311,9 @@ public class FocusOverlayManager {
     }
 
     public void onAutoFocusMoving(boolean moving) {
-        if (!mInitialized) return;
+        if (!mInitialized) {
+            return;
+        }
 
 
         // Ignore if the camera has detected some faces.
@@ -305,55 +324,68 @@ public class FocusOverlayManager {
 
         // Ignore if we have requested autofocus. This method only handles
         // continuous autofocus.
-        if (mState != STATE_IDLE) return;
+        if (mState != STATE_IDLE) {
+            return;
+        }
 
         // animate on false->true trasition only b/8219520
         if (moving && !mPreviousMoving) {
+            // Auto focus at the center of the preview.
+            mUI.setFocusPosition(mPreviewRect.centerX(), mPreviewRect.centerY(), true,
+                    getAFRegionEdge(), getAERegionEdge());
             mUI.onFocusStarted();
         } else if (!moving) {
-            mUI.onFocusSucceeded(true);
+            mUI.onFocusSucceeded();
         }
         mPreviousMoving = moving;
+    }
+
+    /** Returns width of auto focus region in pixels. */
+    private int getAFRegionEdge() {
+        return (int) (Math.min(mPreviewRect.width(), mPreviewRect.height()) * AF_REGION_BOX);
+    }
+
+    /** Returns width of metering region in pixels. */
+    private int getAERegionEdge() {
+        return (int) (Math.min(mPreviewRect.width(), mPreviewRect.height()) * AE_REGION_BOX);
     }
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     private void initializeFocusAreas(int x, int y) {
         if (mFocusArea == null) {
-            mFocusArea = new ArrayList<Object>();
+            mFocusArea = new ArrayList<Area>();
             mFocusArea.add(new Area(new Rect(), 1));
         }
 
         // Convert the coordinates to driver format.
-        calculateTapArea(x, y, 1f, ((Area) mFocusArea.get(0)).rect);
+        calculateTapArea(x, y, getAFRegionEdge(), mFocusArea.get(0).rect);
     }
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     private void initializeMeteringAreas(int x, int y) {
         if (mMeteringArea == null) {
-            mMeteringArea = new ArrayList<Object>();
+            mMeteringArea = new ArrayList<Area>();
             mMeteringArea.add(new Area(new Rect(), 1));
         }
 
         // Convert the coordinates to driver format.
-        // AE area is bigger because exposure is sensitive and
-        // easy to over- or underexposure if area is too small.
-        calculateTapArea(x, y, 1.5f, ((Area) mMeteringArea.get(0)).rect);
-    }
-
-    private void resetMeteringAreas() {
-        mMeteringArea = null;
+        calculateTapArea(x, y, getAERegionEdge(), mMeteringArea.get(0).rect);
     }
 
     public void onSingleTapUp(int x, int y) {
-        if (!mInitialized || mState == STATE_FOCUSING_SNAP_ON_FINISH) return;
+        if (!mInitialized || mState == STATE_FOCUSING_SNAP_ON_FINISH) {
+            return;
+        }
 
         // Let users be able to cancel previous touch focus.
-        if ((!mFocusDefault) && (mState == STATE_FOCUSING ||
+        if ((mFocusArea != null) && (mState == STATE_FOCUSING ||
                     mState == STATE_SUCCESS || mState == STATE_FAIL)) {
             cancelAutoFocus();
         }
-        if (mPreviewWidth == 0 || mPreviewHeight == 0) return;
-        mFocusDefault = false;
+        if (mPreviewRect.width() == 0 || mPreviewRect.height() == 0) {
+            return;
+        }
+        // Initialize variables.
         // Initialize mFocusArea.
         if (mFocusAreaSupported) {
             initializeFocusAreas(x, y);
@@ -364,7 +396,10 @@ public class FocusOverlayManager {
         }
 
         // Use margin to set the focus indicator to the touched area.
-        mUI.setFocusPosition(x, y);
+        mUI.setFocusPosition(x, y, false, getAFRegionEdge(), getAERegionEdge());
+        // Log manual tap to focus.
+        mTouchCoordinate = new TouchCoordinate(x, y, mPreviewRect.width(), mPreviewRect.height());
+        mTouchTime = System.currentTimeMillis();
 
         // Stop face detection because we want to specify focus and metering area.
         mListener.stopFaceDetection();
@@ -375,20 +410,20 @@ public class FocusOverlayManager {
             autoFocus();
         } else {  // Just show the indicator in all other cases.
             updateFocusUI();
-            // Reset the metering area in 3 seconds.
+            // Reset the metering area in 4 seconds.
             mHandler.removeMessages(RESET_TOUCH_FOCUS);
-            mHandler.sendEmptyMessageDelayed(RESET_TOUCH_FOCUS, RESET_TOUCH_FOCUS_DELAY);
+            mHandler.sendEmptyMessageDelayed(RESET_TOUCH_FOCUS, RESET_TOUCH_FOCUS_DELAY_MILLIS);
         }
     }
 
     public void onPreviewStarted() {
         mState = STATE_IDLE;
+        resetTouchFocus();
     }
 
     public void onPreviewStopped() {
         // If auto focus was in progress, it would have been stopped.
         mState = STATE_IDLE;
-        resetTouchFocus();
         updateFocusUI();
     }
 
@@ -396,10 +431,22 @@ public class FocusOverlayManager {
         onPreviewStopped();
     }
 
-    private void autoFocus() {
-        Log.v(TAG, "Start autofocus.");
+    @Override
+    public void onMoving() {
+        if (mFocusLocked) {
+            Log.d(TAG, "onMoving: Early focus unlock.");
+            cancelAutoFocus();
+        }
+    }
+
+    /**
+     * Triggers the autofocus and sets the specified state.
+     *
+     * @param focusingState The state to use when focus is in progress.
+     */
+    private void autoFocus(int focusingState) {
         mListener.autoFocus();
-        mState = STATE_FOCUSING;
+        mState = focusingState;
         // Pause the face view because the driver will keep sending face
         // callbacks after the focus completes.
         mUI.pauseFaceDetection();
@@ -407,9 +454,24 @@ public class FocusOverlayManager {
         mHandler.removeMessages(RESET_TOUCH_FOCUS);
     }
 
+    /**
+     * Triggers the autofocus and set the state to indicate the focus is in
+     * progress.
+     */
+    private void autoFocus() {
+        autoFocus(STATE_FOCUSING);
+    }
+
+    /**
+     * Triggers the autofocus and set the state to which a capture will happen
+     * in the following autofocus callback.
+     */
+    private void autoFocusAndCapture() {
+        autoFocus(STATE_FOCUSING_SNAP_ON_FINISH);
+    }
+
     private void cancelAutoFocus() {
         Log.v(TAG, "Cancel autofocus.");
-
         // Reset the tap area before calling mListener.cancelAutofocus.
         // Otherwise, focus mode stays at auto and the tap area passed to the
         // driver is not reset.
@@ -417,6 +479,7 @@ public class FocusOverlayManager {
         mListener.cancelAutoFocus();
         mUI.resumeFaceDetection();
         mState = STATE_IDLE;
+        mFocusLocked = false;
         updateFocusUI();
         mHandler.removeMessages(RESET_TOUCH_FOCUS);
     }
@@ -428,57 +491,68 @@ public class FocusOverlayManager {
         }
     }
 
-    public String getFocusMode() {
-        if (mOverrideFocusMode != null) return mOverrideFocusMode;
-        if (mParameters == null) return Parameters.FOCUS_MODE_AUTO;
-        List<String> supportedFocusModes = mParameters.getSupportedFocusModes();
+    public CameraCapabilities.FocusMode getFocusMode(
+            final CameraCapabilities.FocusMode currentFocusMode) {
+        if (mOverrideFocusMode != null) {
+            Log.v(TAG, "returning override focus: " + mOverrideFocusMode);
+            return mOverrideFocusMode;
+        }
+        if (mCapabilities == null) {
+            Log.v(TAG, "no capabilities, returning default AUTO focus mode");
+            return CameraCapabilities.FocusMode.AUTO;
+        }
 
-        if (mFocusAreaSupported && !mFocusDefault) {
+        if (mFocusAreaSupported && mFocusArea != null) {
+            Log.v(TAG, "in tap to focus, returning AUTO focus mode");
             // Always use autofocus in tap-to-focus.
-            mFocusMode = Parameters.FOCUS_MODE_AUTO;
+            mFocusMode = CameraCapabilities.FocusMode.AUTO;
         } else {
+            String focusSetting = mSettingsManager.getString(mAppController.getCameraScope(),
+                    Keys.KEY_FOCUS_MODE);
+            Log.v(TAG, "stored focus setting for camera: " + focusSetting);
             // The default is continuous autofocus.
-            mFocusMode = mPreferences.getString(
-                    CameraSettings.KEY_FOCUS_MODE, null);
-
+            mFocusMode = mCapabilities.getStringifier().focusModeFromString(focusSetting);
+            Log.v(TAG, "focus mode resolved from setting: " + mFocusMode);
             // Try to find a supported focus mode from the default list.
             if (mFocusMode == null) {
-                for (int i = 0; i < mDefaultFocusModes.length; i++) {
-                    String mode = mDefaultFocusModes[i];
-                    if (CameraUtil.isSupported(mode, supportedFocusModes)) {
+                for (CameraCapabilities.FocusMode mode : mDefaultFocusModes) {
+                    if (mCapabilities.supports(mode)) {
                         mFocusMode = mode;
+                        Log.v(TAG, "selected supported focus mode from default list" + mode);
                         break;
                     }
                 }
             }
         }
-        if (!CameraUtil.isSupported(mFocusMode, supportedFocusModes)) {
+        if (!mCapabilities.supports(mFocusMode)) {
             // For some reasons, the driver does not support the current
             // focus mode. Fall back to auto.
-            if (CameraUtil.isSupported(Parameters.FOCUS_MODE_AUTO,
-                    mParameters.getSupportedFocusModes())) {
-                mFocusMode = Parameters.FOCUS_MODE_AUTO;
+            if (mCapabilities.supports(CameraCapabilities.FocusMode.AUTO)) {
+                Log.v(TAG, "no supported focus mode, falling back to AUTO");
+                mFocusMode = CameraCapabilities.FocusMode.AUTO;
             } else {
-                mFocusMode = mParameters.getFocusMode();
+                Log.v(TAG, "no supported focus mode, falling back to current: " + currentFocusMode);
+                mFocusMode = currentFocusMode;
             }
         }
         return mFocusMode;
     }
 
-    public List getFocusAreas() {
+    public List<Area> getFocusAreas() {
         return mFocusArea;
     }
 
-    public List getMeteringAreas() {
+    public List<Area> getMeteringAreas() {
         return mMeteringArea;
     }
 
     public void updateFocusUI() {
-        if (!mInitialized) return;
-        // Show only focus indicator or face indicator.
-
+        if (!mInitialized) {
+            // Show only focus indicator or face indicator.
+            return;
+        }
         if (mState == STATE_IDLE) {
-            if (mFocusDefault) {
+            if (mFocusArea == null) {
                 mUI.clearFocus();
             } else {
                 // Users touch on the preview and the indicator represents the
@@ -486,50 +560,50 @@ public class FocusOverlayManager {
                 // autoFocus call is not required.
                 mUI.onFocusStarted();
             }
-        } else if (mState == STATE_FOCUSING || mState == STATE_FOCUSING_SNAP_ON_FINISH) {
+        } else if (mState == STATE_FOCUSING) {
             mUI.onFocusStarted();
         } else {
-            if (CameraUtil.FOCUS_MODE_CONTINUOUS_PICTURE.equals(mFocusMode)) {
+            if (mFocusMode == CameraCapabilities.FocusMode.CONTINUOUS_PICTURE) {
                 // TODO: check HAL behavior and decide if this can be removed.
-                mUI.onFocusSucceeded(false);
+                mUI.onFocusSucceeded();
             } else if (mState == STATE_SUCCESS) {
-                mUI.onFocusSucceeded(false);
+                mUI.onFocusSucceeded();
             } else if (mState == STATE_FAIL) {
-                mUI.onFocusFailed(false);
+                mUI.onFocusFailed();
             }
         }
     }
 
     public void resetTouchFocus() {
-        if (!mInitialized) return;
+        if (!mInitialized) {
+            return;
+        }
 
         // Put focus indicator to the center. clear reset position
         mUI.clearFocus();
         // Initialize mFocusArea.
-        if (mFocusAreaSupported) {
-            initializeFocusAreas(mPreviewWidth / 2, mPreviewHeight / 2);
+        mFocusArea = null;
+        mMeteringArea = null;
+        // This will cause current module to call getFocusAreas() and
+        // getMeteringAreas() and send updated regions to camera.
+        mListener.setFocusParameters();
+
+        if (mTouchCoordinate != null) {
+            UsageStatistics.instance().tapToFocus(mTouchCoordinate,
+                    0.001f * (System.currentTimeMillis() - mTouchTime));
+            mTouchCoordinate = null;
         }
-        // Reset metering area when no specific region is selected.
-        if (mMeteringAreaSupported) {
-            resetMeteringAreas();
-        }
-        mFocusDefault = true;
     }
 
-    private void calculateTapArea(int x, int y, float areaMultiple, Rect rect) {
-        int areaSize = (int) (getAreaSize() * areaMultiple);
-        int left = CameraUtil.clamp(x - areaSize / 2, 0, mPreviewWidth - areaSize);
-        int top = CameraUtil.clamp(y - areaSize / 2, 0, mPreviewHeight - areaSize);
+    private void calculateTapArea(int x, int y, int size, Rect rect) {
+        int left = CameraUtil.clamp(x - size / 2, mPreviewRect.left,
+                mPreviewRect.right - size);
+        int top = CameraUtil.clamp(y - size / 2, mPreviewRect.top,
+                mPreviewRect.bottom - size);
 
-        RectF rectF = new RectF(left, top, left + areaSize, top + areaSize);
+        RectF rectF = new RectF(left, top, left + size, top + size);
         mMatrix.mapRect(rectF);
         CameraUtil.rectFToRect(rectF, rect);
-    }
-
-    private int getAreaSize() {
-        // Recommended focus area size from the manufacture is 1/8 of the image
-        // width (i.e. longer edge of the image)
-        return Math.max(mPreviewWidth, mPreviewHeight) / 8;
     }
 
     /* package */ int getFocusState() {
@@ -548,7 +622,7 @@ public class FocusOverlayManager {
         mHandler.removeMessages(RESET_TOUCH_FOCUS);
     }
 
-    public void overrideFocusMode(String focusMode) {
+    public void overrideFocusMode(CameraCapabilities.FocusMode focusMode) {
         mOverrideFocusMode = focusMode;
     }
 
@@ -560,10 +634,9 @@ public class FocusOverlayManager {
         return mAeAwbLock;
     }
 
-    private boolean needAutoFocusCall() {
-        String focusMode = getFocusMode();
-        return !(focusMode.equals(Parameters.FOCUS_MODE_INFINITY)
-                || focusMode.equals(Parameters.FOCUS_MODE_FIXED)
-                || focusMode.equals(Parameters.FOCUS_MODE_EDOF));
+    private boolean needAutoFocusCall(CameraCapabilities.FocusMode focusMode) {
+        return !(focusMode == CameraCapabilities.FocusMode.INFINITY
+                || focusMode == CameraCapabilities.FocusMode.FIXED
+                || focusMode == CameraCapabilities.FocusMode.EXTENDED_DOF);
     }
 }

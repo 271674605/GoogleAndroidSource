@@ -10,17 +10,26 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/value_store/value_store_frontend.h"
+#include "base/scoped_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/value_store/value_store_frontend.h"
 
 class Profile;
 
+namespace content {
+class BrowserContext;
+}
+
 namespace extensions {
+
+class ExtensionRegistry;
 
 // A storage area for per-extension state that needs to be persisted to disk.
 class StateStore
     : public base::SupportsWeakPtr<StateStore>,
+      public ExtensionRegistryObserver,
       public content::NotificationObserver {
  public:
   typedef ValueStoreFrontend::ReadCallback ReadCallback;
@@ -30,7 +39,7 @@ class StateStore
   StateStore(Profile* profile, const base::FilePath& db_path,
              bool deferred_load);
   // This variant is useful for testing (using a mock ValueStore).
-  StateStore(Profile* profile, ValueStore* store);
+  StateStore(Profile* profile, scoped_ptr<ValueStore> store);
   virtual ~StateStore();
 
   // Register a key for removal upon extension install/uninstall. We remove
@@ -52,6 +61,9 @@ class StateStore
   void RemoveExtensionValue(const std::string& extension_id,
                             const std::string& key);
 
+  // Return whether or not the StateStore has initialized itself.
+  bool IsInitialized() const;
+
  private:
   class DelayedTaskQueue;
 
@@ -64,6 +76,16 @@ class StateStore
 
   // Removes all keys registered for the given extension.
   void RemoveKeysForExtension(const std::string& extension_id);
+
+  // ExtensionRegistryObserver implementation.
+  virtual void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                                      const Extension* extension) OVERRIDE;
+  virtual void OnExtensionWillBeInstalled(
+      content::BrowserContext* browser_context,
+      const Extension* extension,
+      bool is_update,
+      bool from_ephemeral,
+      const std::string& old_name) OVERRIDE;
 
   // Path to our database, on disk. Empty during testing.
   base::FilePath db_path_;
@@ -79,6 +101,9 @@ class StateStore
   scoped_ptr<DelayedTaskQueue> task_queue_;
 
   content::NotificationRegistrar registrar_;
+
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 };
 
 }  // namespace extensions

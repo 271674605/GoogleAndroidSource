@@ -19,19 +19,23 @@ class CONTENT_EXPORT IndexedDBConnection {
                       scoped_refptr<IndexedDBDatabaseCallbacks> callbacks);
   virtual ~IndexedDBConnection();
 
+  // These methods are virtual to allow subclassing in unit tests.
   virtual void ForceClose();
   virtual void Close();
+  virtual bool IsConnected();
 
   IndexedDBDatabase* database() { return database_; }
   IndexedDBDatabaseCallbacks* callbacks() { return callbacks_; }
 
  private:
-  // Only NULL in unit tests.
+  // NULL in some unit tests, and after the connection is closed.
   scoped_refptr<IndexedDBDatabase> database_;
 
   // The callbacks_ member is cleared when the connection is closed.
   // May be NULL in unit tests.
   scoped_refptr<IndexedDBDatabaseCallbacks> callbacks_;
+
+  DISALLOW_COPY_AND_ASSIGN(IndexedDBConnection);
 };
 
 }  // namespace content

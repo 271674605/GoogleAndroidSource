@@ -19,12 +19,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
         package="com.android.cts.accessibilityservice">
 
-  <uses-sdk android:minSdkVersion="18"
-          android:targetSdkVersion="18" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
 
-  <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
-
-  <application android:theme="@android:style/Theme.Holo.NoActionBar" >
+    <application android:theme="@android:style/Theme.Holo.NoActionBar" >
 
       <uses-library android:name="android.test.runner"/>
 
@@ -41,12 +38,15 @@
               android:name="android.accessibilityservice.cts.AccessibilityFocusAndInputFocusSyncActivity"/>
 
       <activity android:label="@string/accessibility_text_traversal_test_activity"
-              android:name="android.accessibilityservice.cts.AccessibilityTextTraversalActivity"/> 
+              android:name="android.accessibilityservice.cts.AccessibilityTextTraversalActivity"/>
 
   </application>
 
-  <instrumentation android:name="android.test.InstrumentationCtsTestRunner"
+  <instrumentation android:name="android.support.test.runner.AndroidJUnitRunner"
                    android:targetPackage="com.android.cts.accessibilityservice"
-                   android:label="Tests for the accessibility APIs."/>
+                   android:label="Tests for the accessibility APIs.">
+        <meta-data android:name="listener"
+            android:value="com.android.cts.runner.CtsTestRunListener" />
+    </instrumentation>
 
 </manifest>

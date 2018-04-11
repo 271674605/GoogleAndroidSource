@@ -12,10 +12,17 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "media/base/media_export.h"
+#include "url/gurl.h"
 
 namespace media {
 
 class Decryptor;
+
+template <typename T>
+class CdmPromiseTemplate;
+
+typedef CdmPromiseTemplate<std::string> NewSessionCdmPromise;
+typedef CdmPromiseTemplate<void> SimpleCdmPromise;
 
 // Performs media key operations.
 //
@@ -24,40 +31,70 @@ class Decryptor;
 class MEDIA_EXPORT MediaKeys {
  public:
   // Reported to UMA, so never reuse a value!
-  // Must be kept in sync with WebKit::WebMediaPlayerClient::MediaKeyErrorCode
+  // Must be kept in sync with blink::WebMediaPlayerClient::MediaKeyErrorCode
   // (enforced in webmediaplayer_impl.cc).
+  // TODO(jrummell): Can this be moved to proxy_decryptor as it should only be
+  // used by the prefixed EME code?
   enum KeyError {
     kUnknownError = 1,
     kClientError,
-    // The following v0.1b values have never been used.
+    // The commented v0.1b values below have never been used.
     // kServiceError,
-    // kOutputError,
+    kOutputError = 4,
     // kHardwareChangeError,
     // kDomainError,
     kMaxKeyError  // Must be last and greater than any legit value.
   };
 
+  // Must be a superset of cdm::MediaKeyException.
+  enum Exception {
+    NOT_SUPPORTED_ERROR,
+    INVALID_STATE_ERROR,
+    INVALID_ACCESS_ERROR,
+    QUOTA_EXCEEDED_ERROR,
+    UNKNOWN_ERROR,
+    CLIENT_ERROR,
+    OUTPUT_ERROR
+  };
+
+  // Type of license required when creating/loading a session.
+  // Must be consistent with the values specified in the spec:
+  // https://dvcs.w3.org/hg/html-media/raw-file/default/encrypted-media/encrypted-media.html#extensions
+  enum SessionType {
+    TEMPORARY_SESSION,
+    PERSISTENT_SESSION
+  };
+
+  const static uint32 kInvalidSessionId = 0;
+
   MediaKeys();
   virtual ~MediaKeys();
 
-  // Generates a key request with the |type| and |init_data| provided.
-  // Returns true if generating key request succeeded, false otherwise.
-  // Note: AddKey() and CancelKeyRequest() should only be called after
-  // GenerateKeyRequest() returns true.
-  virtual bool GenerateKeyRequest(const std::string& type,
-                                  const uint8* init_data,
-                                  int init_data_length) = 0;
+  // Creates a session with the |init_data_type|, |init_data| and |session_type|
+  // provided.
+  // Note: UpdateSession() and ReleaseSession() should only be called after
+  // |promise| is resolved.
+  virtual void CreateSession(const std::string& init_data_type,
+                             const uint8* init_data,
+                             int init_data_length,
+                             SessionType session_type,
+                             scoped_ptr<NewSessionCdmPromise> promise) = 0;
 
-  // Adds a |key| to the session. The |key| is not limited to a decryption
-  // key. It can be any data that the key system accepts, such as a license.
-  // If multiple calls of this function set different keys for the same
-  // key ID, the older key will be replaced by the newer key.
-  virtual void AddKey(const uint8* key, int key_length,
-                      const uint8* init_data, int init_data_length,
-                      const std::string& session_id) = 0;
+  // Loads a session with the |web_session_id| provided.
+  // Note: UpdateSession() and ReleaseSession() should only be called after
+  // |promise| is resolved.
+  virtual void LoadSession(const std::string& web_session_id,
+                           scoped_ptr<NewSessionCdmPromise> promise) = 0;
 
-  // Cancels the key request specified by |session_id|.
-  virtual void CancelKeyRequest(const std::string& session_id) = 0;
+  // Updates a session specified by |web_session_id| with |response|.
+  virtual void UpdateSession(const std::string& web_session_id,
+                             const uint8* response,
+                             int response_length,
+                             scoped_ptr<SimpleCdmPromise> promise) = 0;
+
+  // Releases the session specified by |web_session_id|.
+  virtual void ReleaseSession(const std::string& web_session_id,
+                              scoped_ptr<SimpleCdmPromise> promise) = 0;
 
   // Gets the Decryptor object associated with the MediaKeys. Returns NULL if
   // no Decryptor object is associated. The returned object is only guaranteed
@@ -69,21 +106,19 @@ class MEDIA_EXPORT MediaKeys {
 };
 
 // Key event callbacks. See the spec for details:
-// http://dvcs.w3.org/hg/html-media/raw-file/eme-v0.1b/encrypted-media/encrypted-media.html#event-summary
-typedef base::Callback<void(const std::string& session_id)> KeyAddedCB;
-
-typedef base::Callback<void(const std::string& session_id,
-                            media::MediaKeys::KeyError error_code,
-                            int system_code)> KeyErrorCB;
-
-typedef base::Callback<void(const std::string& session_id,
+// https://dvcs.w3.org/hg/html-media/raw-file/default/encrypted-media/encrypted-media.html#event-summary
+typedef base::Callback<void(const std::string& web_session_id,
                             const std::vector<uint8>& message,
-                            const std::string& default_url)> KeyMessageCB;
+                            const GURL& destination_url)> SessionMessageCB;
 
-typedef base::Callback<void(const std::string& session_id,
-                            const std::string& type,
-                            scoped_ptr<uint8[]> init_data,
-                            int init_data_size)> NeedKeyCB;
+typedef base::Callback<void(const std::string& web_session_id)> SessionReadyCB;
+
+typedef base::Callback<void(const std::string& web_session_id)> SessionClosedCB;
+
+typedef base::Callback<void(const std::string& web_session_id,
+                            MediaKeys::Exception exception_code,
+                            uint32 system_code,
+                            const std::string& error_message)> SessionErrorCB;
 
 }  // namespace media
 

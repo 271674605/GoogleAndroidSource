@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -209,6 +209,11 @@ void nfa_dm_proc_nfcc_power_mode (UINT8 nfcc_power_mode)
         nfa_dm_cb.setcfg_pending_num  = 0;
 
         nfa_dm_set_init_nci_params ();
+        nfa_dm_cb.flags &= ~NFA_DM_FLAGS_POWER_OFF_SLEEP;
+    }
+    else if (nfcc_power_mode == NFA_DM_PWR_MODE_OFF_SLEEP)
+    {
+        nfa_dm_cb.flags |= NFA_DM_FLAGS_POWER_OFF_SLEEP;
     }
 
     nfa_sys_cback_notify_nfcc_power_mode_proc_complete (NFA_ID_DM);
@@ -344,6 +349,7 @@ static void nfa_dm_nfc_response_cback (tNFC_RESPONSE_EVT event, tNFC_RESPONSE *p
     case NFC_NFCEE_INFO_REVT:                    /* NFCEE Discover Notification */
     case NFC_EE_ACTION_REVT:                     /* EE Action notification */
     case NFC_NFCEE_MODE_SET_REVT:                /* NFCEE Mode Set response */
+    case NFC_SET_ROUTING_REVT:                   /* Configure Routing response */
         nfa_ee_proc_evt (event, p_data);
         break;
 
@@ -355,6 +361,9 @@ static void nfa_dm_nfc_response_cback (tNFC_RESPONSE_EVT event, tNFC_RESPONSE *p
         }
         nfa_ee_proc_evt (event, p_data);
         break;
+
+    case NFC_GET_ROUTING_REVT:                   /* Retrieve Routing response */
+        break;
 #endif
 
     case NFC_RF_FIELD_REVT:                      /* RF Field information            */
@@ -363,11 +372,7 @@ static void nfa_dm_nfc_response_cback (tNFC_RESPONSE_EVT event, tNFC_RESPONSE *p
         (*nfa_dm_cb.p_dm_cback) (NFA_DM_RF_FIELD_EVT, &dm_cback_data);
         break;
 
-    case NFC_SET_ROUTING_REVT:                   /* Configure Routing response */
-        break;
 
-    case NFC_GET_ROUTING_REVT:                   /* Retrieve Routing response */
-        break;
 
     case NFC_GEN_ERROR_REVT:                     /* generic error command or notification */
         break;
@@ -1168,6 +1173,8 @@ BOOLEAN nfa_dm_act_send_raw_frame (tNFA_DM_MSG *p_data)
     if (  (nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_POLL_ACTIVE)
         ||(nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_LISTEN_ACTIVE)  )
     {
+        nfa_dm_cb.flags |= NFA_DM_FLAGS_RAW_FRAME;
+        NFC_SetReassemblyFlag (FALSE);
         /* If not in exclusive mode, and not activated for LISTEN, then forward raw data to NFA_RW to send */
         if (  !(nfa_dm_cb.flags & NFA_DM_FLAGS_EXCL_RF_ACTIVE)
             &&!(nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_LISTEN_ACTIVE)
@@ -1183,6 +1190,10 @@ BOOLEAN nfa_dm_act_send_raw_frame (tNFA_DM_MSG *p_data)
         else
         {
             status = NFC_SendData (NFC_RF_CONN_ID, (BT_HDR*) p_data);
+            if (status != NFC_STATUS_OK)
+            {
+                NFC_SetReassemblyFlag (TRUE);
+            }
             /* Already freed or NCI layer will free buffer */
             return FALSE;
         }
@@ -1190,6 +1201,7 @@ BOOLEAN nfa_dm_act_send_raw_frame (tNFA_DM_MSG *p_data)
 
     if (status == NFC_STATUS_FAILED)
     {
+        NFC_SetReassemblyFlag (TRUE);
         /* free the buffer */
         return TRUE;
     }
@@ -1440,6 +1452,7 @@ static void nfa_dm_act_data_cback (UINT8 conn_id, tNFC_CONN_EVT event, tNFC_CONN
 
         if (p_msg)
         {
+            evt_data.data.status = p_data->data.status;
             evt_data.data.p_data = (UINT8 *) (p_msg + 1) + p_msg->offset;
             evt_data.data.len    = p_msg->len;
 
@@ -1838,7 +1851,8 @@ void nfa_dm_notify_activation_status (tNFA_STATUS status, tNFA_TAG_PARAMS *p_par
             memcpy (nfa_dm_cb.activated_nfcid, p_nfcid, nfcid_len);
 
         nfa_dm_cb.flags |= NFA_DM_FLAGS_SEND_DEACTIVATED_EVT;
-        nfa_dm_conn_cback_event_notify (NFA_ACTIVATED_EVT, &evt_data);
+        if (!(nfa_dm_cb.disc_cb.disc_flags & NFA_DM_DISC_FLAGS_CHECKING))
+            nfa_dm_conn_cback_event_notify (NFA_ACTIVATED_EVT, &evt_data);
     }
     else
     {

@@ -48,8 +48,7 @@ public class ThumbnailLoadTask extends AsyncTask<Uri, Void, Bitmap> {
     private final int mWidth;
     private final int mHeight;
 
-    public static void setupThumbnailPreview(
-            ThumbnailLoadTask task, final AttachmentBitmapHolder holder,
+    public static void setupThumbnailPreview(final AttachmentBitmapHolder holder,
             final Attachment attachment, final Attachment prevAttachment) {
         final int width = holder.getThumbnailWidth();
         final int height = holder.getThumbnailHeight();
@@ -68,12 +67,7 @@ public class ThumbnailLoadTask extends AsyncTask<Uri, Void, Bitmap> {
         if ((thumbnailUri != null || contentUri != null)
                 && (holder.bitmapSetToDefault() ||
                 prevUri == null || !uri.equals(prevUri))) {
-            // cancel/dispose any existing task and start a new one
-            if (task != null) {
-                task.cancel(true);
-            }
-
-            task = new ThumbnailLoadTask(
+            final ThumbnailLoadTask task = new ThumbnailLoadTask(
                     holder, width, height);
             task.execute(thumbnailUri, contentUri);
         } else if (thumbnailUri == null && contentUri == null) {
@@ -144,7 +138,8 @@ public class ThumbnailLoadTask extends AsyncTask<Uri, Void, Bitmap> {
             }
             return originalBitmap;
         } catch (Throwable t) {
-            LogUtils.e(LOG_TAG, t, "Unable to decode thumbnail %s", thumbnailUri);
+            LogUtils.i(LOG_TAG, "Unable to decode thumbnail %s: %s %s", thumbnailUri,
+                    t.getClass(), t.getMessage());
         } finally {
             if (fd != null) {
                 try {
@@ -169,7 +164,8 @@ public class ThumbnailLoadTask extends AsyncTask<Uri, Void, Bitmap> {
             in = resolver.openInputStream(thumbnailUri);
             return Exif.getOrientation(in, -1);
         } catch (Throwable t) {
-            LogUtils.e(LOG_TAG, t, "Unable to get orientation of thumbnail %s", thumbnailUri);
+            LogUtils.i(LOG_TAG, "Unable to get orientation of thumbnail %s: %s %s", thumbnailUri,
+                    t.getClass(), t.getMessage());
         } finally {
             if (in != null) {
                 try {

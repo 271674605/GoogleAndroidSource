@@ -15,16 +15,15 @@ AllJsLoadTest.prototype = {
 
   /** @inheritDoc */
   extraLibraries: [
+    'base.js',
     'browser_globals.gtestjs',
     // All of our Javascript files should be listed here unless they are
     // only used by JSCompiler
-    'client_plugin_async.js',
     'client_plugin.js',
     'client_screen.js',
     'client_session.js',
     //'clipboard_event_proto.js',  // Only used by jscompiler.
     'clipboard.js',
-    'connection_history.js',
     'connection_stats.js',
     //'cs_oauth2_trampoline.js', // Uses globals in the chrome namespace, which
                                  // give a compilation error when declared in
@@ -37,6 +36,8 @@ AllJsLoadTest.prototype = {
     'host.js',
     'host_controller.js',
     'host_dispatcher.js',
+    'host_it2me_dispatcher.js',
+    'host_it2me_native_messaging.js',
     'host_list.js',
     'host_native_messaging.js',
     //'host_plugin_proto.js',  // Only used by jscompiler
@@ -56,6 +57,7 @@ AllJsLoadTest.prototype = {
     'remoting.js',
     'session_connector.js',
     'server_log_entry.js',
+    'smart_reconnector.js',
     'stats_accumulator.js',
     'toolbar.js',
     'ui_mode.js',

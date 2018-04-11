@@ -1,5 +1,5 @@
-// REQUIRES: x86-64-registered-target
-// RUN: %clang_cc1 -x c++ %s -triple i386-apple-darwin10 -O0 -fasm-blocks -emit-llvm -o - | FileCheck %s
+// REQUIRES: x86-registered-target
+// RUN: %clang_cc1 -x c++ %s -triple i386-apple-darwin10 -fasm-blocks -emit-llvm -o - -std=c++11 | FileCheck %s
 
 // rdar://13645930
 
@@ -39,7 +39,7 @@ void t2() {
 // CHECK: call void asm sideeffect inteldialect "mov eax, $0", "r,~{eax},~{dirflag},~{fpsr},~{flags}"(i32** @_ZN3Foo3Bar3ptrE)
 }
 
-// CHECK: define void @_Z2t3v()
+// CHECK-LABEL: define void @_Z2t3v()
 void t3() {
   __asm mov eax, LENGTH Foo::ptr
 // CHECK: call void asm sideeffect inteldialect "mov eax, $$1", "~{eax},~{dirflag},~{fpsr},~{flags}"()
@@ -76,7 +76,7 @@ struct T4 {
   void test();
 };
 
-// CHECK: define void @_ZN2T44testEv(
+// CHECK-LABEL: define void @_ZN2T44testEv(
 void T4::test() {
 // CHECK: [[T0:%.*]] = alloca [[T4:%.*]]*,
 // CHECK: [[THIS:%.*]] = load [[T4]]** [[T0]]
@@ -91,13 +91,13 @@ template <class T> struct T5 {
   template <class U> static T create(U);
   void run();
 };
-// CHECK: define void @_Z5test5v()
+// CHECK-LABEL: define void @_Z5test5v()
 void test5() {
   // CHECK: [[X:%.*]] = alloca i32
   // CHECK: [[Y:%.*]] = alloca i32
   int x, y;
   __asm push y
-  // CHECK: call void asm sideeffect inteldialect "push dword ptr $0", "=*m,~{dirflag},~{fpsr},~{flags}"(i32* [[Y]])
+  // CHECK: call void asm sideeffect inteldialect "push dword ptr $0", "=*m,~{esp},~{dirflag},~{fpsr},~{flags}"(i32* [[Y]])
   __asm call T5<int>::create<float>
   // CHECK: call void asm sideeffect inteldialect "call $0", "r,~{dirflag},~{fpsr},~{flags}"(i32 (float)* @_ZN2T5IiE6createIfEEiT_)
   __asm mov x, eax
@@ -110,4 +110,34 @@ void test6() {
    a:
    jmp a
   }
+}
+
+void t7_struct() {
+  struct A {
+    int a;
+    int b;
+  };
+  __asm mov eax, [eax].A.b
+  // CHECK-LABEL: define void @_Z9t7_structv
+  // CHECK: call void asm sideeffect inteldialect "mov eax, [eax].4", "~{eax},~{dirflag},~{fpsr},~{flags}"()
+}
+
+void t7_typedef() {
+  typedef struct {
+    int a;
+    int b;
+  } A;
+  __asm mov eax, [eax].A.b
+  // CHECK-LABEL: define void @_Z10t7_typedefv
+  // CHECK: call void asm sideeffect inteldialect "mov eax, [eax].4", "~{eax},~{dirflag},~{fpsr},~{flags}"()
+}
+
+void t7_using() {
+  using A = struct {
+    int a;
+    int b;
+  };
+  __asm mov eax, [eax].A.b
+  // CHECK-LABEL: define void @_Z8t7_usingv
+  // CHECK: call void asm sideeffect inteldialect "mov eax, [eax].4", "~{eax},~{dirflag},~{fpsr},~{flags}"()
 }

@@ -11,6 +11,7 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+#include "content/public/browser/notification_observer.h"
 
 namespace base {
 class StringValue;
@@ -20,6 +21,7 @@ namespace options {
 
 // Chrome personal stuff profiles manage overlay UI handler.
 class ManageProfileHandler : public OptionsPageUIHandler,
+                             public content::NotificationObserver,
                              public ProfileSyncServiceObserver {
  public:
   ManageProfileHandler();
@@ -30,6 +32,7 @@ class ManageProfileHandler : public OptionsPageUIHandler,
       base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void InitializeHandler() OVERRIDE;
   virtual void InitializePage() OVERRIDE;
+  virtual void Uninitialize() OVERRIDE;
 
   // WebUIMessageHandler:
   virtual void RegisterMessages() OVERRIDE;
@@ -43,9 +46,12 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   virtual void OnStateChanged() OVERRIDE;
 
  private:
+  // This function creates signed in user specific strings in loadTimeData.
+  void GenerateSignedinUserSpecificStrings(base::DictionaryValue* dictionary);
+
   // Callback for the "requestDefaultProfileIcons" message.
-  // Sends the array of default profile icon URLs to WebUI.
-  // |args| is of the form: [ {string} iconURL ]
+  // Sends the array of default profile icon URLs and profile names to WebUI.
+  // First item of |args| is the dialog mode, i.e. "create" or "manage".
   void RequestDefaultProfileIcons(const base::ListValue* args);
 
   // Callback for the "requestNewProfileDefaults" message.
@@ -53,22 +59,9 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   //   { "name": profileName, "iconURL": iconURL }
   void RequestNewProfileDefaults(const base::ListValue* args);
 
-  // Callback for the "requestExistingManagedUsers" message.
-  // Sends an object to WebUI of the form:
-  //   managedProfiles = {
-  //     "Profile ID 1": "Profile Name 1",
-  //     "Profile ID 2": "Profile Name 2",
-  //     ...
-  //   }
-  // The object holds all existing managed users attached to the
-  // custodian's profile who initiated the request except for
-  // those managed users that are already existing of this machine.
-  void RequestExistingManagedUsers(const base::ListValue* args);
-
-  // Send all profile icons to the overlay.
-  // |iconGrid| is the name of the grid to populate with icons (i.e.
-  // "create-profile-icon-grid" or "manage-profile-icon-grid").
-  void SendProfileIcons(const base::StringValue& icon_grid);
+  // Send all profile icons and their default names to the overlay.
+  // |mode| is the dialog mode, i.e. "create" or "manage".
+  void SendProfileIconsAndNames(const base::StringValue& mode);
 
   // Sends an object to WebUI of the form:
   //   profileNames = {
@@ -77,7 +70,11 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   //     ...
   //   };
   // This is used to detect duplicate profile names.
-  void SendProfileNames();
+  void SendExistingProfileNames();
+
+  // Show disconnect managed profile dialog after generating domain and user
+  // specific strings.
+  void ShowDisconnectManagedProfileDialog(const base::ListValue* args);
 
   // Callback for the "setProfileIconAndName" message. Sets the name and icon
   // of a given profile.
@@ -107,13 +104,13 @@ class ManageProfileHandler : public OptionsPageUIHandler,
 
   // Callback for the "RequestCreateProfileUpdate" message.
   // Sends the email address of the signed-in user, or an empty string if the
-  // user is not signed in. Also sends information about whether managed users
-  // may be created.
+  // user is not signed in. Also sends information about whether supervised
+  // users may be created.
   void RequestCreateProfileUpdate(const base::ListValue* args);
 
-  // When the pref allowing managed-user creation changes, sends the new value
-  // to the UI.
-  void OnCreateManagedUserPrefChange();
+  // When the pref allowing supervised-user creation changes, sends the new
+  // value to the UI.
+  void OnCreateSupervisedUserPrefChange();
 
   // Callback invoked from the profile manager indicating whether the profile
   // being edited has any desktop shortcuts.
@@ -129,15 +126,19 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   // shortcut" button. Removes the desktop shortcut for the profile.
   void RemoveProfileShortcut(const base::ListValue* args);
 
+  // Callback for the "refreshGaiaPicture" message, which is called when the
+  // user is editing an existing profile.
+  void RefreshGaiaPicture(const base::ListValue* args);
+
   // URL for the current profile's GAIA picture.
   std::string gaia_picture_url_;
 
-  // For generating weak pointers to itself for callbacks.
-  base::WeakPtrFactory<ManageProfileHandler> weak_factory_;
-
-  // Used to observe the preference that allows creating managed users, which
+  // Used to observe the preference that allows creating supervised users, which
   // can be changed by policy.
   PrefChangeRegistrar pref_change_registrar_;
+
+  // For generating weak pointers to itself for callbacks.
+  base::WeakPtrFactory<ManageProfileHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ManageProfileHandler);
 };

@@ -18,8 +18,6 @@
 
 namespace autofill {
 
-struct AutocheckoutPageMetaData;
-
 // The base class that contains common functionality between
 // AutofillQueryXmlParser and AutofillUploadXmlParser.
 class AutofillXmlParser : public buzz::XmlParseHandler {
@@ -72,12 +70,11 @@ class AutofillXmlParser : public buzz::XmlParseHandler {
 // autofilltype: The server's guess at what type of field this is.  0
 // is unknown, other types are documented in
 // components/autofill/core/browser/field_types.h.
+// Experiment ids are currently ignored.
 class AutofillQueryXmlParser : public AutofillXmlParser {
  public:
   AutofillQueryXmlParser(std::vector<AutofillServerFieldInfo>* field_infos,
-                         UploadRequired* upload_required,
-                         std::string* experiment_id,
-                         AutocheckoutPageMetaData* page_meta_data);
+                         UploadRequired* upload_required);
   virtual ~AutofillQueryXmlParser();
 
  private:
@@ -97,21 +94,6 @@ class AutofillQueryXmlParser : public AutofillXmlParser {
                               const char* const* attrs,
                               WebElementDescriptor* element_descriptor);
 
-  // A callback for the end of an </element>, called by Expat.
-  // |context| is a parsing context used to resolve element/attribute names.
-  // |name| is the name of the element.
-  virtual void EndElement(buzz::XmlParseContext* context,
-                          const char* name) OVERRIDE;
-
-  // The callback for character data between tags (<element>text...</element>).
-  // |context| is a parsing context used to resolve element/attribute names.
-  // |text| is a pointer to the beginning of character data (not null
-  // terminated).
-  // |len| is the length of the string pointed to by text.
-  virtual void CharacterData(buzz::XmlParseContext* context,
-                             const char* text,
-                             int len) OVERRIDE;
-
   // A helper function to retrieve integer values from strings.  Raises an
   // XML parse error if it fails.
   // |context| is the current parsing context.
@@ -124,22 +106,6 @@ class AutofillQueryXmlParser : public AutofillXmlParser {
   // A flag indicating whether the client should upload Autofill data when this
   // form is submitted.
   UploadRequired* upload_required_;
-
-  // The server experiment to which this query response belongs.
-  // For the default server implementation, this is empty.
-  std::string* experiment_id_;
-
-  // Page metadata for multipage autofill flow.
-  AutocheckoutPageMetaData* page_meta_data_;
-
-  // The click element the parser is currently processing.
-  WebElementDescriptor* current_click_element_;
-
-  // Number of page whose type is currently being parsed.
-  int current_page_number_for_page_types_;
-
-  // Whether the instance is currently parsing inside 'type' tags.
-  bool is_in_type_section_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillQueryXmlParser);
 };

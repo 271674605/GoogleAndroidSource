@@ -10,8 +10,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
+#include "components/sync_driver/data_type_controller.h"
+#include "components/sync_driver/data_type_error_handler.h"
 
 class Profile;
 class ProfileSyncService;
@@ -43,6 +43,8 @@ class ChangeProcessor;
 class FrontendDataTypeController : public DataTypeController {
  public:
   FrontendDataTypeController(
+      scoped_refptr<base::MessageLoopProxy> ui_thread,
+      const base::Closure& error_callback,
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
@@ -100,8 +102,15 @@ class FrontendDataTypeController : public DataTypeController {
 
   virtual AssociatorInterface* model_associator() const;
   virtual void set_model_associator(AssociatorInterface* associator);
-  virtual ChangeProcessor* change_processor() const;
+  virtual ChangeProcessor* GetChangeProcessor() const OVERRIDE;
   virtual void set_change_processor(ChangeProcessor* processor);
+
+  // Handles the reporting of unrecoverable error. It records stuff in
+  // UMA and reports to breakpad.
+  // Virtual for testing purpose.
+  virtual void RecordUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message);
 
   ProfileSyncComponentsFactory* const profile_sync_factory_;
   Profile* const profile_;

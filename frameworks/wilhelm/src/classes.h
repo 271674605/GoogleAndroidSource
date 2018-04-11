@@ -120,7 +120,7 @@
     // mandated interfaces
     IObject mObject;
 #ifdef ANDROID
-#define INTERFACES_AudioRecorder 11 // see MPH_to_AudioRecorder in MPH_to.c for list of interfaces
+#define INTERFACES_AudioRecorder 14 // see MPH_to_AudioRecorder in MPH_to.c for list of interfaces
 #else
 #define INTERFACES_AudioRecorder 9  // see MPH_to_AudioRecorder in MPH_to.c for list of interfaces
 #endif
@@ -137,6 +137,9 @@
 #ifdef ANDROID
     IBufferQueue mBufferQueue;
     IAndroidConfiguration mAndroidConfiguration;
+    IAndroidAcousticEchoCancellation  mAcousticEchoCancellation;
+    IAndroidAutomaticGainControl mAutomaticGainControl;
+    IAndroidNoiseSuppression mNoiseSuppression;
 #endif
     // remaining are per-instance private fields not associated with an interface
     DataLocatorFormat mDataSource;
@@ -150,6 +153,7 @@
     // FIXME consolidate the next several variables into ARecorder class to avoid placement new
     enum AndroidObjectType mAndroidObjType;
     android::sp<android::AudioRecord> mAudioRecord;
+    android::sp<android::CallbackProtector> mCallbackProtector;
     audio_source_t mRecordSource;
 #endif
 } /*CAudioRecorder*/;

@@ -64,6 +64,7 @@ class AudioEngine {
 
   static AudioEngine* GetEngine();
   static void SetEngine(AudioEngine* engine);
+  static bool CompareAndSetEngine(AudioEngine* expect, AudioEngine* update);
   static void DeleteEngine();
 
  private:
@@ -86,7 +87,7 @@ class AudioEngine {
   bool HasSampleRateAndChannels();
   SLuint32 GetSLSampleRate();
   SLuint32 GetSLChannels();
-  size_t GetChannelCount();
+  SLuint32 GetChannelCount();
 
   // The single global audio engine instance.
   static AudioEngine* audioEngine_;

@@ -14,7 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/onc/onc_certificate_importer.h"
-#include "chromeos/network/onc/onc_constants.h"
+#include "components/onc/onc_constants.h"
 
 namespace base {
 class DictionaryValue;
@@ -22,6 +22,7 @@ class ListValue;
 }
 
 namespace net {
+class NSSCertDatabase;
 class X509Certificate;
 typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 }
@@ -40,12 +41,12 @@ class CHROMEOS_EXPORT CertificateImporterImpl : public CertificateImporter {
   typedef std::map<std::string, scoped_refptr<net::X509Certificate> >
       CertsByGUID;
 
-  CertificateImporterImpl();
+  explicit CertificateImporterImpl(net::NSSCertDatabase* target_nssdb_);
 
   // CertificateImporter overrides
   virtual bool ImportCertificates(
       const base::ListValue& certificates,
-      onc::ONCSource source,
+      ::onc::ONCSource source,
       net::CertificateList* onc_trusted_certificates) OVERRIDE;
 
   // This implements ImportCertificates. Additionally, if
@@ -57,15 +58,17 @@ class CHROMEOS_EXPORT CertificateImporterImpl : public CertificateImporter {
                                  net::CertificateList* onc_trusted_certificates,
                                  CertsByGUID* imported_server_and_ca_certs);
 
+ private:
   // Lists the certificates that have the string |label| as their certificate
   // nickname (exact match).
   static void ListCertsWithNickname(const std::string& label,
-                                    net::CertificateList* result);
+                                    net::CertificateList* result,
+                                    net::NSSCertDatabase* target_nssdb);
 
- private:
   // Deletes any certificate that has the string |label| as its nickname (exact
   // match).
-  static bool DeleteCertAndKeyByNickname(const std::string& label);
+  static bool DeleteCertAndKeyByNickname(const std::string& label,
+                                         net::NSSCertDatabase* target_nssdb);
 
   // Parses and stores/removes |certificate| in/from the certificate
   // store. Returns true if the operation succeeded.
@@ -89,6 +92,9 @@ class CHROMEOS_EXPORT CertificateImporterImpl : public CertificateImporter {
 
   bool ParseClientCertificate(const std::string& guid,
                               const base::DictionaryValue& certificate);
+
+  // The certificate database to which certificates are imported.
+  net::NSSCertDatabase* target_nssdb_;
 
   DISALLOW_COPY_AND_ASSIGN(CertificateImporterImpl);
 };

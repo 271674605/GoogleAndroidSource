@@ -36,6 +36,15 @@ public:
                        const void * usr,
                        uint32_t usrLen,
                        const RsScriptCall *sc);
+
+    virtual void invokeForEachMulti(uint32_t slot,
+                       const Allocation ** ain,
+                       uint32_t inLen,
+                       Allocation * aout,
+                       const void * usr,
+                       uint32_t usrLen,
+                       const RsScriptCall *sc);
+
     virtual void forEachKernelSetup(uint32_t slot, MTLaunchStruct *mtls);
     virtual void invokeInit();
     virtual void invokeFreeChildren();
@@ -49,7 +58,7 @@ public:
 
     virtual void setGlobalVar(uint32_t slot, const void *data, size_t dataLength);
     virtual void setGlobalVarWithElemDims(uint32_t slot, const void *data, size_t dataLength,
-                                  const Element *e, const size_t *dims, size_t dimLength);
+                                  const Element *e, const uint32_t *dims, size_t dimLength);
     virtual void setGlobalBind(uint32_t slot, Allocation *data);
     virtual void setGlobalObj(uint32_t slot, ObjectBase *data);
 

@@ -7,11 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MCLD_HEXAGON_ABSOLUTE_STUB_H
-#define MCLD_HEXAGON_ABSOLUTE_STUB_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_HEXAGON_HEXAGONABSOLUTESTUB_H
+#define TARGET_HEXAGON_HEXAGONABSOLUTESTUB_H
 
 #include <llvm/Support/DataTypes.h>
 #include <mcld/Fragment/Stub.h>

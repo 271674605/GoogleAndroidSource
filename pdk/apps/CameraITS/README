@@ -41,7 +41,7 @@ shell for Android builds, from the pdk/apps/CameraITS directory run the
 following commands:
 
     cd service
-    mm
+    mma -j32
     adb install -r <YOUR_OUTPUT_PATH>/ItsService.apk
 
 using whatever path is appropriate to your output ItsService.apk file.
@@ -111,6 +111,10 @@ The Python modules are under the pymodules directory, in the "its" package.
 * its.image: contains a collection of functions (built on numpy arrays) for
   processing captured images
 * its.error: the exception/error class used in this framework
+* its.target: functions to set and measure the exposure level to use for
+  manual shots in tests, to ensure that the images are exposed well for the
+  target scene
+* its.dng: functions to work with DNG metadata
 
 All of these module have associated unit tests; to run the unit tests, execute
 the modules (rather than importing them).
@@ -119,36 +123,23 @@ the modules (rather than importing them).
 -------------------
 
 The its.device.ItsSession class encapsulates a session with a connected device
-under test (which is running ItsService.apk).
+under test (which is running ItsService.apk). The session is over TCP, which is
+forwarded over adb.
 
 As an overview, the ItsSession.do_capture() function takes a Python dictionary
 object as an argument, converts that object to JSON, and sends it to the
-device over adb which then deserializes from the JSON object representation to
+device over tcp which then deserializes from the JSON object representation to
 Camera2 Java objects (CaptureRequests) which are used to specify one or more
 captures. Once the captures are complete, the resultant images are copied back
-to the host machine (using adb pull), along with JSON representations of the
+to the host machine (over tcp again), along with JSON representations of the
 CaptureResult and other objects that describe the shot that was actually taken.
 
-The Python dictionary object that is used to specify what shots to capture and
-that is passed as an argument to the do_capture() function can have the
-following top-level keys:
+The Python capture request object(s) can contain key/value entries corresponding
+to any of the Java CaptureRequest object fields.
 
-    captureRequest
-    captureRequestList
-    outputSurface
-
-Exactly one of captureRequest and captureRequestList must be present, and
-outputSurface is optional. Look at the tests directory for examples of
-specifying these objects.
-
-The captureRequest object can contain key/value entries corresponding to any
-of the Java CaptureRequest object fields. The captureRequestList object is
-a list of such objecs, corresponding to a burst capture specification.
-
-The outputSurface object is used to specify the width, height, and format of
-the output images that are captured. Currently supported formats are "jpg" and
-"yuv", where "yuv" is YUV420 fully planar. The default output surface is a
-full sensor YUV420 frame.
+The output surface's width, height, and format can also be specified. Currently
+supported formats are "jpg", "raw", "raw10", "dng", and "yuv", where "yuv" is
+YUV420 fully planar. The default output surface is a full sensor YUV420 frame.
 
 The metadata that is returned along with the captured images is also in JSON
 format, serialized from the CaptureRequest and CaptureResult objects that were
@@ -184,23 +175,106 @@ for example:
 
     mkdir out
     cd out
-    python ../tests/test_linearity.py
+    python ../tests/scene1/test_linearity.py
 
 Any test can be specified to reboot the camera prior to capturing any shots, by
 adding a "reboot" or "reboot=N" command line argument, where N is the number of
 seconds to wait after rebooting the device before sending any commands; the
 default is 30 seconds.
 
-    python tests/test_linearity.py reboot
-    python tests/test_linearity.py reboot=20
+    python tests/scene1/test_linearity.py reboot
+    python tests/scene1/test_linearity.py reboot=20
 
-3.4. Docs
+It's possible that a test could leave the camera in a bad state, in particular
+if there are any bugs in the HAL or the camera framework. Rebooting the device
+can be used to get it into a known clean state again.
+
+Each test assumes some sort of target or scene. There are multiple scene<N>
+folders under the tests directory, and each contains a README file which
+describes the scene for the scripts in that folder.
+
+By default, camera device id=0 is opened when the script connects to the unit,
+however this can be specified by adding a "camera=1" or similar argument to
+the script command line. On a typical device, camera=0 is the main (rear)
+camera, and camera=1 is the front-facing camera.
+
+    python tests/scene1/test_linearity.py camera=1
+
+The tools/run_all_tests.py script should be executed from the top-level
+CameraITS directory, and it will run all of the tests in an automated fashion,
+saving the generated output files along with the stdout and stderr dumps to
+a temporary directory.
+
+    python tools/run_all_tests.py
+
+This can be run with the "noinit" argument, and in general any args provided
+to this command line will be passed to each script as it is executed.
+
+The tests/inprog directory contains a mix of unfinished, in-progress, and
+incomplete tests. These may or may not be useful in testing a HAL impl.,
+and as these tests are copmleted they will be moved into the scene<N> folders.
+
+When running individual tests from the command line (as in the examples here),
+each test run will ensure that the ItsService is running on the device and is
+ready to accept TCP connections. When using a separate test harness to control
+this infrastructure, the "noinit" command line argument can be provided to
+skip this step; in this case, the test will just try to open a socket to the
+service on the device, and will fail if it's not running and ready.
+
+    python tests/scene1/test_linearity.py noinit
+
+3.4. Target exposure
+--------------------
+
+The tools/config.py script is a wrapper for the its.target module, which is
+used to set an exposure level based on the scene that the camera is imaging.
+The purpose of this is to be able to have tests which use hard-coded manual
+exposure controls, while at the same time ensuring that the captured images
+are properly exposed for the test (and aren't clamped to white or black).
+
+If no argument is provided, the script will use the camera to measure the
+scene to determine the exposure level. An argument can be provided to hard-
+code the exposure level.
+
+    python tools/config.py
+    python tools/config.py 16531519962
+
+This creates a file named its.target.cfg in the current directory, storing the
+target exposure level. Tests that use the its.target module will be reusing
+this value, if they are run from the same directory and if they contain the
+"target" command line argument:
+
+    python tests/scene1/test_linearity.py target
+
+If the "target" argument isn't present, then the script won't use any cached
+its.target.cfg values that may be present in the current directory.
+
+3.5. Docs
 ---------
 
 The pydoc tool can generate HTML docs for the ITS Python modules, using the
 following command (run after PYTHONPATH has been set up as described above):
 
-    pydoc -w its its.device its.image its.error its.objects
+    pydoc -w its its.device its.image its.error its.objects its.dng its.target
+
+There is a tutorial script in the tests folder (named tutorial.py). It
+illustrates a number of the its.image and its.device primitives, and shows
+how to work with image data in general using this infrastructure. (Its code
+is commented with explanatory remarks.)
+
+    python tests/tutorial.py
+
+3.6. List of command line args
+---------------------------------
+
+The above doc sections describe the following command line arguments that may
+be provided when running a test:
+
+    reboot
+    reboot=N
+    target
+    noinit
+    camera=N
 
 4. Known issues
 ---------------

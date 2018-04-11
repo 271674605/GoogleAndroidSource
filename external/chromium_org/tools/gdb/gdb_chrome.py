@@ -21,6 +21,7 @@ to print |any_variable| without using any printers.
 
 import datetime
 import gdb
+import gdb.printing
 import webkit
 
 # When debugging this module, set the below variable to True, and then use
@@ -44,6 +45,25 @@ def typed_ptr(ptr):
     return '((%s)%s)' % (ptr.dynamic_type, ptr)
 
 
+def yield_fields(val):
+    """Use this in a printer's children() method to print an object's fields.
+
+    e.g.
+      def children():
+        for result in yield_fields(self.val):
+          yield result
+    """
+    try:
+        fields = val.type.target().fields()
+    except:
+        fields = val.type.fields()
+    for field in fields:
+        if field.is_base_class:
+            yield (field.name, val.cast(gdb.lookup_type(field.name)))
+        else:
+            yield (field.name, val[field.name])
+
+
 class Printer(object):
     def __init__(self, val):
         self.val = val
@@ -59,7 +79,7 @@ class String16Printer(StringPrinter):
         return webkit.ustring_to_string(self.val['_M_dataplus']['_M_p'])
 pp_set.add_printer(
     'string16',
-    '^string16|std::basic_string<(unsigned short|char16|base::char16).*>$',
+    '^string16|std::basic_string<(unsigned short|base::char16).*>$',
     String16Printer);
 
 
@@ -140,6 +160,18 @@ pp_set.add_printer('tracked_objects::Location', '^tracked_objects::Location$',
                    LocationPrinter)
 
 
+class PendingTaskPrinter(Printer):
+    def to_string(self):
+        return 'From %s' % (self.val['posted_from'],)
+
+    def children(self):
+        for result in yield_fields(self.val):
+            if result[0] not in ('task', 'posted_from'):
+                yield result
+pp_set.add_printer('base::PendingTask', '^base::PendingTask$',
+                   PendingTaskPrinter)
+
+
 class LockPrinter(Printer):
     def to_string(self):
         try:
@@ -200,8 +232,7 @@ class IpcMessagePrinter(Printer):
 
     def children(self):
         yield ('header_', self.header().dereference())
-        yield ('capacity_', self.val['capacity_'])
-        yield ('variable_buffer_offset_', self.val['variable_buffer_offset_'])
+        yield ('capacity_after_header_', self.val['capacity_after_header_'])
         for field in self.val.type.fields():
             if field.is_base_class:
                 continue
@@ -274,8 +305,9 @@ class RenderProcessHostImplPrinter(object):
 
     def children(self):
         yield ('id_', self.val['id_'])
-        yield ('render_widget_hosts_',
-               self.val['render_widget_hosts_']['data_'])
+        yield ('listeners_',
+               self.val['listeners_']['data_'])
+        yield ('worker_ref_count_', self.val['worker_ref_count_'])
         yield ('fast_shutdown_started_', self.val['fast_shutdown_started_'])
         yield ('deleting_soon_', self.val['deleting_soon_'])
         yield ('pending_views_', self.val['pending_views_'])

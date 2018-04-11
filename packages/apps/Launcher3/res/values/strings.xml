@@ -20,6 +20,16 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <!-- General -->
     <skip />
+
+    <!-- URI used to import old favorites. [DO NOT TRANSLATE] -->
+    <string name="old_launcher_provider_uri" translatable="false">content://com.android.launcher2.settings/favorites?notify=true</string>
+
+    <!-- Permission to receive the com.android.launcher3.action.LAUNCH intent -->
+    <string name="receive_launch_broadcasts_permission" translatable="false">com.android.launcher3.permission.RECEIVE_LAUNCH_BROADCASTS</string>
+
+    <!-- Permission to receive the com.android.launcher3.action.FIRST_LOAD_COMPLETE intent -->
+    <string name="receive_first_load_broadcast_permission" translatable="false">com.android.launcher3.permission.RECEIVE_FIRST_LOAD_BROADCAST</string>
+
     <!-- Application name -->
     <string name="application_name">Launcher3</string>
     <!-- Accessibility-facing application name -->
@@ -28,32 +38,10 @@
     <string name="uid_name">Android Core Apps</string>
     <!-- Default folder name -->
     <string name="folder_name"></string>
-    <!-- Button label on Wallpaper picker screen; user selects this button to set a specific wallpaper -->
-    <string name="wallpaper_instructions">Set wallpaper</string>
-    <!-- Shown when wallpapers are selected in Wallpaper picker -->
-    <!-- String indicating how many media item(s) is(are) selected
-            eg. 1 selected [CHAR LIMIT=30] -->
-    <plurals name="number_of_items_selected">
-        <item quantity="zero">%1$d selected</item>
-        <item quantity="one">%1$d selected</item>
-        <item quantity="other">%1$d selected</item>
-    </plurals>
-    <!-- Accessibility string used as a label for a particular wallpaper in the Wallpaper Picker list.
-         e.g. "Wallpaper 3 of 10" -->
-    <string name="wallpaper_accessibility_name">Wallpaper %1$d of %2$d</string>
-    <!-- Accessibility string used to announce that a wallpaper has been selected. -->
-    <string name="announce_selection">Selected <xliff:g id="label" example="Wallpaper 3 of 10">%1$s</xliff:g></string>
-
-    <!-- Label on button to delete wallpaper(s) -->
-    <string name="wallpaper_delete">Delete</string>
-    <!-- Label on button in Wallpaper Picker to pick an image -->
-    <string name="pick_image">Pick image</string>
-    <!-- Option in "Select wallpaper from" dialog box -->
-    <string name="pick_wallpaper">Wallpapers</string>
-    <!-- Title of activity for cropping wallpapers -->
-    <string name="crop_wallpaper">Crop wallpaper</string>
     <!-- Displayed when user selects a shortcut for an app that was uninstalled [CHAR_LIMIT=none]-->
     <string name="activity_not_found">App isn\'t installed.</string>
+    <!-- SafeMode shortcut error string -->
+    <string name="safemode_shortcut_error">Downloaded app disabled in Safe mode</string>
     <!--  Labels for the tabs in the customize drawer -->
     <string name="widgets_tab_label">Widgets</string>
 
@@ -109,9 +97,9 @@ s -->
     <!-- Error message when user has filled a home screen -->
     <string name="out_of_space">No more room on this Home screen.</string>
     <!-- Error message when user has filled the hotseat -->
-    <string name="hotseat_out_of_space">No more room on the hotseat.</string>
+    <string name="hotseat_out_of_space">No more room in the Favorites tray</string>
     <!-- Error message when user tries to drop an invalid item on the hotseat -->
-    <string name="invalid_hotseat_item">This widget is too large for the hotseat.</string>
+    <string name="invalid_hotseat_item">This widget is too large for the Favorites tray</string>
     <!-- Message displayed when a shortcut is created by an external application -->
     <string name="shortcut_installed">Shortcut \"<xliff:g id="name" example="Browser">%s</xliff:g>\" created.</string>
     <!-- Message displayed when a shortcut is uninstalled by an external application -->
@@ -205,6 +193,9 @@ s -->
     <!-- Text to show user in place of a gadget when we can't display it properly -->
     <string name="gadget_error_text">Problem loading widget</string>
 
+    <!-- Text to show user in place of a gadget when it is not yet initialized. -->
+    <string name="gadget_setup_text">Setup</string>
+
     <!-- Text to inform the user that they can't uninstall a system application -->
     <string name="uninstall_system_app_text">This is a system app and can\'t be uninstalled.</string>
 
@@ -230,8 +221,8 @@ s -->
     <string name="apps_customize_widgets_scroll_format">Widgets page %1$d of %2$d</string>
 
     <!-- Clings -->
-    <!-- The title text for the workspace cling [CHAR_LIMIT=60] -->
-    <string name="first_run_cling_title">Welcome!</string>
+    <!-- The title text for the workspace cling [CHAR_LIMIT=30] -->
+    <string name="first_run_cling_title">Welcome</string>
     <!-- The description of how to use the workspace [CHAR_LIMIT=60] -->
     <string name="first_run_cling_description">Make yourself at home.</string>
     <!-- The description of how to use the workspace [CHAR_LIMIT=60] -->
@@ -240,17 +231,27 @@ s -->
     <string name="first_run_cling_search_bar_hint"></string>
     <!-- The description of how to use the workspace [CHAR_LIMIT=60] -->
     <string name="first_run_cling_create_screens_hint">Create more screens for apps and folders</string>
-    <!-- The title text for the workspace cling [CHAR_LIMIT=60] -->
+    <!-- The title text for the migration cling [CHAR_LIMIT=30] -->
+    <string name="migration_cling_title">Copy your app icons</string>
+    <!-- The description of what migration does [CHAR_LIMIT=70] -->
+    <string name="migration_cling_description">Import icons and folders from your old Home screens?</string>
+    <!-- The description of the button to migrate apps from another launcher [CHAR_LIMIT=30] -->
+    <string name="migration_cling_copy_apps">COPY ICONS</string>
+    <!-- The description of the button to use the default launcher layout [CHAR_LIMIT=30] -->
+    <string name="migration_cling_use_default">START FRESH</string>
+    <!-- The title text for the workspace cling [CHAR_LIMIT=30] -->
     <string name="workspace_cling_title">Organize your space</string>
-    <!-- The description of how to use the workspace [CHAR_LIMIT=160] -->
+    <!-- The description of how to use the workspace [CHAR_LIMIT=70] -->
     <string name="workspace_cling_move_item">Touch &amp; hold background to manage wallpaper, widgets and settings.</string>
-    <!-- The title text for the All Apps cling [CHAR_LIMIT=60] -->
-    <string name="all_apps_cling_title">Choose some apps</string>
-    <!-- The description of how to pick up and add an item to the workspace [CHAR_LIMIT=160] -->
-    <string name="all_apps_cling_add_item">To add an app to your Home screen, touch &amp; hold it.</string>
-    <!-- The title text for the Folder cling [CHAR_LIMIT=60] -->
+    <!-- The title text for workspace longpress action [CHAR_LIMIT=40] -->
+    <string name="workspace_cling_longpress_title">Wallpapers, widgets, &amp; settings</string>
+    <!-- The description of how to use the workspace [CHAR_LIMIT=70] -->
+    <string name="workspace_cling_longpress_description">Touch &amp; hold background to customize</string>
+    <!-- The description of the button to dismiss the cling [CHAR_LIMIT=30] -->
+    <string name="workspace_cling_longpress_dismiss">GOT IT</string>
+    <!-- The title text for the Folder cling [CHAR_LIMIT=30] -->
     <string name="folder_cling_title">Here\'s a folder</string>
-    <!-- The description of how to create a folder [CHAR_LIMIT=160] -->
+    <!-- The description of how to create a folder [CHAR_LIMIT=70] -->
     <string name="folder_cling_create_folder">To create one like this, touch &amp; hold an app, then move it over another.</string>
     <!-- The text on the button to dismiss a cling [CHAR_LIMIT=30] -->
     <string name="cling_dismiss">OK</string>
@@ -272,18 +273,6 @@ s -->
     <!-- Folder name format -->
     <string name="folder_name_format">Folder: <xliff:g id="name" example="Games">%1$s</xliff:g></string>
 
-    <!-- Strings used in device overlays -->
-
-    <!-- Clings -->
-    <!-- Dummy string [CHAR_LIMIT=40] -->
-    <string name="custom_workspace_cling_title_1"></string>
-    <!-- Dummy string [CHAR_LIMIT=60] -->
-    <string name="custom_workspace_cling_description_1"></string>
-    <!-- Dummy string [CHAR_LIMIT=40] -->
-    <string name="custom_workspace_cling_title_2"></string>
-    <!-- Dummy string [CHAR_LIMIT=60] -->
-    <string name="custom_workspace_cling_description_2"></string>
-
     <!-- Debug-only activity name. [DO NOT TRANSLATE] -->
     <string name="debug_memory_activity">* HPROF</string>
 
@@ -294,4 +283,29 @@ s -->
     <string name="wallpaper_button_text">Wallpapers</string>
     <!-- Text for settings button -->
     <string name="settings_button_text">Settings</string>
+
+    <!-- Label on an icon that references an uninstalled package, that is going to be installed at some point. [CHAR_LIMIT=15] -->
+    <string name="package_state_enqueued">Waiting</string>
+    <!-- Label on an icon that references an uninstalled package, that is currently being downloaded. [CHAR_LIMIT=15] -->
+    <string name="package_state_downloading">Downloading</string>
+    <!-- Label on an icon that references an uninstalled package, that is currently being installed. [CHAR_LIMIT=15] -->
+    <string name="package_state_installing">Installing</string>
+    <!-- Label on an icon that references an uninstalled package, for which we have no information about when it might be installed. [CHAR_LIMIT=15] -->
+    <string name="package_state_unknown">Unknown</string>
+    <!-- Label on an icon that references an uninstalled package, for which restore from market has failed. [CHAR_LIMIT=15] -->
+    <string name="package_state_error">Not restored</string>
+
+    <!-- Button for abandoned promises dialog, that removes all abandoned promise icons. -->
+    <string name="abandoned_clean_all">Remove All</string>
+    <!-- Button for abandoned promises dialog, to removes this abandoned promise icon. -->
+    <string name="abandoned_clean_this">Remove</string>
+    <!-- Button for abandoned promise dialog, to search in the market for the missing package. -->
+    <string name="abandoned_search">Search</string>
+    <!-- Title for abandoned promise dialog. -->
+    <string name="abandoned_promises_title">This app is not installed</string>
+    <!-- Explanation for abandoned promise dialog. "The first 'it' refers to the shortcut icon.
+    The second "it" refers to the app. -->
+    <string name="abandoned_promise_explanation">The app for this icon isn\'t installed.
+        You can remove it, or search for the app and install it manually.
+    </string>
 </resources>

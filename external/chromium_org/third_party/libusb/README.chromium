@@ -1,6 +1,6 @@
 Name: libusbx
 URL: http://libusb.org
-Version: 1.0.16
+Version: 1.0.17
 License: LGPL 2.1
 License File: src/COPYING
 Security Critical: yes
@@ -16,3 +16,4 @@ Local Modifications:
   libusb_handle_event.
 - windows-build.patch has been applied.
 - darwin-sigfpe.patch has been applied.
+- upstream-tick147.patch has been applied.

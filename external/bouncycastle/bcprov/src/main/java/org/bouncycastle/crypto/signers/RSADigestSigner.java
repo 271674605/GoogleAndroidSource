@@ -46,9 +46,7 @@ public class RSADigestSigner
         // END android-removed
 
         oidMap.put("SHA-1", X509ObjectIdentifiers.id_SHA1);
-        // BEGIN android-removed
-        // oidMap.put("SHA-224", NISTObjectIdentifiers.id_sha224);
-        // END android-removed
+        oidMap.put("SHA-224", NISTObjectIdentifiers.id_sha224);
         oidMap.put("SHA-256", NISTObjectIdentifiers.id_sha256);
         oidMap.put("SHA-384", NISTObjectIdentifiers.id_sha384);
         oidMap.put("SHA-512", NISTObjectIdentifiers.id_sha512);
@@ -63,9 +61,15 @@ public class RSADigestSigner
     public RSADigestSigner(
         Digest digest)
     {
-        this.digest = digest;
+        this(digest, (ASN1ObjectIdentifier)oidMap.get(digest.getAlgorithmName()));
+    }
 
-        algId = new AlgorithmIdentifier((ASN1ObjectIdentifier)oidMap.get(digest.getAlgorithmName()), DERNull.INSTANCE);
+    public RSADigestSigner(
+        Digest digest,
+        ASN1ObjectIdentifier digestOid)
+    {
+        this.digest = digest;
+        this.algId = new AlgorithmIdentifier(digestOid, DERNull.INSTANCE);
     }
 
     /**

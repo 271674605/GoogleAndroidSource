@@ -109,7 +109,7 @@ public class WidgetProvider extends BaseWidgetProvider {
             WidgetService.saveWidgetInformation(context, widgetId, uiAccount,
                     uiFolder.folderUri.fullUri.toString());
 
-            updateWidgetInternal(context, widgetId, uiAccount, uiFolder.type,
+            updateWidgetInternal(context, widgetId, uiAccount, uiFolder.type, uiFolder.capabilities,
                     uiFolder.folderUri.fullUri, uiFolder.conversationListUri, uiFolder.name);
 
             // Now remove the old legacy preference value
@@ -159,7 +159,7 @@ public class WidgetProvider extends BaseWidgetProvider {
         com.android.mail.providers.Account uiAccount = null;
         try {
             if (accountCursor.moveToFirst()) {
-                 uiAccount = new com.android.mail.providers.Account(accountCursor);
+                 uiAccount = com.android.mail.providers.Account.builder().buildFrom(accountCursor);
             }
         } finally {
             accountCursor.close();

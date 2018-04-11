@@ -4,9 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SkTypes.h"
 
-#include "Test.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkColor.h"
@@ -15,15 +13,15 @@
 #include "SkPaint.h"
 #include "SkPoint.h"
 #include "SkRect.h"
+#include "SkStream.h"
 #include "SkTypeface.h"
-
-///////////////////////////////////////////////////////////////////////////////
+#include "SkTypes.h"
+#include "Test.h"
 
 static const SkColor bgColor = SK_ColorWHITE;
 
-static void create(SkBitmap* bm, SkIRect bound, SkBitmap::Config config) {
-    bm->setConfig(config, bound.width(), bound.height());
-    bm->allocPixels();
+static void create(SkBitmap* bm, SkIRect bound) {
+    bm->allocN32Pixels(bound.width(), bound.height());
 }
 
 static void drawBG(SkCanvas* canvas) {
@@ -65,8 +63,7 @@ static bool compare(const SkBitmap& ref, const SkIRect& iref,
     return true;
 }
 
-static void test_fontHostStream(skiatest::Reporter* reporter) {
-
+DEF_TEST(FontHostStream, reporter) {
     {
         SkPaint paint;
         paint.setColor(SK_ColorGRAY);
@@ -78,12 +75,12 @@ static void test_fontHostStream(skiatest::Reporter* reporter) {
 
         SkIRect origRect = SkIRect::MakeWH(64, 64);
         SkBitmap origBitmap;
-        create(&origBitmap, origRect, SkBitmap::kARGB_8888_Config);
+        create(&origBitmap, origRect);
         SkCanvas origCanvas(origBitmap);
 
         SkIRect streamRect = SkIRect::MakeWH(64, 64);
         SkBitmap streamBitmap;
-        create(&streamBitmap, streamRect, SkBitmap::kARGB_8888_Config);
+        create(&streamBitmap, streamRect);
         SkCanvas streamCanvas(streamBitmap);
 
         SkPoint point = SkPoint::Make(24, 32);
@@ -99,7 +96,7 @@ static void test_fontHostStream(skiatest::Reporter* reporter) {
         }
 
         int ttcIndex;
-        SkStream* fontData = origTypeface->openStream(&ttcIndex);
+        SkAutoTUnref<SkStream> fontData(origTypeface->openStream(&ttcIndex));
         SkTypeface* streamTypeface = SkTypeface::CreateFromStream(fontData);
         SkSafeUnref(paint.setTypeface(streamTypeface));
         drawBG(&streamCanvas);
@@ -111,6 +108,3 @@ static void test_fontHostStream(skiatest::Reporter* reporter) {
     //Make sure the typeface is deleted and removed.
     SkGraphics::PurgeFontCache();
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("FontHost::CreateTypefaceFromStream", FontHostStreamTestClass, test_fontHostStream)

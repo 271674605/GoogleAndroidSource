@@ -15,9 +15,9 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sync/api/sync_change.h"
@@ -28,7 +28,7 @@
 class Profile;
 
 namespace chrome {
-struct FaviconBitmapResult;
+struct FaviconRawBitmapResult;
 }
 
 namespace browser_sync {
@@ -44,7 +44,7 @@ enum IconSize {
 struct SyncedFaviconInfo;
 
 // Encapsulates the logic for loading and storing synced favicons.
-// TODO(zea): make this a BrowserContextKeyedService.
+// TODO(zea): make this a KeyedService.
 class FaviconCache : public syncer::SyncableService,
                      public content::NotificationObserver {
  public:
@@ -117,7 +117,7 @@ class FaviconCache : public syncer::SyncableService,
   typedef std::set<linked_ptr<SyncedFaviconInfo>,
                    FaviconRecencyFunctor> RecencySet;
   // Map of page url to task id (for favicon loading).
-  typedef std::map<GURL, CancelableTaskTracker::TaskId> PageTaskMap;
+  typedef std::map<GURL, base::CancelableTaskTracker::TaskId> PageTaskMap;
   // Map of page url to favicon url.
   typedef std::map<GURL, GURL> PageFaviconMap;
 
@@ -131,7 +131,7 @@ class FaviconCache : public syncer::SyncableService,
   // available. Does nothing if no favicon data was available.
   void OnFaviconDataAvailable(
       const GURL& page_url,
-      const std::vector<chrome::FaviconBitmapResult>& bitmap_result);
+      const std::vector<favicon_base::FaviconRawBitmapResult>& bitmap_result);
 
   // Helper method to update the sync state of the favicon at |icon_url|. If
   // either |image_change_type| or |tracking_change_type| is ACTION_INVALID,
@@ -189,12 +189,16 @@ class FaviconCache : public syncer::SyncableService,
   // Locally drops the favicon pointed to by |favicon_iter|.
   void DropSyncedFavicon(FaviconMap::iterator favicon_iter);
 
+  // Only drops the data associated with |type| of |favicon_iter|.
+  void DropPartialFavicon(FaviconMap::iterator favicon_iter,
+                          syncer::ModelType type);
+
   // For testing only.
   size_t NumFaviconsForTest() const;
   size_t NumTasksForTest() const;
 
   // Trask tracker for loading favicons.
-  CancelableTaskTracker cancelable_task_tracker_;
+  base::CancelableTaskTracker cancelable_task_tracker_;
 
   // Our actual cached favicon data.
   FaviconMap synced_favicons_;
@@ -214,9 +218,6 @@ class FaviconCache : public syncer::SyncableService,
   // TODO(zea): consider creating a favicon handler here for fetching unsynced
   // favicons from the web.
 
-  // Weak pointer factory for favicon loads.
-  base::WeakPtrFactory<FaviconCache> weak_ptr_factory_;
-
   scoped_ptr<syncer::SyncChangeProcessor> favicon_images_sync_processor_;
   scoped_ptr<syncer::SyncChangeProcessor> favicon_tracking_sync_processor_;
 
@@ -225,6 +226,9 @@ class FaviconCache : public syncer::SyncableService,
 
   // Maximum number of favicons to sync. 0 means no limit.
   const size_t max_sync_favicon_limit_;
+
+  // Weak pointer factory for favicon loads.
+  base::WeakPtrFactory<FaviconCache> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconCache);
 };

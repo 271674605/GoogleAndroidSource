@@ -94,6 +94,11 @@ NET_ERROR(BLOCKED_BY_ADMINISTRATOR, -22)
 // The socket is already connected.
 NET_ERROR(SOCKET_IS_CONNECTED, -23)
 
+// The request was blocked because the forced reenrollment check is still
+// pending. This error can only occur on ChromeOS.
+// The error can be emitted by code in c/b/policy/policy_helpers.cc.
+NET_ERROR(BLOCKED_ENROLLMENT_CHECK_PENDING, -24)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -300,6 +305,33 @@ NET_ERROR(WS_THROTTLE_QUEUE_TOO_LARGE, -154)
 // was rejected.
 NET_ERROR(TOO_MANY_SOCKET_STREAMS, -155)
 
+// The SSL server certificate changed in a renegotiation.
+NET_ERROR(SSL_SERVER_CERT_CHANGED, -156)
+
+// The SSL server indicated that an unnecessary TLS version fallback was
+// performed.
+NET_ERROR(SSL_INAPPROPRIATE_FALLBACK, -157)
+
+// Certificate Transparency: All Signed Certificate Timestamps failed to verify.
+NET_ERROR(CT_NO_SCTS_VERIFIED_OK, -158)
+
+// The SSL server sent us a fatal unrecognized_name alert.
+NET_ERROR(SSL_UNRECOGNIZED_NAME_ALERT, -159)
+
+// Failed to set the socket's receive buffer size as requested.
+NET_ERROR(SOCKET_SET_RECEIVE_BUFFER_SIZE_ERROR, -160)
+
+// Failed to set the socket's send buffer size as requested.
+NET_ERROR(SOCKET_SET_SEND_BUFFER_SIZE_ERROR, -161)
+
+// Failed to set the socket's receive buffer size as requested, despite success
+// return code from setsockopt.
+NET_ERROR(SOCKET_RECEIVE_BUFFER_SIZE_UNCHANGEABLE, -162)
+
+// Failed to set the socket's send buffer size as requested, despite success
+// return code from setsockopt.
+NET_ERROR(SOCKET_SEND_BUFFER_SIZE_UNCHANGEABLE, -163)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -397,13 +429,16 @@ NET_ERROR(CERT_NON_UNIQUE_NAME, -210)
 // a too-small RSA key).
 NET_ERROR(CERT_WEAK_KEY, -211)
 
+// The certificate claimed DNS names that are in violation of name constraints.
+NET_ERROR(CERT_NAME_CONSTRAINT_VIOLATION, -212)
+
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -212)
+NET_ERROR(CERT_END, -213)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -535,8 +570,9 @@ NET_ERROR(SPDY_SERVER_REFUSED_STREAM, -351)
 // SPDY server didn't respond to the PING message.
 NET_ERROR(SPDY_PING_FAILED, -352)
 
-// The request couldn't be completed on an HTTP pipeline. Client should retry.
-NET_ERROR(PIPELINE_EVICTION, -353)
+// Obsolete.  Kept here to avoid reuse, as the old error can still appear on
+// histograms.
+// NET_ERROR(PIPELINE_EVICTION, -353)
 
 // The HTTP response body transferred fewer bytes than were advertised by the
 // Content-Length header when the connection is closed.
@@ -551,6 +587,28 @@ NET_ERROR(QUIC_PROTOCOL_ERROR, -356)
 
 // The HTTP headers were truncated by an EOF.
 NET_ERROR(RESPONSE_HEADERS_TRUNCATED, -357)
+
+// The QUIC crytpo handshake failed.  This means that the server was unable
+// to read any requests sent, so they may be resent.
+NET_ERROR(QUIC_HANDSHAKE_FAILED, -358)
+
+// An https resource was requested over an insecure QUIC connection.
+NET_ERROR(REQUEST_FOR_SECURE_RESOURCE_OVER_INSECURE_QUIC, -359)
+
+// Transport security is inadequate for the SPDY version.
+NET_ERROR(SPDY_INADEQUATE_TRANSPORT_SECURITY, -360)
+
+// The peer violated SPDY flow control.
+NET_ERROR(SPDY_FLOW_CONTROL_ERROR, -361)
+
+// The peer sent an improperly sized SPDY frame.
+NET_ERROR(SPDY_FRAME_SIZE_ERROR, -362)
+
+// Decoding or encoding of compressed SPDY headers failed.
+NET_ERROR(SPDY_COMPRESSION_ERROR, -363)
+
+// Proxy Auth Requested without a valid Client Socket Handle.
+NET_ERROR(PROXY_AUTH_REQUESTED_WITH_NO_CONNECTION, -364)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
@@ -670,6 +728,9 @@ NET_ERROR(PRIVATE_KEY_EXPORT_FAILED, -712)
 
 // Self-signed certificate generation failed.
 NET_ERROR(SELF_SIGNED_CERT_GENERATION_FAILED, -713)
+
+// The certificate database changed in some way.
+NET_ERROR(CERT_DATABASE_CHANGED, -714)
 
 // DNS error codes.
 

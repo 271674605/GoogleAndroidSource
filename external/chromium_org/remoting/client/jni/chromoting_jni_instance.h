@@ -17,17 +17,24 @@
 #include "remoting/client/client_user_interface.h"
 #include "remoting/client/frame_consumer_proxy.h"
 #include "remoting/client/jni/jni_frame_consumer.h"
-#include "remoting/jingle_glue/network_settings.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/cursor_shape_stub.h"
 
 namespace remoting {
+
 namespace protocol {
-  class ClipboardEvent;
-  class CursorShapeInfo;
+class ClipboardEvent;
+class CursorShapeInfo;
 }  // namespace protocol
+
+namespace client {
+class LogToServer;
+}
+
+class VideoRenderer;
+class TokenFetcherProxy;
 
 // ClientUserInterface that indirectly makes and receives JNI calls.
 class ChromotingJniInstance
@@ -52,29 +59,49 @@ class ChromotingJniInstance
   // up. Must be called before destruction.
   void Cleanup();
 
+  // Requests the android app to fetch a third-party token.
+  void FetchThirdPartyToken(
+      const GURL& token_url,
+      const std::string& client_id,
+      const std::string& scope,
+      const base::WeakPtr<TokenFetcherProxy> token_fetcher_proxy);
+
+  // Called by the android app when the token is fetched.
+  void HandleOnThirdPartyTokenFetched(const std::string& token,
+                                      const std::string& shared_secret);
+
   // Provides the user's PIN and resumes the host authentication attempt. Call
   // on the UI thread once the user has finished entering this PIN into the UI,
   // but only after the UI has been asked to provide a PIN (via FetchSecret()).
-  void ProvideSecret(const std::string& pin, bool create_pair);
+  void ProvideSecret(const std::string& pin, bool create_pair,
+                     const std::string& device_name);
 
   // Schedules a redraw on the display thread. May be called from any thread.
   void RedrawDesktop();
 
   // Moves the host's cursor to the specified coordinates, optionally with some
   // mouse button depressed. If |button| is BUTTON_UNDEFINED, no click is made.
-  void PerformMouseAction(int x,
-                          int y,
-                          protocol::MouseEvent_MouseButton button,
-                          bool button_down);
+  void SendMouseEvent(int x, int y,
+                      protocol::MouseEvent_MouseButton button,
+                      bool button_down);
+  void SendMouseWheelEvent(int delta_x, int delta_y);
 
   // Sends the provided keyboard scan code to the host.
-  void PerformKeyboardAction(int key_code, bool key_down);
+  bool SendKeyEvent(int key_code, bool key_down);
+
+  void SendTextEvent(const std::string& text);
+
+  // Records paint time for statistics logging, if enabled. May be called from
+  // any thread.
+  void RecordPaintTime(int64 paint_time_ms);
 
   // ClientUserInterface implementation.
   virtual void OnConnectionState(
       protocol::ConnectionToHost::State state,
       protocol::ErrorCode error) OVERRIDE;
   virtual void OnConnectionReady(bool ready) OVERRIDE;
+  virtual void OnRouteChanged(const std::string& channel_name,
+                              const protocol::TransportRoute& route) OVERRIDE;
   virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
   virtual void SetPairingResponse(
       const protocol::PairingResponse& response) OVERRIDE;
@@ -106,8 +133,25 @@ class ChromotingJniInstance
   void FetchSecret(bool pairable,
                    const protocol::SecretFetchedCallback& callback);
 
+  // Sets the device name. Can be called on any thread.
+  void SetDeviceName(const std::string& device_name);
+
+  void SendKeyEventInternal(int usb_key_code, bool key_down);
+
+  // Enables or disables periodic logging of performance statistics. Called on
+  // the network thread.
+  void EnableStatsLogging(bool enabled);
+
+  // If logging is enabled, logs the current connection statistics, and
+  // triggers another call to this function after the logging time interval.
+  // Called on the network thread.
+  void LogPerfStats();
+
   // Used to obtain task runner references and make calls to Java methods.
   ChromotingJniRuntime* jni_runtime_;
+
+  // ID of the host we are connecting to.
+  std::string host_id_;
 
   // This group of variables is to be used on the display thread.
   scoped_refptr<FrameConsumerProxy> frame_consumer_;
@@ -115,29 +159,19 @@ class ChromotingJniInstance
   scoped_ptr<base::WeakPtrFactory<JniFrameConsumer> > view_weak_factory_;
 
   // This group of variables is to be used on the network thread.
-  scoped_ptr<ClientConfig> client_config_;
+  ClientConfig client_config_;
   scoped_ptr<ClientContext> client_context_;
+  scoped_ptr<VideoRenderer> video_renderer_;
   scoped_ptr<protocol::ConnectionToHost> connection_;
   scoped_ptr<ChromotingClient> client_;
-  scoped_ptr<XmppSignalStrategy::XmppServerConfig> signaling_config_;
+  XmppSignalStrategy::XmppServerConfig xmpp_config_;
   scoped_ptr<XmppSignalStrategy> signaling_;  // Must outlive client_
-  scoped_ptr<NetworkSettings> network_settings_;
+  scoped_ptr<client::LogToServer> log_to_server_;
+  base::WeakPtr<TokenFetcherProxy> token_fetcher_proxy_;
 
   // Pass this the user's PIN once we have it. To be assigned and accessed on
   // the UI thread, but must be posted to the network thread to call it.
   protocol::SecretFetchedCallback pin_callback_;
-
-  // These strings describe the current connection, and are not reused. They
-  // are initialized in ConnectionToHost(), but thereafter are only to be used
-  // on the network thread. (This is safe because ConnectionToHost()'s finishes
-  // using them on the UI thread before they are ever touched from network.)
-  std::string username_;
-  std::string auth_token_;
-  std::string host_jid_;
-  std::string host_id_;
-  std::string host_pubkey_;
-  std::string pairing_id_;
-  std::string pairing_secret_;
 
   // Indicates whether to establish a new pairing with this host. This is
   // modified in ProvideSecret(), but thereafter to be used only from the
@@ -145,7 +179,17 @@ class ChromotingJniInstance
   // once per run, and always before any reference to this flag.)
   bool create_pairing_;
 
+  // The device name to appear in the paired-clients list. Accessed on the
+  // network thread.
+  std::string device_name_;
+
+  // If this is true, performance statistics will be periodically written to
+  // the Android log. Used on the network thread.
+  bool stats_logging_enabled_;
+
   friend class base::RefCountedThreadSafe<ChromotingJniInstance>;
+
+  base::WeakPtrFactory<ChromotingJniInstance> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingJniInstance);
 };

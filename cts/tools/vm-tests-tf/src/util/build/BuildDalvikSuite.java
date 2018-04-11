@@ -211,18 +211,22 @@ public class BuildDalvikSuite {
         curJunitFileData = getWarningMessage() +
         "package " + pName + ";\n" +
         "import java.io.IOException;\n" +
+        "import com.android.tradefed.testtype.IAbi;\n" +
+        "import com.android.tradefed.testtype.IAbiReceiver;\n" +
         "import com.android.tradefed.testtype.DeviceTestCase;\n" +
+        "import com.android.tradefed.util.AbiFormatter;\n" +
         "\n" +
-        "public class " + sourceName + " extends DeviceTestCase {\n";
+        "public class " + sourceName + " extends DeviceTestCase implements IAbiReceiver {\n";
     }
 
     private String getShellExecJavaLine(String classpath, String mainclass) {
-      String cmd = String.format("ANDROID_DATA=%s dalvikvm -Xint:portable -Xmx512M -Xss32K " +
+      String cmd = String.format("ANDROID_DATA=%s dalvikvm|#ABI#| -Xmx512M -Xss32K " +
               "-Djava.io.tmpdir=%s -classpath %s %s", TARGET_JAR_ROOT_PATH, TARGET_JAR_ROOT_PATH,
               classpath, mainclass);
-      return "String res = getDevice().executeShellCommand(\""+ cmd + "\");\n" +
-             "// A sucessful adb shell command returns an empty string.\n" +
-             "assertEquals(\"" + cmd + "\", \"\", res);";
+      return "    String cmd = AbiFormatter.formatCmdForAbi(\"" + cmd + "\", mAbi.getBitness());\n" +
+              "    String res = getDevice().executeShellCommand(cmd);\n" +
+              "    // A sucessful adb shell command returns an empty string.\n" +
+              "    assertEquals(cmd, \"\", res);";
     }
 
     private String getWarningMessage() {
@@ -253,13 +257,14 @@ public class BuildDalvikSuite {
 
         //"dot.junit.opcodes.add_double_2addr.Main_testN2";
         String mainclass = pName + ".Main_" + method;
-        curJunitFileData += "    " + getShellExecJavaLine(cp, mainclass);
-        curJunitFileData += "}\n\n";
+        curJunitFileData += getShellExecJavaLine(cp, mainclass);
+        curJunitFileData += "\n}\n\n";
     }
 
     private void handleTests() throws IOException {
         System.out.println("collected " + testMethodsCnt + " test methods in " +
                 testClassCnt + " junit test classes");
+        String datafileContent = "";
         Set<BuildStep> targets = new TreeSet<BuildStep>();
 
         javacHostJunitBuildStep = new JavacBuildStep(HOSTJUNIT_CLASSES_OUTPUT_FOLDER, CLASS_PATH);
@@ -277,6 +282,13 @@ public class BuildDalvikSuite {
             String instPrefix = "new " + classOnlyName + "()";
 
             openCTSHostFileFor(pName, classOnlyName);
+
+            curJunitFileData += "\n" +
+                    "protected IAbi mAbi;\n" +
+                    "@Override\n" +
+                    "public void setAbi(IAbi abi) {\n" +
+                    "    mAbi = abi;\n" +
+                    "}\n\n";
 
             List<String> methods = entry.getValue();
             Collections.sort(methods, new Comparator<String>() {
@@ -336,6 +348,86 @@ public class BuildDalvikSuite {
                 targets.add(dexBuildStep);
                 // }
 
+
+                // prepare the entry in the data file for the bash script.
+                // e.g.
+                // main class to execute; opcode/constraint; test purpose
+                // dxc.junit.opcodes.aaload.Main_testN1;aaload;normal case test
+                // (#1)
+
+                char ca = method.charAt("test".length()); // either N,B,E,
+                // or V (VFE)
+                String comment;
+                switch (ca) {
+                case 'N':
+                    comment = "Normal #" + method.substring(5);
+                    break;
+                case 'B':
+                    comment = "Boundary #" + method.substring(5);
+                    break;
+                case 'E':
+                    comment = "Exception #" + method.substring(5);
+                    break;
+                case 'V':
+                    comment = "Verifier #" + method.substring(7);
+                    break;
+                default:
+                    throw new RuntimeException("unknown test abbreviation:"
+                            + method + " for " + fqcn);
+                }
+
+                String line = pName + ".Main_" + method + ";";
+                for (String className : dependentTestClassNames) {
+                    line += className + " ";
+                }
+
+
+                // test description
+                String[] pparts = pName.split("\\.");
+                // detail e.g. add_double
+                String detail = pparts[pparts.length-1];
+                // type := opcode | verify
+                String type = pparts[pparts.length-2];
+
+                String description;
+                if ("format".equals(type)) {
+                    description = "format";
+                } else if ("opcodes".equals(type)) {
+                    // Beautify name, so it matches the actual mnemonic
+                    detail = detail.replaceAll("_", "-");
+                    detail = detail.replace("-from16", "/from16");
+                    detail = detail.replace("-high16", "/high16");
+                    detail = detail.replace("-lit8", "/lit8");
+                    detail = detail.replace("-lit16", "/lit16");
+                    detail = detail.replace("-4", "/4");
+                    detail = detail.replace("-16", "/16");
+                    detail = detail.replace("-32", "/32");
+                    detail = detail.replace("-jumbo", "/jumbo");
+                    detail = detail.replace("-range", "/range");
+                    detail = detail.replace("-2addr", "/2addr");
+
+                    // Unescape reserved words
+                    detail = detail.replace("opc-", "");
+
+                    description = detail;
+                } else if ("verify".equals(type)) {
+                    description = "verifier";
+                } else {
+                    description = type + " " + detail;
+                }
+
+                String details = (md.title != null ? md.title : "");
+                if (md.constraint != null) {
+                    details = " Constraint " + md.constraint + ", " + details;
+                }
+                if (details.length() != 0) {
+                    details = details.substring(0, 1).toUpperCase()
+                            + details.substring(1);
+                }
+
+                line += ";" + description + ";" + comment + ";" + details;
+
+                datafileContent += line + "\n";
                 generateBuildStepFor(pName, method, dependentTestClassNames,
                         targets);
             }
@@ -345,6 +437,10 @@ public class BuildDalvikSuite {
 
         // write latest HOSTJUNIT generated file.
         flushHostJunitFile();
+
+        File scriptDataDir = new File(OUTPUT_FOLDER + "/data/");
+        scriptDataDir.mkdirs();
+        writeToFile(new File(scriptDataDir, "scriptdata"), datafileContent);
 
         if (!javacHostJunitBuildStep.build()) {
             System.out.println("main javac cts-host-hostjunit-classes build step failed");
@@ -503,6 +599,22 @@ public class BuildDalvikSuite {
         Matcher m = p.matcher(methodSource);
         while (m.find()) {
             String res = m.group(1);
+            entries.add(res.trim());
+        }
+
+        // search for " load(\"...\" " and add as dependency
+        Pattern loadPattern = Pattern.compile("load\\(\"([^\"]*)\"", Pattern.MULTILINE);
+        Matcher loadMatcher = loadPattern.matcher(methodSource);
+        while (loadMatcher.find()) {
+            String res = loadMatcher.group(1);
+            entries.add(res.trim());
+        }
+
+        // search for " loadAndRun(\"...\" " and add as dependency
+        Pattern loadAndRunPattern = Pattern.compile("loadAndRun\\(\"([^\"]*)\"", Pattern.MULTILINE);
+        Matcher loadAndRunMatcher = loadAndRunPattern.matcher(methodSource);
+        while (loadAndRunMatcher.find()) {
+            String res = loadAndRunMatcher.group(1);
             entries.add(res.trim());
         }
 

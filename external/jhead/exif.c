@@ -711,12 +711,37 @@ static void ProcessExifDir(unsigned char * DirStart, unsigned char * OffsetBase,
                 strncpy(ImageInfo.CameraModel, (char *)ValuePtr, ByteCount < 39 ? ByteCount : 39);
                 break;
 
+            case TAG_SUBSEC_TIME:
+                strlcpy(ImageInfo.SubSecTime, (char *)ValuePtr, sizeof(ImageInfo.SubSecTime));
+                break;
+
+            case TAG_SUBSEC_TIME_ORIG:
+                strlcpy(ImageInfo.SubSecTimeOrig, (char *)ValuePtr,
+                        sizeof(ImageInfo.SubSecTimeOrig));
+                break;
+
+            case TAG_SUBSEC_TIME_DIG:
+                strlcpy(ImageInfo.SubSecTimeDig, (char *)ValuePtr,
+                        sizeof(ImageInfo.SubSecTimeDig));
+                break;
+
+            case TAG_DATETIME_DIGITIZED:
+                strlcpy(ImageInfo.DigitizedTime, (char *)ValuePtr,
+                        sizeof(ImageInfo.DigitizedTime));
+
+                if (ImageInfo.numDateTimeTags >= MAX_DATE_COPIES){
+                    ErrNonfatal("More than %d date fields!  This is nuts", MAX_DATE_COPIES, 0);
+                    break;
+                }
+                ImageInfo.DateTimeOffsets[ImageInfo.numDateTimeTags++] =
+                    (char *)ValuePtr - (char *)OffsetBase;
+                break;
+
             case TAG_DATETIME_ORIGINAL:
                 // If we get a DATETIME_ORIGINAL, we use that one.
                 strncpy(ImageInfo.DateTime, (char *)ValuePtr, 19);
                 // Fallthru...
 
-            case TAG_DATETIME_DIGITIZED:
             case TAG_DATETIME:
                 if (!isdigit(ImageInfo.DateTime[0])){
                     // If we don't already have a DATETIME_ORIGINAL, use whatever
@@ -995,13 +1020,13 @@ static void ProcessExifDir(unsigned char * DirStart, unsigned char * OffsetBase,
         unsigned Offset;
 
         if (DIR_ENTRY_ADDR(DirStart, NumDirEntries) + 4 <= OffsetBase+ExifLength){
-            printf("DirStart %d offset from dirstart %d", (int)DirStart, 2+12*NumDirEntries);
+            printf("DirStart %p offset from dirstart %d", DirStart, 2+12*NumDirEntries);
             Offset = Get32u(DirStart+2+12*NumDirEntries);
             if (Offset){
                 SubdirStart = OffsetBase + Offset;
                 if (SubdirStart > OffsetBase+ExifLength || SubdirStart < OffsetBase){
-                    printf("SubdirStart %d OffsetBase %d ExifLength %d Offset %d",
-                        (int)SubdirStart, (int)OffsetBase, ExifLength, Offset);
+                    printf("SubdirStart %p OffsetBase %p ExifLength %d Offset %d",
+                        SubdirStart, OffsetBase, ExifLength, Offset);
                     if (SubdirStart > OffsetBase && SubdirStart < OffsetBase+ExifLength+20){
                         // Jhead 1.3 or earlier would crop the whole directory!
                         // As Jhead produces this form of format incorrectness,

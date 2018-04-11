@@ -34,6 +34,9 @@ import org.bouncycastle.crypto.digests.AndroidDigestFactory;
 // import org.bouncycastle.crypto.digests.SHA512Digest;
 // END android-removed
 import org.bouncycastle.crypto.params.ParametersWithRandom;
+// BEGIN android-removed
+// import org.bouncycastle.crypto.signers.HMacDSAKCalculator;
+// END android-removed
 
 public class DSASigner
     extends SignatureSpi
@@ -228,21 +231,56 @@ public class DSASigner
     }
 
     // BEGIN android-removed
-    // static public class dsa224
+    // static public class detDSA
     //     extends DSASigner
     // {
-    //     public dsa224()
+    //     public detDSA()
     //     {
-    //         super(new SHA224Digest(), new org.bouncycastle.crypto.signers.DSASigner());
+    //         super(new SHA1Digest(), new org.bouncycastle.crypto.signers.DSASigner(new HMacDSAKCalculator(new SHA1Digest())));
     //     }
     // }
-    //
-    // static public class dsa256
+    // END android-removed
+
+    static public class dsa224
+        extends DSASigner
+    {
+        public dsa224()
+        {
+            // BEGIN android-changed
+            super(AndroidDigestFactory.getSHA224(), new org.bouncycastle.crypto.signers.DSASigner());
+            // END android-changed
+        }
+    }
+
+    // BEGIN android-removed
+    // static public class detDSA224
     //     extends DSASigner
     // {
-    //     public dsa256()
+    //     public detDSA224()
     //     {
-    //         super(new SHA256Digest(), new org.bouncycastle.crypto.signers.DSASigner());
+    //         super(new SHA224Digest(), new org.bouncycastle.crypto.signers.DSASigner(new HMacDSAKCalculator(new SHA224Digest())));
+    //     }
+    // }
+    // END android-removed
+
+    static public class dsa256
+        extends DSASigner
+    {
+        public dsa256()
+        {
+            // BEGIN android-changed
+            super(AndroidDigestFactory.getSHA256(), new org.bouncycastle.crypto.signers.DSASigner());
+            // END android-changed
+        }
+    }
+
+    // BEGIN android-removed
+    // static public class detDSA256
+    //     extends DSASigner
+    // {
+    //     public detDSA256()
+    //     {
+    //         super(new SHA256Digest(), new org.bouncycastle.crypto.signers.DSASigner(new HMacDSAKCalculator(new SHA256Digest())));
     //     }
     // }
     //
@@ -255,12 +293,30 @@ public class DSASigner
     //     }
     // }
     //
+    // static public class detDSA384
+    //     extends DSASigner
+    // {
+    //     public detDSA384()
+    //     {
+    //         super(new SHA384Digest(), new org.bouncycastle.crypto.signers.DSASigner(new HMacDSAKCalculator(new SHA384Digest())));
+    //     }
+    // }
+    //
     // static public class dsa512
     //     extends DSASigner
     // {
     //     public dsa512()
     //     {
     //         super(new SHA512Digest(), new org.bouncycastle.crypto.signers.DSASigner());
+    //     }
+    // }
+    //
+    // static public class detDSA512
+    //     extends DSASigner
+    // {
+    //     public detDSA512()
+    //     {
+    //         super(new SHA512Digest(), new org.bouncycastle.crypto.signers.DSASigner(new HMacDSAKCalculator(new SHA512Digest())));
     //     }
     // }
     // END android-removed

@@ -45,13 +45,11 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   explicit CollectedCookiesViews(content::WebContents* web_contents);
 
   // views::DialogDelegate:
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
+  virtual base::string16 GetDialogButtonLabel(
+      ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
   // views::ButtonListener:
@@ -65,6 +63,7 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view) OVERRIDE;
 
   // views::View:
+  virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) OVERRIDE;
 
@@ -93,8 +92,6 @@ class CollectedCookiesViews : public views::DialogDelegateView,
 
   content::NotificationRegistrar registrar_;
 
-  views::Widget* window_;
-
   // The web contents.
   content::WebContents* web_contents_;
 
@@ -106,6 +103,7 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   views::TreeView* blocked_cookies_tree_;
 
   views::LabelButton* block_allowed_button_;
+  views::LabelButton* delete_allowed_button_;
   views::LabelButton* allow_blocked_button_;
   views::LabelButton* for_session_blocked_button_;
 

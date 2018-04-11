@@ -1,14 +1,14 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
-import com.google.common.annotations.VisibleForTesting;
-
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -17,14 +17,15 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * InputConnection is created by ContentView.onCreateInputConnection.
  * It then adapts android's IME to chrome's RenderWidgetHostView using the
  * native ImeAdapterAndroid via the class ImeAdapter.
  */
 public class AdapterInputConnection extends BaseInputConnection {
-    private static final String TAG =
-            "org.chromium.content.browser.input.AdapterInputConnection";
+    private static final String TAG = "AdapterInputConnection";
     private static final boolean DEBUG = false;
     /**
      * Selection value should be -1 if not known. See EditorInfo.java for details.
@@ -34,10 +35,10 @@ public class AdapterInputConnection extends BaseInputConnection {
 
     private final View mInternalView;
     private final ImeAdapter mImeAdapter;
+    private final Editable mEditable;
 
     private boolean mSingleLine;
     private int mNumNestedBatchEdits = 0;
-    private boolean mIgnoreTextInputStateUpdates = false;
 
     private int mLastUpdateSelectionStart = INVALID_SELECTION;
     private int mLastUpdateSelectionEnd = INVALID_SELECTION;
@@ -45,11 +46,17 @@ public class AdapterInputConnection extends BaseInputConnection {
     private int mLastUpdateCompositionEnd = INVALID_COMPOSITION;
 
     @VisibleForTesting
-    AdapterInputConnection(View view, ImeAdapter imeAdapter, EditorInfo outAttrs) {
+    AdapterInputConnection(View view, ImeAdapter imeAdapter, Editable editable,
+            EditorInfo outAttrs) {
         super(view, true);
         mInternalView = view;
         mImeAdapter = imeAdapter;
         mImeAdapter.setInputConnection(this);
+        mEditable = editable;
+        // The editable passed in might have been in use by a prior keyboard and could have had
+        // prior composition spans set.  To avoid keyboard conflicts, remove all composing spans
+        // when taking ownership of an existing Editable.
+        removeComposingSpans(mEditable);
         mSingleLine = true;
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
                 | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
@@ -58,6 +65,7 @@ public class AdapterInputConnection extends BaseInputConnection {
 
         if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeText) {
             // Normal text field
+            outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
         } else if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeTextArea ||
                 imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeContentEditable) {
@@ -77,8 +85,8 @@ public class AdapterInputConnection extends BaseInputConnection {
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_SEARCH;
         } else if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeUrl) {
             // Url
-            // TYPE_TEXT_VARIATION_URI prevents Tab key from showing, so
-            // exclude it for now.
+            outAttrs.inputType = InputType.TYPE_CLASS_TEXT
+                    | InputType.TYPE_TEXT_VARIATION_URI;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
         } else if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeEmail) {
             // Email
@@ -94,34 +102,47 @@ public class AdapterInputConnection extends BaseInputConnection {
         } else if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeNumber) {
             // Number
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER
-                    | InputType.TYPE_NUMBER_VARIATION_NORMAL;
+                    | InputType.TYPE_NUMBER_VARIATION_NORMAL
+                    | InputType.TYPE_NUMBER_FLAG_DECIMAL;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NEXT;
         }
-        outAttrs.initialSelStart = imeAdapter.getInitialSelectionStart();
-        outAttrs.initialSelEnd = imeAdapter.getInitialSelectionStart();
+        outAttrs.initialSelStart = Selection.getSelectionStart(mEditable);
+        outAttrs.initialSelEnd = Selection.getSelectionEnd(mEditable);
+        mLastUpdateSelectionStart = Selection.getSelectionStart(mEditable);
+        mLastUpdateSelectionEnd = Selection.getSelectionEnd(mEditable);
+
+        Selection.setSelection(mEditable, outAttrs.initialSelStart, outAttrs.initialSelEnd);
+        updateSelectionIfRequired();
     }
 
     /**
-     * Updates the AdapterInputConnection's internal representation of the text
-     * being edited and its selection and composition properties. The resulting
-     * Editable is accessible through the getEditable() method.
-     * If the text has not changed, this also calls updateSelection on the InputMethodManager.
-     * @param text The String contents of the field being edited
-     * @param selectionStart The character offset of the selection start, or the caret
-     * position if there is no selection
-     * @param selectionEnd The character offset of the selection end, or the caret
-     * position if there is no selection
-     * @param compositionStart The character offset of the composition start, or -1
-     * if there is no composition
-     * @param compositionEnd The character offset of the composition end, or -1
-     * if there is no selection
+     * Updates the AdapterInputConnection's internal representation of the text being edited and
+     * its selection and composition properties. The resulting Editable is accessible through the
+     * getEditable() method. If the text has not changed, this also calls updateSelection on the
+     * InputMethodManager.
+     *
+     * @param text The String contents of the field being edited.
+     * @param selectionStart The character offset of the selection start, or the caret position if
+     *                       there is no selection.
+     * @param selectionEnd The character offset of the selection end, or the caret position if there
+     *                     is no selection.
+     * @param compositionStart The character offset of the composition start, or -1 if there is no
+     *                         composition.
+     * @param compositionEnd The character offset of the composition end, or -1 if there is no
+     *                       selection.
+     * @param isNonImeChange True when the update was caused by non-IME (e.g. Javascript).
      */
-    public void setEditableText(String text, int selectionStart, int selectionEnd,
-            int compositionStart, int compositionEnd) {
+    @VisibleForTesting
+    public void updateState(String text, int selectionStart, int selectionEnd, int compositionStart,
+            int compositionEnd, boolean isNonImeChange) {
         if (DEBUG) {
-            Log.w(TAG, "setEditableText [" + text + "] [" + selectionStart + " " + selectionEnd
-                    + "] [" + compositionStart + " " + compositionEnd + "]");
+            Log.w(TAG, "updateState [" + text + "] [" + selectionStart + " " + selectionEnd + "] ["
+                    + compositionStart + " " + compositionEnd + "] [" + isNonImeChange + "]");
         }
+        // If this update is from the IME, no further state modification is necessary because the
+        // state should have been updated already by the IM framework directly.
+        if (!isNonImeChange) return;
+
         // Non-breaking spaces can cause the IME to get confused. Replace with normal spaces.
         text = text.replace('\u00A0', ' ');
 
@@ -130,42 +151,41 @@ public class AdapterInputConnection extends BaseInputConnection {
         compositionStart = Math.min(compositionStart, text.length());
         compositionEnd = Math.min(compositionEnd, text.length());
 
-        Editable editable = getEditable();
-        String prevText = editable.toString();
+        String prevText = mEditable.toString();
         boolean textUnchanged = prevText.equals(text);
 
         if (!textUnchanged) {
-            editable.replace(0, editable.length(), text);
+            mEditable.replace(0, mEditable.length(), text);
         }
 
-        int prevSelectionStart = Selection.getSelectionStart(editable);
-        int prevSelectionEnd = Selection.getSelectionEnd(editable);
-        int prevCompositionStart = getComposingSpanStart(editable);
-        int prevCompositionEnd = getComposingSpanEnd(editable);
-
-        if (prevSelectionStart == selectionStart && prevSelectionEnd == selectionEnd
-                && prevCompositionStart == compositionStart
-                && prevCompositionEnd == compositionEnd) {
-            // Nothing has changed; don't need to do anything
-            return;
-        }
-
-        Selection.setSelection(editable, selectionStart, selectionEnd);
+        Selection.setSelection(mEditable, selectionStart, selectionEnd);
 
         if (compositionStart == compositionEnd) {
-            removeComposingSpans(editable);
+            removeComposingSpans(mEditable);
         } else {
             super.setComposingRegion(compositionStart, compositionEnd);
         }
-
-        if (mIgnoreTextInputStateUpdates) return;
-        updateSelection(selectionStart, selectionEnd, compositionStart, compositionEnd);
+        updateSelectionIfRequired();
     }
 
-    @VisibleForTesting
-    protected void updateSelection(
-            int selectionStart, int selectionEnd,
-            int compositionStart, int compositionEnd) {
+    /**
+     * @return Editable object which contains the state of current focused editable element.
+     */
+    @Override
+    public Editable getEditable() {
+        return mEditable;
+    }
+
+    /**
+     * Sends selection update to the InputMethodManager unless we are currently in a batch edit or
+     * if the exact same selection and composition update was sent already.
+     */
+    private void updateSelectionIfRequired() {
+        if (mNumNestedBatchEdits != 0) return;
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        int compositionStart = getComposingSpanStart(mEditable);
+        int compositionEnd = getComposingSpanEnd(mEditable);
         // Avoid sending update if we sent an exact update already previously.
         if (mLastUpdateSelectionStart == selectionStart &&
                 mLastUpdateSelectionEnd == selectionEnd &&
@@ -174,7 +194,7 @@ public class AdapterInputConnection extends BaseInputConnection {
             return;
         }
         if (DEBUG) {
-            Log.w(TAG, "updateSelection [" + selectionStart + " " + selectionEnd + "] ["
+            Log.w(TAG, "updateSelectionIfRequired [" + selectionStart + " " + selectionEnd + "] ["
                     + compositionStart + " " + compositionEnd + "]");
         }
         // updateSelection should be called every time the selection or composition changes
@@ -193,9 +213,10 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean setComposingText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "setComposingText [" + text + "] [" + newCursorPosition + "]");
+        if (maybePerformEmptyCompositionWorkaround(text)) return true;
         super.setComposingText(text, newCursorPosition);
-        return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
-                newCursorPosition, false);
+        updateSelectionIfRequired();
+        return mImeAdapter.checkCompositionQueueAndCallNative(text, newCursorPosition, false);
     }
 
     /**
@@ -204,9 +225,11 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean commitText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "commitText [" + text + "] [" + newCursorPosition + "]");
+        if (maybePerformEmptyCompositionWorkaround(text)) return true;
         super.commitText(text, newCursorPosition);
-        return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
-                newCursorPosition, text.length() > 0);
+        updateSelectionIfRequired();
+        return mImeAdapter.checkCompositionQueueAndCallNative(text, newCursorPosition,
+                text.length() > 0);
     }
 
     /**
@@ -218,7 +241,7 @@ public class AdapterInputConnection extends BaseInputConnection {
         if (actionCode == EditorInfo.IME_ACTION_NEXT) {
             restartInput();
             // Send TAB key event
-            long timeStampMs = System.currentTimeMillis();
+            long timeStampMs = SystemClock.uptimeMillis();
             mImeAdapter.sendSyntheticKeyEvent(
                     ImeAdapter.sEventTypeRawKeyDown, timeStampMs, KeyEvent.KEYCODE_TAB, 0);
         } else {
@@ -257,11 +280,10 @@ public class AdapterInputConnection extends BaseInputConnection {
     public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
         if (DEBUG) Log.w(TAG, "getExtractedText");
         ExtractedText et = new ExtractedText();
-        Editable editable = getEditable();
-        et.text = editable.toString();
-        et.partialEndOffset = editable.length();
-        et.selectionStart = Selection.getSelectionStart(editable);
-        et.selectionEnd = Selection.getSelectionEnd(editable);
+        et.text = mEditable.toString();
+        et.partialEndOffset = mEditable.length();
+        et.selectionStart = Selection.getSelectionStart(mEditable);
+        et.selectionEnd = Selection.getSelectionEnd(mEditable);
         et.flags = mSingleLine ? ExtractedText.FLAG_SINGLE_LINE : 0;
         return et;
     }
@@ -272,10 +294,8 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean beginBatchEdit() {
         if (DEBUG) Log.w(TAG, "beginBatchEdit [" + (mNumNestedBatchEdits == 0) + "]");
-        if (mNumNestedBatchEdits == 0) mImeAdapter.batchStateChanged(true);
-
         mNumNestedBatchEdits++;
-        return false;
+        return true;
     }
 
     /**
@@ -284,25 +304,27 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean endBatchEdit() {
         if (mNumNestedBatchEdits == 0) return false;
-
         --mNumNestedBatchEdits;
         if (DEBUG) Log.w(TAG, "endBatchEdit [" + (mNumNestedBatchEdits == 0) + "]");
-        if (mNumNestedBatchEdits == 0) mImeAdapter.batchStateChanged(false);
-        return false;
+        if (mNumNestedBatchEdits == 0) updateSelectionIfRequired();
+        return mNumNestedBatchEdits != 0;
     }
 
     /**
      * @see BaseInputConnection#deleteSurroundingText(int, int)
      */
     @Override
-    public boolean deleteSurroundingText(int leftLength, int rightLength) {
+    public boolean deleteSurroundingText(int beforeLength, int afterLength) {
         if (DEBUG) {
-            Log.w(TAG, "deleteSurroundingText [" + leftLength + " " + rightLength + "]");
+            Log.w(TAG, "deleteSurroundingText [" + beforeLength + " " + afterLength + "]");
         }
-        if (!super.deleteSurroundingText(leftLength, rightLength)) {
-            return false;
-        }
-        return mImeAdapter.deleteSurroundingText(leftLength, rightLength);
+        int availableBefore = Selection.getSelectionStart(mEditable);
+        int availableAfter = mEditable.length() - Selection.getSelectionEnd(mEditable);
+        beforeLength = Math.min(beforeLength, availableBefore);
+        afterLength = Math.min(afterLength, availableAfter);
+        super.deleteSurroundingText(beforeLength, afterLength);
+        updateSelectionIfRequired();
+        return mImeAdapter.deleteSurroundingText(beforeLength, afterLength);
     }
 
     /**
@@ -326,20 +348,26 @@ public class AdapterInputConnection extends BaseInputConnection {
             } else {
                 int unicodeChar = event.getUnicodeChar();
                 if (unicodeChar != 0) {
-                    Editable editable = getEditable();
-                    int selectionStart = Selection.getSelectionStart(editable);
-                    int selectionEnd = Selection.getSelectionEnd(editable);
+                    int selectionStart = Selection.getSelectionStart(mEditable);
+                    int selectionEnd = Selection.getSelectionEnd(mEditable);
                     if (selectionStart > selectionEnd) {
                         int temp = selectionStart;
                         selectionStart = selectionEnd;
                         selectionEnd = temp;
                     }
-                    editable.replace(selectionStart, selectionEnd,
-                            Character.toString((char)unicodeChar));
+                    mEditable.replace(selectionStart, selectionEnd,
+                            Character.toString((char) unicodeChar));
                 }
             }
         } else if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+            // TODO(aurimas): remove this workaround when crbug.com/278584 is fixed.
+            if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
+                beginBatchEdit();
+                finishComposingText();
+                mImeAdapter.translateAndSendNativeEvents(event);
+                endBatchEdit();
+                return true;
+            } else if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
                 return true;
             } else if (event.getKeyCode() == KeyEvent.KEYCODE_FORWARD_DEL) {
                 return true;
@@ -355,12 +383,12 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean finishComposingText() {
         if (DEBUG) Log.w(TAG, "finishComposingText");
-        Editable editable = getEditable();
-        if (getComposingSpanStart(editable) == getComposingSpanEnd(editable)) {
+        if (getComposingSpanStart(mEditable) == getComposingSpanEnd(mEditable)) {
             return true;
         }
 
         super.finishComposingText();
+        updateSelectionIfRequired();
         mImeAdapter.finishComposingText();
 
         return true;
@@ -371,9 +399,11 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean setSelection(int start, int end) {
-        if (DEBUG) Log.w(TAG, "setSelection");
-        if (start < 0 || end < 0) return true;
+        if (DEBUG) Log.w(TAG, "setSelection [" + start + " " + end + "]");
+        int textLength = mEditable.length();
+        if (start < 0 || end < 0 || start > textLength || end > textLength) return true;
         super.setSelection(start, end);
+        updateSelectionIfRequired();
         return mImeAdapter.setEditableSelectionOffsets(start, end);
     }
 
@@ -384,7 +414,6 @@ public class AdapterInputConnection extends BaseInputConnection {
     void restartInput() {
         if (DEBUG) Log.w(TAG, "restartInput");
         getInputMethodManagerWrapper().restartInput(mInternalView);
-        mIgnoreTextInputStateUpdates = false;
         mNumNestedBatchEdits = 0;
     }
 
@@ -394,16 +423,20 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean setComposingRegion(int start, int end) {
         if (DEBUG) Log.w(TAG, "setComposingRegion [" + start + " " + end + "]");
+        int textLength = mEditable.length();
         int a = Math.min(start, end);
         int b = Math.max(start, end);
         if (a < 0) a = 0;
         if (b < 0) b = 0;
+        if (a > textLength) a = textLength;
+        if (b > textLength) b = textLength;
 
         if (a == b) {
-            removeComposingSpans(getEditable());
+            removeComposingSpans(mEditable);
         } else {
             super.setComposingRegion(a, b);
         }
+        updateSelectionIfRequired();
         return mImeAdapter.setComposingRegion(a, b);
     }
 
@@ -411,23 +444,62 @@ public class AdapterInputConnection extends BaseInputConnection {
         return getInputMethodManagerWrapper().isActive(mInternalView);
     }
 
-    public void setIgnoreTextInputStateUpdates(boolean shouldIgnore) {
-        mIgnoreTextInputStateUpdates = shouldIgnore;
-        if (shouldIgnore) return;
+    private InputMethodManagerWrapper getInputMethodManagerWrapper() {
+        return mImeAdapter.getInputMethodManagerWrapper();
+    }
 
-        Editable editable = getEditable();
-        updateSelection(Selection.getSelectionStart(editable),
-                Selection.getSelectionEnd(editable),
-                getComposingSpanStart(editable),
-                getComposingSpanEnd(editable));
+    /**
+     * This method works around the issue crbug.com/373934 where Blink does not cancel
+     * the composition when we send a commit with the empty text.
+     *
+     * TODO(aurimas) Remove this once crbug.com/373934 is fixed.
+     *
+     * @param text Text that software keyboard requested to commit.
+     * @return Whether the workaround was performed.
+     */
+    private boolean maybePerformEmptyCompositionWorkaround(CharSequence text) {
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        int compositionStart = getComposingSpanStart(mEditable);
+        int compositionEnd = getComposingSpanEnd(mEditable);
+        if (TextUtils.isEmpty(text) && (selectionStart == selectionEnd)
+                && compositionStart != INVALID_COMPOSITION
+                && compositionEnd != INVALID_COMPOSITION) {
+            beginBatchEdit();
+            finishComposingText();
+            int selection = Selection.getSelectionStart(mEditable);
+            deleteSurroundingText(selection - compositionStart, selection - compositionEnd);
+            endBatchEdit();
+            return true;
+        }
+        return false;
     }
 
     @VisibleForTesting
-    protected boolean isIgnoringTextInputStateUpdates() {
-        return mIgnoreTextInputStateUpdates;
+    static class ImeState {
+        public final String text;
+        public final int selectionStart;
+        public final int selectionEnd;
+        public final int compositionStart;
+        public final int compositionEnd;
+
+        public ImeState(String text, int selectionStart, int selectionEnd,
+                int compositionStart, int compositionEnd) {
+            this.text = text;
+            this.selectionStart = selectionStart;
+            this.selectionEnd = selectionEnd;
+            this.compositionStart = compositionStart;
+            this.compositionEnd = compositionEnd;
+        }
     }
 
-    private InputMethodManagerWrapper getInputMethodManagerWrapper() {
-        return mImeAdapter.getInputMethodManagerWrapper();
+    @VisibleForTesting
+    ImeState getImeStateForTesting() {
+        String text = mEditable.toString();
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        int compositionStart = getComposingSpanStart(mEditable);
+        int compositionEnd = getComposingSpanEnd(mEditable);
+        return new ImeState(text, selectionStart, selectionEnd, compositionStart, compositionEnd);
     }
 }

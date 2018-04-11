@@ -16,7 +16,12 @@
 package android.media.cts;
 
 import android.media.MediaPlayer;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 import android.webkit.cts.CtsTestServer;
+
+import java.io.IOException;
 
 
 /**
@@ -110,10 +115,12 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
     // Streaming HLS video from YouTube
     public void testHLS() throws Exception {
         // Play stream for 60 seconds
-        playLiveVideoTest("http://www.youtube.com/api/manifest/hls/ns/yt-live/id/UeHRu5LFHaU"
-                + "?ip=0.0.0.0&ipbits=0&expire=19000000000&sparams=ip,ipbits,expire&signature"
-                + "=313BE90526F2D815EB207156E1460C7E8EEC2503.799EE7B8B7CE3F2957060DB27C216077"
-                + "0303EBD2&key=test_key1&user=android-device-test&m3u8=1", 60 * 1000);
+        playLiveVideoTest("http://www.youtube.com/api/manifest/hls_variant/id/"
+                + "0168724d02bd9945/itag/5/source/youtube/playlist_type/DVR/ip/"
+                + "0.0.0.0/ipbits/0/expire/19000000000/sparams/ip,ipbits,expire"
+                + ",id,itag,source,playlist_type/signature/773AB8ACC68A96E5AA48"
+                + "1996AD6A1BBCB70DCB87.95733B544ACC5F01A1223A837D2CF04DF85A336"
+                + "0/key/ik0/file/m3u8", 60 * 1000);
     }
 
     // Streaming audio from local HTTP server
@@ -137,6 +144,9 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
     }
     public void testPlayOggStreamNoLength() throws Throwable {
         localHttpAudioStreamTest("noiseandchirps.ogg", false, true);
+    }
+    public void testPlayMp3Stream1Ssl() throws Throwable {
+        localHttpsAudioStreamTest("ringer.mp3", false, false);
     }
 
     private void localHttpAudioStreamTest(final String name, boolean redirect, boolean nolength)
@@ -189,6 +199,172 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             }
             mMediaPlayer.stop();
             mMediaPlayer.reset();
+        } finally {
+            mServer.shutdown();
+        }
+    }
+    private void localHttpsAudioStreamTest(final String name, boolean redirect, boolean nolength)
+            throws Throwable {
+        mServer = new CtsTestServer(mContext, true);
+        try {
+            String stream_url = null;
+            if (redirect) {
+                // Stagefright doesn't have a limit, but we can't test support of infinite redirects
+                // Up to 4 redirects seems reasonable though.
+                stream_url = mServer.getRedirectingAssetUrl(name, 4);
+            } else {
+                stream_url = mServer.getAssetUrl(name);
+            }
+            if (nolength) {
+                stream_url = stream_url + "?" + CtsTestServer.NOLENGTH_POSTFIX;
+            }
+
+            mMediaPlayer.setDataSource(stream_url);
+
+            mMediaPlayer.setDisplay(getActivity().getSurfaceHolder());
+            mMediaPlayer.setScreenOnWhilePlaying(true);
+
+            mOnBufferingUpdateCalled.reset();
+            mMediaPlayer.setOnBufferingUpdateListener(new MediaPlayer.OnBufferingUpdateListener() {
+                @Override
+                public void onBufferingUpdate(MediaPlayer mp, int percent) {
+                    mOnBufferingUpdateCalled.signal();
+                }
+            });
+            mMediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                @Override
+                public boolean onError(MediaPlayer mp, int what, int extra) {
+                    fail("Media player had error " + what + " playing " + name);
+                    return true;
+                }
+            });
+
+            assertFalse(mOnBufferingUpdateCalled.isSignalled());
+            try {
+                mMediaPlayer.prepare();
+            } catch (Exception ex) {
+                return;
+            }
+            fail("https playback should have failed");
+        } finally {
+            mServer.shutdown();
+        }
+    }
+
+    public void testPlayHlsStream() throws Throwable {
+        localHlsTest("hls.m3u8", false, false);
+    }
+
+    public void testPlayHlsStreamWithQueryString() throws Throwable {
+        localHlsTest("hls.m3u8", true, false);
+    }
+
+    public void testPlayHlsStreamWithRedirect() throws Throwable {
+        localHlsTest("hls.m3u8", false, true);
+    }
+
+    private static class WorkerWithPlayer implements Runnable {
+        private final Object mLock = new Object();
+        private Looper mLooper;
+        private MediaPlayer mMediaPlayer;
+
+        /**
+         * Creates a worker thread with the given name. The thread
+         * then runs a {@link android.os.Looper}.
+         * @param name A name for the new thread
+         */
+        WorkerWithPlayer(String name) {
+            Thread t = new Thread(null, this, name);
+            t.setPriority(Thread.MIN_PRIORITY);
+            t.start();
+            synchronized (mLock) {
+                while (mLooper == null) {
+                    try {
+                        mLock.wait();
+                    } catch (InterruptedException ex) {
+                    }
+                }
+            }
+        }
+
+        public MediaPlayer getPlayer() {
+            return mMediaPlayer;
+        }
+
+        @Override
+        public void run() {
+            synchronized (mLock) {
+                Looper.prepare();
+                mLooper = Looper.myLooper();
+                mMediaPlayer = new MediaPlayer();
+                mLock.notifyAll();
+            }
+            Looper.loop();
+        }
+
+        public void quit() {
+            mLooper.quit();
+            mMediaPlayer.release();
+        }
+    }
+
+    public void testBlockingReadRelease() throws Throwable {
+
+        mServer = new CtsTestServer(mContext);
+
+        WorkerWithPlayer worker = new WorkerWithPlayer("player");
+        final MediaPlayer mp = worker.getPlayer();
+
+        try {
+            String path = mServer.getDelayedAssetUrl("noiseandchirps.ogg", 15000);
+            mp.setDataSource(path);
+            mp.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    fail("prepare should not succeed");
+                }
+            });
+            mp.prepareAsync();
+            Thread.sleep(1000);
+            long start = SystemClock.elapsedRealtime();
+            mp.release();
+            long end = SystemClock.elapsedRealtime();
+            long releaseDuration = (end - start);
+            assertTrue("release took too long: " + releaseDuration, releaseDuration < 1000);
+        } catch (IllegalArgumentException e) {
+            fail(e.getMessage());
+        } catch (SecurityException e) {
+            fail(e.getMessage());
+        } catch (IllegalStateException e) {
+            fail(e.getMessage());
+        } catch (IOException e) {
+            fail(e.getMessage());
+        } catch (InterruptedException e) {
+            fail(e.getMessage());
+        } finally {
+            mServer.shutdown();
+        }
+
+        // give the worker a bit of time to start processing the message before shutting it down
+        Thread.sleep(5000);
+        worker.quit();
+    }
+
+    private void localHlsTest(final String name, boolean appendQueryString, boolean redirect)
+            throws Throwable {
+        mServer = new CtsTestServer(mContext);
+        try {
+            String stream_url = null;
+            if (redirect) {
+                stream_url = mServer.getQueryRedirectingAssetUrl(name);
+            } else {
+                stream_url = mServer.getAssetUrl(name);
+            }
+            if (appendQueryString) {
+                stream_url += "?foo=bar/baz";
+            }
+
+            playLiveVideoTest(stream_url, 10);
         } finally {
             mServer.shutdown();
         }

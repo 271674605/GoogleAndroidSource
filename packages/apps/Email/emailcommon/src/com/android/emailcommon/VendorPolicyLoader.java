@@ -99,7 +99,7 @@ public class VendorPolicyLoader {
      * Constructor for testing, where we need to use an alternate package/class name, and skip
      * the system apk check.
      */
-    /* package */ VendorPolicyLoader(Context context, String apkPackageName, String className,
+    public VendorPolicyLoader(Context context, String apkPackageName, String className,
             boolean allowNonSystemApk) {
         if (!allowNonSystemApk && !isSystemPackage(context, apkPackageName)) {
             mPolicyMethod = null;
@@ -127,7 +127,7 @@ public class VendorPolicyLoader {
     }
 
     // Not private for testing
-    /* package */ static boolean isSystemPackage(Context context, String packageName) {
+    public static boolean isSystemPackage(Context context, String packageName) {
         try {
             ApplicationInfo ai = context.getPackageManager().getApplicationInfo(packageName, 0);
             return (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
@@ -142,7 +142,7 @@ public class VendorPolicyLoader {
      * getPolicy returns null).
      */
     // Not private for testing
-    /* package */ Bundle getPolicy(String policy, Bundle args) {
+    public Bundle getPolicy(String policy, Bundle args) {
         Bundle ret = null;
         if (mPolicyMethod != null) {
             try {
@@ -192,6 +192,22 @@ public class VendorPolicyLoader {
         return result;
     }
 
+    public static class OAuthProvider implements Serializable {
+        private static final long serialVersionUID = 8511656164616538990L;
+
+        public String id;
+        public String label;
+        public String authEndpoint;
+        public String tokenEndpoint;
+        public String refreshEndpoint;
+        public String responseType;
+        public String redirectUri;
+        public String scope;
+        public String clientId;
+        public String clientSecret;
+        public String state;
+    }
+
     public static class Provider implements Serializable {
         private static final long serialVersionUID = 8511656164616538989L;
 
@@ -202,11 +218,16 @@ public class VendorPolicyLoader {
         public String incomingUsernameTemplate;
         public String outgoingUriTemplate;
         public String outgoingUsernameTemplate;
+        public String altIncomingUriTemplate;
+        public String altIncomingUsernameTemplate;
+        public String altOutgoingUriTemplate;
+        public String altOutgoingUsernameTemplate;
         public String incomingUri;
         public String incomingUsername;
         public String outgoingUri;
         public String outgoingUsername;
         public String note;
+        public String oauth;
 
         /**
          * Expands templates in all of the  provider fields that support them. Currently,
@@ -214,13 +235,27 @@ public class VendorPolicyLoader {
          * @param email user-specified data used to replace template values
          */
         public void expandTemplates(String email) {
-            String[] emailParts = email.split("@");
-            String user = emailParts[0];
+            final String[] emailParts = email.split("@");
+            final String user = emailParts[0];
 
             incomingUri = expandTemplate(incomingUriTemplate, email, user);
             incomingUsername = expandTemplate(incomingUsernameTemplate, email, user);
             outgoingUri = expandTemplate(outgoingUriTemplate, email, user);
             outgoingUsername = expandTemplate(outgoingUsernameTemplate, email, user);
+        }
+
+        /**
+         * Like the above, but expands the alternate templates instead
+         * @param email user-specified data used to replace template values
+         */
+        public void expandAlternateTemplates(String email) {
+            final String[] emailParts = email.split("@");
+            final String user = emailParts[0];
+
+            incomingUri = expandTemplate(altIncomingUriTemplate, email, user);
+            incomingUsername = expandTemplate(altIncomingUsernameTemplate, email, user);
+            outgoingUri = expandTemplate(altOutgoingUriTemplate, email, user);
+            outgoingUsername = expandTemplate(altOutgoingUsernameTemplate, email, user);
         }
 
         /**

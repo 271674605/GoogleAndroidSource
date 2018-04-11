@@ -22,13 +22,9 @@
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
-    'repack_locales_cmd': ['python', 'tools/build/repack_locales.py'],
-    # TODO: remove this helper when we have loops in GYP
-    'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py'],
     'conditions': [
       ['OS!="ios"', {
         'chromium_browser_dependencies': [
-          '../printing/printing.gyp:printing',
           '../ppapi/ppapi_internal.gyp:ppapi_host',
         ],
         'chromium_child_dependencies': [
@@ -39,7 +35,12 @@
           '../content/content.gyp:content_gpu',
           '../content/content.gyp:content_ppapi_plugin',
           '../content/content.gyp:content_worker',
-          '../third_party/WebKit/Source/devtools/devtools.gyp:devtools_frontend_resources',
+          '../third_party/WebKit/public/blink_devtools.gyp:blink_devtools_frontend_resources',
+        ],
+      }],
+      ['enable_printing!=0', {
+        'chromium_browser_dependencies': [
+          '../printing/printing.gyp:printing',
         ],
       }],
       ['OS=="win"', {
@@ -77,19 +78,6 @@
         'tweak_info_plist_path': '../build/mac/tweak_info_plist.py',
         'platform_locale_settings_grd':
             'app/resources/locale_settings_mac.grd',
-        'conditions': [
-          ['branding=="Chrome"', {
-            'mac_bundle_id': 'com.google.Chrome',
-            'mac_creator': 'rimZ',
-            # The policy .grd file also needs the bundle id.
-            'grit_defines': ['-D', 'mac_bundle_id=com.google.Chrome'],
-          }, {  # else: branding!="Chrome"
-            'mac_bundle_id': 'org.chromium.Chromium',
-            'mac_creator': 'Cr24',
-            # The policy .grd file also needs the bundle id.
-            'grit_defines': ['-D', 'mac_bundle_id=org.chromium.Chromium'],
-          }],  # branding
-        ],  # conditions
       }],  # OS=="mac"
     ],  # conditions
   },  # variables
@@ -100,27 +88,30 @@
     # on 64-bit Windows only. Targets that end with nacl_win64 should be used
     # by Native Client only.
     # NOTE: Most new includes should go in the OS!="ios" condition below.
+    '../build/chrome_settings.gypi',
+    '../build/util/version.gypi',
     '../build/win_precompile.gypi',
     'chrome_browser.gypi',
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_installer_util.gypi',
-    'chrome_tests_unit.gypi',
-    'version.gypi',
     '../components/nacl/nacl_defines.gypi',
   ],
   'conditions': [
     ['OS!="ios"', {
       'includes': [
-        'app/policy/policy_templates.gypi',
+        '../apps/apps.gypi',
         'chrome_browser_extensions.gypi',
+        'chrome_debugger.gypi',
         'chrome_dll.gypi',
         'chrome_exe.gypi',
         'chrome_installer.gypi',
+        'chrome_plugin.gypi',
         'chrome_renderer.gypi',
         'chrome_tests.gypi',
-        'nacl.gypi',
-        '../apps/apps.gypi',
+        'chrome_tests_unit.gypi',
+        'chrome_utility.gypi',
+        'policy_templates.gypi',
       ],
       'targets': [
         {
@@ -136,242 +127,16 @@
                   ]
                 }
               ],
-            }],
-            ['OS=="linux" and chromeos==1 and branding=="Chrome"', {
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)',
-                  'files': [
-                    'browser/extensions/default_extensions/chromeos/extensions/'
-                  ]
-                }
-              ],
-            }],
-          ],
-        },
-        {
-          'target_name': 'debugger',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            'chrome_resources.gyp:chrome_extra_resources',
-            'chrome_resources.gyp:chrome_resources',
-            'chrome_resources.gyp:chrome_strings',
-            'chrome_resources.gyp:theme_resources',
-            'common/extensions/api/api.gyp:api',
-            '../base/base.gyp:base',
-            '../content/content.gyp:content_browser',
-            '../net/net.gyp:http_server',
-            '../net/net.gyp:net',
-            '../skia/skia.gyp:skia',
-            '../third_party/icu/icu.gyp:icui18n',
-            '../third_party/icu/icu.gyp:icuuc',
-            '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
-            '../third_party/libusb/libusb.gyp:libusb',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'browser/devtools/adb/android_rsa.cc',
-            'browser/devtools/adb/android_rsa.h',
-            'browser/devtools/adb/android_usb_device.cc',
-            'browser/devtools/adb/android_usb_device.h',
-            'browser/devtools/adb/android_usb_socket.cc',
-            'browser/devtools/adb/android_usb_socket.h',
-            'browser/devtools/adb_client_socket.cc',
-            'browser/devtools/adb_client_socket.h',
-            'browser/devtools/adb_web_socket.cc',
-            'browser/devtools/adb_web_socket.h',
-            'browser/devtools/browser_list_tabcontents_provider.cc',
-            'browser/devtools/browser_list_tabcontents_provider.h',
-            'browser/devtools/devtools_adb_bridge.cc',
-            'browser/devtools/devtools_adb_bridge.h',
-            'browser/devtools/devtools_file_helper.cc',
-            'browser/devtools/devtools_file_helper.h',
-            'browser/devtools/devtools_file_system_indexer.cc',
-            'browser/devtools/devtools_file_system_indexer.h',
-            'browser/devtools/devtools_protocol.cc',
-            'browser/devtools/devtools_protocol.h',
-            'browser/devtools/devtools_toggle_action.h',
-            'browser/devtools/devtools_window.cc',
-            'browser/devtools/devtools_window.h',
-            'browser/devtools/remote_debugging_server.cc',
-            'browser/devtools/remote_debugging_server.h',
-            'browser/devtools/tethering_adb_filter.cc',
-            'browser/devtools/tethering_adb_filter.h',
-          ],
-          'conditions': [
-            ['toolkit_uses_gtk == 1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
-            ['OS=="android"', {
-              'dependencies!': [
-                '../third_party/libusb/libusb.gyp:libusb',
-              ],
-              'sources!': [
-                'browser/devtools/browser_list_tabcontents_provider.cc',
-                'browser/devtools/devtools_window.cc',
-                'browser/devtools/remote_debugging_server.cc',
-              ],
-            }],
-            ['debug_devtools==1', {
-              'defines': [
-                'DEBUG_DEVTOOLS=1',
-               ],
-            }],
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        },
-        {
-          'target_name': 'plugin',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            'chrome_resources.gyp:chrome_strings',
-            '../base/base.gyp:base',
-            '../content/content.gyp:content_plugin',
-          ],
-          'sources': [
-            'plugin/chrome_content_plugin_client.cc',
-            'plugin/chrome_content_plugin_client.h',
-          ],
-          'include_dirs': [
-            '..',
-            '<(grit_out_dir)',
-          ],
-        },
-        {
-          'target_name': 'utility',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../content/content.gyp:content_utility',
-            '../media/media.gyp:media',
-            '../skia/skia.gyp:skia',
-            '../third_party/libxml/libxml.gyp:libxml',
-            'common',
-            '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
-            '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
-          ],
-          'sources': [
-            'utility/chrome_content_utility_client.cc',
-            'utility/chrome_content_utility_client.h',
-            'utility/extensions/unpacker.cc',
-            'utility/extensions/unpacker.h',
-            'utility/importer/bookmark_html_reader.cc',
-            'utility/importer/bookmark_html_reader.h',
-            'utility/importer/bookmarks_file_importer.cc',
-            'utility/importer/bookmarks_file_importer.h',
-            'utility/importer/external_process_importer_bridge.cc',
-            'utility/importer/external_process_importer_bridge.h',
-            'utility/importer/favicon_reencode.cc',
-            'utility/importer/favicon_reencode.h',
-            'utility/importer/firefox_importer.cc',
-            'utility/importer/firefox_importer.h',
-            'utility/importer/firefox_importer_unittest_messages_internal.h',
-            'utility/importer/firefox_importer_unittest_utils.h',
-            'utility/importer/firefox_importer_unittest_utils_mac.cc',
-            'utility/importer/ie_importer_win.cc',
-            'utility/importer/ie_importer_win.h',
-            'utility/importer/importer.cc',
-            'utility/importer/importer.h',
-            'utility/importer/importer_creator.cc',
-            'utility/importer/importer_creator.h',
-            'utility/importer/nss_decryptor.cc',
-            'utility/importer/nss_decryptor.h',
-            'utility/importer/nss_decryptor_mac.h',
-            'utility/importer/nss_decryptor_mac.mm',
-            'utility/importer/nss_decryptor_win.cc',
-            'utility/importer/nss_decryptor_win.h',
-            'utility/importer/safari_importer.h',
-            'utility/importer/safari_importer.mm',
-            'utility/media_galleries/itunes_pref_parser_win.cc',
-            'utility/media_galleries/itunes_pref_parser_win.h',
-            'utility/profile_import_handler.cc',
-            'utility/profile_import_handler.h',
-            'utility/utility_message_handler.h',
-            'utility/web_resource_unpacker.cc',
-            'utility/web_resource_unpacker.h',
-          ],
-          'include_dirs': [
-            '..',
-            '<(grit_out_dir)',
-          ],
-          'conditions': [
-            ['toolkit_uses_gtk == 1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
-            ['OS=="win" or OS=="mac"', {
-              'sources': [
-                'utility/media_galleries/itunes_library_parser.cc',
-                'utility/media_galleries/itunes_library_parser.h',
-                'utility/media_galleries/picasa_album_table_reader.cc',
-                'utility/media_galleries/picasa_album_table_reader.h',
-                'utility/media_galleries/picasa_albums_indexer.cc',
-                'utility/media_galleries/picasa_albums_indexer.h',
-                'utility/media_galleries/pmp_column_reader.cc',
-                'utility/media_galleries/pmp_column_reader.h',
-              ],
-            }],
-            ['use_openssl==1', {
-              'sources!': [
-                'utility/importer/nss_decryptor.cc',
-              ]
-            }],
-            ['OS!="win" and OS!="mac" and use_openssl==0', {
-              'dependencies': [
-                '../crypto/crypto.gyp:crypto',
-              ],
-              'sources': [
-                'utility/importer/nss_decryptor_system_nss.cc',
-                'utility/importer/nss_decryptor_system_nss.h',
-              ],
-            }],
-            ['OS=="android"', {
-              'sources/': [
-                ['exclude', '^utility/importer/'],
-                ['exclude', '^utility/profile_import_handler\.cc'],
-              ],
-            }],
-            ['enable_mdns == 1', {
-              'sources': [
-                'utility/local_discovery/service_discovery_client_impl.cc',
-                'utility/local_discovery/service_discovery_client_impl.h',
-                'utility/local_discovery/service_discovery_message_handler.cc',
-                'utility/local_discovery/service_discovery_message_handler.h',
-              ]
-            }],
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        },
-        {
-          'target_name': 'ipclist',
-          'type': 'executable',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            'test_support_common',
-            '../skia/skia.gyp:skia',
-            '../sync/sync.gyp:sync',
-          ],
-          'include_dirs': [
-             '..',
-          ],
-          'sources': [
-            'tools/ipclist/ipclist.cc',
+            }]
           ],
         },
       ],
     }],  # OS!="ios"
-    ['OS=="mac"',
-      { 'targets': [
+    ['OS=="mac"', {
+      'includes': [
+        '../apps/app_shim/app_shim.gypi',
+      ],
+      'targets': [
         {
           'target_name': 'helper_app',
           'type': 'executable',
@@ -521,7 +286,10 @@
           'target_name': 'app_mode_app',
           'type': 'executable',
           'mac_bundle' : 1,
-          'variables': { 'enable_wexit_time_destructors': 1, },
+          'variables': {
+            'enable_wexit_time_destructors': 1,
+            'mac_real_dsym': 1,
+          },
           'product_name': 'app_mode_loader',
           'dependencies': [
             'app_mode_app_support',
@@ -642,7 +410,6 @@
           'conditions': [
             ['component=="shared_library"', {
               'dependencies': [
-                '../webkit/support/webkit_support.gyp:glue',
                 '../content/content.gyp:content_plugin',
               ],
               'xcode_settings': {
@@ -693,7 +460,9 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             '../base/base.gyp:base',
-            '../ui/ui.gyp:ui',
+            '../ui/base/ui_base.gyp:ui_base',
+            '../ui/gfx/gfx.gyp:gfx',
+            '../ui/gfx/gfx.gyp:gfx_geometry',
           ],
           'include_dirs': [
             '<(grit_out_dir)',
@@ -704,55 +473,6 @@
         },
       ],  # targets
     }],  # OS=="mac"
-    ['OS!="mac" and OS!="ios"', {
-      'targets': [
-        {
-          'target_name': 'convert_dict',
-          'type': 'executable',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../base/base.gyp:base_i18n',
-            'convert_dict_lib',
-            '../third_party/hunspell/hunspell.gyp:hunspell',
-          ],
-          'sources': [
-            'tools/convert_dict/convert_dict.cc',
-          ],
-        },
-        {
-          'target_name': 'convert_dict_lib',
-          'product_name': 'convert_dict',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'include_dirs': [
-            '..',
-          ],
-          'dependencies': [
-            '../base/base.gyp:base',
-          ],
-          'sources': [
-            'tools/convert_dict/aff_reader.cc',
-            'tools/convert_dict/aff_reader.h',
-            'tools/convert_dict/dic_reader.cc',
-            'tools/convert_dict/dic_reader.h',
-            'tools/convert_dict/hunspell_reader.cc',
-            'tools/convert_dict/hunspell_reader.h',
-          ],
-        },
-        {
-          'target_name': 'flush_cache',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../base/base.gyp:test_support_base',
-          ],
-          'sources': [
-            'tools/perf/flush_cache/flush_cache.cc',
-          ],
-        },
-      ],
-    }],  # OS!="mac" and OS!="ios"
     ['OS=="linux"',
       { 'targets': [
         {
@@ -789,11 +509,6 @@
               'actions': [
                 {
                   'action_name': 'strip_reliability_tests',
-                  'inputs': [
-                    '<(PRODUCT_DIR)/automated_ui_tests',
-                    '<(PRODUCT_DIR)/reliability_tests',
-                    '<(PRODUCT_DIR)/_pyautolib.so',
-                  ],
                   'outputs': [
                     '<(PRODUCT_DIR)/strip_reliability_tests.stamp',
                   ],
@@ -803,25 +518,7 @@
                   'message': 'Stripping reliability tests',
                 },
               ],
-              'dependencies': [
-                'automated_ui_tests',
-                'reliability_tests',
-              ],
             }],
-          ],
-        },
-        {
-          'target_name': 'ipcfuzz',
-          'type': 'loadable_module',
-          'include_dirs': [
-            '..',
-          ],
-          'dependencies': [
-            'test_support_common',
-            '../skia/skia.gyp:skia',
-          ],
-          'sources': [
-            'tools/ipclist/ipcfuzz.cc',
           ],
         },
       ],
@@ -837,21 +534,11 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base_unittests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
-            '../content/content.gyp:content_browsertests',
-            '../content/content.gyp:content_shell',
-            '../content/content.gyp:content_unittests',
+            '../content/content_shell_and_tests.gyp:content_browsertests',
+            '../content/content_shell_and_tests.gyp:content_shell',
+            '../content/content_shell_and_tests.gyp:content_unittests',
             '../net/net.gyp:net_unittests',
-            '../ui/ui.gyp:ui_unittests',
-          ],
-          'conditions': [
-            ['use_aura==1 or target_arch=="x64"', {
-              'dependencies!': [
-                '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
-                '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
-              ],
-            }],
+            '../ui/ui_unittests.gyp:ui_unittests',
           ],
         },
         {
@@ -878,7 +565,6 @@
             ],
           },
           'sources': [
-            'app/app_host_exe.ver',
             'app/chrome_exe.ver',
             'app/chrome_dll.ver',
             'app/nacl64_exe.ver',
@@ -933,49 +619,18 @@
           ],
         },
         {
-          'target_name': 'automation',
-          'type': 'static_library',
-          'dependencies': [
-            'chrome_resources.gyp:theme_resources',
-            '../skia/skia.gyp:skia',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-             'test/automation/automation_handle_tracker.cc',
-             'test/automation/automation_handle_tracker.h',
-             'test/automation/automation_json_requests.cc',
-             'test/automation/automation_json_requests.h',
-             'test/automation/automation_proxy.cc',
-             'test/automation/automation_proxy.h',
-             'test/automation/browser_proxy.cc',
-             'test/automation/browser_proxy.h',
-             'test/automation/tab_proxy.cc',
-             'test/automation/tab_proxy.h',
-             'test/automation/value_conversion_traits.cc',
-             'test/automation/value_conversion_traits.h',
-             'test/automation/value_conversion_util.h',
-             'test/automation/window_proxy.cc',
-             'test/automation/window_proxy.h',
-          ],
-        },
-        {
           'target_name': 'crash_service',
           'type': 'executable',
           'dependencies': [
             'installer_util',
             '../base/base.gyp:base',
-            '../breakpad/breakpad.gyp:breakpad_handler',
-            '../breakpad/breakpad.gyp:breakpad_sender',
             '../chrome/common_constants.gyp:common_constants',
+            '../components/components.gyp:breakpad_crash_service',
           ],
           'include_dirs': [
             '..',
           ],
           'sources': [
-            'tools/crash_service/crash_service.cc',
-            'tools/crash_service/crash_service.h',
             'tools/crash_service/main.cc',
           ],
           'msvs_settings': {
@@ -992,8 +647,10 @@
             'safe_browsing_proto',
           ],
           'sources': [
-            'browser/safe_browsing/signature_util.h',
-            'browser/safe_browsing/signature_util_win.cc',
+            'browser/safe_browsing/binary_feature_extractor.h',
+            'browser/safe_browsing/binary_feature_extractor_win.cc',
+            'browser/safe_browsing/pe_image_reader_win.cc',
+            'browser/safe_browsing/pe_image_reader_win.h',
             'tools/safe_browsing/sb_sigutil.cc',
           ],
         },
@@ -1033,16 +690,13 @@
           'dependencies': [
             'installer_util_nacl_win64',
             '../base/base.gyp:base_static_win64',
-            '../breakpad/breakpad.gyp:breakpad_handler_win64',
-            '../breakpad/breakpad.gyp:breakpad_sender_win64',
             '../chrome/common_constants.gyp:common_constants_win64',
+            '../components/components.gyp:breakpad_crash_service_win64',
           ],
           'include_dirs': [
             '..',
           ],
           'sources': [
-            'tools/crash_service/crash_service.cc',
-            'tools/crash_service/crash_service.h',
             'tools/crash_service/main.cc',
             '../content/public/common/content_switches.cc',
           ],
@@ -1072,26 +726,33 @@
           'target_name': 'chrome_java',
           'type': 'none',
           'dependencies': [
+            'activity_type_ids_java',
+            'app_banner_metrics_ids_java',
             'chrome_resources.gyp:chrome_strings',
+            'chrome_strings_grd',
             'profile_sync_service_model_type_selection_java',
             'resource_id_java',
             'toolbar_model_security_levels_java',
+            'tab_load_status_java',
             '../base/base.gyp:base',
             '../components/components.gyp:autofill_java',
+            '../components/components.gyp:dom_distiller_core_java',
+            '../components/components.gyp:gcm_driver_java',
             '../components/components.gyp:navigation_interception_java',
             '../components/components.gyp:sessions',
             '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
+            '../printing/printing.gyp:printing_java',
             '../sync/sync.gyp:sync_java',
+            '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/guava/guava.gyp:guava_javalib',
-            '../ui/ui.gyp:ui_java',
+            '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
             'java_in_dir': '../chrome/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',
             'R_package_relpath': 'org/chromium/chrome',
-            'java_strings_grd': 'android_chrome_strings.grd',
             # Include xml string files generated from generated_resources.grd
             'res_extra_dirs': ['<(SHARED_INTERMEDIATE_DIR)/chrome/java/res'],
             'res_extra_files': ['<!@pymod_do_main(grit_info <@(grit_defines) --outputs "<(SHARED_INTERMEDIATE_DIR)/chrome" app/generated_resources.grd)'],
@@ -1100,12 +761,22 @@
             '../build/java.gypi',
           ],
         },
+        {
+          'target_name': 'chrome_strings_grd',
+          'type': 'none',
+          'variables': {
+            'grd_file': '../chrome/android/java/strings/android_chrome_strings.grd',
+          },
+          'includes': [
+            '../build/java_strings_grd.gypi',
+          ],
+        },
       ], # 'targets'
       'includes': [
         'chrome_android.gypi',
       ]}, # 'includes'
     ],  # OS=="android"
-    ['configuration_policy==1 and OS!="android"', {
+    ['configuration_policy==1 and OS!="android" and OS!="ios"', {
       'includes': [ 'policy.gypi', ],
     }],
     ['enable_printing==1', {
@@ -1119,6 +790,7 @@
             'common',
             'common_net',
             '../base/base.gyp:base',
+            '../components/components.gyp:cloud_devices_common',
             '../google_apis/google_apis.gyp:google_apis',
             '../jingle/jingle.gyp:notifier',
             '../net/net.gyp:net',
@@ -1127,27 +799,18 @@
             '../third_party/libjingle/libjingle.gyp:libjingle',
           ],
           'sources': [
-            'service/chrome_service_application_mac.h',
-            'service/chrome_service_application_mac.mm',
-            'service/service_ipc_server.cc',
-            'service/service_ipc_server.h',
-            'service/service_main.cc',
-            'service/service_process.cc',
-            'service/service_process.h',
-            'service/service_process_prefs.cc',
-            'service/service_process_prefs.h',
-            'service/service_utility_process_host.cc',
-            'service/service_utility_process_host.h',
+            'service/cloud_print/cdd_conversion_win.cc',
+            'service/cloud_print/cdd_conversion_win.h',
             'service/cloud_print/cloud_print_auth.cc',
             'service/cloud_print/cloud_print_auth.h',
             'service/cloud_print/cloud_print_connector.cc',
             'service/cloud_print/cloud_print_connector.h',
-            'service/cloud_print/cloud_print_helpers.cc',
-            'service/cloud_print/cloud_print_helpers.h',
             'service/cloud_print/cloud_print_proxy.cc',
             'service/cloud_print/cloud_print_proxy.h',
             'service/cloud_print/cloud_print_proxy_backend.cc',
             'service/cloud_print/cloud_print_proxy_backend.h',
+            'service/cloud_print/cloud_print_service_helpers.cc',
+            'service/cloud_print/cloud_print_service_helpers.h',
             'service/cloud_print/cloud_print_token_store.cc',
             'service/cloud_print/cloud_print_token_store.h',
             'service/cloud_print/cloud_print_url_fetcher.cc',
@@ -1158,46 +821,40 @@
             'service/cloud_print/connector_settings.h',
             'service/cloud_print/job_status_updater.cc',
             'service/cloud_print/job_status_updater.h',
-            'service/cloud_print/print_system_dummy.cc',
             'service/cloud_print/print_system.cc',
             'service/cloud_print/print_system.h',
+            'service/cloud_print/print_system_win.cc',
             'service/cloud_print/printer_job_handler.cc',
             'service/cloud_print/printer_job_handler.h',
             'service/cloud_print/printer_job_queue_handler.cc',
             'service/cloud_print/printer_job_queue_handler.h',
             'service/net/service_url_request_context.cc',
             'service/net/service_url_request_context.h',
+            'service/service_ipc_server.cc',
+            'service/service_ipc_server.h',
+            'service/service_main.cc',
+            'service/service_process.cc',
+            'service/service_process.h',
+            'service/service_process_prefs.cc',
+            'service/service_process_prefs.h',
+            'service/service_utility_process_host.cc',
+            'service/service_utility_process_host.h',
           ],
           'include_dirs': [
             '..',
           ],
           'conditions': [
-            ['OS=="win"', {
-              'defines': [
-                # CP_PRINT_SYSTEM_AVAILABLE disables default dummy implementation
-                # of cloud print system, and allows to use custom implementaiton.
-                'CP_PRINT_SYSTEM_AVAILABLE',
-              ],
-              'sources': [
-                'service/cloud_print/print_system_win.cc',
-              ],
-            }],
-            ['toolkit_uses_gtk == 1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
             ['use_cups==1', {
               'dependencies': [
                 '../printing/printing.gyp:cups',
               ],
-              'defines': [
-                # CP_PRINT_SYSTEM_AVAILABLE disables default dummy implementation
-                # of cloud print system, and allows to use custom implementaiton.
-                'CP_PRINT_SYSTEM_AVAILABLE',
-              ],
               'sources': [
                 'service/cloud_print/print_system_cups.cc',
+              ],
+            }],
+            ['OS!="win" and use_cups!=1', {
+              'sources': [
+                'service/cloud_print/print_system_dummy.cc',
               ],
             }],
           ],

@@ -16,42 +16,78 @@
 package com.android.mail.ui;
 
 import android.animation.Animator;
-import android.animation.AnimatorInflater;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.TimeInterpolator;
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.os.Handler;
+import android.support.annotation.StringRes;
+import android.text.TextUtils;
 import android.util.AttributeSet;
-import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
-import android.widget.ImageView;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.PathInterpolator;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.android.mail.R;
+import com.android.mail.utils.Utils;
 
 /**
  * A custom {@link View} that exposes an action to the user.
  */
-public class ActionableToastBar extends LinearLayout {
+public class ActionableToastBar extends FrameLayout {
+
     private boolean mHidden = false;
-    private Animator mShowAnimation;
-    private Animator mHideAnimation;
-    private final Runnable mRunnable;
-    private final Handler mFadeOutHandler;
+    private final Runnable mHideToastBarRunnable;
+    private final Handler mHideToastBarHandler;
 
-    /** How long toast will last in ms */
-    private static final long TOAST_LIFETIME = 15*1000L;
+    /**
+     * The floating action button if it must be animated with the toast bar; <code>null</code>
+     * otherwise.
+     */
+    private View mFloatingActionButton;
 
-    /** Icon for the description. */
-    private ImageView mActionDescriptionIcon;
-    /** The clickable view */
-    private View mActionButton;
-    /** Icon for the action button. */
-    private View mActionIcon;
-    /** The view that contains the description. */
-    private TextView mActionDescriptionView;
-    /** The view that contains the text for the action button. */
-    private TextView mActionText;
+    /**
+     * <tt>true</tt> while animation is occurring; false otherwise; It is used to block attempts to
+     * hide the toast bar while it is being animated
+     */
+    private boolean mAnimating = false;
+
+    /** The interpolator that produces position values during animation. */
+    private TimeInterpolator mAnimationInterpolator;
+
+    /** The length of time (in milliseconds) that the popup / push down animation run over */
+    private int mAnimationDuration;
+
+    /**
+     * The time at which the toast popup completed. This is used to ensure the toast remains
+     * visible for a minimum duration before it is removed.
+     */
+    private long mAnimationCompleteTimestamp;
+
+    /** The min time duration for which the toast must remain visible and cannot be dismissed. */
+    private long mMinToastDuration;
+
+    /** The max time duration for which the toast can remain visible and must be dismissed. */
+    private long mMaxToastDuration;
+
+    /** The view that contains the description when laid out as a single line. */
+    private TextView mSingleLineDescriptionView;
+
+    /** The view that contains the text for the action button when laid out as a single line. */
+    private TextView mSingleLineActionView;
+
+    /** The view that contains the description when laid out as a multiple lines;
+     * always <tt>null</tt> in two-pane layouts. */
+    private TextView mMultiLineDescriptionView;
+
+    /** The view that contains the text for the action button when laid out as a multiple lines;
+     * always <tt>null</tt> in two-pane layouts. */
+    private TextView mMultiLineActionView;
+
     private ToastBarOperation mOperation;
 
     public ActionableToastBar(Context context) {
@@ -64,27 +100,64 @@ public class ActionableToastBar extends LinearLayout {
 
     public ActionableToastBar(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
-        mFadeOutHandler = new Handler();
-        mRunnable = new Runnable() {
+        mAnimationInterpolator = createTimeInterpolator();
+        mAnimationDuration = getResources().getInteger(R.integer.toast_bar_animation_duration_ms);
+        mMinToastDuration = getResources().getInteger(R.integer.toast_bar_min_duration_ms);
+        mMaxToastDuration = getResources().getInteger(R.integer.toast_bar_max_duration_ms);
+        mHideToastBarHandler = new Handler();
+        mHideToastBarRunnable = new Runnable() {
             @Override
             public void run() {
-                if(!mHidden) {
+                if (!mHidden) {
                     hide(true, false /* actionClicked */);
                 }
             }
         };
-        LayoutInflater.from(context).inflate(R.layout.actionable_toast_row, this, true);
+    }
+
+    private TimeInterpolator createTimeInterpolator() {
+        // L and beyond we can use the new PathInterpolator
+        if (Utils.isRunningLOrLater()) {
+            return createPathInterpolator();
+        }
+
+        // fall back to basic LinearInterpolator
+        return new LinearInterpolator();
+    }
+
+    @TargetApi(21)
+    private TimeInterpolator createPathInterpolator() {
+        return new PathInterpolator(0.4f, 0f, 0.2f, 1f);
     }
 
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        mActionDescriptionIcon = (ImageView) findViewById(R.id.description_icon);
-        mActionDescriptionView = (TextView) findViewById(R.id.description_text);
-        mActionButton = findViewById(R.id.action_button);
-        mActionIcon = findViewById(R.id.action_icon);
-        mActionText = (TextView) findViewById(R.id.action_text);
+        mSingleLineDescriptionView = (TextView) findViewById(R.id.description_text);
+        mSingleLineActionView = (TextView) findViewById(R.id.action_text);
+        mMultiLineDescriptionView = (TextView) findViewById(R.id.multiline_description_text);
+        mMultiLineActionView = (TextView) findViewById(R.id.multiline_action_text);
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        final boolean showAction = !TextUtils.isEmpty(mSingleLineActionView.getText());
+
+        // configure the UI assuming the description fits on a single line
+        setVisibility(false /* multiLine */, showAction);
+
+        // measure the view and its content
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+
+        // if the description does not fit, switch to multi line display if one is present
+        final boolean descriptionIsMultiLine = mSingleLineDescriptionView.getLineCount() > 1;
+        final boolean haveMultiLineView = mMultiLineDescriptionView != null;
+        if (descriptionIsMultiLine && haveMultiLineView) {
+            setVisibility(true /* multiLine */, showAction);
+
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        }
     }
 
     /**
@@ -96,28 +169,25 @@ public class ActionableToastBar extends LinearLayout {
      *                 to return <code>true</code>, the
      *                 {@link ToastBarOperation#onActionClicked(android.content.Context)}
      *                 will override this listener and be called instead.
-     * @param descriptionIconResourceId resource ID for the description icon or
-     *                                  0 if no icon should be shown
      * @param descriptionText a description text to show in the toast bar
-     * @param showActionIcon if true, the action button icon should be shown
-     * @param actionTextResource resource ID for the text to show in the action button
+     * @param actionTextResourceId resource ID for the text to show in the action button
      * @param replaceVisibleToast if true, this toast should replace any currently visible toast.
      *                            Otherwise, skip showing this toast.
      * @param op the operation that corresponds to the specific toast being shown
      */
-    public void show(final ActionClickedListener listener, int descriptionIconResourceId,
-            CharSequence descriptionText, boolean showActionIcon, int actionTextResource,
-            boolean replaceVisibleToast, final ToastBarOperation op) {
-
+    public void show(final ActionClickedListener listener, final CharSequence descriptionText,
+                     @StringRes final int actionTextResourceId, final boolean replaceVisibleToast,
+                     final ToastBarOperation op) {
         if (!mHidden && !replaceVisibleToast) {
             return;
         }
+
         // Remove any running delayed animations first
-        mFadeOutHandler.removeCallbacks(mRunnable);
+        mHideToastBarHandler.removeCallbacks(mHideToastBarRunnable);
 
         mOperation = op;
 
-        mActionButton.setOnClickListener(new OnClickListener() {
+        setActionClickListener(new OnClickListener() {
             @Override
             public void onClick(View widget) {
                 if (op.shouldTakeOnActionClickedPrecedence()) {
@@ -129,23 +199,15 @@ public class ActionableToastBar extends LinearLayout {
             }
         });
 
-        // Set description icon.
-        if (descriptionIconResourceId == 0) {
-            mActionDescriptionIcon.setVisibility(GONE);
-        } else {
-            mActionDescriptionIcon.setVisibility(VISIBLE);
-            mActionDescriptionIcon.setImageResource(descriptionIconResourceId);
-        }
-
-        mActionDescriptionView.setText(descriptionText);
-        mActionIcon.setVisibility(showActionIcon ? VISIBLE : GONE);
-        mActionText.setText(actionTextResource);
+        setDescriptionText(descriptionText);
+        setActionText(actionTextResourceId);
 
         mHidden = false;
-        getShowAnimation().start();
+
+        popupToast();
 
         // Set up runnable to execute hide toast once delay is completed
-        mFadeOutHandler.postDelayed(mRunnable, TOAST_LIFETIME);
+        mHideToastBarHandler.postDelayed(mHideToastBarRunnable, mMaxToastDuration);
     }
 
     public ToastBarOperation getOperation() {
@@ -157,15 +219,18 @@ public class ActionableToastBar extends LinearLayout {
      */
     public void hide(boolean animate, boolean actionClicked) {
         mHidden = true;
-        mFadeOutHandler.removeCallbacks(mRunnable);
+        mAnimationCompleteTimestamp = 0;
+        mHideToastBarHandler.removeCallbacks(mHideToastBarRunnable);
         if (getVisibility() == View.VISIBLE) {
-            mActionDescriptionView.setText("");
-            mActionButton.setOnClickListener(null);
+            setActionClickListener(null);
             // Hide view once it's clicked.
             if (animate) {
-                getHideAnimation().start();
+                pushDownToast();
             } else {
-                setAlpha(0);
+                // immediate hiding implies no position adjustment of the FAB and hide the toast bar
+                if (mFloatingActionButton != null) {
+                    mFloatingActionButton.setTranslationY(0);
+                }
                 setVisibility(View.GONE);
             }
 
@@ -175,52 +240,26 @@ public class ActionableToastBar extends LinearLayout {
         }
     }
 
-    private Animator getShowAnimation() {
-        if (mShowAnimation == null) {
-            mShowAnimation = AnimatorInflater.loadAnimator(getContext(),
-                    R.anim.fade_in);
-            mShowAnimation.addListener(new Animator.AnimatorListener() {
-                @Override
-                public void onAnimationStart(Animator animation) {
-                    setVisibility(View.VISIBLE);
-                }
-                @Override
-                public void onAnimationEnd(Animator animation) {
-                }
-                @Override
-                public void onAnimationCancel(Animator animation) {
-                }
-                @Override
-                public void onAnimationRepeat(Animator animation) {
-                }
-            });
-            mShowAnimation.setTarget(this);
-        }
-        return mShowAnimation;
+    /**
+     * @return <tt>true</tt> while the toast bar animation is popping up or pushing down the toast;
+     *      <tt>false</tt> otherwise
+     */
+    public boolean isAnimating() {
+        return mAnimating;
     }
 
-    private Animator getHideAnimation() {
-        if (mHideAnimation == null) {
-            mHideAnimation = AnimatorInflater.loadAnimator(getContext(),
-                    R.anim.fade_out);
-            mHideAnimation.addListener(new Animator.AnimatorListener() {
-                @Override
-                public void onAnimationStart(Animator animation) {
-                }
-                @Override
-                public void onAnimationRepeat(Animator animation) {
-                }
-                @Override
-                public void onAnimationEnd(Animator animation) {
-                    setVisibility(View.GONE);
-                }
-                @Override
-                public void onAnimationCancel(Animator animation) {
-                }
-            });
-            mHideAnimation.setTarget(this);
-        }
-        return mHideAnimation;
+    /**
+     * @return <tt>true</tt> if this toast bar has not yet been displayed for a long enough period
+     *      of time to be dismissed; <tt>false</tt> otherwise
+     */
+    public boolean cannotBeHidden() {
+        return System.currentTimeMillis() - mAnimationCompleteTimestamp < mMinToastDuration;
+    }
+
+    @Override
+    public void onDetachedFromWindow() {
+        mHideToastBarHandler.removeCallbacks(mHideToastBarRunnable);
+        super.onDetachedFromWindow();
     }
 
     public boolean isEventInToastBar(MotionEvent event) {
@@ -234,14 +273,151 @@ public class ActionableToastBar extends LinearLayout {
         return (x > xy[0] && x < (xy[0] + getWidth()) && y > xy[1] && y < xy[1] + getHeight());
     }
 
-    public boolean isAnimating() {
-        return mShowAnimation != null && mShowAnimation.isStarted();
+    /**
+     * Indicates that the given view should be animated with this toast bar as it pops up and pushes
+     * down. In some layouts, the floating action button appears above the toast bar and thus must
+     * be pushed up as the toast pops up and fall down as the toast is pushed down.
+     *
+     * @param floatingActionButton a the floating action button to be animated with the toast bar as
+     *                             it pops up and pushes down
+     */
+    public void setFloatingActionButton(View floatingActionButton) {
+        mFloatingActionButton = floatingActionButton;
     }
 
-    @Override
-    public void onDetachedFromWindow() {
-        mFadeOutHandler.removeCallbacks(mRunnable);
-        super.onDetachedFromWindow();
+    /**
+     * If the View requires multiple lines to fully display the toast description then make the
+     * multi-line view visible and hide the single line view; otherwise vice versa. If the action
+     * text is present, display it, otherwise hide it.
+     *
+     * @param multiLine <tt>true</tt> if the View requires multiple lines to display the toast
+     * @param showAction <tt>true</tt> if the action text is present and should be shown
+     */
+    private void setVisibility(boolean multiLine, boolean showAction) {
+        mSingleLineDescriptionView.setVisibility(!multiLine ? View.VISIBLE : View.GONE);
+        mSingleLineActionView.setVisibility(!multiLine && showAction ? View.VISIBLE : View.GONE);
+        if (mMultiLineDescriptionView != null) {
+            mMultiLineDescriptionView.setVisibility(multiLine ? View.VISIBLE : View.GONE);
+        }
+        if (mMultiLineActionView != null) {
+            mMultiLineActionView.setVisibility(multiLine && showAction ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void setDescriptionText(CharSequence description) {
+        mSingleLineDescriptionView.setText(description);
+        if (mMultiLineDescriptionView != null) {
+            mMultiLineDescriptionView.setText(description);
+        }
+    }
+
+    private void setActionText(@StringRes int actionTextResourceId) {
+        if (actionTextResourceId == 0) {
+            mSingleLineActionView.setText("");
+            if (mMultiLineActionView != null) {
+                mMultiLineActionView.setText("");
+            }
+        } else {
+            mSingleLineActionView.setText(actionTextResourceId);
+            if (mMultiLineActionView != null) {
+                mMultiLineActionView.setText(actionTextResourceId);
+            }
+        }
+    }
+
+    private void setActionClickListener(OnClickListener listener) {
+        mSingleLineActionView.setOnClickListener(listener);
+
+        if (mMultiLineActionView != null) {
+            mMultiLineActionView.setOnClickListener(listener);
+        }
+    }
+
+    /**
+     * Pops up the toast (and optionally the floating action button) into view via an animation.
+     */
+    private void popupToast() {
+        final float animationDistance = getAnimationDistance();
+
+        setVisibility(View.VISIBLE);
+        setTranslationY(animationDistance);
+        animate()
+                .setDuration(mAnimationDuration)
+                .setInterpolator(mAnimationInterpolator)
+                .translationYBy(-animationDistance)
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimating = true;
+                    }
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimating = false;
+                        mAnimationCompleteTimestamp = System.currentTimeMillis();
+                    }
+                });
+
+        if (mFloatingActionButton != null) {
+            mFloatingActionButton.setTranslationY(animationDistance);
+            mFloatingActionButton.animate()
+                    .setDuration(mAnimationDuration)
+                    .setInterpolator(mAnimationInterpolator)
+                    .translationYBy(-animationDistance);
+        }
+    }
+
+    /**
+     * Pushes down the toast (and optionally the floating action button) out of view via an
+     * animation.
+     */
+    private void pushDownToast() {
+        final float animationDistance = getAnimationDistance();
+
+        setTranslationY(0);
+        animate()
+                .setDuration(mAnimationDuration)
+                .setInterpolator(mAnimationInterpolator)
+                .translationYBy(animationDistance)
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimating = true;
+                    }
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimating = false;
+                        // on push down animation completion the toast bar is no longer present
+                        setVisibility(View.GONE);
+                    }
+                });
+
+        if (mFloatingActionButton != null) {
+            mFloatingActionButton.setTranslationY(0);
+            mFloatingActionButton.animate()
+                    .setDuration(mAnimationDuration)
+                    .setInterpolator(mAnimationInterpolator)
+                    .translationYBy(animationDistance)
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            // on push down animation completion the FAB no longer needs translation
+                            mFloatingActionButton.setTranslationY(0);
+                        }
+                    });
+        }
+    }
+
+    /**
+     * The toast bar is assumed to be positioned at the bottom of the display, so the distance over
+     * which to animate is the height of the toast bar + any margin beneath the toast bar.
+     *
+     * @return the distance to move the toast bar to make it appear to pop up / push down from the
+     *      bottom of the display
+     */
+    private int getAnimationDistance() {
+        // total height over which the animation takes place is the toast bar height + bottom margin
+        final LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) getLayoutParams();
+        return getHeight() + params.bottomMargin;
     }
 
     /**

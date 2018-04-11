@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,30 +49,27 @@ const unsigned int kInitialRandSeed = 0xC0DE533D;
 
 
 /*
- * Given a count of cells in a 3x3 grid where cells are worth 1 except for
- * the center which is worth 9, this is a color representation of how
- * "alive" that cell is making for a more interesting representation than
- * a binary alive or dead.
+ * Convert a count value into a live (green) or dead color value.
  */
 const uint32_t kNeighborColors[] = {
-    MakeBGRA(0x00, 0x00, 0x00, 0xff),
-    MakeBGRA(0x00, 0x40, 0x00, 0xff),
-    MakeBGRA(0x00, 0x60, 0x00, 0xff),
-    MakeBGRA(0x00, 0x80, 0x00, 0xff),
-    MakeBGRA(0x00, 0xA0, 0x00, 0xff),
-    MakeBGRA(0x00, 0xC0, 0x00, 0xff),
-    MakeBGRA(0x00, 0xE0, 0x00, 0xff),
-    MakeBGRA(0x00, 0x00, 0x00, 0xff),
-    MakeBGRA(0x00, 0x40, 0x00, 0xff),
-    MakeBGRA(0x00, 0x60, 0x00, 0xff),
-    MakeBGRA(0x00, 0x80, 0x00, 0xff),
-    MakeBGRA(0x00, 0xA0, 0x00, 0xff),
-    MakeBGRA(0x00, 0xC0, 0x00, 0xff),
-    MakeBGRA(0x00, 0xE0, 0x00, 0xff),
-    MakeBGRA(0x00, 0xFF, 0x00, 0xff),
-    MakeBGRA(0x00, 0xFF, 0x00, 0xff),
-    MakeBGRA(0x00, 0xFF, 0x00, 0xff),
-    MakeBGRA(0x00, 0xFF, 0x00, 0xff),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0xFF, 0x00, 0xFF),
+    MakeBGRA(0x00, 0xFF, 0x00, 0xFF),
+    MakeBGRA(0x00, 0xFF, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
+    MakeBGRA(0x00, 0x00, 0x00, 0xFF),
 };
 
 /*
@@ -79,8 +77,8 @@ const uint32_t kNeighborColors[] = {
  * values.  The health is binary: either alive or dead.
  */
 const uint8_t kIsAlive[] = {
-      0, 0, 0, 1, 0, 0, 0, 0, 0,  /* Values if the center cell is dead. */
-      0, 0, 1, 1, 0, 0, 0, 0, 0   /* Values if the center cell is alive. */
+      0, 0, 0, 0, 0, 1, 1, 1, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 void UpdateContext(uint32_t width, uint32_t height) {
@@ -125,6 +123,27 @@ void DrawCell(int32_t x, int32_t y) {
   }
 }
 
+void ProcessTouchEvent(PSEvent* event) {
+  uint32_t count = g_pTouchInput->GetTouchCount(event->as_resource,
+      PP_TOUCHLIST_TYPE_TOUCHES);
+  uint32_t i, j;
+  for (i = 0; i < count; i++) {
+    struct PP_TouchPoint touch = g_pTouchInput->GetTouchByIndex(
+        event->as_resource, PP_TOUCHLIST_TYPE_TOUCHES, i);
+    int radius = (int)touch.radius.x;
+    int x = (int)touch.position.x;
+    int y = (int)touch.position.y;
+    /* num = 1/100th the area of touch point */
+    int num = (int)(M_PI * radius * radius / 100.0f);
+    for (j = 0; j < num; j++) {
+      int dx = rand() % (radius * 2) - radius;
+      int dy = rand() % (radius * 2) - radius;
+      /* only plot random cells within the touch area */
+      if (dx * dx + dy * dy <= radius * radius)
+        DrawCell(x + dx, y + dy);
+    }
+  }
+}
 
 void ProcessEvent(PSEvent* event) {
   switch(event->type) {
@@ -143,23 +162,21 @@ void ProcessEvent(PSEvent* event) {
           g_pInputEvent->GetModifiers(event->as_resource);
 
       switch(type) {
-        case PP_INPUTEVENT_TYPE_MOUSEDOWN: {
+        case PP_INPUTEVENT_TYPE_MOUSEDOWN:
+        case PP_INPUTEVENT_TYPE_MOUSEMOVE: {
           struct PP_Point location =
               g_pMouseInput->GetPosition(event->as_resource);
-          DrawCell(location.x, location.y);
+          /* If the button is down, draw */
+          if (modifiers & PP_INPUTEVENT_MODIFIER_LEFTBUTTONDOWN) {
+            DrawCell(location.x, location.y);
+          }
           break;
         }
 
-        case PP_INPUTEVENT_TYPE_MOUSEMOVE: {
-            struct PP_Point location =
-                g_pMouseInput->GetPosition(event->as_resource);
-
-            /* If the button is down, draw */
-            if (modifiers & PP_INPUTEVENT_MODIFIER_LEFTBUTTONDOWN) {
-              DrawCell(location.x, location.y);
-            }
+        case PP_INPUTEVENT_TYPE_TOUCHSTART:
+        case PP_INPUTEVENT_TYPE_TOUCHMOVE:
+          ProcessTouchEvent(event);
           break;
-        }
 
         case PP_INPUTEVENT_TYPE_KEYDOWN: {
           PP_Bool fullscreen = g_pFullscreen->IsFullscreen(PSGetInstanceId());
@@ -167,6 +184,7 @@ void ProcessEvent(PSEvent* event) {
                                        fullscreen ? PP_FALSE : PP_TRUE);
           break;
         }
+
         default:
           break;
       }
@@ -197,7 +215,7 @@ void Stir(uint32_t width, uint32_t height) {
 
 void Render() {
   struct PP_Size* psize = &g_Context.size;
-  PP_ImageDataFormat format = g_pImageData->GetNativeImageDataFormat();
+  PP_ImageDataFormat format = PP_IMAGEDATAFORMAT_BGRA_PREMUL;
 
   /*
    * Create a buffer to draw into.  Since we are waiting until the next flush
@@ -231,12 +249,14 @@ void Render() {
     uint32_t *pixel_line =  (uint32_t*) (pixels + y * desc.stride);
 
     for (x = 1; x < (desc.size.width - 1); ++x) {
-      /* Build sum, weight center by 9x. */
-      count = src0[-1] + src0[0] +     src0[1] +
-              src1[-1] + src1[0] * 9 + src1[1] +
-              src2[-1] + src2[0] +     src2[1];
+      /* Jitter and sum neighbors. */
+      count = src0[-1] + src0[0] + src0[1] +
+              src1[-1] +         + src1[1] +
+              src2[-1] + src2[0] + src2[1];
+      /* Include center cell. */
+      count = count + count + src1[0];
+      /* Use table lookup indexed by count to determine pixel & alive state. */
       color = kNeighborColors[count];
-
       *pixel_line++ = color;
       *dst++ = kIsAlive[count];
       ++src0;

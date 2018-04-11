@@ -9,7 +9,9 @@
 #include "base/memory/weak_ptr.h"
 #include "webkit/browser/fileapi/async_file_util.h"
 
-namespace chrome {
+namespace net {
+class IOBuffer;
+}
 
 class MediaPathFilter;
 
@@ -24,7 +26,20 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
   // Uses the MIME sniffer code, which actually looks into the file,
   // to determine if it is really a media file (to avoid exposing
   // non-media files with a media file extension.)
-  static base::PlatformFileError IsMediaFile(const base::FilePath& path);
+  static base::File::Error IsMediaFile(const base::FilePath& path);
+  static base::File::Error BufferIsMediaHeader(net::IOBuffer* buf,
+                                                     size_t length);
+
+  // Methods to support CreateOrOpen. Public so they can be shared with
+  // DeviceMediaAsyncFileUtil.
+  static void CreatedSnapshotFileForCreateOrOpen(
+      base::SequencedTaskRunner* media_task_runner,
+      int file_flags,
+      const fileapi::AsyncFileUtil::CreateOrOpenCallback& callback,
+      base::File::Error result,
+      const base::File::Info& file_info,
+      const base::FilePath& platform_path,
+      const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
 
   // AsyncFileUtil overrides.
   virtual void CreateOrOpen(
@@ -65,11 +80,14 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
+      const CopyFileProgressCallback& progress_callback,
       const StatusCallback& callback) OVERRIDE;
   virtual void MoveFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       const StatusCallback& callback) OVERRIDE;
   virtual void CopyInForeignFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
@@ -112,12 +130,17 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       bool copy,
       const StatusCallback& callback);
   virtual void CopyInForeignFileOnTaskRunnerThread(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const base::FilePath& src_file_path,
       const fileapi::FileSystemURL& dest_url,
+      const StatusCallback& callback);
+  virtual void DeleteFileOnTaskRunnerThread(
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
+      const fileapi::FileSystemURL& url,
       const StatusCallback& callback);
   virtual void DeleteDirectoryOnTaskRunnerThread(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
@@ -131,56 +154,59 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
   // The following methods should only be called on the task runner thread.
 
   // Necessary for copy/move to succeed.
-  virtual base::PlatformFileError CreateDirectorySync(
+  virtual base::File::Error CreateDirectorySync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
       bool exclusive,
       bool recursive);
-  virtual base::PlatformFileError CopyOrMoveFileSync(
+  virtual base::File::Error CopyOrMoveFileSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       bool copy);
-  virtual base::PlatformFileError CopyInForeignFileSync(
+  virtual base::File::Error CopyInForeignFileSync(
       fileapi::FileSystemOperationContext* context,
       const base::FilePath& src_file_path,
       const fileapi::FileSystemURL& dest_url);
-  virtual base::PlatformFileError GetFileInfoSync(
+  virtual base::File::Error GetFileInfoSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
-      base::PlatformFileInfo* file_info,
+      base::File::Info* file_info,
       base::FilePath* platform_path);
   // Called by GetFileInfoSync. Meant to be overridden by subclasses that
   // have special mappings from URLs to platform paths (virtual filesystems).
-  virtual base::PlatformFileError GetLocalFilePath(
+  virtual base::File::Error GetLocalFilePath(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& file_system_url,
       base::FilePath* local_file_path);
-  virtual base::PlatformFileError ReadDirectorySync(
+  virtual base::File::Error ReadDirectorySync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
       EntryList* file_list);
-  // Necessary for move to succeed.
-  virtual base::PlatformFileError DeleteDirectorySync(
+  virtual base::File::Error DeleteFileSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url);
-  virtual base::PlatformFileError CreateSnapshotFileSync(
+  // Necessary for move to succeed.
+  virtual base::File::Error DeleteDirectorySync(
+      fileapi::FileSystemOperationContext* context,
+      const fileapi::FileSystemURL& url);
+  virtual base::File::Error CreateSnapshotFileSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
-      base::PlatformFileInfo* file_info,
+      base::File::Info* file_info,
       base::FilePath* platform_path,
       scoped_refptr<webkit_blob::ShareableFileReference>* file_ref);
 
- protected:
-  chrome::MediaPathFilter* media_path_filter() {
+  MediaPathFilter* media_path_filter() {
     return media_path_filter_;
   }
 
  private:
   // Like GetLocalFilePath(), but always take media_path_filter() into
   // consideration. If the media_path_filter() check fails, return
-  // PLATFORM_FILE_ERROR_SECURITY. |local_file_path| does not have to exist.
-  base::PlatformFileError GetFilteredLocalFilePath(
+  // Fila::FILE_ERROR_SECURITY. |local_file_path| does not have to exist.
+  base::File::Error GetFilteredLocalFilePath(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& file_system_url,
       base::FilePath* local_file_path);
@@ -190,22 +216,20 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
   // If |local_file_path| is a file, then take media_path_filter() into
   // consideration.
   // If the media_path_filter() check fails, return |failure_error|.
-  // If |local_file_path| is a directory, return PLATFORM_FILE_OK.
-  base::PlatformFileError GetFilteredLocalFilePathForExistingFileOrDirectory(
+  // If |local_file_path| is a directory, return File::FILE_OK.
+  base::File::Error GetFilteredLocalFilePathForExistingFileOrDirectory(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& file_system_url,
-      base::PlatformFileError failure_error,
+      base::File::Error failure_error,
       base::FilePath* local_file_path);
 
 
-  base::WeakPtrFactory<NativeMediaFileUtil> weak_factory_;
-
   // Not owned, owned by the backend which owns this.
-  chrome::MediaPathFilter* media_path_filter_;
+  MediaPathFilter* const media_path_filter_;
+
+  base::WeakPtrFactory<NativeMediaFileUtil> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeMediaFileUtil);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_NATIVE_MEDIA_FILE_UTIL_H_

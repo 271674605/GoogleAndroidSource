@@ -11,16 +11,12 @@
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
-#include "chrome/browser/media_galleries/mtp_device_delegate_impl.h"
 #include "webkit/browser/fileapi/async_file_util.h"
 
 namespace base {
 class FilePath;
 }
-
-namespace chrome {
 
 struct SnapshotRequestInfo;
 
@@ -73,6 +69,12 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
       const base::FilePath& local_path,
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback) OVERRIDE;
+  virtual bool IsStreaming() OVERRIDE;
+  virtual void ReadBytes(
+      const base::FilePath& device_file_path,
+      net::IOBuffer* buf, int64 offset, int buf_len,
+      const ReadBytesSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) OVERRIDE;
   virtual void CancelPendingTasksAndDeleteDelegate() OVERRIDE;
 
   // Ensures the device is initialized for communication by doing a
@@ -91,8 +93,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // the UI thread.
   //
   // |snapshot_file_info| specifies the metadata details of the snapshot file.
-  void WriteDataIntoSnapshotFile(
-      const base::PlatformFileInfo& snapshot_file_info);
+  void WriteDataIntoSnapshotFile(const base::File::Info& snapshot_file_info);
 
   // Processes the next pending request.
   void ProcessNextPendingRequest();
@@ -107,7 +108,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // requested file details. |success_callback| is invoked to notify the caller
   // about the requested file details.
   void OnDidGetFileInfo(const GetFileInfoSuccessCallback& success_callback,
-                        const base::PlatformFileInfo& file_info);
+                        const base::File::Info& file_info);
 
   // Called when GetFileInfo() succeeds. GetFileInfo() is invoked to
   // get the |root| directory metadata details. |file_info| specifies the |root|
@@ -117,12 +118,12 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // directory file entries.
   //
   // If |root| is not a directory, |error_callback| is invoked to notify the
-  // caller about the platform file error and process the next pending request.
+  // caller about the file error and process the next pending request.
   void OnDidGetFileInfoToReadDirectory(
       const std::string& root,
       const ReadDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback,
-      const base::PlatformFileInfo& file_info);
+      const base::File::Info& file_info);
 
   // Called when GetFileInfo() succeeds. GetFileInfo() is invoked to
   // create the snapshot file of |snapshot_request_info.device_file_path|.
@@ -132,7 +133,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // to the snapshot file.
   void OnDidGetFileInfoToCreateSnapshotFile(
       scoped_ptr<SnapshotRequestInfo> snapshot_request_info,
-      const base::PlatformFileInfo& file_info);
+      const base::File::Info& file_info);
 
   // Called when ReadDirectory() succeeds.
   //
@@ -149,21 +150,28 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // |current_snapshot_request_info_.success_callback| is invoked to notify the
   // caller about |snapshot_file_info|.
   void OnDidWriteDataIntoSnapshotFile(
-      const base::PlatformFileInfo& snapshot_file_info,
+      const base::File::Info& snapshot_file_info,
       const base::FilePath& snapshot_file_path);
 
   // Called when WriteDataIntoSnapshotFile() fails.
   //
-  // |error| specifies the platform file error code.
+  // |error| specifies the file error code.
   //
   // |current_snapshot_request_info_.error_callback| is invoked to notify the
   // caller about |error|.
-  void OnWriteDataIntoSnapshotFileError(base::PlatformFileError error);
+  void OnWriteDataIntoSnapshotFileError(base::File::Error error);
+
+  // Called when ReadBytes() succeeds.
+  //
+  // |success_callback| is invoked to notify the caller about the read bytes.
+  // |bytes_read| is the number of bytes read.
+  void OnDidReadBytes(const ReadBytesSuccessCallback& success_callback,
+                      const base::File::Info& file_info, int bytes_read);
 
   // Handles the device file |error|. |error_callback| is invoked to notify the
   // caller about the file error.
   void HandleDeviceFileError(const ErrorCallback& error_callback,
-                             base::PlatformFileError error);
+                             base::File::Error error);
 
   // MTP device initialization state.
   InitializationState init_state_;
@@ -194,7 +202,5 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(MTPDeviceDelegateImplLinux);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_LINUX_MTP_DEVICE_DELEGATE_IMPL_LINUX_H_

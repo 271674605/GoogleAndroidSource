@@ -11,12 +11,13 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/extensions/crx_installer_error.h"
-#include "chrome/browser/signin/oauth2_token_service.h"
+#include "chrome/browser/extensions/extension_install_prompt_experiment.h"
 #include "extensions/common/url_pattern.h"
-#include "google_apis/gaia/oauth2_mint_token_flow.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -24,7 +25,6 @@
 
 class Browser;
 class ExtensionInstallUI;
-class InfoBarDelegate;
 class Profile;
 
 namespace base {
@@ -45,12 +45,16 @@ class MockGetAuthTokenFunction;
 class PermissionSet;
 }  // namespace extensions
 
+namespace infobars {
+class InfoBarDelegate;
+}
+
 // Displays all the UI around extension installation.
 class ExtensionInstallPrompt
-    : public OAuth2MintTokenFlow::Delegate,
-      public OAuth2TokenService::Consumer,
-      public base::SupportsWeakPtr<ExtensionInstallPrompt> {
+    : public base::SupportsWeakPtr<ExtensionInstallPrompt> {
  public:
+  // This enum is associated with Extensions.InstallPrompt_Type UMA histogram.
+  // Do not modify existing values and add new values only to the end.
   enum PromptType {
     UNSET_PROMPT_TYPE = -1,
     INSTALL_PROMPT = 0,
@@ -60,46 +64,55 @@ class ExtensionInstallPrompt
     PERMISSIONS_PROMPT,
     EXTERNAL_INSTALL_PROMPT,
     POST_INSTALL_PERMISSIONS_PROMPT,
+    LAUNCH_PROMPT,
+    REMOTE_INSTALL_PROMPT,
     NUM_PROMPT_TYPES
+  };
+
+  enum DetailsType {
+    PERMISSIONS_DETAILS = 0,
+    RETAINED_FILES_DETAILS,
   };
 
   // Extra information needed to display an installation or uninstallation
   // prompt. Gets populated with raw data and exposes getters for formatted
   // strings so that the GTK/views/Cocoa install dialogs don't have to repeat
   // that logic.
-  class Prompt {
+  // Ref-counted because we pass around the prompt independent of the full
+  // ExtensionInstallPrompt.
+  class Prompt : public base::RefCountedThreadSafe<Prompt> {
    public:
     explicit Prompt(PromptType type);
-    ~Prompt();
 
     // Sets the permission list for this prompt.
-    void SetPermissions(const std::vector<string16>& permissions);
+    void SetPermissions(const std::vector<base::string16>& permissions);
     // Sets the permission list details for this prompt.
-    void SetPermissionsDetails(const std::vector<string16>& details);
-    void SetInlineInstallWebstoreData(const std::string& localized_user_count,
-                                      bool show_user_count,
-                                      double average_rating,
-                                      int rating_count);
-    void SetOAuthIssueAdvice(const IssueAdviceInfo& issue_advice);
+    void SetPermissionsDetails(const std::vector<base::string16>& details);
+    void SetIsShowingDetails(DetailsType type,
+                             size_t index,
+                             bool is_showing_details);
+    void SetWebstoreData(const std::string& localized_user_count,
+                         bool show_user_count,
+                         double average_rating,
+                         int rating_count);
     void SetUserNameFromProfile(Profile* profile);
 
     PromptType type() const { return type_; }
     void set_type(PromptType type) { type_ = type; }
 
     // Getters for UI element labels.
-    string16 GetDialogTitle() const;
-    string16 GetHeading() const;
+    base::string16 GetDialogTitle() const;
+    base::string16 GetHeading() const;
     int GetDialogButtons() const;
     bool HasAcceptButtonLabel() const;
-    string16 GetAcceptButtonLabel() const;
+    base::string16 GetAcceptButtonLabel() const;
     bool HasAbortButtonLabel() const;
-    string16 GetAbortButtonLabel() const;
-    string16 GetPermissionsHeading() const;
-    string16 GetOAuthHeading() const;
-    string16 GetRetainedFilesHeading() const;
-    string16 GetRetainedFilesHeadingWithCount() const;
+    base::string16 GetAbortButtonLabel() const;
+    base::string16 GetPermissionsHeading() const;
+    base::string16 GetRetainedFilesHeading() const;
 
     bool ShouldShowPermissions() const;
+    bool ShouldShowExplanationText() const;
 
     // Getters for webstore metadata. Only populated when the type is
     // INLINE_INSTALL_PROMPT.
@@ -110,16 +123,15 @@ class ExtensionInstallPrompt
     // that they append to the star display area.
     typedef void(*StarAppender)(const gfx::ImageSkia*, void*);
     void AppendRatingStars(StarAppender appender, void* data) const;
-    string16 GetRatingCount() const;
-    string16 GetUserCount() const;
+    base::string16 GetRatingCount() const;
+    base::string16 GetUserCount() const;
     size_t GetPermissionCount() const;
     size_t GetPermissionsDetailsCount() const;
-    string16 GetPermission(size_t index) const;
-    string16 GetPermissionsDetails(size_t index) const;
-    size_t GetOAuthIssueCount() const;
-    const IssueAdviceInfoEntry& GetOAuthIssue(size_t index) const;
+    base::string16 GetPermission(size_t index) const;
+    base::string16 GetPermissionsDetails(size_t index) const;
+    bool GetIsShowingDetails(DetailsType type, size_t index) const;
     size_t GetRetainedFileCount() const;
-    string16 GetRetainedFile(size_t index) const;
+    base::string16 GetRetainedFile(size_t index) const;
 
     // Populated for BUNDLE_INSTALL_PROMPT.
     const extensions::BundleInstaller* bundle() const { return bundle_; }
@@ -141,22 +153,30 @@ class ExtensionInstallPrompt
     const gfx::Image& icon() const { return icon_; }
     void set_icon(const gfx::Image& icon) { icon_ = icon; }
 
+    bool has_webstore_data() const { return has_webstore_data_; }
+
+    const ExtensionInstallPromptExperiment* experiment() const {
+      return experiment_;
+    }
+    void set_experiment(ExtensionInstallPromptExperiment* experiment) {
+      experiment_ = experiment;
+    }
+
    private:
+    friend class base::RefCountedThreadSafe<Prompt>;
+
+    virtual ~Prompt();
+
     bool ShouldDisplayRevokeFilesButton() const;
 
     PromptType type_;
 
     // Permissions that are being requested (may not be all of an extension's
     // permissions if only additional ones are being requested)
-    std::vector<string16> permissions_;
-    std::vector<string16> details_;
-
-    // Descriptions and details for OAuth2 permissions to display to the user.
-    // These correspond to permission scopes.
-    IssueAdviceInfo oauth_issue_advice_;
-
-    // User name to be used in Oauth heading label.
-    string16 oauth_user_name_;
+    std::vector<base::string16> permissions_;
+    std::vector<base::string16> details_;
+    std::vector<bool> is_showing_details_for_permissions_;
+    bool is_showing_details_for_retained_files_;
 
     // The extension or bundle being installed.
     const extensions::Extension* extension_;
@@ -177,7 +197,15 @@ class ExtensionInstallPrompt
     // false if localized_user_count_ represents the number zero).
     bool show_user_count_;
 
+    // Whether or not this prompt has been populated with data from the
+    // webstore.
+    bool has_webstore_data_;
+
     std::vector<base::FilePath> retained_files_;
+
+    scoped_refptr<ExtensionInstallPromptExperiment> experiment_;
+
+    DISALLOW_COPY_AND_ASSIGN(Prompt);
   };
 
   static const int kMinExtensionRating = 0;
@@ -214,7 +242,7 @@ class ExtensionInstallPrompt
 
   typedef base::Callback<void(const ExtensionInstallPrompt::ShowParams&,
                               ExtensionInstallPrompt::Delegate*,
-                              const ExtensionInstallPrompt::Prompt&)>
+                              scoped_refptr<ExtensionInstallPrompt::Prompt>)>
       ShowDialogCallback;
 
   // Callback to show the default extension install dialog.
@@ -243,8 +271,6 @@ class ExtensionInstallPrompt
 
   ExtensionInstallUI* install_ui() const { return install_ui_.get(); }
 
-  bool record_oauth2_grant() const { return record_oauth2_grant_; }
-
   content::WebContents* parent_web_contents() const {
     return show_params_.parent_web_contents;
   }
@@ -264,7 +290,7 @@ class ExtensionInstallPrompt
   virtual void ConfirmStandaloneInstall(Delegate* delegate,
                                         const extensions::Extension* extension,
                                         SkBitmap* icon,
-                                        const Prompt& prompt);
+                                        scoped_refptr<Prompt> prompt);
 
   // This is called by the installer to verify whether the installation from
   // the webstore should proceed. |show_dialog_callback| is optional and can be
@@ -300,7 +326,8 @@ class ExtensionInstallPrompt
   virtual void ConfirmExternalInstall(
       Delegate* delegate,
       const extensions::Extension* extension,
-      const ShowDialogCallback& show_dialog_callback);
+      const ShowDialogCallback& show_dialog_callback,
+      scoped_refptr<Prompt> prompt);
 
   // This is called by the extension permissions API to verify whether an
   // extension may be granted additional permissions.
@@ -309,14 +336,6 @@ class ExtensionInstallPrompt
   virtual void ConfirmPermissions(Delegate* delegate,
                                   const extensions::Extension* extension,
                                   const extensions::PermissionSet* permissions);
-
-  // This is called by the extension identity API to verify whether an
-  // extension can be granted an OAuth2 token.
-  //
-  // We *MUST* eventually call either Proceed() or Abort() on |delegate|.
-  virtual void ConfirmIssueAdvice(Delegate* delegate,
-                                  const extensions::Extension* extension,
-                                  const IssueAdviceInfo& issue_advice);
 
   // This is called by the app handler launcher to review what permissions the
   // extension or app currently has.
@@ -334,9 +353,12 @@ class ExtensionInstallPrompt
   // Installation failed. This is declared virtual for testing.
   virtual void OnInstallFailure(const extensions::CrxInstallerError& error);
 
+  void set_callback_for_test(const ShowDialogCallback& show_dialog_callback) {
+    show_dialog_callback_ = show_dialog_callback;
+  }
+
  protected:
   friend class extensions::ExtensionWebstorePrivateApiTest;
-  friend class extensions::MockGetAuthTokenFunction;
   friend class WebstoreStartupInstallUnpackFailureTest;
 
   // Whether or not we should record the oauth2 grant upon successful install.
@@ -356,22 +378,6 @@ class ExtensionInstallPrompt
   // 1) Set off a 'load icon' task.
   // 2) Handle the load icon response and show the UI (OnImageLoaded).
   void LoadImageIfNeeded();
-
-  // Starts fetching warnings for OAuth2 scopes, if there are any.
-  void FetchOAuthIssueAdviceIfNeeded();
-
-  // OAuth2TokenService::Consumer implementation:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
-
-  // OAuth2MintTokenFlow::Delegate implementation:
-  virtual void OnIssueAdviceSuccess(
-      const IssueAdviceInfo& issue_advice) OVERRIDE;
-  virtual void OnMintTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
 
   // Shows the actual UI (the icon should already be loaded).
   void ShowConfirmation();
@@ -401,10 +407,7 @@ class ExtensionInstallPrompt
   Delegate* delegate_;
 
   // A pre-filled prompt.
-  Prompt prompt_;
-
-  scoped_ptr<OAuth2TokenService::Request> login_token_request_;
-  scoped_ptr<OAuth2MintTokenFlow> token_flow_;
+  scoped_refptr<Prompt> prompt_;
 
   // Used to show the confirm dialog.
   ShowDialogCallback show_dialog_callback_;

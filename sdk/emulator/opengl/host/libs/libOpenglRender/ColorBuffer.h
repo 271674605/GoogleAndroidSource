@@ -19,7 +19,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES/gl.h>
-#include <SmartPtr.h>
+#include "emugl/common/smart_ptr.h"
 
 class ColorBuffer
 {
@@ -41,7 +41,7 @@ public:
 
 private:
     ColorBuffer();
-    void drawTexQuad(bool flipy);
+    void drawTexQuad();
     bool bind_fbo();  // binds a fbo which have this texture as render target
 
 private:
@@ -53,9 +53,8 @@ private:
     GLuint m_height;
     GLuint m_fbo;
     GLenum m_internalFormat;
-    bool m_warYInvertBug;
 };
 
-typedef SmartPtr<ColorBuffer> ColorBufferPtr;
+typedef emugl::SmartPtr<ColorBuffer> ColorBufferPtr;
 
 #endif

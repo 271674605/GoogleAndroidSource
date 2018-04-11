@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,13 @@ import android.test.suitebuilder.annotation.LargeTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 
+import org.apache.http.Header;
+import org.apache.http.HttpRequest;
+
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.net.test.util.TestWebServer;
@@ -25,83 +28,18 @@ import org.chromium.net.test.util.TestWebServer;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * AwContents tests.
  */
 public class AwContentsTest extends AwTestBase {
-    public static class OnDownloadStartHelper extends CallbackHelper {
-        String mUrl;
-        String mUserAgent;
-        String mContentDisposition;
-        String mMimeType;
-        long mContentLength;
-
-        public String getUrl() {
-            assert getCallCount() > 0;
-            return mUrl;
-        }
-
-        public String getUserAgent() {
-            assert getCallCount() > 0;
-            return mUserAgent;
-        }
-
-        public String getContentDisposition() {
-            assert getCallCount() > 0;
-            return mContentDisposition;
-        }
-
-       public String getMimeType() {
-            assert getCallCount() > 0;
-            return mMimeType;
-        }
-
-        public long getContentLength() {
-            assert getCallCount() > 0;
-            return mContentLength;
-        }
-
-        public void notifyCalled(String url, String userAgent, String contentDisposition,
-                String mimeType, long contentLength) {
-            mUrl = url;
-            mUserAgent = userAgent;
-            mContentDisposition = contentDisposition;
-            mMimeType = mimeType;
-            mContentLength = contentLength;
-            notifyCalled();
-        }
-    }
-
-    private static class TestAwContentsClient
-            extends org.chromium.android_webview.test.TestAwContentsClient {
-
-        private OnDownloadStartHelper mOnDownloadStartHelper;
-
-        public TestAwContentsClient() {
-            mOnDownloadStartHelper = new OnDownloadStartHelper();
-        }
-
-        public OnDownloadStartHelper getOnDownloadStartHelper() {
-            return mOnDownloadStartHelper;
-        }
-
-        @Override
-        public void onDownloadStart(String url,
-                                    String userAgent,
-                                    String contentDisposition,
-                                    String mimeType,
-                                    long contentLength) {
-            getOnDownloadStartHelper().notifyCalled(url, userAgent, contentDisposition, mimeType,
-                    contentLength);
-        }
-    }
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
 
@@ -156,6 +94,8 @@ public class AwContentsTest extends AwTestBase {
         }
     }
 
+    @LargeTest
+    @Feature({"AndroidWebView"})
     public void testCreateAndGcManyTimes() throws Throwable {
         final int CONCURRENT_INSTANCES = 4;
         final int REPETITIONS = 16;
@@ -165,12 +105,12 @@ public class AwContentsTest extends AwTestBase {
 
         System.gc();
 
-        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+        pollOnUiThread(new Callable<Boolean>() {
             @Override
             public Boolean call() {
                 return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
             }
-        }));
+        });
         for (int i = 0; i < REPETITIONS; ++i) {
             for (int j = 0; j < CONCURRENT_INSTANCES; ++j) {
                 AwTestContainerView view = createAwTestContainerViewOnMainSync(mContentsClient);
@@ -188,12 +128,31 @@ public class AwContentsTest extends AwTestBase {
 
         System.gc();
 
-        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+        pollOnUiThread(new Callable<Boolean>() {
             @Override
             public Boolean call() {
                 return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
             }
-        }));
+        });
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testUseAwSettingsAfterDestroy() throws Throwable {
+        AwTestContainerView awTestContainerView =
+                createAwTestContainerViewOnMainSync(mContentsClient);
+        AwSettings awSettings = getAwSettingsOnUiThread(awTestContainerView.getAwContents());
+        loadUrlSync(awTestContainerView.getAwContents(),
+                mContentsClient.getOnPageFinishedHelper(), CommonResources.ABOUT_HTML);
+        destroyAwContentsOnMainSync(awTestContainerView.getAwContents());
+
+        // AwSettings should still be usable even after native side is destroyed.
+        String newFontFamily = "serif";
+        awSettings.setStandardFontFamily(newFontFamily);
+        assertEquals(newFontFamily, awSettings.getStandardFontFamily());
+        boolean newBlockNetworkLoads = !awSettings.getBlockNetworkLoads();
+        awSettings.setBlockNetworkLoads(newBlockNetworkLoads);
+        assertEquals(newBlockNetworkLoads, awSettings.getBlockNetworkLoads());
     }
 
     private int callDocumentHasImagesSync(final AwContents awContents)
@@ -215,7 +174,7 @@ public class AwContentsTest extends AwTestBase {
               awContents.documentHasImages(msg);
             }
         });
-        assertTrue(s.tryAcquire(WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        assertTrue(s.tryAcquire(WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS));
         int result = val.get();
         return result;
     }
@@ -306,19 +265,17 @@ public class AwContentsTest extends AwTestBase {
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-              for (int i = 0; i < 10; ++i) {
-                  awContents.clearCache(true);
-              }
+                for (int i = 0; i < 10; ++i) {
+                    awContents.clearCache(true);
+                }
             }
         });
     }
 
-    private static final long TEST_TIMEOUT = 20000L;
-    private static final int CHECK_INTERVAL = 100;
-
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testGetFavicon() throws Throwable {
+        AwContents.setShouldDownloadFavicons();
         final AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testView.getAwContents();
 
@@ -339,17 +296,17 @@ public class AwContentsTest extends AwTestBase {
             getAwSettingsOnUiThread(awContents).setImagesEnabled(true);
             loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
 
-            assertTrue(pollOnUiThread(new Callable<Boolean>() {
+            pollOnUiThread(new Callable<Boolean>() {
                 @Override
                 public Boolean call() {
                     return awContents.getFavicon() != null &&
                         !awContents.getFavicon().sameAs(defaultFavicon);
                 }
-            }));
+            });
 
             final Object originalFaviconSource = (new URL(faviconUrl)).getContent();
             final Bitmap originalFavicon =
-                BitmapFactory.decodeStream((InputStream)originalFaviconSource);
+                BitmapFactory.decodeStream((InputStream) originalFaviconSource);
             assertNotNull(originalFavicon);
 
             assertTrue(awContents.getFavicon().sameAs(originalFavicon));
@@ -409,12 +366,12 @@ public class AwContentsTest extends AwTestBase {
               SCRIPT));
 
         // Forcing "offline".
-        awContents.setNetworkAvailable(false);
+        setNetworkAvailableOnUiThread(awContents, false);
         assertEquals("false", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
               SCRIPT));
 
         // Forcing "online".
-        awContents.setNetworkAvailable(true);
+        setNetworkAvailableOnUiThread(awContents, true);
         assertEquals("true", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
               SCRIPT));
     }
@@ -429,7 +386,7 @@ public class AwContentsTest extends AwTestBase {
         public void run() {
             mCallbackHelper.notifyCalled();
         }
-    };
+    }
 
     @Feature({"AndroidWebView", "JavaBridge"})
     @SmallTest
@@ -449,6 +406,62 @@ public class AwContentsTest extends AwTestBase {
                         "javascript:window.bridge.run();");
             }
         });
-        callback.waitForCallback(0, 1, 20, TimeUnit.SECONDS);
+        callback.waitForCallback(0, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testEscapingOfErrorPage() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+        String SCRIPT = "window.failed == true";
+
+        enableJavaScriptOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = mContentsClient.getOnPageFinishedHelper();
+        int currentCallCount = onPageFinishedHelper.getCallCount();
+        loadUrlAsync(awContents,
+                "file:///file-that-does-not-exist#<script>window.failed = true;</script>");
+        onPageFinishedHelper.waitForCallback(currentCallCount, 1, WAIT_TIMEOUT_MS,
+                                             TimeUnit.MILLISECONDS);
+
+        assertEquals("false", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
+                SCRIPT));
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testCanInjectHeaders() throws Throwable {
+        final AwTestContainerView testContainer =
+                createAwTestContainerViewOnMainSync(mContentsClient);
+        final AwContents awContents = testContainer.getAwContents();
+
+        TestWebServer webServer = null;
+        try {
+            webServer = new TestWebServer(false);
+            final String pagePath = "/test_can_inject_headers.html";
+            final String pageUrl = webServer.setResponse(
+                    pagePath, "<html><body>foo</body></html>", null);
+
+            final Map<String, String> extraHeaders = new HashMap<String, String>();
+            extraHeaders.put("Referer", "foo");
+            extraHeaders.put("X-foo", "bar");
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                    webServer.getResponseUrl(pagePath), extraHeaders);
+
+            assertEquals(1, webServer.getRequestCount(pagePath));
+
+            HttpRequest request = webServer.getLastRequest(pagePath);
+            assertNotNull(request);
+
+            for (Map.Entry<String, String> value : extraHeaders.entrySet()) {
+                String header = value.getKey();
+                Header[] matchingHeaders = request.getHeaders(header);
+                assertEquals("header " + header + " not found", 1, matchingHeaders.length);
+                assertEquals(value.getValue(), matchingHeaders[0].getValue());
+            }
+        } finally {
+            if (webServer != null) webServer.shutdown();
+        }
+    }
+
 }

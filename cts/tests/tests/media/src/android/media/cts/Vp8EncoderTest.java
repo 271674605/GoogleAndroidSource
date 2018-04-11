@@ -16,594 +16,464 @@
 
 package android.media.cts;
 
-import android.content.Context;
-import android.content.res.Resources;
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo.CodecCapabilities;
-import android.media.MediaFormat;
-import android.os.Bundle;
-import android.test.AndroidTestCase;
+import android.media.MediaCodecInfo;
 import android.util.Log;
-
 import com.android.cts.media.R;
 
-import java.io.InputStream;
-import java.nio.ByteBuffer;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
- * Basic verification test for vp8 encoder.
+ * Verification test for vp8 encoder and decoder.
  *
- * A raw yv12 stream is encoded and written to an IVF
- * file, which is later decoded by vp8 decoder to verify
- * frames are at least decodable.
+ * A raw yv12 stream is encoded at various settings and written to an IVF
+ * file. Encoded stream bitrate and key frame interval are checked against target values.
+ * The stream is later decoded by vp8 decoder to verify frames are decodable and to
+ * calculate PSNR values for various bitrates.
  */
-public class Vp8EncoderTest extends AndroidTestCase {
+public class Vp8EncoderTest extends Vp8CodecTestBase {
 
-    private static final String TAG = "VP8EncoderTest";
-    private static final String VP8_MIME = "video/x-vnd.on2.vp8";
-    private static final String VPX_DECODER_NAME = "OMX.google.vp8.decoder";
-    private static final String VPX_ENCODER_NAME = "OMX.google.vp8.encoder";
-    private static final String BASIC_IVF = "video_176x144_vp8_basic.ivf";
-    private static final long DEFAULT_TIMEOUT_US = 5000;
+    private static final String ENCODED_IVF_BASE = "football";
+    private static final String INPUT_YUV = null;
+    private static final String OUTPUT_YUV = SDCARD_DIR + File.separator +
+            ENCODED_IVF_BASE + "_out.yuv";
 
-    private Resources mResources;
-    private MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
-    private ByteBuffer[] mInputBuffers;
-    private ByteBuffer[] mOutputBuffers;
-
-    @Override
-    public void setContext(Context context) {
-        super.setContext(context);
-        mResources = mContext.getResources();
-    }
+    // YUV stream properties.
+    private static final int WIDTH = 320;
+    private static final int HEIGHT = 240;
+    private static final int FPS = 30;
+    // Default encoding bitrate.
+    private static final int BITRATE = 400000;
+    // Default encoding bitrate mode
+    private static final int BITRATE_MODE = VIDEO_ControlRateVariable;
+    // List of bitrates used in quality and basic bitrate tests.
+    private static final int[] TEST_BITRATES_SET = { 300000, 500000, 700000, 900000 };
+    // Maximum allowed bitrate variation from the target value.
+    private static final double MAX_BITRATE_VARIATION = 0.2;
+    // Average PSNR values for reference SW VP8 codec for the above bitrates.
+    private static final double[] REFERENCE_AVERAGE_PSNR = { 33.1, 35.2, 36.6, 37.8 };
+    // Minimum PSNR values for reference SW VP8 codec for the above bitrates.
+    private static final double[] REFERENCE_MINIMUM_PSNR = { 25.9, 27.5, 28.4, 30.3 };
+    // Maximum allowed average PSNR difference of HW encoder comparing to reference SW encoder.
+    private static final double MAX_AVERAGE_PSNR_DIFFERENCE = 2;
+    // Maximum allowed minimum PSNR difference of HW encoder comparing to reference SW encoder.
+    private static final double MAX_MINIMUM_PSNR_DIFFERENCE = 4;
+    // Maximum allowed average PSNR difference of the encoder running in a looper thread with 0 ms
+    // buffer dequeue timeout comparing to the encoder running in a callee's thread with 100 ms
+    // buffer dequeue timeout.
+    private static final double MAX_ASYNC_AVERAGE_PSNR_DIFFERENCE = 0.5;
+    // Maximum allowed minimum PSNR difference of the encoder running in a looper thread
+    // comparing to the encoder running in a callee's thread.
+    private static final double MAX_ASYNC_MINIMUM_PSNR_DIFFERENCE = 2;
+    // Maximum allowed average key frame interval variation from the target value.
+    private static final int MAX_AVERAGE_KEYFRAME_INTERVAL_VARIATION = 1;
+    // Maximum allowed key frame interval variation from the target value.
+    private static final int MAX_KEYFRAME_INTERVAL_VARIATION = 3;
 
     /**
      * A basic test for VP8 encoder.
      *
-     * Encodes a raw stream with default configuration options,
+     * Encodes 9 seconds of raw stream with default configuration options,
      * and then decodes it to verify the bitstream.
+     * Also checks the average bitrate is within MAX_BITRATE_VARIATION of the target value.
      */
     public void testBasic() throws Exception {
-        encode(BASIC_IVF,
-               R.raw.video_176x144_yv12,
-               176,  // width
-               144,  // height
-               30);  // framerate
-        decode(BASIC_IVF);
+        MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+        if (codecInfo == null) {
+            Log.w(TAG, "Codec " + VP8_MIME + " not supported. Return from testBasic.");
+            return;
+        }
+
+        int encodeSeconds = 9;
+
+        for (int targetBitrate : TEST_BITRATES_SET) {
+            EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                    INPUT_YUV,
+                    ENCODED_IVF_BASE,
+                    encodeSeconds,
+                    WIDTH,
+                    HEIGHT,
+                    FPS,
+                    BITRATE_MODE,
+                    targetBitrate,
+                    true);
+            ArrayList<MediaCodec.BufferInfo> bufInfo = encode(params);
+            Vp8EncodingStatistics statistics = computeEncodingStatistics(bufInfo);
+
+            assertEquals("Stream bitrate " + statistics.mAverageBitrate +
+                    " is different from the target " + targetBitrate,
+                    targetBitrate, statistics.mAverageBitrate,
+                    MAX_BITRATE_VARIATION * targetBitrate);
+
+            decode(params.outputIvfFilename, null, FPS, params.forceSwEncoder);
+        }
+    }
+
+    /**
+     * Asynchronous encoding test for VP8 encoder.
+     *
+     * Encodes 9 seconds of raw stream using synchronous and asynchronous calls.
+     * Checks the PSNR difference between the encoded and decoded output and reference yuv input
+     * does not change much for two different ways of the encoder call.
+     */
+    public void testAsyncEncoding() throws Exception {
+        MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+        if (codecInfo == null) {
+            Log.w(TAG, "Codec " + VP8_MIME + " not supported. Return from testAsyncEncoding.");
+            return;
+        }
+
+        int encodeSeconds = 9;
+
+        // First test the encoder running in a looper thread with buffer callbacks enabled.
+        boolean syncEncoding = false;
+        EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                INPUT_YUV,
+                ENCODED_IVF_BASE,
+                encodeSeconds,
+                WIDTH,
+                HEIGHT,
+                FPS,
+                BITRATE_MODE,
+                BITRATE,
+                syncEncoding);
+        ArrayList<MediaCodec.BufferInfo> bufInfos = encodeAsync(params);
+        computeEncodingStatistics(bufInfos);
+        decode(params.outputIvfFilename, OUTPUT_YUV, FPS, params.forceSwEncoder);
+        Vp8DecodingStatistics statisticsAsync = computeDecodingStatistics(
+                params.inputYuvFilename, R.raw.football_qvga, OUTPUT_YUV,
+                params.frameWidth, params.frameHeight);
+
+
+        // Test the encoder running in a callee's thread.
+        syncEncoding = true;
+        params = getDefaultEncodingParameters(
+                INPUT_YUV,
+                ENCODED_IVF_BASE,
+                encodeSeconds,
+                WIDTH,
+                HEIGHT,
+                FPS,
+                BITRATE_MODE,
+                BITRATE,
+                syncEncoding);
+        bufInfos = encode(params);
+        computeEncodingStatistics(bufInfos);
+        decode(params.outputIvfFilename, OUTPUT_YUV, FPS, params.forceSwEncoder);
+        Vp8DecodingStatistics statisticsSync = computeDecodingStatistics(
+                params.inputYuvFilename, R.raw.football_qvga, OUTPUT_YUV,
+                params.frameWidth, params.frameHeight);
+
+        // Check PSNR difference.
+        Log.d(TAG, "PSNR Average: Async: " + statisticsAsync.mAveragePSNR +
+                ". Sync: " + statisticsSync.mAveragePSNR);
+        Log.d(TAG, "PSNR Minimum: Async: " + statisticsAsync.mMinimumPSNR +
+                ". Sync: " + statisticsSync.mMinimumPSNR);
+        if ((Math.abs(statisticsAsync.mAveragePSNR - statisticsSync.mAveragePSNR) >
+            MAX_ASYNC_AVERAGE_PSNR_DIFFERENCE) ||
+            (Math.abs(statisticsAsync.mMinimumPSNR - statisticsSync.mMinimumPSNR) >
+            MAX_ASYNC_MINIMUM_PSNR_DIFFERENCE)) {
+            throw new RuntimeException("Difference between PSNRs for async and sync encoders");
+        }
     }
 
     /**
      * Check if MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME is honored.
      *
-     * At frame 15, request a sync frame. If one does not occur by EOF the
-     * encoder fails. The test does not verify the output stream.
+     * Encodes 9 seconds of raw stream and requests a sync frame every second (30 frames).
+     * The test does not verify the output stream.
      */
     public void testSyncFrame() throws Exception {
-        encodeSyncFrame(R.raw.video_176x144_yv12,
-                        176, // width
-                        144, // height
-                        30); // framerate
+        MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+        if (codecInfo == null) {
+            Log.w(TAG, "Codec " + VP8_MIME + " not supported. Return from testSyncFrame.");
+            return;
+        }
+
+        int encodeSeconds = 9;
+
+        EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                INPUT_YUV,
+                ENCODED_IVF_BASE,
+                encodeSeconds,
+                WIDTH,
+                HEIGHT,
+                FPS,
+                BITRATE_MODE,
+                BITRATE,
+                true);
+        params.syncFrameInterval = encodeSeconds * FPS;
+        params.syncForceFrameInterval = FPS;
+        ArrayList<MediaCodec.BufferInfo> bufInfo = encode(params);
+        Vp8EncodingStatistics statistics = computeEncodingStatistics(bufInfo);
+
+        // First check if we got expected number of key frames.
+        int actualKeyFrames = statistics.mKeyFrames.size();
+        if (actualKeyFrames != encodeSeconds) {
+            throw new RuntimeException("Number of key frames " + actualKeyFrames +
+                    " is different from the expected " + encodeSeconds);
+        }
+
+        // Check key frame intervals:
+        // Average value should be within +/- 1 frame of the target value,
+        // maximum value should not be greater than target value + 3,
+        // and minimum value should not be less that target value - 3.
+        if (Math.abs(statistics.mAverageKeyFrameInterval - FPS) >
+            MAX_AVERAGE_KEYFRAME_INTERVAL_VARIATION ||
+            (statistics.mMaximumKeyFrameInterval - FPS > MAX_KEYFRAME_INTERVAL_VARIATION) ||
+            (FPS - statistics.mMinimumKeyFrameInterval > MAX_KEYFRAME_INTERVAL_VARIATION)) {
+            throw new RuntimeException(
+                    "Key frame intervals are different from the expected " + FPS);
+        }
     }
 
     /**
      * Check if MediaCodec.PARAMETER_KEY_VIDEO_BITRATE is honored.
      *
-     * Run the sample multiple times. Request periodic changes to the
-     * bitrate and ensure the encoder responds.
+     * Run the the encoder for 12 seconds. Request changes to the
+     * bitrate after 6 seconds and ensure the encoder responds.
      */
-    public void testVariableBitrate() throws Exception {
-        encodeVariableBitrate(R.raw.video_176x144_yv12,
-                              176, // width
-                              144, // height
-                              30); // framerate
-    }
+    public void testDynamicBitrateChange() throws Exception {
+        MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+        if (codecInfo == null) {
+            Log.w(TAG, "Codec " + VP8_MIME + " not supported. Return from testDynamicBitrateChange.");
+            return;
+        }
 
-    /**
-     * A basic check if an encoded stream is decodable.
-     *
-     * The most basic confirmation we can get about a frame
-     * being properly encoded is trying to decode it.
-     * (Especially in realtime mode encode output is non-
-     * deterministic, therefore a more thorough check like
-     * md5 sum comparison wouldn't work.)
-     *
-     * Indeed, MediaCodec will raise an IllegalStateException
-     * whenever vp8 decoder fails to decode a frame, and
-     * this test uses that fact to verify the bitstream.
-     *
-     * @param filename  The name of the IVF file containing encoded bitsream.
-     */
-    private void decode(String filename) throws Exception {
-        IvfReader ivf = null;
-        try {
-            ivf = new IvfReader(filename);
-            int frameWidth = ivf.getWidth();
-            int frameHeight = ivf.getHeight();
-            int frameCount = ivf.getFrameCount();
+        int encodeSeconds = 12;    // Encoding sequence duration in seconds.
+        int[] bitrateTargetValues = { 400000, 800000 };  // List of bitrates to test.
 
-            assertTrue(frameWidth > 0);
-            assertTrue(frameHeight > 0);
-            assertTrue(frameCount > 0);
+        EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                INPUT_YUV,
+                ENCODED_IVF_BASE,
+                encodeSeconds,
+                WIDTH,
+                HEIGHT,
+                FPS,
+                BITRATE_MODE,
+                bitrateTargetValues[0],
+                true);
 
-            MediaFormat format = MediaFormat.createVideoFormat(VP8_MIME,
-                                                               ivf.getWidth(),
-                                                               ivf.getHeight());
+        // Number of seconds for each bitrate
+        int stepSeconds = encodeSeconds / bitrateTargetValues.length;
+        // Fill the bitrates values.
+        params.bitrateSet = new int[encodeSeconds * FPS];
+        for (int i = 0; i < bitrateTargetValues.length ; i++) {
+            Arrays.fill(params.bitrateSet,
+                    i * encodeSeconds * FPS / bitrateTargetValues.length,
+                    (i + 1) * encodeSeconds * FPS / bitrateTargetValues.length,
+                    bitrateTargetValues[i]);
+        }
 
-            Log.d(TAG, "Creating decoder");
-            MediaCodec decoder = MediaCodec.createByCodecName(VPX_DECODER_NAME);
-            decoder.configure(format,
-                              null,  // surface
-                              null,  // crypto
-                              0);  // flags
-            decoder.start();
+        ArrayList<MediaCodec.BufferInfo> bufInfo = encode(params);
+        Vp8EncodingStatistics statistics = computeEncodingStatistics(bufInfo);
 
-            mInputBuffers = decoder.getInputBuffers();
-            mOutputBuffers = decoder.getOutputBuffers();
-
-            // decode loop
-            int frameIndex = 0;
-            boolean sawOutputEOS = false;
-            boolean sawInputEOS = false;
-
-            while (!sawOutputEOS) {
-                if (!sawInputEOS) {
-                    int inputBufIndex = decoder.dequeueInputBuffer(DEFAULT_TIMEOUT_US);
-                    if (inputBufIndex >= 0) {
-                        byte[] frame = ivf.readFrame(frameIndex);
-
-                        if (frameIndex == frameCount - 1) {
-                            sawInputEOS = true;
-                        }
-
-                        mInputBuffers[inputBufIndex].clear();
-                        mInputBuffers[inputBufIndex].put(frame);
-                        mInputBuffers[inputBufIndex].rewind();
-
-                        Log.d(TAG, "Decoding frame at index " + frameIndex);
-                        try {
-                            decoder.queueInputBuffer(
-                                    inputBufIndex,
-                                    0,  // offset
-                                    frame.length,
-                                    frameIndex,
-                                    sawInputEOS ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
-                        } catch (IllegalStateException ise) {
-                            //That is all what is passed from MediaCodec in case of
-                            //decode failure.
-                            fail("Failed to decode frame at index " + frameIndex);
-                        }
-                        frameIndex++;
-                    }
-                }
-
-                int result = decoder.dequeueOutputBuffer(mBufferInfo, DEFAULT_TIMEOUT_US);
-                if (result >= 0) {
-                    int outputBufIndex = result;
-                    if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        sawOutputEOS = true;
-                    }
-                    decoder.releaseOutputBuffer(outputBufIndex, false);
-                } else if (result == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    mOutputBuffers = decoder.getOutputBuffers();
-                }
+        // Calculate actual average bitrates  for every [stepSeconds] second.
+        int[] bitrateActualValues = new int[bitrateTargetValues.length];
+        for (int i = 0; i < bitrateTargetValues.length ; i++) {
+            bitrateActualValues[i] = 0;
+            for (int j = i * stepSeconds; j < (i + 1) * stepSeconds; j++) {
+                bitrateActualValues[i] += statistics.mBitrates.get(j);
             }
-            decoder.stop();
-            decoder.release();
-        } finally {
-            if (ivf != null) {
-                ivf.close();
+            bitrateActualValues[i] /= stepSeconds;
+            Log.d(TAG, "Actual bitrate for interval #" + i + " : " + bitrateActualValues[i] +
+                    ". Target: " + bitrateTargetValues[i]);
+
+            // Compare actual bitrate values to make sure at least same increasing/decreasing
+            // order as the target bitrate values.
+            for (int j = 0; j < i; j++) {
+                long differenceTarget = bitrateTargetValues[i] - bitrateTargetValues[j];
+                long differenceActual = bitrateActualValues[i] - bitrateActualValues[j];
+                if (differenceTarget * differenceActual < 0) {
+                    throw new RuntimeException("Target bitrates: " +
+                            bitrateTargetValues[j] + " , " + bitrateTargetValues[i] +
+                            ". Actual bitrates: "
+                            + bitrateActualValues[j] + " , " + bitrateActualValues[i]);
+                }
             }
         }
     }
 
+     /**
+      * Check if encoder and decoder can run simultaneously on different threads.
+      *
+      * Encodes and decodes 9 seconds of raw stream sequentially in CBR mode,
+      * and then run parallel encoding and decoding of the same streams.
+      * Compares average bitrate and PSNR for sequential and parallel runs.
+      */
+     public void testParallelEncodingAndDecoding() throws Exception {
+         MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+         if (codecInfo == null) {
+             Log.w(TAG, "Codec " + VP8_MIME + " not supported. "
+                     + "Return from testParallelEncodingAndDecoding.");
+             return;
+         }
+
+         int encodeSeconds = 9;
+         final int[] bitrate = new int[1];
+         final double[] psnr = new double[1];
+         final Exception[] exceptionEncoder = new Exception[1];
+         final Exception[] exceptionDecoder = new Exception[1];
+         final EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                 INPUT_YUV,
+                 ENCODED_IVF_BASE,
+                 encodeSeconds,
+                 WIDTH,
+                 HEIGHT,
+                 FPS,
+                 VIDEO_ControlRateConstant,
+                 BITRATE,
+                 true);
+         final String inputIvfFilename = params.outputIvfFilename;
+
+         Runnable runEncoder = new Runnable() {
+             public void run() {
+                 try {
+                     ArrayList<MediaCodec.BufferInfo> bufInfo = encode(params);
+                     Vp8EncodingStatistics statistics = computeEncodingStatistics(bufInfo);
+                     bitrate[0] = statistics.mAverageBitrate;
+                 } catch (Exception e) {
+                     Log.e(TAG, "Encoder error: " + e.toString());
+                     exceptionEncoder[0] = e;
+                 }
+             }
+         };
+         Runnable runDecoder = new Runnable() {
+             public void run() {
+                 try {
+                     decode(inputIvfFilename, OUTPUT_YUV, FPS, params.forceSwEncoder);
+                     Vp8DecodingStatistics statistics = computeDecodingStatistics(
+                            params.inputYuvFilename, R.raw.football_qvga, OUTPUT_YUV,
+                            params.frameWidth, params.frameHeight);
+                     psnr[0] = statistics.mAveragePSNR;
+                 } catch (Exception e) {
+                     Log.e(TAG, "Decoder error: " + e.toString());
+                     exceptionDecoder[0] = e;
+                 }
+             }
+         };
+
+         // Sequential encoding and decoding.
+         runEncoder.run();
+         if (exceptionEncoder[0] != null) {
+             throw exceptionEncoder[0];
+         }
+         int referenceBitrate = bitrate[0];
+         runDecoder.run();
+         if (exceptionDecoder[0] != null) {
+             throw exceptionDecoder[0];
+         }
+         double referencePsnr = psnr[0];
+
+         // Parallel encoding and decoding.
+         params.outputIvfFilename = SDCARD_DIR + File.separator + ENCODED_IVF_BASE + "_copy.ivf";
+         Thread threadEncoder = new Thread(runEncoder);
+         Thread threadDecoder = new Thread(runDecoder);
+         threadEncoder.start();
+         threadDecoder.start();
+         threadEncoder.join();
+         threadDecoder.join();
+         if (exceptionEncoder[0] != null) {
+             throw exceptionEncoder[0];
+         }
+         if (exceptionDecoder[0] != null) {
+             throw exceptionDecoder[0];
+         }
+
+         // Compare bitrates and PSNRs for sequential and parallel cases.
+         Log.d(TAG, "Sequential bitrate: " + referenceBitrate + ". PSNR: " + referencePsnr);
+         Log.d(TAG, "Parallel bitrate: " + bitrate[0] + ". PSNR: " + psnr[0]);
+         assertEquals("Bitrate for sequenatial encoding" + referenceBitrate +
+                 " is different from parallel encoding " + bitrate[0],
+                 referenceBitrate, bitrate[0], MAX_BITRATE_VARIATION * referenceBitrate);
+         assertEquals("PSNR for sequenatial encoding" + referencePsnr +
+                 " is different from parallel encoding " + psnr[0],
+                 referencePsnr, psnr[0], MAX_ASYNC_AVERAGE_PSNR_DIFFERENCE);
+     }
+
+
     /**
-     * A basic vp8 encode loop.
+     * Check the encoder quality for various bitrates by calculating PSNR
      *
-     * MediaCodec will raise an IllegalStateException
-     * whenever vp8 encoder fails to encode a frame.
-     *
-     * In addition to that written IVF file can be tested
-     * to be decodable in order to verify the bitstream produced.
-     *
-     * Color format of input file should be YUV420, and frameWidth,
-     * frameHeight should be supplied correctly as raw input file doesn't
-     * include any header data.
-     *
-     * @param outputFilename  The name of the IVF file to write encoded bitsream
-     * @param rawInputFd      File descriptor for the raw input file (YUV420)
-     * @param frameWidth      Frame width of input file
-     * @param frameHeight     Frame height of input file
-     * @param frameRate       Frame rate of input file in frames per second
+     * Run the the encoder for 9 seconds for each bitrate and calculate PSNR
+     * for each encoded stream.
+     * Video streams with higher bitrates should have higher PSNRs.
+     * Also compares average and minimum PSNR of HW codec with PSNR values of reference SW codec.
      */
-    private void encode(String outputFilename, int rawInputFd,
-                       int frameWidth, int frameHeight, int frameRate) throws Exception {
-        // Create a media format signifying desired output
-        MediaFormat format = MediaFormat.createVideoFormat(VP8_MIME, frameWidth, frameHeight);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 100000);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                          CodecCapabilities.COLOR_FormatYUV420Planar);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
+    public void testEncoderQuality() throws Exception {
+        MediaCodecInfo codecInfo = selectCodec(VP8_MIME);
+        if (codecInfo == null) {
+            Log.w(TAG, "Codec " + VP8_MIME + " not supported. Return from testEncoderQuality.");
+            return;
+        }
 
-        Log.d(TAG, "Creating encoder");
-        MediaCodec encoder;
-        encoder = MediaCodec.createByCodecName(VPX_ENCODER_NAME);
-        encoder.configure(format,
-                          null,  // surface
-                          null,  // crypto
-                          MediaCodec.CONFIGURE_FLAG_ENCODE);
-        encoder.start();
+        int encodeSeconds = 9;      // Encoding sequence duration in seconds for each bitrate.
+        double[] psnrPlatformCodecAverage = new double[TEST_BITRATES_SET.length];
+        double[] psnrPlatformCodecMin = new double[TEST_BITRATES_SET.length];
 
-        mInputBuffers = encoder.getInputBuffers();
-        mOutputBuffers = encoder.getOutputBuffers();
+        // Run platform specific encoder for different bitrates
+        // and compare PSNR of hw codec with PSNR of reference sw codec.
+        for (int i = 0; i < TEST_BITRATES_SET.length; i++) {
+            EncoderOutputStreamParameters params = getDefaultEncodingParameters(
+                    INPUT_YUV,
+                    ENCODED_IVF_BASE,
+                    encodeSeconds,
+                    WIDTH,
+                    HEIGHT,
+                    FPS,
+                    BITRATE_MODE,
+                    TEST_BITRATES_SET[i],
+                    true);
+            encode(params);
 
-        InputStream rawStream = null;
-        IvfWriter ivf = null;
+            decode(params.outputIvfFilename, OUTPUT_YUV, FPS, params.forceSwEncoder);
+            Vp8DecodingStatistics statistics = computeDecodingStatistics(
+                    params.inputYuvFilename, R.raw.football_qvga, OUTPUT_YUV,
+                    params.frameWidth, params.frameHeight);
+            psnrPlatformCodecAverage[i] = statistics.mAveragePSNR;
+            psnrPlatformCodecMin[i] = statistics.mMinimumPSNR;
+        }
 
-        try {
-            rawStream = mResources.openRawResource(rawInputFd);
-            ivf = new IvfWriter(outputFilename, frameWidth, frameHeight);
-            // encode loop
-            long presentationTimeUs = 0;
-            int inputFrameIndex = 0;
-            int outputFrameIndex = 0;
-            boolean sawInputEOS = false;
-            boolean sawOutputEOS = false;
-
-            while (!sawOutputEOS) {
-                if (!sawInputEOS) {
-                    int inputBufIndex = encoder.dequeueInputBuffer(DEFAULT_TIMEOUT_US);
-                    if (inputBufIndex >= 0) {
-                        // YUV420 has 3 planes. Y is full size. U and V are each half size (1/4 the
-                        // pixels).
-                        int frameSize = frameWidth * frameHeight * 3 / 2;
-
-                        byte[] frame = new byte[frameSize];
-                        int bytesRead = rawStream.read(frame);
-
-                        if (bytesRead == -1) {
-                            sawInputEOS = true;
-                            bytesRead = 0;
-                        }
-
-                        mInputBuffers[inputBufIndex].clear();
-                        mInputBuffers[inputBufIndex].put(frame);
-                        mInputBuffers[inputBufIndex].rewind();
-
-                        presentationTimeUs = (inputFrameIndex * 1000000) / frameRate;
-                        Log.d(TAG, "Encoding frame at index " + inputFrameIndex);
-                        encoder.queueInputBuffer(
-                                inputBufIndex,
-                                0,  // offset
-                                bytesRead,  // size
-                                presentationTimeUs,
-                                sawInputEOS ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
-
-                        inputFrameIndex++;
-                    }
+        // First do a sanity check - higher bitrates should results in higher PSNR.
+        for (int i = 1; i < TEST_BITRATES_SET.length ; i++) {
+            for (int j = 0; j < i; j++) {
+                double differenceBitrate = TEST_BITRATES_SET[i] - TEST_BITRATES_SET[j];
+                double differencePSNR = psnrPlatformCodecAverage[i] - psnrPlatformCodecAverage[j];
+                if (differenceBitrate * differencePSNR < 0) {
+                    throw new RuntimeException("Target bitrates: " +
+                            TEST_BITRATES_SET[j] + ", " + TEST_BITRATES_SET[i] +
+                            ". Actual PSNRs: "
+                            + psnrPlatformCodecAverage[j] + ", " + psnrPlatformCodecAverage[i]);
                 }
-
-                int result = encoder.dequeueOutputBuffer(mBufferInfo, DEFAULT_TIMEOUT_US);
-                if (result >= 0) {
-                    int outputBufIndex = result;
-                    byte[] buffer = new byte[mBufferInfo.size];
-                    mOutputBuffers[outputBufIndex].rewind();
-                    mOutputBuffers[outputBufIndex].get(buffer, 0, mBufferInfo.size);
-
-                    if ((outputFrameIndex == 0)
-                        && ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_SYNC_FRAME) == 0)) {
-                      throw new RuntimeException("First frame is not a sync frame.");
-
-                    }
-
-                    if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        sawOutputEOS = true;
-                    } else {
-                        ivf.writeFrame(buffer, mBufferInfo.presentationTimeUs);
-                    }
-                    encoder.releaseOutputBuffer(outputBufIndex,
-                                                false);  // render
-
-                    outputFrameIndex++;
-                } else if (result == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    mOutputBuffers = encoder.getOutputBuffers();
-                }
-            }
-
-            encoder.stop();
-            encoder.release();
-        } finally {
-            if (ivf != null) {
-                ivf.close();
-            }
-
-            if (rawStream != null) {
-                rawStream.close();
             }
         }
-    }
 
-
-    /**
-     * Request Sync Frames
-     *
-     * MediaCodec will raise an IllegalStateException
-     * whenever vp8 encoder fails to encode a frame.
-     *
-     * This presumes a file with 28 frames. Under normal circumstances there
-     * would only be one sync frame: the first one. This test will request an
-     * additional sync frame at 15 and ensure that it occurs by EOF.
-     *
-     * Color format of input file should be YUV420, and frameWidth,
-     * frameHeight should be supplied correctly as raw input file doesn't
-     * include any header data.
-     *
-     * @param rawInputFd      File descriptor for the raw input file (YUV420)
-     * @param frameWidth      Frame width of input file
-     * @param frameHeight     Frame height of input file
-     * @param frameRate       Frame rate of input file in frames per second
-     */
-    private void encodeSyncFrame(int rawInputFd, int frameWidth,
-                                 int frameHeight, int frameRate) throws Exception {
-        // Create a media format signifying desired output
-        MediaFormat format = MediaFormat.createVideoFormat(VP8_MIME, frameWidth, frameHeight);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 100000);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                          CodecCapabilities.COLOR_FormatYUV420Planar);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-
-        Log.d(TAG, "Creating encoder");
-        MediaCodec encoder;
-        encoder = MediaCodec.createByCodecName(VPX_ENCODER_NAME);
-        encoder.configure(format,
-                          null,  // surface
-                          null,  // crypto
-                          MediaCodec.CONFIGURE_FLAG_ENCODE);
-        encoder.start();
-
-        mInputBuffers = encoder.getInputBuffers();
-        mOutputBuffers = encoder.getOutputBuffers();
-
-        InputStream rawStream = null;
-
-        try {
-            rawStream = mResources.openRawResource(rawInputFd);
-            // encode loop
-            long presentationTimeUs = 0;
-            int inputFrameIndex = 0;
-            boolean sawInputEOS = false;
-            boolean sawOutputEOS = false;
-            boolean syncFrameRequested = false;
-            boolean matchedSyncFrame = false;
-
-            while (!sawOutputEOS) {
-                if (!sawInputEOS) {
-                    int inputBufIndex = encoder.dequeueInputBuffer(DEFAULT_TIMEOUT_US);
-                    if (inputBufIndex >= 0) {
-                        int frameSize = frameWidth * frameHeight * 3 / 2;
-
-                        byte[] frame = new byte[frameSize];
-                        int bytesRead = rawStream.read(frame);
-
-                        if (bytesRead == -1) {
-                            sawInputEOS = true;
-                            bytesRead = 0;
-                        }
-
-                        mInputBuffers[inputBufIndex].clear();
-                        mInputBuffers[inputBufIndex].put(frame);
-                        mInputBuffers[inputBufIndex].rewind();
-
-                        if (inputFrameIndex == 15) {
-                            Log.d(TAG, "Requesting sync frame at index " + inputFrameIndex);
-                            Bundle syncFrame = new Bundle();
-                            syncFrame.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
-                            encoder.setParameters(syncFrame);
-                            syncFrameRequested = true;
-                        }
-
-                        presentationTimeUs = (inputFrameIndex * 1000000) / frameRate;
-                        encoder.queueInputBuffer(
-                                inputBufIndex,
-                                0,  // offset
-                                bytesRead,  // size
-                                presentationTimeUs,
-                                sawInputEOS ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
-
-                        inputFrameIndex++;
-                    }
-                }
-
-                int result = encoder.dequeueOutputBuffer(mBufferInfo, DEFAULT_TIMEOUT_US);
-                if (result >= 0) {
-                    if (syncFrameRequested && ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_SYNC_FRAME) != 0)) {
-                        Log.d(TAG, "Found sync frame");
-                        matchedSyncFrame = true;
-                    }
-
-                    if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        sawOutputEOS = true;
-                    }
-
-                    encoder.releaseOutputBuffer(result,
-                                                false);  // render
-
-                } else if (result == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    mOutputBuffers = encoder.getOutputBuffers();
-                }
+        // Then compare average and minimum PSNR of platform codec with reference sw codec -
+        // average PSNR for platform codec should be no more than 2 dB less than reference PSNR
+        // and minumum PSNR - no more than 4 dB less than reference minimum PSNR.
+        // These PSNR difference numbers are arbitrary for now, will need further estimation
+        // when more devices with hw VP8 codec will appear.
+        for (int i = 0; i < TEST_BITRATES_SET.length ; i++) {
+            Log.d(TAG, "Bitrate " + TEST_BITRATES_SET[i]);
+            Log.d(TAG, "Reference: Average: " + REFERENCE_AVERAGE_PSNR[i] + ". Minimum: " +
+                    REFERENCE_MINIMUM_PSNR[i]);
+            Log.d(TAG, "Platform:  Average: " + psnrPlatformCodecAverage[i] + ". Minimum: " +
+                    psnrPlatformCodecMin[i]);
+            if (psnrPlatformCodecAverage[i] < REFERENCE_AVERAGE_PSNR[i] -
+                    MAX_AVERAGE_PSNR_DIFFERENCE) {
+                throw new RuntimeException("Low average PSNR " + psnrPlatformCodecAverage[i] +
+                        " comparing to reference PSNR " + REFERENCE_AVERAGE_PSNR[i] +
+                        " for bitrate " + TEST_BITRATES_SET[i]);
             }
-
-            if (!matchedSyncFrame) {
-                throw new RuntimeException("Requested sync frame did not occur");
-            }
-
-            encoder.stop();
-            encoder.release();
-        } finally {
-            if (rawStream != null) {
-                rawStream.close();
-            }
-        }
-    }
-
-
-    /**
-     * Adjust bitrate
-     *
-     * MediaCodec will raise an IllegalStateException
-     * whenever vp8 encoder fails to encode a frame.
-     *
-     * Encode the file three times: once at the initial bitrate, once at an
-     * increased bitrate, and once at a decreased bitrate. Record the frame
-     * sizes that are returned and verify a strict ordering.
-     *
-     * Color format of input file should be YUV420, and frameWidth,
-     * frameHeight should be supplied correctly as raw input file doesn't
-     * include any header data.
-     *
-     * @param rawInputFd      File descriptor for the raw input file (YUV420)
-     * @param frameWidth      Frame width of input file
-     * @param frameHeight     Frame height of input file
-     * @param frameRate       Frame rate of input file in frames per second
-     */
-    private void encodeVariableBitrate(int rawInputFd, int frameWidth,
-                                       int frameHeight, int frameRate) throws Exception {
-        // Create a media format signifying desired output
-        MediaFormat format = MediaFormat.createVideoFormat(VP8_MIME, frameWidth, frameHeight);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 75000);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                          CodecCapabilities.COLOR_FormatYUV420Planar);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-
-        Log.d(TAG, "Creating encoder");
-        MediaCodec encoder;
-        encoder = MediaCodec.createByCodecName(VPX_ENCODER_NAME);
-        encoder.configure(format,
-                          null,  // surface
-                          null,  // crypto
-                          MediaCodec.CONFIGURE_FLAG_ENCODE);
-        encoder.start();
-
-        mInputBuffers = encoder.getInputBuffers();
-        mOutputBuffers = encoder.getOutputBuffers();
-
-        InputStream rawStream = null;
-
-        int iteration = 0;
-        int[] bits = new int[100];
-
-        try {
-            rawStream = mResources.openRawResource(rawInputFd);
-            /* Doc says this is not the default:
-             * http://developer.android.com/reference/java/io/InputStream.html#markSupported()
-             * but it returns true so using .reset() instead of close/open
-             */
-            if (rawStream.markSupported()) Log.d(TAG, "Stream marking supported");
-            rawStream.mark(1000000);
-
-            // encode loop
-            long presentationTimeUs = 0;
-            int inputFrameIndex = 0;
-            int outputFrameIndex = 0;
-            boolean sawInputEOS = false;
-            boolean sawOutputEOS = false;
-
-            while (!sawOutputEOS) {
-                if (!sawInputEOS) {
-                    int inputBufIndex = encoder.dequeueInputBuffer(DEFAULT_TIMEOUT_US);
-                    if (inputBufIndex >= 0) {
-                        int frameSize = frameWidth * frameHeight * 3 / 2;
-
-                        byte[] frame = new byte[frameSize];
-                        int bytesRead = rawStream.read(frame);
-
-                        if (bytesRead == -1) {
-                            if (iteration < 2) {
-                                rawStream.reset();
-                                Bundle bitrate = new Bundle();
-                                if (iteration == 0) {
-                                    bitrate.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, 150000);
-                                    Log.d(TAG, "Setting bitrate to 150000");
-                                } else {
-                                    bitrate.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, 25000);
-                                    Log.d(TAG, "Setting bitrate to 25000");
-                                }
-                                encoder.setParameters(bitrate);
-
-                                iteration++;
-                                continue;
-                            } else {
-                                sawInputEOS = true;
-                                bytesRead = 0;
-                            }
-                        }
-
-                        mInputBuffers[inputBufIndex].clear();
-                        mInputBuffers[inputBufIndex].put(frame);
-                        mInputBuffers[inputBufIndex].rewind();
-
-                        presentationTimeUs = (inputFrameIndex * 1000000) / frameRate;
-                        encoder.queueInputBuffer(
-                                inputBufIndex,
-                                0,  // offset
-                                bytesRead,  // size
-                                presentationTimeUs,
-                                sawInputEOS ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
-
-                        inputFrameIndex++;
-                    }
-                }
-
-                int result = encoder.dequeueOutputBuffer(mBufferInfo, DEFAULT_TIMEOUT_US);
-                if (result >= 0) {
-
-                    bits[outputFrameIndex] = mBufferInfo.size;
-
-                    if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        sawOutputEOS = true;
-                    }
-
-                    encoder.releaseOutputBuffer(result,
-                                                false);  // render
-
-                    outputFrameIndex++;
-
-                } else if (result == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    mOutputBuffers = encoder.getOutputBuffers();
-                }
-            }
-
-            // 29 frames per run
-            int i;
-            int sum = 0;
-            int frames = 29;
-            for(i = 0; i < frames; i++)
-              sum += bits[i];
-            int midBitrateAvg = sum / frames;
-
-            sum = 0;
-            for(; i < frames * 2; i++)
-              sum += bits[i];
-            int highBitrateAvg = sum / frames;
-
-            sum = 0;
-            for(; i < frames * 3; i++)
-              sum += bits[i];
-            int lowBitrateAvg = sum / frames;
-
-            // For the given bitrates we expect mid ~= 350, high ~= 575 and low ~= 150
-            // bytes per frame
-            if ((midBitrateAvg + 100) > highBitrateAvg)
-                throw new RuntimeException("Bitrate did not increase when requesting higher bitrate");
-            if ((lowBitrateAvg + 100) > midBitrateAvg)
-                throw new RuntimeException("Bitrate did not decrease when requesting lower bitrate");
-
-
-            encoder.stop();
-            encoder.release();
-        } finally {
-            if (rawStream != null) {
-                rawStream.close();
+            if (psnrPlatformCodecMin[i] < REFERENCE_MINIMUM_PSNR[i] -
+                    MAX_MINIMUM_PSNR_DIFFERENCE) {
+                throw new RuntimeException("Low minimum PSNR " + psnrPlatformCodecMin[i] +
+                        " comparing to sw PSNR " + REFERENCE_MINIMUM_PSNR[i] +
+                        " for bitrate " + TEST_BITRATES_SET[i]);
             }
         }
     }
 }
+

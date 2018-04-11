@@ -19,7 +19,7 @@
 #include <string>
 #include <cassert>
 
-#include "../../min_allocator.h"
+#include "min_allocator.h"
 
 int main()
 {
@@ -31,7 +31,7 @@ int main()
             P(10, "ten"),
             P(20, "twenty"),
             P(30, "thirty"),
-            P(40, "fourty"),
+            P(40, "forty"),
             P(50, "fifty"),
             P(50, "fiftyA"),
             P(50, "fiftyB"),
@@ -54,7 +54,7 @@ int main()
             P(10, "ten"),
             P(20, "twenty"),
             P(30, "thirty"),
-            P(40, "fourty"),
+            P(40, "forty"),
             P(50, "fifty"),
             P(50, "fiftyA"),
             P(50, "fiftyB"),

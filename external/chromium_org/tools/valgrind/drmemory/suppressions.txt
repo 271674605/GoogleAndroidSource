@@ -123,7 +123,6 @@ WARNING
 name=http://crbug.com/223255 - prefetches in vp8
 instruction=prefetch*
 ffmpegsumo.dll!ff_prefetch_mmxext
-ffmpegsumo.dll!vp8_decode_mb_row_no_filter
 
 ############################
 # Intentional errors in Chromium tests (ToolsSanityTests)
@@ -202,12 +201,14 @@ base_unittests.exe!base::ToolsSanityTest_SingleElementDeletedWithBraces_Test::Te
 UNINITIALIZED READ
 name=sanity test 14 (malloc/read uninit)
 base_unittests.exe!*ReadUninitializedValue
+...
 base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!base::ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNINITIALIZED READ
 name=sanity test 15 (new/read uninit)
 base_unittests.exe!*ReadUninitializedValue
+...
 base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
@@ -215,12 +216,6 @@ UNADDRESSABLE ACCESS
 name=AboutHandler::AboutCrash deliberate crash
 # TODO(bruening): switch to annotation once have support for that
 chrome.dll!AboutHandler::AboutCrash
-
-UNADDRESSABLE ACCESS
-name=RendererCrashTest.Crash deliberate crash
-# function is small, little risk for false negative in rest of it
-# TODO(bruening): switch to annotation once have support for that
-chrome.dll!HandleRendererErrorTestParameters
 
 UNADDRESSABLE ACCESS
 name=NPAPITesterBase.NoHangIfInitCrashes deliberate crash
@@ -262,12 +257,8 @@ instruction=mov    0xfffffffc(%esp) -> %eax
 chrome.dll!WebCore::RenderStyle::resetBorder*
 
 INVALID HEAP ARGUMENT
-name=http://crbug.com/101537
-*!scoped_ptr<_TOKEN_USER>*
-
-INVALID HEAP ARGUMENT
-name=http://crbug.com/101717 (1)
-*!scoped_ptr<_TOKEN_DEFAULT_DACL>*
+name=http://crbug.com/101537, http://crbug.com/101717 (1)
+*!scoped_ptr<>*
 
 INVALID HEAP ARGUMENT
 name=http://crbug.com/101717 (2)
@@ -275,12 +266,12 @@ name=http://crbug.com/101717 (2)
 
 INVALID HEAP ARGUMENT
 name=http://crbug.com/101717 (3)
-*!scoped_ptr<_UNICODE_STRING>::~scoped_ptr<_UNICODE_STRING>
+*!scoped_ptr<>::~scoped_ptr<>
 *!sandbox::GetHandleName
 
 INVALID HEAP ARGUMENT
 name=http://crbug.com/101717 (4)
-*!scoped_ptr<_OBJECT_NAME_INFORMATION>::~scoped_ptr<_OBJECT_NAME_INFORMATION>
+*!scoped_ptr<>::~scoped_ptr<>
 *!sandbox::GetPathFromHandle
 
 GDI USAGE ERROR
@@ -308,23 +299,6 @@ UNADDRESSABLE ACCESS
 name=http://crbug.com/106522
 npapi_test_plugin.dll!NPAPIClient::PluginTest::id
 npapi_test_plugin.dll!NPAPIClient::ExecuteGetJavascriptUrlTest::TimerProc
-
-# Bad GDI teardown sequence.
-GDI USAGE ERROR
-name=http://crbug.com/109963 a
-system call NtGdiDeleteObjectApp
-# usually one or two GDI32.dll frames here but sometimes in light mode
-# there are zero.  still pretty narrow b/c of frames on either side.
-...
-*!skia::BitmapPlatformDevice::BitmapPlatformDeviceData::~BitmapPlatformDeviceData
-
-GDI USAGE ERROR
-name=http://crbug.com/109963 b
-system call NtGdiDeleteObjectApp
-# usually one or two GDI32.dll frames here but sometimes in light mode
-# there are zero.  still pretty narrow b/c of frames on either side.
-...
-*!skia::BitmapPlatformDevice::BitmapPlatformDeviceData::ReleaseBitmapDC
 
 GDI USAGE ERROR
 name=http://crbug.com/109963 c
@@ -382,7 +356,7 @@ name=http://crbug.com/158090
 ...
 content.dll!content::*::FontCache::PreCacheFont
 content.dll!content::FontCacheDispatcher::OnPreCacheFont
-content.dll!DispatchToMethod<content::FontCacheDispatcher*
+content.dll!DispatchToMethod<>
 
 GDI USAGE ERROR
 name=http://crbug.com/158090 c#4
@@ -421,13 +395,13 @@ MSVCR100D.dll!operator new
 *!operator new
 *!operator new[]
 *!`anonymous namespace'::SecurityTest_NewOverflow_Test::TestBody
-*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+*!testing::internal::HandleExceptionsInMethodIfSupported<>
 
 WARNING
 name=Security test (calloc overflow)
 *!`anonymous namespace'::CallocReturnsNull
 *!`anonymous namespace'::SecurityTest_CallocOverflow_Test::TestBody
-*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+*!testing::internal::HandleExceptionsInMethodIfSupported<>
 
 GDI USAGE ERROR
 name=http://crbug.com/234484
@@ -449,8 +423,201 @@ skia.dll!HDCOffscreen::draw
 skia.dll!SkScalerContext_GDI::generateImage
 skia.dll!SkScalerContext::getImage
 skia.dll!SkGlyphCache::findImage
-skia.dll!D1G_NoBounder_RectClip
+skia.dll!D1G_RectClip
 skia.dll!SkDraw::drawText
-skia.dll!SkDevice::drawText
-skia.dll!SkCanvas::drawText
-media.dll!media::FakeVideoCaptureDevice::OnCaptureTask
+
+HANDLE LEAK
+name=http://crbug.com/346842
+system call NtGdiCreateDIBSection
+*!CreateDIBSection
+*!HDCOffscreen::draw
+*!SkScalerContext_GDI::generateImage
+*!SkScalerContext::getImage
+*!SkGlyphCache::findImage
+*!D1G*RectClip
+*!SkDraw::drawPosText
+*!SkBitmapDevice::drawPosText
+
+HANDLE LEAK
+name=http://crbug.com/346993
+system call NtDuplicateObject
+KERNELBASE.dll!DuplicateHandle
+KERNEL32.dll!DuplicateHandle*
+base.dll!base::`anonymous namespace'::ThreadFunc
+KERNEL32.dll!BaseThreadInitThunk
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/42043-uninit
+...
+QuickTime.qts!*
+
+GDI USAGE ERROR
+name=http://crbug.com/42043-gdi
+...
+QuickTime.qts!*
+
+UNADDRESSABLE ACCESS
+name=IntentionalCrash
+*!content::*::*Crash*
+*!content::*::MaybeHandleDebugURL
+
+HANDLE LEAK
+name=http://crbug.com/371348
+system call NtCreateSection
+KERNELBASE.dll!CreateFileMappingW
+base.dll!base::SharedMemory::Create
+base.dll!base::SharedMemory::CreateAndMapAnonymous
+content.dll!content::ChildThread::AllocateSharedMemory
+content.dll!content::ChildSharedBitmapManager::AllocateSharedBitmap
+cc.dll!cc::ResourceProvider::CreateBitmap
+
+HANDLE LEAK
+name=http://crbug.com/371357
+system call NtCreateEvent
+KERNELBASE.dll!CreateEventExW
+KERNELBASE.dll!CreateEventW
+
+HANDLE LEAK
+name=http://crbug.com/371368
+system call NtCreateNamedPipeFile
+KERNELBASE.dll!CreateNamedPipeW
+ipc.dll!IPC::Channel::ChannelImpl::CreatePipe
+ipc.dll!IPC::Channel::ChannelImpl::ChannelImpl
+ipc.dll!IPC::Channel::Channel
+ipc.dll!IPC::ChannelProxy::Context::CreateChannel
+
+HANDLE LEAK
+name=http://crbug.com/371942
+system call NtCreateThreadEx
+KERNELBASE.dll!CreateRemoteThreadEx
+KERNEL32.dll!CreateThread
+
+HANDLE LEAK
+name=http://crbug.com/371946
+system call NtUserWindowFromPoint
+content.dll!content::LegacyRenderWidgetHostHWND::OnMouseLeave
+content.dll!content::LegacyRenderWidgetHostHWND::_ProcessWindowMessage
+content.dll!content::LegacyRenderWidgetHostHWND::ProcessWindowMessage
+content.dll!ATL::CWindowImplBaseT<>::WindowProc
+USER32.dll!gapfnScSendMessage
+USER32.dll!GetThreadDesktop
+USER32.dll!CharPrevW
+USER32.dll!DispatchMessageW
+base.dll!base::MessagePumpForUI::ProcessMessageHelper
+base.dll!base::MessagePumpForUI::ProcessNextWindowsMessage
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/372177
+NPCTRL.dll!DllGetClassObject
+NPCTRL.dll!DllGetClassObject
+NPCTRL.dll!DllGetClassObject
+NPCTRL.dll!DllGetClassObject
+
+HANDLE LEAK
+name=http://crbug.com/373333
+system call NtGdiCreateCompatibleDC
+*!CreateCompatibleDC
+*!SkScalerContext_GDI::SkScalerContext_GDI
+*!LogFontTypeface::onCreateScalerContext
+*!SkTypeface::createScalerContext
+*!SkGlyphCache::VisitCache
+...
+*!SkPaint::descriptorProc
+...
+*!WebCore::RenderBlockFlow::layoutBlockFlow
+*!WebCore::RenderBlockFlow::layoutBlock
+*!WebCore::RenderBlock::layout
+
+HANDLE LEAK
+name=https://code.google.com/p/drmemory/issues/detail?id=1545
+system call NtGdiCreateCompatibleDC
+GDI32.dll!CreateCompatibleDC
+skia.dll!LogFontTypeface::onGetTableData
+
+HANDLE LEAK
+name=http://crbug.com/379000
+system call NtCreate*
+...
+*!disk_cache::MappedFile::Init
+*!disk_cache::BlockFiles::OpenBlockFile
+*!disk_cache::BlockFiles::Init
+*!disk_cache::BackendImpl::SyncInit
+*!disk_cache::BackendIO::ExecuteBackendOperation
+*!base::internal::Invoker<>::Run
+*!base::MessageLoop::RunTask
+*!base::MessageLoop::DeferOrRunPendingTask
+*!base::MessageLoop::DoWork
+*!base::MessagePumpForIO::DoRunLoop
+*!base::MessagePumpWin::Run
+*!base::MessageLoop::RunHandler
+*!base::Thread::Run
+*!content::BrowserThreadImpl::CacheThreadRun
+*!content::BrowserThreadImpl::Run
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/379204
+...
+*!WTF::MessageQueue<>::waitForMessageWithTimeout
+*!WebCore::WorkerRunLoop::run
+*!WebCore::WorkerRunLoop::run
+*!WebCore::WorkerThread::workerThread
+*!WTF::threadEntryPoint
+
+GDI USAGE ERROR
+name=379774
+system call NtUserCallOneParam.RELEASEDC
+USER32.dll!ReleaseDC
+*!std::_Tree<>::_Erase
+*!std::_Tree<>::erase
+*!DefaultSingletonTraits<>::Delete
+*!Singleton<>::OnExit
+*!base::AtExitManager::ProcessCallbacksNow
+*!base::AtExitManager::~AtExitManager
+*!base::TestSuite::~TestSuite
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/382784
+*!content::PepperMediaStreamAudioTrackHost::AudioSink::OnData
+*!content::MediaStreamAudioSinkOwner::OnData
+*!content::WebRtcLocalAudioTrack::Capture
+*!content::WebRtcAudioCapturer::Capture
+*!media::AudioInputDevice::AudioThreadCallback::Process
+*!media::AudioDeviceThread::Thread::Run
+*!media::AudioDeviceThread::Thread::ThreadMain
+
+HANDLE LEAK
+name=http://crbug.com/383408
+system call NtCreateEvent
+...
+*!base::internal::LockImpl::Lock
+*!mojo::system::MessagePipe::RemoveWaiter
+*!mojo::system::MessagePipeDispatcher::RemoveWaiterImplNoLock
+*!mojo::system::Dispatcher::RemoveWaiter
+*!mojo::system::Core::WaitManyInternal
+*!mojo::system::Core::WaitMany
+*!MojoWaitMany
+
+UNADDRESSABLE ACCESS
+name=IntentionalCrashPluginTest.plugin_client.cc
+npapi_test_plugin.dll!NP_Initialize
+...
+*!content::PluginLib::NP_Initialize
+*!content::PluginThread::PluginThread
+*!content::PluginMain
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/313788
+*!InProcessBrowserTest::AddBlankTabAndShow
+*!InProcessBrowserTest::CreateBrowser
+*!*::RunTestOnMainThread
+*!InProcessBrowserTest::RunTestOnMainThreadLoop
+*!ChromeBrowserMainParts::PreMainMessageLoopRunImpl
+*!ChromeBrowserMainParts::PreMainMessageLoopRun
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/386711
+*!IntranetRedirectDetector::FinishSleep
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/386741
+*!WebResourceService::StartFetch

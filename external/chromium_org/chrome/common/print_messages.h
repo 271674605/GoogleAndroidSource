@@ -42,12 +42,11 @@ struct PrintMsg_Print_Params {
   int32 preview_ui_id;
   int preview_request_id;
   bool is_first_request;
-  WebKit::WebPrintScalingOption print_scaling_option;
+  blink::WebPrintScalingOption print_scaling_option;
   bool print_to_pdf;
   bool display_header_footer;
-  string16 date;
-  string16 title;
-  string16 url;
+  base::string16 title;
+  base::string16 url;
   bool should_print_backgrounds;
 };
 
@@ -75,8 +74,10 @@ struct PrintHostMsg_RequestPrintPreview_Params {
 
 #define IPC_MESSAGE_START PrintMsgStart
 
-IPC_ENUM_TRAITS(printing::MarginType)
-IPC_ENUM_TRAITS(WebKit::WebPrintScalingOption)
+IPC_ENUM_TRAITS_MAX_VALUE(printing::MarginType,
+                          printing::MARGIN_TYPE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPrintScalingOption,
+                          blink::WebPrintScalingOptionLast)
 
 // Parameters for a render request.
 IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
@@ -137,9 +138,6 @@ IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
   // Specifies if the header and footer should be rendered.
   IPC_STRUCT_TRAITS_MEMBER(display_header_footer)
 
-  // Date string to be printed as header if requested by the user.
-  IPC_STRUCT_TRAITS_MEMBER(date)
-
   // Title string to be printed as header if requested by the user.
   IPC_STRUCT_TRAITS_MEMBER(title)
 
@@ -187,10 +185,6 @@ IPC_STRUCT_TRAITS_END()
 
 // Parameters to describe a rendered document.
 IPC_STRUCT_BEGIN(PrintHostMsg_DidPreviewDocument_Params)
-  // True when we can reuse existing preview data. |metafile_data_handle| and
-  // |data_size| should not be used when this is true.
-  IPC_STRUCT_MEMBER(bool, reuse_existing_data)
-
   // A shared memory handle to metafile data.
   IPC_STRUCT_MEMBER(base::SharedMemoryHandle, metafile_data_handle)
 
@@ -259,8 +253,10 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
   // Page number.
   IPC_STRUCT_MEMBER(int, page_number)
 
+#if defined(OS_WIN) && !defined(WIN_PDF_METAFILE_FOR_PRINTING)
   // Shrink factor used to render this page.
   IPC_STRUCT_MEMBER(double, actual_shrink)
+#endif  // OS_WIN && !WIN_PDF_METAFILE_FOR_PRINTING
 
   // The size of the page the page author specified.
   IPC_STRUCT_MEMBER(gfx::Size, page_size)
@@ -283,8 +279,8 @@ IPC_STRUCT_END()
 // Tells the render view to initiate print preview for the entire document.
 IPC_MESSAGE_ROUTED1(PrintMsg_InitiatePrintPreview, bool /* selection_only */)
 
-// Tells the render view to initiate printing or print preview for a particular
-// node, depending on which mode the render view is in.
+// Tells the render frame to initiate printing or print preview for a particular
+// node, depending on which mode the render frame is in.
 IPC_MESSAGE_ROUTED0(PrintMsg_PrintNodeUnderContextMenu)
 
 // Tells the renderer to print the print preview tab's PDF plugin without
@@ -409,6 +405,9 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PrintHostMsg_CheckForCancel,
                            int32 /* PrintPreviewUI ID */,
                            int /* request id */,
                            bool /* print preview cancelled */)
+
+// This is sent when there are invalid printer settings.
+IPC_MESSAGE_ROUTED0(PrintHostMsg_ShowInvalidPrinterSettingsError)
 
 // Sends back to the browser the complete rendered document (non-draft mode,
 // used for printing) that was requested by a PrintMsg_PrintPreview message.

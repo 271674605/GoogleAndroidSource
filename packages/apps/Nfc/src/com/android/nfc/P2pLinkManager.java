@@ -16,6 +16,8 @@
 
 package com.android.nfc;
 
+import android.content.pm.UserInfo;
+import android.os.UserManager;
 import com.android.nfc.echoserver.EchoServer;
 import com.android.nfc.handover.HandoverClient;
 import com.android.nfc.handover.HandoverManager;
@@ -26,8 +28,6 @@ import com.android.nfc.snep.SnepClient;
 import com.android.nfc.snep.SnepMessage;
 import com.android.nfc.snep.SnepServer;
 
-import android.app.ActivityManager;
-import android.app.ActivityManager.RunningTaskInfo;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
@@ -45,7 +45,6 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.util.Log;
-
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -59,10 +58,23 @@ import java.util.List;
  */
 interface P2pEventListener {
     /**
+     * Indicates the user has expressed an intent to share
+     * over NFC, but a remote device has not come into range
+     * yet. Prompt the user to NFC tap.
+     */
+    public void onP2pNfcTapRequested();
+
+    /**
+     * Indicates the user has expressed an intent to share over
+     * NFC, but the link hasn't come up yet and we no longer
+     * want to wait for it
+     */
+    public void onP2pTimeoutWaitingForLink();
+
+    /**
      * Indicates a P2P device is in range.
      * <p>onP2pInRange() and onP2pOutOfRange() will always be called
      * alternately.
-     * <p>All other callbacks will only occur while a P2P device is in range.
      */
     public void onP2pInRange();
 
@@ -108,6 +120,7 @@ interface P2pEventListener {
 
     public interface Callback {
         public void onP2pSendConfirmed();
+        public void onP2pCanceled();
     }
 }
 
@@ -116,7 +129,7 @@ interface P2pEventListener {
  * Does simple debouncing of the LLCP link - so that even if the link
  * drops and returns the user does not know.
  */
-public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
+class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
     static final String TAG = "NfcP2pLinkManager";
     static final boolean DBG = true;
 
@@ -145,6 +158,12 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     static final int LINK_SEND_PENDING_DEBOUNCE_MS = 3000;
     static final int LINK_SEND_CONFIRMED_DEBOUNCE_MS = 5000;
     static final int LINK_SEND_COMPLETE_DEBOUNCE_MS = 250;
+    static final int LINK_SEND_CANCELED_DEBOUNCE_MS = 250;
+
+    // The amount of time we wait for the link to come up
+    // after a user has manually invoked Beam.
+    static final int WAIT_FOR_LINK_TIMEOUT_MS = 10000;
+
     static final int MSG_DEBOUNCE_TIMEOUT = 1;
     static final int MSG_RECEIVE_COMPLETE = 2;
     static final int MSG_RECEIVE_HANDOVER = 3;
@@ -153,6 +172,7 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     static final int MSG_STOP_ECHOSERVER = 6;
     static final int MSG_HANDOVER_NOT_SUPPORTED = 7;
     static final int MSG_SHOW_CONFIRMATION_UI = 8;
+    static final int MSG_WAIT_FOR_LINK_TIMEOUT = 9;
 
     // values for mLinkState
     static final int LINK_STATE_DOWN = 1;
@@ -163,8 +183,10 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     // values for mSendState
     static final int SEND_STATE_NOTHING_TO_SEND = 1;
     static final int SEND_STATE_NEED_CONFIRMATION = 2;
-    static final int SEND_STATE_SENDING = 3;
-    static final int SEND_STATE_SEND_COMPLETE = 4;
+    static final int SEND_STATE_PENDING = 3;
+    static final int SEND_STATE_SENDING = 4;
+    static final int SEND_STATE_COMPLETE = 5;
+    static final int SEND_STATE_CANCELED = 6;
 
     // return values for doSnepProtocol
     static final int SNEP_SUCCESS = 0;
@@ -179,11 +201,11 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     final SnepServer mDefaultSnepServer;
     final HandoverServer mHandoverServer;
     final EchoServer mEchoServer;
-    final ActivityManager mActivityManager;
     final Context mContext;
     final P2pEventListener mEventListener;
     final Handler mHandler;
     final HandoverManager mHandoverManager;
+    final ForegroundUtils mForegroundUtils;
 
     final int mDefaultMiu;
     final int mDefaultRwSize;
@@ -198,10 +220,9 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     Uri[] mUrisToSend;  // not valid in SEND_STATE_NOTHING_TO_SEND
     int mSendFlags; // not valid in SEND_STATE_NOTHING_TO_SEND
     IAppCallback mCallbackNdef;
-    String[] mValidCallbackPackages;
+    int mNdefCallbackUid;
     SendTask mSendTask;
     SharedPreferences mPrefs;
-    boolean mFirstBeam;
     SnepClient mSnepClient;
     HandoverClient mHandoverClient;
     NdefPushClient mNdefPushClient;
@@ -221,7 +242,6 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
         } else {
             mEchoServer = null;
         }
-        mActivityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         mPackageManager = context.getPackageManager();
         mContext = context;
         mEventListener = new P2pEventManager(context, this);
@@ -231,11 +251,12 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
         mIsSendEnabled = false;
         mIsReceiveEnabled = false;
         mPrefs = context.getSharedPreferences(NfcService.PREF, Context.MODE_PRIVATE);
-        mFirstBeam = mPrefs.getBoolean(NfcService.PREF_FIRST_BEAM, true);
         mHandoverManager = handoverManager;
         mDefaultMiu = defaultMiu;
         mDefaultRwSize = defaultRwSize;
         mLlcpServicesConnected = false;
+        mNdefCallbackUid = -1;
+        mForegroundUtils = ForegroundUtils.getInstance();
      }
 
     /**
@@ -286,7 +307,34 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     public void setNdefCallback(IAppCallback callbackNdef, int callingUid) {
         synchronized (this) {
             mCallbackNdef = callbackNdef;
-            mValidCallbackPackages = mPackageManager.getPackagesForUid(callingUid);
+            mNdefCallbackUid = callingUid;
+        }
+    }
+
+
+    public void onManualBeamInvoke(BeamShareData shareData) {
+        synchronized (P2pLinkManager.this)    {
+            if (mLinkState != LINK_STATE_DOWN) {
+                return;
+            }
+            if (mForegroundUtils.getForegroundUids().contains(mNdefCallbackUid)) {
+                // Try to get data from the registered NDEF callback
+                prepareMessageToSend(false);
+            }
+            if (mMessageToSend == null && mUrisToSend == null && shareData != null) {
+                // No data from the NDEF callback, get data from ShareData
+                if (shareData.uris != null) {
+                    mUrisToSend = shareData.uris;
+                } else if (shareData.ndefMessage != null) {
+                    mMessageToSend = shareData.ndefMessage;
+                }
+            }
+            if (mMessageToSend != null ||
+                    (mUrisToSend != null && mHandoverManager.isHandoverSupported())) {
+                mSendState = SEND_STATE_PENDING;
+                mEventListener.onP2pNfcTapRequested();
+                scheduleTimeoutLocked(MSG_WAIT_FOR_LINK_TIMEOUT, WAIT_FOR_LINK_TIMEOUT_MS);
+            }
         }
     }
 
@@ -304,29 +352,36 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
             mLlcpConnectDelayed = false;
             switch (mLinkState) {
                 case LINK_STATE_DOWN:
-                    mLinkState = LINK_STATE_WAITING_PDU;
-                    mSendState = SEND_STATE_NOTHING_TO_SEND;
                     if (DBG) Log.d(TAG, "onP2pInRange()");
+                    mLinkState = LINK_STATE_WAITING_PDU;
                     mEventListener.onP2pInRange();
-                    prepareMessageToSend();
-                    if (mMessageToSend != null ||
-                            (mUrisToSend != null && mHandoverManager.isHandoverSupported())) {
-                        // Ideally we would delay showing the Beam animation until
-                        // we know for certain the other side has SNEP/handover.
-                        // Unfortunately, the NXP LLCP implementation has a bug that
-                        // delays the first SYMM for 750ms if it is the initiator.
-                        // This will cause our SNEP connect to be delayed as well,
-                        // and the animation will be delayed for about a second.
-                        // Alternatively, we could have used WKS as a hint to start
-                        // the animation, but we are only correctly setting the WKS
-                        // since Jelly Bean.
-                        if ((mSendFlags & NfcAdapter.FLAG_NDEF_PUSH_NO_CONFIRM) != 0) {
-                            mSendState = SEND_STATE_SENDING;
-                            onP2pSendConfirmed(false);
-                        } else {
-                            mSendState = SEND_STATE_NEED_CONFIRMATION;
-                            if (DBG) Log.d(TAG, "onP2pSendConfirmationRequested()");
-                            mEventListener.onP2pSendConfirmationRequested();
+                    if (mSendState == SEND_STATE_PENDING) {
+                        if (DBG) Log.d(TAG, "Sending pending data.");
+                        mHandler.removeMessages(MSG_WAIT_FOR_LINK_TIMEOUT);
+                        mSendState = SEND_STATE_SENDING;
+                        onP2pSendConfirmed(false);
+                    } else {
+                        mSendState = SEND_STATE_NOTHING_TO_SEND;
+                        prepareMessageToSend(true);
+                        if (mMessageToSend != null ||
+                                (mUrisToSend != null && mHandoverManager.isHandoverSupported())) {
+                            // Ideally we would delay showing the Beam animation until
+                            // we know for certain the other side has SNEP/handover.
+                            // Unfortunately, the NXP LLCP implementation has a bug that
+                            // delays the first SYMM for 750ms if it is the initiator.
+                            // This will cause our SNEP connect to be delayed as well,
+                            // and the animation will be delayed for about a second.
+                            // Alternatively, we could have used WKS as a hint to start
+                            // the animation, but we are only correctly setting the WKS
+                            // since Jelly Bean.
+                            if ((mSendFlags & NfcAdapter.FLAG_NDEF_PUSH_NO_CONFIRM) != 0) {
+                                mSendState = SEND_STATE_SENDING;
+                                onP2pSendConfirmed(false);
+                            } else {
+                                mSendState = SEND_STATE_NEED_CONFIRMATION;
+                                if (DBG) Log.d(TAG, "onP2pSendConfirmationRequested()");
+                                mEventListener.onP2pSendConfirmationRequested();
+                            }
                         }
                     }
                     break;
@@ -379,55 +434,34 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
         }
     }
 
-    public void onUserSwitched() {
+    public void onUserSwitched(int userId) {
         // Update the cached package manager in case of user switch
         synchronized (P2pLinkManager.this) {
             try {
                 mPackageManager  = mContext.createPackageContextAsUser("android", 0,
-                        new UserHandle(ActivityManager.getCurrentUser())).getPackageManager();
+                        new UserHandle(userId)).getPackageManager();
             } catch (NameNotFoundException e) {
                 Log.e(TAG, "Failed to retrieve PackageManager for user");
             }
         }
     }
 
-    void prepareMessageToSend() {
+    void prepareMessageToSend(boolean generatePlayLink) {
         synchronized (P2pLinkManager.this) {
+            mMessageToSend = null;
+            mUrisToSend = null;
             if (!mIsSendEnabled) {
-                mMessageToSend = null;
-                mUrisToSend = null;
                 return;
             }
 
-            String runningPackage = null;
-            List<RunningTaskInfo> tasks = mActivityManager.getRunningTasks(1);
-            if (tasks.size() > 0) {
-                runningPackage = tasks.get(0).topActivity.getPackageName();
-            }
-
-            if (runningPackage == null) {
-                Log.e(TAG, "Could not determine running package.");
-                mMessageToSend = null;
-                mUrisToSend = null;
+            List<Integer> foregroundUids = mForegroundUtils.getForegroundUids();
+            if (foregroundUids.isEmpty()) {
+                Log.e(TAG, "Could not determine foreground UID.");
                 return;
             }
 
-            // Try application callback first
             if (mCallbackNdef != null) {
-                // Check to see if the package currently running
-                // is the one that registered any callbacks
-                boolean callbackValid = false;
-
-                if (mValidCallbackPackages != null) {
-                    for (String pkg : mValidCallbackPackages) {
-                        if (pkg.equals(runningPackage)) {
-                            callbackValid = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (callbackValid) {
+                if (foregroundUids.contains(mNdefCallbackUid)) {
                     try {
                         BeamShareData shareData = mCallbackNdef.createBeamShareData();
                         mMessageToSend = shareData.ndefMessage;
@@ -447,18 +481,31 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
 
             // fall back to default NDEF for the foreground activity, unless the
             // application disabled this explicitly in their manifest.
-            if (beamDefaultDisabled(runningPackage)) {
-                Log.d(TAG, "Disabling default Beam behavior");
-                mMessageToSend = null;
-                mUrisToSend = null;
-            } else {
-                mMessageToSend = createDefaultNdef(runningPackage);
-                mUrisToSend = null;
+            String[] pkgs = mPackageManager.getPackagesForUid(foregroundUids.get(0));
+            if (pkgs != null && pkgs.length >= 1) {
+                if (!generatePlayLink || beamDefaultDisabled(pkgs[0])
+                        || isManagedOrBeamDisabled(foregroundUids.get(0))) {
+                    if (DBG) Log.d(TAG, "Disabling default Beam behavior");
+                    mMessageToSend = null;
+                    mUrisToSend = null;
+                } else {
+                    mMessageToSend = createDefaultNdef(pkgs[0]);
+                    mUrisToSend = null;
+                }
             }
 
             if (DBG) Log.d(TAG, "mMessageToSend = " + mMessageToSend);
             if (DBG) Log.d(TAG, "mUrisToSend = " + mUrisToSend);
         }
+    }
+
+    private boolean isManagedOrBeamDisabled(int uid) {
+        UserManager userManager = (UserManager) mContext.getSystemService(Context.USER_SERVICE);
+        UserInfo userInfo = userManager.getUserInfo(UserHandle.getUserId(uid));
+        return userInfo.isManagedProfile() ||
+                userManager.hasUserRestriction(
+                        UserManager.DISALLOW_OUTGOING_BEAM, userInfo.getUserHandle());
+
     }
 
     boolean beamDefaultDisabled(String pkgName) {
@@ -534,11 +581,13 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
                         case SEND_STATE_SENDING:
                             debounceTimeout = LINK_SEND_CONFIRMED_DEBOUNCE_MS;
                             break;
-                        case SEND_STATE_SEND_COMPLETE:
+                        case SEND_STATE_COMPLETE:
                             debounceTimeout = LINK_SEND_COMPLETE_DEBOUNCE_MS;
                             break;
+                        case SEND_STATE_CANCELED:
+                            debounceTimeout = LINK_SEND_CANCELED_DEBOUNCE_MS;
                     }
-                    mHandler.sendEmptyMessageDelayed(MSG_DEBOUNCE_TIMEOUT, debounceTimeout);
+                    scheduleTimeoutLocked(MSG_DEBOUNCE_TIMEOUT, debounceTimeout);
                     if (mSendState == SEND_STATE_SENDING) {
                         Log.e(TAG, "onP2pSendDebounce()");
                         mEventListener.onP2pSendDebounce();
@@ -555,13 +604,6 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     }
 
     void onSendComplete(NdefMessage msg, long elapsedRealtime) {
-        if (mFirstBeam) {
-            EventLogTags.writeNfcFirstShare();
-            mPrefs.edit().putBoolean(NfcService.PREF_FIRST_BEAM, false).apply();
-            mFirstBeam = false;
-        }
-        EventLogTags.writeNfcShare(getMessageSize(msg), getMessageTnf(msg), getMessageType(msg),
-                getMessageAarPresent(msg), (int) elapsedRealtime);
         // Make callbacks on UI thread
         mHandler.sendEmptyMessage(MSG_SEND_COMPLETE);
     }
@@ -856,8 +898,6 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
     }
 
     void onReceiveComplete(NdefMessage msg) {
-        EventLogTags.writeNfcNdefReceived(getMessageSize(msg), getMessageTnf(msg),
-                getMessageType(msg), getMessageAarPresent(msg));
         // Make callbacks on UI thread
         mHandler.obtainMessage(MSG_RECEIVE_COMPLETE, msg).sendToTarget();
     }
@@ -875,15 +915,18 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
                     mEchoServer.stop();
                     break;
                 }
+            case MSG_WAIT_FOR_LINK_TIMEOUT:
+                synchronized (this) {
+                    // User wanted to send something but no link
+                    // came up. Just cancel the send
+                    mSendState = SEND_STATE_NOTHING_TO_SEND;
+                    mEventListener.onP2pTimeoutWaitingForLink();
+                }
+                break;
             case MSG_DEBOUNCE_TIMEOUT:
                 synchronized (this) {
                     if (mLinkState != LINK_STATE_DEBOUNCE) {
                         break;
-                    }
-                    if (mSendState == SEND_STATE_SENDING) {
-                        EventLogTags.writeNfcShareFail(getMessageSize(mMessageToSend),
-                                getMessageTnf(mMessageToSend), getMessageType(mMessageToSend),
-                                getMessageAarPresent(mMessageToSend));
                     }
                     if (DBG) Log.d(TAG, "Debounce timeout");
                     mLinkState = LINK_STATE_DOWN;
@@ -942,7 +985,7 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
                     if (mLinkState == LINK_STATE_DOWN || mSendState != SEND_STATE_SENDING) {
                         break;
                     }
-                    mSendState = SEND_STATE_SEND_COMPLETE;
+                    mSendState = SEND_STATE_COMPLETE;
                     mHandler.removeMessages(MSG_DEBOUNCE_TIMEOUT);
                     if (DBG) Log.d(TAG, "onP2pSendComplete()");
                     mEventListener.onP2pSendComplete();
@@ -1043,14 +1086,35 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
                 // Connect was delayed to interop with pre-MR2 stacks; send connect now.
                 connectLlcpServices();
             } else if (mLinkState == LINK_STATE_DEBOUNCE) {
-                // Restart debounce timeout
-                mHandler.removeMessages(MSG_DEBOUNCE_TIMEOUT);
-                mHandler.sendEmptyMessageDelayed(MSG_DEBOUNCE_TIMEOUT,
-                        LINK_SEND_CONFIRMED_DEBOUNCE_MS);
-                // Tell user to tap devices again
+                // Restart debounce timeout and tell user to tap again
+                scheduleTimeoutLocked(MSG_DEBOUNCE_TIMEOUT, LINK_SEND_CONFIRMED_DEBOUNCE_MS);
                 mEventListener.onP2pSendDebounce();
             }
         }
+    }
+
+
+    @Override
+    public void onP2pCanceled() {
+        synchronized (this) {
+            mSendState = SEND_STATE_CANCELED;
+            if (mLinkState == LINK_STATE_DOWN) {
+                // If we were waiting for the link to come up, stop doing so
+                mHandler.removeMessages(MSG_WAIT_FOR_LINK_TIMEOUT);
+            } else if (mLinkState == LINK_STATE_DEBOUNCE) {
+                // We're in debounce state so link is down. Reschedule debounce
+                // timeout to occur sooner, we don't want to wait any longer.
+                scheduleTimeoutLocked(MSG_DEBOUNCE_TIMEOUT, LINK_SEND_CANCELED_DEBOUNCE_MS);
+            } else {
+                // Link is up, nothing else to do but wait for link to go down
+            }
+        }
+    }
+
+    void scheduleTimeoutLocked(int what, int timeout) {
+        // Cancel any outstanding debounce timeouts.
+        mHandler.removeMessages(what);
+        mHandler.sendEmptyMessageDelayed(what, timeout);
     }
 
     static String sendStateToString(int state) {
@@ -1061,6 +1125,10 @@ public class P2pLinkManager implements Handler.Callback, P2pEventListener.Callba
                 return "SEND_STATE_NEED_CONFIRMATION";
             case SEND_STATE_SENDING:
                 return "SEND_STATE_SENDING";
+            case SEND_STATE_COMPLETE:
+                return "SEND_STATE_COMPLETE";
+            case SEND_STATE_CANCELED:
+                return "SEND_STATE_CANCELED";
             default:
                 return "<error>";
         }

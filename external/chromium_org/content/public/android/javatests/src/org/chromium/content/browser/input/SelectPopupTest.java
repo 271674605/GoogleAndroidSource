@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
+
 import android.test.suitebuilder.annotation.LargeTest;
 
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -20,10 +21,11 @@ import org.chromium.content_shell_apk.ContentShellTestBase;
 import java.util.concurrent.TimeUnit;
 
 public class SelectPopupTest extends ContentShellTestBase {
-    private static final int WAIT_TIMEOUT_SECONDS = 2;
+    private static final long WAIT_TIMEOUT_SECONDS = scaleTimeout(2);
     private static final String SELECT_URL = UrlUtils.encodeHtmlDataUri(
-            "<html><body>" +
-            "Which animal is the strongest:<br/>" +
+            "<html><head><meta name=\"viewport\"" +
+            "content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0\" /></head>" +
+            "<body>Which animal is the strongest:<br/>" +
             "<select id=\"select\">" +
             "<option>Black bear</option>" +
             "<option>Polar bear</option>" +
@@ -35,48 +37,47 @@ public class SelectPopupTest extends ContentShellTestBase {
             "</select>" +
             "</body></html>");
 
-    private static class PopupShowingCriteria implements Criteria {
+    private class PopupShowingCriteria implements Criteria {
         @Override
         public boolean isSatisfied() {
-            return SelectPopupDialog.getCurrent() != null;
+           return getContentViewCore().getSelectPopupForTest() != null;
         }
     }
 
-    private static class PopupHiddenCriteria implements Criteria {
+    private class PopupHiddenCriteria implements Criteria {
         @Override
         public boolean isSatisfied() {
-            return SelectPopupDialog.getCurrent() == null;
+            return getContentViewCore().getSelectPopupForTest() == null;
         }
     }
 
-    public SelectPopupTest() {
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+        launchContentShellWithUrl(SELECT_URL);
+        assertTrue("Page failed to load", waitForActiveShellToBeDoneLoading());
+        // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
+        assertWaitForPageScaleFactorMatch(1);
     }
 
     /**
      * Tests that showing a select popup and having the page reload while the popup is showing does
      * not assert.
-     * @LargeTest
-     * @Feature({"Browser"})
-     * BUG 172967
      */
-    @DisabledTest
+    @LargeTest
+    @Feature({"Browser"})
+    @RerunWithUpdatedContainerView
     public void testReloadWhilePopupShowing() throws InterruptedException, Exception, Throwable {
-        // Load the test page.
-        launchContentShellWithUrl(SELECT_URL);
-        assertTrue("Page failed to load", waitForActiveShellToBeDoneLoading());
-
         // The popup should be hidden before the click.
         assertTrue("The select popup is shown after load.",
                 CriteriaHelper.pollForCriteria(new PopupHiddenCriteria()));
 
-        final ContentView view = getActivity().getActiveContentView();
-        final TestCallbackHelperContainer viewClient =
-                new TestCallbackHelperContainer(view);
-        final OnPageFinishedHelper onPageFinishedHelper =
-                viewClient.getOnPageFinishedHelper();
+        final ContentViewCore viewCore = getContentViewCore();
+        final TestCallbackHelperContainer viewClient = new TestCallbackHelperContainer(viewCore);
+        final OnPageFinishedHelper onPageFinishedHelper = viewClient.getOnPageFinishedHelper();
 
         // Once clicked, the popup should show up.
-        DOMUtils.clickNode(this, view, viewClient, "select");
+        DOMUtils.clickNode(this, viewCore, "select");
         assertTrue("The select popup did not show up on click.",
                 CriteriaHelper.pollForCriteria(new PopupShowingCriteria()));
 
@@ -86,7 +87,7 @@ public class SelectPopupTest extends ContentShellTestBase {
             @Override
             public void run() {
                 // Now reload the page while the popup is showing, it gets hidden.
-                getActivity().getActiveShell().loadUrl(SELECT_URL);
+                getContentViewCore().reload(true);
             }
         });
         onPageFinishedHelper.waitForCallback(currentCallCount, 1,
@@ -97,7 +98,7 @@ public class SelectPopupTest extends ContentShellTestBase {
                 CriteriaHelper.pollForCriteria(new PopupHiddenCriteria()));
 
         // Click the select and wait for the popup to show.
-        DOMUtils.clickNode(this, view, viewClient, "select");
+        DOMUtils.clickNode(this, viewCore, "select");
         assertTrue("The select popup did not show on click after reload.",
                 CriteriaHelper.pollForCriteria(new PopupShowingCriteria()));
     }

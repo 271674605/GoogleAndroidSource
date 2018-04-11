@@ -56,7 +56,7 @@ register_var_option "--abis=<list>" ABIS "Specify list of target ABIs."
 NO_MAKEFILE=
 register_var_option "--no-makefile" NO_MAKEFILE "Do not use makefile to speed-up build"
 
-GCC_VERSION=$DEFAULT_GCC_VERSION
+GCC_VERSION=
 register_var_option "--gcc-version=<ver>" GCC_VERSION "Specify GCC version"
 
 LLVM_VERSION=
@@ -84,6 +84,7 @@ if [ -z "$OPTION_BUILD_DIR" ]; then
 else
     BUILD_DIR=$OPTION_BUILD_DIR
 fi
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 fail_panic "Could not create build directory: $BUILD_DIR"
 
@@ -96,13 +97,13 @@ fi
 # Compiler flags we want to use
 COMPILER_RT_CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID__ -ffunction-sections"
 COMPILER_RT_CFLAGS=$COMPILER_RT_CFLAGS" -I$SRC_DIR/include -I$SRC_DIR/lib"
-COMPILER_RT_LDFLAGS="-nostdlib -nodefaultlibs"
+COMPILER_RT_LDFLAGS="-nostdlib"
 
 # List of sources to compile
 COMPILER_RT_GENERIC_SOURCES=$(cd $SRC_DIR && ls lib/*.c)
 
 # filter out the sources we don't need
-UNUSED_SOURCES="lib/apple_versioning.c lib/atomic.c lib/clear_cache.c lib/gcc_personality_v0.c"
+UNUSED_SOURCES="lib/apple_versioning.c lib/gcc_personality_v0.c"
 COMPILER_RT_GENERIC_SOURCES=$(filter_out "$UNUSED_SOURCES" "$COMPILER_RT_GENERIC_SOURCES")
 
 # ARM specific
@@ -162,7 +163,7 @@ prepare_compiler_rt_source_for_abi ()
     local ABI=$1
     local ARCH_SOURCES GENERIC_SOURCES FOUND
 
-    if [ $ABI == "armeabi" -o $ABI == "armeabi-v7a" ]; then
+    if [ $ABI == "armeabi" -o $ABI == "armeabi-v7a" -o $ABI == "armeabi-v7a-hard" ]; then
         ARCH_SOURCES="$COMPILER_RT_ARM_SOURCES"
     elif [ $ABI == "x86" ]; then
         ARCH_SOURCES="$COMPILER_RT_X86_SOURCES"
@@ -195,6 +196,7 @@ build_compiler_rt_libs_for_abi ()
     local BUILDDIR="$2"
     local TYPE="$3"
     local DSTDIR="$4"
+    local GCCVER
 
     mkdir -p "$BUILDDIR"
 
@@ -205,17 +207,31 @@ build_compiler_rt_libs_for_abi ()
 
     mkdir -p "$DSTDIR"
 
-    builder_begin_android $ABI "$BUILDDIR" "$GCC_VERSION" "$LLVM_VERSION" "$MAKEFILE"
+    if [ -n "$GCC_VERSION" ]; then
+        GCCVER=$GCC_VERSION
+    else
+        ARCH=$(convert_abi_to_arch $ABI)
+        GCCVER=$(get_default_gcc_version_for_arch $ARCH)
+    fi
+
+    builder_begin_android $ABI "$BUILDDIR" "$GCCVER" "$LLVM_VERSION" "$MAKEFILE"
     builder_set_srcdir "$SRC_DIR"
     builder_set_dstdir "$DSTDIR"
 
     builder_cflags "$COMPILER_RT_CFLAGS"
 
-    if [ $ABI == "armeabi" -o $ABI == "armeabi-v7a" ]; then
+    if [ $ABI == "armeabi" -o $ABI == "armeabi-v7a" -o $ABI == "armeabi-v7a-hard" ]; then
         builder_cflags "-D__ARM_EABI__"
+        if [ $ABI == "armeabi-v7a-hard" ]; then
+            builder_cflags "-mhard-float -D_NDK_MATH_NO_SOFTFP=1"
+        fi
     fi
 
     builder_ldflags "$COMPILER_RT_LDFLAGS"
+    if [ $ABI == "armeabi-v7a-hard" ]; then
+        builder_cflags "-Wl,--no-warn-mismatch -lm_hard"
+    fi
+
     builder_sources $(prepare_compiler_rt_source_for_abi $ABI)
 
     if [ "$TYPE" = "static" ]; then
@@ -223,6 +239,10 @@ build_compiler_rt_libs_for_abi ()
         builder_static_library libcompiler_rt_static
     else
         log "Building $DSTDIR/libcompiler_rt_shared.so"
+        builder_ldflags "-lc"
+        if [ $ABI != "armeabi-v7a-hard" ]; then
+            builder_ldflags "-lm"
+        fi
         builder_nostdlib_shared_library libcompiler_rt_shared
     fi
     builder_end

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@
 
 #define NFA_HCI_FIRST_HOST_SPECIFIC_GENERIC_GATE    0x10
 #define NFA_HCI_LAST_HOST_SPECIFIC_GENERIC_GATE     0xEF
+#define NFA_HCI_FIRST_PROP_GATE                     0xF0
 #define NFA_HCI_LAST_PROP_GATE                      0xFF
 
 /* Generic Gates */

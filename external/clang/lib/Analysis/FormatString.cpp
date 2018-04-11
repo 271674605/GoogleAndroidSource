@@ -223,6 +223,27 @@ clang::analyze_format_string::ParseLengthModifier(FormatSpecifier &FS,
         break;
       }
       return false;
+    // printf: AsInt64, AsInt32, AsInt3264
+    // scanf:  AsInt64
+    case 'I':
+      if (I + 1 != E && I + 2 != E) {
+        if (I[1] == '6' && I[2] == '4') {
+          I += 3;
+          lmKind = LengthModifier::AsInt64;
+          break;
+        }
+        if (IsScanf)
+          return false;
+
+        if (I[1] == '3' && I[2] == '2') {
+          I += 3;
+          lmKind = LengthModifier::AsInt32;
+          break;
+        }
+      }
+      ++I;
+      lmKind = LengthModifier::AsInt3264;
+      break;
   }
   LengthModifier lm(lmPosition, lmKind);
   FS.setLengthModifier(lm);
@@ -471,6 +492,12 @@ analyze_format_string::LengthModifier::toString() const {
     return "z";
   case AsPtrDiff:
     return "t";
+  case AsInt32:
+    return "I32";
+  case AsInt3264:
+    return "I";
+  case AsInt64:
+    return "I64";
   case AsLongDouble:
     return "L";
   case AsAllocate:
@@ -480,7 +507,7 @@ analyze_format_string::LengthModifier::toString() const {
   case None:
     return "";
   }
-  return NULL;
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -512,9 +539,9 @@ const char *ConversionSpecifier::toString() const {
   case nArg: return "n";
   case PercentArg:  return "%";
   case ScanListArg: return "[";
-  case InvalidSpecifier: return NULL;
+  case InvalidSpecifier: return nullptr;
 
-  // MacOS X unicode extensions.
+  // POSIX unicode extensions.
   case CArg: return "C";
   case SArg: return "S";
 
@@ -524,7 +551,7 @@ const char *ConversionSpecifier::toString() const {
   // GlibC specific specifiers.
   case PrintErrno: return "m";
   }
-  return NULL;
+  return nullptr;
 }
 
 Optional<ConversionSpecifier>
@@ -678,6 +705,20 @@ bool FormatSpecifier::hasValidLengthModifier(const TargetInfo &Target) const {
         default:
           return false;
       }
+    case LengthModifier::AsInt32:
+    case LengthModifier::AsInt3264:
+    case LengthModifier::AsInt64:
+      switch (CS.getKind()) {
+        case ConversionSpecifier::dArg:
+        case ConversionSpecifier::iArg:
+        case ConversionSpecifier::oArg:
+        case ConversionSpecifier::uArg:
+        case ConversionSpecifier::xArg:
+        case ConversionSpecifier::XArg:
+          return Target.getTriple().isOSMSVCRT();
+        default:
+          return false;
+      }
   }
   llvm_unreachable("Invalid LengthModifier Kind!");
 }
@@ -697,6 +738,9 @@ bool FormatSpecifier::hasStandardLengthModifier() const {
     case LengthModifier::AsAllocate:
     case LengthModifier::AsMAllocate:
     case LengthModifier::AsQuad:
+    case LengthModifier::AsInt32:
+    case LengthModifier::AsInt3264:
+    case LengthModifier::AsInt64:
       return false;
   }
   llvm_unreachable("Invalid LengthModifier Kind!");

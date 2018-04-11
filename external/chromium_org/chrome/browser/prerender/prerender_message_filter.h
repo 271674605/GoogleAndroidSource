@@ -10,6 +10,7 @@
 #include "url/gurl.h"
 
 class Profile;
+struct PrerenderAttributes;
 
 namespace content {
 struct Referrer;
@@ -33,15 +34,14 @@ class PrerenderMessageFilter : public content::BrowserMessageFilter {
   virtual ~PrerenderMessageFilter();
 
   // Overridden from content::BrowserMessageFilter.
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       content::BrowserThread::ID* thread) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
 
   void OnAddPrerender(int prerender_id,
-                      const GURL& url,
+                      const PrerenderAttributes& attributes,
                       const content::Referrer& referrer,
                       const gfx::Size& size,
                       int render_view_route_id);

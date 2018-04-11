@@ -16,6 +16,7 @@
 namespace net {
 
 class ClientSocketHandle;
+class HttpStream;
 class SpdySession;
 
 class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
@@ -23,7 +24,8 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
   Request(const GURL& url,
           HttpStreamFactoryImpl* factory,
           HttpStreamRequest::Delegate* delegate,
-          WebSocketStreamBase::Factory* websocket_stream_factory,
+          WebSocketHandshakeStreamBase::CreateHelper*
+              websocket_handshake_stream_create_helper,
           const BoundNetLog& net_log);
   virtual ~Request();
 
@@ -35,12 +37,7 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
   // for this SpdySessionKey, since we may need to wait for NPN to complete
   // before knowing if SPDY is available.
   void SetSpdySessionKey(const SpdySessionKey& spdy_session_key);
-
-  // Called when the Job determines the appropriate |http_pipelining_key| for
-  // the Request. Registers this Request with the factory, so that if an
-  // existing pipeline becomes available, this Request can be late bound to it.
-  // Returns true if this is this key was new to the factory.
-  bool SetHttpPipeliningKey(const HttpPipelinedHost::Key& http_pipelining_key);
+  bool HasSpdySessionKey() const;
 
   // Attaches |job| to this request. Does not mean that Request will use |job|,
   // but Request will own |job|.
@@ -57,17 +54,15 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
   // SpdySessionRequestMap.
   void RemoveRequestFromSpdySessionRequestMap();
 
-  // If this Request has a |http_pipelining_key_|, remove this session from the
-  // HttpPipeliningRequestMap.
-  void RemoveRequestFromHttpPipeliningRequestMap();
-
   // Called by an attached Job if it sets up a SpdySession.
   void OnNewSpdySessionReady(Job* job,
+                             scoped_ptr<HttpStream> stream,
                              const base::WeakPtr<SpdySession>& spdy_session,
                              bool direct);
 
-  WebSocketStreamBase::Factory* websocket_stream_factory() {
-    return websocket_stream_factory_;
+  WebSocketHandshakeStreamBase::CreateHelper*
+  websocket_handshake_stream_create_helper() {
+    return websocket_handshake_stream_create_helper_;
   }
 
   // HttpStreamRequest::Delegate methods which we implement. Note we don't
@@ -77,10 +72,10 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
                      const SSLConfig& used_ssl_config,
                      const ProxyInfo& used_proxy_info,
                      HttpStreamBase* stream);
-  void OnWebSocketStreamReady(Job* job,
-                              const SSLConfig& used_ssl_config,
-                              const ProxyInfo& used_proxy_info,
-                              WebSocketStreamBase* stream);
+  void OnWebSocketHandshakeStreamReady(Job* job,
+                                       const SSLConfig& used_ssl_config,
+                                       const ProxyInfo& used_proxy_info,
+                                       WebSocketHandshakeStreamBase* stream);
   void OnStreamFailed(Job* job, int status, const SSLConfig& used_ssl_config);
   void OnCertificateError(Job* job,
                           int status,
@@ -105,6 +100,7 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
 
   virtual int RestartTunnelWithProxyAuth(
       const AuthCredentials& credentials) OVERRIDE;
+  virtual void SetPriority(RequestPriority priority) OVERRIDE;
   virtual LoadState GetLoadState() const OVERRIDE;
   virtual bool was_npn_negotiated() const OVERRIDE;
   virtual NextProto protocol_negotiated() const OVERRIDE;
@@ -123,7 +119,8 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
 
   const GURL url_;
   HttpStreamFactoryImpl* const factory_;
-  WebSocketStreamBase::Factory* const websocket_stream_factory_;
+  WebSocketHandshakeStreamBase::CreateHelper* const
+      websocket_handshake_stream_create_helper_;
   HttpStreamRequest::Delegate* const delegate_;
   const BoundNetLog net_log_;
 
@@ -131,7 +128,6 @@ class HttpStreamFactoryImpl::Request : public HttpStreamRequest {
   scoped_ptr<Job> bound_job_;
   std::set<HttpStreamFactoryImpl::Job*> jobs_;
   scoped_ptr<const SpdySessionKey> spdy_session_key_;
-  scoped_ptr<const HttpPipelinedHost::Key> http_pipelining_key_;
 
   bool completed_;
   bool was_npn_negotiated_;

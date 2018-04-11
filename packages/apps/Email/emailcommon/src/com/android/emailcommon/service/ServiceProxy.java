@@ -21,12 +21,14 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.pm.ProviderInfo;
 import android.os.AsyncTask;
 import android.os.Debug;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
 
+import com.android.emailcommon.provider.EmailContent;
 import com.android.mail.utils.LogUtils;
 
 /**
@@ -59,24 +61,23 @@ public abstract class ServiceProxy {
     private boolean mTaskCompleted = false;
 
     public static Intent getIntentForEmailPackage(Context context, String actionName) {
-        return new Intent(getIntentStringForEmailPackage(context, actionName));
-    }
-
-    /**
-     * Create Intent action based on the Email package name
-     * Package com.android.email + ACTION -> com.android.email.ACTION
-     * Package com.google.android.email + ACTION -> com.google.android.email.ACTION
-     * Package com.android.exchange + ACTION -> com.android.email.ACTION
-     * Package com.google.exchange + ACTION -> com.google.android.email.ACTION
-     *
-     * @param context the caller's context
-     * @param actionName the Intent action
-     * @return an Intent action based on the package name
-     */
-    public static String getIntentStringForEmailPackage(Context context, String actionName) {
-        String packageName = context.getPackageName();
-        int lastDot = packageName.lastIndexOf('.');
-        return packageName.substring(0, lastDot + 1) + "email." + actionName;
+        /**
+         * We want to scope the intent so that only the Email app will handle it. Unfortunately
+         * we found that there are many instances where the package name of the Email app is
+         * not what we expect. The easiest way to find the package of the correct app is to
+         * see who is the EmailContent.AUTHORITY as there is only one app that can implement
+         * the content provider for this authority and this is the right app to handle this intent.
+         */
+        final Intent intent = new Intent(EmailContent.EMAIL_PACKAGE_NAME + "." + actionName);
+        final ProviderInfo info = context.getPackageManager().resolveContentProvider(
+                EmailContent.AUTHORITY, 0);
+        if (info != null) {
+            final String packageName = info.packageName;
+            intent.setPackage(packageName);
+        } else {
+            LogUtils.e(LogUtils.TAG, "Could not find the Email Content Provider");
+        }
+        return intent;
     }
 
     /**
@@ -118,9 +119,14 @@ public abstract class ServiceProxy {
                         // Each ServiceProxy handles just one task, so we unbind after we're
                         // done with our work.
                         mContext.unbindService(mConnection);
-                    } catch (IllegalArgumentException e) {
-                        // This can happen if the user ended the activity that was using the
-                        // service. This is harmless, but we've got to catch it.
+                    } catch (RuntimeException e) {
+                        // The exceptions that are thrown here look like IllegalStateException,
+                        // IllegalArgumentException and RuntimeException. Catching RuntimeException
+                        // which get them all. Reasons for these exceptions include services that
+                        // have already been stopped or unbound. This can happen if the user ended
+                        // the activity that was using the service. This is harmless, but we've got
+                        // to catch it.
+                        LogUtils.e(mTag, e, "RuntimeException when trying to unbind from service");
                     }
                     mTaskCompleted = true;
                     synchronized(mConnection) {

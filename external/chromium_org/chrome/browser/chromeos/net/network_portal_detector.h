@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_NET_NETWORK_PORTAL_DETECTOR_H_
 
 #include "base/basictypes.h"
+#include "chrome/browser/chromeos/net/network_portal_detector_strategy.h"
 #include "net/url_request/url_fetcher.h"
 
 namespace chromeos {
@@ -13,7 +14,7 @@ namespace chromeos {
 class NetworkState;
 
 // This class handles all notifications about network changes from
-// NetworkLibrary and delegates portal detection for the active
+// NetworkStateHandler and delegates portal detection for the active
 // network to CaptivePortalService.
 class NetworkPortalDetector {
  public:
@@ -32,8 +33,13 @@ class NetworkPortalDetector {
           response_code(net::URLFetcher::RESPONSE_CODE_INVALID) {
     }
 
+    bool operator==(const CaptivePortalState& o) const {
+      return status == o.status && response_code == o.response_code;
+    }
+
     CaptivePortalStatus status;
     int response_code;
+    base::TimeTicks time;
   };
 
   class Observer {
@@ -53,9 +59,6 @@ class NetworkPortalDetector {
     virtual ~Observer() {}
   };
 
-  virtual void Init() = 0;
-  virtual void Shutdown() = 0;
-
   // Adds |observer| to the observers list.
   virtual void AddObserver(Observer* observer) = 0;
 
@@ -74,9 +77,9 @@ class NetworkPortalDetector {
   // Removes |observer| from the observers list.
   virtual void RemoveObserver(Observer* observer) = 0;
 
-  // Returns Captive Portal state for a given |network|.
+  // Returns Captive Portal state for the network specified by |service_path|.
   virtual CaptivePortalState GetCaptivePortalState(
-      const chromeos::NetworkState* network) = 0;
+      const std::string& service_path) = 0;
 
   // Returns true if portal detection is enabled.
   virtual bool IsEnabled() = 0;
@@ -93,25 +96,37 @@ class NetworkPortalDetector {
   // started.
   virtual bool StartDetectionIfIdle() = 0;
 
-  // Enables lazy detection mode. In this mode portal detection after
-  // first 3 consecutive attemps will be performed once in 5 seconds.
-  virtual void EnableLazyDetection() = 0;
+  // Sets current strategy according to |id|. If current detection id
+  // doesn't equal to |id|, detection is restarted.
+  virtual void SetStrategy(PortalDetectorStrategy::StrategyId id) = 0;
 
-  // Dizables lazy detection mode.
-  virtual void DisableLazyDetection() = 0;
+  // Initializes network portal detector for testing. The
+  // |network_portal_detector| will be owned by the internal pointer
+  // and deleted by Shutdown().
+  static void InitializeForTesting(
+      NetworkPortalDetector* network_portal_detector);
 
   // Creates an instance of the NetworkPortalDetector.
-  static NetworkPortalDetector* CreateInstance();
+  static void Initialize();
 
-  // Gets the instance of the NetworkPortalDetector.
-  static NetworkPortalDetector* GetInstance();
+  // Deletes the instance of the NetworkPortalDetector.
+  static void Shutdown();
 
-  // Returns true is NetworkPortalDetector service is enabled in command line.
-  static bool IsEnabledInCommandLine();
+  // Gets the instance of the NetworkPortalDetector. Return value should
+  // be used carefully in tests, because it can be changed "on the fly"
+  // by calls to InitializeForTesting().
+  static NetworkPortalDetector* Get();
+
+  // Returns non-localized string representation of |status|.
+  static std::string CaptivePortalStatusString(CaptivePortalStatus status);
+
+  // Returns |true| if NetworkPortalDetector was Initialized and it is safe to
+  // call Get.
+  static bool IsInitialized();
 
  protected:
-  NetworkPortalDetector();
-  virtual ~NetworkPortalDetector();
+  NetworkPortalDetector() {}
+  virtual ~NetworkPortalDetector() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkPortalDetector);

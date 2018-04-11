@@ -10,7 +10,6 @@
 #include "ui/base/dragdrop/drop_target_win.h"
 
 namespace aura {
-class RootWindow;
 namespace client {
 class DragDropDelegate;
 }
@@ -24,12 +23,12 @@ class OSExchangeData;
 namespace views {
 
 // DesktopDropTargetWin takes care of managing drag and drop for
-// DesktopRootWindowHostWin. It converts Windows OLE drop messages into
+// DesktopWindowTreeHostWin. It converts Windows OLE drop messages into
 // aura::client::DragDropDelegate calls.
 class DesktopDropTargetWin : public ui::DropTargetWin,
                              public aura::WindowObserver {
  public:
-  DesktopDropTargetWin(aura::RootWindow* root_window, HWND window);
+  DesktopDropTargetWin(aura::Window* root_window, HWND window);
   virtual ~DesktopDropTargetWin();
 
  private:
@@ -64,7 +63,7 @@ class DesktopDropTargetWin : public ui::DropTargetWin,
   void NotifyDragLeave();
 
   // The root window associated with this drop target.
-  aura::RootWindow* root_window_;
+  aura::Window* root_window_;
 
   // The Aura window that is currently under the cursor. We need to manually
   // keep track of this because Windows will only call our drag enter method

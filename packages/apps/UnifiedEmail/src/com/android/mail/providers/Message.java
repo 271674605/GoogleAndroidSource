@@ -25,24 +25,30 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.provider.BaseColumns;
 import android.text.Html;
-import android.text.SpannedString;
+import android.text.SpannableString;
 import android.text.TextUtils;
+import android.text.util.Linkify;
 import android.text.util.Rfc822Token;
 import android.text.util.Rfc822Tokenizer;
 
+import com.android.emailcommon.internet.MimeHeader;
 import com.android.emailcommon.internet.MimeMessage;
 import com.android.emailcommon.internet.MimeUtility;
+import com.android.emailcommon.mail.Address;
 import com.android.emailcommon.mail.MessagingException;
 import com.android.emailcommon.mail.Part;
 import com.android.emailcommon.utility.ConversionUtilities;
 import com.android.mail.providers.UIProvider.MessageColumns;
 import com.android.mail.ui.HtmlMessage;
+import com.android.mail.utils.HtmlSanitizer;
 import com.android.mail.utils.Utils;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -55,6 +61,9 @@ public class Message implements Parcelable, HtmlMessage {
      */
     private static Pattern INLINE_IMAGE_PATTERN = Pattern.compile("<img\\s+[^>]*src=",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+
+    // regex that matches content id surrounded by "<>" optionally.
+    private static final Pattern REMOVE_OPTIONAL_BRACKETS = Pattern.compile("^<?([^>]+)>?$");
 
     /**
      * @see BaseColumns#_ID
@@ -137,6 +146,10 @@ public class Message implements Parcelable, HtmlMessage {
      */
     public Uri attachmentListUri;
     /**
+     * @see UIProvider.MessageColumns#ATTACHMENT_BY_CID_URI
+     */
+    public Uri attachmentByCidUri;
+    /**
      * @see UIProvider.MessageColumns#MESSAGE_FLAGS
      */
     public long messageFlags;
@@ -191,9 +204,18 @@ public class Message implements Parcelable, HtmlMessage {
      */
     public String viaDomain;
     /**
-     * @see UIProvider.MessageColumns#IS_SENDING
+     * @see UIProvider.MessageColumns#SENDING_STATE
      */
-    public boolean isSending;
+    public int sendingState;
+
+    /**
+     * @see UIProvider.MessageColumns#CLIPPED
+     */
+    public boolean clipped;
+    /**
+     * @see UIProvider.MessageColumns#PERMALINK
+     */
+    public String permalink;
 
     private transient String[] mFromAddresses = null;
     private transient String[] mToAddresses = null;
@@ -217,6 +239,26 @@ public class Message implements Parcelable, HtmlMessage {
     @Override
     public int hashCode() {
         return uri == null ? 0 : uri.hashCode();
+    }
+
+    /**
+     * Helper equality function to check if the two Message objects are equal in terms of
+     * the fields that the user can input from ComposeActivity. This is primarily used to
+     * ensure draft preview/composition are synced.
+     * @param o the Message being compared to
+     * @return True if they are equal in fields, false otherwise
+     */
+    public boolean isEqual(Message o) {
+        return TextUtils.equals(this.getFrom(), o.getFrom()) &&
+                this.sendingState == o.sendingState &&
+                TextUtils.equals(this.getTo(), o.getTo()) &&
+                TextUtils.equals(this.getCc(), o.getCc()) &&
+                TextUtils.equals(this.getBcc(), o.getBcc()) &&
+                TextUtils.equals(this.subject, o.subject) &&
+                TextUtils.equals(this.bodyHtml, o.bodyHtml) &&
+                TextUtils.equals(this.bodyText, o.bodyText) &&
+                Objects.equal(this.attachmentListUri, o.attachmentListUri) &&
+                Objects.equal(getAttachments(), o.getAttachments());
     }
 
     @Override
@@ -251,7 +293,9 @@ public class Message implements Parcelable, HtmlMessage {
         dest.writeInt(spamWarningLevel);
         dest.writeInt(spamLinkType);
         dest.writeString(viaDomain);
-        dest.writeInt(isSending ? 1 : 0);
+        dest.writeInt(sendingState);
+        dest.writeInt(clipped ? 1 : 0);
+        dest.writeString(permalink);
     }
 
     private Message(Parcel in) {
@@ -285,7 +329,9 @@ public class Message implements Parcelable, HtmlMessage {
         spamWarningLevel = in.readInt();
         spamLinkType = in.readInt();
         viaDomain = in.readString();
-        isSending = in.readInt() != 0;
+        sendingState = in.readInt();
+        clipped = in.readInt() != 0;
+        permalink = in.readString();
     }
 
     public Message() {
@@ -343,6 +389,10 @@ public class Message implements Parcelable, HtmlMessage {
                     .getString(UIProvider.MESSAGE_ATTACHMENT_LIST_URI_COLUMN);
             attachmentListUri = hasAttachments && !TextUtils.isEmpty(attachmentsUri) ? Uri
                     .parse(attachmentsUri) : null;
+            final String attachmentsByCidUri = cursor
+                    .getString(UIProvider.MESSAGE_ATTACHMENT_BY_CID_URI_COLUMN);
+            attachmentByCidUri = hasAttachments && !TextUtils.isEmpty(attachmentsByCidUri) ?
+                    Uri.parse(attachmentsByCidUri) : null;
             messageFlags = cursor.getLong(UIProvider.MESSAGE_FLAGS_COLUMN);
             alwaysShowImages = cursor.getInt(UIProvider.MESSAGE_ALWAYS_SHOW_IMAGES_COLUMN) != 0;
             read = cursor.getInt(UIProvider.MESSAGE_READ_COLUMN) != 0;
@@ -359,32 +409,48 @@ public class Message implements Parcelable, HtmlMessage {
             spamWarningLevel = cursor.getInt(UIProvider.MESSAGE_SPAM_WARNING_LEVEL_COLUMN);
             spamLinkType = cursor.getInt(UIProvider.MESSAGE_SPAM_WARNING_LINK_TYPE_COLUMN);
             viaDomain = cursor.getString(UIProvider.MESSAGE_VIA_DOMAIN_COLUMN);
-            isSending = cursor.getInt(UIProvider.MESSAGE_IS_SENDING_COLUMN) != 0;
+            sendingState = cursor.getInt(UIProvider.MESSAGE_SENDING_STATE_COLUMN);
+            clipped = cursor.getInt(UIProvider.MESSAGE_CLIPPED_COLUMN) != 0;
+            permalink = cursor.getString(UIProvider.MESSAGE_PERMALINK_COLUMN);
         }
     }
 
+    /**
+     * This constructor exists solely to generate Message objects from .eml attachments.
+     */
     public Message(Context context, MimeMessage mimeMessage, Uri emlFileUri)
             throws MessagingException {
         // Set message header values.
-        setFrom(com.android.emailcommon.mail.Address.pack(mimeMessage.getFrom()));
-        setTo(com.android.emailcommon.mail.Address.pack(mimeMessage.getRecipients(
+        setFrom(Address.toHeader(mimeMessage.getFrom()));
+        setTo(Address.toHeader(mimeMessage.getRecipients(
                 com.android.emailcommon.mail.Message.RecipientType.TO)));
-        setCc(com.android.emailcommon.mail.Address.pack(mimeMessage.getRecipients(
+        setCc(Address.toHeader(mimeMessage.getRecipients(
                 com.android.emailcommon.mail.Message.RecipientType.CC)));
-        setBcc(com.android.emailcommon.mail.Address.pack(mimeMessage.getRecipients(
+        setBcc(Address.toHeader(mimeMessage.getRecipients(
                 com.android.emailcommon.mail.Message.RecipientType.BCC)));
-        setReplyTo(com.android.emailcommon.mail.Address.pack(mimeMessage.getReplyTo()));
+        setReplyTo(Address.toHeader(mimeMessage.getReplyTo()));
         subject = mimeMessage.getSubject();
-        dateReceivedMs = mimeMessage.getSentDate().getTime();
+
+        final Date sentDate = mimeMessage.getSentDate();
+        final Date internalDate = mimeMessage.getInternalDate();
+        if (sentDate != null) {
+            dateReceivedMs = sentDate.getTime();
+        } else if (internalDate != null) {
+            dateReceivedMs = internalDate.getTime();
+        } else {
+            dateReceivedMs = System.currentTimeMillis();
+        }
 
         // for now, always set defaults
         alwaysShowImages = false;
         viaDomain = null;
         draftType = UIProvider.DraftType.NOT_A_DRAFT;
-        isSending = false;
+        sendingState = UIProvider.ConversationSendingState.OTHER;
         starred = false;
         spamWarningString = null;
         messageFlags = 0;
+        clipped = false;
+        permalink = null;
         hasAttachments = false;
 
         // body values (snippet/bodyText/bodyHtml)
@@ -393,27 +459,42 @@ public class Message implements Parcelable, HtmlMessage {
         ArrayList<Part> attachments = new ArrayList<Part>();
         MimeUtility.collectParts(mimeMessage, viewables, attachments);
 
-        ConversionUtilities.BodyFieldData data =
-                ConversionUtilities.parseBodyFields(viewables);
+        ConversionUtilities.BodyFieldData data = ConversionUtilities.parseBodyFields(viewables);
 
         snippet = data.snippet;
         bodyText = data.textContent;
-        bodyHtml = data.htmlContent;
+
+        // sanitize the HTML found within the .eml file before consuming it
+        bodyHtml = HtmlSanitizer.sanitizeHtml(data.htmlContent);
 
         // populate mAttachments
         mAttachments = Lists.newArrayList();
 
-        int partId = 0;
         final String messageId = mimeMessage.getMessageId();
+
+        int partId = 0;
         for (final Part attachmentPart : attachments) {
             mAttachments.add(new Attachment(context, attachmentPart,
-                    emlFileUri, messageId, Integer.toString(partId++)));
+                    emlFileUri, messageId, Integer.toString(partId++), false /* inline */));
+        }
+
+        // instantiating an Attachment for each viewable will cause it to be registered within the
+        // EmlAttachmentProvider for later access when displaying inline attachments
+        for (final Part viewablePart : viewables) {
+            final String[] cids = viewablePart.getHeader(MimeHeader.HEADER_CONTENT_ID);
+            if (cids != null && cids.length == 1) {
+                final String cid = REMOVE_OPTIONAL_BRACKETS.matcher(cids[0]).replaceAll("$1");
+                mAttachments.add(new Attachment(context, viewablePart, emlFileUri, messageId, cid,
+                        true /* inline */));
+            }
         }
 
         hasAttachments = !mAttachments.isEmpty();
 
-        attachmentListUri =  hasAttachments ?
+        attachmentListUri = hasAttachments ?
                 EmlAttachmentProvider.getAttachmentsListUri(emlFileUri, messageId) : null;
+
+        attachmentByCidUri = EmlAttachmentProvider.getAttachmentByCidUri(emlFileUri, messageId);
     }
 
     public boolean isFlaggedReplied() {
@@ -467,6 +548,7 @@ public class Message implements Parcelable, HtmlMessage {
         mBccAddresses = null;
     }
 
+    @VisibleForTesting
     public String getReplyTo() {
         return mReplyTo;
     }
@@ -565,6 +647,32 @@ public class Message implements Parcelable, HtmlMessage {
     }
 
     /**
+     * Returns the number of attachments in the message.
+     * @param includeInline If {@code true}, includes inline attachments in the count.
+     *                      {@code false}, otherwise.
+     * @return the number of attachments in the message.
+     */
+    public int getAttachmentCount(boolean includeInline) {
+        // If include inline, just return the full list count.
+        if (includeInline) {
+            return mAttachments.size();
+        }
+
+        // Otherwise, iterate through the attachment list,
+        // skipping inline attachments.
+        int numAttachments = 0;
+        final List<Attachment> attachments = getAttachments();
+        for (int i = 0, size = attachments.size(); i < size; i++) {
+            if (attachments.get(i).isInlineAttachment()) {
+                continue;
+            }
+            numAttachments++;
+        }
+
+        return numAttachments;
+    }
+
+    /**
      * Returns whether a "Show Pictures" button should initially appear for this message. If the
      * button is shown, the message must also block all non-local images in the body. Inversely, if
      * the button is not shown, the message must show all images within (or else the user would be
@@ -605,7 +713,9 @@ public class Message implements Parcelable, HtmlMessage {
         if (!TextUtils.isEmpty(bodyHtml)) {
             body = bodyHtml;
         } else if (!TextUtils.isEmpty(bodyText)) {
-            body = Html.toHtml(new SpannedString(bodyText));
+            final SpannableString spannable = new SpannableString(bodyText);
+            Linkify.addLinks(spannable, Linkify.EMAIL_ADDRESSES);
+            body = Html.toHtml(spannable);
         }
         return body;
     }
@@ -613,5 +723,9 @@ public class Message implements Parcelable, HtmlMessage {
     @Override
     public long getId() {
         return id;
+    }
+
+    public boolean isDraft() {
+        return draftType != UIProvider.DraftType.NOT_A_DRAFT;
     }
 }

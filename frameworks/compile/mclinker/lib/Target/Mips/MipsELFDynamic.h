@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_Mips_ELFDYNAMIC_SECTION_H
-#define MCLD_Mips_ELFDYNAMIC_SECTION_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_MIPS_MIPSELFDYNAMIC_H
+#define TARGET_MIPS_MIPSELFDYNAMIC_H
 
 #include <mcld/Target/ELFDynamic.h>
 
@@ -22,10 +19,10 @@ class MipsELFDynamic : public ELFDynamic
 {
 public:
   MipsELFDynamic(const MipsGNULDBackend& pParent, const LinkerConfig& pConfig);
-  ~MipsELFDynamic();
 
 private:
   const MipsGNULDBackend& m_pParent;
+  const LinkerConfig& m_pConfig;
 
 private:
   void reserveTargetEntries(const ELFFileFormat& pFormat);
@@ -34,6 +31,7 @@ private:
   size_t getSymTabNum(const ELFFileFormat& pFormat) const;
   size_t getGotSym(const ELFFileFormat& pFormat) const;
   size_t getLocalGotNum(const ELFFileFormat& pFormat) const;
+  uint64_t getBaseAddress();
 };
 
 } // namespace of mcld

@@ -45,7 +45,7 @@ import android.widget.Scroller;
  */
 public class SlidingChallengeLayout extends ViewGroup implements ChallengeLayout {
     private static final String TAG = "SlidingChallengeLayout";
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = KeyguardConstants.DEBUG;
 
     // The drag handle is measured in dp above & below the top edge of the
     // challenge view; these parameters change based on whether the challenge
@@ -1001,6 +1001,16 @@ public class SlidingChallengeLayout extends ViewGroup implements ChallengeLayout
                     mChallengeView.getTop() + getDragHandleSizeBelow(),
                     debugPaint);
         }
+    }
+
+    @Override
+    protected boolean onRequestFocusInDescendants(int direction, Rect previouslyFocusedRect) {
+        // Focus security fileds before widgets.
+        if (mChallengeView != null &&
+                mChallengeView.requestFocus(direction, previouslyFocusedRect)) {
+            return true;
+        }
+        return super.onRequestFocusInDescendants(direction, previouslyFocusedRect);
     }
 
     public void computeScroll() {

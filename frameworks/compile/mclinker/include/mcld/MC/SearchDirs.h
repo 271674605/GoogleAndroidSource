@@ -8,11 +8,8 @@
 //===----------------------------------------------------------------------===//
 #ifndef MCLD_MC_SEARCHDIRS_H
 #define MCLD_MC_SEARCHDIRS_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
 #include <mcld/ADT/Uncopyable.h>
-#include <mcld/MC/MCLDInput.h>
+#include <mcld/MC/Input.h>
 #include <mcld/Support/Path.h>
 
 #include <llvm/ADT/StringRef.h>

@@ -16,19 +16,21 @@ class Transform;
 }
 
 namespace aura {
-class RootWindow;
 class Window;
+class WindowTreeHost;
 
 // A minimal, testing Aura implementation of gfx::Screen.
 class TestScreen : public gfx::Screen,
                    public WindowObserver {
  public:
-  static TestScreen* Create();
+  // Creates a gfx::Screen of the specified size. If no size is specified, then
+  // creates a 800x600 screen. |size| is in physical pixels.
+  static TestScreen* Create(const gfx::Size& size);
   // Creates a TestScreen that uses fullscreen for the display.
   static TestScreen* CreateFullscreen();
   virtual ~TestScreen();
 
-  RootWindow* CreateRootWindowForPrimaryDisplay();
+  WindowTreeHost* CreateHostForPrimaryDisplay();
 
   void SetDeviceScaleFactor(float device_scale_fator);
   void SetDisplayRotation(gfx::Display::Rotation rotation);
@@ -47,8 +49,11 @@ class TestScreen : public gfx::Screen,
   // gfx::Screen overrides:
   virtual bool IsDIPEnabled() OVERRIDE;
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
-  virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE;
-  virtual int GetNumDisplays() OVERRIDE;
+  virtual gfx::NativeWindow GetWindowUnderCursor() OVERRIDE;
+  virtual gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point)
+      OVERRIDE;
+  virtual int GetNumDisplays() const OVERRIDE;
+  virtual std::vector<gfx::Display> GetAllDisplays() const OVERRIDE;
   virtual gfx::Display GetDisplayNearestWindow(
       gfx::NativeView view) const OVERRIDE;
   virtual gfx::Display GetDisplayNearestPoint(
@@ -62,7 +67,7 @@ class TestScreen : public gfx::Screen,
  private:
   explicit TestScreen(const gfx::Rect& screen_bounds);
 
-  aura::RootWindow* root_window_;
+  aura::WindowTreeHost* host_;
 
   gfx::Display display_;
 

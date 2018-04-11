@@ -18,24 +18,22 @@ package com.android.camera;
 
 import android.annotation.TargetApi;
 import android.app.Activity;
-import android.content.ContentProviderClient;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences.Editor;
-import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.SurfaceTexture;
-import android.hardware.Camera.CameraInfo;
-import android.hardware.Camera.Parameters;
-import android.hardware.Camera.Size;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
+import android.media.AudioManager;
 import android.media.CameraProfile;
+import android.media.SoundPool;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -44,64 +42,85 @@ import android.os.Message;
 import android.os.MessageQueue;
 import android.os.SystemClock;
 import android.provider.MediaStore;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.OrientationEventListener;
 import android.view.View;
-import android.view.WindowManager;
 
-import com.android.camera.CameraManager.CameraAFCallback;
-import com.android.camera.CameraManager.CameraAFMoveCallback;
-import com.android.camera.CameraManager.CameraPictureCallback;
-import com.android.camera.CameraManager.CameraProxy;
-import com.android.camera.CameraManager.CameraShutterCallback;
 import com.android.camera.PhotoModule.NamedImages.NamedEntity;
+import com.android.camera.app.AppController;
+import com.android.camera.app.CameraAppUI;
+import com.android.camera.app.CameraProvider;
+import com.android.camera.app.MediaSaver;
+import com.android.camera.app.MemoryManager;
+import com.android.camera.app.MemoryManager.MemoryListener;
+import com.android.camera.app.MotionManager;
+import com.android.camera.debug.Log;
 import com.android.camera.exif.ExifInterface;
 import com.android.camera.exif.ExifTag;
 import com.android.camera.exif.Rational;
-import com.android.camera.ui.CountDownView.OnCountDownFinishedListener;
-import com.android.camera.ui.ModuleSwitcher;
-import com.android.camera.ui.RotateTextToast;
+import com.android.camera.hardware.HardwareSpec;
+import com.android.camera.hardware.HardwareSpecImpl;
+import com.android.camera.module.ModuleController;
+import com.android.camera.remote.RemoteCameraModule;
+import com.android.camera.settings.CameraPictureSizesCacher;
+import com.android.camera.settings.Keys;
+import com.android.camera.settings.ResolutionUtil;
+import com.android.camera.settings.SettingsManager;
+import com.android.camera.settings.SettingsUtil;
+import com.android.camera.ui.CountDownView;
+import com.android.camera.ui.TouchCoordinate;
 import com.android.camera.util.ApiHelper;
 import com.android.camera.util.CameraUtil;
 import com.android.camera.util.GcamHelper;
+import com.android.camera.util.GservicesHelper;
+import com.android.camera.util.SessionStatsCollector;
 import com.android.camera.util.UsageStatistics;
+import com.android.camera.widget.AspectRatioSelector;
 import com.android.camera2.R;
+import com.android.ex.camera2.portability.CameraAgent;
+import com.android.ex.camera2.portability.CameraAgent.CameraAFCallback;
+import com.android.ex.camera2.portability.CameraAgent.CameraAFMoveCallback;
+import com.android.ex.camera2.portability.CameraAgent.CameraPictureCallback;
+import com.android.ex.camera2.portability.CameraAgent.CameraProxy;
+import com.android.ex.camera2.portability.CameraAgent.CameraShutterCallback;
+import com.android.ex.camera2.portability.CameraCapabilities;
+import com.android.ex.camera2.portability.CameraDeviceInfo.Characteristics;
+import com.android.ex.camera2.portability.CameraSettings;
+import com.android.ex.camera2.portability.Size;
+import com.google.common.logging.eventprotos;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 
 public class PhotoModule
-        implements CameraModule,
-        PhotoController,
+        extends CameraModule
+        implements PhotoController,
+        ModuleController,
+        MemoryListener,
         FocusOverlayManager.Listener,
-        CameraPreference.OnPreferenceChangedListener,
-        ShutterButton.OnShutterButtonListener,
-        MediaSaveService.Listener,
-        OnCountDownFinishedListener,
-        SensorEventListener {
+        SensorEventListener,
+        SettingsManager.OnSettingChangedListener,
+        RemoteCameraModule,
+        CountDownView.OnCountDownStatusListener {
 
-    private static final String TAG = "CAM_PhotoModule";
+    public static final String PHOTO_MODULE_STRING_ID = "PhotoModule";
+
+    private static final Log.Tag TAG = new Log.Tag(PHOTO_MODULE_STRING_ID);
 
     // We number the request code from 1000 to avoid collision with Gallery.
     private static final int REQUEST_CROP = 1000;
 
-    private static final int SETUP_PREVIEW = 1;
-    private static final int FIRST_TIME_INIT = 2;
-    private static final int CLEAR_SCREEN_DELAY = 3;
-    private static final int SET_CAMERA_PARAMETERS_WHEN_IDLE = 4;
-    private static final int SHOW_TAP_TO_FOCUS_TOAST = 5;
-    private static final int SWITCH_CAMERA = 6;
-    private static final int SWITCH_CAMERA_START_ANIMATION = 7;
-    private static final int CAMERA_OPEN_DONE = 8;
-    private static final int OPEN_CAMERA_FAIL = 9;
-    private static final int CAMERA_DISABLED = 10;
-    private static final int SWITCH_TO_GCAM_MODULE = 11;
+    // Messages defined for the UI thread handler.
+    private static final int MSG_FIRST_TIME_INIT = 1;
+    private static final int MSG_SET_CAMERA_PARAMETERS_WHEN_IDLE = 2;
 
     // The subset of parameters we need to update in setCameraParameters().
     private static final int UPDATE_PARAM_INITIALIZE = 1;
@@ -109,17 +128,17 @@ public class PhotoModule
     private static final int UPDATE_PARAM_PREFERENCE = 4;
     private static final int UPDATE_PARAM_ALL = -1;
 
-    // This is the timeout to keep the camera in onPause for the first time
-    // after screen on if the activity is started from secure lock screen.
-    private static final int KEEP_CAMERA_TIMEOUT = 1000; // ms
+    // This is the delay before we execute onResume tasks when coming
+    // from the lock screen, to allow time for onPause to execute.
+    private static final int ON_RESUME_TASKS_DELAY_MSEC = 20;
 
     private static final String DEBUG_IMAGE_PREFIX = "DEBUG_";
 
-    // copied from Camera hierarchy
     private CameraActivity mActivity;
     private CameraProxy mCameraDevice;
     private int mCameraId;
-    private Parameters mParameters;
+    private CameraCapabilities mCameraCapabilities;
+    private CameraSettings mCameraSettings;
     private boolean mPaused;
 
     private PhotoUI mUI;
@@ -128,18 +147,16 @@ public class PhotoModule
     // needed because texture copy is done in GL thread. -1 means camera is not
     // switching.
     protected int mPendingSwitchCameraId = -1;
-    private boolean mOpenCameraFail;
-    private boolean mCameraDisabled;
 
     // When setCameraParametersWhenIdle() is called, we accumulate the subsets
     // needed to be updated in mUpdateSet.
     private int mUpdateSet;
 
-    private static final int SCREEN_DELAY = 2 * 60 * 1000;
+    private float mZoomValue; // The current zoom ratio.
+    private int mTimerDuration;
+    /** Set when a volume button is clicked to take photo */
+    private boolean mVolumeButtonClickedFlag = false;
 
-    private int mZoomValue;  // The current zoom value.
-
-    private Parameters mInitialParams;
     private boolean mFocusAreaSupported;
     private boolean mMeteringAreaSupported;
     private boolean mAeLockSupported;
@@ -148,11 +165,9 @@ public class PhotoModule
 
     // The degrees of the device rotated clockwise from its natural orientation.
     private int mOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
-    private ComboPreferences mPreferences;
 
     private static final String sTempCropFilename = "crop-temp";
 
-    private ContentProviderClient mMediaProviderClient;
     private boolean mFaceDetectionStarted = false;
 
     // mCropValue and mSaveUri are used only if isImageCaptureIntent() is true.
@@ -165,7 +180,7 @@ public class PhotoModule
     // when the image is ready to be saved.
     private NamedImages mNamedImages;
 
-    private Runnable mDoSnapRunnable = new Runnable() {
+    private final Runnable mDoSnapRunnable = new Runnable() {
         @Override
         public void run() {
             onShutterButtonClick();
@@ -173,10 +188,8 @@ public class PhotoModule
     };
 
     /**
-     * An unpublished intent flag requesting to return as soon as capturing
-     * is completed.
-     *
-     * TODO: consider publishing by moving into MediaStore.
+     * An unpublished intent flag requesting to return as soon as capturing is
+     * completed. TODO: consider publishing by moving into MediaStore.
      */
     private static final String EXTRA_QUICK_CAPTURE =
             "android.intent.extra.quickCapture";
@@ -188,7 +201,7 @@ public class PhotoModule
     private int mCameraDisplayOrientation;
     // The value for UI components like indicators.
     private int mDisplayOrientation;
-    // The value for android.hardware.Camera.Parameters.setRotation.
+    // The value for cameradevice.CameraSettings.setPhotoRotationDegrees.
     private int mJpegRotation;
     // Indicates whether we are using front camera
     private boolean mMirror;
@@ -200,7 +213,7 @@ public class PhotoModule
 
     private ContentResolver mContentResolver;
 
-    private LocationManager mLocationManager;
+    private AppController mAppController;
 
     private final PostViewPictureCallback mPostViewPictureCallback =
             new PostViewPictureCallback();
@@ -222,6 +235,9 @@ public class PhotoModule
     private long mJpegPictureCallbackTime;
     private long mOnResumeTime;
     private byte[] mJpegImageData;
+    /** Touch coordinate for shutter button press. */
+    private TouchCoordinate mShutterTouchCoordinate;
+
 
     // These latency time are for the CameraLatency test.
     public long mAutoFocusTime;
@@ -234,23 +250,25 @@ public class PhotoModule
     // This handles everything about focus.
     private FocusOverlayManager mFocusManager;
 
-    private String mSceneMode;
+    private final int mGcamModeIndex;
+    private SoundPlayer mCountdownSoundPlayer;
 
-    private final Handler mHandler = new MainHandler();
-    private PreferenceGroup mPreferenceGroup;
+    private CameraCapabilities.SceneMode mSceneMode;
+
+    private final Handler mHandler = new MainHandler(this);
 
     private boolean mQuickCapture;
     private SensorManager mSensorManager;
-    private float[] mGData = new float[3];
-    private float[] mMData = new float[3];
-    private float[] mR = new float[16];
+    private final float[] mGData = new float[3];
+    private final float[] mMData = new float[3];
+    private final float[] mR = new float[16];
     private int mHeading = -1;
 
-    // True if all the parameters needed to start preview is ready.
+    /** True if all the parameters needed to start preview is ready. */
     private boolean mCameraPreviewParamsReady = false;
 
-    private MediaSaveService.OnMediaSavedListener mOnMediaSavedListener =
-            new MediaSaveService.OnMediaSavedListener() {
+    private final MediaSaver.OnMediaSavedListener mOnMediaSavedListener =
+            new MediaSaver.OnMediaSavedListener() {
                 @Override
                 public void onMediaSaved(Uri uri) {
                     if (uri != null) {
@@ -258,6 +276,56 @@ public class PhotoModule
                     }
                 }
             };
+    private boolean mShouldResizeTo16x9 = false;
+
+    private final Runnable mResumeTaskRunnable = new Runnable() {
+        @Override
+        public void run() {
+            onResumeTasks();
+        }
+    };
+
+    /**
+     * We keep the flash setting before entering scene modes (HDR)
+     * and restore it after HDR is off.
+     */
+    private String mFlashModeBeforeSceneMode;
+
+    /**
+     * This callback gets called when user select whether or not to
+     * turn on geo-tagging.
+     */
+    public interface LocationDialogCallback {
+        /**
+         * Gets called after user selected/unselected geo-tagging feature.
+         *
+         * @param selected whether or not geo-tagging feature is selected
+         */
+        public void onLocationTaggingSelected(boolean selected);
+    }
+
+    /**
+     * This callback defines the text that is shown in the aspect ratio selection
+     * dialog, provides the current aspect ratio, and gets notified when user changes
+     * aspect ratio selection in the dialog.
+     */
+    public interface AspectRatioDialogCallback {
+        /**
+         * Returns current aspect ratio that is being used to set as default.
+         */
+        public AspectRatioSelector.AspectRatio getCurrentAspectRatio();
+
+        /**
+         * Gets notified when user has made the aspect ratio selection.
+         *
+         * @param newAspectRatio aspect ratio that user has selected
+         * @param dialogHandlingFinishedRunnable runnable to run when the operations
+         *                                       needed to handle changes from dialog
+         *                                       are finished.
+         */
+        public void onAspectRatioSelected(AspectRatioSelector.AspectRatio newAspectRatio,
+                Runnable dialogHandlingFinishedRunnable);
+    }
 
     private void checkDisplayRotation() {
         // Set the display orientation if display rotation has changed.
@@ -282,81 +350,98 @@ public class PhotoModule
      * This Handler is used to post message back onto the main thread of the
      * application
      */
-    private class MainHandler extends Handler {
+    private static class MainHandler extends Handler {
+        private final WeakReference<PhotoModule> mModule;
+
+        public MainHandler(PhotoModule module) {
+            super(Looper.getMainLooper());
+            mModule = new WeakReference<PhotoModule>(module);
+        }
+
         @Override
         public void handleMessage(Message msg) {
+            PhotoModule module = mModule.get();
+            if (module == null) {
+                return;
+            }
             switch (msg.what) {
-                case SETUP_PREVIEW: {
-                    setupPreview();
+                case MSG_FIRST_TIME_INIT: {
+                    module.initializeFirstTime();
                     break;
                 }
 
-                case CLEAR_SCREEN_DELAY: {
-                    mActivity.getWindow().clearFlags(
-                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                case MSG_SET_CAMERA_PARAMETERS_WHEN_IDLE: {
+                    module.setCameraParametersWhenIdle(0);
                     break;
-                }
-
-                case FIRST_TIME_INIT: {
-                    initializeFirstTime();
-                    break;
-                }
-
-                case SET_CAMERA_PARAMETERS_WHEN_IDLE: {
-                    setCameraParametersWhenIdle(0);
-                    break;
-                }
-
-                case SHOW_TAP_TO_FOCUS_TOAST: {
-                    showTapToFocusToast();
-                    break;
-                }
-
-                case SWITCH_CAMERA: {
-                    switchCamera();
-                    break;
-                }
-
-                case SWITCH_CAMERA_START_ANIMATION: {
-                    // TODO: Need to revisit
-                    // ((CameraScreenNail) mActivity.mCameraScreenNail).animateSwitchCamera();
-                    break;
-                }
-
-                case CAMERA_OPEN_DONE: {
-                    onCameraOpened();
-                    break;
-                }
-
-                case OPEN_CAMERA_FAIL: {
-                    mOpenCameraFail = true;
-                    CameraUtil.showErrorAndFinish(mActivity,
-                            R.string.cannot_connect_camera);
-                    break;
-                }
-
-                case CAMERA_DISABLED: {
-                    mCameraDisabled = true;
-                    CameraUtil.showErrorAndFinish(mActivity,
-                            R.string.camera_disabled);
-                    break;
-                }
-
-                case SWITCH_TO_GCAM_MODULE: {
-                    mActivity.onModuleSelected(ModuleSwitcher.GCAM_MODULE_INDEX);
                 }
             }
         }
     }
 
+    private void switchToGcamCapture() {
+        if (mActivity != null && mGcamModeIndex != 0) {
+            SettingsManager settingsManager = mActivity.getSettingsManager();
+            settingsManager.set(SettingsManager.SCOPE_GLOBAL,
+                                Keys.KEY_CAMERA_HDR_PLUS, true);
+
+            // Disable the HDR+ button to prevent callbacks from being
+            // queued before the correct callback is attached to the button
+            // in the new module.  The new module will set the enabled/disabled
+            // of this button when the module's preferred camera becomes available.
+            ButtonManager buttonManager = mActivity.getButtonManager();
+
+            buttonManager.disableButtonClick(ButtonManager.BUTTON_HDR_PLUS);
+
+            mAppController.getCameraAppUI().freezeScreenUntilPreviewReady();
+
+            // Do not post this to avoid this module switch getting interleaved with
+            // other button callbacks.
+            mActivity.onModeSelected(mGcamModeIndex);
+
+            buttonManager.enableButtonClick(ButtonManager.BUTTON_HDR_PLUS);
+        }
+    }
+
+    /**
+     * Constructs a new photo module.
+     */
+    public PhotoModule(AppController app) {
+        super(app);
+        mGcamModeIndex = app.getAndroidContext().getResources()
+                .getInteger(R.integer.camera_mode_gcam);
+    }
 
     @Override
-    public void init(CameraActivity activity, View parent) {
+    public String getPeekAccessibilityString() {
+        return mAppController.getAndroidContext()
+            .getResources().getString(R.string.photo_accessibility_peek);
+    }
+
+    @Override
+    public String getModuleStringIdentifier() {
+        return PHOTO_MODULE_STRING_ID;
+    }
+
+    @Override
+    public void init(CameraActivity activity, boolean isSecureCamera, boolean isCaptureIntent) {
         mActivity = activity;
-        mUI = new PhotoUI(activity, this, parent);
-        mPreferences = new ComboPreferences(mActivity);
-        CameraSettings.upgradeGlobalPreferences(mPreferences.getGlobal());
-        mCameraId = getPreferredCameraId(mPreferences);
+        // TODO: Need to look at the controller interface to see if we can get
+        // rid of passing in the activity directly.
+        mAppController = mActivity;
+
+        mUI = new PhotoUI(mActivity, this, mActivity.getModuleLayoutRoot());
+        mActivity.setPreviewStatusListener(mUI);
+
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        mCameraId = settingsManager.getInteger(mAppController.getModuleScope(),
+                                               Keys.KEY_CAMERA_ID);
+
+        // TODO: Move this to SettingsManager as a part of upgrade procedure.
+        if (!settingsManager.getBoolean(SettingsManager.SCOPE_GLOBAL,
+                                        Keys.KEY_USER_SELECTED_ASPECT_RATIO)) {
+            // Switch to back camera to set aspect ratio.
+            mCameraId = settingsManager.getIntegerDefault(Keys.KEY_CAMERA_ID);
+        }
 
         mContentResolver = mActivity.getContentResolver();
 
@@ -364,54 +449,189 @@ public class PhotoModule
         // This must be done before startPreview.
         mIsImageCaptureIntent = isImageCaptureIntent();
 
-        mPreferences.setLocalId(mActivity, mCameraId);
-        CameraSettings.upgradeLocalPreferences(mPreferences.getLocal());
-        // we need to reset exposure for the preview
-        resetExposureCompensation();
-
-        initializeControlByIntent();
         mQuickCapture = mActivity.getIntent().getBooleanExtra(EXTRA_QUICK_CAPTURE, false);
-        mLocationManager = new LocationManager(mActivity, mUI);
-        mSensorManager = (SensorManager)(mActivity.getSystemService(Context.SENSOR_SERVICE));
+        mSensorManager = (SensorManager) (mActivity.getSystemService(Context.SENSOR_SERVICE));
+        mUI.setCountdownFinishedListener(this);
+        mCountdownSoundPlayer = new SoundPlayer(mAppController.getAndroidContext());
+
+        // TODO: Make this a part of app controller API.
+        View cancelButton = mActivity.findViewById(R.id.shutter_cancel_button);
+        cancelButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                cancelCountDown();
+            }
+        });
+    }
+
+    private void cancelCountDown() {
+        if (mUI.isCountingDown()) {
+            // Cancel on-going countdown.
+            mUI.cancelCountDown();
+        }
+        mAppController.getCameraAppUI().transitionToCapture();
+        mAppController.getCameraAppUI().showModeOptions();
+    }
+
+    @Override
+    public boolean isUsingBottomBar() {
+        return true;
     }
 
     private void initializeControlByIntent() {
-        mUI.initializeControlByIntent();
         if (mIsImageCaptureIntent) {
+            mActivity.getCameraAppUI().transitionToIntentCaptureLayout();
             setupCaptureParams();
         }
     }
 
     private void onPreviewStarted() {
+        mAppController.onPreviewStarted();
+        mAppController.setShutterEnabled(true);
         setCameraState(IDLE);
         startFaceDetection();
-        locationFirstRun();
+        settingsFirstRun();
     }
 
-    // Prompt the user to pick to record location for the very first run of
-    // camera only
-    private void locationFirstRun() {
-        if (RecordLocationPreference.isSet(mPreferences)) {
+    /**
+     * Prompt the user to pick to record location and choose aspect ratio for the
+     * very first run of camera only.
+     */
+    private void settingsFirstRun() {
+        final SettingsManager settingsManager = mActivity.getSettingsManager();
+
+        if (mActivity.isSecureCamera() || isImageCaptureIntent()) {
             return;
         }
-        if (mActivity.isSecureCamera()) return;
+
+        boolean locationPrompt = !settingsManager.isSet(SettingsManager.SCOPE_GLOBAL,
+                                                        Keys.KEY_RECORD_LOCATION);
+        boolean aspectRatioPrompt = !settingsManager.getBoolean(
+            SettingsManager.SCOPE_GLOBAL, Keys.KEY_USER_SELECTED_ASPECT_RATIO);
+        if (!locationPrompt && !aspectRatioPrompt) {
+            return;
+        }
+
         // Check if the back camera exists
-        int backCameraId = CameraHolder.instance().getBackCameraId();
+        int backCameraId = mAppController.getCameraProvider().getFirstBackCameraId();
         if (backCameraId == -1) {
             // If there is no back camera, do not show the prompt.
             return;
         }
-        mUI.showLocationDialog();
+
+        if (locationPrompt) {
+            // Show both location and aspect ratio selection dialog.
+            mUI.showLocationAndAspectRatioDialog(new LocationDialogCallback(){
+                @Override
+                public void onLocationTaggingSelected(boolean selected) {
+                    Keys.setLocation(mActivity.getSettingsManager(), selected,
+                                     mActivity.getLocationManager());
+                }
+            }, createAspectRatioDialogCallback());
+        } else {
+            // App upgrade. Only show aspect ratio selection.
+            boolean wasShown = mUI.showAspectRatioDialog(createAspectRatioDialogCallback());
+            if (!wasShown) {
+                // If the dialog was not shown, set this flag to true so that we
+                // never have to check for it again. It means that we don't need
+                // to show the dialog on this device.
+                mActivity.getSettingsManager().set(SettingsManager.SCOPE_GLOBAL,
+                        Keys.KEY_USER_SELECTED_ASPECT_RATIO, true);
+            }
+        }
     }
 
-    @Override
-    public void enableRecordingLocation(boolean enable) {
-        setLocationPreference(enable ? RecordLocationPreference.VALUE_ON
-                : RecordLocationPreference.VALUE_OFF);
+    private AspectRatioDialogCallback createAspectRatioDialogCallback() {
+        Size currentSize = mCameraSettings.getCurrentPhotoSize();
+        float aspectRatio = (float) currentSize.width() / (float) currentSize.height();
+        if (aspectRatio < 1f) {
+            aspectRatio = 1 / aspectRatio;
+        }
+        final AspectRatioSelector.AspectRatio currentAspectRatio;
+        if (Math.abs(aspectRatio - 4f / 3f) <= 0.1f) {
+            currentAspectRatio = AspectRatioSelector.AspectRatio.ASPECT_RATIO_4x3;
+        } else if (Math.abs(aspectRatio - 16f / 9f) <= 0.1f) {
+            currentAspectRatio = AspectRatioSelector.AspectRatio.ASPECT_RATIO_16x9;
+        } else {
+            // TODO: Log error and not show dialog.
+            return null;
+        }
+
+        List<Size> sizes = mCameraCapabilities.getSupportedPhotoSizes();
+        List<Size> pictureSizes = ResolutionUtil
+                .getDisplayableSizesFromSupported(sizes, true);
+
+        // This logic below finds the largest resolution for each aspect ratio.
+        // TODO: Move this somewhere that can be shared with SettingsActivity
+        int aspectRatio4x3Resolution = 0;
+        int aspectRatio16x9Resolution = 0;
+        Size largestSize4x3 = new Size(0, 0);
+        Size largestSize16x9 = new Size(0, 0);
+        for (Size size : pictureSizes) {
+            float pictureAspectRatio = (float) size.width() / (float) size.height();
+            pictureAspectRatio = pictureAspectRatio < 1 ?
+                    1f / pictureAspectRatio : pictureAspectRatio;
+            int resolution = size.width() * size.height();
+            if (Math.abs(pictureAspectRatio - 4f / 3f) < 0.1f) {
+                if (resolution > aspectRatio4x3Resolution) {
+                    aspectRatio4x3Resolution = resolution;
+                    largestSize4x3 = size;
+                }
+            } else if (Math.abs(pictureAspectRatio - 16f / 9f) < 0.1f) {
+                if (resolution > aspectRatio16x9Resolution) {
+                    aspectRatio16x9Resolution = resolution;
+                    largestSize16x9 = size;
+                }
+            }
+        }
+
+        // Use the largest 4x3 and 16x9 sizes as candidates for picture size selection.
+        final Size size4x3ToSelect = largestSize4x3;
+        final Size size16x9ToSelect = largestSize16x9;
+
+        AspectRatioDialogCallback callback = new AspectRatioDialogCallback() {
+
+            @Override
+            public AspectRatioSelector.AspectRatio getCurrentAspectRatio() {
+                return currentAspectRatio;
+            }
+
+            @Override
+            public void onAspectRatioSelected(AspectRatioSelector.AspectRatio newAspectRatio,
+                    Runnable dialogHandlingFinishedRunnable) {
+                if (newAspectRatio == AspectRatioSelector.AspectRatio.ASPECT_RATIO_4x3) {
+                    String largestSize4x3Text = SettingsUtil.sizeToSetting(size4x3ToSelect);
+                    mActivity.getSettingsManager().set(SettingsManager.SCOPE_GLOBAL,
+                                                       Keys.KEY_PICTURE_SIZE_BACK,
+                                                       largestSize4x3Text);
+                } else if (newAspectRatio == AspectRatioSelector.AspectRatio.ASPECT_RATIO_16x9) {
+                    String largestSize16x9Text = SettingsUtil.sizeToSetting(size16x9ToSelect);
+                    mActivity.getSettingsManager().set(SettingsManager.SCOPE_GLOBAL,
+                                                       Keys.KEY_PICTURE_SIZE_BACK,
+                                                       largestSize16x9Text);
+                }
+                mActivity.getSettingsManager().set(SettingsManager.SCOPE_GLOBAL,
+                                                   Keys.KEY_USER_SELECTED_ASPECT_RATIO, true);
+                String aspectRatio = mActivity.getSettingsManager().getString(
+                    SettingsManager.SCOPE_GLOBAL,
+                    Keys.KEY_USER_SELECTED_ASPECT_RATIO);
+                Log.e(TAG, "aspect ratio after setting it to true=" + aspectRatio);
+                if (newAspectRatio != currentAspectRatio) {
+                    Log.i(TAG, "changing aspect ratio from dialog");
+                    stopPreview();
+                    startPreview();
+                    mUI.setRunnableForNextFrame(dialogHandlingFinishedRunnable);
+                } else {
+                    mHandler.post(dialogHandlingFinishedRunnable);
+                }
+            }
+        };
+        return callback;
     }
 
     @Override
     public void onPreviewUIReady() {
+        Log.i(TAG, "onPreviewUIReady");
         startPreview();
     }
 
@@ -424,109 +644,220 @@ public class PhotoModule
         stopPreview();
     }
 
-    private void setLocationPreference(String value) {
-        mPreferences.edit()
-                .putString(CameraSettings.KEY_RECORD_LOCATION, value)
-                .apply();
-        // TODO: Fix this to use the actual onSharedPreferencesChanged listener
-        // instead of invoking manually
-        onSharedPreferenceChanged();
+    @Override
+    public void startPreCaptureAnimation() {
+        mAppController.startPreCaptureAnimation();
     }
 
     private void onCameraOpened() {
-        View root = mUI.getRootView();
-        // These depend on camera parameters.
-
-        int width = root.getWidth();
-        int height = root.getHeight();
-        mFocusManager.setPreviewSize(width, height);
         openCameraCommon();
+        initializeControlByIntent();
     }
 
     private void switchCamera() {
-        if (mPaused) return;
-
-        Log.v(TAG, "Start to switch camera. id=" + mPendingSwitchCameraId);
-        mCameraId = mPendingSwitchCameraId;
-        mPendingSwitchCameraId = -1;
-        setCameraId(mCameraId);
-
-        // from onPause
-        closeCamera();
-        mUI.collapseCameraControls();
-        mUI.clearFaces();
-        if (mFocusManager != null) mFocusManager.removeMessages();
-
-        // Restart the camera and initialize the UI. From onCreate.
-        mPreferences.setLocalId(mActivity, mCameraId);
-        CameraSettings.upgradeLocalPreferences(mPreferences.getLocal());
-        mCameraDevice = CameraUtil.openCamera(
-                mActivity, mCameraId, mHandler,
-                mActivity.getCameraOpenErrorCallback());
-        if (mCameraDevice == null) {
-            Log.e(TAG, "Failed to open camera:" + mCameraId + ", aborting.");
+        if (mPaused) {
             return;
         }
-        mParameters = mCameraDevice.getParameters();
-        initializeCapabilities();
-        CameraInfo info = CameraHolder.instance().getCameraInfo()[mCameraId];
-        mMirror = (info.facing == CameraInfo.CAMERA_FACING_FRONT);
+        cancelCountDown();
+
+        mAppController.freezeScreenUntilPreviewReady();
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+
+        Log.i(TAG, "Start to switch camera. id=" + mPendingSwitchCameraId);
+        closeCamera();
+        mCameraId = mPendingSwitchCameraId;
+
+        settingsManager.set(mAppController.getModuleScope(), Keys.KEY_CAMERA_ID, mCameraId);
+        requestCameraOpen();
+        mUI.clearFaces();
+        if (mFocusManager != null) {
+            mFocusManager.removeMessages();
+        }
+
+        mMirror = isCameraFrontFacing();
         mFocusManager.setMirror(mMirror);
-        mFocusManager.setParameters(mInitialParams);
-        setupPreview();
-
-        // reset zoom value index
-        mZoomValue = 0;
-        openCameraCommon();
-
         // Start switch camera animation. Post a message because
         // onFrameAvailable from the old camera may already exist.
-        mHandler.sendEmptyMessage(SWITCH_CAMERA_START_ANIMATION);
     }
 
-    protected void setCameraId(int cameraId) {
-        ListPreference pref = mPreferenceGroup.findPreference(CameraSettings.KEY_CAMERA_ID);
-        pref.setValue("" + cameraId);
+    /**
+     * Uses the {@link CameraProvider} to open the currently-selected camera
+     * device, using {@link GservicesHelper} to choose between API-1 and API-2.
+     */
+    private void requestCameraOpen() {
+        Log.v(TAG, "requestCameraOpen");
+        mActivity.getCameraProvider().requestCamera(mCameraId,
+                GservicesHelper.useCamera2ApiThroughPortabilityLayer(mActivity));
+    }
+
+    private final ButtonManager.ButtonCallback mCameraCallback =
+            new ButtonManager.ButtonCallback() {
+                @Override
+                public void onStateChanged(int state) {
+                    // At the time this callback is fired, the camera id
+                    // has be set to the desired camera.
+
+                    if (mPaused || mAppController.getCameraProvider().waitingForCamera()) {
+                        return;
+                    }
+                    // If switching to back camera, and HDR+ is still on,
+                    // switch back to gcam, otherwise handle callback normally.
+                    SettingsManager settingsManager = mActivity.getSettingsManager();
+                    if (Keys.isCameraBackFacing(settingsManager,
+                                                mAppController.getModuleScope())) {
+                        if (Keys.requestsReturnToHdrPlus(settingsManager,
+                                                         mAppController.getModuleScope())) {
+                            switchToGcamCapture();
+                            return;
+                        }
+                    }
+
+                    mPendingSwitchCameraId = state;
+
+                    Log.d(TAG, "Start to switch camera. cameraId=" + state);
+                    // We need to keep a preview frame for the animation before
+                    // releasing the camera. This will trigger
+                    // onPreviewTextureCopied.
+                    // TODO: Need to animate the camera switch
+                    switchCamera();
+                }
+            };
+
+    private final ButtonManager.ButtonCallback mHdrPlusCallback =
+            new ButtonManager.ButtonCallback() {
+                @Override
+                public void onStateChanged(int state) {
+                    SettingsManager settingsManager = mActivity.getSettingsManager();
+                    if (GcamHelper.hasGcamAsSeparateModule()) {
+                        // Set the camera setting to default backfacing.
+                        settingsManager.setToDefault(mAppController.getModuleScope(),
+                                                     Keys.KEY_CAMERA_ID);
+                        switchToGcamCapture();
+                    } else {
+                        if (Keys.isHdrOn(settingsManager)) {
+                            settingsManager.set(mAppController.getCameraScope(), Keys.KEY_SCENE_MODE,
+                                    mCameraCapabilities.getStringifier().stringify(
+                                            CameraCapabilities.SceneMode.HDR));
+                        } else {
+                            settingsManager.set(mAppController.getCameraScope(), Keys.KEY_SCENE_MODE,
+                                    mCameraCapabilities.getStringifier().stringify(
+                                            CameraCapabilities.SceneMode.AUTO));
+                        }
+                        updateParametersSceneMode();
+                        if (mCameraDevice != null) {
+                            mCameraDevice.applySettings(mCameraSettings);
+                        }
+                        updateSceneMode();
+                    }
+                }
+            };
+
+    private final View.OnClickListener mCancelCallback = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            onCaptureCancelled();
+        }
+    };
+
+    private final View.OnClickListener mDoneCallback = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            onCaptureDone();
+        }
+    };
+
+    private final View.OnClickListener mRetakeCallback = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            mActivity.getCameraAppUI().transitionToIntentCaptureLayout();
+            onCaptureRetake();
+        }
+    };
+
+    @Override
+    public void hardResetSettings(SettingsManager settingsManager) {
+        // PhotoModule should hard reset HDR+ to off,
+        // and HDR to off if HDR+ is supported.
+        settingsManager.set(SettingsManager.SCOPE_GLOBAL, Keys.KEY_CAMERA_HDR_PLUS, false);
+        if (GcamHelper.hasGcamAsSeparateModule()) {
+            settingsManager.set(SettingsManager.SCOPE_GLOBAL, Keys.KEY_CAMERA_HDR, false);
+        }
+    }
+
+    @Override
+    public HardwareSpec getHardwareSpec() {
+        return (mCameraSettings != null ?
+                new HardwareSpecImpl(getCameraProvider(), mCameraCapabilities) : null);
+    }
+
+    @Override
+    public CameraAppUI.BottomBarUISpec getBottomBarSpec() {
+        CameraAppUI.BottomBarUISpec bottomBarSpec = new CameraAppUI.BottomBarUISpec();
+
+        bottomBarSpec.enableCamera = true;
+        bottomBarSpec.cameraCallback = mCameraCallback;
+        bottomBarSpec.enableFlash = !mAppController.getSettingsManager()
+            .getBoolean(SettingsManager.SCOPE_GLOBAL, Keys.KEY_CAMERA_HDR);
+        bottomBarSpec.enableHdr = true;
+        bottomBarSpec.hdrCallback = mHdrPlusCallback;
+        bottomBarSpec.enableGridLines = true;
+        if (mCameraCapabilities != null) {
+            bottomBarSpec.enableExposureCompensation = true;
+            bottomBarSpec.exposureCompensationSetCallback =
+                new CameraAppUI.BottomBarUISpec.ExposureCompensationSetCallback() {
+                @Override
+                public void setExposure(int value) {
+                    setExposureCompensation(value);
+                }
+            };
+            bottomBarSpec.minExposureCompensation =
+                mCameraCapabilities.getMinExposureCompensation();
+            bottomBarSpec.maxExposureCompensation =
+                mCameraCapabilities.getMaxExposureCompensation();
+            bottomBarSpec.exposureCompensationStep =
+                mCameraCapabilities.getExposureCompensationStep();
+        }
+
+        bottomBarSpec.enableSelfTimer = true;
+        bottomBarSpec.showSelfTimer = true;
+
+        if (isImageCaptureIntent()) {
+            bottomBarSpec.showCancel = true;
+            bottomBarSpec.cancelCallback = mCancelCallback;
+            bottomBarSpec.showDone = true;
+            bottomBarSpec.doneCallback = mDoneCallback;
+            bottomBarSpec.showRetake = true;
+            bottomBarSpec.retakeCallback = mRetakeCallback;
+        }
+
+        return bottomBarSpec;
     }
 
     // either open a new camera or switch cameras
     private void openCameraCommon() {
-        loadCameraPreferences();
-
-        mUI.onCameraOpened(mPreferenceGroup, mPreferences, mParameters, this);
+        mUI.onCameraOpened(mCameraCapabilities, mCameraSettings);
         if (mIsImageCaptureIntent) {
-            mUI.overrideSettings(CameraSettings.KEY_CAMERA_HDR_PLUS,
-                    mActivity.getString(R.string.setting_off_value));
+            // Set hdr plus to default: off.
+            SettingsManager settingsManager = mActivity.getSettingsManager();
+            settingsManager.setToDefault(SettingsManager.SCOPE_GLOBAL,
+                                         Keys.KEY_CAMERA_HDR_PLUS);
         }
         updateSceneMode();
-        showTapToFocusToastIfNeeded();
-
-
     }
 
     @Override
-    public void onScreenSizeChanged(int width, int height) {
-        if (mFocusManager != null) mFocusManager.setPreviewSize(width, height);
+    public void updatePreviewAspectRatio(float aspectRatio) {
+        mAppController.updatePreviewAspectRatio(aspectRatio);
     }
 
     private void resetExposureCompensation() {
-        String value = mPreferences.getString(CameraSettings.KEY_EXPOSURE,
-                CameraSettings.EXPOSURE_DEFAULT_VALUE);
-        if (!CameraSettings.EXPOSURE_DEFAULT_VALUE.equals(value)) {
-            Editor editor = mPreferences.edit();
-            editor.putString(CameraSettings.KEY_EXPOSURE, "0");
-            editor.apply();
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        if (settingsManager == null) {
+            Log.e(TAG, "Settings manager is null!");
+            return;
         }
-    }
-
-    private void keepMediaProviderInstance() {
-        // We want to keep a reference to MediaProvider in camera's lifecycle.
-        // TODO: Utilize mMediaProviderClient instance to replace
-        // ContentResolver calls.
-        if (mMediaProviderClient == null) {
-            mMediaProviderClient = mContentResolver
-                    .acquireContentProviderClient(MediaStore.AUTHORITY);
-        }
+        settingsManager.setToDefault(mAppController.getCameraScope(),
+                                     Keys.KEY_EXPOSURE);
     }
 
     // Snapshots can only be taken after this is called. It should be called
@@ -537,52 +868,26 @@ public class PhotoModule
             return;
         }
 
-        // Initialize location service.
-        boolean recordLocation = RecordLocationPreference.get(
-                mPreferences, mContentResolver);
-        mLocationManager.recordLocation(recordLocation);
-
-        keepMediaProviderInstance();
-
         mUI.initializeFirstTime();
-        MediaSaveService s = mActivity.getMediaSaveService();
+
         // We set the listener only when both service and shutterbutton
         // are initialized.
-        if (s != null) {
-            s.setListener(this);
-        }
+        getServices().getMemoryManager().addListener(this);
 
         mNamedImages = new NamedImages();
 
         mFirstTimeInitialized = true;
         addIdleHandler();
 
-        mActivity.updateStorageSpaceAndHint();
+        mActivity.updateStorageSpaceAndHint(null);
     }
 
     // If the activity is paused and resumed, this method will be called in
     // onResume.
     private void initializeSecondTime() {
-        // Start location update if needed.
-        boolean recordLocation = RecordLocationPreference.get(
-                mPreferences, mContentResolver);
-        mLocationManager.recordLocation(recordLocation);
-        MediaSaveService s = mActivity.getMediaSaveService();
-        if (s != null) {
-            s.setListener(this);
-        }
+        getServices().getMemoryManager().addListener(this);
         mNamedImages = new NamedImages();
-        mUI.initializeSecondTime(mParameters);
-        keepMediaProviderInstance();
-    }
-
-    private void showTapToFocusToastIfNeeded() {
-        // Show the tap to focus toast if this is the first start.
-        if (mFocusAreaSupported &&
-                mPreferences.getBoolean(CameraSettings.KEY_CAMERA_FIRST_USE_HINT_SHOWN, true)) {
-            // Delay the toast for one second to wait for orientation.
-            mHandler.sendEmptyMessageDelayed(SHOW_TAP_TO_FOCUS_TOAST, 1000);
-        }
+        mUI.initializeSecondTime(mCameraCapabilities, mCameraSettings);
     }
 
     private void addIdleHandler() {
@@ -598,32 +903,36 @@ public class PhotoModule
 
     @Override
     public void startFaceDetection() {
-        if (mFaceDetectionStarted) return;
-        if (mParameters.getMaxNumDetectedFaces() > 0) {
+        if (mFaceDetectionStarted || mCameraDevice == null) {
+            return;
+        }
+        if (mCameraCapabilities.getMaxNumOfFacesSupported() > 0) {
             mFaceDetectionStarted = true;
-            CameraInfo info = CameraHolder.instance().getCameraInfo()[mCameraId];
-            mUI.onStartFaceDetection(mDisplayOrientation,
-                    (info.facing == CameraInfo.CAMERA_FACING_FRONT));
+            mUI.onStartFaceDetection(mDisplayOrientation, isCameraFrontFacing());
             mCameraDevice.setFaceDetectionCallback(mHandler, mUI);
             mCameraDevice.startFaceDetection();
+            SessionStatsCollector.instance().faceScanActive(true);
         }
     }
 
     @Override
     public void stopFaceDetection() {
-        if (!mFaceDetectionStarted) return;
-        if (mParameters.getMaxNumDetectedFaces() > 0) {
+        if (!mFaceDetectionStarted || mCameraDevice == null) {
+            return;
+        }
+        if (mCameraCapabilities.getMaxNumOfFacesSupported() > 0) {
             mFaceDetectionStarted = false;
             mCameraDevice.setFaceDetectionCallback(null, null);
             mCameraDevice.stopFaceDetection();
             mUI.clearFaces();
+            SessionStatsCollector.instance().faceScanActive(false);
         }
     }
 
     private final class ShutterCallback
             implements CameraShutterCallback {
 
-        private boolean mNeedsAnimation;
+        private final boolean mNeedsAnimation;
 
         public ShutterCallback(boolean needsAnimation) {
             mNeedsAnimation = needsAnimation;
@@ -648,7 +957,7 @@ public class PhotoModule
     private final class PostViewPictureCallback
             implements CameraPictureCallback {
         @Override
-        public void onPictureTaken(byte [] data, CameraProxy camera) {
+        public void onPictureTaken(byte[] data, CameraProxy camera) {
             mPostViewPictureCallbackTime = System.currentTimeMillis();
             Log.v(TAG, "mShutterToPostViewCallbackTime = "
                     + (mPostViewPictureCallbackTime - mShutterCallbackTime)
@@ -659,11 +968,58 @@ public class PhotoModule
     private final class RawPictureCallback
             implements CameraPictureCallback {
         @Override
-        public void onPictureTaken(byte [] rawData, CameraProxy camera) {
+        public void onPictureTaken(byte[] rawData, CameraProxy camera) {
             mRawPictureCallbackTime = System.currentTimeMillis();
             Log.v(TAG, "mShutterToRawCallbackTime = "
                     + (mRawPictureCallbackTime - mShutterCallbackTime) + "ms");
         }
+    }
+
+    private static class ResizeBundle {
+        byte[] jpegData;
+        float targetAspectRatio;
+        ExifInterface exif;
+    }
+
+    /**
+     * @return Cropped image if the target aspect ratio is larger than the jpeg
+     *         aspect ratio on the long axis. The original jpeg otherwise.
+     */
+    private ResizeBundle cropJpegDataToAspectRatio(ResizeBundle dataBundle) {
+
+        final byte[] jpegData = dataBundle.jpegData;
+        final ExifInterface exif = dataBundle.exif;
+        float targetAspectRatio = dataBundle.targetAspectRatio;
+
+        Bitmap original = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.length);
+        int originalWidth = original.getWidth();
+        int originalHeight = original.getHeight();
+        int newWidth;
+        int newHeight;
+
+        if (originalWidth > originalHeight) {
+            newHeight = (int) (originalWidth / targetAspectRatio);
+            newWidth = originalWidth;
+        } else {
+            newWidth = (int) (originalHeight / targetAspectRatio);
+            newHeight = originalHeight;
+        }
+        int xOffset = (originalWidth - newWidth)/2;
+        int yOffset = (originalHeight - newHeight)/2;
+
+        if (xOffset < 0 || yOffset < 0) {
+            return dataBundle;
+        }
+
+        Bitmap resized = Bitmap.createBitmap(original,xOffset,yOffset,newWidth, newHeight);
+        exif.setTagValue(ExifInterface.TAG_PIXEL_X_DIMENSION, new Integer(newWidth));
+        exif.setTagValue(ExifInterface.TAG_PIXEL_Y_DIMENSION, new Integer(newHeight));
+
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+
+        resized.compress(Bitmap.CompressFormat.JPEG, 90, stream);
+        dataBundle.jpegData = stream.toByteArray();
+        return dataBundle;
     }
 
     private final class JpegPictureCallback
@@ -675,16 +1031,16 @@ public class PhotoModule
         }
 
         @Override
-        public void onPictureTaken(final byte [] jpegData, CameraProxy camera) {
-            mUI.enableShutter(true);
+        public void onPictureTaken(final byte[] originalJpegData, final CameraProxy camera) {
+            Log.i(TAG, "onPictureTaken");
+            mAppController.setShutterEnabled(true);
             if (mPaused) {
                 return;
             }
             if (mIsImageCaptureIntent) {
                 stopPreview();
             }
-            if (mSceneMode == CameraUtil.SCENE_MODE_HDR) {
-                mUI.showSwitcher();
+            if (mSceneMode == CameraCapabilities.SceneMode.HDR) {
                 mUI.setSwipingEnabled(true);
             }
 
@@ -711,19 +1067,75 @@ public class PhotoModule
                 setupPreview();
             }
 
-            ExifInterface exif = Exif.getExif(jpegData);
+            long now = System.currentTimeMillis();
+            mJpegCallbackFinishTime = now - mJpegPictureCallbackTime;
+            Log.v(TAG, "mJpegCallbackFinishTime = " + mJpegCallbackFinishTime + "ms");
+            mJpegPictureCallbackTime = 0;
+
+            final ExifInterface exif = Exif.getExif(originalJpegData);
+
+            if (mShouldResizeTo16x9) {
+                final ResizeBundle dataBundle = new ResizeBundle();
+                dataBundle.jpegData = originalJpegData;
+                dataBundle.targetAspectRatio = ResolutionUtil.NEXUS_5_LARGE_16_BY_9_ASPECT_RATIO;
+                dataBundle.exif = exif;
+                new AsyncTask<ResizeBundle, Void, ResizeBundle>() {
+
+                    @Override
+                    protected ResizeBundle doInBackground(ResizeBundle... resizeBundles) {
+                        return cropJpegDataToAspectRatio(resizeBundles[0]);
+                    }
+
+                    @Override
+                    protected void onPostExecute(ResizeBundle result) {
+                        saveFinalPhoto(result.jpegData, result.exif, camera);
+                    }
+                }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, dataBundle);
+
+            } else {
+                saveFinalPhoto(originalJpegData, exif, camera);
+            }
+        }
+
+        void saveFinalPhoto(final byte[] jpegData, final ExifInterface exif, CameraProxy camera) {
+
             int orientation = Exif.getOrientation(exif);
+
+            float zoomValue = 1.0f;
+            if (mCameraCapabilities.supports(CameraCapabilities.Feature.ZOOM)) {
+                zoomValue = mCameraSettings.getCurrentZoomRatio();
+            }
+            boolean hdrOn = CameraCapabilities.SceneMode.HDR == mSceneMode;
+            String flashSetting =
+                    mActivity.getSettingsManager().getString(mAppController.getCameraScope(),
+                                                             Keys.KEY_FLASH_MODE);
+            boolean gridLinesOn = Keys.areGridLinesOn(mActivity.getSettingsManager());
+            UsageStatistics.instance().photoCaptureDoneEvent(
+                    eventprotos.NavigationChange.Mode.PHOTO_CAPTURE,
+                    mNamedImages.mQueue.lastElement().title + ".jpg", exif,
+                    isCameraFrontFacing(), hdrOn, zoomValue, flashSetting, gridLinesOn,
+                    (float) mTimerDuration, mShutterTouchCoordinate, mVolumeButtonClickedFlag);
+            mShutterTouchCoordinate = null;
+            mVolumeButtonClickedFlag = false;
 
             if (!mIsImageCaptureIntent) {
                 // Calculate the width and the height of the jpeg.
-                Size s = mParameters.getPictureSize();
+                Integer exifWidth = exif.getTagIntValue(ExifInterface.TAG_PIXEL_X_DIMENSION);
+                Integer exifHeight = exif.getTagIntValue(ExifInterface.TAG_PIXEL_Y_DIMENSION);
                 int width, height;
-                if ((mJpegRotation + orientation) % 180 == 0) {
-                    width = s.width;
-                    height = s.height;
+                if (mShouldResizeTo16x9 && exifWidth != null && exifHeight != null) {
+                    width = exifWidth;
+                    height = exifHeight;
                 } else {
-                    width = s.height;
-                    height = s.width;
+                    Size s;
+                    s = mCameraSettings.getCurrentPhotoSize();
+                    if ((mJpegRotation + orientation) % 180 == 0) {
+                        width = s.width();
+                        height = s.height();
+                    } else {
+                        width = s.height();
+                        height = s.width();
+                    }
                 }
                 NamedEntity name = mNamedImages.getNextNameEntity();
                 String title = (name == null) ? null : name.title;
@@ -743,7 +1155,9 @@ public class PhotoModule
                 if (title == null) {
                     Log.e(TAG, "Unbalanced name/data pair");
                 } else {
-                    if (date == -1) date = mCaptureStartTime;
+                    if (date == -1) {
+                        date = mCaptureStartTime;
+                    }
                     if (mHeading >= 0) {
                         // heading direction has been updated by the sensor.
                         ExifTag directionRefTag = exif.buildTag(
@@ -755,11 +1169,12 @@ public class PhotoModule
                         exif.setTag(directionRefTag);
                         exif.setTag(directionTag);
                     }
-                    mActivity.getMediaSaveService().addImage(
+                    getServices().getMediaSaver().addImage(
                             jpegData, title, date, mLocation, width, height,
                             orientation, exif, mOnMediaSavedListener, mContentResolver);
                 }
-                // Animate capture with real jpeg data instead of a preview frame.
+                // Animate capture with real jpeg data instead of a preview
+                // frame.
                 mUI.animateCapture(jpegData, orientation, mMirror);
             } else {
                 mJpegImageData = jpegData;
@@ -770,30 +1185,30 @@ public class PhotoModule
                 }
             }
 
-            // Check this in advance of each shot so we don't add to shutter
-            // latency. It's true that someone else could write to the SD card in
-            // the mean time and fill it, but that could have happened between the
-            // shutter press and saving the JPEG too.
-            mActivity.updateStorageSpaceAndHint();
+            // Send the taken photo to remote shutter listeners, if any are
+            // registered.
+            getServices().getRemoteShutterListener().onPictureTaken(jpegData);
 
-            long now = System.currentTimeMillis();
-            mJpegCallbackFinishTime = now - mJpegPictureCallbackTime;
-            Log.v(TAG, "mJpegCallbackFinishTime = "
-                    + mJpegCallbackFinishTime + "ms");
-            mJpegPictureCallbackTime = 0;
+            // Check this in advance of each shot so we don't add to shutter
+            // latency. It's true that someone else could write to the SD card
+            // in the mean time and fill it, but that could have happened
+            // between the shutter press and saving the JPEG too.
+            mActivity.updateStorageSpaceAndHint(null);
         }
     }
 
     private final class AutoFocusCallback implements CameraAFCallback {
         @Override
-        public void onAutoFocus(
-                boolean focused, CameraProxy camera) {
-            if (mPaused) return;
+        public void onAutoFocus(boolean focused, CameraProxy camera) {
+            SessionStatsCollector.instance().autofocusResult(focused);
+            if (mPaused) {
+                return;
+            }
 
             mAutoFocusTime = System.currentTimeMillis() - mFocusStartTime;
-            Log.v(TAG, "mAutoFocusTime = " + mAutoFocusTime + "ms");
+            Log.v(TAG, "mAutoFocusTime = " + mAutoFocusTime + "ms   focused = "+focused);
             setCameraState(IDLE);
-            mFocusManager.onAutoFocus(focused, mUI.isShutterPressed());
+            mFocusManager.onAutoFocus(focused, false);
         }
     }
 
@@ -804,6 +1219,7 @@ public class PhotoModule
         public void onAutoFocusMoving(
                 boolean moving, CameraProxy camera) {
             mFocusManager.onAutoFocusMoving(moving);
+            SessionStatsCollector.instance().autofocusMoving(moving);
         }
     }
 
@@ -811,7 +1227,7 @@ public class PhotoModule
      * This class is just a thread-safe queue for name,date holder objects.
      */
     public static class NamedImages {
-        private Vector<NamedEntity> mQueue;
+        private final Vector<NamedEntity> mQueue;
 
         public NamedImages() {
             mQueue = new Vector<NamedEntity>();
@@ -825,7 +1241,7 @@ public class PhotoModule
         }
 
         public NamedEntity getNextNameEntity() {
-            synchronized(mQueue) {
+            synchronized (mQueue) {
                 if (!mQueue.isEmpty()) {
                     return mQueue.remove(0);
                 }
@@ -842,13 +1258,13 @@ public class PhotoModule
     private void setCameraState(int state) {
         mCameraState = state;
         switch (state) {
-            case PhotoController.PREVIEW_STOPPED:
-            case PhotoController.SNAPSHOT_IN_PROGRESS:
-            case PhotoController.SWITCHING_CAMERA:
-                mUI.enableGestures(false);
+            case PREVIEW_STOPPED:
+            case SNAPSHOT_IN_PROGRESS:
+            case SWITCHING_CAMERA:
+                // TODO: Tell app UI to disable swipe
                 break;
             case PhotoController.IDLE:
-                mUI.enableGestures(true);
+                // TODO: Tell app UI to enable swipe
                 break;
         }
     }
@@ -864,41 +1280,38 @@ public class PhotoModule
 
     @Override
     public boolean capture() {
-        // If we are already in the middle of taking a snapshot or the image save request
-        // is full then ignore.
+        // If we are already in the middle of taking a snapshot or the image
+        // save request is full then ignore.
         if (mCameraDevice == null || mCameraState == SNAPSHOT_IN_PROGRESS
-                || mCameraState == SWITCHING_CAMERA
-                || mActivity.getMediaSaveService().isQueueFull()) {
+                || mCameraState == SWITCHING_CAMERA || !mAppController.isShutterEnabled()) {
             return false;
         }
         mCaptureStartTime = System.currentTimeMillis();
+
         mPostViewPictureCallbackTime = 0;
         mJpegImageData = null;
 
-        final boolean animateBefore = (mSceneMode == CameraUtil.SCENE_MODE_HDR);
+        final boolean animateBefore = (mSceneMode == CameraCapabilities.SceneMode.HDR);
 
         if (animateBefore) {
             animateAfterShutter();
         }
 
-        // Set rotation and gps data.
-        int orientation;
-        // We need to be consistent with the framework orientation (i.e. the
-        // orientation of the UI.) when the auto-rotate screen setting is on.
-        if (mActivity.isAutoRotateScreen()) {
-            orientation = (360 - mDisplayRotation) % 360;
-        } else {
-            orientation = mOrientation;
-        }
-        mJpegRotation = CameraUtil.getJpegRotation(mCameraId, orientation);
-        mParameters.setRotation(mJpegRotation);
-        Location loc = mLocationManager.getCurrentLocation();
-        CameraUtil.setGpsParameters(mParameters, loc);
-        mCameraDevice.setParameters(mParameters);
+        Location loc = mActivity.getLocationManager().getCurrentLocation();
+        CameraUtil.setGpsParameters(mCameraSettings, loc);
+        mCameraDevice.applySettings(mCameraSettings);
+
+        // Set JPEG orientation. Even if screen UI is locked in portrait, camera orientation should
+        // still match device orientation (e.g., users should always get landscape photos while
+        // capturing by putting device in landscape.)
+        int orientation = mActivity.isAutoRotateScreen() ? mDisplayRotation : mOrientation;
+        Characteristics info = mActivity.getCameraProvider().getCharacteristics(mCameraId);
+        mJpegRotation = info.getJpegOrientation(orientation);
+        mCameraDevice.setJpegOrientation(mJpegRotation);
 
         // We don't want user to press the button again while taking a
         // multi-second HDR photo.
-        mUI.enableShutter(false);
+        mAppController.setShutterEnabled(false);
         mCameraDevice.takePicture(mHandler,
                 new ShutterCallback(!animateBefore),
                 mRawPictureCallback, mPostViewPictureCallback,
@@ -908,8 +1321,6 @@ public class PhotoModule
 
         mFaceDetectionStarted = false;
         setCameraState(SNAPSHOT_IN_PROGRESS);
-        UsageStatistics.onEvent(UsageStatistics.COMPONENT_CAMERA,
-                UsageStatistics.ACTION_CAPTURE_DONE, "Photo");
         return true;
     }
 
@@ -918,63 +1329,69 @@ public class PhotoModule
         setCameraParameters(UPDATE_PARAM_PREFERENCE);
     }
 
-    private int getPreferredCameraId(ComboPreferences preferences) {
-        int intentCameraId = CameraUtil.getCameraFacingIntentExtras(mActivity);
-        if (intentCameraId != -1) {
-            // Testing purpose. Launch a specific camera through the intent
-            // extras.
-            return intentCameraId;
-        } else {
-            return CameraSettings.readPreferredCameraId(preferences);
-        }
-    }
-
     private void updateSceneMode() {
         // If scene mode is set, we cannot set flash mode, white balance, and
         // focus mode, instead, we read it from driver
-        if (!Parameters.SCENE_MODE_AUTO.equals(mSceneMode)) {
-            overrideCameraSettings(mParameters.getFlashMode(),
-                    mParameters.getWhiteBalance(), mParameters.getFocusMode());
-        } else {
-            overrideCameraSettings(null, null, null);
+        if (CameraCapabilities.SceneMode.AUTO != mSceneMode) {
+            overrideCameraSettings(mCameraSettings.getCurrentFlashMode(),
+                    mCameraSettings.getCurrentFocusMode());
         }
     }
 
-    private void overrideCameraSettings(final String flashMode,
-                                        final String whiteBalance, final String focusMode) {
-        mUI.overrideSettings(
-                CameraSettings.KEY_FLASH_MODE, flashMode,
-                CameraSettings.KEY_WHITE_BALANCE, whiteBalance,
-                CameraSettings.KEY_FOCUS_MODE, focusMode);
-    }
-
-    private void loadCameraPreferences() {
-        CameraSettings settings = new CameraSettings(mActivity, mInitialParams,
-                mCameraId, CameraHolder.instance().getCameraInfo());
-        mPreferenceGroup = settings.getPreferenceGroup(R.xml.camera_preferences);
+    private void overrideCameraSettings(CameraCapabilities.FlashMode flashMode,
+            CameraCapabilities.FocusMode focusMode) {
+        CameraCapabilities.Stringifier stringifier = mCameraCapabilities.getStringifier();
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        if (!CameraCapabilities.FlashMode.NO_FLASH.equals(flashMode)) {
+            settingsManager.set(mAppController.getCameraScope(), Keys.KEY_FLASH_MODE,
+                    stringifier.stringify(flashMode));
+        }
+        settingsManager.set(mAppController.getCameraScope(), Keys.KEY_FOCUS_MODE,
+                stringifier.stringify(focusMode));
     }
 
     @Override
     public void onOrientationChanged(int orientation) {
-        // We keep the last known orientation. So if the user first orient
-        // the camera then point the camera to floor or sky, we still have
-        // the correct orientation.
-        if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return;
-        mOrientation = CameraUtil.roundOrientation(orientation, mOrientation);
-
-        // Show the toast after getting the first orientation changed.
-        if (mHandler.hasMessages(SHOW_TAP_TO_FOCUS_TOAST)) {
-            mHandler.removeMessages(SHOW_TAP_TO_FOCUS_TOAST);
-            showTapToFocusToast();
+        if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
+            return;
         }
+
+        // TODO: Document orientation compute logic and unify them in OrientationManagerImpl.
+        // b/17443789
+        // Flip to counter-clockwise orientation.
+        mOrientation = (360 - orientation) % 360;
     }
 
     @Override
-    public void onStop() {
-        if (mMediaProviderClient != null) {
-            mMediaProviderClient.release();
-            mMediaProviderClient = null;
+    public void onCameraAvailable(CameraProxy cameraProxy) {
+        Log.i(TAG, "onCameraAvailable");
+        if (mPaused) {
+            return;
         }
+        mCameraDevice = cameraProxy;
+
+        initializeCapabilities();
+
+        // Reset zoom value index.
+        mZoomValue = 1.0f;
+        if (mFocusManager == null) {
+            initializeFocusManager();
+        }
+        mFocusManager.updateCapabilities(mCameraCapabilities);
+
+        // Do camera parameter dependent initialization.
+        mCameraSettings = mCameraDevice.getSettings();
+
+        setCameraParameters(UPDATE_PARAM_ALL);
+        // Set a listener which updates camera parameters based
+        // on changed settings.
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        settingsManager.addListener(this);
+        mCameraPreviewParamsReady = true;
+
+        startPreview();
+
+        onCameraOpened();
     }
 
     @Override
@@ -985,9 +1402,12 @@ public class PhotoModule
 
     @Override
     public void onCaptureRetake() {
-        if (mPaused)
+        Log.i(TAG, "onCaptureRetake");
+        if (mPaused) {
             return;
+        }
         mUI.hidePostCaptureAlert();
+        mUI.hideIntentReviewImageView();
         setupPreview();
     }
 
@@ -1000,7 +1420,7 @@ public class PhotoModule
         byte[] data = mJpegImageData;
 
         if (mCropValue == null) {
-            // First handle the no crop case -- just return the value.  If the
+            // First handle the no crop case -- just return the value. If the
             // caller specifies a "save uri" then write the data to its
             // stream. Otherwise, pass back a scaled down version of the bitmap
             // directly in the extras.
@@ -1011,9 +1431,11 @@ public class PhotoModule
                     outputStream.write(data);
                     outputStream.close();
 
+                    Log.v(TAG, "saved result to URI: " + mSaveUri);
                     mActivity.setResultEx(Activity.RESULT_OK);
                     mActivity.finish();
                 } catch (IOException ex) {
+                    Log.w(TAG, "exception saving result to URI: " + mSaveUri, ex);
                     // ignore exception
                 } finally {
                     CameraUtil.closeSilently(outputStream);
@@ -1023,6 +1445,7 @@ public class PhotoModule
                 int orientation = Exif.getOrientation(exif);
                 Bitmap bitmap = CameraUtil.makeBitmap(data, 50 * 1024);
                 bitmap = CameraUtil.rotate(bitmap, orientation);
+                Log.v(TAG, "inlined bitmap into capture intent result");
                 mActivity.setResultEx(Activity.RESULT_OK,
                         new Intent("inline-data").putExtra("data", bitmap));
                 mActivity.finish();
@@ -1038,11 +1461,14 @@ public class PhotoModule
                 tempStream.write(data);
                 tempStream.close();
                 tempUri = Uri.fromFile(path);
+                Log.v(TAG, "wrote temp file for cropping to: " + sTempCropFilename);
             } catch (FileNotFoundException ex) {
+                Log.w(TAG, "error writing temp cropping file to: " + sTempCropFilename, ex);
                 mActivity.setResultEx(Activity.RESULT_CANCELED);
                 mActivity.finish();
                 return;
             } catch (IOException ex) {
+                Log.w(TAG, "error writing temp cropping file to: " + sTempCropFilename, ex);
                 mActivity.setResultEx(Activity.RESULT_CANCELED);
                 mActivity.finish();
                 return;
@@ -1055,6 +1481,7 @@ public class PhotoModule
                 newExtras.putString("circleCrop", "true");
             }
             if (mSaveUri != null) {
+                Log.v(TAG, "setting output of cropped file to: " + mSaveUri);
                 newExtras.putParcelable(MediaStore.EXTRA_OUTPUT, mSaveUri);
             } else {
                 newExtras.putBoolean(CameraUtil.KEY_RETURN_DATA, true);
@@ -1069,47 +1496,55 @@ public class PhotoModule
 
             cropIntent.setData(tempUri);
             cropIntent.putExtras(newExtras);
-
+            Log.v(TAG, "starting CROP intent for capture");
             mActivity.startActivityForResult(cropIntent, REQUEST_CROP);
         }
     }
 
     @Override
+    public void onShutterCoordinate(TouchCoordinate coord) {
+        mShutterTouchCoordinate = coord;
+    }
+
+    @Override
     public void onShutterButtonFocus(boolean pressed) {
-        if (mPaused || mUI.collapseCameraControls()
-                || (mCameraState == SNAPSHOT_IN_PROGRESS)
-                || (mCameraState == PREVIEW_STOPPED)) return;
-
-        // Do not do focus if there is not enough storage.
-        if (pressed && !canTakePicture()) return;
-
-        if (pressed) {
-            mFocusManager.onShutterDown();
-        } else {
-            // for countdown mode, we need to postpone the shutter release
-            // i.e. lock the focus during countdown.
-            if (!mUI.isCountingDown()) {
-                mFocusManager.onShutterUp();
-            }
-        }
+        // Do nothing. We don't support half-press to focus anymore.
     }
 
     @Override
     public void onShutterButtonClick() {
-        if (mPaused || mUI.collapseCameraControls()
-                || (mCameraState == SWITCHING_CAMERA)
-                || (mCameraState == PREVIEW_STOPPED)) return;
+        if (mPaused || (mCameraState == SWITCHING_CAMERA)
+                || (mCameraState == PREVIEW_STOPPED)) {
+            mVolumeButtonClickedFlag = false;
+            return;
+        }
 
         // Do not take the picture if there is not enough storage.
         if (mActivity.getStorageSpaceBytes() <= Storage.LOW_STORAGE_THRESHOLD_BYTES) {
             Log.i(TAG, "Not enough space or storage not ready. remaining="
                     + mActivity.getStorageSpaceBytes());
+            mVolumeButtonClickedFlag = false;
             return;
         }
-        Log.v(TAG, "onShutterButtonClick: mCameraState=" + mCameraState);
+        Log.d(TAG, "onShutterButtonClick: mCameraState=" + mCameraState +
+                " mVolumeButtonClickedFlag=" + mVolumeButtonClickedFlag);
 
-        if (mSceneMode == CameraUtil.SCENE_MODE_HDR) {
-            mUI.hideSwitcher();
+        int countDownDuration = mActivity.getSettingsManager()
+            .getInteger(SettingsManager.SCOPE_GLOBAL, Keys.KEY_COUNTDOWN_DURATION);
+        mTimerDuration = countDownDuration;
+        if (countDownDuration > 0) {
+            // Start count down.
+            mAppController.getCameraAppUI().transitionToCancel();
+            mAppController.getCameraAppUI().hideModeOptions();
+            mUI.startCountdown(countDownDuration);
+            return;
+        } else {
+            focusAndCapture();
+        }
+    }
+
+    private void focusAndCapture() {
+        if (mSceneMode == CameraCapabilities.SceneMode.HDR) {
             mUI.setSwipingEnabled(false);
         }
         // If the user wants to do a snapshot while the previous one is still
@@ -1117,101 +1552,76 @@ public class PhotoModule
         // one and re-start the preview. Snapshot in progress also includes the
         // state that autofocus is focusing and a picture will be taken when
         // focus callback arrives.
-        if ((mFocusManager.isFocusingSnapOnFinish() || mCameraState == SNAPSHOT_IN_PROGRESS)
-                && !mIsImageCaptureIntent) {
-            mSnapshotOnIdle = true;
+        if ((mFocusManager.isFocusingSnapOnFinish() || mCameraState == SNAPSHOT_IN_PROGRESS)) {
+            if (!mIsImageCaptureIntent) {
+                mSnapshotOnIdle = true;
+            }
             return;
         }
 
-        String timer = mPreferences.getString(
-                CameraSettings.KEY_TIMER,
-                mActivity.getString(R.string.pref_camera_timer_default));
-        boolean playSound = mPreferences.getString(CameraSettings.KEY_TIMER_SOUND_EFFECTS,
-                mActivity.getString(R.string.pref_camera_timer_sound_default))
-                .equals(mActivity.getString(R.string.setting_on_value));
+        mSnapshotOnIdle = false;
+        mFocusManager.focusAndCapture(mCameraSettings.getCurrentFocusMode());
+    }
 
-        int seconds = Integer.parseInt(timer);
-        // When shutter button is pressed, check whether the previous countdown is
-        // finished. If not, cancel the previous countdown and start a new one.
-        if (mUI.isCountingDown()) {
-            mUI.cancelCountDown();
+    @Override
+    public void onRemainingSecondsChanged(int remainingSeconds) {
+        if (remainingSeconds == 1) {
+            mCountdownSoundPlayer.play(R.raw.timer_final_second, 0.6f);
+        } else if (remainingSeconds == 2 || remainingSeconds == 3) {
+            mCountdownSoundPlayer.play(R.raw.timer_increment, 0.6f);
         }
-        if (seconds > 0) {
-            mUI.startCountDown(seconds, playSound);
+    }
+
+    @Override
+    public void onCountDownFinished() {
+        if (mIsImageCaptureIntent) {
+            mAppController.getCameraAppUI().transitionToIntentReviewLayout();
         } else {
-            mSnapshotOnIdle = false;
-            mFocusManager.doSnap();
+            mAppController.getCameraAppUI().transitionToCapture();
         }
-    }
-
-    @Override
-    public void installIntentFilter() {
-        // Do nothing.
-    }
-
-    @Override
-    public boolean updateStorageHintOnResume() {
-        return mFirstTimeInitialized;
-    }
-
-    @Override
-    public void onResumeBeforeSuper() {
-        mPaused = false;
-    }
-
-    /**
-     * Opens the camera device.
-     *
-     * @return Whether the camera was opened successfully.
-     */
-    private boolean prepareCamera() {
-        // We need to check whether the activity is paused before long
-        // operations to ensure that onPause() can be done ASAP.
-        mCameraDevice = CameraUtil.openCamera(
-                mActivity, mCameraId, mHandler,
-                mActivity.getCameraOpenErrorCallback());
-        if (mCameraDevice == null) {
-            Log.e(TAG, "Failed to open camera:" + mCameraId);
-            return false;
+        mAppController.getCameraAppUI().showModeOptions();
+        if (mPaused) {
+            return;
         }
-        mParameters = mCameraDevice.getParameters();
-
-        initializeCapabilities();
-        if (mFocusManager == null) initializeFocusManager();
-        setCameraParameters(UPDATE_PARAM_ALL);
-        mHandler.sendEmptyMessage(CAMERA_OPEN_DONE);
-        mCameraPreviewParamsReady = true;
-        startPreview();
-        mOnResumeTime = SystemClock.uptimeMillis();
-        checkDisplayRotation();
-        return true;
+        focusAndCapture();
     }
 
+    private void onResumeTasks() {
+        if (mPaused) {
+            return;
+        }
+        Log.v(TAG, "Executing onResumeTasks.");
 
-    @Override
-    public void onResumeAfterSuper() {
-        if (mOpenCameraFail || mCameraDisabled) return;
+        mCountdownSoundPlayer.loadSound(R.raw.timer_final_second);
+        mCountdownSoundPlayer.loadSound(R.raw.timer_increment);
+        if (mFocusManager != null) {
+            // If camera is not open when resume is called, focus manager will
+            // not be initialized yet, in which case it will start listening to
+            // preview area size change later in the initialization.
+            mAppController.addPreviewAreaSizeChangedListener(mFocusManager);
+        }
+        mAppController.addPreviewAreaSizeChangedListener(mUI);
+
+        CameraProvider camProvider = mActivity.getCameraProvider();
+        if (camProvider == null) {
+            // No camera provider, the Activity is destroyed already.
+            return;
+        }
+        requestCameraOpen();
 
         mJpegPictureCallbackTime = 0;
-        mZoomValue = 0;
-        resetExposureCompensation();
-        if (!prepareCamera()) {
-            // Camera failure.
-            return;
-        }
+        mZoomValue = 1.0f;
+
+        mOnResumeTime = SystemClock.uptimeMillis();
+        checkDisplayRotation();
 
         // If first time initialization is not finished, put it in the
         // message queue.
         if (!mFirstTimeInitialized) {
-            mHandler.sendEmptyMessage(FIRST_TIME_INIT);
+            mHandler.sendEmptyMessage(MSG_FIRST_TIME_INIT);
         } else {
             initializeSecondTime();
         }
-        mUI.initDisplayChangeListener();
-        keepScreenOnAwhile();
-
-        UsageStatistics.onContentViewChanged(
-                UsageStatistics.COMPONENT_CAMERA, "PhotoModule");
 
         Sensor gsensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         if (gsensor != null) {
@@ -1222,11 +1632,88 @@ public class PhotoModule
         if (msensor != null) {
             mSensorManager.registerListener(this, msensor, SensorManager.SENSOR_DELAY_NORMAL);
         }
+
+        getServices().getRemoteShutterListener().onModuleReady(this);
+        SessionStatsCollector.instance().sessionActive(true);
+    }
+
+    /**
+     * @return Whether the currently active camera is front-facing.
+     */
+    private boolean isCameraFrontFacing() {
+        return mAppController.getCameraProvider().getCharacteristics(mCameraId)
+                .isFacingFront();
+    }
+
+    /**
+     * The focus manager is the first UI related element to get initialized, and
+     * it requires the RenderOverlay, so initialize it here
+     */
+    private void initializeFocusManager() {
+        // Create FocusManager object. startPreview needs it.
+        // if mFocusManager not null, reuse it
+        // otherwise create a new instance
+        if (mFocusManager != null) {
+            mFocusManager.removeMessages();
+        } else {
+            mMirror = isCameraFrontFacing();
+            String[] defaultFocusModesStrings = mActivity.getResources().getStringArray(
+                    R.array.pref_camera_focusmode_default_array);
+            ArrayList<CameraCapabilities.FocusMode> defaultFocusModes =
+                    new ArrayList<CameraCapabilities.FocusMode>();
+            CameraCapabilities.Stringifier stringifier = mCameraCapabilities.getStringifier();
+            for (String modeString : defaultFocusModesStrings) {
+                CameraCapabilities.FocusMode mode = stringifier.focusModeFromString(modeString);
+                if (mode != null) {
+                    defaultFocusModes.add(mode);
+                }
+            }
+            mFocusManager =
+                    new FocusOverlayManager(mAppController, defaultFocusModes,
+                            mCameraCapabilities, this, mMirror, mActivity.getMainLooper(),
+                            mUI.getFocusUI());
+            MotionManager motionManager = getServices().getMotionManager();
+            if (motionManager != null) {
+                motionManager.addListener(mFocusManager);
+            }
+        }
+        mAppController.addPreviewAreaSizeChangedListener(mFocusManager);
+    }
+
+    /**
+     * @return Whether we are resuming from within the lockscreen.
+     */
+    private boolean isResumeFromLockscreen() {
+        String action = mActivity.getIntent().getAction();
+        return (MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA.equals(action)
+                || MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE.equals(action));
     }
 
     @Override
-    public void onPauseBeforeSuper() {
+    public void resume() {
+        mPaused = false;
+
+        // Add delay on resume from lock screen only, in order to to speed up
+        // the onResume --> onPause --> onResume cycle from lock screen.
+        // Don't do always because letting go of thread can cause delay.
+        if (isResumeFromLockscreen()) {
+            Log.v(TAG, "On resume, from lock screen.");
+            // Note: onPauseAfterSuper() will delete this runnable, so we will
+            // at most have 1 copy queued up.
+            mHandler.postDelayed(mResumeTaskRunnable, ON_RESUME_TASKS_DELAY_MSEC);
+        } else {
+            Log.v(TAG, "On resume.");
+            onResumeTasks();
+        }
+    }
+
+    @Override
+    public void pause() {
         mPaused = true;
+        mHandler.removeCallbacks(mResumeTaskRunnable);
+        getServices().getRemoteShutterListener().onModuleExit();
+        SessionStatsCollector.instance().sessionActive(false);
+
         Sensor gsensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         if (gsensor != null) {
             mSensorManager.unregisterListener(this, gsensor);
@@ -1236,30 +1723,21 @@ public class PhotoModule
         if (msensor != null) {
             mSensorManager.unregisterListener(this, msensor);
         }
-    }
 
-    @Override
-    public void onPauseAfterSuper() {
-        // When camera is started from secure lock screen for the first time
-        // after screen on, the activity gets onCreate->onResume->onPause->onResume.
-        // To reduce the latency, keep the camera for a short time so it does
-        // not need to be opened again.
-        if (mCameraDevice != null && mActivity.isSecureCamera()
-                && CameraActivity.isFirstStartAfterScreenOn()) {
-            CameraActivity.resetFirstStartAfterScreenOn();
-            CameraHolder.instance().keep(KEEP_CAMERA_TIMEOUT);
-        }
         // Reset the focus first. Camera CTS does not guarantee that
         // cancelAutoFocus is allowed after preview stops.
         if (mCameraDevice != null && mCameraState != PREVIEW_STOPPED) {
             mCameraDevice.cancelAutoFocus();
         }
+
+        // If the camera has not been opened asynchronously yet,
+        // and startPreview hasn't been called, then this is a no-op.
+        // (e.g. onResume -> onPause -> onResume).
         stopPreview();
+        cancelCountDown();
+        mCountdownSoundPlayer.release();
 
         mNamedImages = null;
-
-        if (mLocationManager != null) mLocationManager.recordLocation(false);
-
         // If we are in an image capture intent and has taken
         // a picture, we just clear it in onPause.
         mJpegImageData = null;
@@ -1268,43 +1746,28 @@ public class PhotoModule
         mHandler.removeCallbacksAndMessages(null);
 
         closeCamera();
-
-        resetScreenOn();
+        mActivity.enableKeepScreenOn(false);
         mUI.onPause();
 
         mPendingSwitchCameraId = -1;
-        if (mFocusManager != null) mFocusManager.removeMessages();
-        MediaSaveService s = mActivity.getMediaSaveService();
-        if (s != null) {
-            s.setListener(null);
-        }
-        mUI.removeDisplayChangeListener();
-    }
-
-    /**
-     * The focus manager is the first UI related element to get initialized,
-     * and it requires the RenderOverlay, so initialize it here
-     */
-    private void initializeFocusManager() {
-        // Create FocusManager object. startPreview needs it.
-        // if mFocusManager not null, reuse it
-        // otherwise create a new instance
         if (mFocusManager != null) {
             mFocusManager.removeMessages();
-        } else {
-            CameraInfo info = CameraHolder.instance().getCameraInfo()[mCameraId];
-            mMirror = (info.facing == CameraInfo.CAMERA_FACING_FRONT);
-            String[] defaultFocusModes = mActivity.getResources().getStringArray(
-                    R.array.pref_camera_focusmode_default_array);
-            mFocusManager = new FocusOverlayManager(mPreferences, defaultFocusModes,
-                    mInitialParams, this, mMirror,
-                    mActivity.getMainLooper(), mUI);
         }
+        getServices().getMemoryManager().removeListener(this);
+        mAppController.removePreviewAreaSizeChangedListener(mFocusManager);
+        mAppController.removePreviewAreaSizeChangedListener(mUI);
+
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        settingsManager.removeListener(this);
     }
 
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        Log.v(TAG, "onConfigurationChanged");
+    public void destroy() {
+        // TODO: implement this.
+    }
+
+    @Override
+    public void onLayoutOrientationChanged(boolean isLandscape) {
         setDisplayOrientation();
     }
 
@@ -1315,48 +1778,33 @@ public class PhotoModule
         }
     }
 
-    @Override
-    public void onActivityResult(
-            int requestCode, int resultCode, Intent data) {
-        switch (requestCode) {
-            case REQUEST_CROP: {
-                Intent intent = new Intent();
-                if (data != null) {
-                    Bundle extras = data.getExtras();
-                    if (extras != null) {
-                        intent.putExtras(extras);
-                    }
-                }
-                mActivity.setResultEx(resultCode, intent);
-                mActivity.finish();
-
-                File path = mActivity.getFileStreamPath(sTempCropFilename);
-                path.delete();
-
-                break;
-            }
-        }
-    }
-
     private boolean canTakePicture() {
-        return isCameraIdle() && (mActivity.getStorageSpaceBytes() > Storage.LOW_STORAGE_THRESHOLD_BYTES);
+        return isCameraIdle()
+                && (mActivity.getStorageSpaceBytes() > Storage.LOW_STORAGE_THRESHOLD_BYTES);
     }
 
     @Override
     public void autoFocus() {
+        if (mCameraDevice == null) {
+            return;
+        }
+        Log.v(TAG,"Starting auto focus");
         mFocusStartTime = System.currentTimeMillis();
         mCameraDevice.autoFocus(mHandler, mAutoFocusCallback);
+        SessionStatsCollector.instance().autofocusManualTrigger();
         setCameraState(FOCUSING);
     }
 
     @Override
     public void cancelAutoFocus() {
+        if (mCameraDevice == null) {
+            return;
+        }
         mCameraDevice.cancelAutoFocus();
         setCameraState(IDLE);
         setCameraParameters(UPDATE_PARAM_PREFERENCE);
     }
 
-    // Preview area is touched. Handle touch focus.
     @Override
     public void onSingleTapUp(View view, int x, int y) {
         if (mPaused || mCameraDevice == null || !mFirstTimeInitialized
@@ -1367,7 +1815,9 @@ public class PhotoModule
         }
 
         // Check if metering area or focus area is supported.
-        if (!mFocusAreaSupported && !mMeteringAreaSupported) return;
+        if (!mFocusAreaSupported && !mMeteringAreaSupported) {
+            return;
+        }
         mFocusManager.onSingleTapUp(x, y);
     }
 
@@ -1382,7 +1832,8 @@ public class PhotoModule
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_FOCUS:
-                if (/*TODO: mActivity.isInCameraApp() &&*/ mFirstTimeInitialized) {
+                if (/* TODO: mActivity.isInCameraApp() && */mFirstTimeInitialized &&
+                    !mActivity.getCameraAppUI().isInIntentReview()) {
                     if (event.getRepeatCount() == 0) {
                         onShutterButtonFocus(true);
                     }
@@ -1402,7 +1853,6 @@ public class PhotoModule
                     // the shutter button gets the focus, onShutterButtonFocus()
                     // will be called again but it is fine.
                     onShutterButtonFocus(true);
-                    mUI.pressShutterButton();
                 }
                 return true;
         }
@@ -1414,8 +1864,14 @@ public class PhotoModule
         switch (keyCode) {
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
-                if (/*mActivity.isInCameraApp() && */ mFirstTimeInitialized) {
-                    onShutterButtonClick();
+                if (/* mActivity.isInCameraApp() && */mFirstTimeInitialized &&
+                    !mActivity.getCameraAppUI().isInIntentReview()) {
+                    if (mUI.isCountingDown()) {
+                        cancelCountDown();
+                    } else {
+                        mVolumeButtonClickedFlag = true;
+                        onShutterButtonClick();
+                    }
                     return true;
                 }
                 return false;
@@ -1430,11 +1886,13 @@ public class PhotoModule
 
     private void closeCamera() {
         if (mCameraDevice != null) {
+            stopFaceDetection();
             mCameraDevice.setZoomChangeListener(null);
             mCameraDevice.setFaceDetectionCallback(null, null);
-            mCameraDevice.setErrorCallback(null);
-            CameraHolder.instance().release();
+            mCameraDevice.setErrorCallback(null, null);
+
             mFaceDetectionStarted = false;
+            mActivity.getCameraProvider().releaseCamera(mCameraDevice.getCameraId());
             mCameraDevice = null;
             setCameraState(PREVIEW_STOPPED);
             mFocusManager.onCameraReleased();
@@ -1443,7 +1901,9 @@ public class PhotoModule
 
     private void setDisplayOrientation() {
         mDisplayRotation = CameraUtil.getDisplayRotation(mActivity);
-        mDisplayOrientation = CameraUtil.getDisplayOrientation(mDisplayRotation, mCameraId);
+        Characteristics info =
+                mActivity.getCameraProvider().getCharacteristics(mCameraId);
+        mDisplayOrientation = info.getPreviewOrientation(mDisplayRotation);
         mCameraDisplayOrientation = mDisplayOrientation;
         mUI.setDisplayOrientation(mDisplayOrientation);
         if (mFocusManager != null) {
@@ -1451,271 +1911,364 @@ public class PhotoModule
         }
         // Change the camera display orientation
         if (mCameraDevice != null) {
-            mCameraDevice.setDisplayOrientation(mCameraDisplayOrientation);
+            mCameraDevice.setDisplayOrientation(mDisplayRotation);
         }
     }
 
     /** Only called by UI thread. */
     private void setupPreview() {
+        Log.i(TAG, "setupPreview");
         mFocusManager.resetTouchFocus();
         startPreview();
     }
 
-    // This can only be called by UI Thread.
-    private void startPreview() {
+    /**
+     * Returns whether we can/should start the preview or not.
+     */
+    private boolean checkPreviewPreconditions() {
         if (mPaused) {
-            return;
+            return false;
         }
-        SurfaceTexture st = mUI.getSurfaceTexture();
+
+        if (mCameraDevice == null) {
+            Log.w(TAG, "startPreview: camera device not ready yet.");
+            return false;
+        }
+
+        SurfaceTexture st = mActivity.getCameraAppUI().getSurfaceTexture();
         if (st == null) {
             Log.w(TAG, "startPreview: surfaceTexture is not ready.");
-            return;
+            return false;
         }
+
         if (!mCameraPreviewParamsReady) {
             Log.w(TAG, "startPreview: parameters for preview is not ready.");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * The start/stop preview should only run on the UI thread.
+     */
+    private void startPreview() {
+        if (mCameraDevice == null) {
+            Log.i(TAG, "attempted to start preview before camera device");
+            // do nothing
             return;
         }
-        mCameraDevice.setErrorCallback(mErrorCallback);
 
-        // ICS camera frameworks has a bug. Face detection state is not cleared
-        // after taking a picture. Stop the preview to work around it. The bug
-        // was fixed in JB.
-        if (mCameraState != PREVIEW_STOPPED) stopPreview();
+        if (!checkPreviewPreconditions()) {
+            return;
+        }
 
+        mCameraDevice.setErrorCallback(mHandler, mErrorCallback);
         setDisplayOrientation();
 
         if (!mSnapshotOnIdle) {
-            // If the focus mode is continuous autofocus, call cancelAutoFocus to
-            // resume it because it may have been paused by autoFocus call.
-            if (CameraUtil.FOCUS_MODE_CONTINUOUS_PICTURE.equals(mFocusManager.getFocusMode())) {
+            // If the focus mode is continuous autofocus, call cancelAutoFocus
+            // to resume it because it may have been paused by autoFocus call.
+            if (mFocusManager.getFocusMode(mCameraSettings.getCurrentFocusMode()) ==
+                    CameraCapabilities.FocusMode.CONTINUOUS_PICTURE) {
                 mCameraDevice.cancelAutoFocus();
             }
             mFocusManager.setAeAwbLock(false); // Unlock AE and AWB.
         }
         setCameraParameters(UPDATE_PARAM_ALL);
-        // Let UI set its expected aspect ratio
-        mCameraDevice.setPreviewTexture(st);
 
-        Log.v(TAG, "startPreview");
-        mCameraDevice.startPreview();
-        mFocusManager.onPreviewStarted();
-        onPreviewStarted();
+        updateParametersPictureSize();
 
-        if (mSnapshotOnIdle) {
-            mHandler.post(mDoSnapRunnable);
+        mCameraDevice.setPreviewTexture(mActivity.getCameraAppUI().getSurfaceTexture());
+
+        Log.i(TAG, "startPreview");
+        // If we're using API2 in portability layers, don't use startPreviewWithCallback()
+        // b/17576554
+        CameraAgent.CameraStartPreviewCallback startPreviewCallback =
+            new CameraAgent.CameraStartPreviewCallback() {
+                @Override
+                public void onPreviewStarted() {
+                    mFocusManager.onPreviewStarted();
+                    PhotoModule.this.onPreviewStarted();
+                    SessionStatsCollector.instance().previewActive(true);
+                    if (mSnapshotOnIdle) {
+                        mHandler.post(mDoSnapRunnable);
+                    }
+                }
+            };
+        if (GservicesHelper.useCamera2ApiThroughPortabilityLayer(mActivity)) {
+            mCameraDevice.startPreview();
+            startPreviewCallback.onPreviewStarted();
+        } else {
+            mCameraDevice.startPreviewWithCallback(new Handler(Looper.getMainLooper()),
+                    startPreviewCallback);
         }
     }
 
     @Override
     public void stopPreview() {
         if (mCameraDevice != null && mCameraState != PREVIEW_STOPPED) {
-            Log.v(TAG, "stopPreview");
+            Log.i(TAG, "stopPreview");
             mCameraDevice.stopPreview();
             mFaceDetectionStarted = false;
         }
         setCameraState(PREVIEW_STOPPED);
-        if (mFocusManager != null) mFocusManager.onPreviewStopped();
+        if (mFocusManager != null) {
+            mFocusManager.onPreviewStopped();
+        }
+        SessionStatsCollector.instance().previewActive(false);
     }
 
-    @SuppressWarnings("deprecation")
+    @Override
+    public void onSettingChanged(SettingsManager settingsManager, String key) {
+        if (key.equals(Keys.KEY_FLASH_MODE)) {
+            updateParametersFlashMode();
+        }
+        if (key.equals(Keys.KEY_CAMERA_HDR)) {
+            if (settingsManager.getBoolean(SettingsManager.SCOPE_GLOBAL,
+                                           Keys.KEY_CAMERA_HDR)) {
+                // HDR is on.
+                mAppController.getButtonManager().disableButton(ButtonManager.BUTTON_FLASH);
+                mFlashModeBeforeSceneMode = settingsManager.getString(
+                        mAppController.getCameraScope(), Keys.KEY_FLASH_MODE);
+            } else {
+                if (mFlashModeBeforeSceneMode != null) {
+                    settingsManager.set(mAppController.getCameraScope(),
+                                        Keys.KEY_FLASH_MODE,
+                                        mFlashModeBeforeSceneMode);
+                    updateParametersFlashMode();
+                    mFlashModeBeforeSceneMode = null;
+                }
+                mAppController.getButtonManager().enableButton(ButtonManager.BUTTON_FLASH);
+            }
+        }
+
+        if (mCameraDevice != null) {
+            mCameraDevice.applySettings(mCameraSettings);
+        }
+    }
+
     private void updateCameraParametersInitialize() {
         // Reset preview frame rate to the maximum because it may be lowered by
         // video camera application.
-        int[] fpsRange = CameraUtil.getPhotoPreviewFpsRange(mParameters);
+        int[] fpsRange = CameraUtil.getPhotoPreviewFpsRange(mCameraCapabilities);
         if (fpsRange != null && fpsRange.length > 0) {
-            mParameters.setPreviewFpsRange(
-                    fpsRange[Parameters.PREVIEW_FPS_MIN_INDEX],
-                    fpsRange[Parameters.PREVIEW_FPS_MAX_INDEX]);
+            mCameraSettings.setPreviewFpsRange(fpsRange[0], fpsRange[1]);
         }
 
-        mParameters.set(CameraUtil.RECORDING_HINT, CameraUtil.FALSE);
+        mCameraSettings.setRecordingHintEnabled(false);
 
-        // Disable video stabilization. Convenience methods not available in API
-        // level <= 14
-        String vstabSupported = mParameters.get("video-stabilization-supported");
-        if ("true".equals(vstabSupported)) {
-            mParameters.set("video-stabilization", "false");
+        if (mCameraCapabilities.supports(CameraCapabilities.Feature.VIDEO_STABILIZATION)) {
+            mCameraSettings.setVideoStabilization(false);
         }
     }
 
     private void updateCameraParametersZoom() {
         // Set zoom.
-        if (mParameters.isZoomSupported()) {
-            mParameters.setZoom(mZoomValue);
+        if (mCameraCapabilities.supports(CameraCapabilities.Feature.ZOOM)) {
+            mCameraSettings.setZoomRatio(mZoomValue);
         }
     }
 
     @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     private void setAutoExposureLockIfSupported() {
         if (mAeLockSupported) {
-            mParameters.setAutoExposureLock(mFocusManager.getAeAwbLock());
+            mCameraSettings.setAutoExposureLock(mFocusManager.getAeAwbLock());
         }
     }
 
     @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     private void setAutoWhiteBalanceLockIfSupported() {
         if (mAwbLockSupported) {
-            mParameters.setAutoWhiteBalanceLock(mFocusManager.getAeAwbLock());
+            mCameraSettings.setAutoWhiteBalanceLock(mFocusManager.getAeAwbLock());
         }
     }
 
     private void setFocusAreasIfSupported() {
         if (mFocusAreaSupported) {
-            mParameters.setFocusAreas(mFocusManager.getFocusAreas());
+            mCameraSettings.setFocusAreas(mFocusManager.getFocusAreas());
         }
     }
 
     private void setMeteringAreasIfSupported() {
         if (mMeteringAreaSupported) {
-            mParameters.setMeteringAreas(mFocusManager.getMeteringAreas());
+            mCameraSettings.setMeteringAreas(mFocusManager.getMeteringAreas());
         }
     }
 
-    private boolean updateCameraParametersPreference() {
+    private void updateCameraParametersPreference() {
+        // some monkey tests can get here when shutting the app down
+        // make sure mCameraDevice is still valid, b/17580046
+        if (mCameraDevice == null) {
+            return;
+        }
+
         setAutoExposureLockIfSupported();
         setAutoWhiteBalanceLockIfSupported();
         setFocusAreasIfSupported();
         setMeteringAreasIfSupported();
 
-        // Set picture size.
-        String pictureSize = mPreferences.getString(
-                CameraSettings.KEY_PICTURE_SIZE, null);
-        if (pictureSize == null) {
-            CameraSettings.initialCameraPictureSize(mActivity, mParameters);
-        } else {
-            List<Size> supported = mParameters.getSupportedPictureSizes();
-            CameraSettings.setCameraPictureSize(
-                    pictureSize, supported, mParameters);
-        }
-        Size size = mParameters.getPictureSize();
-
-        // Set a preview size that is closest to the viewfinder height and has
-        // the right aspect ratio.
-        List<Size> sizes = mParameters.getSupportedPreviewSizes();
-        Size optimalSize = CameraUtil.getOptimalPreviewSize(mActivity, sizes,
-                (double) size.width / size.height);
-        Size original = mParameters.getPreviewSize();
-        if (!original.equals(optimalSize)) {
-            mParameters.setPreviewSize(optimalSize.width, optimalSize.height);
-
-            // Zoom related settings will be changed for different preview
-            // sizes, so set and read the parameters to get latest values
-            if (mHandler.getLooper() == Looper.myLooper()) {
-                // On UI thread only, not when camera starts up
-                setupPreview();
-            } else {
-                mCameraDevice.setParameters(mParameters);
-            }
-            mParameters = mCameraDevice.getParameters();
-        }
-        Log.v(TAG, "Preview size is " + optimalSize.width + "x" + optimalSize.height);
-
-        // Since changing scene mode may change supported values, set scene mode
-        // first. HDR is a scene mode. To promote it in UI, it is stored in a
-        // separate preference.
-        String onValue = mActivity.getString(R.string.setting_on_value);
-        String hdr = mPreferences.getString(CameraSettings.KEY_CAMERA_HDR,
-                mActivity.getString(R.string.pref_camera_hdr_default));
-        String hdrPlus = mPreferences.getString(CameraSettings.KEY_CAMERA_HDR_PLUS,
-                mActivity.getString(R.string.pref_camera_hdr_plus_default));
-        boolean hdrOn = onValue.equals(hdr);
-        boolean hdrPlusOn = onValue.equals(hdrPlus);
-
-        boolean doGcamModeSwitch = false;
-        if (hdrPlusOn && GcamHelper.hasGcamCapture()) {
-            // Kick off mode switch to gcam.
-            doGcamModeSwitch = true;
-        } else {
-            if (hdrOn) {
-                mSceneMode = CameraUtil.SCENE_MODE_HDR;
-            } else {
-                mSceneMode = mPreferences.getString(
-                        CameraSettings.KEY_SCENE_MODE,
-                        mActivity.getString(R.string.pref_camera_scenemode_default));
-            }
-        }
-        if (CameraUtil.isSupported(mSceneMode, mParameters.getSupportedSceneModes())) {
-            if (!mParameters.getSceneMode().equals(mSceneMode)) {
-                mParameters.setSceneMode(mSceneMode);
-
-                // Setting scene mode will change the settings of flash mode,
-                // white balance, and focus mode. Here we read back the
-                // parameters, so we can know those settings.
-                mCameraDevice.setParameters(mParameters);
-                mParameters = mCameraDevice.getParameters();
-            }
-        } else {
-            mSceneMode = mParameters.getSceneMode();
-            if (mSceneMode == null) {
-                mSceneMode = Parameters.SCENE_MODE_AUTO;
-            }
-        }
+        // Initialize focus mode.
+        mFocusManager.overrideFocusMode(null);
+        mCameraSettings
+                .setFocusMode(mFocusManager.getFocusMode(mCameraSettings.getCurrentFocusMode()));
+        SessionStatsCollector.instance().autofocusActive(
+                mFocusManager.getFocusMode(mCameraSettings.getCurrentFocusMode()) ==
+                        CameraCapabilities.FocusMode.CONTINUOUS_PICTURE
+        );
 
         // Set JPEG quality.
-        int jpegQuality = CameraProfile.getJpegEncodingQualityParameter(mCameraId,
-                CameraProfile.QUALITY_HIGH);
-        mParameters.setJpegQuality(jpegQuality);
+        updateParametersPictureQuality();
 
         // For the following settings, we need to check if the settings are
         // still supported by latest driver, if not, ignore the settings.
 
         // Set exposure compensation
-        int value = CameraSettings.readExposure(mPreferences);
-        int max = mParameters.getMaxExposureCompensation();
-        int min = mParameters.getMinExposureCompensation();
-        if (value >= min && value <= max) {
-            mParameters.setExposureCompensation(value);
-        } else {
-            Log.w(TAG, "invalid exposure range: " + value);
-        }
+        updateParametersExposureCompensation();
 
-        if (Parameters.SCENE_MODE_AUTO.equals(mSceneMode)) {
-            // Set flash mode.
-            String flashMode = mPreferences.getString(
-                    CameraSettings.KEY_FLASH_MODE,
-                    mActivity.getString(R.string.pref_camera_flashmode_default));
-            List<String> supportedFlash = mParameters.getSupportedFlashModes();
-            if (CameraUtil.isSupported(flashMode, supportedFlash)) {
-                mParameters.setFlashMode(flashMode);
-            } else {
-                flashMode = mParameters.getFlashMode();
-                if (flashMode == null) {
-                    flashMode = mActivity.getString(
-                            R.string.pref_camera_flashmode_no_flash);
-                }
-            }
-
-            // Set white balance parameter.
-            String whiteBalance = mPreferences.getString(
-                    CameraSettings.KEY_WHITE_BALANCE,
-                    mActivity.getString(R.string.pref_camera_whitebalance_default));
-            if (CameraUtil.isSupported(whiteBalance,
-                    mParameters.getSupportedWhiteBalance())) {
-                mParameters.setWhiteBalance(whiteBalance);
-            } else {
-                whiteBalance = mParameters.getWhiteBalance();
-                if (whiteBalance == null) {
-                    whiteBalance = Parameters.WHITE_BALANCE_AUTO;
-                }
-            }
-
-            // Set focus mode.
-            mFocusManager.overrideFocusMode(null);
-            mParameters.setFocusMode(mFocusManager.getFocusMode());
-        } else {
-            mFocusManager.overrideFocusMode(mParameters.getFocusMode());
-        }
+        // Set the scene mode: also sets flash and white balance.
+        updateParametersSceneMode();
 
         if (mContinuousFocusSupported && ApiHelper.HAS_AUTO_FOCUS_MOVE_CALLBACK) {
             updateAutoFocusMoveCallback();
         }
+    }
 
-        return doGcamModeSwitch;
+    /**
+     * This method sets picture size parameters. Size parameters should only be
+     * set when the preview is stopped, and so this method is only invoked in
+     * {@link #startPreview()} just before starting the preview.
+     */
+    private void updateParametersPictureSize() {
+        if (mCameraDevice == null) {
+            Log.w(TAG, "attempting to set picture size without caemra device");
+            return;
+        }
+
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        String pictureSizeKey = isCameraFrontFacing() ? Keys.KEY_PICTURE_SIZE_FRONT
+            : Keys.KEY_PICTURE_SIZE_BACK;
+        String pictureSize = settingsManager.getString(SettingsManager.SCOPE_GLOBAL,
+                                                       pictureSizeKey);
+
+        List<Size> supported = mCameraCapabilities.getSupportedPhotoSizes();
+        CameraPictureSizesCacher.updateSizesForCamera(mAppController.getAndroidContext(),
+                mCameraDevice.getCameraId(), supported);
+        SettingsUtil.setCameraPictureSize(pictureSize, supported, mCameraSettings,
+                mCameraDevice.getCameraId());
+
+        Size size = SettingsUtil.getPhotoSize(pictureSize, supported,
+                mCameraDevice.getCameraId());
+        if (ApiHelper.IS_NEXUS_5) {
+            if (ResolutionUtil.NEXUS_5_LARGE_16_BY_9.equals(pictureSize)) {
+                mShouldResizeTo16x9 = true;
+            } else {
+                mShouldResizeTo16x9 = false;
+            }
+        }
+
+        // Set a preview size that is closest to the viewfinder height and has
+        // the right aspect ratio.
+        List<Size> sizes = mCameraCapabilities.getSupportedPreviewSizes();
+        Size optimalSize = CameraUtil.getOptimalPreviewSize(mActivity, sizes,
+                (double) size.width() / size.height());
+        Size original = mCameraSettings.getCurrentPreviewSize();
+        if (!optimalSize.equals(original)) {
+            Log.v(TAG, "setting preview size. optimal: " + optimalSize + "original: " + original);
+            mCameraSettings.setPreviewSize(optimalSize);
+
+            mCameraDevice.applySettings(mCameraSettings);
+            mCameraSettings = mCameraDevice.getSettings();
+        }
+
+        if (optimalSize.width() != 0 && optimalSize.height() != 0) {
+            Log.v(TAG, "updating aspect ratio");
+            mUI.updatePreviewAspectRatio((float) optimalSize.width()
+                    / (float) optimalSize.height());
+        }
+        Log.d(TAG, "Preview size is " + optimalSize);
+    }
+
+    private void updateParametersPictureQuality() {
+        int jpegQuality = CameraProfile.getJpegEncodingQualityParameter(mCameraId,
+                CameraProfile.QUALITY_HIGH);
+        mCameraSettings.setPhotoJpegCompressionQuality(jpegQuality);
+    }
+
+    private void updateParametersExposureCompensation() {
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+        if (settingsManager.getBoolean(SettingsManager.SCOPE_GLOBAL,
+                                       Keys.KEY_EXPOSURE_COMPENSATION_ENABLED)) {
+            int value = settingsManager.getInteger(mAppController.getCameraScope(),
+                                                   Keys.KEY_EXPOSURE);
+            int max = mCameraCapabilities.getMaxExposureCompensation();
+            int min = mCameraCapabilities.getMinExposureCompensation();
+            if (value >= min && value <= max) {
+                mCameraSettings.setExposureCompensationIndex(value);
+            } else {
+                Log.w(TAG, "invalid exposure range: " + value);
+            }
+        } else {
+            // If exposure compensation is not enabled, reset the exposure compensation value.
+            setExposureCompensation(0);
+        }
+
+    }
+
+    private void updateParametersSceneMode() {
+        CameraCapabilities.Stringifier stringifier = mCameraCapabilities.getStringifier();
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+
+        mSceneMode = stringifier.
+            sceneModeFromString(settingsManager.getString(mAppController.getCameraScope(),
+                                                          Keys.KEY_SCENE_MODE));
+        if (mCameraCapabilities.supports(mSceneMode)) {
+            if (mCameraSettings.getCurrentSceneMode() != mSceneMode) {
+                mCameraSettings.setSceneMode(mSceneMode);
+
+                // Setting scene mode will change the settings of flash mode,
+                // white balance, and focus mode. Here we read back the
+                // parameters, so we can know those settings.
+                mCameraDevice.applySettings(mCameraSettings);
+                mCameraSettings = mCameraDevice.getSettings();
+            }
+        } else {
+            mSceneMode = mCameraSettings.getCurrentSceneMode();
+            if (mSceneMode == null) {
+                mSceneMode = CameraCapabilities.SceneMode.AUTO;
+            }
+        }
+
+        if (CameraCapabilities.SceneMode.AUTO == mSceneMode) {
+            // Set flash mode.
+            updateParametersFlashMode();
+
+            // Set focus mode.
+            mFocusManager.overrideFocusMode(null);
+            mCameraSettings.setFocusMode(
+                    mFocusManager.getFocusMode(mCameraSettings.getCurrentFocusMode()));
+        } else {
+            mFocusManager.overrideFocusMode(mCameraSettings.getCurrentFocusMode());
+        }
+    }
+
+    private void updateParametersFlashMode() {
+        SettingsManager settingsManager = mActivity.getSettingsManager();
+
+        CameraCapabilities.FlashMode flashMode = mCameraCapabilities.getStringifier()
+            .flashModeFromString(settingsManager.getString(mAppController.getCameraScope(),
+                                                           Keys.KEY_FLASH_MODE));
+        if (mCameraCapabilities.supports(flashMode)) {
+            mCameraSettings.setFlashMode(flashMode);
+        }
     }
 
     @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     private void updateAutoFocusMoveCallback() {
-        if (mParameters.getFocusMode().equals(CameraUtil.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+        if (mCameraDevice == null) {
+            return;
+        }
+        if (mCameraSettings.getCurrentFocusMode() ==
+                CameraCapabilities.FocusMode.CONTINUOUS_PICTURE) {
             mCameraDevice.setAutoFocusMoveCallback(mHandler,
                     (CameraAFMoveCallback) mAutoFocusMoveCallback);
         } else {
@@ -1723,12 +2276,28 @@ public class PhotoModule
         }
     }
 
+    /**
+     * Sets the exposure compensation to the given value and also updates settings.
+     *
+     * @param value exposure compensation value to be set
+     */
+    public void setExposureCompensation(int value) {
+        int max = mCameraCapabilities.getMaxExposureCompensation();
+        int min = mCameraCapabilities.getMinExposureCompensation();
+        if (value >= min && value <= max) {
+            mCameraSettings.setExposureCompensationIndex(value);
+            SettingsManager settingsManager = mActivity.getSettingsManager();
+            settingsManager.set(mAppController.getCameraScope(),
+                                Keys.KEY_EXPOSURE, value);
+        } else {
+            Log.w(TAG, "invalid exposure range: " + value);
+        }
+    }
+
     // We separate the parameters into several subsets, so we can update only
     // the subsets actually need updating. The PREFERENCE set needs extra
     // locking because the preference can be changed from GLThread as well.
     private void setCameraParameters(int updateSet) {
-        boolean doModeSwitch = false;
-
         if ((updateSet & UPDATE_PARAM_INITIALIZE) != 0) {
             updateCameraParametersInitialize();
         }
@@ -1738,14 +2307,11 @@ public class PhotoModule
         }
 
         if ((updateSet & UPDATE_PARAM_PREFERENCE) != 0) {
-            doModeSwitch = updateCameraParametersPreference();
+            updateCameraParametersPreference();
         }
 
-        mCameraDevice.setParameters(mParameters);
-
-        // Switch to gcam module if HDR+ was selected
-        if (doModeSwitch && !mIsImageCaptureIntent) {
-            mHandler.sendEmptyMessage(SWITCH_TO_GCAM_MODULE);
+        if (mCameraDevice != null) {
+            mCameraDevice.applySettings(mCameraSettings);
         }
     }
 
@@ -1763,9 +2329,8 @@ public class PhotoModule
             updateSceneMode();
             mUpdateSet = 0;
         } else {
-            if (!mHandler.hasMessages(SET_CAMERA_PARAMETERS_WHEN_IDLE)) {
-                mHandler.sendEmptyMessageDelayed(
-                        SET_CAMERA_PARAMETERS_WHEN_IDLE, 1000);
+            if (!mHandler.hasMessages(MSG_SET_CAMERA_PARAMETERS_WHEN_IDLE)) {
+                mHandler.sendEmptyMessageDelayed(MSG_SET_CAMERA_PARAMETERS_WHEN_IDLE, 1000);
             }
         }
     }
@@ -1775,14 +2340,14 @@ public class PhotoModule
         return (mCameraState == IDLE) ||
                 (mCameraState == PREVIEW_STOPPED) ||
                 ((mFocusManager != null) && mFocusManager.isFocusCompleted()
-                        && (mCameraState != SWITCHING_CAMERA));
+                && (mCameraState != SWITCHING_CAMERA));
     }
 
     @Override
     public boolean isImageCaptureIntent() {
         String action = mActivity.getIntent().getAction();
         return (MediaStore.ACTION_IMAGE_CAPTURE.equals(action)
-                || CameraActivity.ACTION_IMAGE_CAPTURE_SECURE.equals(action));
+        || CameraActivity.ACTION_IMAGE_CAPTURE_SECURE.equals(action));
     }
 
     private void setupCaptureParams() {
@@ -1793,108 +2358,29 @@ public class PhotoModule
         }
     }
 
-    @Override
-    public void onSharedPreferenceChanged() {
-        // ignore the events after "onPause()"
-        if (mPaused) return;
-
-        boolean recordLocation = RecordLocationPreference.get(
-                mPreferences, mContentResolver);
-        mLocationManager.recordLocation(recordLocation);
-
-        setCameraParametersWhenIdle(UPDATE_PARAM_PREFERENCE);
-        mUI.updateOnScreenIndicators(mParameters, mPreferenceGroup, mPreferences);
-    }
-
-    @Override
-    public void onCameraPickerClicked(int cameraId) {
-        if (mPaused || mPendingSwitchCameraId != -1) return;
-
-        mPendingSwitchCameraId = cameraId;
-
-        Log.v(TAG, "Start to switch camera. cameraId=" + cameraId);
-        // We need to keep a preview frame for the animation before
-        // releasing the camera. This will trigger onPreviewTextureCopied.
-        //TODO: Need to animate the camera switch
-        switchCamera();
-    }
-
-    // Preview texture has been copied. Now camera can be released and the
-    // animation can be started.
-    @Override
-    public void onPreviewTextureCopied() {
-        mHandler.sendEmptyMessage(SWITCH_CAMERA);
-    }
-
-    @Override
-    public void onCaptureTextureCopied() {
-    }
-
-    @Override
-    public void onUserInteraction() {
-        if (!mActivity.isFinishing()) keepScreenOnAwhile();
-    }
-
-    private void resetScreenOn() {
-        mHandler.removeMessages(CLEAR_SCREEN_DELAY);
-        mActivity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-    }
-
-    private void keepScreenOnAwhile() {
-        mHandler.removeMessages(CLEAR_SCREEN_DELAY);
-        mActivity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        mHandler.sendEmptyMessageDelayed(CLEAR_SCREEN_DELAY, SCREEN_DELAY);
-    }
-
-    @Override
-    public void onOverriddenPreferencesClicked() {
-        if (mPaused) return;
-        mUI.showPreferencesToast();
-    }
-
-    private void showTapToFocusToast() {
-        // TODO: Use a toast?
-        new RotateTextToast(mActivity, R.string.tap_to_focus, 0).show();
-        // Clear the preference.
-        Editor editor = mPreferences.edit();
-        editor.putBoolean(CameraSettings.KEY_CAMERA_FIRST_USE_HINT_SHOWN, false);
-        editor.apply();
-    }
-
     private void initializeCapabilities() {
-        mInitialParams = mCameraDevice.getParameters();
-        mFocusAreaSupported = CameraUtil.isFocusAreaSupported(mInitialParams);
-        mMeteringAreaSupported = CameraUtil.isMeteringAreaSupported(mInitialParams);
-        mAeLockSupported = CameraUtil.isAutoExposureLockSupported(mInitialParams);
-        mAwbLockSupported = CameraUtil.isAutoWhiteBalanceLockSupported(mInitialParams);
-        mContinuousFocusSupported = mInitialParams.getSupportedFocusModes().contains(
-                CameraUtil.FOCUS_MODE_CONTINUOUS_PICTURE);
+        mCameraCapabilities = mCameraDevice.getCapabilities();
+        mFocusAreaSupported = mCameraCapabilities.supports(CameraCapabilities.Feature.FOCUS_AREA);
+        mMeteringAreaSupported = mCameraCapabilities.supports(CameraCapabilities.Feature.METERING_AREA);
+        mAeLockSupported = mCameraCapabilities.supports(CameraCapabilities.Feature.AUTO_EXPOSURE_LOCK);
+        mAwbLockSupported = mCameraCapabilities.supports(CameraCapabilities.Feature.AUTO_WHITE_BALANCE_LOCK);
+        mContinuousFocusSupported =
+                mCameraCapabilities.supports(CameraCapabilities.FocusMode.CONTINUOUS_PICTURE);
     }
 
     @Override
-    public void onCountDownFinished() {
-        mSnapshotOnIdle = false;
-        mFocusManager.doSnap();
-        mFocusManager.onShutterUp();
-    }
-
-    @Override
-    public void onShowSwitcherPopup() {
-        mUI.onShowSwitcherPopup();
-    }
-
-    @Override
-    public int onZoomChanged(int index) {
+    public void onZoomChanged(float ratio) {
         // Not useful to change zoom value when the activity is paused.
-        if (mPaused) return index;
-        mZoomValue = index;
-        if (mParameters == null || mCameraDevice == null) return index;
+        if (mPaused) {
+            return;
+        }
+        mZoomValue = ratio;
+        if (mCameraSettings == null || mCameraDevice == null) {
+            return;
+        }
         // Set zoom parameters asynchronously
-        mParameters.setZoom(mZoomValue);
-        mCameraDevice.setParameters(mParameters);
-        Parameters p = mCameraDevice.getParameters();
-        if (p != null) return p.getZoom();
-        return index;
+        mCameraSettings.setZoomRatio(mZoomValue);
+        mCameraDevice.applySettings(mCameraSettings);
     }
 
     @Override
@@ -1903,17 +2389,13 @@ public class PhotoModule
     }
 
     @Override
-    public void onQueueStatus(boolean full) {
-        mUI.enableShutter(!full);
+    public void onMemoryStateChanged(int state) {
+        mAppController.setShutterEnabled(state == MemoryManager.STATE_OK);
     }
 
     @Override
-    public void onMediaSaveServiceConnected(MediaSaveService s) {
-        // We set the listener only when both service and shutterbutton
-        // are initialized.
-        if (mFirstTimeInitialized) {
-            s.setListener(this);
-        }
+    public void onLowMemory() {
+        // Not much we can do in the photo module.
     }
 
     @Override
@@ -1932,7 +2414,7 @@ public class PhotoModule
             // we should not be here.
             return;
         }
-        for (int i = 0; i < 3 ; i++) {
+        for (int i = 0; i < 3; i++) {
             data[i] = event.values[i];
         }
         float[] orientation = new float[3];
@@ -1942,16 +2424,6 @@ public class PhotoModule
         if (mHeading < 0) {
             mHeading += 360;
         }
-    }
-
-    @Override
-    public void onPreviewFocusChanged(boolean previewFocused) {
-        mUI.onPreviewFocusChanged(previewFocused);
-    }
-
-    @Override
-    public boolean arePreviewControlsVisible() {
-        return mUI.arePreviewControlsVisible();
     }
 
     // For debugging only.
@@ -1975,12 +2447,51 @@ public class PhotoModule
         }
     }
 
-/* Below is no longer needed, except to get rid of compile error
- * TODO: Remove these
- */
-
-    // TODO: Delete this function after old camera code is removed
     @Override
-    public void onRestorePreferencesClicked() {}
+    public void onRemoteShutterPress() {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                focusAndCapture();
+            }
+        });
+    }
 
+    /**
+     * This class manages the loading/releasing/playing of the sounds needed for
+     * countdown timer.
+     */
+    private class CountdownSoundPlayer {
+        private SoundPool mSoundPool;
+        private int mTimerIncrement;
+        private int mTimerFinalSecond;
+
+        void loadSounds() {
+            // Load the sounds.
+            if (mSoundPool == null) {
+                mSoundPool = new SoundPool(1, AudioManager.STREAM_NOTIFICATION, 0);
+                mTimerIncrement = mSoundPool.load(mAppController.getAndroidContext(), R.raw.timer_increment, 1);
+                mTimerFinalSecond = mSoundPool.load(mAppController.getAndroidContext(), R.raw.timer_final_second, 1);
+            }
+        }
+
+        void onRemainingSecondsChanged(int newVal) {
+            if (mSoundPool == null) {
+                Log.e(TAG, "Cannot play sound - they have not been loaded.");
+                return;
+            }
+            if (newVal == 1) {
+                mSoundPool.play(mTimerFinalSecond, 1.0f, 1.0f, 0, 0, 1.0f);
+            } else if (newVal == 2 || newVal == 3) {
+                mSoundPool.play(mTimerIncrement, 1.0f, 1.0f, 0, 0, 1.0f);
+            }
+        }
+
+        void release() {
+            if (mSoundPool != null) {
+                mSoundPool.release();
+                mSoundPool = null;
+            }
+        }
+    }
 }

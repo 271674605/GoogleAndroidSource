@@ -794,7 +794,7 @@ pack_archive ()
     fi
     # Ensure symlinks are stored as is in zip files. for toolchains
     # this can save up to 7 MB in the size of the final archive
-    ZIPFLAGS="$ZIPFLAGS --symlinks"
+    #ZIPFLAGS="$ZIPFLAGS --symlinks"
     case "$ARCHIVE" in
         *.zip)
             (cd $SRCDIR && run zip $ZIPFLAGS "$ARCHIVE" $SRCFILES)
@@ -838,6 +838,25 @@ copy_directory ()
     fail_panic "Cannot copy to directory: $DSTDIR"
 }
 
+# Move a directory, create target location if needed
+#
+# $1: source directory
+# $2: target directory location
+#
+move_directory ()
+{
+    local SRCDIR="$1"
+    local DSTDIR="$2"
+    if [ ! -d "$SRCDIR" ] ; then
+        panic "Can't move from non-directory: $SRCDIR"
+    fi
+    log "Move directory: "
+    log "  from $SRCDIR"
+    log "  to $DSTDIR"
+    mkdir -p "$DSTDIR" && (mv "$SRCDIR"/* "$DSTDIR")
+    fail_panic "Cannot move to directory: $DSTDIR"
+}
+
 # This is the same than copy_directory(), but symlinks will be replaced
 # by the file they actually point to instead.
 copy_directory_nolinks ()
@@ -869,7 +888,7 @@ copy_file_list ()
     log "Copying file: $@"
     log "  from $SRCDIR"
     log "  to $DSTDIR"
-    mkdir -p "$DSTDIR" && (cd "$SRCDIR" && tar cf - "$@") | (tar xf - -C "$DSTDIR")
+    mkdir -p "$DSTDIR" && (cd "$SRCDIR" && (echo $@ | tr ' ' '\n' | tar cf - -T -)) | (tar xf - -C "$DSTDIR")
     fail_panic "Cannot copy files to directory: $DSTDIR"
 }
 

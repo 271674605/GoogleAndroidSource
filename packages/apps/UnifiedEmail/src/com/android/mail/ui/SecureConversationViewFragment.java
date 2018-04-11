@@ -24,8 +24,10 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.browse.ConversationAccountController;
 import com.android.mail.browse.ConversationMessage;
 import com.android.mail.browse.ConversationViewHeader;
@@ -33,7 +35,6 @@ import com.android.mail.browse.MessageCursor;
 import com.android.mail.browse.MessageHeaderView;
 import com.android.mail.content.ObjectCursor;
 import com.android.mail.providers.Account;
-import com.android.mail.providers.Address;
 import com.android.mail.providers.Conversation;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
@@ -54,6 +55,19 @@ public class SecureConversationViewFragment extends AbstractConversationViewFrag
     private class SecureConversationWebViewClient extends AbstractConversationWebViewClient {
         public SecureConversationWebViewClient(Account account) {
             super(account);
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+            // try to load the url assuming it is a cid url
+            final Uri uri = Uri.parse(url);
+            final WebResourceResponse response = loadCIDUri(uri, mViewController.getMessage());
+            if (response != null) {
+                return response;
+            }
+
+            // otherwise, attempt the default handling
+            return super.shouldInterceptRequest(view, url);
         }
 
         @Override
@@ -141,9 +155,10 @@ public class SecureConversationViewFragment extends AbstractConversationViewFrag
 
     @Override
     public void setupConversationHeaderView(ConversationViewHeader headerView) {
-        headerView.setCallbacks(this, this);
+        headerView.setCallbacks(this, this, getListController());
         headerView.setFolders(mConversation);
         headerView.setSubject(mConversation.subject);
+        headerView.setStarred(mConversation.starred);
     }
 
     @Override
@@ -181,11 +196,6 @@ public class SecureConversationViewFragment extends AbstractConversationViewFrag
     @Override
     public boolean isViewOnlyMode() {
         return false;
-    }
-
-    @Override
-    public Uri getAccountUri() {
-        return mAccount.uri;
     }
 
     // End implementations of SecureConversationViewControllerCallbacks
@@ -256,7 +266,6 @@ public class SecureConversationViewFragment extends AbstractConversationViewFrag
         final ConversationViewHeader headerView = mViewController.getConversationHeaderView();
         if (headerView != null) {
             headerView.onConversationUpdated(conv);
-            headerView.setSubject(conv.subject);
         }
     }
 
@@ -264,5 +273,21 @@ public class SecureConversationViewFragment extends AbstractConversationViewFrag
     @Override
     public boolean supportsMessageTransforms() {
         return false;
+    }
+
+    /**
+     * Users are expected to use the Print item in the Message overflow menu to print the single
+     * message.
+     *
+     * @return {@code false} because Print and Print All menu items are never shown in EMail.
+     */
+    @Override
+    protected boolean shouldShowPrintInOverflow() {
+        return false;
+    }
+
+    @Override
+    protected void printConversation() {
+        mViewController.printMessage();
     }
 }

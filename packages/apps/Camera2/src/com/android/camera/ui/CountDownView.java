@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2014 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,77 +19,105 @@ package com.android.camera.ui;
 import java.util.Locale;
 
 import android.content.Context;
-import android.media.AudioManager;
-import android.media.SoundPool;
+import android.graphics.RectF;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.View;
-import android.view.animation.Animation;
-import android.view.animation.AnimationUtils;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.android.camera.debug.Log;
 import com.android.camera2.R;
 
+/**
+ * This class manages the looks of the countdown.
+ */
 public class CountDownView extends FrameLayout {
 
-    private static final String TAG = "CAM_CountDownView";
+    private static final Log.Tag TAG = new Log.Tag("CountDownView");
     private static final int SET_TIMER_TEXT = 1;
+    private static final long ANIMATION_DURATION_MS = 800;
     private TextView mRemainingSecondsView;
     private int mRemainingSecs = 0;
-    private OnCountDownFinishedListener mListener;
-    private Animation mCountDownAnim;
-    private SoundPool mSoundPool;
-    private int mBeepTwice;
-    private int mBeepOnce;
-    private boolean mPlaySound;
+    private OnCountDownStatusListener mListener;
     private final Handler mHandler = new MainHandler();
+    private final RectF mPreviewArea = new RectF();
+
+    /**
+     * Listener that gets notified when the countdown status has
+     * been updated (i.e. remaining seconds changed, or finished).
+     */
+    public interface OnCountDownStatusListener {
+        /**
+         * Gets notified when the remaining seconds for the countdown
+         * has changed.
+         *
+         * @param remainingSeconds seconds remained for countdown
+         */
+        public void onRemainingSecondsChanged(int remainingSeconds);
+
+        /**
+         * Gets called when countdown is finished.
+         */
+        public void onCountDownFinished();
+    }
 
     public CountDownView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mCountDownAnim = AnimationUtils.loadAnimation(context, R.anim.count_down_exit);
-        // Load the beeps
-        mSoundPool = new SoundPool(1, AudioManager.STREAM_NOTIFICATION, 0);
-        mBeepOnce = mSoundPool.load(context, R.raw.beep_once, 1);
-        mBeepTwice = mSoundPool.load(context, R.raw.beep_twice, 1);
     }
 
+    /**
+     * Returns whether countdown is on-going.
+     */
     public boolean isCountingDown() {
         return mRemainingSecs > 0;
     };
 
-    public interface OnCountDownFinishedListener {
-        public void onCountDownFinished();
+    /**
+     * Responds to preview area change by centering th countdown UI in the new
+     * preview area.
+     */
+    public void onPreviewAreaChanged(RectF previewArea) {
+        mPreviewArea.set(previewArea);
     }
 
     private void remainingSecondsChanged(int newVal) {
         mRemainingSecs = newVal;
+        if (mListener != null) {
+            mListener.onRemainingSecondsChanged(mRemainingSecs);
+        }
+
         if (newVal == 0) {
-            // Countdown has finished
+            // Countdown has finished.
             setVisibility(View.INVISIBLE);
-            mListener.onCountDownFinished();
+            if (mListener != null) {
+                mListener.onCountDownFinished();
+            }
         } else {
             Locale locale = getResources().getConfiguration().locale;
             String localizedValue = String.format(locale, "%d", newVal);
             mRemainingSecondsView.setText(localizedValue);
-            // Fade-out animation
-            mCountDownAnim.reset();
-            mRemainingSecondsView.clearAnimation();
-            mRemainingSecondsView.startAnimation(mCountDownAnim);
-
-            // Play sound effect for the last 3 seconds of the countdown
-            if (mPlaySound) {
-                if (newVal == 1) {
-                    mSoundPool.play(mBeepTwice, 1.0f, 1.0f, 0, 0, 1.0f);
-                } else if (newVal <= 3) {
-                    mSoundPool.play(mBeepOnce, 1.0f, 1.0f, 0, 0, 1.0f);
-                }
-            }
+            // Fade-out animation.
+            startFadeOutAnimation();
             // Schedule the next remainingSecondsChanged() call in 1 second
             mHandler.sendEmptyMessageDelayed(SET_TIMER_TEXT, 1000);
         }
+    }
+
+    private void startFadeOutAnimation() {
+        int textWidth = mRemainingSecondsView.getMeasuredWidth();
+        int textHeight = mRemainingSecondsView.getMeasuredHeight();
+        mRemainingSecondsView.setScaleX(1f);
+        mRemainingSecondsView.setScaleY(1f);
+        mRemainingSecondsView.setTranslationX(mPreviewArea.centerX() - textWidth / 2);
+        mRemainingSecondsView.setTranslationY(mPreviewArea.centerY() - textHeight / 2);
+        mRemainingSecondsView.setPivotX(textWidth / 2);
+        mRemainingSecondsView.setPivotY(textHeight / 2);
+        mRemainingSecondsView.setAlpha(1f);
+        float endScale = 2.5f;
+        mRemainingSecondsView.animate().scaleX(endScale).scaleY(endScale)
+                .alpha(0f).setDuration(ANIMATION_DURATION_MS).start();
     }
 
     @Override
@@ -98,20 +126,33 @@ public class CountDownView extends FrameLayout {
         mRemainingSecondsView = (TextView) findViewById(R.id.remaining_seconds);
     }
 
-    public void setCountDownFinishedListener(OnCountDownFinishedListener listener) {
+    /**
+     * Sets a listener that gets notified when the status of countdown has changed.
+     */
+    public void setCountDownStatusListener(OnCountDownStatusListener listener) {
         mListener = listener;
     }
 
-    public void startCountDown(int sec, boolean playSound) {
+    /**
+     * Starts showing countdown in the UI.
+     *
+     * @param sec duration of the countdown, in seconds
+     */
+    public void startCountDown(int sec) {
         if (sec <= 0) {
             Log.w(TAG, "Invalid input for countdown timer: " + sec + " seconds");
             return;
         }
+        if (isCountingDown()) {
+            cancelCountDown();
+        }
         setVisibility(View.VISIBLE);
-        mPlaySound = playSound;
         remainingSecondsChanged(sec);
     }
 
+    /**
+     * Cancels the on-going countdown in the UI, if any.
+     */
     public void cancelCountDown() {
         if (mRemainingSecs > 0) {
             mRemainingSecs = 0;

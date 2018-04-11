@@ -33,18 +33,15 @@ class BufferedResourceHandler
  private:
   // ResourceHandler implementation:
   virtual void SetController(ResourceController* controller) OVERRIDE;
-  virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response,
+  virtual bool OnResponseStarted(ResourceResponse* response,
                                  bool* defer) OVERRIDE;
-  virtual bool OnWillRead(int request_id,
-                          net::IOBuffer** buf,
+  virtual bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                           int* buf_size,
                           int min_size) OVERRIDE;
-  virtual bool OnReadCompleted(int request_id, int bytes_read,
-                               bool* defer) OVERRIDE;
-  virtual bool OnResponseCompleted(int request_id,
-                                   const net::URLRequestStatus& status,
-                                   const std::string& security_info) OVERRIDE;
+  virtual bool OnReadCompleted(int bytes_read, bool* defer) OVERRIDE;
+  virtual void OnResponseCompleted(const net::URLRequestStatus& status,
+                                   const std::string& security_info,
+                                   bool* defer) OVERRIDE;
 
   // ResourceController implementation:
   virtual void Resume() OVERRIDE;
@@ -57,7 +54,8 @@ class BufferedResourceHandler
   bool ShouldSniffContent();
   bool DetermineMimeType();
   bool SelectNextHandler(bool* defer);
-  bool UseAlternateNextHandler(scoped_ptr<ResourceHandler> handler);
+  bool UseAlternateNextHandler(scoped_ptr<ResourceHandler> handler,
+                               const std::string& payload_for_old_handler);
 
   bool ReplayReadCompleted(bool* defer);
   void CallReplayReadCompleted();
@@ -66,7 +64,7 @@ class BufferedResourceHandler
   bool HasSupportingPlugin(bool* is_stale);
 
   // Copies data from |read_buffer_| to |next_handler_|.
-  bool CopyReadBufferToNextHandler(int request_id);
+  bool CopyReadBufferToNextHandler();
 
   // Called on the IO thread once the list of plugins has been loaded.
   void OnPluginsLoaded(const std::vector<WebPluginInfo>& plugins);
@@ -95,7 +93,6 @@ class BufferedResourceHandler
 
   scoped_refptr<ResourceResponse> response_;
   ResourceDispatcherHostImpl* host_;
-  net::URLRequest* request_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
   int bytes_read_;

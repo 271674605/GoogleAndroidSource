@@ -11,7 +11,7 @@ arm_disassembler_SRC_FILES := \
 
 # For the device
 # =====================================================
-ifeq ($(TARGET_ARCH),arm)
+ifneq (true,$(DISABLE_LLVM_DEVICE_BUILDS))
 include $(CLEAR_VARS)
 include $(CLEAR_TBLGEN_VARS)
 

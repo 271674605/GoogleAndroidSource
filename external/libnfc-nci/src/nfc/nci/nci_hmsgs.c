@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -417,6 +417,8 @@ UINT8 nci_snd_deactivate_cmd (UINT8 de_act_type )
     BT_HDR *p;
     UINT8 *pp;
 
+    nfc_cb.reassembly = TRUE;
+
     if ((p = NCI_GET_CMD_BUF (NCI_DISCOVER_PARAM_SIZE_DEACT)) == NULL)
         return (NCI_STATUS_FAILED);
 
@@ -580,7 +582,7 @@ UINT8 nci_snd_parameter_update_cmd (UINT8 *p_param_tlvs, UINT8 tlv_size)
 ** Returns          status
 **
 *******************************************************************************/
-UINT8 nci_snd_set_routing_cmd (BOOLEAN more, UINT8 target_handle, UINT8 num_tlv, UINT8 tlv_size, UINT8 *p_param_tlvs)
+UINT8 nci_snd_set_routing_cmd (BOOLEAN more, UINT8 num_tlv, UINT8 tlv_size, UINT8 *p_param_tlvs)
 {
     BT_HDR *p;
     UINT8 *pp;

@@ -24,8 +24,8 @@ class SurfaceTexturePeerBrowserImpl : public SurfaceTexturePeer {
   // SurfaceTexturePeer implementation.
   virtual void EstablishSurfaceTexturePeer(
       base::ProcessHandle render_process_handle,
-      scoped_refptr<gfx::SurfaceTextureBridge> surface_texture_bridge,
-      int render_view_id,
+      scoped_refptr<gfx::SurfaceTexture> surface_texture,
+      int render_frame_id,
       int player_id) OVERRIDE;
 
  private:

@@ -18,19 +18,21 @@ package com.google.android.droiddriver.finders;
 import android.util.Log;
 
 import com.google.android.droiddriver.UiElement;
-import com.google.android.droiddriver.base.AbstractUiElement;
+import com.google.android.droiddriver.base.BaseUiElement;
 import com.google.android.droiddriver.exceptions.DroidDriverException;
 import com.google.android.droiddriver.exceptions.ElementNotFoundException;
 import com.google.android.droiddriver.util.FileUtils;
 import com.google.android.droiddriver.util.Logs;
-import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
+import com.google.android.droiddriver.util.Preconditions;
+import com.google.android.droiddriver.util.Strings;
 
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
 import java.io.BufferedOutputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -50,10 +52,21 @@ import javax.xml.xpath.XPathFactory;
  */
 public class ByXPath implements Finder {
   private static final XPath XPATH_COMPILER = XPathFactory.newInstance().newXPath();
-  private static final String UI_ELEMENT = "UiElement";
   // document needs to be static so that when buildDomNode is called recursively
   // on children they are in the same document to be appended.
   private static Document document;
+  // The two maps should be kept in sync
+  private static final Map<BaseUiElement<?, ?>, Element> TO_DOM_MAP =
+      new HashMap<BaseUiElement<?, ?>, Element>();
+  private static final Map<Element, BaseUiElement<?, ?>> FROM_DOM_MAP =
+      new HashMap<Element, BaseUiElement<?, ?>>();
+
+  public static void clearData() {
+    TO_DOM_MAP.clear();
+    FROM_DOM_MAP.clear();
+    document = null;
+  }
+
   private final String xPathString;
   private final XPathExpression xPathExpression;
 
@@ -68,12 +81,12 @@ public class ByXPath implements Finder {
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(this).addValue(xPathString).toString();
+    return Strings.toStringHelper(this).addValue(xPathString).toString();
   }
 
   @Override
   public UiElement find(UiElement context) {
-    Element domNode = ((AbstractUiElement) context).getDomNode();
+    Element domNode = getDomNode((BaseUiElement<?, ?>) context, UiElement.VISIBLE);
     try {
       getDocument().appendChild(domNode);
       Element foundNode = (Element) xPathExpression.evaluate(domNode, XPathConstants.NODE);
@@ -82,7 +95,7 @@ public class ByXPath implements Finder {
         throw new ElementNotFoundException(this);
       }
 
-      UiElement match = (UiElement) foundNode.getUserData(UI_ELEMENT);
+      UiElement match = FROM_DOM_MAP.get(foundNode);
       Logs.log(Log.INFO, "Found match: " + match);
       return match;
     } catch (XPathExpressionException e) {
@@ -109,15 +122,26 @@ public class ByXPath implements Finder {
   }
 
   /**
-   * Used internally in {@link AbstractUiElement}.
+   * Returns the DOM node representing this UiElement.
    */
-  public static Element buildDomNode(AbstractUiElement uiElement) {
+  private static Element getDomNode(BaseUiElement<?, ?> uiElement,
+      Predicate<? super UiElement> predicate) {
+    Element domNode = TO_DOM_MAP.get(uiElement);
+    if (domNode == null) {
+      domNode = buildDomNode(uiElement, predicate);
+    }
+    return domNode;
+  }
+
+  private static Element buildDomNode(BaseUiElement<?, ?> uiElement,
+      Predicate<? super UiElement> predicate) {
     String className = uiElement.getClassName();
     if (className == null) {
       className = "UNKNOWN";
     }
     Element element = getDocument().createElement(XPaths.tag(className));
-    element.setUserData(UI_ELEMENT, uiElement, null /* UserDataHandler */);
+    TO_DOM_MAP.put(uiElement, element);
+    FROM_DOM_MAP.put(element, uiElement);
 
     setAttribute(element, Attribute.CLASS, className);
     setAttribute(element, Attribute.RESOURCE_ID, uiElement.getResourceId());
@@ -133,23 +157,27 @@ public class ByXPath implements Finder {
     setAttribute(element, Attribute.SCROLLABLE, uiElement.isScrollable());
     setAttribute(element, Attribute.LONG_CLICKABLE, uiElement.isLongClickable());
     setAttribute(element, Attribute.PASSWORD, uiElement.isPassword());
+    if (uiElement.hasSelection()) {
+      element.setAttribute(Attribute.SELECTION_START.getName(),
+          Integer.toString(uiElement.getSelectionStart()));
+      element.setAttribute(Attribute.SELECTION_END.getName(),
+          Integer.toString(uiElement.getSelectionEnd()));
+    }
     setAttribute(element, Attribute.SELECTED, uiElement.isSelected());
     element.setAttribute(Attribute.BOUNDS.getName(), uiElement.getBounds().toShortString());
 
-    // TODO: visitor pattern
-    int childCount = uiElement.getChildCount();
-    for (int i = 0; i < childCount; i++) {
-      AbstractUiElement child = uiElement.getChild(i);
-      if (child == null) {
-        Logs.log(Log.INFO, "Skip null child for " + uiElement);
-        continue;
+    // If we're dumping for debugging, add extra information
+    if (!UiElement.VISIBLE.equals(predicate)) {
+      if (!uiElement.isVisible()) {
+        element.setAttribute(BaseUiElement.ATTRIB_NOT_VISIBLE, "");
+      } else if (!uiElement.getVisibleBounds().equals(uiElement.getBounds())) {
+        element.setAttribute(BaseUiElement.ATTRIB_VISIBLE_BOUNDS, uiElement.getVisibleBounds()
+            .toShortString());
       }
-      if (!child.isVisible()) {
-        Logs.log(Log.VERBOSE, "Skip invisible child: " + child);
-        continue;
-      }
+    }
 
-      element.appendChild(child.getDomNode());
+    for (BaseUiElement<?, ?> child : uiElement.getChildren(predicate)) {
+      element.appendChild(getDomNode(child, predicate));
     }
     return element;
   }
@@ -167,18 +195,24 @@ public class ByXPath implements Finder {
     }
   }
 
-  public static boolean dumpDom(String path, AbstractUiElement uiElement) {
+  public static boolean dumpDom(String path, BaseUiElement<?, ?> uiElement) {
     BufferedOutputStream bos = null;
     try {
       bos = FileUtils.open(path);
       Transformer transformer = TransformerFactory.newInstance().newTransformer();
       transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-      transformer.transform(new DOMSource(uiElement.getDomNode()), new StreamResult(bos));
+      // find() filters invisible UiElements, but this is for debugging and
+      // invisible UiElements may be of interest.
+      clearData();
+      Element domNode = getDomNode(uiElement, null);
+      transformer.transform(new DOMSource(domNode), new StreamResult(bos));
       Logs.log(Log.INFO, "Wrote dom to " + path);
     } catch (Exception e) {
       Logs.log(Log.ERROR, e, "Failed to transform node");
       return false;
     } finally {
+      // We built DOM with invisible UiElements. Don't use it for find()!
+      clearData();
       if (bos != null) {
         try {
           bos.close();

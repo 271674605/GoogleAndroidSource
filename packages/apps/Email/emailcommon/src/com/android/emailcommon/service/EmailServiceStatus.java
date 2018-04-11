@@ -51,6 +51,24 @@ public abstract class EmailServiceStatus {
     // Client certificates used to authenticate cannot be retrieved from the system.
     public static final int CLIENT_CERTIFICATE_ERROR = 0x21;
 
+    // Data is invalid on the client side, sync cannot proceed.
+    public static final int HARD_DATA_ERROR = 0x22;
+
+    // Sync failed due to some type of IO error.
+    public static final int IO_ERROR = 0x23;
+
+    // The sync call encountered a protocol error.
+    public static final int PROTOCOL_ERROR = 0x24;
+
+    // The sync call encountered too many redirects.
+    public static final int TOO_MANY_REDIRECTS = 0x25;
+
+    // The sync call encountered a provisioning error.
+    public static final int PROVISIONING_ERROR = 0x26;
+
+    // We have encountered some sort of unexpected illegal state.
+    public static final int INTERNAL_ERROR = 0x27;
+
     // Keys for the sync extras Bundle that specify the callback.
     public static final String SYNC_EXTRAS_CALLBACK_URI = "callback_uri";
     public static final String SYNC_EXTRAS_CALLBACK_METHOD = "callback_method";
@@ -60,6 +78,7 @@ public abstract class EmailServiceStatus {
     public static final String SYNC_STATUS_TYPE = "type";
     public static final String SYNC_STATUS_ID = "id";
     public static final String SYNC_STATUS_CODE = "status_code";
+    public static final String SYNC_RESULT = "result";
     public static final String SYNC_STATUS_PROGRESS = "progress";
 
     // Values for the SYNC_STATUS_TYPE to specify what kind of sync status we're returning.
@@ -88,6 +107,7 @@ public abstract class EmailServiceStatus {
      */
     private static void syncStatus(final ContentResolver cr, final Bundle syncExtras,
             final int statusType, final long id, final int statusCode, final int progress,
+            int syncResult,
             final StatusWriter writer) {
         final String callbackUri = syncExtras.getString(SYNC_EXTRAS_CALLBACK_URI);
         final String callbackMethod = syncExtras.getString(SYNC_EXTRAS_CALLBACK_METHOD);
@@ -97,6 +117,9 @@ public abstract class EmailServiceStatus {
             statusExtras.putInt(SYNC_STATUS_TYPE, statusType);
             statusExtras.putLong(SYNC_STATUS_ID, id);
             statusExtras.putInt(SYNC_STATUS_CODE, statusCode);
+            if (statusCode != IN_PROGRESS) {
+                statusExtras.putInt(SYNC_RESULT, syncResult);
+            }
             statusExtras.putInt(SYNC_STATUS_PROGRESS, progress);
             if (writer != null) {
                 writer.addToStatus(statusExtras);
@@ -116,8 +139,10 @@ public abstract class EmailServiceStatus {
      * @param progress The progress of this sync operation.
      */
     public static void syncMailboxStatus(final ContentResolver cr, final Bundle syncExtras,
-            final long mailboxId, final int statusCode, final int progress) {
-        syncStatus(cr, syncExtras, SYNC_STATUS_TYPE_MAILBOX, mailboxId, statusCode, progress, null);
+            final long mailboxId, final int statusCode, final int progress, int syncResult) {
+        syncStatus(cr, syncExtras, SYNC_STATUS_TYPE_MAILBOX, mailboxId, statusCode, progress,
+                syncResult, null);
     }
+
 
 }

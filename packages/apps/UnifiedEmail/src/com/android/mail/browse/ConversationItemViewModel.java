@@ -31,12 +31,11 @@ import android.util.Pair;
 import com.android.mail.R;
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Folder;
-import com.android.mail.providers.MessageInfo;
+import com.android.mail.providers.ParticipantInfo;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.utils.FolderUri;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
-import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,7 +48,6 @@ import java.util.List;
 public class ConversationItemViewModel {
     private static final int MAX_CACHE_SIZE = 100;
 
-    int fontColor;
     @VisibleForTesting
     static LruCache<Pair<String, Long>, ConversationItemViewModel> sConversationHeaderMap
         = new LruCache<Pair<String, Long>, ConversationItemViewModel>(MAX_CACHE_SIZE);
@@ -68,12 +66,16 @@ public class ConversationItemViewModel {
 
     // Date
     CharSequence dateText;
-    public CharSequence dateOverrideText;
+    public boolean showDateText = true;
 
     // Personal level
     Bitmap personalLevelBitmap;
 
     public Bitmap infoIcon;
+
+    public String badgeText;
+
+    public int insetPadding = 0;
 
     // Paperclip
     Bitmap paperclip;
@@ -84,16 +86,10 @@ public class ConversationItemViewModel {
     // Senders
     public String sendersText;
 
-    // A list of all the fragments that cover sendersText
-    final ArrayList<SenderFragment> senderFragments;
-
     SpannableStringBuilder sendersDisplayText;
     StaticLayout sendersDisplayLayout;
 
     boolean hasDraftMessage;
-
-    // Attachment Previews overflow
-    String overflowText;
 
     // View Width
     public int viewWidth;
@@ -116,10 +112,6 @@ public class ConversationItemViewModel {
 
     public boolean isInvite;
 
-    public ArrayList<SpannableString> styledSenders;
-
-    public SpannableStringBuilder styledSendersString;
-
     public SpannableStringBuilder messageInfoString;
 
     public int styledMessageInfoStringOffset;
@@ -127,16 +119,21 @@ public class ConversationItemViewModel {
     private String mContentDescription;
 
     /**
-     * Email address corresponding to the senders that will be displayed in the
-     * senders field.
+     * Email addresses corresponding to the senders/recipients that will be displayed on the top
+     * line; used to generate the conversation icon.
      */
-    public ArrayList<String> displayableSenderEmails;
+    public ArrayList<String> displayableEmails;
 
     /**
-     * Display names corresponding to the email address corresponding to the
-     * senders that will be displayed in the senders field.
+     * Display names corresponding to the email address for the senders/recipients that will be
+     * displayed on the top line.
      */
-    public ArrayList<String> displayableSenderNames;
+    public ArrayList<String> displayableNames;
+
+    /**
+     * A styled version of the {@link #displayableNames} to be displayed on the top line.
+     */
+    public ArrayList<SpannableString> styledNames;
 
     /**
      * Returns the view model for a conversation. If the model doesn't exist for this conversation
@@ -147,8 +144,7 @@ public class ConversationItemViewModel {
      * @return the view model for this conversation, or null
      */
     @VisibleForTesting
-    static ConversationItemViewModel forConversationIdOrNull(
-            String account, long conversationId) {
+    static ConversationItemViewModel forConversationIdOrNull(String account, long conversationId) {
         final Pair<String, Long> key = new Pair<String, Long>(account, conversationId);
         synchronized(sConversationHeaderMap) {
             return sConversationHeaderMap.get(key);
@@ -179,7 +175,6 @@ public class ConversationItemViewModel {
      *
      * @param account the account contains this conversation
      * @param conversationId the Id of this conversation
-     * @param cursor the cursor to use in populating/ updating the model.
      * @return the view model for this conversation
      */
     static ConversationItemViewModel forConversationId(String account, long conversationId) {
@@ -193,23 +188,6 @@ public class ConversationItemViewModel {
             }
             return header;
         }
-    }
-
-    public ConversationItemViewModel() {
-        senderFragments = Lists.newArrayList();
-    }
-
-    /**
-     * Adds a sender fragment.
-     *
-     * @param start the start position of this fragment
-     * @param end the start position of this fragment
-     * @param style the style of this fragment
-     * @param isFixed whether this fragment is fixed or not
-     */
-    void addSenderFragment(int start, int end, CharacterStyle style, boolean isFixed) {
-        SenderFragment senderFragment = new SenderFragment(start, end, sendersText, style, isFixed);
-        senderFragments.add(senderFragment);
     }
 
     /**
@@ -232,17 +210,12 @@ public class ConversationItemViewModel {
         return Objects.hashCode(mDataHashCode, viewWidth, standardScaledDimen, gadgetMode);
     }
 
-    private Object getConvInfo() {
-        return conversation.conversationInfo != null ?
-                conversation.conversationInfo : conversation.getSnippet();
-    }
-
     /**
      * Marks this header as having valid data and layout.
      */
     void validate() {
         mDataHashCode = getHashCode(dateText,
-                getConvInfo(), conversation.getRawFolders(), conversation.starred,
+                conversation.conversationInfo, conversation.getRawFolders(), conversation.starred,
                 conversation.read, conversation.priority, conversation.sendingState);
         mLayoutHashCode = getLayoutHashCode();
     }
@@ -252,7 +225,7 @@ public class ConversationItemViewModel {
      */
     boolean isDataValid() {
         return mDataHashCode == getHashCode(dateText,
-                getConvInfo(), conversation.getRawFolders(), conversation.starred,
+                conversation.conversationInfo, conversation.getRawFolders(), conversation.starred,
                 conversation.read, conversation.priority, conversation.sendingState);
     }
 
@@ -308,47 +281,52 @@ public class ConversationItemViewModel {
     /**
      * Get conversation information to use for accessibility.
      */
-    public CharSequence getContentDescription(Context context) {
+    public CharSequence getContentDescription(Context context, boolean showToHeader) {
         if (mContentDescription == null) {
             // If any are unread, get the first unread sender.
             // If all are unread, get the first sender.
             // If all are read, get the last sender.
-            String sender = "";
-            if (conversation.conversationInfo != null) {
-                String lastSender = "";
-                int last = conversation.conversationInfo.messageInfos != null ?
-                        conversation.conversationInfo.messageInfos.size() - 1 : -1;
-                if (last != -1) {
-                    lastSender = conversation.conversationInfo.messageInfos.get(last).sender;
-                }
-                if (conversation.read) {
-                    sender = TextUtils.isEmpty(lastSender) ?
-                            SendersView.getMe(context) : lastSender;
-                } else {
-                    MessageInfo firstUnread = null;
-                    for (MessageInfo m : conversation.conversationInfo.messageInfos) {
-                        if (!m.read) {
-                            firstUnread = m;
-                            break;
-                        }
-                    }
-                    if (firstUnread != null) {
-                        sender = TextUtils.isEmpty(firstUnread.sender) ?
-                                SendersView.getMe(context) : firstUnread.sender;
+            String participant = "";
+            String lastParticipant = "";
+            int last = conversation.conversationInfo.participantInfos != null ?
+                    conversation.conversationInfo.participantInfos.size() - 1 : -1;
+            if (last != -1) {
+                lastParticipant = conversation.conversationInfo.participantInfos.get(last).name;
+            }
+            if (conversation.read) {
+                participant = TextUtils.isEmpty(lastParticipant) ?
+                        SendersView.getMe(showToHeader /* useObjectMe */) : lastParticipant;
+            } else {
+                ParticipantInfo firstUnread = null;
+                for (ParticipantInfo p : conversation.conversationInfo.participantInfos) {
+                    if (!p.readConversation) {
+                        firstUnread = p;
+                        break;
                     }
                 }
-                if (TextUtils.isEmpty(sender)) {
-                    // Just take the last sender
-                    sender = lastSender;
+                if (firstUnread != null) {
+                    participant = TextUtils.isEmpty(firstUnread.name) ?
+                            SendersView.getMe(showToHeader /* useObjectMe */) : firstUnread.name;
                 }
             }
+            if (TextUtils.isEmpty(participant)) {
+                // Just take the last sender
+                participant = lastParticipant;
+            }
+
+            // the toHeader should read "To: " if requested
+            String toHeader = "";
+            if (showToHeader && !TextUtils.isEmpty(participant)) {
+                toHeader = SendersView.getFormattedToHeader().toString();
+            }
+
             boolean isToday = DateUtils.isToday(conversation.dateMs);
             String date = DateUtils.getRelativeTimeSpanString(context, conversation.dateMs)
                     .toString();
             String readString = context.getString(
                     conversation.read ? R.string.read_string : R.string.unread_string);
             int res = isToday ? R.string.content_description_today : R.string.content_description;
-            mContentDescription = context.getString(res, sender,
+            mContentDescription = context.getString(res, toHeader, participant,
                     conversation.subject, conversation.getSnippet(), date, readString);
         }
         return mContentDescription;

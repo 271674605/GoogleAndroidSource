@@ -14,31 +14,45 @@ common_src_files := \
 	Loop.cpp \
 	Devmapper.cpp \
 	ResponseCode.cpp \
-	Xwarp.cpp \
+	CheckBattery.cpp \
 	VoldUtil.c \
 	fstrim.c \
 	cryptfs.c
 
 common_c_includes := \
-	$(KERNEL_HEADERS) \
 	system/extras/ext4_utils \
+	system/extras/f2fs_utils \
 	external/openssl/include \
-	external/scrypt/lib/crypto
+	external/stlport/stlport \
+	bionic \
+	external/scrypt/lib/crypto \
+	frameworks/native/include \
+	system/security/keystore \
+	hardware/libhardware/include/hardware \
+	system/security/softkeymaster/include/keymaster
 
 common_shared_libraries := \
 	libsysutils \
+	libstlport \
+	libbinder \
 	libcutils \
 	liblog \
 	libdiskconfig \
 	libhardware_legacy \
 	liblogwrap \
 	libext4_utils \
-	libcrypto
+	libf2fs_sparseblock \
+	libcrypto \
+	libselinux \
+	libutils \
+	libhardware \
+	libsoftkeymaster
 
 common_static_libraries := \
 	libfs_mgr \
 	libscrypt_static \
-	libmincrypt
+	libmincrypt \
+	libbatteryservice
 
 include $(CLEAR_VARS)
 
@@ -80,7 +94,7 @@ LOCAL_SRC_FILES:= vdc.c
 
 LOCAL_MODULE:= vdc
 
-LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
+LOCAL_C_INCLUDES :=
 
 LOCAL_CFLAGS := 
 

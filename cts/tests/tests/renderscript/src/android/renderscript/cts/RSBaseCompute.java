@@ -20,22 +20,14 @@ import android.renderscript.RenderScript;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.RSRuntimeException;
+import android.util.Log;
 
 /**
  * Base RenderScript test class. This class provides a message handler and a
  * convenient way to wait for compute scripts to complete their execution.
  */
-class RSBaseCompute extends RSBase {
+public class RSBaseCompute extends RSBase {
     RenderScript mRS;
-
-    static final int TEST_F32 = 0;
-    static final int TEST_F32_2 = 1;
-    static final int TEST_F32_3 = 2;
-    static final int TEST_F32_4 = 3;
-    static final int TEST_RELAXED_F32 = 4;
-    static final int TEST_RELAXED_F32_2 = 5;
-    static final int TEST_RELAXED_F32_3 = 6;
-    static final int TEST_RELAXED_F32_4 = 7;
     protected int INPUTSIZE = 512;
 
     @Override
@@ -84,62 +76,310 @@ class RSBaseCompute extends RSBase {
         }
     }
 
-    private void baseTestHelper(int testid, Element inElement, Element outElement, long seed, int fact,
-                                int offset, int rStride, int rSkip, int refStride, int outStride,
-                                int inStride, int skip, int ulp) {
-        float[] inArray = makeInArray(INPUTSIZE * inStride);
-        fillRandom(seed, fact, offset, inArray, rStride, rSkip);
-        float[] refArray = getRefArray(inArray, INPUTSIZE, inStride, skip);
-
-        Allocation mAllocationIn = setInAlloc(inElement);
-        fillInAlloc(mAllocationIn, inArray);
-
-        Allocation mAllocationOut = setOutAlloc(outElement);
-        try {
-            RSUtils.forEach(this, testid, mAllocationIn, mAllocationOut);
-        } catch (RSRuntimeException e) {
+    // TODO Is there a better way to do this
+    protected Element getElement(RenderScript rs, Element.DataType dataType, int size) {
+        Element element = null;
+        if (size == 1) {
+            if (dataType == Element.DataType.FLOAT_64) {
+                element = Element.F64(rs);
+            } else if (dataType == Element.DataType.FLOAT_32) {
+                element = Element.F32(rs);
+            } else if (dataType == Element.DataType.SIGNED_64) {
+                element = Element.I64(rs);
+            } else if (dataType == Element.DataType.UNSIGNED_64) {
+                element = Element.U64(rs);
+            } else if (dataType == Element.DataType.SIGNED_32) {
+                element = Element.I32(rs);
+            } else if (dataType == Element.DataType.UNSIGNED_32) {
+                element = Element.U32(rs);
+            } else if (dataType == Element.DataType.SIGNED_16) {
+                element = Element.I16(rs);
+            } else if (dataType == Element.DataType.UNSIGNED_16) {
+                element = Element.U16(rs);
+            } else if (dataType == Element.DataType.SIGNED_8) {
+                element = Element.I8(rs);
+            } else if (dataType == Element.DataType.UNSIGNED_8) {
+                element = Element.U8(rs);
+            } else {
+                android.util.Log.e("RenderscriptCTS", "Don't know how to create allocation of type" +
+                        dataType.toString());
+            }
+        } else {
+            element = Element.createVector(rs, dataType, size);
         }
-        float[] outArray = makeOutArray(INPUTSIZE * outStride);
-        mAllocationOut.copyTo(outArray);
-        checkArray(refArray, outArray, INPUTSIZE, refStride, outStride, ulp);
+        return element;
     }
 
-    public void baseTest(int testid, long seed, int refStride, int outStride, int inStride, int skip, int ulp) {
-        baseTestHelper(testid, null, null, seed, 1, 0, 1, 0, refStride, outStride, inStride, skip, ulp);
+    protected Allocation createRandomAllocation(RenderScript rs, Element.DataType dataType,
+            int size, long seed, boolean includeExtremes) {
+        Element element = getElement(rs, dataType, size);
+        Allocation alloc = Allocation.createSized(rs, element, INPUTSIZE);
+        int width = (size == 3) ? 4 : size;
+        if (dataType == Element.DataType.FLOAT_64) {
+            double[] inArray = new double[INPUTSIZE * width];
+            // TODO The ranges for float is too small.  We need to accept a wider range of values.
+            double min = -4.0 * Math.PI;
+            double max = 4.0 * Math.PI;
+            RSUtils.genRandomDoubles(seed, min, max, inArray, includeExtremes);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.FLOAT_32) {
+            float[] inArray = new float[INPUTSIZE * width];
+            // TODO The ranges for float is too small.  We need to accept a wider range of values.
+            float min = -4.0f * (float) Math.PI;
+            float max = 4.0f * (float) Math.PI;
+            RSUtils.genRandomFloats(seed, min, max, inArray, includeExtremes);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_64) {
+            long[] inArray = new long[INPUTSIZE * width];
+            RSUtils.genRandomLongs(seed, inArray, true, 63);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.UNSIGNED_64) {
+            long[] inArray = new long[INPUTSIZE * width];
+            RSUtils.genRandomLongs(seed, inArray, false, 64);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_32) {
+            int[] inArray = new int[INPUTSIZE * width];
+            RSUtils.genRandomInts(seed, inArray, true, 31);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.UNSIGNED_32) {
+            int[] inArray = new int[INPUTSIZE * width];
+            RSUtils.genRandomInts(seed, inArray, false, 32);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_16) {
+            short[] inArray = new short[INPUTSIZE * width];
+            RSUtils.genRandomShorts(seed, inArray, true, 15);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.UNSIGNED_16) {
+            short[] inArray = new short[INPUTSIZE * width];
+            RSUtils.genRandomShorts(seed, inArray, false, 16);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_8) {
+            byte[] inArray = new byte[INPUTSIZE * width];
+            RSUtils.genRandomBytes(seed, inArray, true, 7);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.UNSIGNED_8) {
+            byte[] inArray = new byte[INPUTSIZE * width];
+            RSUtils.genRandomBytes(seed, inArray, true, 8);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else {
+            android.util.Log.e("RenderscriptCTS", "Don't know how to create allocation of type" +
+                    dataType.toString());
+        }
+        return alloc;
     }
 
-    public void doF32(long seed, int ulp) {
-        baseTestHelper(TEST_F32, Element.F32(mRS), Element.F32(mRS), seed, 1, 0, 1, 0, 1, 1, 1, 0, ulp);
+    protected Allocation createRandomFloatAllocation(RenderScript rs, Element.DataType dataType,
+            int size, long seed, double minValue, double maxValue) {
+        Element element = getElement(rs, dataType, size);
+        Allocation alloc = Allocation.createSized(rs, element, INPUTSIZE);
+        int width = (size == 3) ? 4 : size;
+        if (dataType == Element.DataType.FLOAT_64) {
+            double[] inArray = new double[INPUTSIZE * width];
+            RSUtils.genRandomDoubles(seed, minValue, maxValue, inArray, false);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.FLOAT_32) {
+            float[] inArray = new float[INPUTSIZE * width];
+            RSUtils.genRandomFloats(seed, (float) minValue, (float) maxValue, inArray, false);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else {
+            android.util.Log.e("RenderscriptCTS",
+                               "Don't know how to create a random float allocation for " +
+                                           dataType.toString());
+        }
+        return alloc;
     }
 
-    public void doF32_2(long seed, int ulp) {
-        baseTestHelper(TEST_F32_2, Element.F32_2(mRS), Element.F32_2(mRS), seed, 1, 0, 1, 0, 2, 2, 2, 0, ulp);
+    protected Allocation createRandomIntegerAllocation(RenderScript rs, Element.DataType dataType,
+            int size, long seed, boolean signed, int numberOfBits) {
+        Element element = getElement(rs, dataType, size);
+        Allocation alloc = Allocation.createSized(rs, element, INPUTSIZE);
+        int width = (size == 3) ? 4 : size;
+        if (dataType == Element.DataType.SIGNED_64 ||
+                dataType == Element.DataType.UNSIGNED_64) {
+            long[] inArray = new long[INPUTSIZE * width];
+            RSUtils.genRandomLongs(seed, inArray, signed, numberOfBits);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else
+        if (dataType == Element.DataType.SIGNED_32 ||
+                dataType == Element.DataType.UNSIGNED_32) {
+            int[] inArray = new int[INPUTSIZE * width];
+            RSUtils.genRandomInts(seed, inArray, signed, numberOfBits);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_16 ||
+                dataType == Element.DataType.UNSIGNED_16) {
+            short[] inArray = new short[INPUTSIZE * width];
+            RSUtils.genRandomShorts(seed, inArray, signed, numberOfBits);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else if (dataType == Element.DataType.SIGNED_8 ||
+                dataType == Element.DataType.UNSIGNED_8) {
+            byte[] inArray = new byte[INPUTSIZE * width];
+            RSUtils.genRandomBytes(seed, inArray, signed, numberOfBits);
+            alloc.copy1DRangeFrom(0, INPUTSIZE, inArray);
+        } else {
+            android.util.Log.e("RenderscriptCTS",
+                               "Don't know how to create an integer allocation of type" +
+                                           dataType.toString());
+        }
+        return alloc;
     }
 
-    public void doF32_3(long seed, int ulp) {
-        baseTestHelper(TEST_F32_3, Element.F32_3(mRS), Element.F32_3(mRS), seed, 1, 0, 4, 1, 3, 4, 4, 1, ulp);
+    protected <T> void enforceOrdering(/*RenderScript rs,*/ Allocation minAlloc, Allocation maxAlloc) {
+        Element element = minAlloc.getElement();
+        int stride = element.getVectorSize();
+        if (stride == 3) {
+            stride = 4;
+        }
+        int size = INPUTSIZE * stride;
+        Element.DataType dataType = element.getDataType();
+        if (dataType == Element.DataType.FLOAT_64) {
+            double[] minArray = new double[size];
+            double[] maxArray = new double[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    double temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else
+        if (dataType == Element.DataType.FLOAT_32) {
+            float[] minArray = new float[size];
+            float[] maxArray = new float[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    float temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.SIGNED_64) {
+            long[] minArray = new long[size];
+            long[] maxArray = new long[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    long temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.UNSIGNED_64) {
+            long[] minArray = new long[size];
+            long[] maxArray = new long[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (RSUtils.compareUnsignedLong(minArray[i], maxArray[i]) > 0) {
+                    long temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.SIGNED_32) {
+            int[] minArray = new int[size];
+            int[] maxArray = new int[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    int temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.UNSIGNED_32) {
+            int[] minArray = new int[size];
+            int[] maxArray = new int[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                long min = minArray[i] &0xffffffffl;
+                long max = maxArray[i] &0xffffffffl;
+                if (min > max) {
+                    minArray[i] = (int) max;
+                    maxArray[i] = (int) min;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.SIGNED_16) {
+            short[] minArray = new short[size];
+            short[] maxArray = new short[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    short temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.UNSIGNED_16) {
+            short[] minArray = new short[size];
+            short[] maxArray = new short[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                int min = minArray[i] &0xffff;
+                int max = maxArray[i] &0xffff;
+                if (min > max) {
+                    minArray[i] = (short) max;
+                    maxArray[i] = (short) min;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.SIGNED_8) {
+            byte[] minArray = new byte[size];
+            byte[] maxArray = new byte[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                if (minArray[i] > maxArray[i]) {
+                    byte temp = minArray[i];
+                    minArray[i] = maxArray[i];
+                    maxArray[i] = temp;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else if (dataType == Element.DataType.UNSIGNED_8) {
+            byte[] minArray = new byte[size];
+            byte[] maxArray = new byte[size];
+            minAlloc.copyTo(minArray);
+            maxAlloc.copyTo(maxArray);
+            for (int i = 0; i < size; i++) {
+                int min = minArray[i] &0xff;
+                int max = maxArray[i] &0xff;
+                if (min > max) {
+                    minArray[i] = (byte) max;
+                    maxArray[i] = (byte) min;
+                }
+            }
+            minAlloc.copyFrom(minArray);
+            maxAlloc.copyFrom(maxArray);
+        } else {
+            android.util.Log.e("RenderscriptCTS", "Ordering not supported for " +
+                    dataType.toString());
+        }
     }
-
-    public void doF32_4(long seed, int ulp) {
-        baseTestHelper(TEST_F32_4, Element.F32_4(mRS), Element.F32_4(mRS), seed, 1, 0, 1, 0, 4, 4, 4, 0, ulp);
-    }
-
-    public void doF32_relaxed(long seed, int ulp) {
-        baseTestHelper(TEST_RELAXED_F32, Element.F32(mRS), Element.F32(mRS), seed, 1, 0, 1, 0, 1, 1, 1, 0, ulp);
-    }
-
-    public void doF32_2_relaxed(long seed, int ulp) {
-        baseTestHelper(TEST_RELAXED_F32_2, Element.F32_2(mRS), Element.F32_2(mRS), seed, 1, 0, 1, 0, 2, 2, 2, 0, ulp);
-    }
-
-    public void doF32_3_relaxed(long seed, int ulp) {
-        baseTestHelper(TEST_RELAXED_F32_3, Element.F32_3(mRS), Element.F32_3(mRS), seed, 1, 0, 4, 1, 3, 4, 4, 1, ulp);
-    }
-
-    public void doF32_4_relaxed(long seed, int ulp) {
-        baseTestHelper(TEST_RELAXED_F32_4, Element.F32_4(mRS), Element.F32_4(mRS), seed, 1, 0, 1, 0, 4, 4, 4, 0, ulp);
-    }
-
 
     public void forEach(int testId, Allocation mIn, Allocation mOut) throws RSRuntimeException {
         // Intentionally empty... subclass will likely define only one, but not both
@@ -147,34 +387,5 @@ class RSBaseCompute extends RSBase {
 
     public void forEach(int testId, Allocation mIn) throws RSRuntimeException {
         // Intentionally empty... subclass will likely define only one, but not both
-    }
-
-    //These are default actions for these functions, specific tests overload them
-    protected float[] getRefArray(float[] inArray, int size, int stride, int skip) {
-        return null;
-    }
-
-    protected Allocation setInAlloc(Element e) {
-        return Allocation.createSized(mRS, e, INPUTSIZE);
-    }
-
-    protected Allocation setOutAlloc(Element e) {
-        return Allocation.createSized(mRS, e, INPUTSIZE);
-    }
-
-    protected float[] makeInArray(int size) {
-        return new float[size];
-    }
-
-    protected float[] makeOutArray(int size) {
-        return new float[size];
-    }
-
-    protected void fillRandom(long seed, int fact, int offset, float[] inArray, int rStride, int rSkip) {
-        RSUtils.genRandom(seed, fact, offset, inArray, rStride, rSkip);
-    }
-
-    protected void fillInAlloc(Allocation mIn, float[] inArray) {
-        mIn.copy1DRangeFromUnchecked(0, INPUTSIZE, inArray);
     }
 }

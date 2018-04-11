@@ -17,13 +17,15 @@ namespace skia {
 // SkCanvas to draw into. This specific device is not not backed by a surface
 // and is thus unreadable. This is because the backend is completely vectorial.
 // This device is a simple wrapper over a Windows device context (HDC) handle.
-class VectorPlatformDeviceEmf : public SkDevice, public PlatformDevice {
+// TODO(robertphillips): Once Skia's SkBaseDevice is refactored to remove
+// the bitmap-specific entry points, this class should derive from it.
+class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
  public:
-  SK_API static SkDevice* CreateDevice(int width, int height, bool isOpaque,
-                                       HANDLE shared_section);
+  SK_API static SkBaseDevice* CreateDevice(int width, int height, bool isOpaque,
+                                           HANDLE shared_section);
 
   // Factory function. The DC is kept as the output context.
-  static SkDevice* create(HDC dc, int width, int height);
+  static SkBaseDevice* create(HDC dc, int width, int height);
 
   VectorPlatformDeviceEmf(HDC dc, const SkBitmap& bitmap);
   virtual ~VectorPlatformDeviceEmf();
@@ -32,21 +34,23 @@ class VectorPlatformDeviceEmf : public SkDevice, public PlatformDevice {
   virtual PlatformSurface BeginPlatformPaint() OVERRIDE;
   virtual void DrawToNativeContext(HDC dc, int x, int y,
                                    const RECT* src_rect) OVERRIDE;
-  // SkDevice methods.
-  virtual uint32_t getDeviceCapabilities();
+  // SkBaseDevice methods.
   virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) OVERRIDE;
   virtual void drawPoints(const SkDraw& draw, SkCanvas::PointMode mode,
                           size_t count, const SkPoint[],
                           const SkPaint& paint) OVERRIDE;
   virtual void drawRect(const SkDraw& draw, const SkRect& r,
                         const SkPaint& paint) OVERRIDE;
+  virtual void drawRRect(const SkDraw&, const SkRRect& rr,
+                         const SkPaint& paint) OVERRIDE;
   virtual void drawPath(const SkDraw& draw, const SkPath& path,
                         const SkPaint& paint,
                         const SkMatrix* prePathMatrix = NULL,
                         bool pathIsMutable = false) OVERRIDE;
   virtual void drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
                               const SkRect* src, const SkRect& dst,
-                              const SkPaint& paint) SK_OVERRIDE;
+                              const SkPaint& paint,
+                              SkCanvas::DrawBitmapRectFlags flags) SK_OVERRIDE;
   virtual void drawBitmap(const SkDraw& draw, const SkBitmap& bitmap,
                           const SkMatrix& matrix,
                           const SkPaint& paint) OVERRIDE;
@@ -66,7 +70,7 @@ class VectorPlatformDeviceEmf : public SkDevice, public PlatformDevice {
                             const SkColor colors[], SkXfermode* xmode,
                             const uint16_t indices[], int indexCount,
                             const SkPaint& paint) OVERRIDE;
-  virtual void drawDevice(const SkDraw& draw, SkDevice*, int x, int y,
+  virtual void drawDevice(const SkDraw& draw, SkBaseDevice*, int x, int y,
                           const SkPaint&) OVERRIDE;
 
   virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region,
@@ -75,9 +79,13 @@ class VectorPlatformDeviceEmf : public SkDevice, public PlatformDevice {
   void LoadClipRegion();
 
  protected:
-  virtual SkDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
-                                             int height, bool isOpaque,
-                                             Usage usage) OVERRIDE;
+#ifdef SK_SUPPORT_LEGACY_COMPATIBLEDEVICE_CONFIG
+  virtual SkBaseDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
+                                                 int height, bool isOpaque,
+                                                 Usage usage) OVERRIDE;
+#endif
+  virtual SkBaseDevice* onCreateDevice(const SkImageInfo& info,
+                                       Usage usage) OVERRIDE;
 
  private:
   // Applies the SkPaint's painting properties in the current GDI context, if

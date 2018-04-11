@@ -1,7 +1,7 @@
 
 LOCAL_PATH:=$(call my-dir)
 
-rs_base_CFLAGS := -Werror -Wall -Wno-unused-parameter -Wno-unused-variable
+rs_base_CFLAGS := -Werror -Wall -Wno-unused-parameter -Wno-unused-variable -fno-exceptions
 ifeq ($(TARGET_BUILD_PDK), true)
   rs_base_CFLAGS += -D__RS_PDK__
 endif
@@ -10,14 +10,26 @@ ifneq ($(OVERRIDE_RS_DRIVER),)
   rs_base_CFLAGS += -DOVERRIDE_RS_DRIVER=$(OVERRIDE_RS_DRIVER)
 endif
 
+ifneq ($(DISABLE_RS_64_BIT_DRIVER),)
+  rs_base_CFLAGS += -DDISABLE_RS_64_BIT_DRIVER
+endif
+
+ifeq ($(RS_FIND_OFFSETS), true)
+  rs_base_CFLAGS += -DRS_FIND_OFFSETS
+endif
+
 include $(CLEAR_VARS)
+ifneq ($(HOST_OS),windows)
 LOCAL_CLANG := true
+endif
 LOCAL_MODULE := libRSDriver
+LOCAL_MODULE_TARGET_ARCH_WARN := arm mips mips64 x86 x86_64 arm64
 
 LOCAL_SRC_FILES:= \
 	driver/rsdAllocation.cpp \
 	driver/rsdBcc.cpp \
 	driver/rsdCore.cpp \
+	driver/rsdElement.cpp \
 	driver/rsdFrameBuffer.cpp \
 	driver/rsdFrameBufferObj.cpp \
 	driver/rsdGL.cpp \
@@ -32,19 +44,23 @@ LOCAL_SRC_FILES:= \
 	driver/rsdScriptGroup.cpp \
 	driver/rsdShader.cpp \
 	driver/rsdShaderCache.cpp \
+	driver/rsdType.cpp \
 	driver/rsdVertexArray.cpp
 
 
-LOCAL_SHARED_LIBRARIES += libRS libRSCpuRef
+LOCAL_SHARED_LIBRARIES += libRS libRSCpuRef libc++
 LOCAL_SHARED_LIBRARIES += liblog libcutils libutils libEGL libGLESv1_CM libGLESv2
-LOCAL_SHARED_LIBRARIES += libbcc libbcinfo libLLVM libui libgui libsync
+LOCAL_SHARED_LIBRARIES += libui libgui libsync
+
+LOCAL_SHARED_LIBRARIES += libbcc libbcinfo libLLVM
 
 LOCAL_C_INCLUDES += frameworks/compile/libbcc/include
 LOCAL_C_INCLUDES += frameworks/rs/cpu_ref/linkloader/include
+LOCAL_C_INCLUDES += external/libcxx/include
 
 LOCAL_CFLAGS += $(rs_base_CFLAGS)
+LOCAL_CPPFLAGS += -fno-exceptions
 
-LOCAL_LDLIBS := -lpthread -ldl
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)
@@ -71,15 +87,18 @@ include $(BUILD_HOST_EXECUTABLE)
 RSG_GENERATOR:=$(LOCAL_BUILT_MODULE)
 
 include $(CLEAR_VARS)
+ifneq ($(HOST_OS),windows)
 LOCAL_CLANG := true
+endif
 LOCAL_MODULE := libRS
+LOCAL_MODULE_TARGET_ARCH_WARN := arm mips mips64 x86 x86_64 arm64
 
 LOCAL_MODULE_CLASS := SHARED_LIBRARIES
-intermediates:= $(local-intermediates-dir)
+generated_sources:= $(local-generated-sources-dir)
 
 # Generate custom headers
 
-GEN := $(addprefix $(intermediates)/, \
+GEN := $(addprefix $(generated_sources)/, \
             rsgApiStructs.h \
             rsgApiFuncDecl.h \
         )
@@ -87,7 +106,7 @@ GEN := $(addprefix $(intermediates)/, \
 $(GEN) : PRIVATE_PATH := $(LOCAL_PATH)
 $(GEN) : PRIVATE_CUSTOM_TOOL = cat $(PRIVATE_PATH)/rs.spec $(PRIVATE_PATH)/rsg.spec $(PRIVATE_PATH)/rs_native.spec | $(RSG_GENERATOR) $< $@
 $(GEN) : $(RSG_GENERATOR) $(LOCAL_PATH)/rs.spec $(LOCAL_PATH)/rsg.spec $(LOCAL_PATH)/rs_native.spec
-$(GEN): $(intermediates)/%.h : $(LOCAL_PATH)/%.h.rsg
+$(GEN): $(generated_sources)/%.h : $(LOCAL_PATH)/%.h.rsg
 	$(transform-generated-source)
 
 # used in jni/Android.mk
@@ -96,7 +115,7 @@ LOCAL_GENERATED_SOURCES += $(GEN)
 
 # Generate custom source files
 
-GEN := $(addprefix $(intermediates)/, \
+GEN := $(addprefix $(generated_sources)/, \
             rsgApi.cpp \
             rsgApiReplay.cpp \
         )
@@ -104,7 +123,7 @@ GEN := $(addprefix $(intermediates)/, \
 $(GEN) : PRIVATE_PATH := $(LOCAL_PATH)
 $(GEN) : PRIVATE_CUSTOM_TOOL = cat $(PRIVATE_PATH)/rs.spec $(PRIVATE_PATH)/rsg.spec $(PRIVATE_PATH)/rs_native.spec | $(RSG_GENERATOR) $< $@
 $(GEN) : $(RSG_GENERATOR) $(LOCAL_PATH)/rs.spec $(LOCAL_PATH)/rsg.spec $(LOCAL_PATH)/rs_native.spec
-$(GEN): $(intermediates)/%.cpp : $(LOCAL_PATH)/%.cpp.rsg
+$(GEN): $(generated_sources)/%.cpp : $(LOCAL_PATH)/%.cpp.rsg
 	$(transform-generated-source)
 
 # used in jni/Android.mk
@@ -150,16 +169,20 @@ LOCAL_SRC_FILES:= \
 	rsThreadIO.cpp \
 	rsType.cpp
 
-LOCAL_SHARED_LIBRARIES += liblog libcutils libutils libEGL libGLESv1_CM libGLESv2 libbcc
-LOCAL_SHARED_LIBRARIES += libui libbcinfo libLLVM libgui libsync libdl
+LOCAL_SHARED_LIBRARIES += liblog libcutils libutils libEGL libGLESv1_CM libGLESv2 libc++
+LOCAL_SHARED_LIBRARIES += libgui libsync libdl libui
 LOCAL_SHARED_LIBRARIES += libft2 libpng libz
+
+LOCAL_SHARED_LIBRARIES += libbcc libbcinfo libLLVM
 
 LOCAL_C_INCLUDES += external/freetype/include
 LOCAL_C_INCLUDES += frameworks/compile/libbcc/include
+LOCAL_C_INCLUDES += external/libcxx/include
 
 LOCAL_CFLAGS += $(rs_base_CFLAGS)
 
-LOCAL_LDLIBS := -lpthread -ldl
+LOCAL_CPPFLAGS += -fno-exceptions
+
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)
@@ -168,8 +191,10 @@ include $(BUILD_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_MODULE:= libRS
 LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := STATIC_LIBRARIES
+LOCAL_IS_HOST_MODULE := true
 
-intermediates := $(call intermediates-dir-for,STATIC_LIBRARIES,libRS,HOST,)
+intermediates := $(call local-generated-sources-dir)
 
 # Generate custom headers
 
@@ -204,6 +229,7 @@ LOCAL_GENERATED_SOURCES += $(GEN)
 LOCAL_CFLAGS += $(rs_base_CFLAGS)
 LOCAL_CFLAGS += -DANDROID_RS_SERIALIZE
 LOCAL_CFLAGS += -fPIC
+LOCAL_CPPFLAGS += -fno-exceptions
 
 LOCAL_SRC_FILES:= \
 	rsAdapter.cpp \
@@ -243,10 +269,9 @@ LOCAL_SRC_FILES:= \
 
 LOCAL_STATIC_LIBRARIES := libcutils libutils liblog
 
-LOCAL_LDLIBS := -lpthread
+LOCAL_CLANG := true
 
 include $(BUILD_HOST_STATIC_LIBRARY)
-
 
 LLVM_ROOT_PATH := external/llvm
 
@@ -269,8 +294,8 @@ rsloader_SRC_FILES := \
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := librsloader
 
+LOCAL_MODULE := librsloader
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_SRC_FILES := $(rsloader_SRC_FILES)
@@ -278,15 +303,16 @@ LOCAL_SRC_FILES := $(rsloader_SRC_FILES)
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 LOCAL_CFLAGS += $(rs_base_CFLAGS)
+LOCAL_CPPFLAGS += -fno-exceptions
 
 LOCAL_C_INCLUDES := \
   $(LOCAL_PATH)/cpu_ref/linkloader \
   $(LOCAL_PATH)/cpu_ref/linkloader/include \
+  external/libcxx/include \
   $(LOCAL_C_INCLUDES)
 
 include $(LLVM_ROOT_PATH)/llvm-device-build.mk
 include $(BUILD_STATIC_LIBRARY)
-
 
 #=============================================================================
 # android librsloader for libbcc (Host)
@@ -295,6 +321,9 @@ include $(BUILD_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := librsloader
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
 
 LOCAL_MODULE_TAGS := optional
 
@@ -308,11 +337,20 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 LOCAL_CFLAGS += $(rs_base_CFLAGS)
 LOCAL_CFLAGS += -D__HOST__
+LOCAL_CPPFLAGS += -fno-exceptions
 
+ifeq ($(HOST_OS),windows)
 LOCAL_C_INCLUDES := \
   $(LOCAL_PATH)/cpu_ref/linkloader \
   $(LOCAL_PATH)/cpu_ref/linkloader/include \
   $(LOCAL_C_INCLUDES)
+else
+LOCAL_C_INCLUDES := \
+  $(LOCAL_PATH)/cpu_ref/linkloader \
+  $(LOCAL_PATH)/cpu_ref/linkloader/include \
+  external/libcxx/include \
+  $(LOCAL_C_INCLUDES)
+endif
 
 include $(LLVM_ROOT_PATH)/llvm-host-build.mk
 include $(BUILD_HOST_STATIC_LIBRARY)

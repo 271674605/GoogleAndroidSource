@@ -23,8 +23,12 @@ PROGDIR=$(dirname $0)
 NDK_DIR=$ANDROID_NDK_ROOT
 register_var_option "--ndk-dir=<path>" NDK_DIR "NDK installation directory"
 
-ARCHS=$DEFAULT_ARCHS
+ARCHS=$(find_ndk_unknown_archs)
+ARCHS="$DEFAULT_ARCHS $ARCHS"
 register_var_option "--arch=<list>" ARCHS "List of target archs to build for"
+
+NO_GEN_PLATFORMS=
+register_var_option "--no-gen-platforms" NO_GEN_PLATFORMS "Don't generate platforms/ directory, use existing one"
 
 PACKAGE_DIR=
 register_var_option "--package-dir=<path>" PACKAGE_DIR "Package toolchain into this directory"
@@ -56,10 +60,24 @@ if [ "$PACKAGE_DIR" ]; then
     PACKAGE_FLAGS="--package-dir=$PACKAGE_DIR"
 fi
 
-run $BUILDTOOLS/gen-platforms.sh --samples --fast-copy --dst-dir=$NDK_DIR --ndk-dir=$NDK_DIR --arch=$(spaces_to_commas $ARCHS) $PACKAGE_FLAGS
-fail_panic "Could not generate platforms and samples directores!"
+if [ -z "$NO_GEN_PLATFORMS" ]; then
+    echo "Preparing the build..."
+    run $BUILDTOOLS/gen-platforms.sh --samples --fast-copy --dst-dir=$NDK_DIR --ndk-dir=$NDK_DIR --arch=$(spaces_to_commas $ARCHS) $PACKAGE_FLAGS
+    fail_panic "Could not generate platforms and samples directores!"
+else
+    if [ ! -d "$NDK_DIR/platforms" ]; then
+        echo "ERROR: --no-gen-platforms used but directory missing: $NDK_DIR/platforms"
+        exit 1
+    fi
+fi
 
 ARCHS=$(commas_to_spaces $ARCHS)
+
+# Detect unknown arch
+UNKNOWN_ARCH=$(filter_out "$DEFAULT_ARCHS" "$ARCHS")
+if [ ! -z "$UNKNOWN_ARCH" ]; then
+    ARCHS=$(filter_out "$UNKNOWN_ARCH" "$ARCHS")
+fi
 
 FLAGS=
 if [ "$VERBOSE" = "yes" ]; then
@@ -79,43 +97,66 @@ FLAGS=$FLAGS" -j$NUM_JOBS"
 for ARCH in $ARCHS; do
     GDB_TOOLCHAINS=$(get_default_toolchain_name_for_arch $ARCH)
     for GDB_TOOLCHAIN in $GDB_TOOLCHAINS; do
+        GDB_VERSION="--gdb-version="$(get_default_gdb_version_for_gcc $GDB_TOOLCHAIN)
         dump "Building $GDB_TOOLCHAIN gdbserver binaries..."
-        run $BUILDTOOLS/build-gdbserver.sh "$SRC_DIR" "$NDK_DIR" "$GDB_TOOLCHAIN" $FLAGS
+        run $BUILDTOOLS/build-gdbserver.sh "$SRC_DIR" "$NDK_DIR" "$GDB_TOOLCHAIN" "$GDB_VERSION" $FLAGS
         fail_panic "Could not build $GDB_TOOLCHAIN gdb-server!"
     done
 done
 
 FLAGS=$FLAGS" --ndk-dir=\"$NDK_DIR\""
 ABIS=$(convert_archs_to_abis $ARCHS)
+UNKNOWN_ABIS=$(convert_archs_to_abis $UNKNOWN_ARCH)
 
-FLAGS=$FLAGS" --abis=$ABIS"
+dump "Building $ABIS compiler-rt binaries..."
+run $BUILDTOOLS/build-compiler-rt.sh --abis="$ABIS" $FLAGS --src-dir="$SRC_DIR/llvm-$DEFAULT_LLVM_VERSION/compiler-rt" \
+   --llvm-version=$DEFAULT_LLVM_VERSION
+fail_panic "Could not build compiler-rt!"
+
 dump "Building $ABIS gabi++ binaries..."
-run $BUILDTOOLS/build-cxx-stl.sh --stl=gabi++ $FLAGS
+run $BUILDTOOLS/build-cxx-stl.sh --stl=gabi++ --abis="$ABIS" $FLAGS
 fail_panic "Could not build gabi++!"
+run $BUILDTOOLS/build-cxx-stl.sh --stl=gabi++ --abis="$ABIS" $FLAGS --with-debug-info
+fail_panic "Could not build gabi++ with debug info!"
 
-dump "Building $ABIS stlport binaries..."
-run $BUILDTOOLS/build-cxx-stl.sh --stl=stlport $FLAGS
+dump "Building $ABIS $UNKNOWN_ABIS stlport binaries..."
+run $BUILDTOOLS/build-cxx-stl.sh --stl=stlport --abis="$ABIS,$UNKNOWN_ABIS" $FLAGS
 fail_panic "Could not build stlport!"
+run $BUILDTOOLS/build-cxx-stl.sh --stl=stlport --abis="$ABIS,$UNKNOWN_ABIS" $FLAGS --with-debug-info
+fail_panic "Could not build stlport with debug info!"
 
-dump "Building $ABIS libc++ binaries..."
-run $BUILDTOOLS/build-cxx-stl.sh --stl=libc++ $FLAGS
-fail_panic "Could not build libc++!"
+dump "Building $ABIS $UNKNOWN_ABIS libc++ binaries... with libc++abi"
+run $BUILDTOOLS/build-cxx-stl.sh --stl=libc++-libc++abi --abis="$ABIS,$UNKNOWN_ABIS" $FLAGS --llvm-version=$DEFAULT_LLVM_VERSION
+fail_panic "Could not build libc++ with libc++abi!"
+run $BUILDTOOLS/build-cxx-stl.sh --stl=libc++-libc++abi --abis="$ABIS,$UNKNOWN_ABIS" $FLAGS --with-debug-info --llvm-version=$DEFAULT_LLVM_VERSION
+fail_panic "Could not build libc++ with libc++abi and debug info!"
+
+# workaround issues in libc++/libc++abi for x86 and mips
+for abi in $ABIS; do
+  case $abi in
+     x86|x86_64|mips|mips64)
+  dump "Rebuilding $abi libc++ binaries... with gabi++"
+  run $BUILDTOOLS/build-cxx-stl.sh --stl=libc++-gabi++ --abis=$abi $FLAGS --llvm-version=$DEFAULT_LLVM_VERSION
+  fail_panic "Could not build libc++ with gabi++!"
+  run $BUILDTOOLS/build-cxx-stl.sh --stl=libc++-gabi++ --abis=$abi $FLAGS --with-debug-info --llvm-version=$DEFAULT_LLVM_VERSION
+  fail_panic "Could not build libc++ with gabi++ and debug info!"
+     ;;
+  esac
+done
 
 if [ ! -z $VISIBLE_LIBGNUSTL_STATIC ]; then
     GNUSTL_STATIC_VIS_FLAG=--visible-libgnustl-static
 fi
 
 dump "Building $ABIS gnustl binaries..."
-run $BUILDTOOLS/build-gnu-libstdc++.sh $FLAGS $GNUSTL_STATIC_VIS_FLAG "$SRC_DIR"
+run $BUILDTOOLS/build-gnu-libstdc++.sh --abis="$ABIS" $FLAGS $GNUSTL_STATIC_VIS_FLAG "$SRC_DIR"
 fail_panic "Could not build gnustl!"
+run $BUILDTOOLS/build-gnu-libstdc++.sh --abis="$ABIS" $FLAGS $GNUSTL_STATIC_VIS_FLAG "$SRC_DIR" --with-debug-info
+fail_panic "Could not build gnustl with debug info!"
 
 dump "Building $ABIS libportable binaries..."
-run $BUILDTOOLS/build-libportable.sh $FLAGS
+run $BUILDTOOLS/build-libportable.sh --abis="$ABIS" $FLAGS
 fail_panic "Could not build libportable!"
-
-dump "Building $ABIS compiler-rt binaries..."
-run $BUILDTOOLS/build-compiler-rt.sh $FLAGS --src-dir="$SRC_DIR/llvm-$DEFAULT_LLVM_VERSION/compiler-rt"
-fail_panic "Could not build compiler-rt!"
 
 if [ "$PACKAGE_DIR" ]; then
     dump "Done, see $PACKAGE_DIR"

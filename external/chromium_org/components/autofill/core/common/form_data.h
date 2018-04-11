@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H__
-#define COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H__
+#ifndef COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H_
+#define COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H_
 
 #include <vector>
 
@@ -19,9 +19,12 @@ struct FormData {
   FormData(const FormData& data);
   ~FormData();
 
-  // Used by FormStructureTest.
+  // Used in testing.
   bool operator==(const FormData& form) const;
   bool operator!=(const FormData& form) const;
+
+  // Allow FormData to be a key in STL containers.
+  bool operator<(const FormData& form) const;
 
   // The name of the form.
   base::string16 name;
@@ -37,6 +40,16 @@ struct FormData {
   std::vector<FormFieldData> fields;
 };
 
+// For testing.
+std::ostream& operator<<(std::ostream& os, const FormData& form);
+
+// Serialize FormData. Used by the PasswordManager to persist FormData
+// pertaining to password forms. Serialized data is appended to |pickle|
+void SerializeFormData(const FormData& form_data, Pickle* pickle);
+// Deserialize FormData. This assumes that |iter| is currently pointing to
+// the part of a pickle created by SerializeFormData. Returns true on success.
+bool DeserializeFormData(PickleIterator* iter, FormData* form_data);
+
 }  // namespace autofill
 
-#endif  // COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H__
+#endif  // COMPONENTS_AUTOFILL_CORE_COMMON_FORM_DATA_H_

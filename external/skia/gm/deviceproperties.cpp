@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 #include "gm.h"
+#include "SkBitmapDevice.h"
 #include "SkTypeface.h"
 
 namespace skiagm {
@@ -24,7 +25,7 @@ protected:
     }
 
     virtual SkISize onISize() {
-        return make_isize(1450, 750);
+        return SkISize::Make(1450, 750);
     }
 
     static void rotate_about(SkCanvas* canvas,
@@ -38,13 +39,12 @@ protected:
     virtual void onDraw(SkCanvas* originalCanvas) {
         SkISize size = this->getISize();
         SkBitmap bitmap;
-        bitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
-        bitmap.allocPixels();
+        bitmap.allocN32Pixels(size.width(), size.height());
         SkDeviceProperties properties = SkDeviceProperties::Make(
             SkDeviceProperties::Geometry::Make(SkDeviceProperties::Geometry::kVertical_Orientation,
                                                SkDeviceProperties::Geometry::kBGR_Layout),
             SK_Scalar1);
-        SkDevice device(bitmap, properties);
+        SkBitmapDevice device(bitmap, properties);
         SkCanvas canvas(&device);
         canvas.drawColor(SK_ColorWHITE);
 

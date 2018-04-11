@@ -17,10 +17,15 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/common/child_process_host_delegate.h"
 
+namespace base {
+class CommandLine;
+}
+
 namespace content {
 
 class BrowserChildProcessHostIterator;
 class BrowserChildProcessObserver;
+class BrowserMessageFilter;
 
 // Plugins/workers and other child processes that live on the IO thread use this
 // class. RenderProcessHostImpl is the main exception that doesn't use this
@@ -42,22 +47,23 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // BrowserChildProcessHost implementation:
   virtual bool Send(IPC::Message* message) OVERRIDE;
   virtual void Launch(
-#if defined(OS_WIN)
       SandboxedProcessLauncherDelegate* delegate,
-#elif defined(OS_POSIX)
-      bool use_zygote,
-      const base::EnvironmentVector& environ,
-#endif
-      CommandLine* cmd_line) OVERRIDE;
+      base::CommandLine* cmd_line) OVERRIDE;
   virtual const ChildProcessData& GetData() const OVERRIDE;
   virtual ChildProcessHost* GetHost() const OVERRIDE;
-  virtual base::TerminationStatus GetTerminationStatus(int* exit_code) OVERRIDE;
-  virtual void SetName(const string16& name) OVERRIDE;
+  virtual base::TerminationStatus GetTerminationStatus(
+      bool known_dead, int* exit_code) OVERRIDE;
+  virtual void SetName(const base::string16& name) OVERRIDE;
   virtual void SetHandle(base::ProcessHandle handle) OVERRIDE;
 
-  // Returns the handle of the child process. This can be called only after
-  // OnProcessLaunched is called or it will be invalid and may crash.
-  base::ProcessHandle GetHandle() const;
+  // ChildProcessHostDelegate implementation:
+  virtual bool CanShutdown() OVERRIDE;
+  virtual void OnChildDisconnected() OVERRIDE;
+  virtual base::ProcessHandle GetHandle() const OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
+  virtual void OnBadMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Removes this host from the host list. Calls ChildProcessHost::ForceShutdown
   void ForceShutdown();
@@ -69,8 +75,13 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // shutdown. Default is to always terminate.
   void SetTerminateChildOnShutdown(bool terminate_on_shutdown);
 
+  // Adds an IPC message filter.
+  void AddFilter(BrowserMessageFilter* filter);
+
   // Called when an instance of a particular child is created in a page.
   static void NotifyProcessInstanceCreated(const ChildProcessData& data);
+
+  static void HistogramBadMessageTerminated(int process_type);
 
   BrowserChildProcessHostDelegate* delegate() const { return delegate_; }
 
@@ -84,15 +95,9 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   static void AddObserver(BrowserChildProcessObserver* observer);
   static void RemoveObserver(BrowserChildProcessObserver* observer);
 
-  // ChildProcessHostDelegate implementation:
-  virtual bool CanShutdown() OVERRIDE;
-  virtual void OnChildDisconnected() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
-
   // ChildProcessLauncher::Client implementation.
   virtual void OnProcessLaunched() OVERRIDE;
+  virtual void OnProcessLaunchFailed() OVERRIDE;
 
 #if defined(OS_WIN)
   void DeleteProcessWaitableEvent(base::WaitableEvent* event);

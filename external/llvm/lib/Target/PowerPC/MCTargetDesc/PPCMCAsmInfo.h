@@ -15,19 +15,21 @@
 #define PPCTARGETASMINFO_H
 
 #include "llvm/MC/MCAsmInfoDarwin.h"
+#include "llvm/MC/MCAsmInfoELF.h"
 
 namespace llvm {
+class Triple;
 
   class PPCMCAsmInfoDarwin : public MCAsmInfoDarwin {
-    virtual void anchor();
+    void anchor() override;
   public:
-    explicit PPCMCAsmInfoDarwin(bool is64Bit);
+    explicit PPCMCAsmInfoDarwin(bool is64Bit, const Triple&);
   };
 
-  class PPCLinuxMCAsmInfo : public MCAsmInfo {
-    virtual void anchor();
+  class PPCLinuxMCAsmInfo : public MCAsmInfoELF {
+    void anchor() override;
   public:
-    explicit PPCLinuxMCAsmInfo(bool is64Bit);
+    explicit PPCLinuxMCAsmInfo(bool is64Bit, const Triple&);
   };
 
 } // namespace llvm

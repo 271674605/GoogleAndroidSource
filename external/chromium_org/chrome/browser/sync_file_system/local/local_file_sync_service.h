@@ -26,6 +26,14 @@ namespace fileapi {
 class FileSystemContext;
 }
 
+namespace leveldb {
+class Env;
+}
+
+namespace webkit_blob {
+class ScopedFile;
+}
+
 namespace sync_file_system {
 
 class FileChange;
@@ -40,6 +48,9 @@ class LocalFileSyncService
       public LocalOriginChangeObserver,
       public base::SupportsWeakPtr<LocalFileSyncService> {
  public:
+  typedef base::Callback<LocalChangeProcessor*(const GURL& origin)>
+      GetLocalChangeProcessorCallback;
+
   class Observer {
    public:
     Observer() {}
@@ -59,7 +70,10 @@ class LocalFileSyncService
                               bool has_pending_changes)>
       HasPendingLocalChangeCallback;
 
-  explicit LocalFileSyncService(Profile* profile);
+  static scoped_ptr<LocalFileSyncService> Create(Profile* profile);
+  static scoped_ptr<LocalFileSyncService> CreateForTesting(
+      Profile* profile,
+      leveldb::Env* env_override);
   virtual ~LocalFileSyncService();
 
   void Shutdown();
@@ -86,9 +100,22 @@ class LocalFileSyncService
   // It is invalid to call this method before calling SetLocalChangeProcessor().
   void ProcessLocalChange(const SyncFileCallback& callback);
 
-  // Sets a local change processor.  This must be called before any
+  // Sets a local change processor. The value is ignored if
+  // SetLocalChangeProcessorCallback() is called separately.
+  // Either this or SetLocalChangeProcessorCallback() must be called before
+  // any ProcessLocalChange().
+  void SetLocalChangeProcessor(LocalChangeProcessor* local_change_processor);
+
+  // Sets a closure which gets a local change processor for the given origin.
+  // Note that once this is called it overrides the direct processor setting
+  // done by SetLocalChangeProcessor().
+  // Either this or SetLocalChangeProcessor() must be called before any
   // ProcessLocalChange().
-  void SetLocalChangeProcessor(LocalChangeProcessor* processor);
+  //
+  // TODO(kinuko): Remove this method once we stop using multiple backends
+  // (crbug.com/324215), or deprecate the other if we keep doing so.
+  void SetLocalChangeProcessorCallback(
+      const GetLocalChangeProcessorCallback& get_local_change_processor);
 
   // Returns true via |callback| if the given file |url| has local pending
   // changes.
@@ -96,9 +123,7 @@ class LocalFileSyncService
       const fileapi::FileSystemURL& url,
       const HasPendingLocalChangeCallback& callback);
 
-  // A local or remote sync has been finished (either successfully or
-  // with an error). Clears the internal sync flag and enable writing for |url|.
-  void ClearSyncFlagForURL(const fileapi::FileSystemURL& url);
+  void PromoteDemotedChanges();
 
   // Returns the metadata of a remote file pointed by |url|.
   virtual void GetLocalFileMetadata(
@@ -114,8 +139,9 @@ class LocalFileSyncService
       const base::FilePath& local_path,
       const fileapi::FileSystemURL& url,
       const SyncStatusCallback& callback) OVERRIDE;
-  virtual void ClearLocalChanges(
+  virtual void FinalizeRemoteSync(
       const fileapi::FileSystemURL& url,
+      bool clear_local_changes,
       const base::Closure& completion_callback) OVERRIDE;
   virtual void RecordFakeLocalChange(
       const fileapi::FileSystemURL& url,
@@ -132,6 +158,7 @@ class LocalFileSyncService
   void SetOriginEnabled(const GURL& origin, bool enabled);
 
  private:
+  typedef std::map<GURL, fileapi::FileSystemContext*> OriginToContext;
   friend class OriginChangeMapTest;
 
   class OriginChangeMap {
@@ -162,6 +189,8 @@ class LocalFileSyncService
     std::set<GURL> disabled_origins_;
   };
 
+  LocalFileSyncService(Profile* profile, leveldb::Env* env_override);
+
   void DidInitializeFileSystemContext(
       const GURL& app_origin,
       fileapi::FileSystemContext* file_system_context,
@@ -178,15 +207,26 @@ class LocalFileSyncService
       SyncStatusCode status,
       const fileapi::FileSystemURL& url);
 
+  // Callback for ApplyRemoteChange.
+  void DidApplyRemoteChange(
+      const SyncStatusCallback& callback,
+      SyncStatusCode status);
+
   // Callbacks for ProcessLocalChange.
   void DidGetFileForLocalSync(
       SyncStatusCode status,
-      const LocalFileSyncInfo& sync_file_info);
+      const LocalFileSyncInfo& sync_file_info,
+      webkit_blob::ScopedFile snapshot);
   void ProcessNextChangeForURL(
+      webkit_blob::ScopedFile snapshot,
       const LocalFileSyncInfo& sync_file_info,
       const FileChange& last_change,
       const FileChangeList& changes,
       SyncStatusCode status);
+
+  // A thin wrapper of get_local_change_processor_.
+  LocalChangeProcessor* GetLocalChangeProcessor(
+      const fileapi::FileSystemURL& url);
 
   Profile* profile_;
 
@@ -194,7 +234,7 @@ class LocalFileSyncService
 
   // Origin to context map. (Assuming that as far as we're in the same
   // profile single origin wouldn't belong to multiple FileSystemContexts.)
-  std::map<GURL, fileapi::FileSystemContext*> origin_to_contexts_;
+  OriginToContext origin_to_contexts_;
 
   // Origins which have pending changes but have not been initialized yet.
   // (Used only for handling dirty files left in the local tracker database
@@ -208,6 +248,7 @@ class LocalFileSyncService
   SyncFileCallback local_sync_callback_;
 
   LocalChangeProcessor* local_change_processor_;
+  GetLocalChangeProcessorCallback get_local_change_processor_;
 
   ObserverList<Observer> change_observers_;
 

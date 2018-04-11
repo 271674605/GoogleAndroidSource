@@ -19,9 +19,10 @@
 #include "rsContext.h"
 #include "rsThreadIO.h"
 
+#include "rsgApiStructs.h"
+
 #ifndef RS_COMPATIBILITY_LIB
 #include "rsMesh.h"
-#include <ui/FramebufferNativeWindow.h>
 #include <gui/DisplayEventReceiver.h>
 #endif
 
@@ -32,6 +33,7 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <inttypes.h>
 #include <unistd.h>
 
 #if !defined(RS_SERVER) && !defined(RS_COMPATIBILITY_LIB) && \
@@ -182,7 +184,8 @@ void Context::timerPrint() {
 
 
     if (props.mLogTimes) {
-        ALOGV("RS: Frame (%i),   Script %2.1f%% (%i),  Swap %2.1f%% (%i),  Idle %2.1f%% (%lli),  Internal %2.1f%% (%lli), Avg fps: %u",
+        ALOGV("RS: Frame (%i),   Script %2.1f%% (%i),  Swap %2.1f%% (%i),  Idle %2.1f%% (%" PRIi64 "),  "
+              "Internal %2.1f%% (%" PRIi64 "), Avg fps: %u",
              mTimeMSLastFrame,
              100.0 * mTimers[RS_TIMER_SCRIPT] / total, mTimeMSLastScript,
              100.0 * mTimers[RS_TIMER_CLEAR_SWAP] / total, mTimeMSLastSwap,
@@ -309,6 +312,11 @@ void * Context::threadProc(void *vrsc) {
     rsc->props.mLogVisual = getProp("debug.rs.visual") != 0;
     rsc->props.mDebugMaxThreads = getProp("debug.rs.max-threads");
 
+    if (getProp("debug.rs.debug") != 0) {
+        ALOGD("Forcing debug context due to debug.rs.debug.");
+        rsc->mContextType = RS_CONTEXT_TYPE_DEBUG;
+    }
+
     bool loadDefault = true;
 
     // Provide a mechanism for dropping in a different RS driver.
@@ -319,18 +327,22 @@ void * Context::threadProc(void *vrsc) {
 #define OVERRIDE_RS_DRIVER_STRING STR(OVERRIDE_RS_DRIVER)
 
     if (getProp("debug.rs.default-CPU-driver") != 0) {
-        ALOGE("Skipping override driver and loading default CPU driver");
-    } else if (rsc->mForceCpu) {
+        ALOGD("Skipping override driver and loading default CPU driver");
+    } else if (rsc->mForceCpu || rsc->mIsGraphicsContext) {
         ALOGV("Application requested CPU execution");
     } else if (rsc->getContextType() == RS_CONTEXT_TYPE_DEBUG) {
         ALOGV("Application requested debug context");
     } else {
+#if defined(__LP64__) && defined(DISABLE_RS_64_BIT_DRIVER)
+        // skip load
+#else
         if (loadRuntime(OVERRIDE_RS_DRIVER_STRING, rsc)) {
-            ALOGE("Successfully loaded runtime: %s", OVERRIDE_RS_DRIVER_STRING);
+            ALOGV("Successfully loaded runtime: %s", OVERRIDE_RS_DRIVER_STRING);
             loadDefault = false;
         } else {
             ALOGE("Failed to load runtime %s, loading default", OVERRIDE_RS_DRIVER_STRING);
         }
+#endif
     }
 
 #undef XSTR
@@ -510,6 +522,7 @@ Context::Context() {
     mDPI = 96;
     mIsContextLite = false;
     memset(&watchdog, 0, sizeof(watchdog));
+    memset(&mHal, 0, sizeof(mHal));
     mForceCpu = false;
     mContextType = RS_CONTEXT_TYPE_NORMAL;
     mSynchronous = false;
@@ -526,6 +539,7 @@ Context * Context::createContext(Device *dev, const RsSurfaceConfig *sc,
         rsc->mSynchronous = true;
     }
     rsc->mContextType = ct;
+    rsc->mHal.flags = flags;
 
     if (!rsc->initContext(dev, sc)) {
         delete rsc;
@@ -575,6 +589,11 @@ bool Context::initContext(Device *dev, const RsSurfaceConfig *sc) {
     timerSet(RS_TIMER_INTERNAL);
     if (mSynchronous) {
         threadProc(this);
+
+        if (mError != RS_ERROR_NONE) {
+            ALOGE("Errors during thread init (sync mode)");
+            return false;
+        }
     } else {
         status = pthread_create(&mThreadId, &threadAttr, threadProc, this);
         if (status) {
@@ -603,10 +622,12 @@ Context::~Context() {
         void *res;
 
         mIO.shutdown();
-        int status = pthread_join(mThreadId, &res);
+        if (!mSynchronous) {
+            pthread_join(mThreadId, &res);
+        }
         rsAssert(mExit);
 
-        if (mHal.funcs.shutdownDriver) {
+        if (mHal.funcs.shutdownDriver && mHal.drv) {
             mHal.funcs.shutdownDriver(this);
         }
 
@@ -721,6 +742,12 @@ void Context::setFont(Font *f) {
 }
 #endif
 
+void Context::finish() {
+    if (mHal.funcs.finish) {
+        mHal.funcs.finish(this);
+    }
+}
+
 void Context::assignName(ObjectBase *obj, const char *name, uint32_t len) {
     rsAssert(!obj->getName());
     obj->setName(name, len);
@@ -785,6 +812,7 @@ namespace android {
 namespace renderscript {
 
 void rsi_ContextFinish(Context *rsc) {
+    rsc->finish();
 }
 
 void rsi_ContextBindRootScript(Context *rsc, RsScript vs) {
@@ -870,7 +898,7 @@ void rsi_ContextDestroyWorker(Context *rsc) {
 }
 
 void rsi_ContextDestroy(Context *rsc) {
-    //ALOGV("%p rsContextDestroy", rsc);
+    //ALOGE("%p rsContextDestroy", rsc);
     rsContextDestroyWorker(rsc);
     delete rsc;
     //ALOGV("%p rsContextDestroy done", rsc);
@@ -900,6 +928,32 @@ void rsi_ContextDeinitToClient(Context *rsc) {
 
 void rsi_ContextSendMessage(Context *rsc, uint32_t id, const uint8_t *data, size_t len) {
     rsc->sendMessageToClient(data, RS_MESSAGE_TO_CLIENT_USER, id, len, true);
+}
+
+// implementation of handcode LF_ObjDestroy
+// required so nObjDestroy can be run from finalizer without blocking
+void LF_ObjDestroy_handcode(const Context *rsc, RsAsyncVoidPtr objPtr) {
+    if (((Context *)rsc)->isSynchronous()) {
+        rsi_ObjDestroy((Context *)rsc, objPtr);
+        return;
+    }
+
+    // struct has two parts:
+    // RsPlaybackRemoteHeader (cmdID and bytes)
+    // RS_CMD_ObjDestroy (ptr)
+    struct destroyCmd {
+        uint32_t cmdID;
+        uint32_t bytes;
+        RsAsyncVoidPtr ptr;
+     };
+
+    destroyCmd cmd;
+    cmd.cmdID = RS_CMD_ID_ObjDestroy;
+    cmd.bytes = sizeof(RsAsyncVoidPtr);
+    cmd.ptr = objPtr;
+    ThreadIO *io = &((Context *)rsc)->mIO;
+    io->coreWrite((void*)&cmd, sizeof(destroyCmd));
+
 }
 
 }
@@ -938,3 +992,4 @@ void rsaGetName(RsContext con, void * obj, const char **name) {
     ObjectBase *ob = static_cast<ObjectBase *>(obj);
     (*name) = ob->getName();
 }
+

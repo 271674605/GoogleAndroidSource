@@ -43,12 +43,6 @@ class CatCommand(SubCommand):
     json_root = OrderedDict()
     json_root['version'] = 1
     json_root['run_id'] = None
-    for dump in dumps:
-      if json_root['run_id'] and json_root['run_id'] != dump.run_id:
-        LOGGER.error('Inconsistent heap profile dumps.')
-        json_root['run_id'] = ''
-        break
-      json_root['run_id'] = dump.run_id
     json_root['roots'] = []
     for sorter in sorters:
       if sorter.root:
@@ -56,9 +50,29 @@ class CatCommand(SubCommand):
     json_root['default_template'] = 'l2'
     json_root['templates'] = sorters.templates.as_dict()
 
+    orders = OrderedDict()
+    orders['worlds'] = OrderedDict()
+    for world in ['vm', 'malloc']:
+      orders['worlds'][world] = OrderedDict()
+      orders['worlds'][world]['breakdown'] = OrderedDict()
+      for sorter in sorters.iter_world(world):
+        order = []
+        for rule in sorter.iter_rule():
+          if rule.name not in order:
+            order.append(rule.name)
+        orders['worlds'][world]['breakdown'][sorter.name] = order
+    json_root['orders'] = orders
+
     json_root['snapshots'] = []
 
     for dump in dumps:
+      if json_root['run_id'] and json_root['run_id'] != dump.run_id:
+        LOGGER.error('Inconsistent heap profile dumps.')
+        json_root['run_id'] = ''
+      else:
+        json_root['run_id'] = dump.run_id
+
+      LOGGER.info('Sorting a dump %s...' % dump.path)
       json_root['snapshots'].append(
           self._fill_snapshot(dump, bucket_set, sorters))
 
@@ -107,23 +121,25 @@ class CatCommand(SubCommand):
     # Iterate for { vm | malloc } sorters.
     root['breakdown'] = OrderedDict()
     for sorter in sorters.iter_world(world):
+      LOGGER.info('  Sorting with %s:%s.' % (sorter.world, sorter.name))
       breakdown = OrderedDict()
+      for rule in sorter.iter_rule():
+        category = OrderedDict()
+        category['name'] = rule.name
+        subs = []
+        for sub_world, sub_breakdown in rule.iter_subs():
+          subs.append([sub_world, sub_breakdown])
+        if subs:
+          category['subs'] = subs
+        if rule.hidden:
+          category['hidden'] = True
+        category['units'] = []
+        breakdown[rule.name] = category
       for unit in unit_set:
         found = sorter.find(unit)
-        if found.name not in breakdown:
-          category = OrderedDict()
-          category['name'] = found.name
-          category['color'] = 'random'
-          subs = []
-          for sub_world, sub_breakdown in found.iter_subs():
-            subs.append([sub_world, sub_breakdown])
-          if subs:
-            category['subs'] = subs
-          if found.hidden:
-            category['hidden'] = True
-          category['units'] = []
-          breakdown[found.name] = category
-        breakdown[found.name]['units'].append(unit.unit_id)
+        if found:
+          # Note that a bucket which doesn't match any rule is just dropped.
+          breakdown[found.name]['units'].append(unit.unit_id)
       root['breakdown'][sorter.name] = breakdown
 
     return root

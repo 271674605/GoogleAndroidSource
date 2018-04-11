@@ -14,9 +14,9 @@
 #include "limits"
 #include <sys/types.h>
 #if !defined(_WIN32)
-#if !defined(__sun__) && !defined(__linux__)
+#if !defined(__sun__) && !defined(__linux__) && !defined(_AIX)
 #include <sys/sysctl.h>
-#endif // !__sun__ && !__linux__
+#endif // !__sun__ && !__linux__ && !_AIX
 #include <unistd.h>
 #endif // !_WIN32
 
@@ -26,6 +26,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #endif
+
+#if !_LIBCPP_SINGLE_THREADED
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -89,7 +91,11 @@ thread::hardware_concurrency() _NOEXCEPT
 #else  // defined(CTL_HW) && defined(HW_NCPU)
     // TODO: grovel through /proc or check cpuid on x86 and similar
     // instructions on other architectures.
-#warning hardware_concurrency not yet implemented
+#   if defined(_MSC_VER) && ! defined(__clang__)
+        _LIBCPP_WARNING("hardware_concurrency not yet implemented")
+#   else
+#       warning hardware_concurrency not yet implemented
+#   endif
     return 0;  // Means not computable [thread.thread.static]
 #endif  // defined(CTL_HW) && defined(HW_NCPU)
 }
@@ -117,7 +123,12 @@ sleep_for(const chrono::nanoseconds& ns)
             ts.tv_sec = ts_sec_max;
             ts.tv_nsec = giga::num - 1;
         }
-        nanosleep(&ts, 0);
+#if (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 199309L) || defined(__ANDROID__)
+        while (nanosleep(&ts, &ts) == -1 && errno == EINTR)
+            ;
+#else
+#warning sleep_for not yet implemented
+#endif
     }
 }
 
@@ -140,7 +151,7 @@ public:
     
     T* allocate(size_t __n)
         {return static_cast<T*>(::operator new(__n * sizeof(T)));}
-    void deallocate(T* __p, size_t) {::operator delete((void*)__p);}
+    void deallocate(T* __p, size_t) {::operator delete(static_cast<void*>(__p));}
 
     size_t max_size() const {return size_t(~0) / sizeof(T);}
 };
@@ -219,3 +230,6 @@ __thread_struct::__make_ready_at_thread_exit(__assoc_sub_state* __s)
 }
 
 _LIBCPP_END_NAMESPACE_STD
+
+#endif // !_LIBCPP_SINGLE_THREADED
+

@@ -122,7 +122,7 @@ public:
   inline ProgramStateRef 
   processRegionChange(ProgramStateRef state,
                       const MemRegion* MR) {
-    return processRegionChanges(state, 0, MR, MR, 0);
+    return processRegionChanges(state, nullptr, MR, MR, nullptr);
   }
 
   virtual ProgramStateRef
@@ -134,7 +134,7 @@ public:
                            ArrayRef<const MemRegion *> ExplicitRegions,
                            ArrayRef<const MemRegion *> Regions,
                            const CallEvent *Call,
-                           bool IsConst = false) = 0;
+                           RegionAndSymbolInvalidationTraits &HTraits) = 0;
 
   /// printState - Called by ProgramStateManager to print checker-specific data.
   virtual void printState(raw_ostream &Out, ProgramStateRef State,

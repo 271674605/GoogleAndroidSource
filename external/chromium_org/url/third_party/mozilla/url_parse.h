@@ -11,7 +11,7 @@
 #include "base/strings/string16.h"
 #include "url/url_export.h"
 
-namespace url_parse {
+namespace url {
 
 // Deprecated, but WebKit/WebCore/platform/KURLGooglePrivate.h and
 // KURLGoogle.cpp still rely on this type.
@@ -69,17 +69,17 @@ inline Component MakeRange(int begin, int end) {
 //
 // Typical usage would be:
 //
-//    url_parse::Parsed parsed;
-//    url_parse::Component scheme;
-//    if (!url_parse::ExtractScheme(url, url_len, &scheme))
+//    Parsed parsed;
+//    Component scheme;
+//    if (!ExtractScheme(url, url_len, &scheme))
 //      return I_CAN_NOT_FIND_THE_SCHEME_DUDE;
 //
 //    if (IsStandardScheme(url, scheme))  // Not provided by this component
-//      url_parseParseStandardURL(url, url_len, &parsed);
+//      ParseStandardURL(url, url_len, &parsed);
 //    else if (IsFileURL(url, scheme))    // Not provided by this component
-//      url_parse::ParseFileURL(url, url_len, &parsed);
+//      ParseFileURL(url, url_len, &parsed);
 //    else
-//      url_parse::ParsePathURL(url, url_len, &parsed);
+//      ParsePathURL(url, url_len, &parsed);
 //
 struct URL_EXPORT Parsed {
   // Identifies different components.
@@ -238,9 +238,13 @@ URL_EXPORT void ParseStandardURL(const base::char16* url,
 // section but that aren't file URLs either. The scheme is parsed, and
 // everything after the scheme is considered as the path. This is used for
 // things like "about:" and "javascript:"
-URL_EXPORT void ParsePathURL(const char* url, int url_len, Parsed* parsed);
+URL_EXPORT void ParsePathURL(const char* url,
+                             int url_len,
+                             bool trim_path_end,
+                             Parsed* parsed);
 URL_EXPORT void ParsePathURL(const base::char16* url,
                              int url_len,
+                             bool trim_path_end,
                              Parsed* parsed);
 
 // FileURL is for file URLs. There are some special rules for interpreting
@@ -363,6 +367,6 @@ URL_EXPORT bool ExtractQueryKeyValue(const base::char16* url,
                                      Component* key,
                                      Component* value);
 
-}  // namespace url_parse
+}  // namespace url
 
 #endif  // URL_THIRD_PARTY_MOZILLA_URL_PARSE_H_

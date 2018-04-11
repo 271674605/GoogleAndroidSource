@@ -16,161 +16,81 @@
 
 package com.google.android.droiddriver.finders;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.android.droiddriver.util.Preconditions.checkNotNull;
 
 import com.google.android.droiddriver.UiElement;
-import com.google.common.annotations.Beta;
-import com.google.common.base.Joiner;
-import com.google.common.base.Objects;
+import com.google.android.droiddriver.exceptions.ElementNotFoundException;
 
 /**
  * Convenience methods to create commonly used finders.
  */
 public class By {
-  /** Matches by {@link Object#equals}. */
-  public static final MatchStrategy<Object> OBJECT_EQUALS = new MatchStrategy<Object>() {
-    @Override
-    public boolean match(Object expected, Object actual) {
-      return Objects.equal(actual, expected);
-    }
+  private static final MatchFinder ANY = new MatchFinder(null);
 
-    @Override
-    public String toString() {
-      return "equals";
-    }
-  };
-  /** Matches by {@link String#matches}. */
-  public static final MatchStrategy<String> STRING_MATCHES = new MatchStrategy<String>() {
-    @Override
-    public boolean match(String expected, String actual) {
-      return actual != null && actual.matches(expected);
-    }
-
-    @Override
-    public String toString() {
-      return "matches pattern";
-    }
-  };
-  /** Matches by {@link String#contains}. */
-  public static final MatchStrategy<String> STRING_CONTAINS = new MatchStrategy<String>() {
-    @Override
-    public boolean match(String expected, String actual) {
-      return actual != null && actual.contains(expected);
-    }
-
-    @Override
-    public String toString() {
-      return "contains";
-    }
-  };
-
-  /**
-   * Creates a new ByAttribute finder. Frequently-used finders have shorthands
-   * below, for example, {@link #text}, {@link #textRegex}. Users can create
-   * custom finders using this method.
-   *
-   * @param attribute the attribute to match against
-   * @param strategy the matching strategy, for instance, equals or matches
-   *        regular expression
-   * @param expected the expected attribute value
-   * @return a new ByAttribute finder
-   */
-  public static <T> ByAttribute<T> attribute(Attribute attribute,
-      MatchStrategy<? super T> strategy, T expected) {
-    return new ByAttribute<T>(attribute, strategy, expected);
+  /** Matches any UiElement. */
+  public static MatchFinder any() {
+    return ANY;
   }
 
-  /** Shorthand for {@link #attribute}{@code (attribute, OBJECT_EQUALS, expected)} */
-  public static <T> ByAttribute<T> attribute(Attribute attribute, T expected) {
-    return attribute(attribute, OBJECT_EQUALS, expected);
-  }
-
-  /** Shorthand for {@link #attribute}{@code (attribute, true)} */
-  public static ByAttribute<Boolean> is(Attribute attribute) {
-    return attribute(attribute, true);
-  }
-
-  /** Shorthand for {@link #attribute}{@code (attribute, false)} */
-  public static ByAttribute<Boolean> not(Attribute attribute) {
-    return attribute(attribute, false);
+  /** Matches a UiElement whose {@code attribute} is {@code true}. */
+  public static MatchFinder is(Attribute attribute) {
+    return new MatchFinder(Predicates.attributeTrue(attribute));
   }
 
   /**
-   * @param resourceId The resource id to match against
-   * @return a finder to find an element by resource id
+   * Matches a UiElement whose {@code attribute} is {@code false} or is not set.
    */
-  public static ByAttribute<String> resourceId(String resourceId) {
-    return attribute(Attribute.RESOURCE_ID, OBJECT_EQUALS, resourceId);
+  public static MatchFinder not(Attribute attribute) {
+    return new MatchFinder(Predicates.attributeFalse(attribute));
   }
 
-  /**
-   * @param name The exact package name to match against
-   * @return a finder to find an element by package name
-   */
-  public static ByAttribute<String> packageName(String name) {
-    return attribute(Attribute.PACKAGE, OBJECT_EQUALS, name);
+  /** Matches a UiElement by resource id. */
+  public static MatchFinder resourceId(String resourceId) {
+    return new MatchFinder(Predicates.attributeEquals(Attribute.RESOURCE_ID, resourceId));
   }
 
-  /**
-   * @param text The exact text to match against
-   * @return a finder to find an element by text
-   */
-  public static ByAttribute<String> text(String text) {
-    return attribute(Attribute.TEXT, OBJECT_EQUALS, text);
+  /** Matches a UiElement by package name. */
+  public static MatchFinder packageName(String name) {
+    return new MatchFinder(Predicates.attributeEquals(Attribute.PACKAGE, name));
   }
 
-  /**
-   * @param regex The regular expression pattern to match against
-   * @return a finder to find an element by text pattern
-   */
-  public static ByAttribute<String> textRegex(String regex) {
-    return attribute(Attribute.TEXT, STRING_MATCHES, regex);
+  /** Matches a UiElement by the exact text. */
+  public static MatchFinder text(String text) {
+    return new MatchFinder(Predicates.attributeEquals(Attribute.TEXT, text));
   }
 
-  /**
-   * @param substring String inside a text field
-   * @return a finder to find an element by text substring
-   */
-  public static ByAttribute<String> textContains(String substring) {
-    return attribute(Attribute.TEXT, STRING_CONTAINS, substring);
+  /** Matches a UiElement whose text matches {@code regex}. */
+  public static MatchFinder textRegex(String regex) {
+    return new MatchFinder(Predicates.attributeMatches(Attribute.TEXT, regex));
   }
 
-  /**
-   * @param contentDescription The exact content description to match against
-   * @return a finder to find an element by content description
-   */
-  public static ByAttribute<String> contentDescription(String contentDescription) {
-    return attribute(Attribute.CONTENT_DESC, OBJECT_EQUALS, contentDescription);
+  /** Matches a UiElement whose text contains {@code substring}. */
+  public static MatchFinder textContains(String substring) {
+    return new MatchFinder(Predicates.attributeContains(Attribute.TEXT, substring));
   }
 
-  /**
-   * @param substring String inside a content description
-   * @return a finder to find an element by content description substring
-   */
-  public static ByAttribute<String> contentDescriptionContains(String substring) {
-    return attribute(Attribute.CONTENT_DESC, STRING_CONTAINS, substring);
+  /** Matches a UiElement by content description. */
+  public static MatchFinder contentDescription(String contentDescription) {
+    return new MatchFinder(Predicates.attributeEquals(Attribute.CONTENT_DESC, contentDescription));
   }
 
-  /**
-   * @param className The exact class name to match against
-   * @return a finder to find an element by class name
-   */
-  public static ByAttribute<String> className(String className) {
-    return attribute(Attribute.CLASS, OBJECT_EQUALS, className);
+  /** Matches a UiElement whose content description contains {@code substring}. */
+  public static MatchFinder contentDescriptionContains(String substring) {
+    return new MatchFinder(Predicates.attributeContains(Attribute.CONTENT_DESC, substring));
   }
 
-  /**
-   * @param clazz The class whose name is matched against
-   * @return a finder to find an element by class name
-   */
-  public static ByAttribute<String> className(Class<?> clazz) {
+  /** Matches a UiElement by class name. */
+  public static MatchFinder className(String className) {
+    return new MatchFinder(Predicates.attributeEquals(Attribute.CLASS, className));
+  }
+
+  /** Matches a UiElement by class name. */
+  public static MatchFinder className(Class<?> clazz) {
     return className(clazz.getName());
   }
 
-  /**
-   * @return a finder to find an element that is selected
-   */
-  public static ByAttribute<Boolean> selected() {
+  /** Matches a UiElement that is selected. */
+  public static MatchFinder selected() {
     return is(Attribute.SELECTED);
   }
 
@@ -210,20 +130,34 @@ public class By {
    * @param xPath The xpath to use
    * @return a finder which locates elements via XPath
    */
-  @Beta
   public static ByXPath xpath(String xPath) {
     return new ByXPath(xPath);
   }
 
   /**
-   * @return a finder that uses the UiElement returned by parent Finder as
-   *         context for the child Finder
+   * Returns a finder that uses the UiElement returned by first Finder as
+   * context for the second Finder.
+   * <p>
+   * typically first Finder finds the ancestor, then second Finder finds the
+   * target UiElement, which is a descendant.
+   * </p>
+   * Note that if the first Finder matches multiple UiElements, only the first
+   * match is tried, which usually is not what callers expect. In this case,
+   * allOf(second, withAncesor(first)) may work.
    */
-  public static ChainFinder chain(Finder parent, Finder child) {
-    return new ChainFinder(parent, child);
+  public static ChainFinder chain(Finder first, Finder second) {
+    return new ChainFinder(first, second);
   }
 
-  // Hamcrest style finder aggregators
+  private static Predicate<? super UiElement>[] getPredicates(MatchFinder... finders) {
+    @SuppressWarnings("unchecked")
+    Predicate<? super UiElement>[] predicates = new Predicate[finders.length];
+    for (int i = 0; i < finders.length; i++) {
+      predicates[i] = finders[i].predicate;
+    }
+    return predicates;
+  }
+
   /**
    * Evaluates given {@finders} in short-circuit fashion in the order
    * they are passed. Costly finders (for example those returned by with*
@@ -233,22 +167,7 @@ public class By {
    * @return a finder that is the logical conjunction of given finders
    */
   public static MatchFinder allOf(final MatchFinder... finders) {
-    return new MatchFinder() {
-      @Override
-      public boolean matches(UiElement element) {
-        for (MatchFinder finder : finders) {
-          if (!finder.matches(element)) {
-            return false;
-          }
-        }
-        return true;
-      }
-
-      @Override
-      public String toString() {
-        return "allOf(" + Joiner.on(",").join(finders) + ")";
-      }
-    };
+    return new MatchFinder(Predicates.allOf(getPredicates(finders)));
   }
 
   /**
@@ -260,96 +179,73 @@ public class By {
    * @return a finder that is the logical disjunction of given finders
    */
   public static MatchFinder anyOf(final MatchFinder... finders) {
-    return new MatchFinder() {
-      @Override
-      public boolean matches(UiElement element) {
-        for (MatchFinder finder : finders) {
-          if (finder.matches(element)) {
-            return true;
-          }
-        }
-        return false;
-      }
-
-      @Override
-      public String toString() {
-        return "anyOf(" + Joiner.on(",").join(finders) + ")";
-      }
-    };
+    return new MatchFinder(Predicates.anyOf(getPredicates(finders)));
   }
 
   /**
    * Matches a UiElement whose parent matches the given parentFinder. For
    * complex cases, consider {@link #xpath}.
    */
-  public static MatchFinder withParent(final MatchFinder parentFinder) {
+  public static MatchFinder withParent(MatchFinder parentFinder) {
     checkNotNull(parentFinder);
-    return new MatchFinder() {
-      @Override
-      public boolean matches(UiElement element) {
-        UiElement parent = element.getParent();
-        return parent != null && parentFinder.matches(parent);
-      }
-
-      @Override
-      public String toString() {
-        return "withParent(" + parentFinder + ")";
-      }
-    };
+    return new MatchFinder(Predicates.withParent(parentFinder.predicate));
   }
 
   /**
    * Matches a UiElement whose ancestor matches the given ancestorFinder. For
    * complex cases, consider {@link #xpath}.
    */
-  public static MatchFinder withAncestor(final MatchFinder ancestorFinder) {
+  public static MatchFinder withAncestor(MatchFinder ancestorFinder) {
     checkNotNull(ancestorFinder);
-    return new MatchFinder() {
-      @Override
-      public boolean matches(UiElement element) {
-        UiElement parent = element.getParent();
-        while (parent != null) {
-          if (ancestorFinder.matches(parent)) {
-            return true;
-          }
-          parent = parent.getParent();
-        }
-        return false;
-      }
-
-      @Override
-      public String toString() {
-        return "withAncestor(" + ancestorFinder + ")";
-      }
-    };
+    return new MatchFinder(Predicates.withAncestor(ancestorFinder.predicate));
   }
 
   /**
-   * Matches a UiElement which has a sibling matching the given siblingFinder.
-   * For complex cases, consider {@link #xpath}.
+   * Matches a UiElement which has a visible sibling matching the given
+   * siblingFinder. This could be inefficient; consider {@link #xpath}.
    */
-  public static MatchFinder withSibling(final MatchFinder siblingFinder) {
+  public static MatchFinder withSibling(MatchFinder siblingFinder) {
     checkNotNull(siblingFinder);
-    return new MatchFinder() {
+    return new MatchFinder(Predicates.withSibling(siblingFinder.predicate));
+  }
+
+  /**
+   * Matches a UiElement which has a visible child matching the given
+   * childFinder. This could be inefficient; consider {@link #xpath}.
+   */
+  public static MatchFinder withChild(MatchFinder childFinder) {
+    checkNotNull(childFinder);
+    return new MatchFinder(Predicates.withChild(childFinder.predicate));
+  }
+
+  /**
+   * Matches a UiElement whose descendant (including self) matches the given
+   * descendantFinder. This could be VERY inefficient; consider {@link #xpath}.
+   */
+  public static MatchFinder withDescendant(final MatchFinder descendantFinder) {
+    checkNotNull(descendantFinder);
+    return new MatchFinder(new Predicate<UiElement>() {
       @Override
-      public boolean matches(UiElement element) {
-        UiElement parent = element.getParent();
-        if (parent == null) {
+      public boolean apply(UiElement element) {
+        try {
+          descendantFinder.find(element);
+          return true;
+        } catch (ElementNotFoundException enfe) {
           return false;
         }
-        for (int i = 0; i < parent.getChildCount(); i++) {
-          if (siblingFinder.matches(parent.getChild(i))) {
-            return true;
-          }
-        }
-        return false;
       }
 
       @Override
       public String toString() {
-        return "withSibling(" + siblingFinder + ")";
+        return "withDescendant(" + descendantFinder + ")";
       }
-    };
+    });
+  }
+
+  /** Matches a UiElement that does not match the provided {@code finder}. */
+  public static MatchFinder not(MatchFinder finder) {
+    checkNotNull(finder);
+    return new MatchFinder(Predicates.not(finder.predicate));
   }
 
   private By() {}

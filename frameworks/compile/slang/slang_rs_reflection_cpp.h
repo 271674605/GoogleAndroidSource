@@ -17,29 +17,50 @@
 #ifndef _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_CPP_H_  // NOLINT
 #define _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_CPP_H_
 
-#include "slang_rs_reflection_base.h"
+#include "slang_rs_reflect_utils.h"
 
 #include <set>
 #include <string>
 
-#define RS_EXPORT_VAR_PREFIX             "mExportVar_"
+#define RS_EXPORT_VAR_PREFIX "mExportVar_"
 
 namespace slang {
 
-class RSReflectionCpp : public RSReflectionBase {
+class RSReflectionCpp {
  public:
-  explicit RSReflectionCpp(const RSContext *);
+  RSReflectionCpp(const RSContext *Context, const std::string &OutputDirectory,
+                  const std::string &RSSourceFileName,
+                  const std::string &BitCodeFileName);
   virtual ~RSReflectionCpp();
 
-  bool reflect(const std::string &OutputPathBase,
-               const std::string &InputFileName,
-               const std::string &OutputBCFileName);
-
+  bool reflect();
 
  private:
+  // List of of (type, name) pairs.
+  typedef std::vector<std::pair<std::string, std::string> > ArgumentList;
+
+  // Information coming from the compiler about the code we're reflecting.
+  const RSContext *mRSContext;
+
+  // Path to the *.rs file for which we're generating C++ code.
+  std::string mRSSourceFilePath;
+  // Path to the file that contains the byte code generated from the *.rs file.
+  std::string mBitCodeFilePath;
+  // The directory where we'll generate the C++ files.
+  std::string mOutputDirectory;
+  // A cleaned up version of the *.rs file name that can be used in generating
+  // C++ identifiers.
+  std::string mCleanedRSFileName;
+  // The name of the generated C++ class.
+  std::string mClassName;
+
+  // TODO document
   unsigned int mNextExportVarSlot;
   unsigned int mNextExportFuncSlot;
   unsigned int mNextExportForEachSlot;
+
+  // Generated RS Elements for type-checking code.
+  std::set<std::string> mTypesToCheck;
 
   inline void clear() {
     mNextExportVarSlot = 0;
@@ -48,30 +69,36 @@ class RSReflectionCpp : public RSReflectionBase {
     mTypesToCheck.clear();
   }
 
-  inline unsigned int getNextExportVarSlot() {
-    return mNextExportVarSlot++;
-  }
+  // The file we are currently generating, either the header or the
+  // implementation file.
+  GeneratedFile mOut;
 
-  inline unsigned int getNextExportFuncSlot() {
-    return mNextExportFuncSlot++;
-  }
+  void genInitValue(const clang::APValue &Val, bool asBool = false);
+  static const char *getVectorAccessor(unsigned index);
+
+  inline unsigned int getNextExportVarSlot() { return mNextExportVarSlot++; }
+
+  inline unsigned int getNextExportFuncSlot() { return mNextExportFuncSlot++; }
 
   inline unsigned int getNextExportForEachSlot() {
     return mNextExportForEachSlot++;
   }
 
-  bool makeHeader(const std::string &baseClass);
-  bool makeImpl(const std::string &baseClass);
-  void makeFunctionSignature(std::stringstream &ss, bool isDefinition,
-                             const RSExportFunc *ef);
-  bool writeBC();
+  bool writeHeaderFile();
+  bool writeImplementationFile();
+  void makeFunctionSignature(bool isDefinition, const RSExportFunc *ef);
+  bool genEncodedBitCode();
+  void genFieldsToStoreExportVariableValues();
+  void genTypeInstancesUsedInForEach();
+  void genFieldsForAllocationTypeVerification();
+  void genExportVariablesGetterAndSetter();
+  void genForEachDeclarations();
+  void genExportFunctionDeclarations();
 
   bool startScriptHeader();
 
-
   // Write out code for an export variable initialization.
-  void genInitExportVariable(const RSExportType *ET,
-                             const std::string &VarName,
+  void genInitExportVariable(const RSExportType *ET, const std::string &VarName,
                              const clang::APValue &Val);
   void genZeroInitExportVariable(const std::string &VarName);
   void genInitBoolExportVariable(const std::string &VarName,
@@ -80,25 +107,22 @@ class RSReflectionCpp : public RSReflectionBase {
                                       const clang::APValue &Val);
 
   // Produce an argument string of the form "T1 t, T2 u, T3 v".
-  void makeArgs(std::stringstream &ss, const ArgTy& Args);
+  void genArguments(const ArgumentList &Args, int Offset);
 
-  // Write out code for an export variable.
-  void genExportVariable(const RSExportVar *EV);
-
-  void genPrimitiveTypeExportVariable(const RSExportVar *EV);
   void genPointerTypeExportVariable(const RSExportVar *EV);
-  void genVectorTypeExportVariable(const RSExportVar *EV);
   void genMatrixTypeExportVariable(const RSExportVar *EV);
-  void genConstantArrayTypeExportVariable(const RSExportVar *EV);
   void genRecordTypeExportVariable(const RSExportVar *EV);
 
+  void genGetterAndSetter(const RSExportPrimitiveType *EPT, const RSExportVar* EV);
+  void genGetterAndSetter(const RSExportVectorType *EVT, const RSExportVar* EV);
+  void genGetterAndSetter(const RSExportConstantArrayType *AT, const RSExportVar* EV);
+  void genGetterAndSetter(const RSExportRecordType *ERT, const RSExportVar *EV);
+
   // Write out a local FieldPacker (if necessary).
-  bool genCreateFieldPacker(const RSExportType *T,
-                            const char *FieldPackerName);
+  bool genCreateFieldPacker(const RSExportType *T, const char *FieldPackerName);
 
   // Populate (write) the FieldPacker with add() operations.
-  void genPackVarOfType(const RSExportType *ET,
-                        const char *VarName,
+  void genPackVarOfType(const RSExportType *ET, const char *VarName,
                         const char *FieldPackerName);
 
   // Generate a runtime type check for VarName.
@@ -108,8 +132,8 @@ class RSReflectionCpp : public RSReflectionBase {
   void genTypeInstanceFromPointer(const RSExportType *ET);
   void genTypeInstance(const RSExportType *ET);
 
-};  // class RSReflectionCpp
+}; // class RSReflectionCpp
 
-}   // namespace slang
+} // namespace slang
 
-#endif  // _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_CPP_H_  NOLINT
+#endif // _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_REFLECTION_CPP_H_  NOLINT

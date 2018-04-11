@@ -9,15 +9,16 @@
 #define CHROME_BROWSER_EXTENSIONS_API_DEBUGGER_DEBUGGER_API_H_
 
 #include <string>
+#include <vector>
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/debugger.h"
 
 using extensions::api::debugger::Debuggee;
 
 // Base debugger function.
 
-class ExtensionDevToolsClientHost;
+class DevToolsTargetImpl;
 
 namespace base {
 class DictionaryValue;
@@ -28,7 +29,10 @@ class DevToolsAgentHost;
 class WebContents;
 }
 
-class DebuggerFunction : public AsyncExtensionFunction {
+namespace extensions {
+class ExtensionDevToolsClientHost;
+
+class DebuggerFunction : public ChromeAsyncExtensionFunction {
  protected:
   DebuggerFunction();
   virtual ~DebuggerFunction();
@@ -54,7 +58,7 @@ class DebuggerAttachFunction : public DebuggerFunction {
   virtual ~DebuggerAttachFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 // Implements the debugger.detach() extension function.
@@ -68,7 +72,7 @@ class DebuggerDetachFunction : public DebuggerFunction {
   virtual ~DebuggerDetachFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 // Implements the debugger.sendCommand() extension function.
@@ -83,7 +87,7 @@ class DebuggerSendCommandFunction : public DebuggerFunction {
   virtual ~DebuggerSendCommandFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 // Implements the debugger.getTargets() extension function.
@@ -97,12 +101,12 @@ class DebuggerGetTargetsFunction : public DebuggerFunction {
   virtual ~DebuggerGetTargetsFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  void CollectWorkerInfo(base::ListValue* list);
-
-  void SendTargetList(base::ListValue* list);
+  void SendTargetList(const std::vector<DevToolsTargetImpl*>& target_list);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_DEBUGGER_DEBUGGER_API_H_

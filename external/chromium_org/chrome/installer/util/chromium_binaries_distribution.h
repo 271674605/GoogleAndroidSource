@@ -9,53 +9,53 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/installer/util/browser_distribution.h"
 
 class ChromiumBinariesDistribution : public BrowserDistribution {
  public:
-  virtual string16 GetAppGuid() OVERRIDE;
+  virtual base::string16 GetBrowserProgIdPrefix() OVERRIDE;
 
-  virtual string16 GetBaseAppName() OVERRIDE;
+  virtual base::string16 GetBrowserProgIdDesc() OVERRIDE;
 
-  virtual string16 GetAppShortCutName() OVERRIDE;
+  virtual base::string16 GetDisplayName() OVERRIDE;
 
-  virtual string16 GetAlternateApplicationName() OVERRIDE;
+  virtual base::string16 GetShortcutName(ShortcutType shortcut_type) OVERRIDE;
 
-  virtual string16 GetBaseAppId() OVERRIDE;
+  virtual int GetIconIndex(ShortcutType shortcut_type) OVERRIDE;
 
-  virtual string16 GetInstallSubDir() OVERRIDE;
+  virtual base::string16 GetBaseAppName() OVERRIDE;
 
-  virtual string16 GetPublisherName() OVERRIDE;
+  virtual base::string16 GetBaseAppId() OVERRIDE;
 
-  virtual string16 GetAppDescription() OVERRIDE;
+  virtual base::string16 GetInstallSubDir() OVERRIDE;
 
-  virtual string16 GetLongAppDescription() OVERRIDE;
+  virtual base::string16 GetPublisherName() OVERRIDE;
+
+  virtual base::string16 GetAppDescription() OVERRIDE;
+
+  virtual base::string16 GetLongAppDescription() OVERRIDE;
 
   virtual std::string GetSafeBrowsingName() OVERRIDE;
 
-  virtual string16 GetStateKey() OVERRIDE;
+  virtual base::string16 GetUninstallLinkName() OVERRIDE;
 
-  virtual string16 GetStateMediumKey() OVERRIDE;
+  virtual base::string16 GetUninstallRegPath() OVERRIDE;
 
-  virtual string16 GetUninstallLinkName() OVERRIDE;
+  virtual DefaultBrowserControlPolicy GetDefaultBrowserControlPolicy() OVERRIDE;
 
-  virtual string16 GetUninstallRegPath() OVERRIDE;
-
-  virtual string16 GetVersionKey() OVERRIDE;
-
-  virtual bool CanSetAsDefault() OVERRIDE;
-
-  virtual int GetIconIndex() OVERRIDE;
-
-  virtual bool GetChromeChannel(string16* channel) OVERRIDE;
+  virtual bool GetChromeChannel(base::string16* channel) OVERRIDE;
 
   virtual bool GetCommandExecuteImplClsid(
-      string16* handler_class_uuid) OVERRIDE;
+      base::string16* handler_class_uuid) OVERRIDE;
 
  protected:
   friend class BrowserDistribution;
 
   ChromiumBinariesDistribution();
+
+  explicit ChromiumBinariesDistribution(
+      scoped_ptr<AppRegistrationData> app_reg_data);
 
   BrowserDistribution* browser_distribution_;
 

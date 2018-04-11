@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.emailcommon.mail;
 
+import android.os.Parcel;
+import android.os.Parcelable;
+import android.text.Html;
 import android.text.TextUtils;
 import android.text.util.Rfc822Token;
 import android.text.util.Rfc822Tokenizer;
 
+import com.android.mail.utils.LogTag;
+import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.james.mime4j.codec.EncoderUtil;
@@ -39,7 +43,8 @@ import java.util.regex.Pattern;
  * Name and comment part should be MIME/base64 encoded in header if necessary.
  *
  */
-public class Address {
+public class Address implements Parcelable {
+    public static final String ADDRESS_DELIMETER = ",";
     /**
      *  Address part, in the form local_part@domain_part. No surrounding angle brackets.
      */
@@ -51,13 +56,18 @@ public class Address {
      */
     private String mPersonal;
 
+    /**
+     * When personal is set, it will return the first token of the personal
+     * string. Otherwise, it will return the e-mail address up to the '@' sign.
+     */
+    private String mSimplifiedName;
+
     // Regex that matches address surrounded by '<>' optionally. '^<?([^>]+)>?$'
     private static final Pattern REMOVE_OPTIONAL_BRACKET = Pattern.compile("^<?([^>]+)>?$");
     // Regex that matches personal name surrounded by '""' optionally. '^"?([^"]+)"?$'
     private static final Pattern REMOVE_OPTIONAL_DQUOTE = Pattern.compile("^\"?([^\"]*)\"?$");
     // Regex that matches escaped character '\\([\\"])'
     private static final Pattern UNQUOTE = Pattern.compile("\\\\([\\\\\"])");
-
 
     // TODO: LOCAL_PART and DOMAIN_PART_PART are too permissive and can be improved.
     // TODO: Fix this to better constrain comments.
@@ -75,17 +85,67 @@ public class Address {
 
     private static final Address[] EMPTY_ADDRESS_ARRAY = new Address[0];
 
-    // delimiters are chars that do not appear in an email address, used by pack/unpack
+    // delimiters are chars that do not appear in an email address, used by fromHeader
     private static final char LIST_DELIMITER_EMAIL = '\1';
     private static final char LIST_DELIMITER_PERSONAL = '\2';
 
-    public Address(String address, String personal) {
-        setAddress(address);
-        setPersonal(personal);
-    }
+    private static final String LOG_TAG = LogTag.getLogTag();
 
+    @VisibleForTesting
     public Address(String address) {
         setAddress(address);
+    }
+
+    public Address(String address, String personal) {
+        setPersonal(personal);
+        setAddress(address);
+    }
+
+    /**
+     * Returns a simplified string for this e-mail address.
+     * When a name is known, it will return the first token of that name. Otherwise, it will
+     * return the e-mail address up to the '@' sign.
+     */
+    public String getSimplifiedName() {
+        if (mSimplifiedName == null) {
+            if (TextUtils.isEmpty(mPersonal) && !TextUtils.isEmpty(mAddress)) {
+                int atSign = mAddress.indexOf('@');
+                mSimplifiedName = (atSign != -1) ? mAddress.substring(0, atSign) : "";
+            } else if (!TextUtils.isEmpty(mPersonal)) {
+
+                // TODO: use Contacts' NameSplitter for more reliable first-name extraction
+
+                int end = mPersonal.indexOf(' ');
+                while (end > 0 && mPersonal.charAt(end - 1) == ',') {
+                    end--;
+                }
+                mSimplifiedName = (end < 1) ? mPersonal : mPersonal.substring(0, end);
+
+            } else {
+                LogUtils.w(LOG_TAG, "Unable to get a simplified name");
+                mSimplifiedName = "";
+            }
+        }
+        return mSimplifiedName;
+    }
+
+    public static synchronized Address getEmailAddress(String rawAddress) {
+        if (TextUtils.isEmpty(rawAddress)) {
+            return null;
+        }
+        String name, address;
+        final Rfc822Token[] tokens = Rfc822Tokenizer.tokenize(rawAddress);
+        if (tokens.length > 0) {
+            final String tokenizedName = tokens[0].getName();
+            name = tokenizedName != null ? Html.fromHtml(tokenizedName.trim()).toString()
+                    : "";
+            address = Html.fromHtml(tokens[0].getAddress()).toString();
+        } else {
+            name = "";
+            address = rawAddress == null ?
+                    "" : Html.fromHtml(rawAddress).toString();
+        }
+        return new Address(address, name);
     }
 
     public String getAddress() {
@@ -106,12 +166,22 @@ public class Address {
     }
 
     /**
-     * Set name part from UTF-16 string. Optional surrounding double quote will be removed.
+     * Set personal part from UTF-16 string. Optional surrounding double quote will be removed.
      * It will be also unquoted and MIME/base64 decoded.
      *
      * @param personal name part of email address as UTF-16 string. Null is acceptable.
      */
     public void setPersonal(String personal) {
+        mPersonal = decodeAddressPersonal(personal);
+    }
+
+    /**
+     * Decodes name from UTF-16 string. Optional surrounding double quote will be removed.
+     * It will be also unquoted and MIME/base64 decoded.
+     *
+     * @param personal name part of email address as UTF-16 string. Null is acceptable.
+     */
+    public static String decodeAddressPersonal(String personal) {
         if (personal != null) {
             personal = REMOVE_OPTIONAL_DQUOTE.matcher(personal).replaceAll("$1");
             personal = UNQUOTE.matcher(personal).replaceAll("$1");
@@ -120,13 +190,14 @@ public class Address {
                 personal = null;
             }
         }
-        mPersonal = personal;
+        return personal;
     }
 
     /**
      * This method is used to check that all the addresses that the user
      * entered in a list (e.g. To:) are valid, so that none is dropped.
      */
+    @VisibleForTesting
     public static boolean isAllValid(String addressList) {
         // This code mimics the parse() method below.
         // I don't know how to better avoid the code-duplication.
@@ -169,7 +240,7 @@ public class Address {
                 }
             }
         }
-        return addresses.toArray(new Address[] {});
+        return addresses.toArray(new Address[addresses.size()]);
     }
 
     /**
@@ -212,7 +283,7 @@ public class Address {
     public String toString() {
         if (mPersonal != null && !mPersonal.equals(mAddress)) {
             if (mPersonal.matches(".*[\\(\\)<>@,;:\\\\\".\\[\\]].*")) {
-                return quoteString(mPersonal) + " <" + mAddress + ">";
+                return ensureQuotedString(mPersonal) + " <" + mAddress + ">";
             } else {
                 return mPersonal + " <" + mAddress + ">";
             }
@@ -226,8 +297,6 @@ public class Address {
      * not modified in any way except to add the double quote character to start and end if it's not
      * already there.
      *
-     * TODO: Rename this, because "quoteString()" can mean so many different things.
-     *
      * sample -> "sample"
      * "sample" -> "sample"
      * ""sample"" -> "sample"
@@ -237,14 +306,13 @@ public class Address {
      * (empty string) -> ""
      * " -> ""
      */
-    public static String quoteString(String s) {
+    private static String ensureQuotedString(String s) {
         if (s == null) {
             return null;
         }
         if (!s.matches("^\".*\"$")) {
             return "\"" + s + "\"";
-        }
-        else {
+        } else {
             return s;
         }
     }
@@ -255,8 +323,9 @@ public class Address {
      * @param addresses Address array
      * @return Human readable comma-delimited address string.
      */
+    @VisibleForTesting
     public static String toString(Address[] addresses) {
-        return toString(addresses, ",");
+        return toString(addresses, ADDRESS_DELIMETER);
     }
 
     /**
@@ -273,7 +342,7 @@ public class Address {
         if (addresses.length == 1) {
             return addresses[0].toString();
         }
-        StringBuffer sb = new StringBuffer(addresses[0].toString());
+        StringBuilder sb = new StringBuilder(addresses[0].toString());
         for (int i = 1; i < addresses.length; i++) {
             sb.append(separator);
             // TODO: investigate why this .trim() is needed.
@@ -310,7 +379,7 @@ public class Address {
         if (addresses.length == 1) {
             return addresses[0].toHeader();
         }
-        StringBuffer sb = new StringBuffer(addresses[0].toHeader());
+        StringBuilder sb = new StringBuilder(addresses[0].toHeader());
         for (int i = 1; i < addresses.length; i++) {
             // We need space character to be able to fold line.
             sb.append(", ");
@@ -325,6 +394,7 @@ public class Address {
      * @return the personal part of this Address, or the address part if the
      * personal part is not available
      */
+    @VisibleForTesting
     public String toFriendly() {
         if (mPersonal != null && mPersonal.length() > 0) {
             return mPersonal;
@@ -341,6 +411,7 @@ public class Address {
      * @return A comma-delimited string listing all of the addresses supplied.  Null if source
      * was null or empty.
      */
+    @VisibleForTesting
     public static String toFriendly(Address[] addresses) {
         if (addresses == null || addresses.length == 0) {
             return null;
@@ -348,7 +419,7 @@ public class Address {
         if (addresses.length == 1) {
             return addresses[0].toFriendly();
         }
-        StringBuffer sb = new StringBuffer(addresses[0].toFriendly());
+        StringBuilder sb = new StringBuilder(addresses[0].toFriendly());
         for (int i = 1; i < addresses.length; i++) {
             sb.append(", ");
             sb.append(addresses[i].toFriendly());
@@ -357,45 +428,50 @@ public class Address {
     }
 
     /**
-     * Returns exactly the same result as Address.toString(Address.unpack(packedList)).
+     * Returns exactly the same result as Address.toString(Address.fromHeader(addressList)).
      */
-    public static String unpackToString(String packedList) {
-        return toString(unpack(packedList));
+    @VisibleForTesting
+    public static String fromHeaderToString(String addressList) {
+        return toString(fromHeader(addressList));
     }
 
     /**
-     * Returns exactly the same result as Address.pack(Address.parse(textList)).
+     * Returns exactly the same result as Address.toHeader(Address.parse(addressList)).
      */
-    public static String parseAndPack(String textList) {
-        return Address.pack(Address.parse(textList));
+    @VisibleForTesting
+    public static String parseToHeader(String addressList) {
+        return Address.toHeader(Address.parse(addressList));
     }
 
     /**
-     * Returns null if the packedList has 0 addresses, otherwise returns the first address.
-     * The same as Address.unpack(packedList)[0] for non-empty list.
+     * Returns null if the addressList has 0 addresses, otherwise returns the first address.
+     * The same as Address.fromHeader(addressList)[0] for non-empty list.
      * This is an utility method that offers some performance optimization opportunities.
      */
-    public static Address unpackFirst(String packedList) {
-        Address[] array = unpack(packedList);
+    @VisibleForTesting
+    public static Address firstAddress(String addressList) {
+        Address[] array = fromHeader(addressList);
         return array.length > 0 ? array[0] : null;
     }
 
     /**
-     * Convert a packed list of addresses to a form suitable for use in an RFC822 header.
+     * This method exists to convert an address list formatted in a deprecated legacy format to the
+     * standard RFC822 header format. {@link #fromHeader(String)} is capable of reading the legacy
+     * format and the RFC822 format. {@link #toHeader()} always produces the RFC822 format.
+     *
      * This implementation is brute-force, and could be replaced with a more efficient version
      * if desired.
      */
-    public static String packedToHeader(String packedList) {
-        return toHeader(unpack(packedList));
+    public static String reformatToHeader(String addressList) {
+        return toHeader(fromHeader(addressList));
     }
 
     /**
-     * Unpacks an address list that is either CSV of RFC822 addresses OR (for backward
-     * compatibility) previously packed with pack()
-     * @param addressList string packed with pack() or CSV of RFC822 addresses
-     * @return array of addresses resulting from unpack
+     * @param addressList a CSV of RFC822 addresses or the deprecated legacy string format
+     * @return array of addresses parsed from <code>addressList</code>
      */
-    public static Address[] unpack(String addressList) {
+    @VisibleForTesting
+    public static Address[] fromHeader(String addressList) {
         if (addressList == null || addressList.length() == 0) {
             return EMPTY_ADDRESS_ARRAY;
         }
@@ -404,11 +480,11 @@ public class Address {
                 (addressList.indexOf(LIST_DELIMITER_EMAIL) == -1)) {
             return Address.parse(addressList);
         }
-        // Otherwise, do backward-compatibile unpack
+        // Otherwise, do backward-compatible unpack
         ArrayList<Address> addresses = new ArrayList<Address>();
         int length = addressList.length();
         int pairStartIndex = 0;
-        int pairEndIndex = 0;
+        int pairEndIndex;
 
         /* addressEndIndex is only re-scanned (indexOf()) when a LIST_DELIMITER_PERSONAL
            is used, not for every email address; i.e. not for every iteration of the while().
@@ -429,34 +505,41 @@ public class Address {
                 address = new Address(addressList.substring(pairStartIndex, pairEndIndex), null);
             } else {
                 address = new Address(addressList.substring(pairStartIndex, addressEndIndex),
-                                      addressList.substring(addressEndIndex + 1, pairEndIndex));
+                        addressList.substring(addressEndIndex + 1, pairEndIndex));
                 // only update addressEndIndex when we use the LIST_DELIMITER_PERSONAL
                 addressEndIndex = addressList.indexOf(LIST_DELIMITER_PERSONAL, pairEndIndex + 1);
             }
             addresses.add(address);
             pairStartIndex = pairEndIndex + 1;
         }
-        return addresses.toArray(EMPTY_ADDRESS_ARRAY);
+        return addresses.toArray(new Address[addresses.size()]);
     }
 
-    /**
-     * Generate a String containing RFC822 addresses separated by commas
-     * NOTE: We used to "pack" these addresses in an app-specific format, but no longer do so
-     */
-    public static String pack(Address[] addresses) {
-        return Address.toHeader(addresses);
-    }
-
-    /**
-     * Produces the same result as pack(array), but only packs one (this) address.
-     */
-    public String pack() {
-        final String address = getAddress();
-        final String personal = getPersonal();
-        if (personal == null) {
-            return address;
-        } else {
-            return address + LIST_DELIMITER_PERSONAL + personal;
+    public static final Creator<Address> CREATOR = new Creator<Address>() {
+        @Override
+        public Address createFromParcel(Parcel parcel) {
+            return new Address(parcel);
         }
+
+        @Override
+        public Address[] newArray(int size) {
+            return new Address[size];
+        }
+    };
+
+    public Address(Parcel in) {
+        setPersonal(in.readString());
+        setAddress(in.readString());
+    }
+
+    @Override
+    public int describeContents() {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel out, int flags) {
+        out.writeString(mPersonal);
+        out.writeString(mAddress);
     }
 }

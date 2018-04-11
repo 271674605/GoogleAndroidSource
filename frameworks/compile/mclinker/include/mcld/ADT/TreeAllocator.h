@@ -6,13 +6,10 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TREE_ALLOCATOR_H
-#define MCLD_TREE_ALLOCATOR_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_TREEALLOCATOR_H
+#define MCLD_ADT_TREEALLOCATOR_H
 #include <set>
-#include "mcld/Support/GCFactory.h"
+#include <mcld/Support/GCFactory.h>
 
 namespace mcld {
 
@@ -25,7 +22,7 @@ namespace mcld {
  *  NodeFactory provides delegation of memory. Sometimes, we have to merge two
  *  NodeFactories, and NodeFactory::delegate() can move the memory from one
  *  NodeFactories to another.
- *  
+ *
  *  @see LinearAllocator
  */
 template<typename DataType>

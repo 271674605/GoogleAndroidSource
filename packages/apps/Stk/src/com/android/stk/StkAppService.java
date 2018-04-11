@@ -53,6 +53,8 @@ import com.android.internal.telephony.cat.CatCmdMessage.BrowserSettings;
 import com.android.internal.telephony.cat.CatLog;
 import com.android.internal.telephony.cat.CatResponseMessage;
 import com.android.internal.telephony.cat.TextMessage;
+import com.android.internal.telephony.uicc.IccRefreshResponse;
+import com.android.internal.telephony.uicc.IccCardStatus.CardState;
 
 import java.util.LinkedList;
 
@@ -105,6 +107,7 @@ public class StkAppService extends Service implements Runnable {
     static final int OP_END_SESSION = 4;
     static final int OP_BOOT_COMPLETED = 5;
     private static final int OP_DELAYED_MSG = 6;
+    static final int OP_CARD_STATUS_CHANGED = 7;
 
     // Response ids
     static final int RES_ID_MENU_SELECTION = 11;
@@ -188,6 +191,7 @@ public class StkAppService extends Service implements Runnable {
             msg.obj = args.getParcelable(CMD_MSG);
             break;
         case OP_RESPONSE:
+        case OP_CARD_STATUS_CHANGED:
             msg.obj = args;
             /* falls through */
         case OP_LAUNCH_APP:
@@ -318,6 +322,40 @@ public class StkAppService extends Service implements Runnable {
             case OP_DELAYED_MSG:
                 handleDelayedCmd();
                 break;
+            case OP_CARD_STATUS_CHANGED:
+                CatLog.d(this, "Card/Icc Status change received");
+                handleCardStatusChangeAndIccRefresh((Bundle) msg.obj);
+                break;
+            }
+        }
+
+        private void handleCardStatusChangeAndIccRefresh(Bundle args) {
+            boolean cardStatus = args.getBoolean(AppInterface.CARD_STATUS);
+
+            CatLog.d(this, "CardStatus: " + cardStatus);
+            if (cardStatus == false) {
+                CatLog.d(this, "CARD is ABSENT");
+                // Uninstall STKAPP, Clear Idle text, Stop StkAppService
+                StkAppInstaller.unInstall(mContext);
+                mNotificationManager.cancel(STK_NOTIFICATION_ID);
+                stopSelf();
+            } else {
+                IccRefreshResponse state = new IccRefreshResponse();
+                state.refreshResult = args.getInt(AppInterface.REFRESH_RESULT);
+
+                CatLog.d(this, "Icc Refresh Result: "+ state.refreshResult);
+                if ((state.refreshResult == IccRefreshResponse.REFRESH_RESULT_INIT) ||
+                    (state.refreshResult == IccRefreshResponse.REFRESH_RESULT_RESET)) {
+                    // Clear Idle Text
+                    mNotificationManager.cancel(STK_NOTIFICATION_ID);
+                }
+
+                if (state.refreshResult == IccRefreshResponse.REFRESH_RESULT_RESET) {
+                    // Uninstall STkmenu
+                    StkAppInstaller.unInstall(mContext);
+                    mCurrentMenu = null;
+                    mMainCmd = null;
+                }
             }
         }
     }
@@ -780,7 +818,11 @@ public class StkAppService extends Service implements Runnable {
 
             final Notification.Builder notificationBuilder = new Notification.Builder(
                     StkAppService.this);
-            notificationBuilder.setContentTitle("");
+            if (mMainCmd != null && mMainCmd.getMenu() != null) {
+                notificationBuilder.setContentTitle(mMainCmd.getMenu().title);
+            } else {
+                notificationBuilder.setContentTitle("");
+            }
             notificationBuilder
                     .setSmallIcon(com.android.internal.R.drawable.stat_notify_sim_toolkit);
             notificationBuilder.setContentIntent(pendingIntent);
@@ -788,6 +830,7 @@ public class StkAppService extends Service implements Runnable {
             // Set text and icon for the status bar and notification body.
             if (!msg.iconSelfExplanatory) {
                 notificationBuilder.setContentText(msg.text);
+                notificationBuilder.setTicker(msg.text);
             }
             if (msg.icon != null) {
                 notificationBuilder.setLargeIcon(msg.icon);
@@ -797,7 +840,8 @@ public class StkAppService extends Service implements Runnable {
                     com.android.internal.R.drawable.stat_notify_sim_toolkit);
                 notificationBuilder.setLargeIcon(bitmapIcon);
             }
-
+            notificationBuilder.setColor(mContext.getResources().getColor(
+                    com.android.internal.R.color.system_notification_accent_color));
             mNotificationManager.notify(STK_NOTIFICATION_ID, notificationBuilder.build());
         }
     }

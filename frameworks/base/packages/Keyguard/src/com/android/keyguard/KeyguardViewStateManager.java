@@ -15,9 +15,11 @@
  */
 package com.android.keyguard;
 
+import android.animation.Animator;
+import android.animation.Animator.AnimatorListener;
+import android.animation.AnimatorListenerAdapter;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import android.view.View;
 
 public class KeyguardViewStateManager implements
@@ -45,6 +47,20 @@ public class KeyguardViewStateManager implements
     private int mPageIndexOnPageBeginMoving = -1;
 
     int mChallengeTop = 0;
+
+    private final AnimatorListener mPauseListener = new AnimatorListenerAdapter() {
+        public void onAnimationEnd(Animator animation) {
+            mKeyguardSecurityContainer.onPause();
+        }
+    };
+
+    private final AnimatorListener mResumeListener = new AnimatorListenerAdapter() {
+        public void onAnimationEnd(Animator animation) {
+            if (((View)mKeyguardSecurityContainer).isShown()) {
+                mKeyguardSecurityContainer.onResume(0);
+            }
+        }
+    };
 
     public KeyguardViewStateManager(KeyguardHostView hostView) {
         mKeyguardHostView = hostView;
@@ -89,11 +105,6 @@ public class KeyguardViewStateManager implements
     }
 
     public void showBouncer(boolean show) {
-        CharSequence what = mKeyguardHostView.getContext().getResources().getText(
-                show ? R.string.keyguard_accessibility_show_bouncer
-                        : R.string.keyguard_accessibility_hide_bouncer);
-        mKeyguardHostView.announceForAccessibility(what);
-        mKeyguardHostView.announceCurrentSecurityMethod();
         mChallengeLayout.showBouncer();
     }
 
@@ -102,20 +113,20 @@ public class KeyguardViewStateManager implements
     }
 
     public void fadeOutSecurity(int duration) {
-        ((View) mKeyguardSecurityContainer).animate().alpha(0f).setDuration(duration).start();
+        ((View) mKeyguardSecurityContainer).animate().alpha(0f).setDuration(duration)
+                .setListener(mPauseListener);
     }
 
     public void fadeInSecurity(int duration) {
-        ((View) mKeyguardSecurityContainer).animate().alpha(1f).setDuration(duration).start();
+        ((View) mKeyguardSecurityContainer).animate().alpha(1f).setDuration(duration)
+                .setListener(mResumeListener);
     }
 
     public void onPageBeginMoving() {
         if (mChallengeLayout.isChallengeOverlapping() &&
                 mChallengeLayout instanceof SlidingChallengeLayout) {
             SlidingChallengeLayout scl = (SlidingChallengeLayout) mChallengeLayout;
-            if (!mKeyguardWidgetPager.isWarping()) {
-                scl.fadeOutChallenge();
-            }
+            scl.fadeOutChallenge();
             mPageIndexOnPageBeginMoving = mKeyguardWidgetPager.getCurrentPage();
         }
         // We use mAppWidgetToShow to show a particular widget after you add it--
@@ -137,11 +148,12 @@ public class KeyguardViewStateManager implements
     public void onPageSwitching(View newPage, int newPageIndex) {
         if (mKeyguardWidgetPager != null && mChallengeLayout instanceof SlidingChallengeLayout) {
             boolean isCameraPage = newPage instanceof CameraWidgetFrame;
+            if (isCameraPage) {
+                CameraWidgetFrame camera = (CameraWidgetFrame) newPage;
+                camera.setUseFastTransition(mKeyguardWidgetPager.isWarping());
+            }
             SlidingChallengeLayout scl = (SlidingChallengeLayout) mChallengeLayout;
             scl.setChallengeInteractive(!isCameraPage);
-            if (isCameraPage) {
-                scl.fadeOutChallenge();
-            }
             final int currentFlags = mKeyguardWidgetPager.getSystemUiVisibility();
             final int newFlags = isCameraPage ? (currentFlags | View.STATUS_BAR_DISABLE_SEARCH)
                     : (currentFlags & ~View.STATUS_BAR_DISABLE_SEARCH);
@@ -178,7 +190,7 @@ public class KeyguardViewStateManager implements
             boolean challengeOverlapping = mChallengeLayout.isChallengeOverlapping();
             if (challengeOverlapping && !newCurPage.isSmall()
                     && mPageListeningToSlider != newPageIndex) {
-                newCurPage.shrinkWidget();
+                newCurPage.shrinkWidget(true);
             }
         }
 

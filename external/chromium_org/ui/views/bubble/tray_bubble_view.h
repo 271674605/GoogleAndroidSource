@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/mouse_watcher.h"
 #include "ui/views/views_export.h"
 
 // Specialized bubble view for bubbles associated with a tray icon (e.g. the
@@ -30,7 +31,8 @@ class TrayBubbleBorder;
 class TrayBubbleContentMask;
 }
 
-class VIEWS_EXPORT TrayBubbleView : public views::BubbleDelegateView {
+class VIEWS_EXPORT TrayBubbleView : public views::BubbleDelegateView,
+                                    public views::MouseWatcherListener {
  public:
   // AnchorType differentiates between bubbles that are anchored on a tray
   // element (ANCHOR_TYPE_TRAY) and display an arrow, or that are floating on
@@ -62,18 +64,21 @@ class VIEWS_EXPORT TrayBubbleView : public views::BubbleDelegateView {
     virtual void BubbleViewDestroyed() = 0;
 
     // Called when the mouse enters/exits the view.
+    // Note: This event will only be called if the mouse gets actively moved by
+    // the user to enter the view.
     virtual void OnMouseEnteredView() = 0;
     virtual void OnMouseExitedView() = 0;
 
     // Called from GetAccessibleState(); should return the appropriate
     // accessible name for the bubble.
-    virtual string16 GetAccessibleNameForBubble() = 0;
+    virtual base::string16 GetAccessibleNameForBubble() = 0;
 
     // Passes responsibility for BubbleDelegateView::GetAnchorRect to the
     // delegate.
-    virtual gfx::Rect GetAnchorRect(views::Widget* anchor_widget,
-                                    AnchorType anchor_type,
-                                    AnchorAlignment anchor_alignment) = 0;
+    virtual gfx::Rect GetAnchorRect(
+        views::Widget* anchor_widget,
+        AnchorType anchor_type,
+        AnchorAlignment anchor_alignment) const = 0;
 
     // Called when a bubble wants to hide/destroy itself (e.g. last visible
     // child view was closed).
@@ -149,15 +154,18 @@ class VIEWS_EXPORT TrayBubbleView : public views::BubbleDelegateView {
   virtual void GetWidgetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Overridden from views::BubbleDelegateView.
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  virtual gfx::Rect GetAnchorRect() const OVERRIDE;
 
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
-  virtual int GetHeightForWidth(int width) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  virtual gfx::Size GetMaximumSize() const OVERRIDE;
+  virtual int GetHeightForWidth(int width) const OVERRIDE;
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+
+  // Overridden from MouseWatcherListener
+  virtual void MouseMovedOutOfHost() OVERRIDE;
 
  protected:
   TrayBubbleView(gfx::NativeView parent_window,
@@ -180,6 +188,13 @@ class VIEWS_EXPORT TrayBubbleView : public views::BubbleDelegateView {
   internal::TrayBubbleBorder* bubble_border_;
   scoped_ptr<internal::TrayBubbleContentMask> bubble_content_mask_;
   bool is_gesture_dragging_;
+
+  // True once the mouse cursor was actively moved by the user over the bubble.
+  // Only then the OnMouseExitedView() event will get passed on to listeners.
+  bool mouse_actively_entered_;
+
+  // Used to find any mouse movements.
+  scoped_ptr<MouseWatcher> mouse_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayBubbleView);
 };

@@ -8,10 +8,15 @@
 #include <string>
 #include <vector>
 
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
+
+namespace content {
+class SandboxDirectoryDatabaseTest;
+}
 
 namespace tracked_objects {
 class Location;
@@ -19,6 +24,7 @@ class Location;
 
 namespace leveldb {
 class DB;
+class Env;
 class Status;
 class WriteBatch;
 }
@@ -55,8 +61,9 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxDirectoryDatabase {
     base::Time modification_time;
   };
 
-  explicit SandboxDirectoryDatabase(
-      const base::FilePath& filesystem_data_directory);
+  SandboxDirectoryDatabase(
+      const base::FilePath& filesystem_data_directory,
+      leveldb::Env* env_override);
   ~SandboxDirectoryDatabase();
 
   bool GetChildWithName(
@@ -68,7 +75,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxDirectoryDatabase {
   // exist.
   bool ListChildren(FileId parent_id, std::vector<FileId>* children);
   bool GetFileInfo(FileId file_id, FileInfo* info);
-  bool AddFileInfo(const FileInfo& info, FileId* file_id);
+  base::File::Error AddFileInfo(const FileInfo& info, FileId* file_id);
   bool RemoveFileInfo(FileId file_id);
   // This does a full update of the FileInfo, and is what you'd use for moves
   // and renames.  If you just want to update the modification_time, use
@@ -87,10 +94,13 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxDirectoryDatabase {
   // creation/destruction of SandboxDirectoryDatabase objects.
   bool GetNextInteger(int64* next);
 
+  bool IsDirectory(FileId file_id);
+
   // Returns true if the database looks consistent with local filesystem.
   bool IsFileSystemConsistent();
 
-  static bool DestroyDatabase(const base::FilePath& path);
+  static bool DestroyDatabase(const base::FilePath& path,
+                              leveldb::Env* env_override);
 
  private:
   enum RecoveryOption {
@@ -99,15 +109,14 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxDirectoryDatabase {
     FAIL_ON_CORRUPTION,
   };
 
+  friend class content::SandboxDirectoryDatabaseTest;
   friend class ObfuscatedFileUtil;
-  friend class SandboxDirectoryDatabaseTest;
 
   bool Init(RecoveryOption recovery_option);
   bool RepairDatabase(const std::string& db_path);
   void ReportInitStatus(const leveldb::Status& status);
   bool StoreDefaultValues();
   bool GetLastFileId(FileId* file_id);
-  bool VerifyIsDirectory(FileId file_id);
   bool AddFileInfoHelper(
       const FileInfo& info, FileId file_id, leveldb::WriteBatch* batch);
   bool RemoveFileInfoHelper(FileId file_id, leveldb::WriteBatch* batch);
@@ -115,6 +124,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxDirectoryDatabase {
                    const leveldb::Status& status);
 
   const base::FilePath filesystem_data_directory_;
+  leveldb::Env* env_override_;
   scoped_ptr<leveldb::DB> db_;
   base::Time last_reported_time_;
   DISALLOW_COPY_AND_ASSIGN(SandboxDirectoryDatabase);

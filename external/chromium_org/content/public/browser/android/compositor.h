@@ -6,12 +6,14 @@
 #define CONTENT_PUBLIC_BROWSER_ANDROID_COMPOSITOR_H_
 
 #include "base/callback.h"
+#include "cc/resources/ui_resource_bitmap.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/android/ui_resource_provider.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
-#include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
+class SkBitmap;
 
 namespace cc {
 class Layer;
@@ -23,6 +25,7 @@ class JavaBitmap;
 
 namespace content {
 class CompositorClient;
+class UIResourceProvider;
 
 // An interface to the browser-side compositor.
 class CONTENT_EXPORT Compositor {
@@ -33,21 +36,10 @@ class CONTENT_EXPORT Compositor {
   // instance can be used. This should be called only once.
   static void Initialize();
 
-  enum CompositorFlags {
-    // Creates a direct GL context on the thread that draws
-    // (i.e. main or impl thread).
-    DIRECT_CONTEXT_ON_DRAW_THREAD = 1,
-
-    // Runs the compositor in threaded mode.
-    ENABLE_COMPOSITOR_THREAD = 1 << 1,
-  };
-
-  // Initialize with flags. This should only be called once instead
-  // of Initialize().
-  static void InitializeWithFlags(uint32 flags);
-
-  // Creates and returns a compositor instance.
-  static Compositor* Create(CompositorClient* client);
+  // Creates and returns a compositor instance.  |root_window| needs to outlive
+  // the compositor as it manages callbacks on the compositor.
+  static Compositor* Create(CompositorClient* client,
+                            gfx::NativeWindow root_window);
 
   // Attaches the layer tree.
   virtual void SetRootLayer(scoped_refptr<cc::Layer> root) = 0;
@@ -73,42 +65,13 @@ class CONTENT_EXPORT Compositor {
   // Tells the view tree to assume a transparent background when rendering.
   virtual void SetHasTransparentBackground(bool flag) = 0;
 
-  // Attempts to composite and read back the result into the provided buffer.
-  // The buffer must be at least window width * height * 4 (RGBA) bytes large.
-  // The buffer is not modified if false is returned.
-  virtual bool CompositeAndReadback(void *pixels, const gfx::Rect& rect) = 0;
+  // Request layout and draw. You only need to call this if you need to trigger
+  // Composite *without* having modified the layer tree.
+  virtual void SetNeedsComposite() = 0;
 
-  // Invalidate the whole viewport.
-  virtual void SetNeedsRedraw() = 0;
+  // Returns the UI resource provider associated with the compositor.
+  virtual UIResourceProvider& GetUIResourceProvider() = 0;
 
-  // Composite immediately. Used in single-threaded mode.
-  virtual void Composite() = 0;
-
-  // Generates an OpenGL texture and returns a texture handle.  May return 0
-  // if the current context is lost.
-  virtual WebKit::WebGLId GenerateTexture(gfx::JavaBitmap& bitmap) = 0;
-
-  // Generates an OpenGL compressed texture and returns a texture handle.  May
-  // return 0 if the current context is lost.
-  virtual WebKit::WebGLId GenerateCompressedTexture(gfx::Size& size,
-                                                    int data_size,
-                                                    void* data) = 0;
-
-  // Deletes an OpenGL texture.
-  virtual void DeleteTexture(WebKit::WebGLId texture_id) = 0;
-
-  // Grabs a copy of |texture_id| and saves it into |bitmap|.  No scaling is
-  // done.  It is assumed that the texture size matches that of the bitmap.
-  virtual bool CopyTextureToBitmap(WebKit::WebGLId texture_id,
-                                   gfx::JavaBitmap& bitmap) = 0;
-
-  // Grabs a copy of |texture_id| and saves it into |bitmap|.  No scaling is
-  // done. |src_rect| allows the caller to specify which rect of |texture_id|
-  // to copy to |bitmap|.  It needs to match the size of |bitmap|.  Returns
-  // true if the |texture_id| was copied into |bitmap|, false if not.
-  virtual bool CopyTextureToBitmap(WebKit::WebGLId texture_id,
-                                   const gfx::Rect& src_rect,
-                                   gfx::JavaBitmap& bitmap) = 0;
  protected:
   Compositor() {}
 };

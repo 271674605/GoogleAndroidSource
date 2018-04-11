@@ -14,10 +14,12 @@
 #include "base/containers/hash_tables.h"
 #include "base/file_util.h"
 #include "base/gtest_prod_util.h"
+#include "base/values.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/syncable/dir_open_result.h"
+#include "sync/syncable/entry.h"
 #include "sync/syncable/entry_kernel.h"
 #include "sync/syncable/metahandle_set.h"
 #include "sync/syncable/parent_child_index.h"
@@ -32,6 +34,7 @@ class UnrecoverableErrorHandler;
 namespace syncable {
 
 class BaseTransaction;
+class BaseWriteTransaction;
 class DirectoryChangeDelegate;
 class DirectoryBackingStore;
 class NigoriHandler;
@@ -45,9 +48,13 @@ enum InvariantCheckLevel {
   FULL_DB_VERIFICATION = 2 // Check every entry.  This can be expensive.
 };
 
+// Directory stores and manages EntryKernels.
+//
+// This class is tightly coupled to several other classes (see friends).
 class SYNC_EXPORT Directory {
   friend class BaseTransaction;
   friend class Entry;
+  friend class ModelNeutralMutableEntry;
   friend class MutableEntry;
   friend class ReadTransaction;
   friend class ScopedKernelLock;
@@ -77,6 +84,9 @@ class SYNC_EXPORT Directory {
   typedef base::hash_map<int64, EntryKernel*> MetahandlesMap;
   typedef base::hash_map<std::string, EntryKernel*> IdsMap;
   typedef base::hash_map<std::string, EntryKernel*> TagsMap;
+  typedef std::string AttachmentIdUniqueId;
+  typedef base::hash_map<AttachmentIdUniqueId, MetahandleSet>
+      IndexByAttachmentId;
 
   static const base::FilePath::CharType kSyncDatabaseFilename[];
 
@@ -97,7 +107,7 @@ class SYNC_EXPORT Directory {
     // Set the |download_progress| entry for the given model to a
     // "first sync" start point.  When such a value is sent to the server,
     // a full download of all objects of the model will be initiated.
-    void reset_download_progress(ModelType model_type);
+    void ResetDownloadProgress(ModelType model_type);
 
     // Last sync timestamp fetched from the server.
     sync_pb::DataTypeProgressMarker download_progress[MODEL_TYPE_COUNT];
@@ -117,6 +127,8 @@ class SYNC_EXPORT Directory {
     // opaque to the client. This is the serialization of a message of type
     // ChipBag defined in sync.proto. It can contains NULL characters.
     std::string bag_of_chips;
+    // The per-datatype context.
+    sync_pb::DataTypeContext datatype_context[MODEL_TYPE_COUNT];
   };
 
   // What the Directory needs on initialization to create itself and its Kernel.
@@ -193,6 +205,14 @@ class SYNC_EXPORT Directory {
   int64 GetTransactionVersion(ModelType type) const;
   void IncrementTransactionVersion(ModelType type);
 
+  // Getter/setters for the per datatype context.
+  void GetDataTypeContext(BaseTransaction* trans,
+                          ModelType type,
+                          sync_pb::DataTypeContext* context) const;
+  void SetDataTypeContext(BaseWriteTransaction* trans,
+                          ModelType type,
+                          const sync_pb::DataTypeContext& context);
+
   ModelTypeSet InitialSyncEndedTypes();
   bool InitialSyncEndedForType(ModelType type);
   bool InitialSyncEndedForType(BaseTransaction* trans, ModelType type);
@@ -248,12 +268,6 @@ class SYNC_EXPORT Directory {
   bool GetChildHandlesById(BaseTransaction*, const Id& parent_id,
       Metahandles* result);
 
-  // Returns the child meta handles (even those for deleted/unlinked
-  // nodes) for given meta handle.  Clears |result| if there are no
-  // children.
-  bool GetChildHandlesByHandle(BaseTransaction*, int64 handle,
-      Metahandles* result);
-
   // Counts all items under the given node, including the node itself.
   int GetTotalNodeCount(BaseTransaction*, EntryKernel* kernel_) const;
 
@@ -300,10 +314,6 @@ class SYNC_EXPORT Directory {
   // WARNING: THIS METHOD PERFORMS SYNCHRONOUS I/O VIA SQLITE.
   bool SaveChanges();
 
-  // Fill in |result| with all entry kernels.
-  void GetAllEntryKernels(BaseTransaction* trans,
-                          std::vector<const EntryKernel*>* result);
-
   // Returns the number of entities with the unsynced bit set.
   int64 unsynced_entity_count() const;
 
@@ -313,11 +323,8 @@ class SYNC_EXPORT Directory {
   void GetUnsyncedMetaHandles(BaseTransaction* trans,
                               Metahandles* result);
 
-  // Returns all server types with unapplied updates.  A subset of
-  // those types can then be passed into
-  // GetUnappliedUpdateMetaHandles() below.
-  FullModelTypeSet GetServerTypesWithUnappliedUpdates(
-      BaseTransaction* trans) const;
+  // Returns whether or not this |type| has unapplied updates.
+  bool TypeHasUnappliedUpdates(ModelType type);
 
   // Get all the metahandles for unapplied updates for a given set of
   // server types.
@@ -325,12 +332,22 @@ class SYNC_EXPORT Directory {
                                      FullModelTypeSet server_types,
                                      std::vector<int64>* result);
 
+  // Get all the metahandles of entries of |type|.
+  void GetMetaHandlesOfType(BaseTransaction* trans,
+                            ModelType type,
+                            Metahandles* result);
+
   // Get metahandle counts for various criteria to show on the
   // about:sync page. The information is computed on the fly
   // each time. If this results in a significant performance hit,
   // additional data structures can be added to cache results.
   void CollectMetaHandleCounts(std::vector<int>* num_entries_by_type,
                                std::vector<int>* num_to_delete_entries_by_type);
+
+  // Returns a ListValue serialization of all nodes for the given type.
+  scoped_ptr<base::ListValue> GetNodeDetailsForType(
+      BaseTransaction* trans,
+      ModelType type);
 
   // Sets the level of invariant checking performed after transactions.
   void SetInvariantCheckLevel(InvariantCheckLevel check_level);
@@ -340,7 +357,7 @@ class SYNC_EXPORT Directory {
   // and may be used in release code.
   bool CheckInvariantsOnTransactionClose(
       syncable::BaseTransaction* trans,
-      const EntryKernelMutationMap& mutations);
+      const MetahandleSet& modified_handles);
 
   // Forces a full check of the directory.  This operation may be slow and
   // should not be invoked outside of tests.
@@ -368,6 +385,31 @@ class SYNC_EXPORT Directory {
                                       ModelTypeSet types_to_journal,
                                       ModelTypeSet types_to_unapply);
 
+  // Resets the base_versions and server_versions of all synced entities
+  // associated with |type| to 1.
+  // WARNING! This can be slow, as it iterates over all entries for a type.
+  bool ResetVersionsForType(BaseWriteTransaction* trans, ModelType type);
+
+  // Returns true iff the attachment identified by |attachment_id_proto| is
+  // linked to an entry.
+  //
+  // An attachment linked to a deleted entry is still considered linked if the
+  // entry hasn't yet been purged.
+  bool IsAttachmentLinked(
+      const sync_pb::AttachmentIdProto& attachment_id_proto) const;
+
+  // Given attachment id return metahandles to all entries that reference this
+  // attachment.
+  void GetMetahandlesByAttachmentId(
+      BaseTransaction* trans,
+      const sync_pb::AttachmentIdProto& attachment_id_proto,
+      Metahandles* result);
+
+  // Change entry to not dirty. Used in special case when we don't want to
+  // persist modified entry on disk. e.g. SyncBackupManager uses this to
+  // preserve sync preferences in DB on disk.
+  void UnmarkDirtyEntry(WriteTransaction* trans, Entry* entry);
+
  protected:  // for friends, mainly used by Entry constructors
   virtual EntryKernel* GetEntryByHandle(int64 handle);
   virtual EntryKernel* GetEntryByHandle(int64 metahandle,
@@ -375,11 +417,15 @@ class SYNC_EXPORT Directory {
   virtual EntryKernel* GetEntryById(const Id& id);
   EntryKernel* GetEntryByServerTag(const std::string& tag);
   virtual EntryKernel* GetEntryByClientTag(const std::string& tag);
-  EntryKernel* GetRootEntry();
-  bool ReindexId(WriteTransaction* trans, EntryKernel* const entry,
+  bool ReindexId(BaseWriteTransaction* trans, EntryKernel* const entry,
                  const Id& new_id);
-  bool ReindexParentId(WriteTransaction* trans, EntryKernel* const entry,
+  bool ReindexParentId(BaseWriteTransaction* trans, EntryKernel* const entry,
                        const Id& new_parent_id);
+  // Update the attachment index for |metahandle| removing it from the index
+  // under |old_metadata| entries and add it under |new_metadata| entries.
+  void UpdateAttachmentIndex(const int64 metahandle,
+                             const sync_pb::AttachmentMetadata& old_metadata,
+                             const sync_pb::AttachmentMetadata& new_metadata);
   void ClearDirtyMetahandles();
 
   DirOpenResult OpenImpl(
@@ -436,6 +482,17 @@ class SYNC_EXPORT Directory {
     // Contains non-deleted items, indexed according to parent and position
     // within parent.  Protected by the ScopedKernelLock.
     ParentChildIndex parent_child_index;
+
+    // This index keeps track of which metahandles refer to a given attachment.
+    // Think of it as the inverse of EntryKernel's AttachmentMetadata Records.
+    //
+    // Because entries can be undeleted (e.g. PutIsDel(false)), entries should
+    // not removed from the index until they are actually deleted from memory.
+    //
+    // All access should go through IsAttachmentLinked,
+    // RemoveFromAttachmentIndex, AddToAttachmentIndex, and
+    // UpdateAttachmentIndex methods to avoid iterator invalidation errors.
+    IndexByAttachmentId index_by_attachment_id;
 
     // 3 in-memory indices on bits used extremely frequently by the syncer.
     // |unapplied_update_metahandles| is keyed by the server model type.
@@ -505,9 +562,9 @@ class SYNC_EXPORT Directory {
   void HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot);
 
   // For new entry creation only
-  bool InsertEntry(WriteTransaction* trans,
+  bool InsertEntry(BaseWriteTransaction* trans,
                    EntryKernel* entry, ScopedKernelLock* lock);
-  bool InsertEntry(WriteTransaction* trans, EntryKernel* entry);
+  bool InsertEntry(BaseWriteTransaction* trans, EntryKernel* entry);
 
   // Used by CheckTreeInvariants
   void GetAllMetaHandles(BaseTransaction* trans, MetahandleSet* result);
@@ -529,7 +586,19 @@ class SYNC_EXPORT Directory {
   void UnapplyEntry(EntryKernel* entry);
   void DeleteEntry(bool save_to_journal,
                    EntryKernel* entry,
-                   EntryKernelSet* entries_to_journal);
+                   EntryKernelSet* entries_to_journal,
+                   const ScopedKernelLock& lock);
+
+  // Remove each of |metahandle|'s attachment ids from index_by_attachment_id.
+  void RemoveFromAttachmentIndex(
+      const int64 metahandle,
+      const sync_pb::AttachmentMetadata& attachment_metadata,
+      const ScopedKernelLock& lock);
+  // Add each of |metahandle|'s attachment ids to the index_by_attachment_id.
+  void AddToAttachmentIndex(
+      const int64 metahandle,
+      const sync_pb::AttachmentMetadata& attachment_metadata,
+      const ScopedKernelLock& lock);
 
   Kernel* kernel_;
 

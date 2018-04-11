@@ -23,6 +23,8 @@
           android:title="@string/reply_all" />
     <item android:id="@+id/forward"
           android:title="@string/forward" />
+    <item android:id="@+id/print_message"
+          android:title="@string/print" />
     <item android:id="@+id/report_rendering_problem"
           android:title="@string/report_rendering_problem" />
     <item android:id="@+id/report_rendering_improvement"

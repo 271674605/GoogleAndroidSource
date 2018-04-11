@@ -14,6 +14,7 @@
 #include "remoting/protocol/authentication_method.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/third_party_host_authenticator.h"
+#include "remoting/protocol/token_validator.h"
 
 namespace remoting {
 
@@ -27,6 +28,8 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
  public:
   // Create a factory that dispenses shared secret authenticators.
   static scoped_ptr<AuthenticatorFactory> CreateWithSharedSecret(
+      bool use_service_account,
+      const std::string& host_owner,
       const std::string& local_cert,
       scoped_refptr<RsaKeyPair> key_pair,
       const SharedSecretHash& shared_secret_hash,
@@ -34,10 +37,11 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
 
   // Create a factory that dispenses third party authenticators.
   static scoped_ptr<AuthenticatorFactory> CreateWithThirdPartyAuth(
+      bool use_service_account,
+      const std::string& host_owner,
       const std::string& local_cert,
       scoped_refptr<RsaKeyPair> key_pair,
-      scoped_ptr<ThirdPartyHostAuthenticator::TokenValidatorFactory>
-          token_validator_factory);
+      scoped_ptr<TokenValidatorFactory> token_validator_factory);
 
   // Create a factory that dispenses rejecting authenticators (used when the
   // host config/policy is inconsistent)
@@ -54,6 +58,8 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
 
  private:
   // Used for all host authenticators.
+  bool use_service_account_;
+  std::string host_owner_;
   std::string local_cert_;
   scoped_refptr<RsaKeyPair> key_pair_;
 
@@ -61,8 +67,7 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
   SharedSecretHash shared_secret_hash_;
 
   // Used only for third party host authenticators.
-  scoped_ptr<ThirdPartyHostAuthenticator::TokenValidatorFactory>
-      token_validator_factory_;
+  scoped_ptr<TokenValidatorFactory> token_validator_factory_;
 
   // Used only for pairing host authenticators.
   scoped_refptr<PairingRegistry> pairing_registry_;

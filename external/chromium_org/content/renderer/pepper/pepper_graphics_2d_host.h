@@ -15,14 +15,25 @@
 #include "ppapi/host/host_message_context.h"
 #include "ppapi/host/resource_host.h"
 #include "third_party/WebKit/public/platform/WebCanvas.h"
+#include "ui/events/latency_info.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
+
+namespace cc {
+class SingleReleaseCallback;
+class TextureMailbox;
+}
 
 namespace gfx {
-class Point;
 class Rect;
 }
 
+namespace ppapi {
+struct ViewData;
+}
+
 namespace content {
-  
+
 class PepperPluginInstanceImpl;
 class PPB_ImageData_Impl;
 class RendererPpapiHost;
@@ -31,11 +42,13 @@ class CONTENT_EXPORT PepperGraphics2DHost
     : public ppapi::host::ResourceHost,
       public base::SupportsWeakPtr<PepperGraphics2DHost> {
  public:
-  static PepperGraphics2DHost* Create(RendererPpapiHost* host,
-                                      PP_Instance instance,
-                                      PP_Resource resource,
-                                      const PP_Size& size,
-                                      PP_Bool is_always_opaque);
+  static PepperGraphics2DHost* Create(
+      RendererPpapiHost* host,
+      PP_Instance instance,
+      PP_Resource resource,
+      const PP_Size& size,
+      PP_Bool is_always_opaque,
+      scoped_refptr<PPB_ImageData_Impl> backing_store);
 
   virtual ~PepperGraphics2DHost();
 
@@ -45,21 +58,24 @@ class CONTENT_EXPORT PepperGraphics2DHost
       ppapi::host::HostMessageContext* context) OVERRIDE;
   virtual bool IsGraphics2DHost() OVERRIDE;
 
-  bool ReadImageData(PP_Resource image,
-                     const PP_Point* top_left);
+  bool ReadImageData(PP_Resource image, const PP_Point* top_left);
   // Assciates this device with the given plugin instance. You can pass NULL
   // to clear the existing device. Returns true on success. In this case, a
   // repaint of the page will also be scheduled. Failure means that the device
   // is already bound to a different instance, and nothing will happen.
   bool BindToInstance(PepperPluginInstanceImpl* new_instance);
   // Paints the current backing store to the web page.
-  void Paint(WebKit::WebCanvas* canvas,
+  void Paint(blink::WebCanvas* canvas,
              const gfx::Rect& plugin_rect,
              const gfx::Rect& paint_rect);
 
+  bool PrepareTextureMailbox(
+      cc::TextureMailbox* mailbox,
+      scoped_ptr<cc::SingleReleaseCallback>* release_callback);
+  void AttachedToNewLayer();
+
   // Notifications about the view's progress painting.  See PluginInstance.
   // These messages are used to send Flush callbacks to the plugin.
-  void ViewWillInitiatePaint();
   void ViewInitiatedPaint();
   void ViewFlushedPaint();
 
@@ -67,13 +83,17 @@ class CONTENT_EXPORT PepperGraphics2DHost
   float GetScale() const;
   bool IsAlwaysOpaque() const;
   PPB_ImageData_Impl* ImageData();
+  gfx::Size Size() const;
 
  private:
   PepperGraphics2DHost(RendererPpapiHost* host,
                        PP_Instance instance,
                        PP_Resource resource);
 
-  bool Init(int width, int height, bool is_always_opaque);
+  bool Init(int width,
+            int height,
+            bool is_always_opaque,
+            scoped_refptr<PPB_ImageData_Impl> backing_store);
 
   int32_t OnHostMsgPaintImageData(ppapi::host::HostMessageContext* context,
                                   const ppapi::HostResource& image_data,
@@ -86,7 +106,8 @@ class CONTENT_EXPORT PepperGraphics2DHost
                           const PP_Point& amount);
   int32_t OnHostMsgReplaceContents(ppapi::host::HostMessageContext* context,
                                    const ppapi::HostResource& image_data);
-  int32_t OnHostMsgFlush(ppapi::host::HostMessageContext* context);
+  int32_t OnHostMsgFlush(ppapi::host::HostMessageContext* context,
+                         const std::vector<ui::LatencyInfo>& latency_info);
   int32_t OnHostMsgSetScale(ppapi::host::HostMessageContext* context,
                             float scale);
   int32_t OnHostMsgReadImageData(ppapi::host::HostMessageContext* context,
@@ -103,10 +124,13 @@ class CONTENT_EXPORT PepperGraphics2DHost
   // the update that requires invalidation. If there were no pixels changed,
   // this rect can be untouched.
   void ExecutePaintImageData(PPB_ImageData_Impl* image,
-                             int x, int y,
+                             int x,
+                             int y,
                              const gfx::Rect& src_rect,
                              gfx::Rect* invalidated_rect);
-  void ExecuteScroll(const gfx::Rect& clip, int dx, int dy,
+  void ExecuteScroll(const gfx::Rect& clip,
+                     int dx,
+                     int dy,
                      gfx::Rect* invalidated_rect);
   void ExecuteReplaceContents(PPB_ImageData_Impl* image,
                               gfx::Rect* invalidated_rect,
@@ -132,7 +156,6 @@ class CONTENT_EXPORT PepperGraphics2DHost
   static bool ConvertToLogicalPixels(float scale,
                                      gfx::Rect* op_rect,
                                      gfx::Point* delta);
-
 
   RendererPpapiHost* renderer_ppapi_host_;
 
@@ -163,11 +186,12 @@ class CONTENT_EXPORT PepperGraphics2DHost
   // DIP
   float scale_;
 
-  base::WeakPtrFactory<PepperGraphics2DHost> weak_ptr_factory_;
-
   ppapi::host::ReplyMessageContext flush_reply_context_;
 
   bool is_running_in_process_;
+
+  bool texture_mailbox_modified_;
+  bool is_using_texture_layer_;
 
   friend class PepperGraphics2DHostTest;
   DISALLOW_COPY_AND_ASSIGN(PepperGraphics2DHost);

@@ -18,6 +18,7 @@ package libcore.icu;
 
 import com.android.tools.layoutlib.annotations.LayoutlibDelegate;
 import com.ibm.icu.text.DateTimePatternGenerator;
+import com.ibm.icu.util.Currency;
 import com.ibm.icu.util.ULocale;
 
 import java.util.Locale;
@@ -46,7 +47,7 @@ public class ICU_Delegate {
     // --- Native methods accessing ICU's database.
 
     @LayoutlibDelegate
-    /*package*/ static String getBestDateTimePattern(String skeleton, String localeName) {
+    /*package*/ static String getBestDateTimePatternNative(String skeleton, String localeName) {
         return DateTimePatternGenerator.getInstance(new ULocale(localeName))
                 .getBestPattern(skeleton);
     }
@@ -117,6 +118,11 @@ public class ICU_Delegate {
     }
 
     @LayoutlibDelegate
+    /*package*/ static int getCurrencyNumericCode(String currencyCode) {
+        return Currency.getInstance(currencyCode).getNumericCode();
+    }
+
+    @LayoutlibDelegate
     /*package*/ static String getCurrencySymbol(String locale, String currencyCode) {
         return "";
     }
@@ -137,12 +143,17 @@ public class ICU_Delegate {
     }
 
     @LayoutlibDelegate
-    /*package*/ static String getISO3CountryNative(String locale) {
+    /*package*/ static String getDisplayScriptNative(String variantCode, String locale) {
         return "";
     }
 
     @LayoutlibDelegate
-    /*package*/ static String getISO3LanguageNative(String locale) {
+    /*package*/ static String getISO3Country(String locale) {
+        return "";
+    }
+
+    @LayoutlibDelegate
+    /*package*/ static String getISO3Language(String locale) {
         return "";
     }
 
@@ -167,7 +178,7 @@ public class ICU_Delegate {
     }
 
     @LayoutlibDelegate
-    /*package*/ static boolean initLocaleDataImpl(String locale, LocaleData result) {
+    /*package*/ static boolean initLocaleDataNative(String locale, LocaleData result) {
 
         // Used by Calendar.
         result.firstDayOfWeek = Integer.valueOf(1);
@@ -184,12 +195,18 @@ public class ICU_Delegate {
         result.longStandAloneMonthNames = result.longMonthNames;
         result.shortStandAloneMonthNames = result.shortMonthNames;
 
+        // The platform code expects this to begin at index 1, rather than 0. It maps it directly to
+        // the constants from java.util.Calendar.<weekday>
         result.longWeekdayNames = new String[] {
-                "Monday" ,"Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+                "", "Sunday", "Monday" ,"Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
         result.shortWeekdayNames = new String[] {
-                "Mon" ,"Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+                "", "Sun", "Mon" ,"Tue", "Wed", "Thu", "Fri", "Sat" };
+        result.tinyWeekdayNames = new String[] {
+                "", "S", "M", "T", "W", "T", "F", "S" };
+
         result.longStandAloneWeekdayNames = result.longWeekdayNames;
         result.shortStandAloneWeekdayNames = result.shortWeekdayNames;
+        result.tinyStandAloneWeekdayNames = result.tinyWeekdayNames;
 
         result.fullTimeFormat = "";
         result.longTimeFormat = "";
@@ -209,7 +226,7 @@ public class ICU_Delegate {
         result.percent = '%';
         result.perMill = '\u2030';
         result.monetarySeparator = ' ';
-        result.minusSign = '-';
+        result.minusSign = "-";
         result.exponentSeparator = "e";
         result.infinity = "\u221E";
         result.NaN = "NaN";
@@ -224,5 +241,15 @@ public class ICU_Delegate {
         result.percentPattern = "%f";
 
         return true;
+    }
+
+    @LayoutlibDelegate
+    /*package*/ static void setDefaultLocale(String locale) {
+        ICU.setDefaultLocale(locale);
+    }
+
+    @LayoutlibDelegate
+    /*package*/ static String getDefaultLocale() {
+        return ICU.getDefaultLocale();
     }
 }

@@ -45,6 +45,13 @@ Type::~Type() {
     clear();
 }
 
+void Type::operator delete(void* ptr) {
+    if (ptr) {
+        Type *t = (Type*) ptr;
+        t->getContext()->mHal.funcs.freeRuntimeMem(ptr);
+    }
+}
+
 void Type::clear() {
     if (mHal.state.lodCount) {
         delete [] mHal.state.lodDimX;
@@ -72,7 +79,11 @@ void Type::compute() {
         mHal.state.lodCount = rsMax(l2x, l2y);
         mHal.state.lodCount = rsMax(mHal.state.lodCount, l2z);
     } else {
-        mHal.state.lodCount = 1;
+        if (mHal.state.dimYuv) {
+            mHal.state.lodCount = 3;
+        } else {
+            mHal.state.lodCount = 1;
+        }
     }
     if (mHal.state.lodCount != oldLODCount) {
         if (oldLODCount) {
@@ -89,14 +100,16 @@ void Type::compute() {
     uint32_t ty = mHal.state.dimY;
     uint32_t tz = mHal.state.dimZ;
     mCellCount = 0;
-    for (uint32_t lod=0; lod < mHal.state.lodCount; lod++) {
-        mHal.state.lodDimX[lod] = tx;
-        mHal.state.lodDimY[lod] = ty;
-        mHal.state.lodDimZ[lod]  = tz;
-        mCellCount += tx * rsMax(ty, 1u) * rsMax(tz, 1u);
-        if (tx > 1) tx >>= 1;
-        if (ty > 1) ty >>= 1;
-        if (tz > 1) tz >>= 1;
+    if (!mHal.state.dimYuv) {
+        for (uint32_t lod=0; lod < mHal.state.lodCount; lod++) {
+            mHal.state.lodDimX[lod] = tx;
+            mHal.state.lodDimY[lod] = ty;
+            mHal.state.lodDimZ[lod]  = tz;
+            mCellCount += tx * rsMax(ty, 1u) * rsMax(tz, 1u);
+            if (tx > 1) tx >>= 1;
+            if (ty > 1) ty >>= 1;
+            if (tz > 1) tz >>= 1;
+        }
     }
 
     if (mHal.state.faces) {
@@ -110,6 +123,7 @@ void Type::compute() {
         mHal.state.lodDimY[1] = mHal.state.lodDimY[0] / 2;
         mHal.state.lodDimX[2] = mHal.state.lodDimX[0] / 2;
         mHal.state.lodDimY[2] = mHal.state.lodDimY[0] / 2;
+        mCellCount += mHal.state.lodDimX[0] * mHal.state.lodDimY[0];
         mCellCount += mHal.state.lodDimX[1] * mHal.state.lodDimY[1];
         mCellCount += mHal.state.lodDimX[2] * mHal.state.lodDimY[2];
 
@@ -226,8 +240,20 @@ ObjectBaseRef<Type> Type::getTypeRef(Context *rsc, const Element *e,
     }
     ObjectBase::asyncUnlock();
 
+    // Type objects must use allocator specified by the driver
+    void* allocMem = rsc->mHal.funcs.allocRuntimeMem(sizeof(Type), 0);
+    if (!allocMem) {
+        rsc->setError(RS_ERROR_FATAL_DRIVER, "Couldn't allocate memory for Type");
+        return NULL;
+    }
 
-    Type *nt = new Type(rsc);
+    Type *nt = new (allocMem) Type(rsc);
+
+#ifdef RS_FIND_OFFSETS
+    ALOGE("pointer for type: %p", nt);
+    ALOGE("pointer for type.drv: %p", &nt->mHal.drv);
+#endif
+
     nt->mDimLOD = dimLOD;
     returnRef.set(nt);
     nt->mElement.set(e);
@@ -288,6 +314,13 @@ void Type::decRefs(const void *ptr, size_t ct, size_t startOff) const {
     }
 }
 
+void Type::callUpdateCacheObject(const Context *rsc, void *dstObj) const {
+    if (rsc->mHal.funcs.type.updateCachedObject != NULL) {
+        rsc->mHal.funcs.type.updateCachedObject(rsc, this, (rs_type *)dstObj);
+    } else {
+        *((const void **)dstObj) = this;
+    }
+}
 
 //////////////////////////////////////////////////
 //
@@ -295,10 +328,10 @@ namespace android {
 namespace renderscript {
 
 RsType rsi_TypeCreate(Context *rsc, RsElement _e, uint32_t dimX,
-                     uint32_t dimY, uint32_t dimZ, bool mips, bool faces, uint32_t yuv) {
+                     uint32_t dimY, uint32_t dimZ, bool mipmaps, bool faces, uint32_t yuv) {
     Element *e = static_cast<Element *>(_e);
 
-    return Type::getType(rsc, e, dimX, dimY, dimZ, mips, faces, yuv);
+    return Type::getType(rsc, e, dimX, dimY, dimZ, mipmaps, faces, yuv);
 }
 
 }

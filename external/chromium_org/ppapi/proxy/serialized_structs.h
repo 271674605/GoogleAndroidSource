@@ -16,6 +16,8 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
+#include "ppapi/c/ppb_network_list.h"
+#include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
 #include "ppapi/shared_impl/host_resource.h"
 
@@ -56,6 +58,19 @@ struct PPAPI_PROXY_EXPORT SerializedFontDescription {
   int32_t letter_spacing;
   int32_t word_spacing;
 };
+
+struct PPAPI_PROXY_EXPORT SerializedNetworkInfo {
+  SerializedNetworkInfo();
+  ~SerializedNetworkInfo();
+
+  std::string name;
+  PP_NetworkList_Type type;
+  PP_NetworkList_State state;
+  std::vector<PP_NetAddress_Private> addresses;
+  std::string display_name;
+  int mtu;
+};
+typedef std::vector<SerializedNetworkInfo> SerializedNetworkList;
 
 struct PPAPI_PROXY_EXPORT SerializedTrueTypeFontDesc {
   SerializedTrueTypeFontDesc();
@@ -120,9 +135,6 @@ struct PPPDecryptor_Buffer {
 // TODO(raymes): Make ImageHandle compatible with SerializedHandle.
 #if defined(OS_WIN)
 typedef HANDLE ImageHandle;
-#elif defined(TOOLKIT_GTK)
-// On legacy X Windows this is a SysV shared memory key.
-typedef int ImageHandle;
 #else
 typedef base::SharedMemoryHandle ImageHandle;
 #endif

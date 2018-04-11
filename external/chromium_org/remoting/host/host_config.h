@@ -19,6 +19,8 @@ namespace remoting {
 
 // Status of the host, whether it is enabled or disabled.
 extern const char kHostEnabledConfigPath[];
+// Google account of the owner of this host.
+extern const char kHostOwnerConfigPath[];
 // Login used to authenticate in XMPP network.
 extern const char kXmppLoginConfigPath[];
 // Auth token used to authenticate to XMPP network.
@@ -38,6 +40,8 @@ extern const char kHostSecretHashConfigPath[];
 extern const char kPrivateKeyConfigPath[];
 // Whether consent is given for usage stats reporting.
 extern const char kUsageStatsConsentConfigPath[];
+// Whether to offer VP9 encoding to clients.
+extern const char kEnableVp9ConfigPath[];
 
 // HostConfig interace provides read-only access to host configuration.
 class HostConfig {

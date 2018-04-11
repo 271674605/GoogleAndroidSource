@@ -16,23 +16,20 @@
 
 package com.android.mail.utils;
 
-import com.google.android.mail.common.html.parser.HtmlDocument;
-import com.google.android.mail.common.html.parser.HtmlParser;
-import com.google.android.mail.common.html.parser.HtmlTree;
-import com.google.android.mail.common.html.parser.HtmlTreeBuilder;
-import com.google.common.collect.Maps;
-
+import android.annotation.TargetApi;
+import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.Fragment;
 import android.app.SearchManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Resources;
-import android.content.res.TypedArray;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Typeface;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -40,14 +37,11 @@ import android.os.Bundle;
 import android.provider.Browser;
 import android.text.Spannable;
 import android.text.SpannableString;
-import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
-import android.text.TextUtils.SimpleStringSplitter;
 import android.text.style.CharacterStyle;
-import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
-import android.util.TypedValue;
+import android.text.style.TextAppearanceSpan;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -58,6 +52,7 @@ import android.view.Window;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.R;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.compose.ComposeActivity;
@@ -67,8 +62,12 @@ import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.EditSettingsExtras;
-import com.android.mail.ui.FeedbackEnabledActivity;
+import com.android.mail.ui.HelpActivity;
 import com.android.mail.ui.ViewMode;
+import com.google.android.mail.common.html.parser.HtmlDocument;
+import com.google.android.mail.common.html.parser.HtmlParser;
+import com.google.android.mail.common.html.parser.HtmlTree;
+import com.google.android.mail.common.html.parser.HtmlTreeBuilder;
 
 import org.json.JSONObject;
 
@@ -83,7 +82,6 @@ public class Utils {
      * longest extension we recognize is 4 characters (e.g. "html", "docx")
      */
     private static final int FILE_EXTENSION_MAX_CHARS = 4;
-    private static final Map<Integer, Integer> sPriorityToLength = Maps.newHashMap();
     public static final String SENDER_LIST_TOKEN_ELIDED = "e";
     public static final String SENDER_LIST_TOKEN_NUM_MESSAGES = "n";
     public static final String SENDER_LIST_TOKEN_NUM_DRAFTS = "d";
@@ -91,9 +89,6 @@ public class Utils {
     public static final String SENDER_LIST_TOKEN_SENDING = "s";
     public static final String SENDER_LIST_TOKEN_SEND_FAILED = "f";
     public static final Character SENDER_LIST_SEPARATOR = '\n';
-    public static final SimpleStringSplitter sSenderListSplitter = new SimpleStringSplitter(
-            SENDER_LIST_SEPARATOR);
-    public static String[] sSenderFragments = new String[8];
 
     public static final String EXTRA_ACCOUNT = "account";
     public static final String EXTRA_ACCOUNT_URI = "accountUri";
@@ -102,6 +97,8 @@ public class Utils {
     public static final String EXTRA_COMPOSE_URI = "composeUri";
     public static final String EXTRA_CONVERSATION = "conversationUri";
     public static final String EXTRA_FROM_NOTIFICATION = "notification";
+    public static final String EXTRA_IGNORE_INITIAL_CONVERSATION_LIMIT =
+            "ignore-initial-conversation-limit";
 
     private static final String MAILTO_SCHEME = "mailto";
 
@@ -121,7 +118,7 @@ public class Utils {
     private static final String SMART_HELP_LINK_PARAMETER_NAME = "p";
 
     private static final String SMART_LINK_APP_VERSION = "version";
-    private static int sVersionCode = -1;
+    private static String sVersionCode = null;
 
     private static final int SCALED_SCREENSHOT_MAX_HEIGHT_WIDTH = 600;
 
@@ -140,8 +137,34 @@ public class Utils {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
     }
 
+    public static boolean isRunningJBMR1OrLater() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1;
+    }
+
     public static boolean isRunningKitkatOrLater() {
-        return Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR2;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
+    }
+
+    public static boolean isRunningLOrLater() {
+        //TODO: Update this to the L SDK once defined. Right now it is fine to use the watch
+        // build version number, as this app woll not be running on watch devices
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH;
+    }
+
+    /**
+     * @return Whether we are running on a low memory device.  This is used to disable certain
+     * memory intensive features in the app.
+     */
+    @TargetApi(Build.VERSION_CODES.KITKAT)
+    public static boolean isLowRamDevice(Context context) {
+        if (isRunningKitkatOrLater()) {
+            final ActivityManager am = (ActivityManager) context.getSystemService(
+                    Context.ACTIVITY_SERVICE);
+            // This will be null when running unit tests
+            return am != null && am.isLowRamDevice();
+        } else {
+            return false;
+        }
     }
 
     /**
@@ -155,6 +178,37 @@ public class Utils {
         webSettings.setSaveFormData(false);
         webSettings.setJavaScriptEnabled(false);
         webSettings.setSupportZoom(false);
+    }
+
+    /**
+     * Sets custom user agent to WebView so we don't get GAIA interstitials b/13990689.
+     *
+     * @param webView The WebView to customize.
+     */
+    public static void setCustomUserAgent(WebView webView, Context context) {
+        final WebSettings settings = webView.getSettings();
+        final String version = getVersionCode(context);
+        final String originalUserAgent = settings.getUserAgentString();
+        final String userAgent = context.getResources().getString(
+                R.string.user_agent_format, originalUserAgent, version);
+        settings.setUserAgentString(userAgent);
+    }
+
+    /**
+     * Returns the version code for the package, or null if it cannot be retrieved.
+     */
+    public static String getVersionCode(Context context) {
+        if (sVersionCode == null) {
+            try {
+                sVersionCode = String.valueOf(context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0 /* flags */)
+                        .versionCode);
+            } catch (NameNotFoundException e) {
+                LogUtils.e(Utils.LOG_TAG, "Error finding package %s",
+                        context.getApplicationInfo().packageName);
+            }
+        }
+        return sVersionCode;
     }
 
     /**
@@ -195,361 +249,27 @@ public class Utils {
         return text.substring(0, realMax) + extension;
     }
 
-    /**
-     * Ensures that the given string starts and ends with the double quote
-     * character. The string is not modified in any way except to add the double
-     * quote character to start and end if it's not already there. sample ->
-     * "sample" "sample" -> "sample" ""sample"" -> "sample"
-     * "sample"" -> "sample" sa"mp"le -> "sa"mp"le" "sa"mp"le" -> "sa"mp"le"
-     * (empty string) -> "" " -> ""
-     */
-    public static String ensureQuotedString(String s) {
-        if (s == null) {
-            return null;
-        }
-        if (!s.matches("^\".*\"$")) {
-            return "\"" + s + "\"";
-        } else {
-            return s;
-        }
-    }
-
-    // TODO: Move this to the UI Provider.
-    private static CharacterStyle sUnreadStyleSpan = null;
-    private static CharacterStyle sReadStyleSpan;
-    private static CharacterStyle sDraftsStyleSpan;
-    private static CharSequence sMeString;
-    private static CharSequence sDraftSingularString;
-    private static CharSequence sDraftPluralString;
-    private static CharSequence sSendingString;
-    private static CharSequence sSendFailedString;
-
     private static int sMaxUnreadCount = -1;
     private static final CharacterStyle ACTION_BAR_UNREAD_STYLE = new StyleSpan(Typeface.BOLD);
     private static String sUnreadText;
+    private static String sUnseenText;
+    private static String sLargeUnseenText;
     private static int sDefaultFolderBackgroundColor = -1;
     private static int sUseFolderListFragmentTransition = -1;
-
-    public static void getStyledSenderSnippet(Context context, String senderInstructions,
-            SpannableStringBuilder senderBuilder, SpannableStringBuilder statusBuilder,
-            int maxChars, boolean forceAllUnread, boolean forceAllRead, boolean allowDraft) {
-        Resources res = context.getResources();
-        if (sUnreadStyleSpan == null) {
-            sUnreadStyleSpan = new StyleSpan(Typeface.BOLD);
-            sReadStyleSpan = new StyleSpan(Typeface.NORMAL);
-            sDraftsStyleSpan = new ForegroundColorSpan(res.getColor(R.color.drafts));
-
-            sMeString = context.getText(R.string.me_subject_pronun);
-            sDraftSingularString = res.getQuantityText(R.plurals.draft, 1);
-            sDraftPluralString = res.getQuantityText(R.plurals.draft, 2);
-            SpannableString sendingString = new SpannableString(context.getText(R.string.sending));
-            sendingString.setSpan(CharacterStyle.wrap(sDraftsStyleSpan), 0, sendingString.length(),
-                    0);
-            sSendingString = sendingString;
-            sSendFailedString = context.getText(R.string.send_failed);
-        }
-
-        getSenderSnippet(senderInstructions, senderBuilder, statusBuilder, maxChars,
-                sUnreadStyleSpan, sReadStyleSpan, sDraftsStyleSpan, sMeString,
-                sDraftSingularString, sDraftPluralString, sSendingString, sSendFailedString,
-                forceAllUnread, forceAllRead, allowDraft);
-    }
-
-    /**
-     * Uses sender instructions to build a formatted string.
-     * <p>
-     * Sender list instructions contain compact information about the sender
-     * list. Most work that can be done without knowing how much room will be
-     * availble for the sender list is done when creating the instructions.
-     * <p>
-     * The instructions string consists of tokens separated by
-     * SENDER_LIST_SEPARATOR. Here are the tokens, one per line:
-     * <ul>
-     * <li><tt>n</tt></li>
-     * <li><em>int</em>, the number of non-draft messages in the conversation</li>
-     * <li><tt>d</tt</li>
-     * <li><em>int</em>, the number of drafts in the conversation</li>
-     * <li><tt>l</tt></li>
-     * <li><em>literal html to be included in the output</em></li>
-     * <li><tt>s</tt> indicates that the message is sending (in the outbox
-     * without errors)</li>
-     * <li><tt>f</tt> indicates that the message failed to send (in the outbox
-     * with errors)</li>
-     * <li><em>for each message</em>
-     * <ul>
-     * <li><em>int</em>, 0 for read, 1 for unread</li>
-     * <li><em>int</em>, the priority of the message. Zero is the most important
-     * </li>
-     * <li><em>text</em>, the sender text or blank for messages from 'me'</li>
-     * </ul>
-     * </li>
-     * <li><tt>e</tt> to indicate that one or more messages have been elided</li>
-     * <p>
-     * The instructions indicate how many messages and drafts are in the
-     * conversation and then describe the most important messages in order,
-     * indicating the priority of each message and whether the message is
-     * unread.
-     *
-     * @param instructions instructions as described above
-     * @param senderBuilder the SpannableStringBuilder to append to for sender
-     *            information
-     * @param statusBuilder the SpannableStringBuilder to append to for status
-     * @param maxChars the number of characters available to display the text
-     * @param unreadStyle the CharacterStyle for unread messages, or null
-     * @param draftsStyle the CharacterStyle for draft messages, or null
-     * @param sendingString the string to use when there are messages scheduled
-     *            to be sent
-     * @param sendFailedString the string to use when there are messages that
-     *            mailed to send
-     * @param meString the string to use for messages sent by this user
-     * @param draftString the string to use for "Draft"
-     * @param draftPluralString the string to use for "Drafts"
-     */
-    public static synchronized void getSenderSnippet(String instructions,
-            SpannableStringBuilder senderBuilder, SpannableStringBuilder statusBuilder,
-            int maxChars, CharacterStyle unreadStyle, CharacterStyle readStyle,
-            CharacterStyle draftsStyle, CharSequence meString, CharSequence draftString,
-            CharSequence draftPluralString, CharSequence sendingString,
-            CharSequence sendFailedString, boolean forceAllUnread, boolean forceAllRead,
-            boolean allowDraft) {
-        assert !(forceAllUnread && forceAllRead);
-        boolean unreadStatusIsForced = forceAllUnread || forceAllRead;
-        boolean forcedUnreadStatus = forceAllUnread;
-
-        // Measure each fragment. It's ok to iterate over the entire set of
-        // fragments because it is
-        // never a long list, even if there are many senders.
-        final Map<Integer, Integer> priorityToLength = sPriorityToLength;
-        priorityToLength.clear();
-
-        int maxFoundPriority = Integer.MIN_VALUE;
-        int numMessages = 0;
-        int numDrafts = 0;
-        CharSequence draftsFragment = "";
-        CharSequence sendingFragment = "";
-        CharSequence sendFailedFragment = "";
-
-        sSenderListSplitter.setString(instructions);
-        int numFragments = 0;
-        String[] fragments = sSenderFragments;
-        int currentSize = fragments.length;
-        while (sSenderListSplitter.hasNext()) {
-            fragments[numFragments++] = sSenderListSplitter.next();
-            if (numFragments == currentSize) {
-                sSenderFragments = new String[2 * currentSize];
-                System.arraycopy(fragments, 0, sSenderFragments, 0, currentSize);
-                currentSize *= 2;
-                fragments = sSenderFragments;
-            }
-        }
-
-        for (int i = 0; i < numFragments;) {
-            String fragment0 = fragments[i++];
-            if ("".equals(fragment0)) {
-                // This should be the final fragment.
-            } else if (SENDER_LIST_TOKEN_ELIDED.equals(fragment0)) {
-                // ignore
-            } else if (SENDER_LIST_TOKEN_NUM_MESSAGES.equals(fragment0)) {
-                numMessages = Integer.valueOf(fragments[i++]);
-            } else if (SENDER_LIST_TOKEN_NUM_DRAFTS.equals(fragment0)) {
-                String numDraftsString = fragments[i++];
-                numDrafts = Integer.parseInt(numDraftsString);
-                draftsFragment = numDrafts == 1 ? draftString : draftPluralString + " ("
-                        + numDraftsString + ")";
-            } else if (SENDER_LIST_TOKEN_LITERAL.equals(fragment0)) {
-                senderBuilder.append(Utils.convertHtmlToPlainText(fragments[i++]));
-                return;
-            } else if (SENDER_LIST_TOKEN_SENDING.equals(fragment0)) {
-                sendingFragment = sendingString;
-            } else if (SENDER_LIST_TOKEN_SEND_FAILED.equals(fragment0)) {
-                sendFailedFragment = sendFailedString;
-            } else {
-                String priorityString = fragments[i++];
-                CharSequence nameString = fragments[i++];
-                if (nameString.length() == 0)
-                    nameString = meString;
-                int priority = Integer.parseInt(priorityString);
-                priorityToLength.put(priority, nameString.length());
-                maxFoundPriority = Math.max(maxFoundPriority, priority);
-            }
-        }
-        String numMessagesFragment = (numMessages != 0) ? " \u00A0"
-                + Integer.toString(numMessages + numDrafts) : "";
-
-        // Don't allocate fixedFragment unless we need it
-        SpannableStringBuilder fixedFragment = null;
-        int fixedFragmentLength = 0;
-        if (draftsFragment.length() != 0 && allowDraft) {
-            fixedFragment = new SpannableStringBuilder();
-            fixedFragment.append(draftsFragment);
-            if (draftsStyle != null) {
-                fixedFragment.setSpan(CharacterStyle.wrap(draftsStyle), 0, fixedFragment.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
-        if (sendingFragment.length() != 0) {
-            if (fixedFragment == null) {
-                fixedFragment = new SpannableStringBuilder();
-            }
-            if (fixedFragment.length() != 0)
-                fixedFragment.append(", ");
-            fixedFragment.append(sendingFragment);
-        }
-        if (sendFailedFragment.length() != 0) {
-            if (fixedFragment == null) {
-                fixedFragment = new SpannableStringBuilder();
-            }
-            if (fixedFragment.length() != 0)
-                fixedFragment.append(", ");
-            fixedFragment.append(sendFailedFragment);
-        }
-
-        if (fixedFragment != null) {
-            fixedFragmentLength = fixedFragment.length();
-        }
-        maxChars -= fixedFragmentLength;
-
-        int maxPriorityToInclude = -1; // inclusive
-        int numCharsUsed = numMessagesFragment.length();
-        int numSendersUsed = 0;
-        while (maxPriorityToInclude < maxFoundPriority) {
-            if (priorityToLength.containsKey(maxPriorityToInclude + 1)) {
-                int length = numCharsUsed + priorityToLength.get(maxPriorityToInclude + 1);
-                if (numCharsUsed > 0)
-                    length += 2;
-                // We must show at least two senders if they exist. If we don't
-                // have space for both
-                // then we will truncate names.
-                if (length > maxChars && numSendersUsed >= 2) {
-                    break;
-                }
-                numCharsUsed = length;
-                numSendersUsed++;
-            }
-            maxPriorityToInclude++;
-        }
-
-        int numCharsToRemovePerWord = 0;
-        if (numCharsUsed > maxChars) {
-            numCharsToRemovePerWord = (numCharsUsed - maxChars) / numSendersUsed;
-        }
-
-        String lastFragment = null;
-        CharacterStyle lastStyle = null;
-        for (int i = 0; i < numFragments;) {
-            String fragment0 = fragments[i++];
-            if ("".equals(fragment0)) {
-                // This should be the final fragment.
-            } else if (SENDER_LIST_TOKEN_ELIDED.equals(fragment0)) {
-                if (lastFragment != null) {
-                    addStyledFragment(senderBuilder, lastFragment, lastStyle, false);
-                    senderBuilder.append(" ");
-                    addStyledFragment(senderBuilder, "..", lastStyle, true);
-                    senderBuilder.append(" ");
-                }
-                lastFragment = null;
-            } else if (SENDER_LIST_TOKEN_NUM_MESSAGES.equals(fragment0)) {
-                i++;
-            } else if (SENDER_LIST_TOKEN_NUM_DRAFTS.equals(fragment0)) {
-                i++;
-            } else if (SENDER_LIST_TOKEN_SENDING.equals(fragment0)) {
-            } else if (SENDER_LIST_TOKEN_SEND_FAILED.equals(fragment0)) {
-            } else {
-                final String unreadString = fragment0;
-                final String priorityString = fragments[i++];
-                String nameString = fragments[i++];
-                if (nameString.length() == 0) {
-                    nameString = meString.toString();
-                } else {
-                    nameString = Utils.convertHtmlToPlainText(nameString).toString();
-                }
-                if (numCharsToRemovePerWord != 0) {
-                    nameString = nameString.substring(0,
-                            Math.max(nameString.length() - numCharsToRemovePerWord, 0));
-                }
-                final boolean unread = unreadStatusIsForced ? forcedUnreadStatus : Integer
-                        .parseInt(unreadString) != 0;
-                final int priority = Integer.parseInt(priorityString);
-                if (priority <= maxPriorityToInclude) {
-                    if (lastFragment != null && !lastFragment.equals(nameString)) {
-                        addStyledFragment(senderBuilder, lastFragment.concat(","), lastStyle,
-                                false);
-                        senderBuilder.append(" ");
-                    }
-                    lastFragment = nameString;
-                    lastStyle = unread ? unreadStyle : readStyle;
-                } else {
-                    if (lastFragment != null) {
-                        addStyledFragment(senderBuilder, lastFragment, lastStyle, false);
-                        // Adjacent spans can cause the TextView in Gmail widget
-                        // confused and leads to weird behavior on scrolling.
-                        // Our workaround here is to separate the spans by
-                        // spaces.
-                        senderBuilder.append(" ");
-                        addStyledFragment(senderBuilder, "..", lastStyle, true);
-                        senderBuilder.append(" ");
-                    }
-                    lastFragment = null;
-                }
-            }
-        }
-        if (lastFragment != null) {
-            addStyledFragment(senderBuilder, lastFragment, lastStyle, false);
-        }
-        senderBuilder.append(numMessagesFragment);
-        if (fixedFragmentLength != 0) {
-            statusBuilder.append(fixedFragment);
-        }
-    }
-
-    /**
-     * Adds a fragment with given style to a string builder.
-     *
-     * @param builder the current string builder
-     * @param fragment the fragment to be added
-     * @param style the style of the fragment
-     * @param withSpaces whether to add the whole fragment or to divide it into
-     *            smaller ones
-     */
-    private static void addStyledFragment(SpannableStringBuilder builder, String fragment,
-            CharacterStyle style, boolean withSpaces) {
-        if (withSpaces) {
-            int pos = builder.length();
-            builder.append(fragment);
-            builder.setSpan(CharacterStyle.wrap(style), pos, builder.length(),
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        } else {
-            int start = 0;
-            while (true) {
-                int pos = fragment.substring(start).indexOf(' ');
-                if (pos == -1) {
-                    addStyledFragment(builder, fragment.substring(start), style, true);
-                    break;
-                } else {
-                    pos += start;
-                    if (start < pos) {
-                        addStyledFragment(builder, fragment.substring(start, pos), style, true);
-                        builder.append(' ');
-                    }
-                    start = pos + 1;
-                    if (start >= fragment.length()) {
-                        break;
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * Returns a boolean indicating whether the table UI should be shown.
      */
     public static boolean useTabletUI(Resources res) {
-        return res.getInteger(R.integer.use_tablet_ui) != 0;
+        return res.getBoolean(R.bool.use_tablet_ui);
     }
 
     /**
      * @return <code>true</code> if the right edge effect should be displayed on list items
      */
+    @Deprecated
+    // TODO: remove this now that visual design no longer has right-edge caret (which made it so
+    // the hard right edge was drawn IN list items to ensure the caret didn't get an edge)
     public static boolean getDisplayListRightEdgeEffect(final boolean tabletDevice,
             final boolean listCollapsible, final int viewMode) {
         return tabletDevice && !listCollapsible
@@ -660,7 +380,7 @@ public class Utils {
             if (sUnreadText == null) {
                 sUnreadText = resources.getString(R.string.widget_large_unread_count);
             }
-            // Localize "999+" according to the device language
+            // Localize "99+" according to the device language
             unreadCountString = String.format(sUnreadText, sMaxUnreadCount);
         } else if (unreadCount <= 0) {
             unreadCountString = "";
@@ -669,6 +389,33 @@ public class Utils {
             unreadCountString = String.format("%d", unreadCount);
         }
         return unreadCountString;
+    }
+
+    /**
+     * Get the correct display string for the unseen count of a folder.
+     */
+    public static String getUnseenCountString(Context context, int unseenCount) {
+        final String unseenCountString;
+        final Resources resources = context.getResources();
+        if (sMaxUnreadCount == -1) {
+            sMaxUnreadCount = resources.getInteger(R.integer.maxUnreadCount);
+        }
+        if (unseenCount > sMaxUnreadCount) {
+            if (sLargeUnseenText == null) {
+                sLargeUnseenText = resources.getString(R.string.large_unseen_count);
+            }
+            // Localize "99+" according to the device language
+            unseenCountString = String.format(sLargeUnseenText, sMaxUnreadCount);
+        } else if (unseenCount <= 0) {
+            unseenCountString = "";
+        } else {
+            if (sUnseenText == null) {
+                sUnseenText = resources.getString(R.string.unseen_count);
+            }
+            // Localize unseen count according to the device language
+            unseenCountString = String.format(sUnseenText, unseenCount);
+        }
+        return unseenCountString;
     }
 
     /**
@@ -709,7 +456,7 @@ public class Utils {
     /**
      * Create an intent to show a conversation.
      * @param conversation Conversation to open.
-     * @param folder
+     * @param folderUri
      * @param account
      * @return
      */
@@ -732,7 +479,7 @@ public class Utils {
     /**
      * Create an intent to open a folder.
      *
-     * @param folder Folder to open.
+     * @param folderUri Folder to open.
      * @param account
      * @return
      */
@@ -772,27 +519,51 @@ public class Utils {
     }
 
     /**
-     * Helper method to show context-aware Gmail help.
+     * Helper method to show context-aware help.
      *
      * @param context Context to be used to open the help.
-     * @param fromWhere Information about the activity the user was in
-     * when they requested help.
+     * @param account Account from which the help URI is extracted
+     * @param helpTopic Information about the activity the user was in
+     *      when they requested help which specifies the help topic to display
      */
-    public static void showHelp(Context context, Account account, String fromWhere) {
-        final String urlString = (account != null && account.helpIntentUri != null) ?
+    public static void showHelp(Context context, Account account, String helpTopic) {
+        final String urlString = account.helpIntentUri != null ?
                 account.helpIntentUri.toString() : null;
-        if (TextUtils.isEmpty(urlString) ) {
+        if (TextUtils.isEmpty(urlString)) {
             LogUtils.e(LOG_TAG, "unable to show help for account: %s", account);
             return;
         }
-        final Uri uri = addParamsToUrl(context, urlString);
-        Uri.Builder builder = uri.buildUpon();
-        // Add the activity specific information parameter.
-        if (!TextUtils.isEmpty(fromWhere)) {
-            builder = builder.appendQueryParameter(SMART_HELP_LINK_PARAMETER_NAME, fromWhere);
+        showHelp(context, account.helpIntentUri, helpTopic);
+    }
+
+    /**
+     * Helper method to show context-aware help.
+     *
+     * @param context Context to be used to open the help.
+     * @param helpIntentUri URI of the help content to display
+     * @param helpTopic Information about the activity the user was in
+     *      when they requested help which specifies the help topic to display
+     */
+    public static void showHelp(Context context, Uri helpIntentUri, String helpTopic) {
+        final String urlString = helpIntentUri == null ? null : helpIntentUri.toString();
+        if (TextUtils.isEmpty(urlString)) {
+            LogUtils.e(LOG_TAG, "unable to show help for help URI: %s", helpIntentUri);
+            return;
         }
 
-        openUrl(context, builder.build(), null);
+        // generate the full URL to the requested help section
+        final Uri helpUrl = HelpUrl.getHelpUrl(context, helpIntentUri, helpTopic);
+
+        final boolean useBrowser = context.getResources().getBoolean(R.bool.openHelpWithBrowser);
+        if (useBrowser) {
+            // open a browser with the full help URL
+            openUrl(context, helpUrl, null);
+        } else {
+            // start the help activity with the full help URL
+            final Intent intent = new Intent(context, HelpActivity.class);
+            intent.putExtra(HelpActivity.PARAM_HELP_URL, helpUrl);
+            context.startActivity(intent);
+        }
     }
 
     /**
@@ -817,54 +588,6 @@ public class Utils {
         context.startActivity(intent);
     }
 
-
-    private static Uri addParamsToUrl(Context context, String url) {
-        url = replaceLocale(url);
-        Uri.Builder builder = Uri.parse(url).buildUpon();
-        final int versionCode = getVersionCode(context);
-        if (versionCode != -1) {
-            builder = builder.appendQueryParameter(SMART_LINK_APP_VERSION,
-                    String.valueOf(versionCode));
-        }
-
-        return builder.build();
-    }
-
-    /**
-     * Replaces the language/country of the device into the given string.  The pattern "%locale%"
-     * will be replaced with the <language_code>_<country_code> value.
-     *
-     * @param str the string to replace the language/country within
-     *
-     * @return the string with replacement
-     */
-    private static String replaceLocale(String str) {
-        // Substitute locale if present in string
-        if (str.contains("%locale%")) {
-            Locale locale = Locale.getDefault();
-            String tmp = locale.getLanguage() + "_" + locale.getCountry().toLowerCase();
-            str = str.replace("%locale%", tmp);
-        }
-        return str;
-    }
-
-    /**
-     * Returns the version code for the package, or -1 if it cannot be retrieved.
-     */
-    public static int getVersionCode(Context context) {
-        if (sVersionCode == -1) {
-            try {
-                sVersionCode =
-                        context.getPackageManager().getPackageInfo(context.getPackageName(),
-                                0 /* flags */).versionCode;
-            } catch (NameNotFoundException e) {
-                LogUtils.e(Utils.LOG_TAG, "Error finding package %s",
-                        context.getApplicationInfo().packageName);
-            }
-        }
-        return sVersionCode;
-    }
-
     /**
      * Show the top level settings screen for the supplied account.
      */
@@ -874,7 +597,10 @@ public class Utils {
             return;
         }
         final Intent settingsIntent = new Intent(Intent.ACTION_EDIT, account.settingsIntentUri);
+
+        settingsIntent.setPackage(context.getPackageName());
         settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+
         context.startActivity(settingsIntent);
     }
 
@@ -889,71 +615,38 @@ public class Utils {
         final Intent settingsIntent = new Intent(Intent.ACTION_EDIT,
                 appendVersionQueryParameter(context, account.settingsIntentUri));
 
+        settingsIntent.setPackage(context.getPackageName());
         settingsIntent.putExtra(EditSettingsExtras.EXTRA_ACCOUNT, account);
         settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+
         context.startActivity(settingsIntent);
-    }
-
-    /**
-     * Show the settings screen for the supplied account.
-     */
-     public static void showFolderSettings(Context context, Account account, Folder folder) {
-        if (account == null || folder == null) {
-            LogUtils.e(LOG_TAG, "Invalid attempt to show folder settings. account: %s folder: %s",
-                    account, folder);
-            return;
-        }
-        final Intent settingsIntent = new Intent(Intent.ACTION_EDIT,
-                appendVersionQueryParameter(context, account.settingsIntentUri));
-
-        settingsIntent.putExtra(EditSettingsExtras.EXTRA_ACCOUNT, account);
-        settingsIntent.putExtra(EditSettingsExtras.EXTRA_FOLDER, folder);
-        settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-        context.startActivity(settingsIntent);
-    }
-
-    /**
-     * Show the settings screen for managing all folders.
-     */
-     public static void showManageFolder(Context context, Account account) {
-         if (account == null) {
-             LogUtils.e(LOG_TAG, "Invalid attempt to the manage folders screen with null account");
-             return;
-         }
-         final Intent settingsIntent = new Intent(Intent.ACTION_EDIT, account.settingsIntentUri);
-
-         settingsIntent.putExtra(EditSettingsExtras.EXTRA_ACCOUNT, account);
-         settingsIntent.putExtra(EditSettingsExtras.EXTRA_MANAGE_FOLDERS, true);
-         settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-         context.startActivity(settingsIntent);
     }
 
     /**
      * Show the feedback screen for the supplied account.
      */
-    public static void sendFeedback(FeedbackEnabledActivity activity, Account account,
-                                    boolean reportingProblem) {
+    public static void sendFeedback(Activity activity, Account account, boolean reportingProblem) {
         if (activity != null && account != null) {
             sendFeedback(activity, account.sendFeedbackIntentUri, reportingProblem);
         }
     }
-    public static void sendFeedback(FeedbackEnabledActivity activity, Uri feedbackIntentUri,
+
+    public static void sendFeedback(Activity activity, Uri feedbackIntentUri,
             boolean reportingProblem) {
         if (activity != null &&  !isEmpty(feedbackIntentUri)) {
             final Bundle optionalExtras = new Bundle(2);
             optionalExtras.putBoolean(
                     UIProvider.SendFeedbackExtras.EXTRA_REPORTING_PROBLEM, reportingProblem);
-            final Bitmap screenBitmap =  getReducedSizeBitmap(activity);
+            final Bitmap screenBitmap = getReducedSizeBitmap(activity);
             if (screenBitmap != null) {
                 optionalExtras.putParcelable(
                         UIProvider.SendFeedbackExtras.EXTRA_SCREEN_SHOT, screenBitmap);
             }
-            openUrl(activity.getActivityContext(), feedbackIntentUri, optionalExtras);
+            openUrl(activity, feedbackIntentUri, optionalExtras);
         }
     }
 
-
-    public static Bitmap getReducedSizeBitmap(FeedbackEnabledActivity activity) {
+    private static Bitmap getReducedSizeBitmap(Activity activity) {
         final Window activityWindow = activity.getWindow();
         final View currentView = activityWindow != null ? activityWindow.getDecorView() : null;
         final View rootView = currentView != null ? currentView.getRootView() : null;
@@ -962,18 +655,22 @@ public class Utils {
             final Bitmap drawingCache = rootView.getDrawingCache();
             // Null check to avoid NPE discovered from monkey crash:
             if (drawingCache != null) {
-                final Bitmap originalBitmap = drawingCache.copy(Bitmap.Config.RGB_565, false);
-                double originalHeight = originalBitmap.getHeight();
-                double originalWidth = originalBitmap.getWidth();
-                int newHeight = SCALED_SCREENSHOT_MAX_HEIGHT_WIDTH;
-                int newWidth = SCALED_SCREENSHOT_MAX_HEIGHT_WIDTH;
-                double scaleX, scaleY;
-                scaleX = newWidth  / originalWidth;
-                scaleY = newHeight / originalHeight;
-                final double scale = Math.min(scaleX, scaleY);
-                newWidth = (int)Math.round(originalWidth * scale);
-                newHeight = (int)Math.round(originalHeight * scale);
-                return Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true);
+                try {
+                    final Bitmap originalBitmap = drawingCache.copy(Bitmap.Config.RGB_565, false);
+                    double originalHeight = originalBitmap.getHeight();
+                    double originalWidth = originalBitmap.getWidth();
+                    int newHeight = SCALED_SCREENSHOT_MAX_HEIGHT_WIDTH;
+                    int newWidth = SCALED_SCREENSHOT_MAX_HEIGHT_WIDTH;
+                    double scaleX, scaleY;
+                    scaleX = newWidth  / originalWidth;
+                    scaleY = newHeight / originalHeight;
+                    final double scale = Math.min(scaleX, scaleY);
+                    newWidth = (int)Math.round(originalWidth * scale);
+                    newHeight = (int)Math.round(originalHeight * scale);
+                    return Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true);
+                } catch (OutOfMemoryError e) {
+                    LogUtils.e(LOG_TAG, e, "OOME when attempting to scale screenshot");
+                }
             }
         }
         return null;
@@ -1022,8 +719,8 @@ public class Utils {
     *
     * @param type MIME data type to normalize
     * @return normalized MIME data type, or null if the input was null
-    * @see {@link #setType}
-    * @see {@link #setTypeAndNormalize}
+    * @see {@link android.content.Intent#setType}
+    * @see {@link android.content.Intent#setTypeAndNormalize}
     */
    public static String normalizeMimeType(String type) {
        if (type == null) {
@@ -1040,7 +737,7 @@ public class Utils {
    }
 
    /**
-    * (copied from {@link Uri#normalize()} for pre-J)
+    * (copied from {@link android.net.Uri#normalizeScheme()} for pre-J)
     *
     * Return a normalized representation of this Uri.
     *
@@ -1062,7 +759,6 @@ public class Utils {
     *
     * @return normalized Uri (never null)
     * @see {@link android.content.Intent#setData}
-    * @see {@link #setNormalizedData}
     */
    public static Uri normalizeUri(Uri uri) {
        String scheme = uri.getScheme();
@@ -1107,7 +803,7 @@ public class Utils {
     }
 
     public static boolean isEmpty(Uri uri) {
-        return uri == null || uri.equals(Uri.EMPTY);
+        return uri == null || Uri.EMPTY.equals(uri);
     }
 
     public static String dumpFragment(Fragment f) {
@@ -1254,14 +950,6 @@ public class Utils {
         }
     }
 
-    /**
-     * Return whether menus should show the disabled archive menu item or just
-     * remove it when archive is not available.
-     */
-    public static boolean shouldShowDisabledArchiveIcon(Context context) {
-        return context.getResources().getBoolean(R.bool.show_disabled_archive_menu_item);
-    }
-
     public static int getDefaultFolderBackgroundColor(Context context) {
         if (sDefaultFolderBackgroundColor == -1) {
             sDefaultFolderBackgroundColor = context.getResources().getColor(
@@ -1278,7 +966,9 @@ public class Utils {
      */
     public static int getFolderUnreadDisplayCount(final Folder folder) {
         if (folder != null) {
-            if (folder.isUnreadCountHidden()) {
+            if (folder.supportsCapability(UIProvider.FolderCapabilities.UNSEEN_COUNT_ONLY)) {
+                return 0;
+            } else if (folder.isUnreadCountHidden()) {
                 return folder.totalCount;
             } else {
                 return folder.unreadCount;
@@ -1307,27 +997,27 @@ public class Utils {
     }
 
     public static Uri appendVersionQueryParameter(final Context context, final Uri uri) {
-        int appVersion = 0;
-
-        try {
-            final PackageInfo packageInfo =
-                    context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            appVersion = packageInfo.versionCode;
-        } catch (final NameNotFoundException e) {
-            LogUtils.wtf(LOG_TAG, e, "Couldn't find our own PackageInfo");
-        }
-
         return uri.buildUpon().appendQueryParameter(APP_VERSION_QUERY_PARAMETER,
-                Integer.toString(appVersion)).build();
+                getVersionCode(context)).build();
     }
 
     /**
-     * Adds the Account extra to mailto intents.
+     * Convenience method for diverting mailto: uris directly to our compose activity. Using this
+     * method ensures that the Account object is not accidentally sent to a different process.
+     *
+     * @param context for sending the intent
+     * @param uri mailto: or other uri
+     * @param account desired account for potential compose activity
+     * @return true if a compose activity was started, false if uri should be sent to a view intent
      */
-    public static void addAccountToMailtoIntent(Intent intent, Account account) {
-        if (TextUtils.equals(MAILTO_SCHEME, intent.getData().getScheme())) {
-            intent.putExtra(Utils.EXTRA_ACCOUNT, account);
+    public static boolean divertMailtoUri(final Context context, final Uri uri,
+            final Account account) {
+        final String scheme = normalizeUri(uri).getScheme();
+        if (TextUtils.equals(MAILTO_SCHEME, scheme)) {
+            ComposeActivity.composeMailto(context, account, uri);
+            return true;
         }
+        return false;
     }
 
     /**
@@ -1390,22 +1080,93 @@ public class Utils {
     }
 
     /**
-     * Get the background color of Gmail's action bar.
+     * Given a value and a set of upper-bounds to use as buckets, return the smallest upper-bound
+     * that is greater than the value.<br>
+     * <br>
+     * Useful for turning a continuous value into one of a set of discrete ones.
+     *
+     * @param value a value to bucketize
+     * @param upperBounds list of upper-bound buckets to clamp to, sorted from smallest-greatest
+     * @return the smallest upper-bound larger than the value, or -1 if the value is larger than
+     * all upper-bounds
      */
-    public static int getActionBarBackgroundResource(final Context context) {
-        final TypedValue actionBarStyle = new TypedValue();
-        if (context.getTheme().resolveAttribute(android.R.attr.actionBarStyle, actionBarStyle, true)
-                && actionBarStyle.type == TypedValue.TYPE_REFERENCE) {
-            final TypedValue backgroundValue = new TypedValue();
-            final TypedArray attr = context.obtainStyledAttributes(actionBarStyle.resourceId,
-                    STYLE_ATTR);
-            attr.getValue(0, backgroundValue);
-            attr.recycle();
-            return backgroundValue.resourceId;
+    public static long getUpperBound(long value, long[] upperBounds) {
+        for (long ub : upperBounds) {
+            if (value < ub) {
+                return ub;
+            }
+        }
+        return -1;
+    }
+
+    public static Address getAddress(Map<String, Address> cache, String emailStr) {
+        Address addr;
+        synchronized (cache) {
+            addr = cache.get(emailStr);
+            if (addr == null) {
+                addr = Address.getEmailAddress(emailStr);
+                if (addr != null) {
+                    cache.put(emailStr, addr);
+                }
+            }
+        }
+        return addr;
+    }
+
+    /**
+     * Applies the given appearance on the given subString, and inserts that as a parameter in the
+     * given parentString.
+     */
+    public static Spanned insertStringWithStyle(Context context,
+            String entireString, String subString, int appearance) {
+        final Resources resources = context.getResources();
+        final int index = entireString.indexOf(subString);
+        final SpannableString descriptionText = new SpannableString(entireString);
+        descriptionText.setSpan(
+                new TextAppearanceSpan(context, appearance),
+                index,
+                index + subString.length(),
+                0);
+        return descriptionText;
+    }
+
+    /**
+     * Email addresses are supposed to be treated as case-insensitive for the host-part and
+     * case-sensitive for the local-part, but nobody really wants email addresses to match
+     * case-sensitive on the local-part, so just smash everything to lower case.
+     * @param email Hello@Example.COM
+     * @return hello@example.com
+     */
+    public static String normalizeEmailAddress(String email) {
+        /*
+        // The RFC5321 version
+        if (TextUtils.isEmpty(email)) {
+            return email;
+        }
+        String[] parts = email.split("@");
+        if (parts.length != 2) {
+            LogUtils.d(LOG_TAG, "Tried to normalize a malformed email address: ", email);
+            return email;
+        }
+
+        return parts[0] + "@" + parts[1].toLowerCase(Locale.US);
+        */
+        if (TextUtils.isEmpty(email)) {
+            return email;
         } else {
-            // Default color
-            return context.getResources().getColor(R.color.list_background_color);
+            // Doing this for other locales might really screw things up, so do US-version only
+            return email.toLowerCase(Locale.US);
         }
     }
 
+    /**
+     * Returns whether the device currently has network connection. This does not guarantee that
+     * the connection is reliable.
+     */
+    public static boolean isConnected(final Context context) {
+        final ConnectivityManager connectivityManager =
+                ((ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE));
+        final NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+        return (networkInfo != null) && networkInfo.isConnected();
+    }
 }

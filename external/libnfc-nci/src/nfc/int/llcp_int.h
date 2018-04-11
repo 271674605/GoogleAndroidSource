@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -74,6 +74,7 @@ typedef struct
     UINT16              peer_lto;               /* link timeout of peer device in ms            */
     UINT8               peer_opt;               /* Option field of peer device                  */
     UINT16              effective_miu;          /* MIU to send PDU in activated state           */
+
     TIMER_LIST_ENT      timer;                  /* link timer for LTO and SYMM response         */
     UINT8               symm_state;             /* state of symmectric procedure                */
     BOOLEAN             ll_served;              /* TRUE if last transmisstion was for UI        */

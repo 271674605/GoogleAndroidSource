@@ -30,7 +30,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.android.launcher3.R;
+import com.android.launcher3.compat.AppWidgetManagerCompat;
 
 /**
  * The linear layout used strictly for the widget/wallpaper tab of the customization tray
@@ -84,11 +84,11 @@ public class PagedViewWidget extends LinearLayout {
         DeviceProfile grid = app.getDynamicGrid().getDeviceProfile();
         TextView name = (TextView) findViewById(R.id.widget_name);
         if (name != null) {
-            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, grid.iconTextSize);
+            name.setTextSize(TypedValue.COMPLEX_UNIT_PX, grid.iconTextSizePx);
         }
         TextView dims = (TextView) findViewById(R.id.widget_dims);
         if (dims != null) {
-            dims.setTextSize(TypedValue.COMPLEX_UNIT_SP, grid.iconTextSize);
+            dims.setTextSize(TypedValue.COMPLEX_UNIT_PX, grid.iconTextSizePx);
         }
     }
 
@@ -129,7 +129,7 @@ public class PagedViewWidget extends LinearLayout {
             image.setMaxWidth(maxWidth);
         }
         final TextView name = (TextView) findViewById(R.id.widget_name);
-        name.setText(info.label);
+        name.setText(AppWidgetManagerCompat.getInstance(getContext()).loadLabel(info));
         final TextView dims = (TextView) findViewById(R.id.widget_dims);
         if (dims != null) {
             int hSpan = Math.min(cellSpan[0], (int) grid.numColumns);

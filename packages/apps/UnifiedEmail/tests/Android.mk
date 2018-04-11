@@ -15,7 +15,6 @@
 LOCAL_PATH:= $(call my-dir)
 
 src_dirs := src
-res_dirs := res
 
 ##################################################
 
@@ -26,13 +25,13 @@ LOCAL_MODULE_TAGS := tests
 
 # LOCAL_JAVA_LIBRARIES := android.test.runner
 
-LOCAL_SDK_VERSION := 14
+LOCAL_SDK_VERSION := current
 LOCAL_PACKAGE_NAME := UnifiedEmailTests
 LOCAL_INSTRUMENTATION_FOR := UnifiedEmail
 
 LOCAL_SRC_FILES := $(call all-java-files-under, $(src_dirs))
-LOCAL_RESOURCE_DIR := $(addprefix $(LOCAL_PATH)/, $(res_dirs))
 LOCAL_AAPT_FLAGS := --auto-add-overlay
+LOCAL_STATIC_JAVA_LIBRARIES := android-support-test
 
 include $(BUILD_PACKAGE)
 

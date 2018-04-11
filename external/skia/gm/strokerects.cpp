@@ -20,20 +20,24 @@ namespace skiagm {
 static const SkScalar SW = SkIntToScalar(W);
 static const SkScalar SH = SkIntToScalar(H);
 
-class StrokeRectGM : public GM {
+class StrokeRectsGM : public GM {
 public:
-    StrokeRectGM() {}
+    StrokeRectsGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("strokerects");
     }
 
     virtual SkISize onISize() {
-        return make_isize(W*2, H*2);
+        return SkISize::Make(W*2, H*2);
     }
 
-    static void rnd_rect(SkRect* r, SkRandom& rand) {
+    static void rnd_rect(SkRect* r, SkLCGRandom& rand) {
         SkScalar x = rand.nextUScalar1() * W;
         SkScalar y = rand.nextUScalar1() * H;
         SkScalar w = rand.nextUScalar1() * (W >> 2);
@@ -61,7 +65,7 @@ protected:
                         , SW - SkIntToScalar(2), SH - SkIntToScalar(2)
                 ));
 
-                SkRandom rand;
+                SkLCGRandom rand;
                 for (int i = 0; i < N; i++) {
                     SkRect r;
                     rnd_rect(&r, rand);
@@ -77,7 +81,7 @@ private:
 
 //////////////////////////////////////////////////////////////////////////////
 
-static GM* MyFactory(void*) { return new StrokeRectGM; }
+static GM* MyFactory(void*) { return new StrokeRectsGM; }
 static GMRegistry reg(MyFactory);
 
 }

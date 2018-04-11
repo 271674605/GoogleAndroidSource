@@ -16,7 +16,7 @@
 
 #define LOG_TAG "BluetoothHidServiceJni"
 
-#define LOG_NDEBUG 0
+#define LOG_NDEBUG 1
 
 #define CHECK_CALLBACK_ENV                                                      \
    if (!checkCallbackThread()) {                                                \
@@ -36,6 +36,7 @@ namespace android {
 static jmethodID method_onConnectStateChanged;
 static jmethodID method_onGetProtocolMode;
 static jmethodID method_onGetReport;
+static jmethodID method_onHandshake;
 static jmethodID method_onVirtualUnplug;
 
 static const bthh_interface_t *sBluetoothHidInterface = NULL;
@@ -96,8 +97,42 @@ static void get_protocol_mode_callback(bt_bdaddr_t *bd_addr, bthh_status_t hh_st
     sCallbackEnv->DeleteLocalRef(addr);
 }
 
+static void get_report_callback(bt_bdaddr_t *bd_addr, bthh_status_t hh_status, uint8_t *rpt_data, int rpt_size) {
+    jbyteArray addr;
+    jbyteArray data;
+
+    CHECK_CALLBACK_ENV
+    if (hh_status != BTHH_OK) {
+        ALOGE("BTHH Status is not OK!");
+        checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+        return;
+    }
+
+    addr = sCallbackEnv->NewByteArray(sizeof(bt_bdaddr_t));
+    if (!addr) {
+        ALOGE("Fail to new jbyteArray bd addr for get report callback");
+        checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+        return;
+    }
+    data = sCallbackEnv->NewByteArray(rpt_size);
+    if (!data) {
+        ALOGE("Fail to new jbyteArray data for get report callback");
+        checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+        sCallbackEnv->DeleteLocalRef(addr);
+        return;
+    }
+
+    sCallbackEnv->SetByteArrayRegion(addr, 0, sizeof(bt_bdaddr_t), (jbyte *) bd_addr);
+    sCallbackEnv->SetByteArrayRegion(data, 0, rpt_size, (jbyte *) rpt_data);
+
+    sCallbackEnv->CallVoidMethod(mCallbacksObj, method_onGetReport, addr, data, (jint) rpt_size);
+    checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+    sCallbackEnv->DeleteLocalRef(addr);
+    sCallbackEnv->DeleteLocalRef(data);
+}
+
 static void virtual_unplug_callback(bt_bdaddr_t *bd_addr, bthh_status_t hh_status) {
-    ALOGD("call to virtual_unplug_callback");
+    ALOGV("call to virtual_unplug_callback");
     jbyteArray addr;
 
     CHECK_CALLBACK_ENV
@@ -129,6 +164,23 @@ static void virtual_unplug_callback(bt_bdaddr_t *bd_addr, bthh_status_t hh_statu
     sCallbackEnv->DeleteLocalRef(addr);*/
 }
 
+static void handshake_callback(bt_bdaddr_t *bd_addr, bthh_status_t hh_status)
+{
+    jbyteArray addr;
+
+    CHECK_CALLBACK_ENV
+
+    addr = sCallbackEnv->NewByteArray(sizeof(bt_bdaddr_t));
+    if (!addr) {
+        ALOGE("Fail to new jbyteArray bd addr for handshake callback");
+        checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+        return;
+    }
+    sCallbackEnv->SetByteArrayRegion(addr, 0, sizeof(bt_bdaddr_t), (jbyte *) bd_addr);
+    sCallbackEnv->CallVoidMethod(mCallbacksObj, method_onHandshake, addr, (jint) hh_status);
+    checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+    sCallbackEnv->DeleteLocalRef(addr);
+}
 
 static bthh_callbacks_t sBluetoothHidCallbacks = {
     sizeof(sBluetoothHidCallbacks),
@@ -136,8 +188,9 @@ static bthh_callbacks_t sBluetoothHidCallbacks = {
     NULL,
     get_protocol_mode_callback,
     NULL,
-    NULL,
-    virtual_unplug_callback
+    get_report_callback,
+    virtual_unplug_callback,
+    handshake_callback
 };
 
 // Define native functions
@@ -149,6 +202,8 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
 
     method_onConnectStateChanged = env->GetMethodID(clazz, "onConnectStateChanged", "([BI)V");
     method_onGetProtocolMode = env->GetMethodID(clazz, "onGetProtocolMode", "([BI)V");
+    method_onGetReport = env->GetMethodID(clazz, "onGetReport", "([B[BI)V");
+    method_onHandshake = env->GetMethodID(clazz, "onHandshake", "([BI)V");
     method_onVirtualUnplug = env->GetMethodID(clazz, "onVirtualUnplug", "([BI)V");
 
 /*
@@ -364,7 +419,7 @@ static jboolean setProtocolModeNative(JNIEnv *env, jobject object, jbyteArray ad
 }
 
 static jboolean getReportNative(JNIEnv *env, jobject object, jbyteArray address, jbyte reportType, jbyte reportId, jint bufferSize) {
-    ALOGD("%s: reportType = %d, reportId = %d, bufferSize = %d", __FUNCTION__, reportType, reportId, bufferSize);
+    ALOGV("%s: reportType = %d, reportId = %d, bufferSize = %d", __FUNCTION__, reportType, reportId, bufferSize);
 
     bt_status_t status;
     jbyte *addr;
@@ -392,7 +447,7 @@ static jboolean getReportNative(JNIEnv *env, jobject object, jbyteArray address,
 
 
 static jboolean setReportNative(JNIEnv *env, jobject object, jbyteArray address, jbyte reportType, jstring report) {
-    ALOGD("%s: reportType = %d", __FUNCTION__, reportType);
+    ALOGV("%s: reportType = %d", __FUNCTION__, reportType);
     bt_status_t status;
     jbyte *addr;
     jboolean ret = JNI_TRUE;
@@ -418,7 +473,7 @@ static jboolean setReportNative(JNIEnv *env, jobject object, jbyteArray address,
 }
 
 static jboolean sendDataNative(JNIEnv *env, jobject object, jbyteArray address, jstring report) {
-    ALOGD("%s", __FUNCTION__);
+    ALOGV("%s", __FUNCTION__);
     bt_status_t status;
     jbyte *addr;
     jboolean ret = JNI_TRUE;

@@ -8,10 +8,9 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
-#include "chrome/browser/ui/views/omnibox/omnibox_result_view_model.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/slide_animation.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/view.h"
 
@@ -24,9 +23,8 @@ class Profile;
 
 // A view representing the contents of the autocomplete popup.
 class OmniboxPopupContentsView : public views::View,
-                                 public OmniboxResultViewModel,
                                  public OmniboxPopupView,
-                                 public ui::AnimationDelegate {
+                                 public gfx::AnimationDelegate {
  public:
   // Factory method for creating the AutocompletePopupView.
   static OmniboxPopupView* Create(const gfx::FontList& font_list,
@@ -48,18 +46,13 @@ class OmniboxPopupContentsView : public views::View,
   virtual void PaintUpdatesNow() OVERRIDE;
   virtual void OnDragCanceled() OVERRIDE;
 
-  // Overridden from OmniboxResultViewModel:
-  virtual bool IsSelectedIndex(size_t index) const OVERRIDE;
-  virtual bool IsHoveredIndex(size_t index) const OVERRIDE;
-  virtual gfx::Image GetIconIfExtensionMatch(size_t index) const OVERRIDE;
-
-  // Overridden from ui::AnimationDelegate:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  // Overridden from gfx::AnimationDelegate:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
 
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
-  virtual views::View* GetEventHandlerForPoint(
-      const gfx::Point& point) OVERRIDE;
+  virtual views::View* GetEventHandlerForRect(
+      const gfx::Rect& rect) OVERRIDE;
   virtual views::View* GetTooltipHandlerForPoint(
       const gfx::Point& point) OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
@@ -72,6 +65,14 @@ class OmniboxPopupContentsView : public views::View,
 
   // Overridden from ui::EventHandler:
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+
+  bool IsSelectedIndex(size_t index) const;
+  bool IsHoveredIndex(size_t index) const;
+  gfx::Image GetIconIfExtensionMatch(size_t index) const;
+
+  int max_match_contents_width() const {
+    return max_match_contents_width_;
+  }
 
  protected:
   OmniboxPopupContentsView(const gfx::FontList& font_list,
@@ -86,8 +87,7 @@ class OmniboxPopupContentsView : public views::View,
 
   // Calculates the height needed to show all the results in the model.
   virtual int CalculatePopupHeight();
-  virtual OmniboxResultView* CreateResultView(OmniboxResultViewModel* model,
-                                              int model_index,
+  virtual OmniboxResultView* CreateResultView(int model_index,
                                               const gfx::FontList& font_list);
 
   // Overridden from views::View:
@@ -96,7 +96,8 @@ class OmniboxPopupContentsView : public views::View,
   // in an un-conventional way inside OnPaint. We use a separate canvas to
   // paint the children. Hence we override this method to a no-op so that
   // the view hierarchy does not "accidentally" trigger this.
-  virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
+  virtual void PaintChildren(gfx::Canvas* canvas,
+                             const views::CullSet& cull_set) OVERRIDE;
 
   scoped_ptr<OmniboxPopupModel> model_;
 
@@ -157,7 +158,7 @@ class OmniboxPopupContentsView : public views::View,
 
   // The popup sizes vertically using an animation when the popup is getting
   // shorter (not larger, that makes it look "slow").
-  ui::SlideAnimation size_animation_;
+  gfx::SlideAnimation size_animation_;
   gfx::Rect start_bounds_;
   gfx::Rect target_bounds_;
 
@@ -168,6 +169,11 @@ class OmniboxPopupContentsView : public views::View,
 
   // Amount of extra padding to add to the popup on the top and bottom.
   int outside_vertical_padding_;
+
+  // When the dropdown is not wide enough while displaying postfix suggestions,
+  // we use the width of widest match contents to shift the suggestions so that
+  // the widest suggestion just reaches the end edge.
+  int max_match_contents_width_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxPopupContentsView);
 };

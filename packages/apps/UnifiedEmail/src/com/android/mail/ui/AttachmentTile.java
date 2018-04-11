@@ -20,7 +20,6 @@ package com.android.mail.ui;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
@@ -28,26 +27,25 @@ import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.ImageView;
+import android.widget.ImageView.ScaleType;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
-import android.widget.ImageView.ScaleType;
 
 import com.android.ex.photo.util.ImageUtils;
 import com.android.mail.R;
 import com.android.mail.providers.Attachment;
-import com.android.mail.utils.LogTag;
 import com.android.mail.utils.AttachmentUtils;
+import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 
 /**
  * Base class for attachment tiles that handles the work of fetching and displaying the bitmaps for
  * the tiles.
  */
-public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHolder {
+public abstract class AttachmentTile extends RelativeLayout implements AttachmentBitmapHolder {
     protected Attachment mAttachment;
     private ImageView mIcon;
     private ImageView mDefaultIcon;
-    private ThumbnailLoadTask mThumbnailTask;
     private TextView mTitle;
     private TextView mSubtitle;
     private String mAttachmentSizeText;
@@ -59,6 +57,8 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
     // previews with width/height or height/width less than this value will be
     // considered skinny
     private static final float skinnyThresholdRatio = 0.5f;
+
+    private boolean mAlwaysShowInfoText;
 
 
     /**
@@ -77,6 +77,7 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
     public AttachmentTile(Context context, AttributeSet attrs) {
         super(context, attrs);
         mDefaultThumbnailSet = true;
+        mAlwaysShowInfoText = false;
     }
 
     @Override
@@ -93,7 +94,11 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
 
-        ThumbnailLoadTask.setupThumbnailPreview(mThumbnailTask, this, mAttachment, null);
+        ThumbnailLoadTask.setupThumbnailPreview(this, mAttachment, null);
+    }
+
+    public Attachment getAttachment() {
+        return mAttachment;
     }
 
     /**
@@ -101,8 +106,7 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
      * repeatedly as status updates stream in, so only properties with new or changed values will
      * cause sub-views to update.
      */
-    public void render(Attachment attachment, Uri attachmentsListUri, int index,
-            AttachmentPreviewCache attachmentPreviewCache, boolean loaderResult) {
+    protected void render(Attachment attachment, AttachmentPreviewCache attachmentPreviewCache) {
         if (attachment == null) {
             setVisibility(View.INVISIBLE);
             return;
@@ -132,7 +136,7 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
             updateSubtitleText();
         }
 
-        ThumbnailLoadTask.setupThumbnailPreview(mThumbnailTask, this, attachment, prevAttachment);
+        ThumbnailLoadTask.setupThumbnailPreview(this, attachment, prevAttachment);
     }
 
     private void updateSubtitleText() {
@@ -155,6 +159,8 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
             return;
         }
         mDefaultIcon.setVisibility(View.VISIBLE);
+        mTitle.setVisibility(View.VISIBLE);
+        mSubtitle.setVisibility(View.VISIBLE);
         mDefaultThumbnailSet = true;
     }
 
@@ -166,6 +172,10 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
 
         // We got a real thumbnail; hide the default thumbnail.
         mDefaultIcon.setVisibility(View.GONE);
+        if (!mAlwaysShowInfoText) {
+            mTitle.setVisibility(View.GONE);
+            mSubtitle.setVisibility(View.GONE);
+        }
 
         final int maxSize = getResources().getInteger(R.integer.attachment_preview_max_size);
         final int width = result.getWidth();
@@ -277,5 +287,9 @@ public class AttachmentTile extends RelativeLayout implements AttachmentBitmapHo
     @Override
     public void thumbnailLoadFailed() {
         setThumbnailToDefault();
+    }
+
+    protected void setAlwaysShowInfoText(boolean alwaysShowInfoText) {
+        mAlwaysShowInfoText = alwaysShowInfoText;
     }
 }

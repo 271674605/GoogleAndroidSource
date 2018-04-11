@@ -1,9 +1,12 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from telemetry.core import video
 from telemetry.core import web_contents
 
 DEFAULT_TAB_TIMEOUT = 60
+
 
 class Tab(web_contents.WebContents):
   """Represents a tab in the browser
@@ -16,11 +19,8 @@ class Tab(web_contents.WebContents):
       # Evaluates 1+1 in the tab's JavaScript context.
       tab.Evaluate('1+1')
   """
-  def __init__(self, inspector_backend):
-    super(Tab, self).__init__(inspector_backend)
-
-  def __del__(self):
-    super(Tab, self).__del__()
+  def __init__(self, inspector_backend, backend_list):
+    super(Tab, self).__init__(inspector_backend, backend_list)
 
   @property
   def browser(self):
@@ -49,7 +49,6 @@ class Tab(web_contents.WebContents):
                                              'event_listener_count']]))
     return dom_counters
 
-
   def Activate(self):
     """Brings this tab to the foreground asynchronously.
 
@@ -60,27 +59,117 @@ class Tab(web_contents.WebContents):
     and the page's documentVisibilityState becoming 'visible', and yet more
     delay until the actual tab is visible to the user. None of these delays
     are included in this call."""
-    self._inspector_backend.Activate()
+    self._backend_list.ActivateTab(self._inspector_backend.debugger_url)
+
+  def Close(self):
+    """Closes this tab.
+
+    Not all browsers or browser versions support this method.
+    Be sure to check browser.supports_tab_control."""
+    self._backend_list.CloseTab(self._inspector_backend.debugger_url)
 
   @property
   def screenshot_supported(self):
-    """True if the browser instance is capable of capturing screenshots"""
+    """True if the browser instance is capable of capturing screenshots."""
     return self._inspector_backend.screenshot_supported
 
   def Screenshot(self, timeout=DEFAULT_TAB_TIMEOUT):
-    """Capture a screenshot of the window for rendering validation"""
+    """Capture a screenshot of the tab's contents.
+
+    Returns:
+      A telemetry.core.Bitmap.
+    """
     return self._inspector_backend.Screenshot(timeout)
 
-  def PerformActionAndWaitForNavigate(
-      self, action_function, timeout=DEFAULT_TAB_TIMEOUT):
-    """Executes action_function, and waits for the navigation to complete.
+  @property
+  def video_capture_supported(self):
+    """True if the browser instance is capable of capturing video."""
+    return self.browser.platform.CanCaptureVideo()
 
-    action_function must be a Python function that results in a navigation.
+  def Highlight(self, color):
+    """Synchronously highlights entire tab contents with the given RgbaColor.
+
+    TODO(tonyg): It is possible that the z-index hack here might not work for
+    all pages. If this happens, DevTools also provides a method for this.
+    """
+    self.ExecuteJavaScript("""
+      (function() {
+        var screen = document.createElement('div');
+        screen.style.background = 'rgba(%d, %d, %d, %d)';
+        screen.style.position = 'fixed';
+        screen.style.top = '0';
+        screen.style.left = '0';
+        screen.style.width = '100%%';
+        screen.style.height = '100%%';
+        screen.style.zIndex = '2147483638';
+        document.body.appendChild(screen);
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            window.__telemetry_screen_%d = screen;
+          });
+        });
+      })();
+    """ % (color.r, color.g, color.b, color.a, int(color)))
+    self.WaitForJavaScriptExpression(
+        '!!window.__telemetry_screen_%d' % int(color), 5)
+
+  def ClearHighlight(self, color):
+    """Clears a highlight of the given bitmap.RgbaColor."""
+    self.ExecuteJavaScript("""
+      (function() {
+        document.body.removeChild(window.__telemetry_screen_%d);
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            window.__telemetry_screen_%d = null;
+            console.time('__ClearHighlight.video_capture_start');
+            console.timeEnd('__ClearHighlight.video_capture_start');
+          });
+        });
+      })();
+    """ % (int(color), int(color)))
+    self.WaitForJavaScriptExpression(
+        '!window.__telemetry_screen_%d' % int(color), 5)
+
+  def StartVideoCapture(self, min_bitrate_mbps,
+                        highlight_bitmap=video.HIGHLIGHT_ORANGE_FRAME):
+    """Starts capturing video of the tab's contents.
+
+    This works by flashing the entire tab contents to a arbitrary color and then
+    starting video recording. When the frames are processed, we can look for
+    that flash as the content bounds.
+
+    Args:
+      min_bitrate_mbps: The minimum caputre bitrate in MegaBits Per Second.
+          The platform is free to deliver a higher bitrate if it can do so
+          without increasing overhead.
+    """
+    self.Highlight(highlight_bitmap)
+    self.browser.platform.StartVideoCapture(min_bitrate_mbps)
+    self.ClearHighlight(highlight_bitmap)
+
+  @property
+  def is_video_capture_running(self):
+    return self.browser.platform.is_video_capture_running
+
+  def StopVideoCapture(self):
+    """Stops recording video of the tab's contents.
+
+    This looks for the initial color flash in the first frame to establish the
+    tab content boundaries and then omits all frames displaying the flash.
+
+    Returns:
+      video: A video object which is a telemetry.core.Video
+    """
+    return self.browser.platform.StopVideoCapture()
+
+  def WaitForNavigate(self, timeout=DEFAULT_TAB_TIMEOUT):
+    """Waits for the navigation to complete.
+
+    The current page is expect to be in a navigation.
     This function returns when the navigation is complete or when
     the timeout has been exceeded.
     """
-    self._inspector_backend.PerformActionAndWaitForNavigate(
-        action_function, timeout)
+    self._inspector_backend.WaitForNavigate(timeout)
 
   def Navigate(self, url, script_to_evaluate_on_commit=None,
                timeout=DEFAULT_TAB_TIMEOUT):
@@ -99,6 +188,22 @@ class Tab(web_contents.WebContents):
   def CollectGarbage(self):
     self._inspector_backend.CollectGarbage()
 
-  def ClearCache(self):
-    """Clears the browser's HTTP disk cache and the tab's HTTP memory cache."""
-    self._inspector_backend.ClearCache()
+  def ClearCache(self, force):
+    """Clears the browser's networking related disk, memory and other caches.
+
+    Args:
+      force: Iff true, navigates to about:blank which destroys the previous
+          renderer, ensuring that even "live" resources in the memory cache are
+          cleared.
+    """
+    self.browser.platform.FlushDnsCache()
+    self.ExecuteJavaScript("""
+        if (window.chrome && chrome.benchmarking &&
+            chrome.benchmarking.clearCache) {
+          chrome.benchmarking.clearCache();
+          chrome.benchmarking.clearPredictorCache();
+          chrome.benchmarking.clearHostResolverCache();
+        }
+    """)
+    if force:
+      self.Navigate('about:blank')

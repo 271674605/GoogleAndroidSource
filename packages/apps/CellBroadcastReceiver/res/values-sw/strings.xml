@@ -18,6 +18,7 @@
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_label" msgid="7559008249836700599">"Matangazo ya simu"</string>
     <string name="sms_cb_settings" msgid="971917159442705371">"Mipangilio ya Matangazo ya simu"</string>
+    <string name="cell_broadcast_settings_not_available" msgid="2612364350745967915">"Mipangilio ya matangazo ya simu za mkononi haipatikani kwa mtumiaji huyu"</string>
     <string name="button_dismiss" msgid="1234221657930516287">"Sawa"</string>
     <string name="no_cell_broadcasts" msgid="5409324337492758562">"Hakuna arifu amilifu katika eneo lako. Unaweza kubadilisha mipangilio ya Arifu kwa kutumia chaguo la menyu ya Mipangilio."</string>
     <string name="menu_preferences" msgid="3596514894131599202">"Mipangilio"</string>
@@ -48,7 +49,7 @@
     <string name="enable_emergency_alerts_title" msgid="1411195469162410084">"Wezesha taarifa"</string>
     <string name="enable_emergency_alerts_summary" msgid="5932655529367149358">"Onyesha matangazo ya ilani ya dharura"</string>
     <string name="alert_sound_duration_title" msgid="4712853569849108005">"Muda wa kengele ya sauti"</string>
-    <string name="alert_reminder_interval_title" msgid="3283595202268218149">"Kumbusho la arifa"</string>
+    <string name="alert_reminder_interval_title" msgid="3283595202268218149">"Kikumbusho cha arifa"</string>
     <string name="enable_alert_speech_title" msgid="8052104771053526941">"Tamka ujumbe wa ilani"</string>
     <string name="enable_alert_speech_summary" msgid="356086178962268831">"Tumia usemi-hadi-maandishi ili kuzungumzia ujumbe wa kengele ya dharura"</string>
     <string name="category_etws_settings_title" msgid="4072774251965938576">"Mipangilio ya ETWS"</string>

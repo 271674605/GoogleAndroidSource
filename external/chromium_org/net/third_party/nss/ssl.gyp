@@ -8,7 +8,7 @@
       'conditions': [
         ['sysroot!=""', {
           'variables': {
-            'pkg-config': '../../../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)"',
+            'pkg-config': '../../../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)" "<(system_libdir)"',
           },
         }, {
           'variables': {
@@ -107,6 +107,13 @@
             # https://bugzilla.mozilla.org/show_bug.cgi?id=884072
             '-Wno-header-guard',
           ],
+        }],
+        [ 'OS == "linux"', {
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+            ],
+          },
         }],
         [ 'OS == "mac" or OS == "ios"', {
           'defines': [

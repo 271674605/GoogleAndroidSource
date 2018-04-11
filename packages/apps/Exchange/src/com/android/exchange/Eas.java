@@ -21,6 +21,10 @@ import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.service.EmailServiceProxy;
 import com.android.mail.utils.LogUtils;
 
+import java.text.SimpleDateFormat;
+import java.util.Locale;
+import java.util.TimeZone;
+
 /**
  * Constants used throughout the EAS implementation are stored here.
  *
@@ -39,7 +43,7 @@ public class Eas {
     public static boolean PARSER_LOG = false;   // DO NOT CHECK IN WITH THIS SET TO TRUE
     public static boolean FILE_LOG = false;     // DO NOT CHECK IN WITH THIS SET TO TRUE
 
-    public static final String CLIENT_VERSION = "EAS-1.3";
+    public static final String CLIENT_VERSION = "EAS-2.0";
     public static final String ACCOUNT_MAILBOX_PREFIX = "__eas";
 
     // Define our default protocol version as 2.5 (Exchange 2003)
@@ -54,6 +58,7 @@ public class Eas {
     public static final String SUPPORTED_PROTOCOL_EX2010_SP1 = "14.1";
     public static final double SUPPORTED_PROTOCOL_EX2010_SP1_DOUBLE = 14.1;
     public static final String DEFAULT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_EX2003;
+    public static final boolean DEFAULT_PROTOCOL_IS_EAS14 = false;
 
     public static final String EXCHANGE_ACCOUNT_MANAGER_TYPE =
             com.android.exchange.Configuration.EXCHANGE_ACCOUNT_MANAGER_TYPE;
@@ -153,6 +158,13 @@ public class Eas {
         throw new IllegalArgumentException("illegal protocol version");
     }
 
+    static public boolean isProtocolEas14(String version) {
+        if (version == null) {
+            return DEFAULT_PROTOCOL_IS_EAS14;
+        }
+        return getProtocolVersionDouble(version) >= SUPPORTED_PROTOCOL_EX2010_DOUBLE;
+    }
+
     /**
      * Gets the Exchange folder class for a mailbox type (PIM collections have different values
      * from email), needed when forming the request.
@@ -168,5 +180,12 @@ public class Eas {
             default:
                 return "Email";
         }
+    }
+
+    // Time format documented at http://msdn.microsoft.com/en-us/library/ee201818(v=exchg.80).aspx
+    public static final SimpleDateFormat DATE_FORMAT;
+    static {
+        DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.S'Z'", Locale.US);
+        DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("UTC"));
     }
 }

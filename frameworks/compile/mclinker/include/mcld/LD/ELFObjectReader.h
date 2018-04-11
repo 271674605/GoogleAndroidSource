@@ -8,9 +8,6 @@
 //===----------------------------------------------------------------------===//
 #ifndef MCLD_ELF_OBJECT_READER_H
 #define MCLD_ELF_OBJECT_READER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
 
 #include <mcld/LD/ObjectReader.h>
 #include <mcld/ADT/Flags.h>
@@ -46,7 +43,7 @@ public:
   ~ELFObjectReader();
 
   // -----  observers  ----- //
-  bool isMyFormat(Input &pFile) const;
+  bool isMyFormat(Input &pFile, bool &pContinue) const;
 
   // -----  readers  ----- //
   bool readHeader(Input& pFile);

@@ -19,9 +19,13 @@ namespace net {
 class IOBuffer;
 }
 
+namespace content {
+class MockAppCacheStorage;
+}
+
 namespace appcache {
 
-class AppCacheService;
+class AppCacheStorage;
 
 static const int kUnkownResponseDataSize = -1;
 
@@ -31,7 +35,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheResponseInfo
     : public base::RefCounted<AppCacheResponseInfo> {
  public:
   // AppCacheResponseInfo takes ownership of the http_info.
-  AppCacheResponseInfo(AppCacheService* service, const GURL& manifest_url,
+  AppCacheResponseInfo(AppCacheStorage* storage, const GURL& manifest_url,
                        int64 response_id, net::HttpResponseInfo* http_info,
                        int64 response_data_size);
 
@@ -50,7 +54,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheResponseInfo
   const int64 response_id_;
   const scoped_ptr<net::HttpResponseInfo> http_response_info_;
   const int64 response_data_size_;
-  const AppCacheService* service_;
+  AppCacheStorage* storage_;
 };
 
 // A refcounted wrapper for HttpResponseInfo so we can apply the
@@ -63,7 +67,7 @@ struct WEBKIT_STORAGE_BROWSER_EXPORT HttpResponseInfoIOBuffer
   HttpResponseInfoIOBuffer();
   explicit HttpResponseInfoIOBuffer(net::HttpResponseInfo* info);
 
- private:
+ protected:
   friend class base::RefCountedThreadSafe<HttpResponseInfoIOBuffer>;
   virtual ~HttpResponseInfoIOBuffer();
 };
@@ -170,9 +174,9 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheResponseReader
 
  protected:
   friend class AppCacheStorageImpl;
-  friend class MockAppCacheStorage;
+  friend class content::MockAppCacheStorage;
 
-  // Should only be constructed by the storage class.
+  // Should only be constructed by the storage class and derivatives.
   AppCacheResponseReader(int64 response_id,
                          int64 group_id,
                          AppCacheDiskCacheInterface* disk_cache);
@@ -226,9 +230,15 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheResponseWriter
   // Returns the amount written, info and data.
   int64 amount_written() { return info_size_ + write_position_; }
 
+ protected:
+  // Should only be constructed by the storage class and derivatives.
+  AppCacheResponseWriter(int64 response_id,
+                         int64 group_id,
+                         AppCacheDiskCacheInterface* disk_cache);
+
  private:
   friend class AppCacheStorageImpl;
-  friend class MockAppCacheStorage;
+  friend class content::MockAppCacheStorage;
 
   enum CreationPhase {
     NO_ATTEMPT,
@@ -236,11 +246,6 @@ class WEBKIT_STORAGE_BROWSER_EXPORT AppCacheResponseWriter
     DOOM_EXISTING,
     SECOND_ATTEMPT
   };
-
-  // Should only be constructed by the storage class.
-  AppCacheResponseWriter(int64 response_id,
-                         int64 group_id,
-                         AppCacheDiskCacheInterface* disk_cache);
 
   virtual void OnIOComplete(int result) OVERRIDE;
   void ContinueWriteInfo();

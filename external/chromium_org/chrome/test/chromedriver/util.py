@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import urlparse
+import zipfile
 
 
 def GetPlatformName():
@@ -36,6 +37,14 @@ def IsLinux():
 
 def IsMac():
   return sys.platform.startswith('darwin')
+
+
+def GetAbsolutePathOfUserPath(user_path):
+  """Expand the given |user_path| (like "~/file") and return its absolute path.
+  """
+  if user_path is None:
+    return None
+  return os.path.abspath(os.path.expanduser(user_path))
 
 
 def _DeleteDir(path):
@@ -81,6 +90,15 @@ def MakeTempDir(parent_dir=None):
   path = tempfile.mkdtemp(dir=parent_dir)
   atexit.register(MaybeDelete, path)
   return path
+
+
+def Zip(path):
+  """Zips the given path and returns the zipped file."""
+  zip_path = os.path.join(MakeTempDir(), 'build.zip')
+  f = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+  f.write(path, os.path.basename(path))
+  f.close()
+  return zip_path
 
 
 def Unzip(zip_path, output_dir):
@@ -171,3 +189,13 @@ def AddBuildStepText(text):
 def PrintAndFlush(text):
   print text
   sys.stdout.flush()
+
+
+def AddLink(label, url):
+  """Adds a link with name |label| linking to |url| to current buildbot step.
+
+  Args:
+    label: A string with the name of the label.
+    url: A string of the URL.
+  """
+  print '@@@STEP_LINK@%s@%s@@@' % (label, url)

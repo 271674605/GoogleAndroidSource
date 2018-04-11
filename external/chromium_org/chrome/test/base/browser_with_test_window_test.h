@@ -16,7 +16,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/users/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #endif
@@ -40,6 +40,12 @@ namespace aura {
 namespace test {
 class AuraTestHelper;
 }
+}
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+namespace views {
+class ViewsDelegate;
 }
 #endif
 
@@ -73,13 +79,16 @@ class WebContents;
 class BrowserWithTestWindowTest : public testing::Test {
  public:
   // Creates a BrowserWithTestWindowTest for which the initial window will be
-  // created on the native desktop.
+  // a tabbed browser created on the native desktop, which is not a hosted app.
   BrowserWithTestWindowTest();
-  virtual ~BrowserWithTestWindowTest();
 
-  // Sets the desktop on which the initial window will be created. Must be
-  // called before SetUp().
-  void SetHostDesktopType(chrome::HostDesktopType host_desktop_type);
+  // Creates a BrowserWithTestWindowTest for which the initial window will be
+  // the specified type.
+  BrowserWithTestWindowTest(Browser::Type browser_type,
+                            chrome::HostDesktopType host_desktop_type,
+                            bool hosted_app);
+
+  virtual ~BrowserWithTestWindowTest();
 
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
@@ -95,9 +104,9 @@ class BrowserWithTestWindowTest : public testing::Test {
     return browser_.release();
   }
 
-  TestingProfile* profile() const { return profile_.get(); }
+  TestingProfile* profile() const { return profile_; }
 
-  TestingProfile* GetProfile() { return profile_.get(); }
+  TestingProfile* GetProfile() { return profile_; }
 
   BrowserWindow* release_browser_window() WARN_UNUSED_RESULT {
     return window_.release();
@@ -122,10 +131,9 @@ class BrowserWithTestWindowTest : public testing::Test {
   void NavigateAndCommitActiveTab(const GURL& url);
 
   // Set the |title| of the current tab.
-  void NavigateAndCommitActiveTabWithTitle(
-      Browser* browser,
-      const GURL& url,
-      const string16& title);
+  void NavigateAndCommitActiveTabWithTitle(Browser* browser,
+                                           const GURL& url,
+                                           const base::string16& title);
 
   // Destroys the browser, window, and profile created by this class. This is
   // invoked from the destructor.
@@ -134,11 +142,28 @@ class BrowserWithTestWindowTest : public testing::Test {
   // Creates the profile used by this test. The caller owns the return value.
   virtual TestingProfile* CreateProfile();
 
+  // Destroys the profile which was created through |CreateProfile|.
+  virtual void DestroyProfile(TestingProfile* profile);
+
   // Creates the BrowserWindow used by this test. The caller owns the return
   // value. Can return NULL to use the default window created by Browser.
   virtual BrowserWindow* CreateBrowserWindow();
 
+  // Creates the browser given |profile|, |browser_type|, |hosted_app|,
+  // |host_desktop_type| and |browser_window|. The caller owns the return value.
+  virtual Browser* CreateBrowser(Profile* profile,
+                                 Browser::Type browser_type,
+                                 bool hosted_app,
+                                 chrome::HostDesktopType host_desktop_type,
+                                 BrowserWindow* browser_window);
+
  private:
+#if !defined(OS_CHROMEOS) && defined(TOOLKIT_VIEWS)
+  // Creates the ViewsDelegate to use, may be overriden to create a different
+  // ViewsDelegate.
+  views::ViewsDelegate* CreateViewsDelegate();
+#endif
+
   // We need to create a MessageLoop, otherwise a bunch of things fails.
   content::TestBrowserThreadBundle thread_bundle_;
   base::ShadowingAtExitManager at_exit_manager_;
@@ -149,7 +174,10 @@ class BrowserWithTestWindowTest : public testing::Test {
   chromeos::ScopedTestUserManager test_user_manager_;
 #endif
 
-  scoped_ptr<TestingProfile> profile_;
+  // The profile will automatically be destroyed by TearDown using the
+  // |DestroyProfile()| function - which can be overwritten by derived testing
+  // frameworks.
+  TestingProfile* profile_;
   scoped_ptr<BrowserWindow> window_;  // Usually a TestBrowserWindow.
   scoped_ptr<Browser> browser_;
 
@@ -164,12 +192,22 @@ class BrowserWithTestWindowTest : public testing::Test {
   scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
 #endif
 
+#if defined(TOOLKIT_VIEWS)
+  scoped_ptr<views::ViewsDelegate> views_delegate_;
+#endif
+
 #if defined(OS_WIN)
   ui::ScopedOleInitializer ole_initializer_;
 #endif
 
+  // The type of browser to create (tabbed or popup).
+  Browser::Type browser_type_;
+
   // The desktop to create the initial window on.
   chrome::HostDesktopType host_desktop_type_;
+
+  // Whether the browser is part of a hosted app.
+  bool hosted_app_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWithTestWindowTest);
 };

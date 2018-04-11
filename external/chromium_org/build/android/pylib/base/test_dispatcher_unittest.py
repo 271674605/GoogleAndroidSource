@@ -3,6 +3,8 @@
 # found in the LICENSE file.
 
 """Unittests for test_dispatcher.py."""
+# pylint: disable=R0201
+# pylint: disable=W0212
 
 import os
 import sys
@@ -15,10 +17,10 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),
 from pylib import android_commands
 android_commands.GetAttachedDevices = lambda: ['0', '1']
 from pylib import constants
+from pylib.base import base_test_result
+from pylib.base import test_dispatcher
 from pylib.utils import watchdog_timer
 
-import base_test_result
-import test_dispatcher
 
 
 class TestException(Exception):
@@ -28,7 +30,7 @@ class TestException(Exception):
 class MockRunner(object):
   """A mock TestRunner."""
   def __init__(self, device='0', shard_index=0):
-    self.device = device
+    self.device_serial = device
     self.shard_index = shard_index
     self.setups = 0
     self.teardowns = 0
@@ -131,7 +133,7 @@ class TestThreadGroupFunctions(unittest.TestCase):
     runners = test_dispatcher._CreateRunners(MockRunner, ['0', '1'])
     for runner in runners:
       self.assertEqual(runner.setups, 1)
-    self.assertEqual(set([r.device for r in runners]),
+    self.assertEqual(set([r.device_serial for r in runners]),
                      set(['0', '1']))
     self.assertEqual(set([r.shard_index for r in runners]),
                      set([0, 1]))
@@ -167,7 +169,7 @@ class TestShard(unittest.TestCase):
   @staticmethod
   def _RunShard(runner_factory):
     return test_dispatcher.RunTests(
-        ['a', 'b', 'c'], runner_factory, False, None, shard=True)
+        ['a', 'b', 'c'], runner_factory, ['0', '1'], shard=True)
 
   def testShard(self):
     results, exit_code = TestShard._RunShard(MockRunner)
@@ -182,9 +184,18 @@ class TestShard(unittest.TestCase):
 
   def testNoTests(self):
     results, exit_code = test_dispatcher.RunTests(
-        [], MockRunner, False, None, shard=True)
+        [], MockRunner, ['0', '1'], shard=True)
     self.assertEqual(len(results.GetAll()), 0)
     self.assertEqual(exit_code, constants.ERROR_EXIT_CODE)
+
+  def testTestsRemainWithAllDevicesOffline(self):
+    attached_devices = android_commands.GetAttachedDevices
+    android_commands.GetAttachedDevices = lambda: []
+    try:
+      with self.assertRaises(AssertionError):
+        _results, _exit_code = TestShard._RunShard(MockRunner)
+    finally:
+      android_commands.GetAttachedDevices = attached_devices
 
 
 class TestReplicate(unittest.TestCase):
@@ -192,7 +203,7 @@ class TestReplicate(unittest.TestCase):
   @staticmethod
   def _RunReplicate(runner_factory):
     return test_dispatcher.RunTests(
-        ['a', 'b', 'c'], runner_factory, False, None, shard=False)
+        ['a', 'b', 'c'], runner_factory, ['0', '1'], shard=False)
 
   def testReplicate(self):
     results, exit_code = TestReplicate._RunReplicate(MockRunner)
@@ -208,7 +219,7 @@ class TestReplicate(unittest.TestCase):
 
   def testNoTests(self):
     results, exit_code = test_dispatcher.RunTests(
-        [], MockRunner, False, None, shard=False)
+        [], MockRunner, ['0', '1'], shard=False)
     self.assertEqual(len(results.GetAll()), 0)
     self.assertEqual(exit_code, constants.ERROR_EXIT_CODE)
 

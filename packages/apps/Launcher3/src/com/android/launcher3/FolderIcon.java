@@ -33,14 +33,14 @@ import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.android.launcher3.R;
 import com.android.launcher3.DropTarget.DragObject;
 import com.android.launcher3.FolderInfo.FolderListener;
 
@@ -49,7 +49,7 @@ import java.util.ArrayList;
 /**
  * An icon that can appear on in the workspace representing an {@link UserFolder}.
  */
-public class FolderIcon extends LinearLayout implements FolderListener {
+public class FolderIcon extends FrameLayout implements FolderListener {
     private Launcher mLauncher;
     private Folder mFolder;
     private FolderInfo mInfo;
@@ -71,14 +71,20 @@ public class FolderIcon extends LinearLayout implements FolderListener {
     private static final float OUTER_RING_GROWTH_FACTOR = 0.3f;
 
     // The amount of vertical spread between items in the stack [0...1]
-    private static final float PERSPECTIVE_SHIFT_FACTOR = 0.24f;
+    private static final float PERSPECTIVE_SHIFT_FACTOR = 0.18f;
 
     // Flag as to whether or not to draw an outer ring. Currently none is designed.
     public static final boolean HAS_OUTER_RING = true;
 
+    // Flag whether the folder should open itself when an item is dragged over is enabled.
+    public static final boolean SPRING_LOADING_ENABLED = true;
+
     // The degree to which the item in the back of the stack is scaled [0...1]
     // (0 means it's not scaled at all, 1 means it's scaled to nothing)
     private static final float PERSPECTIVE_SCALE_FACTOR = 0.35f;
+
+    // Delay when drag enters until the folder opens, in miliseconds.
+    private static final int ON_OPEN_DELAY = 800;
 
     public static Drawable sSharedFolderLeaveBehind = null;
 
@@ -100,9 +106,14 @@ public class FolderIcon extends LinearLayout implements FolderListener {
     boolean mAnimating = false;
     private Rect mOldBounds = new Rect();
 
+    private float mSlop;
+
     private PreviewItemDrawingParams mParams = new PreviewItemDrawingParams(0, 0, 0, 0);
     private PreviewItemDrawingParams mAnimParams = new PreviewItemDrawingParams(0, 0, 0, 0);
     private ArrayList<ShortcutInfo> mHiddenItems = new ArrayList<ShortcutInfo>();
+
+    private Alarm mOpenAlarm = new Alarm();
+    private ItemInfo mDragInfo;
 
     public FolderIcon(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -122,7 +133,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         final ViewGroup cellLayoutChildren = (ViewGroup) getParent();
         final ViewGroup cellLayout = (ViewGroup) cellLayoutChildren.getParent();
         final Workspace workspace = (Workspace) cellLayout.getParent();
-        return !workspace.isSmall();
+        return !workspace.workspaceInModalState();
     }
 
     static FolderIcon fromXml(int resId, Launcher launcher, ViewGroup group,
@@ -134,17 +145,20 @@ public class FolderIcon extends LinearLayout implements FolderListener {
                     "INITIAL_ITEM_ANIMATION_DURATION, as sequencing of adding first two items " +
                     "is dependent on this");
         }
+        LauncherAppState app = LauncherAppState.getInstance();
+        DeviceProfile grid = app.getDynamicGrid().getDeviceProfile();
 
         FolderIcon icon = (FolderIcon) LayoutInflater.from(launcher).inflate(resId, group, false);
         icon.setClipToPadding(false);
         icon.mFolderName = (BubbleTextView) icon.findViewById(R.id.folder_icon_name);
         icon.mFolderName.setText(folderInfo.title);
-        icon.mPreviewBackground = (ImageView) icon.findViewById(R.id.preview_background);
-        LauncherAppState app = LauncherAppState.getInstance();
-        DeviceProfile grid = app.getDynamicGrid().getDeviceProfile();
+        icon.mFolderName.setCompoundDrawablePadding(0);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) icon.mFolderName.getLayoutParams();
+        lp.topMargin = grid.iconSizePx + grid.iconDrawablePaddingPx;
+
         // Offset the preview background to center this view accordingly
-        LinearLayout.LayoutParams lp =
-                (LinearLayout.LayoutParams) icon.mPreviewBackground.getLayoutParams();
+        icon.mPreviewBackground = (ImageView) icon.findViewById(R.id.preview_background);
+        lp = (FrameLayout.LayoutParams) icon.mPreviewBackground.getLayoutParams();
         lp.topMargin = grid.folderBackgroundOffset;
         lp.width = grid.folderIconSizePx;
         lp.height = grid.folderIconSizePx;
@@ -164,6 +178,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         icon.mFolderRingAnimator = new FolderRingAnimator(launcher, icon);
         folderInfo.addListener(icon);
 
+        icon.setOnFocusChangeListener(launcher.mFocusHandler);
         return icon;
     }
 
@@ -297,7 +312,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         }
     }
 
-    Folder getFolder() {
+    public Folder getFolder() {
         return mFolder;
     }
 
@@ -329,17 +344,44 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         mFolderRingAnimator.setCellLayout(layout);
         mFolderRingAnimator.animateToAcceptState();
         layout.showFolderAccept(mFolderRingAnimator);
+        mOpenAlarm.setOnAlarmListener(mOnOpenListener);
+        if (SPRING_LOADING_ENABLED &&
+                ((dragInfo instanceof AppInfo) || (dragInfo instanceof ShortcutInfo))) {
+            // TODO: we currently don't support spring-loading for PendingAddShortcutInfos even
+            // though widget-style shortcuts can be added to folders. The issue is that we need
+            // to deal with configuration activities which are currently handled in
+            // Workspace#onDropExternal.
+            mOpenAlarm.setAlarm(ON_OPEN_DELAY);
+        }
+        mDragInfo = (ItemInfo) dragInfo;
     }
 
     public void onDragOver(Object dragInfo) {
     }
+
+    OnAlarmListener mOnOpenListener = new OnAlarmListener() {
+        public void onAlarm(Alarm alarm) {
+            ShortcutInfo item;
+            if (mDragInfo instanceof AppInfo) {
+                // Came from all apps -- make a copy.
+                item = ((AppInfo) mDragInfo).makeShortcut();
+                item.spanX = 1;
+                item.spanY = 1;
+            } else {
+                // ShortcutInfo
+                item = (ShortcutInfo) mDragInfo;
+            }
+            mFolder.beginExternalDrag(item);
+            mLauncher.openFolder(FolderIcon.this);
+        }
+    };
 
     public void performCreateAnimation(final ShortcutInfo destInfo, final View destView,
             final ShortcutInfo srcInfo, final DragView srcView, Rect dstRect,
             float scaleRelativeToDragLayer, Runnable postAnimationRunnable) {
 
         // These correspond two the drawable and view that the icon was dropped _onto_
-        Drawable animateDrawable = ((TextView) destView).getCompoundDrawables()[1];
+        Drawable animateDrawable = getTopDrawable((TextView) destView);
         computePreviewDrawingParams(animateDrawable.getIntrinsicWidth(),
                 destView.getMeasuredWidth());
 
@@ -353,8 +395,8 @@ public class FolderIcon extends LinearLayout implements FolderListener {
     }
 
     public void performDestroyAnimation(final View finalView, Runnable onCompleteRunnable) {
-        Drawable animateDrawable = ((TextView) finalView).getCompoundDrawables()[1];
-        computePreviewDrawingParams(animateDrawable.getIntrinsicWidth(), 
+        Drawable animateDrawable = getTopDrawable((TextView) finalView);
+        computePreviewDrawingParams(animateDrawable.getIntrinsicWidth(),
                 finalView.getMeasuredWidth());
 
         // This will animate the first item from it's position as an icon into its
@@ -369,6 +411,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
 
     public void onDragExit() {
         mFolderRingAnimator.animateToNaturalState();
+        mOpenAlarm.cancelAlarm();
     }
 
     private void onDrop(final ShortcutInfo item, DragView animateView, Rect finalRect,
@@ -459,6 +502,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
             int adjustedAvailableSpace = (int) ((mAvailableSpaceInPreview / 2) * (1 + 0.8f));
 
             int unscaledHeight = (int) (mIntrinsicIconSize * (1 + PERSPECTIVE_SHIFT_FACTOR));
+
             mBaselineIconScale = (1.0f * adjustedAvailableSpace / unscaledHeight);
 
             mBaselineIconSize = (int) (mIntrinsicIconSize * mBaselineIconScale);
@@ -513,7 +557,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         // We want to imagine our coordinates from the bottom left, growing up and to the
         // right. This is natural for the x-axis, but for the y-axis, we have to invert things.
         float transY = mAvailableSpaceInPreview - (offset + scaledSize + scaleOffsetCorrection) + getPaddingTop();
-        float transX = offset + scaleOffsetCorrection;
+        float transX = (mAvailableSpaceInPreview - scaledSize) / 2;
         float totalScale = mBaselineIconScale * scale;
         final int overlayAlpha = (int) (80 * (1 - r));
 
@@ -537,12 +581,18 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         if (d != null) {
             mOldBounds.set(d.getBounds());
             d.setBounds(0, 0, mIntrinsicIconSize, mIntrinsicIconSize);
-            d.setFilterBitmap(true);
-            d.setColorFilter(Color.argb(params.overlayAlpha, 255, 255, 255),
-                    PorterDuff.Mode.SRC_ATOP);
-            d.draw(canvas);
-            d.clearColorFilter();
-            d.setFilterBitmap(false);
+            if (d instanceof FastBitmapDrawable) {
+                FastBitmapDrawable fd = (FastBitmapDrawable) d;
+                int oldBrightness = fd.getBrightness();
+                fd.setBrightness(params.overlayAlpha);
+                d.draw(canvas);
+                fd.setBrightness(oldBrightness);
+            } else {
+                d.setColorFilter(Color.argb(params.overlayAlpha, 255, 255, 255),
+                        PorterDuff.Mode.SRC_ATOP);
+                d.draw(canvas);
+                d.clearColorFilter();
+            }
             d.setBounds(mOldBounds);
         }
         canvas.restore();
@@ -564,7 +614,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
             computePreviewDrawingParams(mAnimParams.drawable);
         } else {
             v = (TextView) items.get(0);
-            d = v.getCompoundDrawables()[1];
+            d = getTopDrawable(v);
             computePreviewDrawingParams(d);
         }
 
@@ -573,7 +623,7 @@ public class FolderIcon extends LinearLayout implements FolderListener {
             for (int i = nItemsInPreview - 1; i >= 0; i--) {
                 v = (TextView) items.get(i);
                 if (!mHiddenItems.contains(v.getTag())) {
-                    d = v.getCompoundDrawables()[1];
+                    d = getTopDrawable(v);
                     mParams = computePreviewItemDrawingParams(i, mParams);
                     mParams.drawable = d;
                     drawPreviewItem(canvas, mParams);
@@ -582,6 +632,11 @@ public class FolderIcon extends LinearLayout implements FolderListener {
         } else {
             drawPreviewItem(canvas, mAnimParams);
         }
+    }
+
+    private Drawable getTopDrawable(TextView v) {
+        Drawable d = v.getCompoundDrawables()[1];
+        return (d instanceof PreloadIconDrawable) ? ((PreloadIconDrawable) d).mIcon : d;
     }
 
     private void animateFirstItem(final Drawable d, int duration, final boolean reverse,
@@ -672,8 +727,19 @@ public class FolderIcon extends LinearLayout implements FolderListener {
             case MotionEvent.ACTION_UP:
                 mLongPressHelper.cancelLongPress();
                 break;
+            case MotionEvent.ACTION_MOVE:
+                if (!Utilities.pointInView(this, event.getX(), event.getY(), mSlop)) {
+                    mLongPressHelper.cancelLongPress();
+                }
+                break;
         }
         return result;
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        mSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
     }
 
     @Override

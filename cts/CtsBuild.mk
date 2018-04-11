@@ -30,6 +30,12 @@ CTS_XML_GENERATOR := $(HOST_OUT_EXECUTABLES)/cts-xml-generator
 # File indicating which tests should be blacklisted due to problems.
 CTS_EXPECTATIONS := cts/tests/expectations/knownfailures.txt
 
+# File indicating which tests should be blacklisted due to unsupported abi.
+CTS_UNSUPPORTED_ABIS := cts/tests/expectations/unsupportedabis.txt
+
+# Holds the target architecture to build for.
+CTS_TARGET_ARCH := $(TARGET_ARCH)
+
 # Functions to get the paths of the build outputs.
 
 define cts-get-lib-paths
@@ -41,7 +47,7 @@ define cts-get-ui-lib-paths
 endef
 
 define cts-get-native-paths
-	$(foreach exe,$(1),$(call intermediates-dir-for,EXECUTABLES,$(exe))/$(exe))
+	$(foreach exe,$(1),$(call intermediates-dir-for,EXECUTABLES,$(exe),,,$(3))/$(exe)$(2))
 endef
 
 define cts-get-package-paths
@@ -50,4 +56,12 @@ endef
 
 define cts-get-test-xmls
 	$(foreach name,$(1),$(CTS_TESTCASES_OUT)/$(name).xml)
+endef
+
+define cts-get-executable-paths
+	$(foreach executable,$(1),$(CTS_TESTCASES_OUT)/$(executable))
+endef
+
+define cts-get-deqp-test-xmls
+	$(foreach api,$(1),$(CTS_TESTCASES_OUT)/com.drawelements.deqp.$(api).xml)
 endef

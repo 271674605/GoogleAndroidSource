@@ -4,13 +4,17 @@
  */
 
 #gaia-signin {
-  height: 609px;
+  height: 609px; /* Should be the same as #user-image.loading min-heigth. */
   padding: 70px 17px 69px;    /* Screen has no controls. */
-  width: 722px;
+  width: 722px; /* Should be the same as #user-image.loading width. */
 }
 
-#gaia-signin.no-right-panel {
+#gaia-signin:not(.saml).no-right-panel {
   width: 522px;
+}
+
+#gaia-signin.saml {
+  padding: 75px 0 0;
 }
 
 #signin-right {
@@ -21,7 +25,8 @@
 }
 
 #signin-right,
-#enterprise-info-container {
+#enterprise-info-container,
+#saml-info-container {
   font-size: 12px;
 }
 
@@ -32,7 +37,8 @@
   }
 }
 
-.no-right-panel #signin-right {
+.no-right-panel #signin-right,
+.saml #signin-right {
   display: none;
 }
 
@@ -58,24 +64,37 @@
   height: 100%;
 }
 
-#gaia-signin-divider {
-  background: -webkit-gradient(
-                   linear, left top, left bottom,
-                   color-stop(0, #e3e3e3),
-                   color-stop(0.5, #cacaca),
-                   color-stop(1, #e3e3e3));
+.saml #gaia-signin-form-container,
+.saml #signin-frame {
+  width: 100%;
+}
+
+.signin-divider {
+  background: linear-gradient(
+                   to bottom,
+                   #e3e3e3,
+                   #cacaca 50%,
+                   #e3e3e3);
   border: none;
   width: 1px;
 }
 
-.no-right-panel #gaia-signin-divider {
+.no-right-panel #gaia-signin-divider,
+.saml #gaia-signin-divider {
   display: none;
 }
 
 #signin-frame {
   background-color: transparent;
+  margin-left: -44px;
   vertical-align: top;
-  width: 340px;
+  width: 400px;
+}
+
+/* Simpler alignment if no right panel. */
+.no-right-panel #signin-frame,
+.saml #signin-frame {
+  margin-left: 0;
 }
 
 /* Position to be aligned with the login box in iframe  */
@@ -119,7 +138,23 @@
   vertical-align: text-bottom;
 }
 
+#createManagedUserLogo span {
+  vertical-align: -10%;
+}
+
 #createManagedUserLinkPlaceholder,
 #createManagedUserNoManagerText {
   margin-top: 10px;
+}
+
+#saml-notice-container {
+  left: 0;
+  position: absolute;
+  right: 0;
+  text-align: center;
+  top: 50px;
+}
+
+#saml-notice-message {
+  margin: 0 auto;
 }

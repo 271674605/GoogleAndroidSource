@@ -23,7 +23,7 @@
  *
  */
 
-#include <utils/UniquePtr.h>
+#include <UniquePtr.h>
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "OpenSSL-keystore-ecdsa"
@@ -99,7 +99,7 @@ static ECDSA_SIG* keystore_ecdsa_do_sign(const unsigned char *dgst, int dlen,
         return 0;
     }
 
-    ALOGV("keystore_ecdsa_do_sign(%p, %d, %p) => returning %p len %llu", dgst, dlen, eckey,
+    ALOGV("keystore_ecdsa_do_sign(%p, %d, %p) => returning %p len %zu", dgst, dlen, eckey,
             ecdsa_sig.get(), replyLen);
     return ecdsa_sig.release();
 }

@@ -9,16 +9,15 @@
 #define GrGpu_DEFINED
 
 #include "GrDrawTarget.h"
-#include "GrRefCnt.h"
 #include "GrClipMaskManager.h"
 #include "SkPath.h"
 
 class GrContext;
+class GrGpuObject;
 class GrIndexBufferAllocPool;
 class GrPath;
 class GrPathRenderer;
 class GrPathRendererChain;
-class GrResource;
 class GrStencilBuffer;
 class GrVertexBufferAllocPool;
 
@@ -72,15 +71,26 @@ public:
      * two but underlying API requires a power of two texture then srcData
      * will be embedded in a power of two texture. The extra width and height
      * is filled as though srcData were rendered clamped into the texture.
+     * The exception is when using compressed data formats. In this case, the
+     * desc width and height must be a multiple of the compressed format block
+     * size otherwise this function returns NULL. Similarly, if the underlying
+     * API requires a power of two texture and the source width and height are not
+     * a power of two, then this function returns NULL.
      *
      * If kRenderTarget_TextureFlag is specified the GrRenderTarget is
      * accessible via GrTexture::asRenderTarget(). The texture will hold a ref
-     * on the render target until the texture is destroyed.
+     * on the render target until the texture is destroyed. Compressed textures
+     * cannot have the kRenderTarget_TextureFlag set.
      *
      * @param desc        describes the texture to be created.
      * @param srcData     texel data to load texture. Begins with full-size
-     *                    palette data for paletted textures. Contains width*
-     *                    height texels. If NULL texture data is uninitialized.
+     *                    palette data for paletted textures. For compressed
+     *                    formats it contains the compressed pixel data. Otherwise,
+     *                    it contains width*height texels. If NULL texture data
+     *                    is uninitialized.
+     * @param rowBytes    the number of bytes between consecutive rows. Zero
+     *                    means rows are tightly packed. This field is ignored
+     *                    for compressed formats.
      *
      * @return    The texture object if successful, otherwise NULL.
      */
@@ -102,30 +112,30 @@ public:
      *
      * @param size    size in bytes of the vertex buffer
      * @param dynamic hints whether the data will be frequently changed
-     *                by either GrVertexBuffer::lock or
-     *                GrVertexBuffer::updateData.
+     *                by either GrVertexBuffer::map() or
+     *                GrVertexBuffer::updateData().
      *
      * @return    The vertex buffer if successful, otherwise NULL.
      */
-    GrVertexBuffer* createVertexBuffer(uint32_t size, bool dynamic);
+    GrVertexBuffer* createVertexBuffer(size_t size, bool dynamic);
 
     /**
      * Creates an index buffer.
      *
      * @param size    size in bytes of the index buffer
      * @param dynamic hints whether the data will be frequently changed
-     *                by either GrIndexBuffer::lock or
-     *                GrIndexBuffer::updateData.
+     *                by either GrIndexBuffer::map() or
+     *                GrIndexBuffer::updateData().
      *
      * @return The index buffer if successful, otherwise NULL.
      */
-    GrIndexBuffer* createIndexBuffer(uint32_t size, bool dynamic);
+    GrIndexBuffer* createIndexBuffer(size_t size, bool dynamic);
 
     /**
      * Creates a path object that can be stenciled using stencilPath(). It is
      * only legal to call this if the caps report support for path stenciling.
      */
-    GrPath* createPath(const SkPath& path);
+    GrPath* createPath(const SkPath& path, const SkStrokeRec& stroke);
 
     /**
      * Returns an index buffer that can be used to render quads.
@@ -140,13 +150,6 @@ public:
      * Resolves MSAA.
      */
     void resolveRenderTarget(GrRenderTarget* target);
-
-    /**
-     * Ensures that the current render target is actually set in the
-     * underlying 3D API. Used when client wants to use 3D API to directly
-     * render to the RT.
-     */
-    void forceRenderTargetFlush();
 
     /**
      * Gets a preferred 8888 config to use for writing/reading pixel data to/from a surface with
@@ -239,33 +242,33 @@ public:
                             size_t rowBytes);
 
     /**
-     * Called to tell Gpu object that all GrResources have been lost and should
+     * Called to tell GrGpu that all GrGpuObjects have been lost and should
      * be abandoned. Overrides must call INHERITED::abandonResources().
      */
     virtual void abandonResources();
 
     /**
-     * Called to tell Gpu object to release all GrResources. Overrides must call
+     * Called to tell GrGpu to release all GrGpuObjects. Overrides must call
      * INHERITED::releaseResources().
      */
     void releaseResources();
 
     /**
-     * Add resource to list of resources. Should only be called by GrResource.
+     * Add object to list of objects. Should only be called by GrGpuObject.
      * @param resource  the resource to add.
      */
-    void insertResource(GrResource* resource);
+    void insertObject(GrGpuObject* object);
 
     /**
-     * Remove resource from list of resources. Should only be called by
-     * GrResource.
+     * Remove object from list of objects. Should only be called by GrGpuObject.
      * @param resource  the resource to remove.
      */
-    void removeResource(GrResource* resource);
+    void removeObject(GrGpuObject* object);
 
     // GrDrawTarget overrides
     virtual void clear(const SkIRect* rect,
                        GrColor color,
+                       bool canIgnoreRect,
                        GrRenderTarget* renderTarget = NULL) SK_OVERRIDE;
 
     virtual void purgeResources() SK_OVERRIDE {
@@ -289,14 +292,6 @@ public:
     // is dirty.
     ResetTimestamp getResetTimestamp() const {
         return fResetTimestamp;
-    }
-
-    /**
-     * Can the provided configuration act as a color render target?
-     */
-    bool isConfigRenderable(GrPixelConfig config) const {
-        GrAssert(kGrPixelConfigCnt > config);
-        return fConfigRenderSupport[config];
     }
 
     /**
@@ -336,14 +331,18 @@ public:
                                                  // clipping.
     };
 
-protected:
+    void getPathStencilSettingsForFillType(SkPath::FillType fill, GrStencilSettings* outStencilSettings);
+
     enum DrawType {
         kDrawPoints_DrawType,
         kDrawLines_DrawType,
         kDrawTriangles_DrawType,
         kStencilPath_DrawType,
+        kDrawPath_DrawType,
+        kDrawPaths_DrawType,
     };
 
+protected:
     DrawType PrimTypeToDrawType(GrPrimitiveType type) {
         switch (type) {
             case kTriangles_GrPrimitiveType:
@@ -356,7 +355,7 @@ protected:
             case kLineStrip_GrPrimitiveType:
                 return kDrawLines_DrawType;
             default:
-                GrCrash("Unexpected primitive type");
+                SkFAIL("Unexpected primitive type");
                 return kDrawTriangles_DrawType;
         }
     }
@@ -364,7 +363,8 @@ protected:
     // prepares clip flushes gpu state before a draw
     bool setupClipAndFlushState(DrawType,
                                 const GrDeviceCoordTexture* dstCopy,
-                                GrDrawState::AutoRestoreEffects* are);
+                                GrDrawState::AutoRestoreEffects* are,
+                                const SkRect* devBounds);
 
     // Functions used to map clip-respecting stencil tests into normal
     // stencil funcs supported by GPUs.
@@ -399,10 +399,6 @@ protected:
     // The final stencil settings to use as determined by the clip manager.
     GrStencilSettings fStencilSettings;
 
-    // Derived classes need access to this so they can fill it out in their
-    // constructors
-    bool    fConfigRenderSupport[kGrPixelConfigCnt];
-
     // Helpers for setting up geometry state
     void finalizeReservedVertices();
     void finalizeReservedIndices();
@@ -429,30 +425,27 @@ private:
     virtual GrTexture* onCreateTexture(const GrTextureDesc& desc,
                                        const void* srcData,
                                        size_t rowBytes) = 0;
+    virtual GrTexture* onCreateCompressedTexture(const GrTextureDesc& desc,
+                                                 const void* srcData) = 0;
     virtual GrTexture* onWrapBackendTexture(const GrBackendTextureDesc&) = 0;
     virtual GrRenderTarget* onWrapBackendRenderTarget(const GrBackendRenderTargetDesc&) = 0;
-    virtual GrVertexBuffer* onCreateVertexBuffer(uint32_t size, bool dynamic) = 0;
-    virtual GrIndexBuffer* onCreateIndexBuffer(uint32_t size, bool dynamic) = 0;
-    virtual GrPath* onCreatePath(const SkPath& path) = 0;
+    virtual GrVertexBuffer* onCreateVertexBuffer(size_t size, bool dynamic) = 0;
+    virtual GrIndexBuffer* onCreateIndexBuffer(size_t size, bool dynamic) = 0;
+    virtual GrPath* onCreatePath(const SkPath& path, const SkStrokeRec&) = 0;
 
     // overridden by backend-specific derived class to perform the clear and
-    // clearRect. NULL rect means clear whole target.
-    virtual void onClear(const SkIRect* rect, GrColor color) = 0;
+    // clearRect. NULL rect means clear whole target. If canIgnoreRect is
+    // true, it is okay to perform a full clear instead of a partial clear
+    virtual void onClear(const SkIRect* rect, GrColor color, bool canIgnoreRect) = 0;
 
     // overridden by backend-specific derived class to perform the draw call.
     virtual void onGpuDraw(const DrawInfo&) = 0;
-    // when GrDrawTarget::stencilPath is called the draw state's current stencil
-    // settings are ignored. Instead the GrGpu decides the stencil rules
-    // necessary to stencil the path. These are still subject to filtering by
-    // the clip mask manager.
-    virtual void setStencilPathSettings(const GrPath&,
-                                        SkPath::FillType,
-                                        GrStencilSettings* settings) = 0;
+
     // overridden by backend-specific derived class to perform the path stenciling.
     virtual void onGpuStencilPath(const GrPath*, SkPath::FillType) = 0;
-
-    // overridden by backend-specific derived class to perform flush
-    virtual void onForceRenderTargetFlush() = 0;
+    virtual void onGpuDrawPath(const GrPath*, SkPath::FillType) = 0;
+    virtual void onGpuDrawPaths(int, const GrPath**, const SkMatrix*,
+                                SkPath::FillType, SkStrokeRec::Style) = 0;
 
     // overridden by backend-specific derived class to perform the read pixels.
     virtual bool onReadPixels(GrRenderTarget* target,
@@ -492,8 +485,12 @@ private:
 
     // GrDrawTarget overrides
     virtual void onDraw(const DrawInfo&) SK_OVERRIDE;
-    virtual void onStencilPath(const GrPath* path, const SkStrokeRec& stroke,
-                               SkPath::FillType) SK_OVERRIDE;
+    virtual void onStencilPath(const GrPath*, SkPath::FillType) SK_OVERRIDE;
+    virtual void onDrawPath(const GrPath*, SkPath::FillType,
+                            const GrDeviceCoordTexture* dstCopy) SK_OVERRIDE;
+    virtual void onDrawPaths(int, const GrPath**, const SkMatrix*,
+                             SkPath::FillType, SkStrokeRec::Style,
+                             const GrDeviceCoordTexture* dstCopy) SK_OVERRIDE;
 
     // readies the pools to provide vertex/index data.
     void prepareVertexPool();
@@ -518,7 +515,7 @@ private:
     enum {
         kPreallocGeomPoolStateStackCnt = 4,
     };
-    typedef SkTInternalLList<GrResource> ResourceList;
+    typedef SkTInternalLList<GrGpuObject> ObjectList;
     SkSTArray<kPreallocGeomPoolStateStackCnt, GeometryPoolState, true>  fGeomPoolStateStack;
     ResetTimestamp                                                      fResetTimestamp;
     uint32_t                                                            fResetBits;
@@ -531,7 +528,7 @@ private:
     mutable GrIndexBuffer*                                              fQuadIndexBuffer;
     // Used to abandon/release all resources created by this GrGpu. TODO: Move this
     // functionality to GrResourceCache.
-    ResourceList                                                        fResourceList;
+    ObjectList                                                          fObjectList;
 
     typedef GrDrawTarget INHERITED;
 };

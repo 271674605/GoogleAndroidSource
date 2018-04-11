@@ -5,11 +5,7 @@
 #ifndef LIBRARIES_NACL_IO_OSTERMIOS_H
 #define LIBRARIES_NACL_IO_OSTERMIOS_H
 
-#if defined(__native_client__)
-
-#include <termios.h>
-
-#else
+#if defined(WIN32)
 
 #include "sdk_util/macros.h"
 
@@ -29,14 +25,18 @@ struct termios {
   speed_t c_ospeed;
 };
 
-
 EXTERN_C_BEGIN
 
-int tcgetattr(int fd,struct termios *termios_p);
-int tcsetattr(int fd,int optional_actions,const struct termios *termios_p);
+int tcgetattr(int fd, struct termios* termios_p);
+int tcsetattr(int fd, int optional_actions, const struct termios* termios_p);
 
 EXTERN_C_END
 
+#else
+
+#include <termios.h>
+
 #endif
+
 
 #endif  /* LIBRARIES_NACL_IO_OSTERMIOS_H */

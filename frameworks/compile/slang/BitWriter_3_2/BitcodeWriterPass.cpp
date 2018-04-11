@@ -12,12 +12,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "ReaderWriter_3_2.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 using namespace llvm;
 
 namespace {
   class WriteBitcodePass : public ModulePass {
     raw_ostream &OS; // raw_ostream to print on
+
   public:
     static char ID; // Pass identification, replacement for typeid
     explicit WriteBitcodePass(raw_ostream &o)
@@ -26,8 +30,9 @@ namespace {
     const char *getPassName() const { return "Bitcode Writer"; }
     
     bool runOnModule(Module &M) {
+      bool Changed = false;
       llvm_3_2::WriteBitcodeToFile(&M, OS);
-      return false;
+      return Changed;
     }
   };
 }

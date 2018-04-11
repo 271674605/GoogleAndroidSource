@@ -3,6 +3,9 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'chromium_code': 1,
+  },
   'targets': [
     {
       'target_name': 'browser_ui_views',
@@ -10,7 +13,10 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
-        '../ui/ui.gyp:ui',
+        '../ui/base/ui_base.gyp:ui_base',
+        '../ui/events/events.gyp:events',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
         '../url/url.gyp:url_lib',
       ],
       'conditions': [

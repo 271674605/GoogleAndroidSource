@@ -7,11 +7,16 @@
 //
 //===----------------------------------------------------------------------===//
 #include <mcld/Fragment/Fragment.h>
+#include <mcld/LD/LDContext.h>
+#include <mcld/LD/LDSection.h>
 #include <mcld/LD/LDSymbol.h>
 #include <mcld/LD/Relocator.h>
 #include <mcld/LD/ResolveInfo.h>
 #include <mcld/LD/SectionData.h>
+#include <mcld/Support/Demangle.h>
+#include <mcld/Support/MsgHandling.h>
 #include <mcld/Module.h>
+#include <sstream>
 
 using namespace mcld;
 
@@ -46,3 +51,50 @@ void Relocator::partialScanRelocation(Relocation& pReloc,
   }
 }
 
+void Relocator::issueUndefRef(Relocation& pReloc,
+                              LDSection& pSection,
+                              Input& pInput)
+{
+  FragmentRef::Offset undef_sym_pos = pReloc.targetRef().offset();
+  std::string sect_name(pSection.name());
+  sect_name = sect_name.substr(sect_name.find('.', /*pos=*/1));  // Drop .rel(a) prefix
+
+  std::string reloc_sym(pReloc.symInfo()->name());
+  reloc_sym = demangleName(reloc_sym);
+
+  std::stringstream ss;
+  ss << "0x" << std::hex << undef_sym_pos;
+  std::string undef_sym_pos_hex(ss.str());
+
+  if (sect_name.substr(0, 5) != ".text") {
+    // Function name is only valid for text section
+    fatal(diag::undefined_reference) << reloc_sym
+                                     << pInput.path()
+                                     << sect_name
+                                     << undef_sym_pos_hex;
+    return;
+  }
+
+  std::string caller_file_name;
+  std::string caller_func_name;
+  for (LDContext::sym_iterator i = pInput.context()->symTabBegin(),
+       e = pInput.context()->symTabEnd(); i != e; ++i) {
+    LDSymbol& sym = **i;
+    if (sym.resolveInfo()->type() == ResolveInfo::File)
+      caller_file_name = sym.resolveInfo()->name();
+
+    if (sym.resolveInfo()->type() == ResolveInfo::Function &&
+        sym.value() <= undef_sym_pos &&
+        sym.value() + sym.size() > undef_sym_pos) {
+      caller_func_name = sym.name();
+      break;
+    }
+  }
+
+  caller_func_name = demangleName(caller_func_name);
+
+  fatal(diag::undefined_reference_text) << reloc_sym
+                                        << pInput.path()
+                                        << caller_file_name
+                                        << caller_func_name;
+}

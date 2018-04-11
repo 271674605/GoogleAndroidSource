@@ -26,6 +26,8 @@ class TimeDelta;
 
 namespace net {
 
+class HttpByteRange;
+
 // HttpResponseHeaders: parses and holds HTTP response headers.
 class NET_EXPORT HttpResponseHeaders
     : public base::RefCountedThreadSafe<HttpResponseHeaders> {
@@ -40,6 +42,8 @@ class NET_EXPORT HttpResponseHeaders
   static const PersistOptions PERSIST_SANS_NON_CACHEABLE = 1 << 3;
   static const PersistOptions PERSIST_SANS_RANGES = 1 << 4;
   static const PersistOptions PERSIST_SANS_SECURITY_STATE = 1 << 5;
+
+  static const char kContentRange[];
 
   // Parses the given raw_headers.  raw_headers should be formatted thus:
   // includes the http status response line, each line is \0-terminated, and
@@ -80,6 +84,15 @@ class NET_EXPORT HttpResponseHeaders
   // Replaces the current status line with the provided one (|new_status| should
   // not have any EOL).
   void ReplaceStatusLine(const std::string& new_status);
+
+  // Updates headers (Content-Length and Content-Range) in the |headers| to
+  // include the right content length and range for |byte_range|.  This also
+  // updates HTTP status line if |replace_status_line| is true.
+  // |byte_range| must have a valid, bounded range (i.e. coming from a valid
+  // response or should be usable for a response).
+  void UpdateWithNewRange(const HttpByteRange& byte_range,
+                          int64 resource_size,
+                          bool replace_status_line);
 
   // Creates a normalized header string.  The output will be formatted exactly
   // like so:

@@ -36,8 +36,11 @@ class CONTENT_EXPORT PPB_ImageData_Impl
   class Backend {
    public:
     virtual ~Backend() {};
-    virtual bool Init(PPB_ImageData_Impl* impl, PP_ImageDataFormat format,
-                      int width, int height, bool init_to_zero) = 0;
+    virtual bool Init(PPB_ImageData_Impl* impl,
+                      PP_ImageDataFormat format,
+                      int width,
+                      int height,
+                      bool init_to_zero) = 0;
     virtual bool IsMapped() const = 0;
     virtual TransportDIB* GetTransportDIB() const = 0;
     virtual void* Map() = 0;
@@ -54,8 +57,13 @@ class CONTENT_EXPORT PPB_ImageData_Impl
   PPB_ImageData_Impl(PP_Instance instance,
                      PPB_ImageData_Shared::ImageDataType type);
 
+  // Constructor used for unittests. The ImageData is always allocated locally.
+  struct ForTest {};
+  PPB_ImageData_Impl(PP_Instance instance, ForTest);
+
   bool Init(PP_ImageDataFormat format,
-            int width, int height,
+            int width,
+            int height,
             bool init_to_zero);
 
   static PP_Resource Create(PP_Instance pp_instance,
@@ -102,12 +110,17 @@ class CONTENT_EXPORT PPB_ImageData_Impl
 
 class ImageDataPlatformBackend : public PPB_ImageData_Impl::Backend {
  public:
-  ImageDataPlatformBackend();
+  // |is_browser_allocated| indicates whether the backing shared memory should
+  // be allocated by the browser process.
+  ImageDataPlatformBackend(bool is_browser_allocated);
   virtual ~ImageDataPlatformBackend();
 
   // PPB_ImageData_Impl::Backend implementation.
-  virtual bool Init(PPB_ImageData_Impl* impl, PP_ImageDataFormat format,
-                    int width, int height, bool init_to_zero) OVERRIDE;
+  virtual bool Init(PPB_ImageData_Impl* impl,
+                    PP_ImageDataFormat format,
+                    int width,
+                    int height,
+                    bool init_to_zero) OVERRIDE;
   virtual bool IsMapped() const OVERRIDE;
   virtual TransportDIB* GetTransportDIB() const OVERRIDE;
   virtual void* Map() OVERRIDE;
@@ -124,6 +137,8 @@ class ImageDataPlatformBackend : public PPB_ImageData_Impl::Backend {
   int height_;
   scoped_ptr<TransportDIB> dib_;
 
+  bool is_browser_allocated_;
+
   // When the device is mapped, this is the image. Null when umapped.
   scoped_ptr<SkCanvas> mapped_canvas_;
 
@@ -136,8 +151,11 @@ class ImageDataSimpleBackend : public PPB_ImageData_Impl::Backend {
   virtual ~ImageDataSimpleBackend();
 
   // PPB_ImageData_Impl::Backend implementation.
-  virtual bool Init(PPB_ImageData_Impl* impl, PP_ImageDataFormat format,
-            int width, int height, bool init_to_zero) OVERRIDE;
+  virtual bool Init(PPB_ImageData_Impl* impl,
+                    PP_ImageDataFormat format,
+                    int width,
+                    int height,
+                    bool init_to_zero) OVERRIDE;
   virtual bool IsMapped() const OVERRIDE;
   virtual TransportDIB* GetTransportDIB() const OVERRIDE;
   virtual void* Map() OVERRIDE;
@@ -170,7 +188,7 @@ class ImageDataSimpleBackend : public PPB_ImageData_Impl::Backend {
 class ImageDataAutoMapper {
  public:
   explicit ImageDataAutoMapper(PPB_ImageData_Impl* image_data)
-        : image_data_(image_data) {
+      : image_data_(image_data) {
     if (image_data_->IsMapped()) {
       is_valid_ = true;
       needs_unmap_ = false;

@@ -221,6 +221,22 @@
                 android:textOff="@string/exposure_lock_off_label"
                 android:textOn="@string/exposure_lock_on_label" />
 
+            <TextView
+                android:id="@+id/zoom_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/zoom_label"
+                android:textAppearance="?android:attr/textAppearanceSmall" />
+
+            <SeekBar
+                android:id="@+id/zoom_seekbar"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:progress="0"
+                style="?android:attr/progressBarStyleHorizontal" />
+
             <View
                 android:id="@+id/horizontal_rule_3"
                 android:layout_width="fill_parent"
@@ -328,6 +344,24 @@
                 android:textOff="@string/record_stabilization_off_label"
                 android:textOn="@string/record_stabilization_on_label" />
 
+            <ToggleButton
+                android:id="@+id/record_hint"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColorLink="@android:color/holo_blue_dark"
+                android:textOff="@string/record_hint_off_label"
+                android:textOn="@string/record_hint_on_label" />
+
+            <ToggleButton
+                android:id="@+id/lock_camera"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColorLink="@android:color/holo_blue_dark"
+                android:textOff="@string/lock_camera_off_label"
+                android:textOn="@string/lock_camera_on_label" />
+
             <View
                 android:id="@+id/horizontal_rule_5"
                 android:layout_width="fill_parent"
@@ -358,6 +392,30 @@
                 android:layout_weight="1"
                 android:textOff="@string/callbacks_off_label"
                 android:textOn="@string/callbacks_on_label" />
+
+            <View
+                android:id="@+id/horizontal_rule_6"
+                android:layout_width="fill_parent"
+                android:layout_height="1dip"
+                android:layout_marginBottom="@dimen/horiz_rule_btm_margin"
+                android:layout_marginTop="@dimen/horiz_rule_top_margin"
+                android:layout_weight="1"
+                android:background="@color/horiz_rule_color" />
+
+            <TextView
+                android:id="@+id/color_effect_spinner_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/color_effect_prompt"
+                android:textAppearance="?android:attr/textAppearanceSmall" />
+
+            <Spinner
+                android:id="@+id/color_effect_spinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
 
         </LinearLayout>
     </ScrollView>

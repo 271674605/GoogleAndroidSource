@@ -5,13 +5,14 @@
  * found in the LICENSE file.
  */
 
-#include "SkPictureUtils.h"
+#include "SkBitmapDevice.h"
 #include "SkCanvas.h"
 #include "SkData.h"
-#include "SkDevice.h"
+#include "SkNoSaveLayerCanvas.h"
+#include "SkPictureUtils.h"
 #include "SkPixelRef.h"
-#include "SkShader.h"
 #include "SkRRect.h"
+#include "SkShader.h"
 
 class PixelRefSet {
 public:
@@ -37,7 +38,7 @@ private:
 };
 
 static void not_supported() {
-    SkASSERT(!"this method should never be called");
+    SkDEBUGFAIL("this method should never be called");
 }
 
 static void nothing_to_do() {}
@@ -45,41 +46,40 @@ static void nothing_to_do() {}
 /**
  *  This device will route all bitmaps (primitives and in shaders) to its PRSet.
  *  It should never actually draw anything, so there need not be any pixels
- *  behind its device-bitmap.
+ *  behind its device.
  */
-class GatherPixelRefDevice : public SkDevice {
-private:
-    PixelRefSet*  fPRSet;
-
-    void addBitmap(const SkBitmap& bm) {
-        fPRSet->add(bm.pixelRef());
-    }
-
-    void addBitmapFromPaint(const SkPaint& paint) {
-        SkShader* shader = paint.getShader();
-        if (shader) {
-            SkBitmap bm;
-            // Check whether the shader is a gradient in order to short-circuit
-            // call to asABitmap to prevent generation of bitmaps from
-            // gradient shaders, which implement asABitmap.
-            if (SkShader::kNone_GradientType == shader->asAGradient(NULL) &&
-                shader->asABitmap(&bm, NULL, NULL)) {
-                fPRSet->add(bm.pixelRef());
-            }
-        }
-    }
-
+class GatherPixelRefDevice : public SkBaseDevice {
 public:
-    GatherPixelRefDevice(const SkBitmap& bm, PixelRefSet* prset) : SkDevice(bm) {
+    SK_DECLARE_INST_COUNT(GatherPixelRefDevice)
+
+    GatherPixelRefDevice(int width, int height, PixelRefSet* prset) {
+        fSize.set(width, height);
+        fEmptyBitmap.setInfo(SkImageInfo::MakeUnknown(width, height));
         fPRSet = prset;
+    }
+
+    virtual SkImageInfo imageInfo() const SK_OVERRIDE {
+        return SkImageInfo::MakeUnknown(fSize.width(), fSize.height());
+    }
+    virtual GrRenderTarget* accessRenderTarget() SK_OVERRIDE { return NULL; }
+    virtual bool filterTextFlags(const SkPaint& paint, TextFlags*) SK_OVERRIDE {
+        return false;
+    }
+    // TODO: allow this call to return failure, or move to SkBitmapDevice only.
+    virtual const SkBitmap& onAccessBitmap() SK_OVERRIDE {
+        return fEmptyBitmap;
+    }
+    virtual void lockPixels() SK_OVERRIDE { nothing_to_do(); }
+    virtual void unlockPixels() SK_OVERRIDE { nothing_to_do(); }
+    virtual bool allowImageFilter(const SkImageFilter*) SK_OVERRIDE { return false; }
+    virtual bool canHandleImageFilter(const SkImageFilter*) SK_OVERRIDE { return false; }
+    virtual bool filterImage(const SkImageFilter*, const SkBitmap&, const SkImageFilter::Context&,
+                             SkBitmap* result, SkIPoint* offset) SK_OVERRIDE {
+        return false;
     }
 
     virtual void clear(SkColor color) SK_OVERRIDE {
         nothing_to_do();
-    }
-    virtual void writePixels(const SkBitmap& bitmap, int x, int y,
-                             SkCanvas::Config8888 config8888) SK_OVERRIDE {
-        not_supported();
     }
 
     virtual void drawPaint(const SkDraw&, const SkPaint& paint) SK_OVERRIDE {
@@ -93,6 +93,10 @@ public:
                           const SkPaint& paint) SK_OVERRIDE {
         this->addBitmapFromPaint(paint);
     }
+    virtual void drawRRect(const SkDraw&, const SkRRect&,
+                           const SkPaint& paint) SK_OVERRIDE {
+        this->addBitmapFromPaint(paint);
+    }
     virtual void drawOval(const SkDraw&, const SkRect&,
                           const SkPaint& paint) SK_OVERRIDE {
         this->addBitmapFromPaint(paint);
@@ -103,13 +107,20 @@ public:
         this->addBitmapFromPaint(paint);
     }
     virtual void drawBitmap(const SkDraw&, const SkBitmap& bitmap,
-                            const SkMatrix&, const SkPaint&) SK_OVERRIDE {
+                            const SkMatrix&, const SkPaint& paint) SK_OVERRIDE {
         this->addBitmap(bitmap);
+        if (kAlpha_8_SkColorType == bitmap.colorType()) {
+            this->addBitmapFromPaint(paint);
+        }
     }
     virtual void drawBitmapRect(const SkDraw&, const SkBitmap& bitmap,
                                 const SkRect* srcOrNull, const SkRect& dst,
-                                const SkPaint&) SK_OVERRIDE {
+                                const SkPaint& paint,
+                                SkCanvas::DrawBitmapRectFlags flags) SK_OVERRIDE {
         this->addBitmap(bitmap);
+        if (kAlpha_8_SkColorType == bitmap.colorType()) {
+            this->addBitmapFromPaint(paint);
+        }
     }
     virtual void drawSprite(const SkDraw&, const SkBitmap& bitmap,
                             int x, int y, const SkPaint& paint) SK_OVERRIDE {
@@ -137,57 +148,46 @@ public:
                               const SkPaint& paint) SK_OVERRIDE {
         this->addBitmapFromPaint(paint);
     }
-    virtual void drawDevice(const SkDraw&, SkDevice*, int x, int y,
+    virtual void drawDevice(const SkDraw&, SkBaseDevice*, int x, int y,
                             const SkPaint&) SK_OVERRIDE {
         nothing_to_do();
     }
 
 protected:
-    virtual bool onReadPixels(const SkBitmap& bitmap,
-                              int x, int y,
-                              SkCanvas::Config8888 config8888) SK_OVERRIDE {
+    virtual void replaceBitmapBackendForRasterSurface(const SkBitmap&) SK_OVERRIDE {
         not_supported();
-        return false;
     }
-};
-
-class NoSaveLayerCanvas : public SkCanvas {
-public:
-    NoSaveLayerCanvas(SkDevice* device) : INHERITED(device) {}
-
-    // turn saveLayer() into save() for speed, should not affect correctness.
-    virtual int saveLayer(const SkRect* bounds, const SkPaint* paint,
-                          SaveFlags flags) SK_OVERRIDE {
-
-        // Like SkPictureRecord, we don't want to create layers, but we do need
-        // to respect the save and (possibly) its rect-clip.
-
-        int count = this->INHERITED::save(flags);
-        if (bounds) {
-            this->INHERITED::clipRectBounds(bounds, flags, NULL);
-        }
-        return count;
+    virtual SkBaseDevice* onCreateDevice(const SkImageInfo& info, Usage usage) SK_OVERRIDE {
+        // we expect to only get called via savelayer, in which case it is fine.
+        SkASSERT(kSaveLayer_Usage == usage);
+        return SkNEW_ARGS(GatherPixelRefDevice, (info.width(), info.height(), fPRSet));
     }
-
-    // disable aa for speed
-    virtual bool clipRect(const SkRect& rect, SkRegion::Op op,
-                          bool doAA) SK_OVERRIDE {
-        return this->INHERITED::clipRect(rect, op, false);
-    }
-
-    // for speed, just respect the bounds, and disable AA. May give us a few
-    // false positives and negatives.
-    virtual bool clipPath(const SkPath& path, SkRegion::Op op,
-                          bool doAA) SK_OVERRIDE {
-        return this->updateClipConservativelyUsingBounds(path.getBounds(), op, path.isInverseFillType());
-    }
-    virtual bool clipRRect(const SkRRect& rrect, SkRegion::Op op,
-                           bool doAA) SK_OVERRIDE {
-        return this->updateClipConservativelyUsingBounds(rrect.getBounds(), op, false);
-    }
+    virtual void flush() SK_OVERRIDE {}
 
 private:
-    typedef SkCanvas INHERITED;
+    PixelRefSet*  fPRSet;
+    SkBitmap fEmptyBitmap;  // legacy -- need to remove the need for this guy
+    SkISize fSize;
+
+    void addBitmap(const SkBitmap& bm) {
+      fPRSet->add(bm.pixelRef());
+    }
+
+    void addBitmapFromPaint(const SkPaint& paint) {
+      SkShader* shader = paint.getShader();
+      if (shader) {
+          SkBitmap bm;
+          // Check whether the shader is a gradient in order to short-circuit
+          // call to asABitmap to prevent generation of bitmaps from
+          // gradient shaders, which implement asABitmap.
+          if (SkShader::kNone_GradientType == shader->asAGradient(NULL) &&
+              shader->asABitmap(&bm, NULL, NULL)) {
+              fPRSet->add(bm.pixelRef());
+          }
+      }
+    }
+
+    typedef SkBaseDevice INHERITED;
 };
 
 SkData* SkPictureUtils::GatherPixelRefs(SkPicture* pict, const SkRect& area) {
@@ -205,15 +205,11 @@ SkData* SkPictureUtils::GatherPixelRefs(SkPicture* pict, const SkRect& area) {
     SkTDArray<SkPixelRef*> array;
     PixelRefSet prset(&array);
 
-    SkBitmap emptyBitmap;
-    emptyBitmap.setConfig(SkBitmap::kARGB_8888_Config, pict->width(), pict->height());
-    // note: we do not set any pixels (shouldn't need to)
-
-    GatherPixelRefDevice device(emptyBitmap, &prset);
-    NoSaveLayerCanvas canvas(&device);
+    GatherPixelRefDevice device(pict->width(), pict->height(), &prset);
+    SkNoSaveLayerCanvas canvas(&device);
 
     canvas.clipRect(area, SkRegion::kIntersect_Op, false);
-    canvas.drawPicture(*pict);
+    canvas.drawPicture(pict);
 
     SkData* data = NULL;
     int count = array.count();

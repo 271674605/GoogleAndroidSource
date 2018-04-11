@@ -5,29 +5,33 @@
 #ifndef UI_MESSAGE_CENTER_NOTIFICATION_LIST_H_
 #define UI_MESSAGE_CENTER_NOTIFICATION_LIST_H_
 
+#include <list>
 #include <set>
 #include <string>
 
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "ui/gfx/image/image.h"
-#include "ui/gfx/native_widget_types.h"
+#include "base/gtest_prod_util.h"
 #include "ui/message_center/message_center_export.h"
-#include "ui/message_center/notification.h"
+#include "ui/message_center/notification_blocker.h"
 #include "ui/message_center/notification_types.h"
 
 namespace base {
 class DictionaryValue;
+class TimeDelta;
+}
+
+namespace gfx {
+class Image;
 }
 
 namespace message_center {
 
-class NotificationDelegate;
-
 namespace test {
 class NotificationListTest;
 }
+
+class Notification;
+class NotificationDelegate;
+struct NotifierId;
 
 // Comparers used to auto-sort the lists of Notifications.
 struct MESSAGE_CENTER_EXPORT ComparePriorityTimestampSerial {
@@ -65,10 +69,7 @@ class MESSAGE_CENTER_EXPORT NotificationList {
 
   void RemoveNotification(const std::string& id);
 
-  void RemoveAllNotifications();
-
-  Notifications GetNotificationsBySource(const std::string& id);
-  Notifications GetNotificationsByExtension(const std::string& id);
+  Notifications GetNotificationsByNotifierId(const NotifierId& notifier_id);
 
   // Returns true if the notification exists and was updated.
   bool SetNotificationIcon(const std::string& notification_id,
@@ -83,21 +84,24 @@ class MESSAGE_CENTER_EXPORT NotificationList {
                                  int button_index,
                                  const gfx::Image& image);
 
-  bool HasNotification(const std::string& id);
+  // Returns true if |id| matches a notification in the list and that
+  // notification's type matches the given type.
+  bool HasNotificationOfType(const std::string& id,
+                             const NotificationType type);
 
   // Returns false if the first notification has been shown as a popup (which
   // means that all notifications have been shown).
-  bool HasPopupNotifications();
+  bool HasPopupNotifications(const NotificationBlockers& blockers);
 
   // Returns the recent notifications of the priority higher then LOW,
   // that have not been shown as a popup. kMaxVisiblePopupNotifications are
   // used to limit the number of notifications for the DEFAULT priority.
-  // The returned list is sorted by timestamp, newer first.
-  PopupNotifications GetPopupNotifications();
-  Notification* GetPopup(const std::string& id);
-
-  // Marks the popups for the |priority| as shown.
-  void MarkPopupsAsShown(int priority);
+  // It also stores the list of notification ids which is blocked by |blockers|
+  // to |blocked_ids|. |blocked_ids| can be NULL if the caller doesn't care
+  // which notifications are blocked.
+  PopupNotifications GetPopupNotifications(
+      const NotificationBlockers& blockers,
+      std::list<std::string>* blocked_ids);
 
   // Marks a specific popup item as shown. Set |mark_notification_as_read| to
   // true in case marking the notification as read too.
@@ -107,30 +111,34 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   // Marks a specific popup item as displayed.
   void MarkSinglePopupAsDisplayed(const std::string& id);
 
-  // Marks the specified notification as expanded in the notification center.
-  void MarkNotificationAsExpanded(const std::string& id);
-
   NotificationDelegate* GetNotificationDelegate(const std::string& id);
 
   bool quiet_mode() const { return quiet_mode_; }
 
-  // Sets the current quiet mode status to |quiet_mode|. The new status is not
-  // expired.
+  // Sets the current quiet mode status to |quiet_mode|.
   void SetQuietMode(bool quiet_mode);
 
   // Sets the current quiet mode to true. The quiet mode will expire in the
   // specified time-delta from now.
   void EnterQuietModeWithExpire(const base::TimeDelta& expires_in);
 
-  // Returns all notifications, in a (priority-timestamp) order. Suitable for
-  // rendering notifications in a NotificationCenter.
-  const Notifications& GetNotifications();
-  size_t NotificationCount() const;
-  size_t unread_count() const { return unread_count_; }
+  // Returns the notification with the corresponding id. If not found, returns
+  // NULL. Notification instance is owned by this list.
+  Notification* GetNotificationById(const std::string& id);
+
+  // Returns all visible notifications, in a (priority-timestamp) order.
+  // Suitable for rendering notifications in a MessageCenter.
+  Notifications GetVisibleNotifications(
+      const NotificationBlockers& blockers) const;
+  size_t NotificationCount(const NotificationBlockers& blockers) const;
+  size_t UnreadCount(const NotificationBlockers& blockers) const;
+
   bool is_message_center_visible() const { return message_center_visible_; }
 
  private:
-  friend class test::NotificationListTest;
+  friend class NotificationListTest;
+  FRIEND_TEST_ALL_PREFIXES(NotificationListTest,
+                           TestPushingShownNotification);
 
   // Iterates through the list and returns the first notification matching |id|.
   Notifications::iterator GetNotification(const std::string& id);
@@ -139,14 +147,9 @@ class MESSAGE_CENTER_EXPORT NotificationList {
 
   void PushNotification(scoped_ptr<Notification> notification);
 
-  // Sets the current quiet mode status to |quiet_mode|.
-  void SetQuietModeInternal(bool quiet_mode);
-
   Notifications notifications_;
   bool message_center_visible_;
-  size_t unread_count_;
   bool quiet_mode_;
-  scoped_ptr<base::OneShotTimer<NotificationList> > quiet_mode_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationList);
 };

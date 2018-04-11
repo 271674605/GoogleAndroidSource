@@ -16,10 +16,6 @@
 
 package android.content.cts;
 
-import com.android.cts.stub.R;
-
-import dalvik.annotation.BrokenTest;
-
 import android.app.QueuedWork;
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -28,7 +24,6 @@ import android.os.StrictMode;
 import android.preference.PreferenceManager;
 import android.test.AndroidTestCase;
 import android.util.Log;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -59,8 +54,8 @@ public class SharedPreferencesTest extends AndroidTestCase {
 
         // Duplicated from ContextImpl.java.  Not ideal, but there wasn't a better
         // way to reach into Context{Wrapper,Impl} to ask where this file lives.
-        mPrefsFile = new File("/data/data/com.android.cts.stub/shared_prefs",
-                              "com.android.cts.stub_preferences.xml");
+        mPrefsFile = new File("/data/data/com.android.cts.content/shared_prefs",
+                              "com.android.cts.content_preferences.xml");
         mPrefsFile.delete();
     }
 
@@ -91,6 +86,19 @@ public class SharedPreferencesTest extends AndroidTestCase {
         assertEquals(123, prefs.getInt(key, 123));
         assertEquals(999L, prefs.getLong(key, 999L));
         assertEquals("default", prefs.getString(key, "default"));
+    }
+
+    public void testPutNullRemovesKey() {
+        SharedPreferences prefs = getPrefs();
+        prefs.edit().putString("test-key", "test-value").commit();
+        assertEquals("test-value", prefs.getString("test-key", null));
+
+        SharedPreferences.Editor editor = prefs.edit().putString("test-key", null);
+        assertEquals("test-value", prefs.getString("test-key", null));
+        editor.commit();
+
+        assertNull(prefs.getString("test-key", null));
+        assertFalse(prefs.contains("test-key"));
     }
 
     private abstract class RedundantWriteTest {

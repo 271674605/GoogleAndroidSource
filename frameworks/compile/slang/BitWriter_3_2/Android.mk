@@ -21,6 +21,10 @@ LOCAL_MODULE:= libLLVMBitWriter_3_2
 
 LOCAL_MODULE_TAGS := optional
 
+ifneq ($(HOST_OS),windows)
+LOCAL_CLANG := true
+endif
+
 include $(LLVM_HOST_BUILD_MK)
 include $(LLVM_GEN_INTRINSICS_MK)
 include $(BUILD_HOST_STATIC_LIBRARY)

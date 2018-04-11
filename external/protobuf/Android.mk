@@ -16,6 +16,8 @@
 
 LOCAL_PATH := $(call my-dir)
 
+IGNORED_WARNINGS := -Wno-sign-compare -Wno-unused-parameter -Wno-sign-promo
+
 CC_LITE_SRC_FILES := \
     src/google/protobuf/stubs/common.cc                              \
     src/google/protobuf/stubs/once.cc                                \
@@ -140,6 +142,7 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_SDK_VERSION := 8
 
 LOCAL_SRC_FILES := $(call all-java-files-under, java/src/main/java/com/google/protobuf/nano)
+LOCAL_SRC_FILES += $(call all-java-files-under, java/src/device/main/java/com/google/protobuf/nano)
 
 include $(BUILD_STATIC_JAVA_LIBRARY)
 
@@ -227,7 +230,7 @@ LOCAL_C_INCLUDES := \
 #
 #LOCAL_COPY_HEADERS_TO := $(LOCAL_MODULE)
 
-LOCAL_CFLAGS := -DGOOGLE_PROTOBUF_NO_RTTI
+LOCAL_CFLAGS := -DGOOGLE_PROTOBUF_NO_RTTI $(IGNORED_WARNINGS)
 
 # These are the minimum versions and don't need to be update.
 ifeq ($(TARGET_ARCH),arm)
@@ -293,7 +296,7 @@ LOCAL_C_INCLUDES := \
 #
 #LOCAL_COPY_HEADERS_TO := $(LOCAL_MODULE)
 
-LOCAL_CFLAGS := -DGOOGLE_PROTOBUF_NO_RTTI
+LOCAL_CFLAGS := -DGOOGLE_PROTOBUF_NO_RTTI $(IGNORED_WARNINGS)
 
 # These are the minimum versions and don't need to be update.
 ifeq ($(TARGET_ARCH),arm)
@@ -319,7 +322,7 @@ LOCAL_C_INCLUDES := \
     external/zlib \
     $(LOCAL_PATH)/src
 
-LOCAL_CFLAGS := -frtti
+LOCAL_CFLAGS := -frtti $(IGNORED_WARNINGS)
 LOCAL_SDK_VERSION := 14
 LOCAL_NDK_STL_VARIANT := gnustl_static
 
@@ -344,10 +347,13 @@ LOCAL_SRC_FILES := $(COMPILER_SRC_FILES)
 
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/android \
+    external/zlib \
     $(LOCAL_PATH)/src
 
 LOCAL_STATIC_LIBRARIES += libz
 LOCAL_LDLIBS := -lpthread
+
+LOCAL_CFLAGS := $(IGNORED_WARNINGS)
 
 include $(BUILD_HOST_EXECUTABLE)
 
@@ -370,6 +376,68 @@ LOCAL_SRC_FILES := \
 
 LOCAL_PROTOC_FLAGS := --proto_path=$(LOCAL_PATH)/src
 
-LOCAL_PROTO_JAVA_OUTPUT_PARAMS := java_package=$(LOCAL_PATH)/src/google/protobuf/unittest_import_nano.proto|com.google.protobuf.nano,java_outer_classname=$(LOCAL_PATH)/src/google/protobuf/unittest_import_nano.proto|UnittestImportNano
+LOCAL_PROTO_JAVA_OUTPUT_PARAMS := \
+        java_package = $(LOCAL_PATH)/src/google/protobuf/unittest_import_nano.proto|com.google.protobuf.nano, \
+        java_outer_classname = $(LOCAL_PATH)/src/google/protobuf/unittest_import_nano.proto|UnittestImportNano
 
 include $(BUILD_STATIC_JAVA_LIBRARY)
+
+# To test Android-specific nanoproto features.
+# =======================================================
+include $(CLEAR_VARS)
+
+# Parcelable messages
+LOCAL_MODULE := android-nano-test-parcelable
+LOCAL_MODULE_TAGS := tests
+LOCAL_SDK_VERSION := current
+
+LOCAL_PROTOC_OPTIMIZE_TYPE := nano
+
+LOCAL_SRC_FILES := src/google/protobuf/unittest_simple_nano.proto
+
+LOCAL_PROTOC_FLAGS := --proto_path=$(LOCAL_PATH)/src
+
+LOCAL_PROTO_JAVA_OUTPUT_PARAMS := \
+        parcelable_messages = true
+
+include $(BUILD_STATIC_JAVA_LIBRARY)
+
+include $(CLEAR_VARS)
+
+# Parcelable and extendable messages
+LOCAL_MODULE := android-nano-test-parcelable-extendable
+LOCAL_MODULE_TAGS := tests
+LOCAL_SDK_VERSION := current
+
+LOCAL_PROTOC_OPTIMIZE_TYPE := nano
+
+LOCAL_SRC_FILES := src/google/protobuf/unittest_extension_nano.proto
+
+LOCAL_PROTOC_FLAGS := --proto_path=$(LOCAL_PATH)/src
+
+LOCAL_PROTO_JAVA_OUTPUT_PARAMS := \
+        parcelable_messages = true, \
+        store_unknown_fields = true
+
+include $(BUILD_STATIC_JAVA_LIBRARY)
+
+include $(CLEAR_VARS)
+
+# Test APK
+LOCAL_PACKAGE_NAME := NanoAndroidTest
+
+LOCAL_SDK_VERSION := 8
+
+LOCAL_MODULE_TAGS := tests
+
+LOCAL_SRC_FILES := $(call all-java-files-under, java/src/device/test/java/com/google/protobuf/nano)
+
+LOCAL_MANIFEST_FILE := java/src/device/test/AndroidManifest.xml
+
+LOCAL_STATIC_JAVA_LIBRARIES := libprotobuf-java-2.3.0-nano \
+        android-nano-test-parcelable \
+        android-nano-test-parcelable-extendable
+
+LOCAL_DEX_PREOPT := false
+
+include $(BUILD_PACKAGE)

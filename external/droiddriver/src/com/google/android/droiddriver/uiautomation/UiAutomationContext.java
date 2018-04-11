@@ -16,50 +16,41 @@
 
 package com.google.android.droiddriver.uiautomation;
 
+import android.app.Instrumentation;
 import android.app.UiAutomation;
-import android.view.InputEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import com.google.android.droiddriver.InputInjector;
-import com.google.android.droiddriver.base.AbstractContext;
-import com.google.common.collect.MapMaker;
+import com.google.android.droiddriver.base.DroidDriverContext;
+import com.google.android.droiddriver.exceptions.UnrecoverableException;
 
-import java.util.Map;
-
-/**
- * Internal helper for managing all instances.
- */
-public class UiAutomationContext extends AbstractContext {
-  // Maybe we should use Cache instead of Map on memory-constrained devices
-  private final Map<AccessibilityNodeInfo, UiAutomationElement> map = new MapMaker().weakKeys()
-      .weakValues().makeMap();
+public class UiAutomationContext extends
+    DroidDriverContext<AccessibilityNodeInfo, UiAutomationElement> {
   private final UiAutomation uiAutomation;
 
-  UiAutomationContext(final UiAutomation uiAutomation) {
-    super(new InputInjector() {
-      @Override
-      public boolean injectInputEvent(InputEvent event) {
-        return uiAutomation.injectInputEvent(event, true /* sync */);
-      }
-    });
-    this.uiAutomation = uiAutomation;
-  }
-
-  public UiAutomationElement getUiElement(AccessibilityNodeInfo node) {
-    UiAutomationElement element = map.get(node);
-    if (element == null) {
-      element = new UiAutomationElement(this, node);
-      map.put(node, element);
-    }
-    return element;
+  public UiAutomationContext(Instrumentation instrumentation, UiAutomationDriver driver) {
+    super(instrumentation, driver);
+    this.uiAutomation = instrumentation.getUiAutomation();
   }
 
   @Override
-  public void clearData() {
-    map.clear();
+  public UiAutomationDriver getDriver() {
+    return (UiAutomationDriver) super.getDriver();
   }
 
-  public UiAutomation getUiAutomation() {
-    return uiAutomation;
+  public interface UiAutomationCallable<T> {
+    T call(UiAutomation uiAutomation);
+  }
+
+  /**
+   * Wraps calls to UiAutomation API. Currently supports fail-fast if
+   * UiAutomation throws IllegalStateException, which occurs when the connection
+   * to UiAutomation service is lost.
+   */
+  public <T> T callUiAutomation(UiAutomationCallable<T> uiAutomationCallable) {
+    try {
+      return uiAutomationCallable.call(uiAutomation);
+    } catch (IllegalStateException e) {
+      throw new UnrecoverableException(e);
+    }
   }
 }

@@ -36,7 +36,8 @@ list .row-delete-button {
 }
 
 list > *:not(:hover):not([selected]):not([lead]) .row-delete-button,
-list:not([hasElementFocus]) > *:not(:hover):not([selected]) .row-delete-button,
+list:not([has-element-focus]) > *:not(:hover):not([selected])
+    .row-delete-button,
 list[disabled] .row-delete-button,
 list .row-delete-button[disabled] {
   opacity: 0;
@@ -59,8 +60,24 @@ list .row-delete-button:active {
           2x);
 }
 
-#kiosk-app-id-edit {
+.controlled-setting-with-label > input:disabled + span label {
+  color: #999;
+}
+
+#kiosk-app-id-edit-row {
+  -webkit-justify-content: space-between;
+  display: -webkit-flex;
   width: 510px;
+}
+
+#kiosk-app-id-edit,
+#kiosk-app-add {
+  display: block;
+}
+
+#kiosk-app-id-edit {
+  -webkit-flex-grow: 1;
+  -webkit-margin-end: 10px;
 }
 
 #kiosk-apps-error-banner {
@@ -71,7 +88,7 @@ list .row-delete-button:active {
   padding: 5px;
   visibility: hidden;
   white-space: nowrap;
-  width: 510px;
+  width: 100%;
 }
 
 #kiosk-apps-error-banner.visible {

@@ -66,6 +66,8 @@ public class Doclava {
   public static int showLevel = SHOW_PROTECTED;
 
   public static final boolean SORT_BY_NAV_GROUPS = true;
+  /* Debug output for PageMetadata, format urls from site root */
+  public static boolean META_DBG=false;
 
   public static String outputPathBase = "/";
   public static ArrayList<String> inputPathHtmlDirs = new ArrayList<String>();
@@ -78,13 +80,17 @@ public class Doclava {
 
   public static RootDoc root;
   public static ArrayList<String[]> mHDFData = new ArrayList<String[]>();
+  public static List<PageMetadata.Node> sTaglist = new ArrayList<PageMetadata.Node>();
+  public static ArrayList<SampleCode> sampleCodes = new ArrayList<SampleCode>();
   public static ArrayList<SampleCode> sampleCodeGroups = new ArrayList<SampleCode>();
+  public static Data samplesNavTree;
   public static Map<Character, String> escapeChars = new HashMap<Character, String>();
   public static String title = "";
   public static SinceTagger sinceTagger = new SinceTagger();
   public static HashSet<String> knownTags = new HashSet<String>();
   public static FederationTagger federationTagger = new FederationTagger();
   public static Set<String> showAnnotations = new HashSet<String>();
+  public static Set<String> hiddenPackages = new HashSet<String>();
   public static boolean includeDefaultAssets = true;
   private static boolean generateDocs = true;
   private static boolean parseComments = false;
@@ -111,7 +117,6 @@ public class Doclava {
 
   public static boolean checkLevel(boolean pub, boolean prot, boolean pkgp, boolean priv,
       boolean hidden) {
-    int level = 0;
     if (hidden && !checkLevel(SHOW_HIDDEN)) {
       return false;
     }
@@ -141,11 +146,11 @@ public class Doclava {
     String proofreadFile = null;
     String todoFile = null;
     String sdkValuePath = null;
-    ArrayList<SampleCode> sampleCodes = new ArrayList<SampleCode>();
     String stubsDir = null;
     // Create the dependency graph for the stubs  directory
     boolean offlineMode = false;
     String apiFile = null;
+    String removedApiFile = null;
     String debugStubsFile = "";
     HashSet<String> stubPackages = null;
     ArrayList<String> knownTagsFiles = new ArrayList<String>();
@@ -168,6 +173,8 @@ public class Doclava {
         sampleCodes.add(new SampleCode(a[1], a[2], a[3]));
       } else if (a[0].equals("-samplegroup")) {
         sampleCodeGroups.add(new SampleCode(null, null, a[1]));
+      } else if (a[0].equals("-samplesdir")) {
+        getSampleProjects(new File(a[1]));
       //the destination output path for main htmldir
       } else if (a[0].equals("-htmldir")) {
         inputPathHtmlDirs.add(a[1]);
@@ -203,6 +210,8 @@ public class Doclava {
         keepListFile = a[1];
       } else if (a[0].equals("-showAnnotation")) {
         showAnnotations.add(a[1]);
+      } else if (a[0].equals("-hidePackage")) {
+        hiddenPackages.add(a[1]);
       } else if (a[0].equals("-proguard")) {
         proguardFile = a[1];
       } else if (a[0].equals("-proofread")) {
@@ -230,7 +239,10 @@ public class Doclava {
         sdkValuePath = a[1];
       } else if (a[0].equals("-api")) {
         apiFile = a[1];
-      } else if (a[0].equals("-nodocs")) {
+      } else if (a[0].equals("-removedApi")) {
+        removedApiFile = a[1];
+      }
+      else if (a[0].equals("-nodocs")) {
         generateDocs = false;
       } else if (a[0].equals("-nodefaultassets")) {
         includeDefaultAssets = false;
@@ -240,6 +252,8 @@ public class Doclava {
         sinceTagger.addVersion(a[1], a[2]);
       } else if (a[0].equals("-offlinemode")) {
         offlineMode = true;
+      } else if (a[0].equals("-metadataDebug")) {
+        META_DBG = true;
       } else if (a[0].equals("-federate")) {
         try {
           String name = a[1];
@@ -309,6 +323,11 @@ public class Doclava {
         TodoFile.writeTodoFile(todoFile);
       }
 
+  if (samplesRef) {
+        // always write samples without offlineMode behaviors
+  writeSamples(false, sampleCodes, SORT_BY_NAV_GROUPS);
+  }
+
       // HTML2 Pages -- Generate Pages from optional secondary dir
       if (!inputPathHtmlDir2.isEmpty()) {
         if (!outputPathHtmlDir2.isEmpty()) {
@@ -328,12 +347,6 @@ public class Doclava {
 
       writeAssets();
 
-      // Sample code pages
-      if (samplesRef) {
-        // always write samples without offlineMode behaviors
-        writeSamples(false, sampleCodes, SORT_BY_NAV_GROUPS);
-      }
-      
       // Navigation tree
       String refPrefix = new String();
       if(gmsRef){
@@ -352,30 +365,34 @@ public class Doclava {
       writePackages(javadocDir + refPrefix + "packages" + htmlExtension);
 
       // Classes
-      writeClassLists();
-      writeClasses();
-      writeHierarchy();
+  writeClassLists();
+  writeClasses();
+  writeHierarchy();
       // writeKeywords();
 
       // Lists for JavaScript
-      writeLists();
+  writeLists();
       if (keepListFile != null) {
         writeKeepList(keepListFile);
       }
 
       // Index page
-      writeIndex();
+  writeIndex();
 
-      Proofread.finishProofread(proofreadFile);
+  Proofread.finishProofread(proofreadFile);
 
-      if (sdkValuePath != null) {
-        writeSdkValues(sdkValuePath);
+  if (sdkValuePath != null) {
+    writeSdkValues(sdkValuePath);
+  }
+      // Write metadata for all processed files to jd_lists_unified.js in out dir
+      if (!sTaglist.isEmpty()) {
+        PageMetadata.WriteList(sTaglist);
       }
     }
 
     // Stubs
-    if (stubsDir != null || apiFile != null || proguardFile != null) {
-      Stubs.writeStubsAndApi(stubsDir, apiFile, proguardFile, stubPackages);
+    if (stubsDir != null || apiFile != null || proguardFile != null || removedApiFile != null) {
+      Stubs.writeStubsAndApi(stubsDir, apiFile, proguardFile, removedApiFile, stubPackages);
     }
 
     Errors.printErrors();
@@ -532,6 +549,10 @@ public class Doclava {
     if (option.equals("-samplegroup")) {
       return 2;
     }
+    if (option.equals("-samplesdir")) {
+      samplesRef = true;
+      return 2;
+    }
     if (option.equals("-devsite")) {
       return 1;
     }
@@ -560,6 +581,9 @@ public class Doclava {
       return 2;
     }
     if (option.equals("-showAnnotation")) {
+      return 2;
+    }
+    if (option.equals("-hidePackage")) {
       return 2;
     }
     if (option.equals("-proguard")) {
@@ -598,6 +622,9 @@ public class Doclava {
     if (option.equals("-api")) {
       return 2;
     }
+    if (option.equals("-removedApi")) {
+      return 2;
+    }
     if (option.equals("-nodocs")) {
       return 1;
     }
@@ -631,6 +658,9 @@ public class Doclava {
     }
     if (option.equals("-gcmref")) {
       gcmRef = true;
+      return 1;
+    }
+    if (option.equals("-metadataDebug")) {
       return 1;
     }
     return 0;
@@ -682,13 +712,13 @@ public class Doclava {
     for (String s : sorted.keySet()) {
       PackageInfo pkg = sorted.get(s);
 
-      if (pkg.isHidden()) {
+      if (pkg.isHiddenOrRemoved()) {
         continue;
       }
-      Boolean allHidden = true;
+      boolean allHiddenOrRemoved = true;
       int pass = 0;
       ClassInfo[] classesToCheck = null;
-      while (pass < 5) {
+      while (pass < 6) {
         switch (pass) {
           case 0:
             classesToCheck = pkg.ordinaryClasses();
@@ -705,22 +735,25 @@ public class Doclava {
           case 4:
             classesToCheck = pkg.interfaces();
             break;
+          case 5:
+            classesToCheck = pkg.annotations();
+            break;
           default:
             System.err.println("Error reading package: " + pkg.name());
             break;
         }
         for (ClassInfo cl : classesToCheck) {
-          if (!cl.isHidden()) {
-            allHidden = false;
+          if (!cl.isHiddenOrRemoved()) {
+            allHiddenOrRemoved = false;
             break;
           }
         }
-        if (!allHidden) {
+        if (!allHiddenOrRemoved) {
           break;
         }
         pass++;
       }
-      if (allHidden) {
+      if (allHiddenOrRemoved) {
         continue;
       }
       if(gmsRef){
@@ -754,8 +787,9 @@ public class Doclava {
           String filename = templ.substring(0, len - 3) + htmlExtension;
           ClearPage.write(data, templ, filename, js);
         } else if (len > 3 && ".jd".equals(templ.substring(len - 3))) {
+          Data data = makeHDF();
           String filename = templ.substring(0, len - 3) + htmlExtension;
-          DocFile.writePage(f.getAbsolutePath(), relative, filename, null);
+          DocFile.writePage(f.getAbsolutePath(), relative, filename, data);
         } else if(!f.getName().equals(".DS_Store")){
               Data data = makeHDF();
               String hdfValue = data.getValue("sac") == null ? "" : data.getValue("sac");
@@ -823,7 +857,7 @@ public class Doclava {
 
     SortedMap<String, Object> sorted = new TreeMap<String, Object>();
     for (ClassInfo cl : classes) {
-      if (cl.isHidden()) {
+      if (cl.isHiddenOrRemoved()) {
         continue;
       }
       sorted.put(cl.qualifiedName(), cl);
@@ -892,7 +926,8 @@ public class Doclava {
         // If it's a .jd file we want to process
         if (len > 3 && ".jd".equals(templ.substring(len - 3))) {
           // remove the directories below the site root
-          String webPath = filePath.substring(filePath.indexOf("docs/html/") + 10, filePath.length());
+          String webPath = filePath.substring(filePath.indexOf("docs/html/") + 10,
+              filePath.length());
           // replace .jd with .html
           webPath = webPath.substring(0, webPath.length() - 3) + htmlExtension;
           // Parse the .jd file for properties data at top of page
@@ -932,10 +967,10 @@ public class Doclava {
           }
 
           StringBuilder tags =  new StringBuilder();
-          String tagList = hdf.getValue("page.tags", "");
-          if (!tagList.equals("")) {
-            tagList = tagList.replaceAll("\"", "");
-            String[] tagParts = tagList.split(",");
+          String tagsList = hdf.getValue("page.tags", "");
+          if (!tagsList.equals("")) {
+            tagsList = tagsList.replaceAll("\"", "");
+            String[] tagParts = tagsList.split(",");
             for (int iter = 0; iter < tagParts.length; iter++) {
               tags.append("\"");
               tags.append(tagParts[iter].trim());
@@ -1005,7 +1040,7 @@ public class Doclava {
     // If a class is public and not hidden, then it and everything it derives
     // from cannot be stripped. Otherwise we can strip it.
     for (ClassInfo cl : all) {
-      if (cl.isPublic() && !cl.isHidden()) {
+      if (cl.isPublic() && !cl.isHiddenOrRemoved()) {
         cantStripThis(cl, notStrippable);
       }
     }
@@ -1049,13 +1084,14 @@ public class Doclava {
     for (String s : sorted.keySet()) {
       PackageInfo pkg = sorted.get(s);
 
-      if (pkg.isHidden()) {
+      if (pkg.isHiddenOrRemoved()) {
         continue;
       }
-      Boolean allHidden = true;
+
+      boolean allHiddenOrRemoved = true;
       int pass = 0;
       ClassInfo[] classesToCheck = null;
-      while (pass < 5) {
+      while (pass < 6) {
         switch (pass) {
           case 0:
             classesToCheck = pkg.ordinaryClasses();
@@ -1072,22 +1108,25 @@ public class Doclava {
           case 4:
             classesToCheck = pkg.interfaces();
             break;
+          case 5:
+            classesToCheck = pkg.annotations();
+            break;
           default:
             System.err.println("Error reading package: " + pkg.name());
             break;
         }
         for (ClassInfo cl : classesToCheck) {
-          if (!cl.isHidden()) {
-            allHidden = false;
+          if (!cl.isHiddenOrRemoved()) {
+            allHiddenOrRemoved = false;
             break;
           }
         }
-        if (!allHidden) {
+        if (!allHiddenOrRemoved) {
           break;
         }
         pass++;
       }
-      if (allHidden) {
+      if (allHiddenOrRemoved) {
         continue;
       }
 
@@ -1134,6 +1173,7 @@ public class Doclava {
     data.setValue("package.descr", "...description...");
     pkg.setFederatedReferences(data, "package");
 
+    makeClassListHDF(data, "package.annotations", ClassInfo.sortByName(pkg.annotations()));
     makeClassListHDF(data, "package.interfaces", ClassInfo.sortByName(pkg.interfaces()));
     makeClassListHDF(data, "package.classes", ClassInfo.sortByName(pkg.ordinaryClasses()));
     makeClassListHDF(data, "package.enums", ClassInfo.sortByName(pkg.enums()));
@@ -1153,7 +1193,8 @@ public class Doclava {
     int i;
     Data data = makePackageHDF();
 
-    ClassInfo[] classes = PackageInfo.filterHidden(Converter.convertClasses(root.classes()));
+    ClassInfo[] classes = PackageInfo.filterHiddenAndRemoved(
+        Converter.convertClasses(root.classes()));
     if (classes.length == 0) {
       return;
     }
@@ -1207,7 +1248,7 @@ public class Doclava {
    * public static void writeKeywords() { ArrayList<KeywordEntry> keywords = new
    * ArrayList<KeywordEntry>();
    *
-   * ClassInfo[] classes = PackageInfo.filterHidden(Converter.convertClasses(root.classes()));
+   * ClassInfo[] classes = PackageInfo.filterHiddenAndRemoved(Converter.convertClasses(root.classes()));
    *
    * for (ClassInfo cl: classes) { cl.makeKeywordEntries(keywords); }
    *
@@ -1226,7 +1267,7 @@ public class Doclava {
     ClassInfo[] classes = Converter.rootClasses();
     ArrayList<ClassInfo> info = new ArrayList<ClassInfo>();
     for (ClassInfo cl : classes) {
-      if (!cl.isHidden()) {
+      if (!cl.isHiddenOrRemoved()) {
         info.add(cl);
       }
     }
@@ -1241,7 +1282,7 @@ public class Doclava {
 
     for (ClassInfo cl : classes) {
       Data data = makePackageHDF();
-      if (!cl.isHidden()) {
+      if (!cl.isHiddenOrRemoved()) {
         writeClass(cl, data);
       }
     }
@@ -1258,7 +1299,7 @@ public class Doclava {
   public static void makeClassListHDF(Data data, String base, ClassInfo[] classes) {
     for (int i = 0; i < classes.length; i++) {
       ClassInfo cl = classes[i];
-      if (!cl.isHidden()) {
+      if (!cl.isHiddenOrRemoved()) {
         cl.makeShortDescrHDF(data, base + "." + i);
       }
     }
@@ -1294,20 +1335,21 @@ public class Doclava {
   }
 
   /**
-   * Returns true if the given element has an @hide or @pending annotation.
+   * Returns true if the given element has an @hide, @removed or @pending annotation.
    */
-  private static boolean hasHideAnnotation(Doc doc) {
+  private static boolean hasHideOrRemovedAnnotation(Doc doc) {
     String comment = doc.getRawCommentText();
-    return comment.indexOf("@hide") != -1 || comment.indexOf("@pending") != -1;
+    return comment.indexOf("@hide") != -1 || comment.indexOf("@pending") != -1 ||
+        comment.indexOf("@removed") != -1;
   }
 
   /**
    * Returns true if the given element is hidden.
    */
-  private static boolean isHidden(Doc doc) {
+  private static boolean isHiddenOrRemoved(Doc doc) {
     // Methods, fields, constructors.
     if (doc instanceof MemberDoc) {
-      return hasHideAnnotation(doc);
+      return hasHideOrRemovedAnnotation(doc);
     }
 
     // Classes, interfaces, enums, annotation types.
@@ -1315,7 +1357,7 @@ public class Doclava {
       ClassDoc classDoc = (ClassDoc) doc;
 
       // Check the containing package.
-      if (hasHideAnnotation(classDoc.containingPackage())) {
+      if (hasHideOrRemovedAnnotation(classDoc.containingPackage())) {
         return true;
       }
 
@@ -1323,7 +1365,7 @@ public class Doclava {
       // nested class.
       ClassDoc current = classDoc;
       do {
-        if (hasHideAnnotation(current)) {
+        if (hasHideOrRemovedAnnotation(current)) {
           return true;
         }
 
@@ -1335,9 +1377,9 @@ public class Doclava {
   }
 
   /**
-   * Filters out hidden elements.
+   * Filters out hidden and removed elements.
    */
-  private static Object filterHidden(Object o, Class<?> expected) {
+  private static Object filterHiddenAndRemoved(Object o, Class<?> expected) {
     if (o == null) {
       return null;
     }
@@ -1352,10 +1394,10 @@ public class Doclava {
       Object[] array = (Object[]) o;
       List<Object> list = new ArrayList<Object>(array.length);
       for (Object entry : array) {
-        if ((entry instanceof Doc) && isHidden((Doc) entry)) {
+        if ((entry instanceof Doc) && isHiddenOrRemoved((Doc) entry)) {
           continue;
         }
-        list.add(filterHidden(entry, componentType));
+        list.add(filterHiddenAndRemoved(entry, componentType));
       }
       return list.toArray((Object[]) Array.newInstance(componentType, list.size()));
     } else {
@@ -1393,7 +1435,7 @@ public class Doclava {
       }
 
       try {
-        return filterHidden(method.invoke(target, args), method.getReturnType());
+        return filterHiddenAndRemoved(method.invoke(target, args), method.getReturnType());
       } catch (InvocationTargetException e) {
         throw e.getTargetException();
       }
@@ -1438,6 +1480,9 @@ public class Doclava {
 
     ClassInfo[] classes = Converter.allClasses();
 
+    // The topmost LayoutParams class - android.view.ViewGroup.LayoutParams
+    ClassInfo topLayoutParams = null;
+
     // Go through all the fields of all the classes, looking SDK stuff.
     for (ClassInfo clazz : classes) {
 
@@ -1473,7 +1518,7 @@ public class Doclava {
 
       // Now check the class for @Widget or if its in the android.widget package
       // (unless the class is hidden or abstract, or non public)
-      if (clazz.isHidden() == false && clazz.isPublic() && clazz.isAbstract() == false) {
+      if (clazz.isHiddenOrRemoved() == false && clazz.isPublic() && clazz.isAbstract() == false) {
         boolean annotated = false;
         ArrayList<AnnotationInstanceInfo> annotations = clazz.annotations();
         if (!annotations.isEmpty()) {
@@ -1491,10 +1536,12 @@ public class Doclava {
         }
 
         if (annotated == false) {
-          // lets check if this is inside android.widget
-          PackageInfo pckg = clazz.containingPackage();
-          String packageName = pckg.name();
-          if ("android.widget".equals(packageName) || "android.view".equals(packageName)) {
+          if (topLayoutParams == null
+              && "android.view.ViewGroup.LayoutParams".equals(clazz.qualifiedName())) {
+            topLayoutParams = clazz;
+          }
+          // let's check if this is inside android.widget or android.view
+          if (isIncludedPackage(clazz)) {
             // now we check what this class inherits either from android.view.ViewGroup
             // or android.view.View, or android.view.ViewGroup.LayoutParams
             int type = checkInheritance(clazz);
@@ -1535,9 +1582,14 @@ public class Doclava {
     // before writing the list of classes, we do some checks, to make sure the layout params
     // are enclosed by a layout class (and not one that has been declared as a widget)
     for (int i = 0; i < layoutParams.size();) {
-      ClassInfo layoutParamClass = layoutParams.get(i);
-      ClassInfo containingClass = layoutParamClass.containingClass();
-      if (containingClass == null || layouts.indexOf(containingClass) == -1) {
+      ClassInfo clazz = layoutParams.get(i);
+      ClassInfo containingClass = clazz.containingClass();
+      boolean remove = containingClass == null || layouts.indexOf(containingClass) == -1;
+      // Also ensure that super classes of the layout params are in android.widget or android.view.
+      while (!remove && (clazz = clazz.superclass()) != null && !clazz.equals(topLayoutParams)) {
+        remove = !isIncludedPackage(clazz);
+      }
+      if (remove) {
         layoutParams.remove(i);
       } else {
         i++;
@@ -1545,6 +1597,14 @@ public class Doclava {
     }
 
     writeClasses(output + "/widgets.txt", widgets, layouts, layoutParams);
+  }
+
+  /**
+   * Check if the clazz is in package android.view or android.widget
+   */
+  private static boolean isIncludedPackage(ClassInfo clazz) {
+    String pckg = clazz.containingPackage().name();
+    return "android.widget".equals(pckg) || "android.view".equals(pckg);
   }
 
   /**
@@ -1676,29 +1736,83 @@ public class Doclava {
   }
 
   /**
-  * Process samples dirs that are specified in Android.mk. Generate html
-  * wrapped pages, copy files to output dir, and generate a SampleCode NavTree.
+  * Process sample projects. Generate the TOC for the samples groups and project
+  * and write it to a cs var, which is then written to files during templating to
+  * html output. Collect metadata from sample project _index.jd files. Copy html
+  * and specific source file types to the output directory.
   */
   public static void writeSamples(boolean offlineMode, ArrayList<SampleCode> sampleCodes,
       boolean sortNavByGroups) {
-    // Go through SCs processing files. Create a root list for SC nodes,
+    samplesNavTree = makeHDF();
+
+    // Go through samples processing files. Create a root list for SC nodes,
     // pass it to SCs for their NavTree children and append them.
     List<SampleCode.Node> samplesList = new ArrayList<SampleCode.Node>();
     List<SampleCode.Node> sampleGroupsRootNodes = null;
     for (SampleCode sc : sampleCodes) {
-      samplesList.add(sc.write(offlineMode));
-    }
+      samplesList.add(sc.setSamplesTOC(offlineMode));
+     }
     if (sortNavByGroups) {
       sampleGroupsRootNodes = new ArrayList<SampleCode.Node>();
       for (SampleCode gsc : sampleCodeGroups) {
-        String link = "samples/topic.html#t=" + gsc.mTitle.replaceAll(" ", "").trim();
-        sampleGroupsRootNodes.add(new SampleCode.Node(gsc.mTitle, link, null, null, null,
-            "groupholder"));
+        String link =  ClearPage.toroot + "samples/" + gsc.mTitle.replaceAll(" ", "").trim().toLowerCase() + ".html";
+        sampleGroupsRootNodes.add(new SampleCode.Node.Builder().setLabel(gsc.mTitle).setLink(link).setType("groupholder").build());
       }
     }
-    // Pass full samplesList to SC to render to js file
+    // Pass full samplesList to SC to render the samples TOC to sampleNavTree hdf
     if (!offlineMode) {
       SampleCode.writeSamplesNavTree(samplesList, sampleGroupsRootNodes);
+    }
+    // Iterate the samplecode projects writing the files to out
+    for (SampleCode sc : sampleCodes) {
+      sc.writeSamplesFiles(offlineMode);
+    }
+  }
+
+  /**
+  * Given an initial samples directory root, walk through the directory collecting
+  * sample code project roots and adding them to an array of SampleCodes.
+  * @param rootDir Root directory holding all browseable sample code projects,
+  *        defined in frameworks/base/Android.mk as "-sampleDir path".
+  */
+  public static void getSampleProjects(File rootDir) {
+    for (File f : rootDir.listFiles()) {
+      String name = f.getName();
+      if (f.isDirectory()) {
+        if (isValidSampleProjectRoot(f)) {
+          sampleCodes.add(new SampleCode(f.getAbsolutePath(), "samples/" + name, name));
+        } else {
+          getSampleProjects(f);
+        }
+      }
+    }
+  }
+
+  /**
+  * Test whether a given directory is the root directory for a sample code project.
+  * Root directories must contain a valid _index.jd file and a src/ directory
+  * or a module directory that contains a src/ directory.
+  */
+  public static boolean isValidSampleProjectRoot(File dir) {
+    File indexJd = new File(dir, "_index.jd");
+    if (!indexJd.exists()) {
+      return false;
+    }
+    File srcDir = new File(dir, "src");
+    if (srcDir.exists()) {
+      return true;
+    } else {
+      // Look for a src/ directory one level below the root directory, so
+      // modules are supported.
+      for (File childDir : dir.listFiles()) {
+        if (childDir.isDirectory()) {
+          srcDir = new File(childDir, "src");
+          if (srcDir.exists()) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
   }
 

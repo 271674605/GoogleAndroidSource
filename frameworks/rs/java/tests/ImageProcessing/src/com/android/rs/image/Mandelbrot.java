@@ -30,6 +30,11 @@ import android.widget.TextView;
 
 public class Mandelbrot extends TestBase {
     private ScriptC_mandelbrot mScript;
+    private boolean mUseDouble = false;
+
+    public Mandelbrot(boolean useDouble) {
+        mUseDouble = useDouble;
+    }
 
     public boolean onBar1Setup(SeekBar b, TextView t) {
         t.setText("Iterations");
@@ -83,14 +88,18 @@ public class Mandelbrot extends TestBase {
         int width = mOutPixelsAllocation.getType().getX();
         int height = mOutPixelsAllocation.getType().getY();
 
-        mScript = new ScriptC_mandelbrot(mRS, res, R.raw.mandelbrot);
+        mScript = new ScriptC_mandelbrot(mRS);
         mScript.set_gDimX(width);
         mScript.set_gDimY(height);
         mScript.set_gMaxIteration(50);
     }
 
     public void runTest() {
-        mScript.forEach_root(mOutPixelsAllocation);
+        if (mUseDouble) {
+            mScript.forEach_rootD(mOutPixelsAllocation);
+        } else {
+            mScript.forEach_root(mOutPixelsAllocation);
+        }
         mRS.finish();
     }
 

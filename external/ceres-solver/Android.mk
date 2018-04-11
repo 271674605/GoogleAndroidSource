@@ -29,141 +29,208 @@
 # Author: settinger@google.com (Scott Ettinger)
 #         keir@google.com (Keir Mierle)
 #
-# Builds Ceres for Android, using the standard toolchain (not standalone). It
-# uses STLPort instead of GNU C++. This is useful for anyone wishing to ship
-# GPL-free code. This cannot build the tests or other parts of Ceres; only the
-# core libraries. If you need a more complete Ceres build, consider using the
-# CMake toolchain (noting that the standalone toolchain doesn't work with
-# STLPort).
+# Builds Ceres for Android, using the standard toolchain (not
+# standalone). It uses LLVM's libc++ as the standard library. It is a
+# modern BSD licensed implementation of the standard c++ library. We
+# do this to avoid any licensing issues that may arise from using
+# GCC's libstdc++ which is licensed under GPL3.
 #
-# Reducing binary size:
+# Building
+# --------
 #
-# This build includes the Schur specializations, which cause binary bloat. If
-# you don't need them for your application, consider adding:
+# You will have to specify the environment EIGEN_PATH to point to the
+# Eigen sources when building. For example:
+#
+#   EIGEN_PATH=/home/keir/src/eigen-3.0.5 ndk-build -j
+#
+# It is also possible to specify CERES_EXTRA_DEFINES, in case you need
+# to pass more definitions to the C compiler.
+#
+# Using the library
+# -----------------
+# Copy the static library:
+#
+#   ../obj/local/armeabi-v7a/libceres.a
+#
+# into your own project, then link it into your binary in your
+# Android.mk file.
+#
+# Reducing binary size
+# --------------------
+# This build includes the Schur specializations, which increase the
+# size of the binary. If you don't need them for your application,
+# consider adding:
 #
 #   -DCERES_RESTRICT_SCHUR_SPECIALIZATION
 #
-# to the LOCAL_CFLAGS variable below, and commenting out all the
-# generated/schur_eliminator_2_2_2.cc-alike files, leaving only the _d_d_d one.
+# to the LOCAL_CFLAGS variable below.
 #
-# Similarly if you do not need the line search minimizer, consider adding
-#
-#   -DCERES_NO_LINE_SEARCH_MINIMIZER
+# Changing the logging library
+# ----------------------------
+# Ceres Solver ships with a replacement for glog that provides a
+# simple and small implementation that builds on Android. However, if
+# you wish to supply a header only version yourself, then you may
+# define CERES_GLOG_DIR to point to it.
 
 LOCAL_PATH := $(call my-dir)
-include $(CLEAR_VARS)
 
-LOCAL_MODULE := libceres
+EIGEN_PATH := external/eigen
+CERES_INCLUDE_PATHS := $(CERES_EXTRA_INCLUDES)
+CERES_INCLUDE_PATHS += $(LOCAL_PATH)/internal
+CERES_INCLUDE_PATHS += $(LOCAL_PATH)/internal/ceres
+CERES_INCLUDE_PATHS += $(LOCAL_PATH)/include
+CERES_INCLUDE_PATHS += $(LOCAL_PATH)/config
+
+# Use the alternate glog implementation if provided by the user.
+ifdef CERES_GLOG_DIR
+  CERES_INCLUDE_PATHS += $(CERES_GLOG_DIR)
+else
+  CERES_INCLUDE_PATHS += $(LOCAL_PATH)/internal/ceres/miniglog
+endif
+CERES_SRC_PATH := internal/ceres
+
+
+include $(CLEAR_VARS)
+LOCAL_C_INCLUDES := $(CERES_INCLUDE_PATHS)
+LOCAL_C_INCLUDES += $(EIGEN_PATH)
 
 LOCAL_SDK_VERSION := 17
-LOCAL_NDK_STL_VARIANT := stlport_static
-
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/internal \
-                    $(LOCAL_PATH)/internal/ceres \
-                    $(LOCAL_PATH)/internal/ceres/miniglog \
-                    $(LOCAL_PATH)/include \
-                    external/eigen \
+LOCAL_NDK_STL_VARIANT := c++_static
 
 LOCAL_CPP_EXTENSION := .cc
-LOCAL_CPPFLAGS := -DCERES_NO_PROTOCOL_BUFFERS \
-                  -DCERES_NO_LAPACK \
-                  -DCERES_NO_SUITESPARSE \
-                  -DCERES_NO_GFLAGS \
-                  -DCERES_NO_THREADS \
-                  -DCERES_NO_CXSPARSE \
-                  -DCERES_NO_TR1 \
-                  -DCERES_WORK_AROUND_ANDROID_NDK_COMPILER_BUG \
-                  -DMAX_LOG_LEVEL=-1 \
-                  -O3 -w
+LOCAL_CFLAGS := $(CERES_EXTRA_DEFINES) \
+                -DCERES_NO_LAPACK \
+                -DCERES_NO_SUITESPARSE \
+                -DCERES_NO_THREADS \
+                -DCERES_NO_CXSPARSE \
+                -DCERES_STD_UNORDERED_MAP
+
+# The default relase optimization level is O2, but we want O3.
+LOCAL_CFLAGS += -O3 -w
+
+# Set the logging max level to 1.
+LOCAL_CFLAGS += -DMAX_LOG_LEVEL=-1
 
 # On Android NDK 8b, GCC gives spurrious warnings about ABI incompatibility for
 # which there is no solution. Hide the warning instead.
 LOCAL_CFLAGS += -Wno-psabi
 
-LOCAL_SRC_FILES := internal/ceres/array_utils.cc \
-                   internal/ceres/blas.cc \
-                   internal/ceres/block_evaluate_preparer.cc \
-                   internal/ceres/block_jacobian_writer.cc \
-                   internal/ceres/block_jacobi_preconditioner.cc \
-                   internal/ceres/block_random_access_dense_matrix.cc \
-                   internal/ceres/block_random_access_matrix.cc \
-                   internal/ceres/block_random_access_sparse_matrix.cc \
-                   internal/ceres/block_sparse_matrix.cc \
-                   internal/ceres/block_structure.cc \
-                   internal/ceres/canonical_views_clustering.cc \
-                   internal/ceres/cgnr_solver.cc \
-                   internal/ceres/compressed_row_jacobian_writer.cc \
-                   internal/ceres/compressed_row_sparse_matrix.cc \
-                   internal/ceres/conditioned_cost_function.cc \
-                   internal/ceres/conjugate_gradients_solver.cc \
-                   internal/ceres/coordinate_descent_minimizer.cc \
-                   internal/ceres/corrector.cc \
-                   internal/ceres/dense_normal_cholesky_solver.cc \
-                   internal/ceres/dense_qr_solver.cc \
-                   internal/ceres/dense_sparse_matrix.cc \
-                   internal/ceres/detect_structure.cc \
-                   internal/ceres/dogleg_strategy.cc \
-                   internal/ceres/evaluator.cc \
-                   internal/ceres/file.cc \
-                   internal/ceres/gradient_checking_cost_function.cc \
-                   internal/ceres/implicit_schur_complement.cc \
-                   internal/ceres/iterative_schur_complement_solver.cc \
-                   internal/ceres/lapack.cc \
-                   internal/ceres/levenberg_marquardt_strategy.cc \
-                   internal/ceres/line_search.cc \
-                   internal/ceres/line_search_direction.cc \
-                   internal/ceres/line_search_minimizer.cc \
-                   internal/ceres/linear_least_squares_problems.cc \
-                   internal/ceres/linear_operator.cc \
-                   internal/ceres/linear_solver.cc \
-                   internal/ceres/local_parameterization.cc \
-                   internal/ceres/loss_function.cc \
-                   internal/ceres/low_rank_inverse_hessian.cc \
-                   internal/ceres/minimizer.cc \
-                   internal/ceres/normal_prior.cc \
-                   internal/ceres/parameter_block_ordering.cc \
-                   internal/ceres/partitioned_matrix_view.cc \
-                   internal/ceres/polynomial.cc \
-                   internal/ceres/preconditioner.cc \
-                   internal/ceres/problem.cc \
-                   internal/ceres/problem_impl.cc \
-                   internal/ceres/program.cc \
-                   internal/ceres/residual_block.cc \
-                   internal/ceres/residual_block_utils.cc \
-                   internal/ceres/runtime_numeric_diff_cost_function.cc \
-                   internal/ceres/schur_complement_solver.cc \
-                   internal/ceres/schur_eliminator.cc \
-                   internal/ceres/schur_jacobi_preconditioner.cc \
-                   internal/ceres/scratch_evaluate_preparer.cc \
-                   internal/ceres/solver.cc \
-                   internal/ceres/solver_impl.cc \
-                   internal/ceres/sparse_matrix.cc \
-                   internal/ceres/sparse_normal_cholesky_solver.cc \
-                   internal/ceres/split.cc \
-                   internal/ceres/stringprintf.cc \
-                   internal/ceres/suitesparse.cc \
-                   internal/ceres/triplet_sparse_matrix.cc \
-                   internal/ceres/trust_region_minimizer.cc \
-                   internal/ceres/trust_region_strategy.cc \
-                   internal/ceres/types.cc \
-                   internal/ceres/visibility_based_preconditioner.cc \
-                   internal/ceres/visibility.cc \
-                   internal/ceres/wall_time.cc \
-                   internal/ceres/generated/schur_eliminator_d_d_d.cc \
-                   internal/ceres/generated/schur_eliminator_2_2_2.cc \
-                   internal/ceres/generated/schur_eliminator_2_2_3.cc \
-                   internal/ceres/generated/schur_eliminator_2_2_4.cc \
-                   internal/ceres/generated/schur_eliminator_2_2_d.cc \
-                   internal/ceres/generated/schur_eliminator_2_3_3.cc \
-                   internal/ceres/generated/schur_eliminator_2_3_4.cc \
-                   internal/ceres/generated/schur_eliminator_2_3_9.cc \
-                   internal/ceres/generated/schur_eliminator_2_3_d.cc \
-                   internal/ceres/generated/schur_eliminator_2_4_3.cc \
-                   internal/ceres/generated/schur_eliminator_2_4_4.cc \
-                   internal/ceres/generated/schur_eliminator_2_4_d.cc \
-                   internal/ceres/generated/schur_eliminator_4_4_2.cc \
-                   internal/ceres/generated/schur_eliminator_4_4_3.cc \
-                   internal/ceres/generated/schur_eliminator_4_4_4.cc \
-                   internal/ceres/generated/schur_eliminator_4_4_d.cc
+LOCAL_SRC_FILES := $(CERES_SRC_PATH)/array_utils.cc \
+                   $(CERES_SRC_PATH)/blas.cc \
+                   $(CERES_SRC_PATH)/block_evaluate_preparer.cc \
+                   $(CERES_SRC_PATH)/block_jacobian_writer.cc \
+                   $(CERES_SRC_PATH)/block_jacobi_preconditioner.cc \
+                   $(CERES_SRC_PATH)/block_random_access_dense_matrix.cc \
+                   $(CERES_SRC_PATH)/block_random_access_diagonal_matrix.cc \
+                   $(CERES_SRC_PATH)/block_random_access_matrix.cc \
+                   $(CERES_SRC_PATH)/block_random_access_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/block_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/block_structure.cc \
+                   $(CERES_SRC_PATH)/callbacks.cc \
+                   $(CERES_SRC_PATH)/canonical_views_clustering.cc \
+                   $(CERES_SRC_PATH)/cgnr_solver.cc \
+                   $(CERES_SRC_PATH)/compressed_row_jacobian_writer.cc \
+                   $(CERES_SRC_PATH)/compressed_row_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/conditioned_cost_function.cc \
+                   $(CERES_SRC_PATH)/conjugate_gradients_solver.cc \
+                   $(CERES_SRC_PATH)/coordinate_descent_minimizer.cc \
+                   $(CERES_SRC_PATH)/corrector.cc \
+                   $(CERES_SRC_PATH)/dense_normal_cholesky_solver.cc \
+                   $(CERES_SRC_PATH)/dense_qr_solver.cc \
+                   $(CERES_SRC_PATH)/dense_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/detect_structure.cc \
+                   $(CERES_SRC_PATH)/dogleg_strategy.cc \
+                   $(CERES_SRC_PATH)/dynamic_compressed_row_jacobian_writer.cc \
+                   $(CERES_SRC_PATH)/dynamic_compressed_row_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/evaluator.cc \
+                   $(CERES_SRC_PATH)/file.cc \
+                   $(CERES_SRC_PATH)/gradient_checking_cost_function.cc \
+                   $(CERES_SRC_PATH)/implicit_schur_complement.cc \
+                   $(CERES_SRC_PATH)/iterative_schur_complement_solver.cc \
+                   $(CERES_SRC_PATH)/lapack.cc \
+                   $(CERES_SRC_PATH)/levenberg_marquardt_strategy.cc \
+                   $(CERES_SRC_PATH)/line_search.cc \
+                   $(CERES_SRC_PATH)/line_search_direction.cc \
+                   $(CERES_SRC_PATH)/line_search_minimizer.cc \
+                   $(CERES_SRC_PATH)/linear_least_squares_problems.cc \
+                   $(CERES_SRC_PATH)/linear_operator.cc \
+                   $(CERES_SRC_PATH)/linear_solver.cc \
+                   $(CERES_SRC_PATH)/local_parameterization.cc \
+                   $(CERES_SRC_PATH)/loss_function.cc \
+                   $(CERES_SRC_PATH)/low_rank_inverse_hessian.cc \
+                   $(CERES_SRC_PATH)/minimizer.cc \
+                   $(CERES_SRC_PATH)/normal_prior.cc \
+                   $(CERES_SRC_PATH)/parameter_block_ordering.cc \
+                   $(CERES_SRC_PATH)/partitioned_matrix_view.cc \
+                   $(CERES_SRC_PATH)/polynomial.cc \
+                   $(CERES_SRC_PATH)/preconditioner.cc \
+                   $(CERES_SRC_PATH)/problem.cc \
+                   $(CERES_SRC_PATH)/problem_impl.cc \
+                   $(CERES_SRC_PATH)/program.cc \
+                   $(CERES_SRC_PATH)/reorder_program.cc \
+                   $(CERES_SRC_PATH)/residual_block.cc \
+                   $(CERES_SRC_PATH)/residual_block_utils.cc \
+                   $(CERES_SRC_PATH)/schur_complement_solver.cc \
+                   $(CERES_SRC_PATH)/schur_eliminator.cc \
+                   $(CERES_SRC_PATH)/schur_jacobi_preconditioner.cc \
+                   $(CERES_SRC_PATH)/scratch_evaluate_preparer.cc \
+                   $(CERES_SRC_PATH)/solver.cc \
+                   $(CERES_SRC_PATH)/solver_impl.cc \
+                   $(CERES_SRC_PATH)/sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/sparse_normal_cholesky_solver.cc \
+                   $(CERES_SRC_PATH)/split.cc \
+                   $(CERES_SRC_PATH)/stringprintf.cc \
+                   $(CERES_SRC_PATH)/summary_utils.cc \
+                   $(CERES_SRC_PATH)/suitesparse.cc \
+                   $(CERES_SRC_PATH)/triplet_sparse_matrix.cc \
+                   $(CERES_SRC_PATH)/trust_region_minimizer.cc \
+                   $(CERES_SRC_PATH)/trust_region_strategy.cc \
+                   $(CERES_SRC_PATH)/types.cc \
+                   $(CERES_SRC_PATH)/visibility_based_preconditioner.cc \
+                   $(CERES_SRC_PATH)/visibility.cc \
+                   $(CERES_SRC_PATH)/wall_time.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_d_d_d.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_2_2.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_2_3.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_2_4.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_2_d.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_3_3.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_3_4.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_3_9.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_3_d.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_4_3.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_4_4.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_4_8.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_4_9.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_4_d.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_2_d_d.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_4_4_2.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_4_4_3.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_4_4_4.cc \
+                   $(CERES_SRC_PATH)/generated/schur_eliminator_4_4_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_d_d_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_2_2.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_2_3.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_2_4.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_2_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_3_3.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_3_4.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_3_9.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_3_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_4_3.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_4_4.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_4_8.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_4_9.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_4_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_2_d_d.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_4_4_2.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_4_4_3.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_4_4_4.cc \
+                   $(CERES_SRC_PATH)/generated/partitioned_matrix_view_4_4_d.cc
 
+ifndef CERES_GLOG_DIR
+LOCAL_SRC_FILES += $(CERES_SRC_PATH)/miniglog/glog/logging.cc
+endif
+
+LOCAL_MODULE := libceres
 include $(BUILD_STATIC_LIBRARY)

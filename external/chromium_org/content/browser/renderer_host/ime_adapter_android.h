@@ -7,12 +7,14 @@
 
 #include <jni.h>
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 
 namespace content {
 
+class RenderFrameHost;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewAndroid;
+class WebContents;
 struct NativeWebKeyboardEvent;
 
 // This class is in charge of dispatching key events from the java side
@@ -27,7 +29,7 @@ class ImeAdapterAndroid {
 
   // Called from java -> native
   // The java side is responsible to translate android KeyEvent various enums
-  // and values into the corresponding WebKit::WebInputEvent.
+  // and values into the corresponding blink::WebInputEvent.
   bool SendKeyEvent(JNIEnv* env, jobject,
                     jobject original_key_event,
                     int action, int meta_state,
@@ -40,9 +42,12 @@ class ImeAdapterAndroid {
                              long timestamp_ms,
                              int native_key_code,
                              int unicode_char);
-  void SetComposingText(JNIEnv*, jobject, jstring text, int new_cursor_pos);
-  void ImeBatchStateChanged(JNIEnv*, jobject, jboolean is_begin);
-  void CommitText(JNIEnv*, jobject, jstring text);
+  void SetComposingText(JNIEnv*,
+                        jobject obj,
+                        jobject text,
+                        jstring text_str,
+                        int new_cursor_pos);
+  void CommitText(JNIEnv*, jobject, jstring text_str);
   void FinishComposingText(JNIEnv* env, jobject);
   void AttachImeAdapter(JNIEnv*, jobject java_object);
   void SetEditableSelectionOffsets(JNIEnv*, jobject, int start, int end);
@@ -57,9 +62,12 @@ class ImeAdapterAndroid {
 
   // Called from native -> java
   void CancelComposition();
+  void FocusedNodeChanged(bool is_editable_node);
 
  private:
   RenderWidgetHostImpl* GetRenderWidgetHostImpl();
+  RenderFrameHost* GetFocusedFrame();
+  WebContents* GetWebContents();
 
   RenderWidgetHostViewAndroid* rwhva_;
   JavaObjectWeakGlobalRef java_ime_adapter_;

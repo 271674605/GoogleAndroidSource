@@ -24,6 +24,7 @@ class Scrollbar {
   virtual ~Scrollbar() {}
 
   virtual ScrollbarOrientation Orientation() const = 0;
+  virtual bool IsLeftSideVerticalScrollbar() const = 0;
   virtual gfx::Point Location() const = 0;
   virtual bool IsOverlay() const = 0;
   virtual bool HasThumb() const = 0;
@@ -32,7 +33,7 @@ class Scrollbar {
   virtual gfx::Rect TrackRect() const = 0;
   virtual void PaintPart(SkCanvas* canvas,
                          ScrollbarPart part,
-                         gfx::Rect content_rect) = 0;
+                         const gfx::Rect& content_rect) = 0;
 };
 
 }  // namespace cc

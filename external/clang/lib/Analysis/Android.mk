@@ -8,6 +8,7 @@ include $(CLEAR_TBLGEN_VARS)
 TBLGEN_TABLES := \
   AttrList.inc \
   Attrs.inc \
+  AttrVisitor.inc \
   CommentCommandList.inc \
   CommentNodes.inc \
   DeclNodes.inc \
@@ -23,6 +24,7 @@ clang_analysis_SRC_FILES := \
   CFGReachabilityAnalysis.cpp \
   CFGStmtMap.cpp \
   CocoaConventions.cpp \
+  Consumed.cpp \
   Dominators.cpp \
   FormatString.cpp \
   LiveVariables.cpp \

@@ -7,9 +7,9 @@
 
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/id_map.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/ssl/ssl_error_handler.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "net/socket_stream/socket_stream.h"
@@ -32,14 +32,15 @@ class SocketStreamDispatcherHost
       public net::SocketStream::Delegate,
       public SSLErrorHandler::Delegate {
  public:
+  typedef base::Callback<net::URLRequestContext*(ResourceType::Type)>
+      GetRequestContextCallback;
   SocketStreamDispatcherHost(
       int render_process_id,
-      ResourceMessageFilter::URLRequestContextSelector* selector,
+      const GetRequestContextCallback& request_context_callback,
       ResourceContext* resource_context);
 
   // BrowserMessageFilter:
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Make this object inactive.
   // Remove all active SocketStreamHost objects.
@@ -74,7 +75,7 @@ class SocketStreamDispatcherHost
 
  private:
   // Message handlers called by OnMessageReceived.
-  void OnConnect(int render_view_id, const GURL& url, int socket_id);
+  void OnConnect(int render_frame_id, const GURL& url, int socket_id);
   void OnSendData(int socket_id, const std::vector<char>& data);
   void OnCloseReq(int socket_id);
 
@@ -84,8 +85,7 @@ class SocketStreamDispatcherHost
 
   IDMap<SocketStreamHost> hosts_;
   int render_process_id_;
-  const scoped_ptr<ResourceMessageFilter::URLRequestContextSelector>
-      url_request_context_selector_;
+  GetRequestContextCallback request_context_callback_;
   ResourceContext* resource_context_;
 
   base::WeakPtrFactory<SocketStreamDispatcherHost> weak_ptr_factory_;

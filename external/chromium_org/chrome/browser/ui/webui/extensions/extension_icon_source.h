@@ -10,10 +10,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/common/cancelable_task_tracker.h"
-#include "chrome/common/extensions/extension_icon_set.h"
 #include "content/public/browser/url_data_source.h"
+#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -75,7 +75,7 @@ class ExtensionIconSource : public content::URLDataSource,
   virtual void StartDataRequest(
       const std::string& path,
       int render_process_id,
-      int render_view_id,
+      int render_frame_id,
       const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
 
  private:
@@ -110,7 +110,7 @@ class ExtensionIconSource : public content::URLDataSource,
   // FaviconService callback
   void OnFaviconDataAvailable(
       int request_id,
-      const chrome::FaviconBitmapResult& bitmap_result);
+      const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
   // ImageLoader callback
   void OnImageLoaded(int request_id, const gfx::Image& image);
@@ -156,7 +156,7 @@ class ExtensionIconSource : public content::URLDataSource,
 
   scoped_ptr<SkBitmap> default_extension_data_;
 
-  CancelableTaskTracker cancelable_task_tracker_;
+  base::CancelableTaskTracker cancelable_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionIconSource);
 };

@@ -14,13 +14,13 @@
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
+#include "ppapi/shared_impl/compositor_layer_data.h"
 #include "ppapi/shared_impl/file_path.h"
 #include "ppapi/shared_impl/file_ref_create_info.h"
+#include "ppapi/shared_impl/media_stream_video_track_shared.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
-#include "ppapi/shared_impl/ppb_file_ref_shared.h"
 #include "ppapi/shared_impl/socket_option_data.h"
 
-struct PP_FileInfo;
 struct PP_NetAddress_Private;
 
 namespace ppapi {
@@ -52,14 +52,6 @@ struct PPAPI_PROXY_EXPORT ParamTraits<PP_Bool> {
   static void Log(const param_type& p, std::string* l);
 };
 
-template<>
-struct PPAPI_PROXY_EXPORT ParamTraits<PP_FileInfo> {
-  typedef PP_FileInfo param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
 template <>
 struct PPAPI_PROXY_EXPORT ParamTraits<PP_NetAddress_Private> {
   typedef PP_NetAddress_Private param_type;
@@ -72,15 +64,6 @@ template<>
 struct PPAPI_PROXY_EXPORT ParamTraits<
     ppapi::proxy::PPBFlash_DrawGlyphs_Params> {
   typedef ppapi::proxy::PPBFlash_DrawGlyphs_Params param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-// TODO(teravest): Remove this when we've switched over to the new proxy.
-template<>
-struct PPAPI_PROXY_EXPORT ParamTraits<ppapi::PPB_FileRef_CreateInfo> {
-  typedef ppapi::PPB_FileRef_CreateInfo param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -154,15 +137,6 @@ struct PPAPI_PROXY_EXPORT ParamTraits<
 };
 
 template<>
-struct PPAPI_PROXY_EXPORT ParamTraits< std::vector<
-    ppapi::PPB_FileRef_CreateInfo> > {
-  typedef std::vector<ppapi::PPB_FileRef_CreateInfo> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template<>
 struct PPAPI_PROXY_EXPORT ParamTraits<ppapi::PpapiPermissions> {
   typedef ppapi::PpapiPermissions param_type;
   static void Write(Message* m, const param_type& p);
@@ -199,6 +173,14 @@ struct PPAPI_PROXY_EXPORT ParamTraits<ppapi::PPB_X509Certificate_Fields> {
 template<>
 struct PPAPI_PROXY_EXPORT ParamTraits<ppapi::SocketOptionData> {
   typedef ppapi::SocketOptionData param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
+struct PPAPI_PROXY_EXPORT ParamTraits<ppapi::CompositorLayerData::Transform> {
+  typedef ppapi::CompositorLayerData::Transform param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);

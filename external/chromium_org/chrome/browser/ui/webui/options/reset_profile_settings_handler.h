@@ -5,7 +5,10 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_RESET_PROFILE_SETTINGS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_RESET_PROFILE_SETTINGS_HANDLER_H_
 
+#include <string>
+
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
@@ -14,13 +17,15 @@ class DictionaryValue;
 class ListValue;
 }  // namespace base
 
+class AutomaticProfileResetter;
 class BrandcodeConfigFetcher;
 class ProfileResetter;
 class ResettableSettingsSnapshot;
 
 namespace options {
 
-// Reset Profile Settings handler page UI handler.
+// Handler for both the 'Reset Profile Settings' overlay page and also the
+// corresponding banner that is shown at the top of the options page.
 class ResetProfileSettingsHandler
     : public OptionsPageUIHandler,
       public base::SupportsWeakPtr<ResetProfileSettingsHandler> {
@@ -32,6 +37,8 @@ class ResetProfileSettingsHandler
   virtual void GetLocalizedValues(
       base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void InitializeHandler() OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
+  virtual void Uninitialize() OVERRIDE;
 
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
@@ -41,10 +48,16 @@ class ResetProfileSettingsHandler
   void HandleResetProfileSettings(const base::ListValue* value);
 
   // Closes the dialog once all requested settings has been reset.
-  void OnResetProfileSettingsDone();
+  void OnResetProfileSettingsDone(bool send_feedback);
 
   // Called when the confirmation box appears.
   void OnShowResetProfileDialog(const base::ListValue* value);
+
+  // Called when the confirmation box disappears.
+  void OnHideResetProfileDialog(const base::ListValue* value);
+
+  // Called when the reset banner is dismissed from the WebUI.
+  void OnDismissedResetProfileSettingsBanner(const base::ListValue* args);
 
   // Called when BrandcodeConfigFetcher completed fetching settings.
   void OnSettingsFetched();
@@ -52,6 +65,17 @@ class ResetProfileSettingsHandler
   // Resets profile settings to default values. |send_settings| is true if user
   // gave his consent to upload broken settings to Google for analysis.
   void ResetProfile(bool send_settings);
+
+  // Sets new values for the feedback area.
+  void UpdateFeedbackUI();
+
+  // Destroyed with the Profile, thus it should outlive us. This will be NULL if
+  // the underlying profile is off-the-record (e.g. in Guest mode on Chrome OS).
+  AutomaticProfileResetter* automatic_profile_resetter_;
+
+  // Records whether or not the Profile Reset confirmation dialog was opened at
+  // least once during the lifetime of the settings page.
+  bool has_shown_confirmation_dialog_;
 
   scoped_ptr<ProfileResetter> resetter_;
 

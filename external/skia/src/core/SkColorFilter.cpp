@@ -7,12 +7,11 @@
 
 #include "SkColorFilter.h"
 
-#include "SkFlattenableBuffers.h"
+#include "SkReadBuffer.h"
+#include "SkWriteBuffer.h"
 #include "SkShader.h"
 #include "SkUnPreMultiply.h"
 #include "SkString.h"
-
-SK_DEFINE_INST_COUNT(SkColorFilter)
 
 bool SkColorFilter::asColorMode(SkColor* color, SkXfermode::Mode* mode) const {
     return false;

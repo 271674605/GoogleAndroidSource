@@ -6,7 +6,8 @@ LOCAL_SRC_FILES := \
 	camera_metadata.c
 
 LOCAL_C_INCLUDES:= \
-	system/media/camera/include
+	system/media/camera/include \
+	system/media/private/camera/include
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils \
@@ -20,5 +21,11 @@ LOCAL_CFLAGS += \
 	-fvisibility=hidden \
 	-std=c99
 
+ifneq ($(filter userdebug eng,$(TARGET_BUILD_VARIANT)),)
+    # Enable assert()
+    LOCAL_CFLAGS += -UNDEBUG -DLOG_NDEBUG=1
+endif
+
+LOCAL_EXPORT_C_INCLUDE_DIRS := $(LOCAL_PATH)/../include
 
 include $(BUILD_SHARED_LIBRARY)

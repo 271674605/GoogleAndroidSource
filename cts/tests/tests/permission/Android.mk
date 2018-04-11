@@ -19,9 +19,12 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE_TAGS := tests
 
-LOCAL_JAVA_LIBRARIES := android.test.runner telephony-common
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner
+LOCAL_JAVA_LIBRARIES := telephony-common
+
+LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner guava android-ex-camera2
 
 LOCAL_JNI_SHARED_LIBRARIES := libctspermission_jni
 
@@ -29,8 +32,9 @@ LOCAL_SRC_FILES := $(call all-java-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsPermissionTestCases
 
-# uncomment when dalvik test annotations are removed or part of SDK
+# uncomment when b/13249777 is fixed
 #LOCAL_SDK_VERSION := current
+LOCAL_JAVA_LIBRARIES += android.test.runner
 
 include $(BUILD_CTS_PACKAGE)
 

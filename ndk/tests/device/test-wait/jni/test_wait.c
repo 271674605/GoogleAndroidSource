@@ -26,127 +26,100 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/wait.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+
+#define CHILD_EXIT_CODE  111
+
+typedef int (*wait_call_function)(pid_t child_pid);
+
+static int check_wait_call(const char* title,
+                           wait_call_function wait_func,
+                           int expected_exit_code) {
+  printf("Testing %s(): ", title);
+  int cpid = fork();
+  if (cpid < 0) {
+    fprintf(stderr, "ERROR: fork() failed: %s\n", strerror(errno));
+    return -1;
+  }
+
+  if (cpid == 0) {  /* in the chid process */
+    printf("Child created pid=%d parent_pid=%d\n", getpid(), getppid());
+    exit(expected_exit_code);
+  }
+
+  /* in the parent process */
+  printf("Parent waiting for child with pid=%d\n", cpid);
+  int exit_code = wait_func(cpid);
+  if (exit_code < 0)
+    return -1;
+
+  if (exit_code != expected_exit_code) {
+    fprintf(stderr, "ERROR: Child exited with code %d, expected %d\n",
+            exit_code, expected_exit_code);
+    return -1;
+  }
+  printf("Testing %s(): OK\n", title);
+  return 0;
+}
+
+// To be called by check_wait_call() to check wait().
+static int check_wait(pid_t child_pid) {
+  int status = 0;
+  pid_t ret = wait(&status);
+  if (ret != child_pid) {
+    fprintf(stderr, "ERROR: wait() returned %d, expected %d\n", ret, child_pid);
+    return -1;
+  }
+  return WEXITSTATUS(status);
+}
+
+// To be called by check_wait_call() to check waitpid()
+static int check_waitpid(pid_t child_pid) {
+  int status = 0;
+  pid_t ret = waitpid((pid_t)-1, &status, 0);
+  if (ret != child_pid) {
+    fprintf(stderr, "ERROR: waitpid() returned %d, expected %d\n", ret, child_pid);
+    return -1;
+  }
+  return WEXITSTATUS(status);
+}
+
+// To be called by check_wait_call() to check wait3()
+static int check_wait3(pid_t child_pid) {
+  int status = 0;
+  struct rusage ru;
+  pid_t ret = wait3(&status, 0, &ru);
+  if (ret != child_pid) {
+    fprintf(stderr, "ERROR: wait3() returned %d, expected %d\n", ret, child_pid);
+    return -1;
+  }
+  return WEXITSTATUS(status);
+}
+
+// To be called by check_wait_call() to check wait3()
+static int check_wait4(pid_t child_pid) {
+  int status = 0;
+  struct rusage ru;
+  pid_t ret = wait4(-1, &status, 0, &ru);
+  if (ret != child_pid) {
+    fprintf(stderr, "ERROR: wait3() returned %d, expected %d\n", ret, child_pid);
+    return -1;
+  }
+  return WEXITSTATUS(status);
+}
 
 int main(int argc, char *argv[]) {
+  printf("Testing for API level %d\n", __ANDROID_API__);
+  if (check_wait_call("wait", check_wait, CHILD_EXIT_CODE + 0) < 0 ||
+      check_wait_call("waitpid", check_waitpid, CHILD_EXIT_CODE + 1) < 0 ||
+      check_wait_call("wait3", check_wait3, CHILD_EXIT_CODE + 2) < 0 ||
+      check_wait_call("wait4", check_wait4, CHILD_EXIT_CODE + 3)) {
+    return 1;
+  }
 
-   pid_t cpid;
-   int status;
-   struct rusage usage;
-
-//----------------------------------------------------
-//----------------- Wait(); System Call --------------
-//----------------------------------------------------
-   printf("Testing Wait(); System Call\n");
-   printf("\n");
-
-   cpid = fork();               /* Creates fork */
-   if (cpid == -1) {
-      printf("For has failed, returned = %d\n", EXIT_FAILURE);
-   }
-
-   if (cpid == 0) {		/* This is the child operation */
-      printf("Child Created\n");
-      printf("Child = %d\n", getpid());
-      printf("Parent = %d\n", getppid());
-      sleep(2);
-      exit(3);
-
-   } else {                     /* This is the parent operation */
-      printf("Waiting for child\n");
-      wait(&status);
-      printf("Waiting Complete\n");
-      printf("Child Exit Code: %d\n", WEXITSTATUS(status));
-   }
-
-   printf("\n");               /* Just console space */
-//----------------------------------------------------
-//-------------- Waitpid(); System Call --------------
-//----------------------------------------------------
-   printf("Testing Waitpid(); System Call\n");
-   printf("\n");
-
-
-   cpid = fork();                 /* Creates fork */
-   if (cpid == -1) {
-      printf("Fork has failed, returned = %d\n", EXIT_FAILURE);
-   }
-
-   if (cpid == 0) {               /* This is the child operation */
-      printf("Child Created\n");
-      printf("Child = %d\n", getpid());
-      printf("Parent = %d\n", getppid());
-      sleep(2);
-      exit(3);
-
-   } else {                       /* This is the parent operation */
-      printf("Waiting for child %d\n", cpid);
-      waitpid(cpid, NULL, 0);
-      printf("Waiting Complete\n");
-      printf("Child Exit Code: %d\n", WEXITSTATUS(status));
-   }
-
-   printf("\n");
-//----------------------------------------------------
-//---------------- Wait3(); System Call --------------
-//----------------------------------------------------
-   printf("Testing Wait3(); System Call\n");
-   printf("\n");
-
-   cpid = fork();               /* Creates fork */
-   if (cpid == -1) {
-      printf("For has failed, returned = %d\n", EXIT_FAILURE);
-   }
-
-   if (cpid == 0) {             /* This is the child operation */
-      printf("Child Created\n");
-      printf("Child = %d\n", getpid());
-      printf("Parent = %d\n", getppid());
-      sleep(2);
-      exit(3);
-
-   } else {                     /* This is the parent operation */
-      printf("Waiting for child\n");
-      wait3(&status, 0, &usage);
-      printf("Waiting Complete\n");
-      printf("Child Exit Code: %d\n", WEXITSTATUS(status));
-   }
-
-   printf("\n");
-   sleep(1);
-//----------------------------------------------------
-//---------------- Wait4(); System Call --------------
-//----------------------------------------------------
-   printf("Testing Wait4(); System Call\n");
-   printf("\n");
-
-   cpid = fork();               /* Creates fork */
-   if (cpid == -1) {
-      printf("For has failed, returned = %d\n", EXIT_FAILURE);
-   }
-
-   if (cpid == 0) {             /* This is the child operation */
-      printf("Child Created\n");
-      printf("Child = %d\n", getpid());
-      printf("Parent = %d\n", getppid());
-      sleep(2);
-      exit(3);
-
-   } else {                     /* This is the parent operation */
-      printf("Waiting for child\n");
-      wait4(cpid, &status, 0, &usage);
-      //__wait4(cpid, &status, 0, &usage);  //  This function will work, the above which is delcared will not.
-      printf("Waiting Complete\n");
-      printf("Child Exit Code: %d\n", WEXITSTATUS(status));
-   }
-
-   printf("\n");
-   sleep(1);
-
-   return EXIT_SUCCESS;
-
+  return EXIT_SUCCESS;
 }
 

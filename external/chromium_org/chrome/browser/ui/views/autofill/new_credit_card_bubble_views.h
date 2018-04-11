@@ -29,9 +29,10 @@ class NewCreditCardBubbleViews : public NewCreditCardBubbleView,
   virtual void Hide() OVERRIDE;
 
   // views::BubbleDelegateView:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual void Init() OVERRIDE;
+  virtual gfx::Rect GetBubbleBounds() OVERRIDE;
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;

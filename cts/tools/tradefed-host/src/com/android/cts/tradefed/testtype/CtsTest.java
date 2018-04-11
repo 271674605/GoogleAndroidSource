@@ -20,6 +20,7 @@ import com.android.cts.tradefed.build.CtsBuildHelper;
 import com.android.cts.tradefed.device.DeviceInfoCollector;
 import com.android.cts.tradefed.result.CtsTestStatus;
 import com.android.cts.tradefed.result.PlanCreator;
+import com.android.cts.util.AbiUtils;
 import com.android.ddmlib.Log;
 import com.android.ddmlib.Log.LogLevel;
 import com.android.ddmlib.testrunner.TestIdentifier;
@@ -27,6 +28,7 @@ import com.android.tradefed.build.IBuildInfo;
 import com.android.tradefed.config.ConfigurationException;
 import com.android.tradefed.config.Option;
 import com.android.tradefed.config.Option.Importance;
+import com.android.tradefed.config.OptionCopier;
 import com.android.tradefed.device.DeviceNotAvailableException;
 import com.android.tradefed.device.ITestDevice;
 import com.android.tradefed.device.TestDeviceOptions;
@@ -35,22 +37,23 @@ import com.android.tradefed.result.ITestInvocationListener;
 import com.android.tradefed.result.InputStreamSource;
 import com.android.tradefed.result.LogDataType;
 import com.android.tradefed.result.ResultForwarder;
+import com.android.tradefed.testtype.IAbi;
 import com.android.tradefed.testtype.IBuildReceiver;
 import com.android.tradefed.testtype.IDeviceTest;
 import com.android.tradefed.testtype.IRemoteTest;
 import com.android.tradefed.testtype.IResumableTest;
 import com.android.tradefed.testtype.IShardableTest;
+import com.android.tradefed.util.AbiFormatter;
 import com.android.tradefed.util.RunUtil;
 import com.android.tradefed.util.xml.AbstractXmlParser.ParseException;
+
+import junit.framework.Test;
 
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
-import java.lang.InterruptedException;
-import java.lang.System;
-import java.lang.Thread;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -63,7 +66,6 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
-import junit.framework.Test;
 
 /**
  * A {@link Test} for running CTS tests.
@@ -77,10 +79,12 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     private static final String PACKAGE_OPTION = "package";
     private static final String CLASS_OPTION = "class";
     private static final String METHOD_OPTION = "method";
+    private static final String TEST_OPTION = "test";
     public static final String CONTINUE_OPTION = "continue-session";
     public static final String RUN_KNOWN_FAILURES_OPTION = "run-known-failures";
 
     public static final String PACKAGE_NAME_METRIC = "packageName";
+    public static final String PACKAGE_ABI_METRIC = "packageAbi";
     public static final String PACKAGE_DIGEST_METRIC = "packageDigest";
 
     private ITestDevice mDevice;
@@ -104,6 +108,10 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
             description = "run a specific test method, from given --class.",
             importance = Importance.IF_UNSET)
     private String mMethodName = null;
+
+    @Option(name = TEST_OPTION, shortName = 't', description = "run a specific test",
+            importance = Importance.IF_UNSET)
+    private String mTestName = null;
 
     @Option(name = CONTINUE_OPTION,
             description = "continue a previous test session.",
@@ -160,18 +168,27 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
             "performant.")
     private boolean mLogcatOnFailures = false;
 
+    @Option(name = AbiFormatter.FORCE_ABI_STRING,
+            description = AbiFormatter.FORCE_ABI_DESCRIPTION,
+            importance = Importance.IF_UNSET)
+    private String mForceAbi = null;
+
     @Option(name = "logcat-on-failure-size", description =
             "The max number of logcat data in bytes to capture when --logcat-on-failure is on. " +
             "Should be an amount that can comfortably fit in memory.")
     private int mMaxLogcatBytes = 500 * 1024; // 500K
+
+    @Option(name = "collect-deqp-logs", description =
+            "Collect dEQP logs from the device.")
+    private boolean mCollectDeqpLogs = false;
 
     private long mPrevRebootTime; // last reboot time
 
     /** data structure for a {@link IRemoteTest} and its known tests */
     class TestPackage {
         private final IRemoteTest mTestForPackage;
-        private final Collection<TestIdentifier> mKnownTests;
         private final ITestPackageDef mPackageDef;
+        private final Collection<TestIdentifier> mKnownTests;
 
         TestPackage(ITestPackageDef packageDef, IRemoteTest testForPackage,
                 Collection<TestIdentifier> knownTests) {
@@ -193,10 +210,17 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         }
 
         /**
-         * Return the test run name that should be used for the TestPackage
+         * @return the test run name that should be used for the TestPackage.
          */
         String getTestRunName() {
-            return mPackageDef.getUri();
+            return mPackageDef.getId();
+        }
+
+        /**
+         * @return the ABI on which the test will run.
+         */
+        IAbi getAbi() {
+            return mPackageDef.getAbi();
         }
     }
 
@@ -212,8 +236,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         }
 
         @Override
-        public void testFailed(TestFailure status, TestIdentifier test, String trace) {
-            super.testFailed(status, test, trace);
+        public void testFailed(TestIdentifier test, String trace) {
+            super.testFailed(test, trace);
             InputStreamSource bugSource = mDevice.getBugreport();
             super.testLog(String.format("bug-%s_%s", test.getClassName(), test.getTestName()),
                     LogDataType.TEXT, bugSource);
@@ -236,8 +260,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         }
 
         @Override
-        public void testFailed(TestFailure status, TestIdentifier test, String trace) {
-            super.testFailed(status, test, trace);
+        public void testFailed(TestIdentifier test, String trace) {
+            super.testFailed(test, trace);
             // sleep a small amount of time to ensure test failure stack trace makes it into logcat
             // capture
             RunUtil.getDefault().sleep(10);
@@ -261,8 +285,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         }
 
         @Override
-        public void testFailed(TestFailure status, TestIdentifier test, String trace) {
-            super.testFailed(status, test, trace);
+        public void testFailed(TestIdentifier test, String trace) {
+            super.testFailed(test, trace);
 
             try {
                 InputStreamSource screenSource = mDevice.getScreenshot();
@@ -354,6 +378,15 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     }
 
     /**
+     * Set the test name to run e.g. android.test.cts.SampleTest#testSample
+     * <p/>
+     * Exposed for unit testing
+     */
+    void setTestName(String testName) {
+        mTestName = testName;
+    }
+
+    /**
      * Sets the test session id to continue.
      * <p/>
      * Exposed for unit testing
@@ -419,11 +452,18 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
             listener = logcatListener;
         }
 
+        // Only run test packages on ABIs which this device supports.
+        Set<String> abis = getAbis();
+        if (abis == null || abis.isEmpty()) {
+            throw new IllegalArgumentException("could not get device's ABIs");
+        }
+        List<TestPackage> packages = filterTestPackagesByAbi(mRemainingTestPkgs, abis);
+
         // collect and install the prerequisiteApks first, to save time when multiple test
         // packages are using the same prerequisite apk (I'm looking at you, CtsTestStubs!)
-        Collection<String> prerequisiteApks = getPrerequisiteApks(mRemainingTestPkgs);
-        Collection<String> uninstallPackages = getPrerequisitePackageNames(mRemainingTestPkgs);
-        ResultFilter filter = new ResultFilter(listener, mRemainingTestPkgs);
+        Collection<String> prerequisiteApks = getPrerequisiteApks(packages);
+        Collection<String> uninstallPackages = getPrerequisitePackageNames(packages);
+        List<ResultFilter> filters = new ArrayList<ResultFilter>(packages.size());
 
         try {
             installPrerequisiteApks(prerequisiteApks);
@@ -431,28 +471,33 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
             // always collect the device info, even for resumed runs, since test will likely be
             // running on a different device
             collectDeviceInfo(getDevice(), mCtsBuild, listener);
-            if (mRemainingTestPkgs.size() > 1 && !mDisableReboot) {
+            if (packages.size() > 1 && !mDisableReboot) {
                 Log.i(LOG_TAG, "Initial reboot for multiple packages");
                 rebootDevice();
             }
             mPrevRebootTime = System.currentTimeMillis();
 
-            while (!mRemainingTestPkgs.isEmpty()) {
-                TestPackage knownTests = mRemainingTestPkgs.get(0);
+            while (!packages.isEmpty()) {
+                TestPackage knownTests = packages.get(0);
+                ResultFilter filter = new ResultFilter(listener, knownTests);
+                filters.add(filter);
 
                 IRemoteTest test = knownTests.getTestForPackage();
-                if (test instanceof IDeviceTest) {
-                    ((IDeviceTest)test).setDevice(getDevice());
-                }
                 if (test instanceof IBuildReceiver) {
-                    ((IBuildReceiver)test).setBuild(mBuildInfo);
+                    ((IBuildReceiver) test).setBuild(mBuildInfo);
+                }
+                if (test instanceof IDeviceTest) {
+                    ((IDeviceTest) test).setDevice(getDevice());
+                }
+                if (test instanceof DeqpTestRunner) {
+                    ((DeqpTestRunner)test).setCollectLogs(mCollectDeqpLogs);
                 }
 
                 forwardPackageDetails(knownTests.getPackageDef(), listener);
                 test.run(filter);
-                mRemainingTestPkgs.remove(0);
-                if (mRemainingTestPkgs.size() > 0) {
-                    rebootIfNecessary(knownTests, mRemainingTestPkgs.get(0));
+                packages.remove(0);
+                if (packages.size() > 0) {
+                    rebootIfNecessary(knownTests, packages.get(0));
                     // remove artifacts like status bar from the previous test.
                     // But this cannot dismiss dialog popped-up.
                     changeToHomeScreen();
@@ -470,9 +515,33 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
 
             uninstallPrequisiteApks(uninstallPackages);
 
+        } catch (RuntimeException e) {
+            CLog.e(e);
+            throw e;
+        } catch (Error e) {
+            CLog.e(e);
+            throw e;
         } finally {
-            filter.reportUnexecutedTests();
+            for (ResultFilter filter : filters) {
+                filter.reportUnexecutedTests();
+            }
         }
+    }
+
+    /**
+     * @param packages The package list to filter
+     * @param abis The ABIs to test on
+     * @return A list of {@link TestPackage} which test one of the given ABIs
+     */
+    private static List<TestPackage> filterTestPackagesByAbi(
+            List<TestPackage> packages, Set<String> abis){
+        List<TestPackage> testPackages = new LinkedList<>();
+        for (TestPackage test : packages) {
+            if (abis.contains(test.getAbi().getName())) {
+                testPackages.add(test);
+            }
+        }
+        return testPackages;
     }
 
     private void rebootIfNecessary(TestPackage testFinished, TestPackage testToRun)
@@ -489,21 +558,19 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
                 "CtsViewTestCases",
                 "CtsWidgetTestCases" );
         long intervalInMSec = mRebootIntervalMin * 60 * 1000;
-        if (mDevice.getSerialNumber().startsWith("emulator-")) {
+        if (mDisableReboot || mDevice.getSerialNumber().startsWith("emulator-")) {
             return;
         }
-        if (!mDisableReboot) {
-            long currentTime = System.currentTimeMillis();
-            if (((currentTime - mPrevRebootTime) > intervalInMSec) ||
-                    rebootAfterList.contains(testFinished.getPackageDef().getName()) ||
-                    rebootBeforeList.contains(testToRun.getPackageDef().getName()) ) {
-                Log.i(LOG_TAG,
-                        String.format("Rebooting after running package %s, before package %s",
-                                testFinished.getPackageDef().getName(),
-                                testToRun.getPackageDef().getName()));
-                rebootDevice();
-                mPrevRebootTime = System.currentTimeMillis();
-            }
+        long currentTime = System.currentTimeMillis();
+        if (((currentTime - mPrevRebootTime) > intervalInMSec) ||
+                rebootAfterList.contains(testFinished.getPackageDef().getName()) ||
+                rebootBeforeList.contains(testToRun.getPackageDef().getName()) ) {
+            Log.i(LOG_TAG,
+                    String.format("Rebooting after running package %s, before package %s",
+                            testFinished.getPackageDef().getName(),
+                            testToRun.getPackageDef().getName()));
+            rebootDevice();
+            mPrevRebootTime = System.currentTimeMillis();
         }
     }
 
@@ -549,7 +616,6 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         try {
             ITestPackageRepo testRepo = createTestCaseRepo();
             Collection<ITestPackageDef> testPkgDefs = getTestPackagesToRun(testRepo);
-
             for (ITestPackageDef testPkgDef : testPkgDefs) {
                 addTestPackage(testPkgList, testPkgDef);
             }
@@ -597,50 +663,58 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
             File ctsPlanFile = mCtsBuild.getTestPlanFile(mPlanName);
             ITestPlan plan = createPlan(mPlanName);
             plan.parse(createXmlStream(ctsPlanFile));
-            for (String uri : plan.getTestUris()) {
-                if (!mExcludedPackageNames.contains(uri)) {
-                    ITestPackageDef testPackage = testRepo.getTestPackage(uri);
-                    testPackage.setExcludedTestFilter(plan.getExcludedTestFilter(uri));
-                    testPkgDefs.add(testPackage);
+            for (String id : plan.getTestIds()) {
+                if (!mExcludedPackageNames.contains(AbiUtils.parseId(id)[1])) {
+                    ITestPackageDef testPackageDef = testRepo.getTestPackage(id);
+                    if (testPackageDef != null) {
+                        testPackageDef.setTestFilter(plan.getTestFilter(id));
+                        testPkgDefs.add(testPackageDef);
+                    } else {
+                        CLog.e("Could not find test package id %s referenced in plan %s", id,
+                                mPlanName);
+                    }
                 }
             }
         } else if (mPackageNames.size() > 0){
             Log.i(LOG_TAG, String.format("Executing CTS test packages %s", mPackageNames));
-            for (String uri : mPackageNames) {
-                ITestPackageDef testPackage = testRepo.getTestPackage(uri);
-                if (testPackage != null) {
-                    testPkgDefs.add(testPackage);
+            for (String name : mPackageNames) {
+                Set<ITestPackageDef> testPackages = testRepo.getTestPackages(name);
+                if (!testPackages.isEmpty()) {
+                    testPkgDefs.addAll(testPackages);
                 } else {
                     throw new IllegalArgumentException(String.format(
                             "Could not find test package %s. " +
-                            "Use 'list packages' to see available packages." , uri));
+                            "Use 'list packages' to see available packages." , name));
                 }
             }
         } else if (mClassName != null) {
             Log.i(LOG_TAG, String.format("Executing CTS test class %s", mClassName));
-            // try to find package to run from class name
-            String packageUri = testRepo.findPackageForTest(mClassName);
-            if (packageUri != null) {
-                ITestPackageDef testPackageDef = testRepo.getTestPackage(packageUri);
-                testPackageDef.setClassName(mClassName, mMethodName);
-                testPkgDefs.add(testPackageDef);
-            } else {
+            testPkgDefs.addAll(buildTestPackageDefSet(testRepo, mClassName, mMethodName));
+        } else if (mTestName != null) {
+            Log.i(LOG_TAG, String.format("Executing CTS test %s", mTestName));
+            String [] split = mTestName.split("#");
+            if (split.length != 2) {
                 Log.logAndDisplay(LogLevel.WARN, LOG_TAG, String.format(
-                        "Could not find package for test class %s", mClassName));
+                        "Could not parse class and method from test %s", mTestName));
+            } else {
+                String className = split[0];
+                String methodName = split[1];
+                testPkgDefs.addAll(buildTestPackageDefSet(testRepo, className, methodName));
             }
         } else if (mContinueSessionId != null) {
             // create an in-memory derived plan that contains the notExecuted tests from previous
-            // session
-            // use timestamp as plan name so it will hopefully be unique
+            // session use timestamp as plan name so it will hopefully be unique
             String uniquePlanName = Long.toString(System.currentTimeMillis());
             PlanCreator planCreator = new PlanCreator(uniquePlanName, mContinueSessionId,
                     CtsTestStatus.NOT_EXECUTED);
             ITestPlan plan = createPlan(planCreator);
-            for (String uri : plan.getTestUris()) {
-                if (!mExcludedPackageNames.contains(uri)) {
-                    ITestPackageDef testPackage = testRepo.getTestPackage(uri);
-                    testPackage.setExcludedTestFilter(plan.getExcludedTestFilter(uri));
-                    testPkgDefs.add(testPackage);
+            for (String id : plan.getTestIds()) {
+                if (!mExcludedPackageNames.contains(AbiUtils.parseId(id)[1])) {
+                    ITestPackageDef testPackageDef = testRepo.getTestPackage(id);
+                    if (testPackageDef != null) {
+                        testPackageDef.setTestFilter(plan.getTestFilter(id));
+                        testPkgDefs.add(testPackageDef);
+                    }
                 }
             }
         } else {
@@ -666,6 +740,29 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     }
 
     /**
+     * @return a {@link Set} containing {@ITestPackageDef}s pertaining to the given
+     *     {@code className} and {@code methodName}.
+     */
+    private static Set<ITestPackageDef> buildTestPackageDefSet(
+            ITestPackageRepo testRepo, String className, String methodName) {
+        Set<ITestPackageDef> testPkgDefs = new LinkedHashSet<ITestPackageDef>();
+        // try to find packages to run from class name
+        List<String> packageIds = testRepo.findPackageIdsForTest(className);
+        if (packageIds.isEmpty()) {
+            Log.logAndDisplay(LogLevel.WARN, LOG_TAG, String.format(
+                    "Could not find package for test class %s", className));
+        }
+        for (String packageId: packageIds) {
+            ITestPackageDef testPackageDef = testRepo.getTestPackage(packageId);
+            if (testPackageDef != null) {
+                testPackageDef.setClassName(className, methodName);
+                testPkgDefs.add(testPackageDef);
+            }
+        }
+        return testPkgDefs;
+    }
+
+    /**
      * Return the list of unique prerequisite apks to install
      * @param testPackages
      */
@@ -681,6 +778,9 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     }
 
     /**
+     * FIXME eventually this should be removed once we get rid of CtsTestStubs, any other
+     * prerequisite apks should be installed by the test runner
+     *
      * Install the collection of test apk file names
      *
      * @param prerequisiteApks
@@ -688,12 +788,26 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
      */
     private void installPrerequisiteApks(Collection<String> prerequisiteApks)
             throws DeviceNotAvailableException {
+        Log.logAndDisplay(LogLevel.INFO, LOG_TAG, "Installing prerequisites");
+        Set<String> supportedAbiSet = getAbis();
         for (String apkName : prerequisiteApks) {
             try {
                 File apkFile = mCtsBuild.getTestApp(apkName);
-                String errorCode = getDevice().installPackage(apkFile, true);
-                if (errorCode != null) {
-                    CLog.e("Failed to install %s. Reason: %s", apkName, errorCode);
+                // As a workaround for multi arch support, try to install the APK
+                // for all device supported ABIs. This will generate warning messages
+                // until the above FIXME is resolved.
+                int installFailCount = 0;
+                for (String abi : supportedAbiSet) {
+                    String[] options = {AbiUtils.createAbiFlag(abi)};
+                    String errorCode = getDevice().installPackage(apkFile, true, options);
+                    if (errorCode != null) {
+                        installFailCount++;
+                        CLog.w("Failed to install %s. Reason: %s", apkName, errorCode);
+                    }
+
+                }
+                if (installFailCount >= supportedAbiSet.size()) {
+                    CLog.e("Failed to install %s. See warning messages.", apkName);
                 }
             } catch (FileNotFoundException e) {
                 CLog.e("Could not find test apk %s", apkName);
@@ -724,7 +838,7 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         checkFields();
         List<TestPackage> allTests = buildTestsToRun();
 
-        if (allTests.size() <= 1) {
+        if (allTests == null || allTests.size() <= 1) {
             Log.w(LOG_TAG, "no tests to shard!");
             return null;
         }
@@ -734,6 +848,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
         // don't create more shards than the number of tests we have!
         for (int i = 0; i < mShards && i < allTests.size(); i++) {
             CtsTest shard = new CtsTest();
+            OptionCopier.copyOptionsNoThrow(this, shard);
+            shard.mShards = 0;
             shard.mRemainingTestPkgs = new LinkedList<TestPackage>();
             shardQueue.add(shard);
         }
@@ -757,7 +873,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     void collectDeviceInfo(ITestDevice device, CtsBuildHelper ctsBuild,
             ITestInvocationListener listener) throws DeviceNotAvailableException {
         if (!mSkipDeviceInfo) {
-            DeviceInfoCollector.collectDeviceInfo(device, ctsBuild.getTestCasesDir(), listener);
+            String abi = AbiFormatter.getDefaultAbi(device, "");
+            DeviceInfoCollector.collectDeviceInfo(device, abi, ctsBuild.getTestCasesDir(), listener);
         }
     }
 
@@ -767,7 +884,8 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
      * Exposed for unit testing
      */
     ITestPackageRepo createTestCaseRepo() {
-        return new TestPackageRepo(mCtsBuild.getTestCasesDir(), mIncludeKnownFailures);
+        return new TestPackageRepo(mCtsBuild.getTestCasesDir(), AbiUtils.getAbisSupportedByCts(),
+                mIncludeKnownFailures);
     }
 
     /**
@@ -776,7 +894,26 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
      * Exposed for unit testing
      */
     ITestPlan createPlan(String planName) {
-        return new TestPlan(planName);
+        return new TestPlan(planName, AbiUtils.getAbisSupportedByCts());
+    }
+
+    /**
+     * Gets the set of ABIs supported by both CTS and the device under test
+     * <p/>
+     * Exposed for unit testing
+     * @return The set of ABIs to run the tests on
+     * @throws DeviceNotAvailableException
+     */
+    Set<String> getAbis() throws DeviceNotAvailableException {
+        String bitness = (mForceAbi == null) ? "" : mForceAbi;
+        Set<String> abis = new HashSet<String>();
+        for (String abi : AbiFormatter.getSupportedAbis(mDevice, bitness)) {
+            if (AbiUtils.isAbiSupportedByCts(abi)) {
+                abis.add(abi);
+            }
+        }
+        Log.logAndDisplay(LogLevel.INFO, LOG_TAG, "ABIs: " + abis);
+        return abis;
     }
 
     /**
@@ -785,8 +922,9 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
      * Exposed for unit testing
      * @throws ConfigurationException
      */
-    ITestPlan createPlan(PlanCreator planCreator) throws ConfigurationException {
-        return planCreator.createDerivedPlan(mCtsBuild);
+    ITestPlan createPlan(PlanCreator planCreator)
+            throws ConfigurationException {
+        return planCreator.createDerivedPlan(mCtsBuild, AbiUtils.getAbisSupportedByCts());
     }
 
     /**
@@ -799,10 +937,10 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
     }
 
     private void checkFields() {
-        // for simplicity of command line usage, make --plan, --package, and --class mutually
+        // for simplicity of command line usage, make --plan, --package, --test and --class mutually
         // exclusive
         boolean mutualExclusiveArgs = xor(mPlanName != null, mPackageNames.size() > 0,
-                mClassName != null, mContinueSessionId != null);
+                mClassName != null, mContinueSessionId != null, mTestName != null);
 
         if (!mutualExclusiveArgs) {
             throw new IllegalArgumentException(String.format(
@@ -843,10 +981,11 @@ public class CtsTest implements IDeviceTest, IResumableTest, IShardableTest, IBu
      * @param listener
      */
     private void forwardPackageDetails(ITestPackageDef def, ITestInvocationListener listener) {
-        Map<String, String> metrics = new HashMap<String, String>(2);
+        Map<String, String> metrics = new HashMap<String, String>(3);
         metrics.put(PACKAGE_NAME_METRIC, def.getName());
+        metrics.put(PACKAGE_ABI_METRIC, def.getAbi().getName());
         metrics.put(PACKAGE_DIGEST_METRIC, def.getDigest());
-        listener.testRunStarted(def.getUri(), 0);
+        listener.testRunStarted(def.getId(), 0);
         listener.testRunEnded(0, metrics);
     }
 }

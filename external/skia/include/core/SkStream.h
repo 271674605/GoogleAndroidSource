@@ -60,22 +60,14 @@ public:
      *  @return the actual number bytes that could be skipped.
      */
     size_t skip(size_t size) {
-        //return this->read(NULL, size);
-        //TODO: remove this old logic after updating existing implementations
-        return 0 == size ? 0 : this->read(NULL, size);
+        return this->read(NULL, size);
     }
 
     /** Returns true when all the bytes in the stream have been read.
      *  This may return true early (when there are no more bytes to be read)
      *  or late (after the first unsuccessful read).
-     *
-     *  In Progress: do not use until all implementations are updated.
-     *  TODO: after this is implemented everywhere, make pure virtual.
      */
-    virtual bool isAtEnd() const {
-        SkASSERT(false);
-        return true;
-    }
+    virtual bool isAtEnd() const = 0;
 
     int8_t   readS8();
     int16_t  readS16();
@@ -133,11 +125,7 @@ public:
     /** Returns true if this stream can report it's total length. */
     virtual bool hasLength() const { return false; }
     /** Returns the total length of the stream. If this cannot be done, returns 0. */
-    virtual size_t getLength() const {
-        //return 0;
-        //TODO: remove the following after everyone is updated.
-        return ((SkStream*)this)->read(NULL, 0);
-    }
+    virtual size_t getLength() const { return 0; }
 
 //SkStreamMemory
     /** Returns the starting address for the data. If this cannot be done, returns NULL. */
@@ -151,11 +139,6 @@ private:
 /** SkStreamRewindable is a SkStream for which rewind and duplicate are required. */
 class SK_API SkStreamRewindable : public SkStream {
 public:
-    //TODO: remove the following after everyone is updated (ensures new behavior on new classes).
-    virtual bool isAtEnd() const SK_OVERRIDE = 0;
-    //TODO: remove the following after everyone is updated (ensures new behavior on new classes).
-    virtual size_t getLength() const SK_OVERRIDE { return 0; }
-
     virtual bool rewind() SK_OVERRIDE = 0;
     virtual SkStreamRewindable* duplicate() const SK_OVERRIDE = 0;
 };
@@ -206,6 +189,8 @@ public:
     virtual void newline();
     virtual void flush();
 
+    virtual size_t bytesWritten() const = 0;
+
     // helpers
 
     bool    write8(U8CPU);
@@ -222,7 +207,7 @@ public:
     bool    writeScalar(SkScalar);
     bool    writePackedUInt(size_t);
 
-    bool writeStream(SkStream* input, size_t length);
+    bool    writeStream(SkStream* input, size_t length);
 
     /**
      * Append an SkData object to the stream, such that it can be read
@@ -233,11 +218,18 @@ public:
      * just write the raw content of the SkData object to the stream.
      */
     bool writeData(const SkData*);
+
+    /**
+     * This returns the number of bytes in the stream required to store
+     * 'value'.
+     */
+    static int SizeOfPackedUInt(size_t value);
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
 #include "SkString.h"
+#include <stdio.h>
 
 struct SkFILE;
 
@@ -381,6 +373,7 @@ public:
 
     virtual bool write(const void* buffer, size_t size) SK_OVERRIDE;
     virtual void flush() SK_OVERRIDE;
+    virtual size_t bytesWritten() const SK_OVERRIDE;
 
 private:
     SkFILE* fFILE;
@@ -394,7 +387,7 @@ public:
 
     SkMemoryWStream(void* buffer, size_t size);
     virtual bool write(const void* buffer, size_t size) SK_OVERRIDE;
-    size_t bytesWritten() const { return fBytesWritten; }
+    virtual size_t bytesWritten() const SK_OVERRIDE { return fBytesWritten; }
 
 private:
     char*   fBuffer;
@@ -412,12 +405,12 @@ public:
     virtual ~SkDynamicMemoryWStream();
 
     virtual bool write(const void* buffer, size_t size) SK_OVERRIDE;
+    virtual size_t bytesWritten() const SK_OVERRIDE { return fBytesWritten; }
     // random access write
     // modifies stream and returns true if offset + size is less than or equal to getOffset()
     bool write(const void* buffer, size_t offset, size_t size);
     bool read(void* buffer, size_t offset, size_t size);
     size_t getOffset() const { return fBytesWritten; }
-    size_t bytesWritten() const { return fBytesWritten; }
 
     // copy what has been written to the stream into dst
     void copyTo(void* dst) const;
@@ -453,13 +446,16 @@ private:
 
 class SK_API SkDebugWStream : public SkWStream {
 public:
+    SkDebugWStream() : fBytesWritten(0) {}
     SK_DECLARE_INST_COUNT(SkDebugWStream)
 
     // overrides
     virtual bool write(const void* buffer, size_t size) SK_OVERRIDE;
     virtual void newline() SK_OVERRIDE;
+    virtual size_t bytesWritten() const SK_OVERRIDE { return fBytesWritten; }
 
 private:
+    size_t fBytesWritten;
     typedef SkWStream INHERITED;
 };
 

@@ -3,16 +3,16 @@
 
 
 <p>
-This tutorial walks you through creating your first packaged app.
-Packaged apps are structured similarly to extensions
+This tutorial walks you through creating your first Chrome App.
+Chrome Apps are structured similarly to extensions
 so current developers will recognize the manifest and packaging methods.
 When you're done,
 you'll just need to produce a zip file of your code and assets
-in order to <a href="publish_app.html">publish</a> your app.
+in order to <a href="publish_app">publish</a> your app.
 </p>
 
 <p>
-A packaged app contains these components:
+A Chrome App contains these components:
 </p>
 
 <ul>
@@ -20,7 +20,7 @@ A packaged app contains these components:
     how to launch it and the extra permissions that it requires.</li>
   <li>The <strong>background script</strong> is used to create the event page
     responsible for managing the app life cycle.</li>
-  <li>All code must be included in the package. This includes HTML, JS, CSS
+  <li>All code must be included in the Chrome App package. This includes HTML, JS, CSS
     and Native Client modules.</li>
   <li>All <strong>icons</strong> and other assets must be included
     in the package as well.</li>
@@ -38,15 +38,16 @@ sample.
 
 <p>
 First create your <code>manifest.json</code> file
-(<a href="manifest.html">Formats: Manifest Files</a>
+(<a href="manifest">Formats: Manifest Files</a>
 describes this manifest in detail):
 </p>
 
-<pre>
+<pre data-filename="manifest.json">
 {
   "name": "Hello World!",
-  "description": "My first packaged app.",
+  "description": "My first Chrome App.",
   "version": "0.1",
+  "manifest_version": 2,
   "app": {
     "background": {
       "scripts": ["background.js"]
@@ -58,8 +59,8 @@ describes this manifest in detail):
 
 <p class="note">
 <b>Important:</b>
-Packaged apps <b>must</b> use
-<a href="manifestVersion.html">manifest version 2</a>.
+Chrome Apps <b>must</b> use
+<a href="manifestVersion">manifest version 2</a>.
 </p>
 
 <h2 id="two">Step 2: Create the background script</h2>
@@ -69,7 +70,7 @@ Next create a new file called <code>background.js</code>
 with the following content:
 </p>
 
-<pre>
+<pre data-filename="background.js">
 chrome.app.runtime.onLaunched.addListener(function() {
   chrome.app.window.create('window.html', {
     'bounds': {
@@ -82,7 +83,7 @@ chrome.app.runtime.onLaunched.addListener(function() {
 
 <p>
 In the above sample code,
-the <a href="app_lifecycle.html#lifecycle">onLaunched event</a>
+the <a href="app_lifecycle#lifecycle">onLaunched event</a>
 will be fired when the user starts the app.
 It then immediately opens a window for the app of the specified width and height.
 Your background script may contain additional listeners,
@@ -96,7 +97,7 @@ all of which are used by the event page to manage the app.
 Create your <code>window.html</code> file:
 </p>
 
-<pre>
+<pre data-filename="window.html">
 &lt;!DOCTYPE html>
 &lt;html>
   &lt;head>
@@ -123,7 +124,7 @@ Copy these icons to your app folder:
 <h3 id="enable">Enable flags</h3>
 
 <p>
-Many of the packaged apps APIs are still experimental,
+Many of the Chrome Apps APIs are still experimental,
 so you should enable experimental APIs
 so that you can try them out:
 </p>

@@ -1,1 +1,1 @@
-include ':BasicMultitouch'
+include 'Application'

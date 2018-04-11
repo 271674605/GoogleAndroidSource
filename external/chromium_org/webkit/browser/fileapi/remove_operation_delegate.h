@@ -11,8 +11,7 @@
 
 namespace fileapi {
 
-class RemoveOperationDelegate
-    : public RecursiveOperationDelegate {
+class RemoveOperationDelegate : public RecursiveOperationDelegate {
  public:
   RemoveOperationDelegate(FileSystemContext* file_system_context,
                           const FileSystemURL& url,
@@ -26,20 +25,19 @@ class RemoveOperationDelegate
                            const StatusCallback& callback) OVERRIDE;
   virtual void ProcessDirectory(const FileSystemURL& url,
                                 const StatusCallback& callback) OVERRIDE;
+  virtual void PostProcessDirectory(const FileSystemURL& url,
+                                    const StatusCallback& callback) OVERRIDE;
 
  private:
-  void DidTryRemoveFile(base::PlatformFileError error);
+  void DidTryRemoveFile(base::File::Error error);
+  void DidTryRemoveDirectory(base::File::Error remove_file_error,
+                             base::File::Error remove_directory_error);
   void DidRemoveFile(const StatusCallback& callback,
-                     base::PlatformFileError error);
-  void RemoveNextDirectory(base::PlatformFileError error);
+                     base::File::Error error);
 
   FileSystemURL url_;
   StatusCallback callback_;
-
-  std::stack<FileSystemURL> to_remove_directories_;
-
   base::WeakPtrFactory<RemoveOperationDelegate> weak_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(RemoveOperationDelegate);
 };
 

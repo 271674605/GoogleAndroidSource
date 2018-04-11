@@ -32,9 +32,9 @@ LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE := $(TOPDIR)external/clang/lib/Headers \
                                         $(TOPDIR)frameworks/rs/scriptc
 
 LOCAL_RENDERSCRIPT_FLAGS := -rs-package-name=android.support.v8.renderscript
-LOCAL_REQUIRED_MODULES := librsjni
+LOCAL_JNI_SHARED_LIBRARIES := librsjni
+LOCAL_32_BIT_ONLY := true
 
 include $(BUILD_PACKAGE)
 
 #include $(call all-makefiles-under, $(LOCAL_PATH))
-

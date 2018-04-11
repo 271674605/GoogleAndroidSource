@@ -50,6 +50,7 @@ public class TestHtmlConstants {
     public static final String HTML_URL1 = "webkit/test_firstPage.html";
     public static final String HTML_URL2 = "webkit/test_secondPage.html";
     public static final String HTML_URL3 = "webkit/test_thirdPage.html";
+    public static final String HTML_URL1_TITLE = "First page";
 
     public static final String BLANK_PAGE_URL = "webkit/test_blankPage.html";
     public static final String ADD_JAVA_SCRIPT_INTERFACE_URL = "webkit/test_jsInterface.html";
@@ -64,6 +65,8 @@ public class TestHtmlConstants {
     public static final String IFRAME_ACCESS_URL = "webkit/test_iframeaccess.html";
     public static final String DATABASE_ACCESS_URL = "webkit/test_databaseaccess.html";
     public static final String STOP_LOADING_URL = "webkit/test_stop_loading.html";
+    public static final String BLANK_TAG_URL = "webkit/blank_tag.html";
+    public static final String PAGE_WITH_LINK_URL = "webkit/page_with_link.html";
 
     // Must match the title of the page at
     // android/frameworks/base/core/res/res/raw/loaderror.html

@@ -31,49 +31,41 @@ namespace content {
 //
 class CertificateResourceHandler : public ResourceHandler {
  public:
-  CertificateResourceHandler(net::URLRequest* request,
-                             int render_process_host_id,
-                             int render_view_id);
+  explicit CertificateResourceHandler(net::URLRequest* request);
   virtual ~CertificateResourceHandler();
 
-  virtual bool OnUploadProgress(int request_id,
-                                uint64 position,
-                                uint64 size) OVERRIDE;
+  virtual bool OnUploadProgress(uint64 position, uint64 size) OVERRIDE;
 
   // Not needed, as this event handler ought to be the final resource.
-  virtual bool OnRequestRedirected(int request_id,
-                                   const GURL& url,
+  virtual bool OnRequestRedirected(const GURL& url,
                                    ResourceResponse* resp,
                                    bool* defer) OVERRIDE;
 
   // Check if this indeed an X509 cert.
-  virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* resp,
+  virtual bool OnResponseStarted(ResourceResponse* resp,
                                  bool* defer) OVERRIDE;
 
   // Pass-through implementation.
-  virtual bool OnWillStart(int request_id,
-                           const GURL& url,
-                           bool* defer) OVERRIDE;
+  virtual bool OnWillStart(const GURL& url, bool* defer) OVERRIDE;
+
+  // Pass-through implementation.
+  virtual bool OnBeforeNetworkStart(const GURL& url, bool* defer) OVERRIDE;
 
   // Create a new buffer to store received data.
-  virtual bool OnWillRead(int request_id,
-                          net::IOBuffer** buf,
+  virtual bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                           int* buf_size,
                           int min_size) OVERRIDE;
 
   // A read was completed, maybe allocate a new buffer for further data.
-  virtual bool OnReadCompleted(int request_id,
-                               int bytes_read,
-                               bool* defer) OVERRIDE;
+  virtual bool OnReadCompleted(int bytes_read, bool* defer) OVERRIDE;
 
   // Done downloading the certificate.
-  virtual bool OnResponseCompleted(int request_id,
-                                   const net::URLRequestStatus& urs,
-                                   const std::string& sec_info) OVERRIDE;
+  virtual void OnResponseCompleted(const net::URLRequestStatus& urs,
+                                   const std::string& sec_info,
+                                   bool* defer) OVERRIDE;
 
   // N/A to cert downloading.
-  virtual void OnDataDownloaded(int request_id, int bytes_downloaded) OVERRIDE;
+  virtual void OnDataDownloaded(int bytes_downloaded) OVERRIDE;
 
  private:
   typedef std::vector<std::pair<scoped_refptr<net::IOBuffer>,
@@ -82,15 +74,10 @@ class CertificateResourceHandler : public ResourceHandler {
   void AssembleResource();
 
   GURL url_;
-  net::URLRequest* request_;
   size_t content_length_;
   ContentVector buffer_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   scoped_refptr<net::IOBuffer> resource_buffer_;  // Downloaded certificate.
-  // The id of the |RenderProcessHost| which started the download.
-  int render_process_host_id_;
-  // The id of the |RenderView| which started the download.
-  int render_view_id_;
   net::CertificateMimeType cert_type_;
   DISALLOW_COPY_AND_ASSIGN(CertificateResourceHandler);
 };

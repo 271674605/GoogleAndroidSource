@@ -7,7 +7,9 @@
 {
   'dependencies': [
     'sandbox',
+    'sandbox_linux_test_utils',
     '../base/base.gyp:base',
+    '../base/base.gyp:test_support_base',
     '../testing/gtest.gyp:gtest',
   ],
   'include_dirs': [
@@ -15,9 +17,11 @@
   ],
   'sources': [
     'tests/main.cc',
-    'tests/unit_tests.cc',
-    'tests/unit_tests.h',
+    'tests/unit_tests_unittest.cc',
     'services/broker_process_unittest.cc',
+    'services/scoped_process_unittest.cc',
+    'services/thread_helpers_unittests.cc',
+    'services/yama_unittests.cc',
   ],
   'conditions': [
     [ 'compile_suid_client==1', {
@@ -25,14 +29,21 @@
         'suid/client/setuid_sandbox_client_unittest.cc',
       ],
     }],
-    [ 'compile_seccomp_bpf==1', {
+    [ 'use_seccomp_bpf==1', {
       'sources': [
-        'seccomp-bpf/bpf_tests.h',
+        'seccomp-bpf-helpers/baseline_policy_unittest.cc',
+        'seccomp-bpf/bpf_tests_unittest.cc',
         'seccomp-bpf/codegen_unittest.cc',
         'seccomp-bpf/errorcode_unittest.cc',
         'seccomp-bpf/sandbox_bpf_unittest.cc',
         'seccomp-bpf/syscall_iterator_unittest.cc',
         'seccomp-bpf/syscall_unittest.cc',
+      ],
+    }],
+    [ 'compile_credentials==1', {
+      'sources': [
+        'services/credentials_unittest.cc',
+        'services/unix_domain_socket_unittest.cc',
       ],
     }],
   ],

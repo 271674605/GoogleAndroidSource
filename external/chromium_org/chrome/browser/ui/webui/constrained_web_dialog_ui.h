@@ -26,7 +26,7 @@ class ConstrainedWebDialogDelegate {
   virtual const ui::WebDialogDelegate* GetWebDialogDelegate() const = 0;
   virtual ui::WebDialogDelegate* GetWebDialogDelegate() = 0;
 
-  // Called when the dialog is being closed in response to a "DialogClose"
+  // Called when the dialog is being closed in response to a "dialogClose"
   // message from WebUI.
   virtual void OnDialogCloseFromWebUI() = 0;
 
@@ -51,8 +51,7 @@ class ConstrainedWebDialogDelegate {
 //
 // Since the web contents modal dialog requires platform-specific delegate
 // implementations, this class is just a factory stub.
-class ConstrainedWebDialogUI
-    : public content::WebUIController {
+class ConstrainedWebDialogUI : public content::WebUIController {
  public:
   explicit ConstrainedWebDialogUI(content::WebUI* web_ui);
   virtual ~ConstrainedWebDialogUI();

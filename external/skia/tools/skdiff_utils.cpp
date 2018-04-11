@@ -63,7 +63,7 @@ bool get_bitmap(SkData* fileBits, DiffResource& resource, SkImageDecoder::Mode m
     SkAutoTDelete<SkImageDecoder> ad(codec);
 
     stream.rewind();
-    if (!codec->decode(&stream, &resource.fBitmap, SkBitmap::kARGB_8888_Config, mode)) {
+    if (!codec->decode(&stream, &resource.fBitmap, kN32_SkColorType, mode)) {
         SkDebugf("ERROR: codec failed for basePath <%s>\n", resource.fFullPath.c_str());
         resource.fStatus = DiffResource::kCouldNotDecode_Status;
         return false;
@@ -85,7 +85,7 @@ static void force_all_opaque(const SkBitmap& bitmap) {
 
 bool write_bitmap(const SkString& path, const SkBitmap& bitmap) {
     SkBitmap copy;
-    bitmap.copyTo(&copy, SkBitmap::kARGB_8888_Config);
+    bitmap.copyTo(&copy, kN32_SkColorType);
     force_all_opaque(copy);
     return SkImageEncoder::EncodeFile(path.c_str(), copy,
                                       SkImageEncoder::kPNG_Type, 100);
@@ -102,7 +102,7 @@ static SkString replace_all(const SkString &input,
     const char *input_cstr = input.c_str();
     const char *first_char = input_cstr;
     const char *match_char;
-    int oldSubstringLen = strlen(oldSubstring);
+    size_t oldSubstringLen = strlen(oldSubstring);
     while (NULL != (match_char = strstr(first_char, oldSubstring))) {
         output.append(first_char, (match_char - first_char));
         output.append(newSubstring);
@@ -115,7 +115,7 @@ static SkString replace_all(const SkString &input,
 static SkString filename_to_derived_filename(const SkString& filename, const char *suffix) {
     SkString diffName (filename);
     const char* cstring = diffName.c_str();
-    int dotOffset = strrchr(cstring, '.') - cstring;
+    size_t dotOffset = strrchr(cstring, '.') - cstring;
     diffName.remove(dotOffset, diffName.size() - dotOffset);
     diffName.append(suffix);
 
@@ -144,11 +144,9 @@ void create_and_write_diff_image(DiffRecord* drp,
     if (w != drp->fComparison.fBitmap.width() || h != drp->fComparison.fBitmap.height()) {
         drp->fResult = DiffRecord::kDifferentSizes_Result;
     } else {
-        drp->fDifference.fBitmap.setConfig(SkBitmap::kARGB_8888_Config, w, h);
-        drp->fDifference.fBitmap.allocPixels();
+        drp->fDifference.fBitmap.allocN32Pixels(w, h);
 
-        drp->fWhite.fBitmap.setConfig(SkBitmap::kARGB_8888_Config, w, h);
-        drp->fWhite.fBitmap.allocPixels();
+        drp->fWhite.fBitmap.allocN32Pixels(w, h);
 
         SkASSERT(DiffRecord::kUnknown_Result == drp->fResult);
         compute_diff(drp, dmp, colorThreshold);

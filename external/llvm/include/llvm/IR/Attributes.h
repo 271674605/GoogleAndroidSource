@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 #include <bitset>
 #include <cassert>
@@ -70,9 +71,11 @@ public:
     Builtin,               ///< Callee is recognized as a builtin, despite
                            ///< nobuiltin attribute on its declaration.
     ByVal,                 ///< Pass structure by value
+    InAlloca,              ///< Pass structure in an alloca
     Cold,                  ///< Marks function as being in a cold path.
     InlineHint,            ///< Source said inlining was desirable
     InReg,                 ///< Force argument to be passed in register
+    JumpTable,             ///< Build jump-instruction tables and replace refs.
     MinSize,               ///< Function must be optimized for size first
     Naked,                 ///< Naked function
     Nest,                  ///< Nested function static chain
@@ -84,10 +87,12 @@ public:
     NoInline,              ///< inline=never
     NonLazyBind,           ///< Function is called early and/or
                            ///< often, so lazy binding isn't worthwhile
+    NonNull,               ///< Pointer is known to be not null
     NoRedZone,             ///< Disable redzone
     NoReturn,              ///< Mark the function as not returning
     NoUnwind,              ///< Function doesn't unwind stack
     OptimizeForSize,       ///< opt_size
+    OptimizeNone,          ///< Function must not be optimized.
     ReadNone,              ///< Function does not access memory
     ReadOnly,              ///< Function only reads from memory
     Returned,              ///< Return value is always equal to this argument
@@ -113,7 +118,7 @@ private:
   AttributeImpl *pImpl;
   Attribute(AttributeImpl *A) : pImpl(A) {}
 public:
-  Attribute() : pImpl(0) {}
+  Attribute() : pImpl(nullptr) {}
 
   //===--------------------------------------------------------------------===//
   // Attribute Construction
@@ -199,7 +204,7 @@ public:
 /// index `1'.
 class AttributeSet {
 public:
-  enum AttrIndex {
+  enum AttrIndex : unsigned {
     ReturnIndex = 0U,
     FunctionIndex = ~0U
   };
@@ -229,7 +234,7 @@ private:
 
   explicit AttributeSet(AttributeSetImpl *LI) : pImpl(LI) {}
 public:
-  AttributeSet() : pImpl(0) {}
+  AttributeSet() : pImpl(nullptr) {}
 
   //===--------------------------------------------------------------------===//
   // AttributeSet Construction and Mutation
@@ -239,7 +244,7 @@ public:
   static AttributeSet get(LLVMContext &C, ArrayRef<AttributeSet> Attrs);
   static AttributeSet get(LLVMContext &C, unsigned Index,
                           ArrayRef<Attribute::AttrKind> Kind);
-  static AttributeSet get(LLVMContext &C, unsigned Index, AttrBuilder &B);
+  static AttributeSet get(LLVMContext &C, unsigned Index, const AttrBuilder &B);
 
   /// \brief Add an attribute to the attribute set at the given index. Since
   /// attribute sets are immutable, this returns a new set.
@@ -400,10 +405,6 @@ public:
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
-  AttrBuilder(const AttrBuilder &B)
-    : Attrs(B.Attrs),
-      TargetDepAttrs(B.TargetDepAttrs.begin(), B.TargetDepAttrs.end()),
-      Alignment(B.Alignment), StackAlignment(B.StackAlignment) {}
 
   void clear();
 
@@ -470,12 +471,19 @@ public:
   typedef std::pair<std::string, std::string>                td_type;
   typedef std::map<std::string, std::string>::iterator       td_iterator;
   typedef std::map<std::string, std::string>::const_iterator td_const_iterator;
+  typedef llvm::iterator_range<td_iterator>                  td_range;
+  typedef llvm::iterator_range<td_const_iterator>            td_const_range;
 
   td_iterator td_begin()             { return TargetDepAttrs.begin(); }
   td_iterator td_end()               { return TargetDepAttrs.end(); }
 
   td_const_iterator td_begin() const { return TargetDepAttrs.begin(); }
   td_const_iterator td_end() const   { return TargetDepAttrs.end(); }
+
+  td_range td_attrs() { return td_range(td_begin(), td_end()); }
+  td_const_range td_attrs() const {
+    return td_const_range(td_begin(), td_end());
+  }
 
   bool td_empty() const              { return TargetDepAttrs.empty(); }
 

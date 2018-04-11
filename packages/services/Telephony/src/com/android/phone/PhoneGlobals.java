@@ -23,7 +23,6 @@ import android.app.ProgressDialog;
 import android.app.TaskStackBuilder;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.IBluetoothHeadsetPhone;
-import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentResolver;
@@ -32,11 +31,9 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.content.res.Configuration;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.AsyncResult;
-import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.IPowerManager;
@@ -51,10 +48,7 @@ import android.os.UserHandle;
 import android.preference.PreferenceManager;
 import android.provider.Settings.System;
 import android.telephony.ServiceState;
-import android.text.TextUtils;
 import android.util.Log;
-import android.util.Slog;
-import android.view.KeyEvent;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
@@ -66,18 +60,14 @@ import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.TelephonyCapabilities;
 import com.android.internal.telephony.TelephonyIntents;
-import com.android.internal.telephony.cdma.TtyIntent;
 import com.android.phone.common.CallLogAsync;
-import com.android.phone.OtaUtils.CdmaOtaScreenState;
-import com.android.phone.WiredHeadsetManager.WiredHeadsetListener;
 import com.android.server.sip.SipService;
-import com.android.services.telephony.common.AudioMode;
 
 /**
  * Global state for the telephony subsystem when running in the primary
  * phone process.
  */
-public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener {
+public class PhoneGlobals extends ContextWrapper {
     /* package */ static final String LOG_TAG = "PhoneApp";
 
     /**
@@ -109,10 +99,7 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
     private static final int EVENT_DATA_ROAMING_OK = 11;
     private static final int EVENT_UNSOL_CDMA_INFO_RECORD = 12;
     private static final int EVENT_DOCK_STATE_CHANGED = 13;
-    private static final int EVENT_TTY_PREFERRED_MODE_CHANGED = 14;
-    private static final int EVENT_TTY_MODE_GET = 15;
-    private static final int EVENT_TTY_MODE_SET = 16;
-    private static final int EVENT_START_SIP_SERVICE = 17;
+    private static final int EVENT_START_SIP_SERVICE = 14;
 
     // The MMI codes are also used by the InCallScreen.
     public static final int MMI_INITIATE = 51;
@@ -141,20 +128,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
     public static final String ACTION_HANG_UP_ONGOING_CALL =
             "com.android.phone.ACTION_HANG_UP_ONGOING_CALL";
 
-    /**
-     * Intent Action used for making a phone call from Notification bar.
-     * This is for missed call notifications.
-     */
-    public static final String ACTION_CALL_BACK_FROM_NOTIFICATION =
-            "com.android.phone.ACTION_CALL_BACK_FROM_NOTIFICATION";
-
-    /**
-     * Intent Action used for sending a SMS from notification bar.
-     * This is for missed call notifications.
-     */
-    public static final String ACTION_SEND_SMS_FROM_NOTIFICATION =
-            "com.android.phone.ACTION_SEND_SMS_FROM_NOTIFICATION";
-
     private static PhoneGlobals sMe;
 
     // A few important fields we expose to the rest of the package
@@ -167,17 +140,9 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
     Phone phone;
     PhoneInterfaceManager phoneMgr;
 
-    private AudioRouter audioRouter;
     private BluetoothManager bluetoothManager;
-    private CallCommandService callCommandService;
     private CallGatewayManager callGatewayManager;
-    private CallHandlerServiceProxy callHandlerServiceProxy;
-    private CallModeler callModeler;
     private CallStateMonitor callStateMonitor;
-    private DTMFTonePlayer dtmfTonePlayer;
-    private IBluetoothHeadsetPhone mBluetoothPhone;
-    private Ringer ringer;
-    private WiredHeadsetManager wiredHeadsetManager;
 
     static int mDockState = Intent.EXTRA_DOCK_STATE_UNDOCKED;
     static boolean sVoiceCapable = true;
@@ -214,9 +179,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
     // Broadcast receiver for various intent broadcasts (see onCreate())
     private final BroadcastReceiver mReceiver = new PhoneAppBroadcastReceiver();
 
-    // Broadcast receiver purely for ACTION_MEDIA_BUTTON broadcasts
-    private final BroadcastReceiver mMediaButtonReceiver = new MediaButtonBroadcastReceiver();
-
     /** boolean indicating restoring mute state on InCallScreen.onResume() */
     private boolean mShouldRestoreMuteOnInCallResume;
 
@@ -239,11 +201,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
     public OtaUtils.CdmaOtaConfigData cdmaOtaConfigData;
     public OtaUtils.CdmaOtaScreenState cdmaOtaScreenState;
     public OtaUtils.CdmaOtaInCallScreenUiState cdmaOtaInCallScreenUiState;
-
-    // TTY feature enabled on this platform
-    private boolean mTtyEnabled;
-    // Current TTY operating mode selected by user
-    private int mPreferredTtyMode = Phone.TTY_MODE_OFF;
 
     /**
      * Set the restore mute state flag. Used when we are setting the mute state
@@ -336,31 +293,9 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
 
                     phoneState = mCM.getState();
                     if (phoneState == PhoneConstants.State.OFFHOOK &&
-                            !wiredHeadsetManager.isHeadsetPlugged() &&
                             !bluetoothManager.isBluetoothHeadsetAudioOn()) {
-                        audioRouter.setSpeaker(inDockMode);
-
                         PhoneUtils.turnOnSpeaker(getApplicationContext(), inDockMode, true);
                     }
-                    break;
-
-                case EVENT_TTY_PREFERRED_MODE_CHANGED:
-                    // TTY mode is only applied if a headset is connected
-                    int ttyMode;
-                    if (wiredHeadsetManager.isHeadsetPlugged()) {
-                        ttyMode = mPreferredTtyMode;
-                    } else {
-                        ttyMode = Phone.TTY_MODE_OFF;
-                    }
-                    phone.setTTYMode(ttyMode, mHandler.obtainMessage(EVENT_TTY_MODE_SET));
-                    break;
-
-                case EVENT_TTY_MODE_GET:
-                    handleQueryTTYModeResponse(msg);
-                    break;
-
-                case EVENT_TTY_MODE_SET:
-                    handleSetTTYModeResponse(msg);
                     break;
             }
         }
@@ -414,17 +349,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
                 cdmaPhoneCallState.CdmaPhoneCallStateInit();
             }
 
-            if (BluetoothAdapter.getDefaultAdapter() != null) {
-                // Start BluetoothPhoneService even if device is not voice capable.
-                // The device can still support VOIP.
-                startService(new Intent(this, BluetoothPhoneService.class));
-                bindService(new Intent(this, BluetoothPhoneService.class),
-                            mBluetoothPhoneConnection, 0);
-            } else {
-                // Device is not bluetooth capable
-                mBluetoothPhone = null;
-            }
-
             // before registering for phone state changes
             mPowerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
             mWakeLock = mPowerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK, LOG_TAG);
@@ -447,7 +371,7 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
 
             CallLogger callLogger = new CallLogger(this, new CallLogAsync());
 
-            callGatewayManager = new CallGatewayManager();
+            callGatewayManager = CallGatewayManager.getInstance();
 
             // Create the CallController singleton, which is the interface
             // to the telephony layer for user-initiated telephony functionality
@@ -463,40 +387,17 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
             // Monitors call activity from the telephony layer
             callStateMonitor = new CallStateMonitor(mCM);
 
-            // Creates call models for use with CallHandlerService.
-            callModeler = new CallModeler(callStateMonitor, mCM, callGatewayManager);
-
-            // Plays DTMF Tones
-            dtmfTonePlayer = new DTMFTonePlayer(mCM, callModeler);
-
-            // Manages wired headset state
-            wiredHeadsetManager = new WiredHeadsetManager(this);
-            wiredHeadsetManager.addWiredHeadsetListener(this);
-
             // Bluetooth manager
-            bluetoothManager = new BluetoothManager(this, mCM, callModeler);
+            bluetoothManager = new BluetoothManager();
 
-            ringer = Ringer.init(this, bluetoothManager);
-
-            // Audio router
-            audioRouter = new AudioRouter(this, bluetoothManager, wiredHeadsetManager, mCM);
-
-            // Service used by in-call UI to control calls
-            callCommandService = new CallCommandService(this, mCM, callModeler, dtmfTonePlayer,
-                    audioRouter);
-
-            // Sends call state to the UI
-            callHandlerServiceProxy = new CallHandlerServiceProxy(this, callModeler,
-                    callCommandService, audioRouter);
-
-            phoneMgr = PhoneInterfaceManager.init(this, phone, callHandlerServiceProxy);
+            phoneMgr = PhoneInterfaceManager.init(this, phone);
 
             // Create the CallNotifer singleton, which handles
             // asynchronous events from the telephony layer (like
             // launching the incoming-call UI when an incoming call comes
             // in.)
-            notifier = CallNotifier.init(this, phone, ringer, callLogger, callStateMonitor,
-                    bluetoothManager, callModeler);
+            notifier = CallNotifier.init(this, phone, callLogger, callStateMonitor,
+                    bluetoothManager);
 
             // register for ICC status
             IccCard sim = phone.getIccCard();
@@ -511,9 +412,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
             // register connection tracking to PhoneUtils
             PhoneUtils.initializeConnectionHandler(mCM);
 
-            // Read platform settings for TTY feature
-            mTtyEnabled = getResources().getBoolean(R.bool.tty_enabled);
-
             // Register for misc other intent broadcasts.
             IntentFilter intentFilter =
                     new IntentFilter(Intent.ACTION_AIRPLANE_MODE_CHANGED);
@@ -523,29 +421,7 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
             intentFilter.addAction(TelephonyIntents.ACTION_RADIO_TECHNOLOGY_CHANGED);
             intentFilter.addAction(TelephonyIntents.ACTION_SERVICE_STATE_CHANGED);
             intentFilter.addAction(TelephonyIntents.ACTION_EMERGENCY_CALLBACK_MODE_CHANGED);
-            if (mTtyEnabled) {
-                intentFilter.addAction(TtyIntent.TTY_PREFERRED_MODE_CHANGE_ACTION);
-            }
-            intentFilter.addAction(AudioManager.RINGER_MODE_CHANGED_ACTION);
             registerReceiver(mReceiver, intentFilter);
-
-            // Use a separate receiver for ACTION_MEDIA_BUTTON broadcasts,
-            // since we need to manually adjust its priority (to make sure
-            // we get these intents *before* the media player.)
-            IntentFilter mediaButtonIntentFilter =
-                    new IntentFilter(Intent.ACTION_MEDIA_BUTTON);
-            // TODO verify the independent priority doesn't need to be handled thanks to the
-            //  private intent handler registration
-            // Make sure we're higher priority than the media player's
-            // MediaButtonIntentReceiver (which currently has the default
-            // priority of zero; see apps/Music/AndroidManifest.xml.)
-            mediaButtonIntentFilter.setPriority(1);
-            //
-            registerReceiver(mMediaButtonReceiver, mediaButtonIntentFilter);
-            // register the component so it gets priority for calls
-            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            am.registerMediaButtonEventReceiverForCalls(new ComponentName(this.getPackageName(),
-                    MediaButtonBroadcastReceiver.class.getName()));
 
             //set the default values for the preferences in the phone.
             PreferenceManager.setDefaultValues(this, R.xml.network_setting, false);
@@ -558,12 +434,10 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
             PhoneUtils.setAudioMode(mCM);
         }
 
-        if (TelephonyCapabilities.supportsOtasp(phone)) {
-            cdmaOtaProvisionData = new OtaUtils.CdmaOtaProvisionData();
-            cdmaOtaConfigData = new OtaUtils.CdmaOtaConfigData();
-            cdmaOtaScreenState = new OtaUtils.CdmaOtaScreenState();
-            cdmaOtaInCallScreenUiState = new OtaUtils.CdmaOtaInCallScreenUiState();
-        }
+        cdmaOtaProvisionData = new OtaUtils.CdmaOtaProvisionData();
+        cdmaOtaConfigData = new OtaUtils.CdmaOtaConfigData();
+        cdmaOtaScreenState = new OtaUtils.CdmaOtaScreenState();
+        cdmaOtaInCallScreenUiState = new OtaUtils.CdmaOtaInCallScreenUiState();
 
         // XXX pre-load the SimProvider so that it's ready
         resolver.getType(Uri.parse("content://icc/adn"));
@@ -574,17 +448,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
         // TODO: Register for Cdma Information Records
         // phone.registerCdmaInformationRecord(mHandler, EVENT_UNSOL_CDMA_INFO_RECORD, null);
 
-        // Read TTY settings and store it into BP NV.
-        // AP owns (i.e. stores) the TTY setting in AP settings database and pushes the setting
-        // to BP at power up (BP does not need to make the TTY setting persistent storage).
-        // This way, there is a single owner (i.e AP) for the TTY setting in the phone.
-        if (mTtyEnabled) {
-            mPreferredTtyMode = android.provider.Settings.Secure.getInt(
-                    phone.getContext().getContentResolver(),
-                    android.provider.Settings.Secure.PREFERRED_TTY_MODE,
-                    Phone.TTY_MODE_OFF);
-            mHandler.sendMessage(mHandler.obtainMessage(EVENT_TTY_PREFERRED_MODE_CHANGED, 0));
-        }
         // Read HAC settings and configure audio hardware
         if (getResources().getBoolean(R.bool.hac_enabled)) {
             int hac = android.provider.Settings.System.getInt(phone.getContext().getContentResolver(),
@@ -595,12 +458,12 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
                                       CallFeaturesSetting.HAC_VAL_ON :
                                       CallFeaturesSetting.HAC_VAL_OFF);
         }
-   }
+    }
 
     /**
      * Returns the singleton instance of the PhoneApp.
      */
-    static PhoneGlobals getInstance() {
+    public static PhoneGlobals getInstance() {
         if (sMe == null) {
             throw new IllegalStateException("No PhoneGlobals here!");
         }
@@ -622,53 +485,12 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
         return getInstance().phone;
     }
 
-    Ringer getRinger() {
-        return ringer;
-    }
-
-    IBluetoothHeadsetPhone getBluetoothPhoneService() {
-        return mBluetoothPhone;
-    }
-
     /* package */ BluetoothManager getBluetoothManager() {
         return bluetoothManager;
     }
 
-    /* package */ WiredHeadsetManager getWiredHeadsetManager() {
-        return wiredHeadsetManager;
-    }
-
-    /* package */ AudioRouter getAudioRouter() {
-        return audioRouter;
-    }
-
-    /* package */ CallModeler getCallModeler() {
-        return callModeler;
-    }
-
     /* package */ CallManager getCallManager() {
         return mCM;
-    }
-
-    /**
-     * Returns an Intent that can be used to go to the "Call log"
-     * UI (aka CallLogActivity) in the Contacts app.
-     *
-     * Watch out: there's no guarantee that the system has any activity to
-     * handle this intent.  (In particular there may be no "Call log" at
-     * all on on non-voice-capable devices.)
-     */
-    /* package */ static Intent createCallLogIntent() {
-        Intent intent = new Intent(Intent.ACTION_VIEW, null);
-        intent.setType("vnd.android.cursor.dir/calls");
-        return intent;
-    }
-
-    /* package */static PendingIntent createPendingCallLogIntent(Context context) {
-        final Intent callLogIntent = PhoneGlobals.createCallLogIntent();
-        final TaskStackBuilder taskStackBuilder = TaskStackBuilder.create(context);
-        taskStackBuilder.addNextIntent(callLogIntent);
-        return taskStackBuilder.getPendingIntent(0, 0);
     }
 
     /**
@@ -677,21 +499,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
      */
     /* package */ static PendingIntent createHangUpOngoingCallPendingIntent(Context context) {
         Intent intent = new Intent(PhoneGlobals.ACTION_HANG_UP_ONGOING_CALL, null,
-                context, NotificationBroadcastReceiver.class);
-        return PendingIntent.getBroadcast(context, 0, intent, 0);
-    }
-
-    /* package */ static PendingIntent getCallBackPendingIntent(Context context, String number) {
-        Intent intent = new Intent(ACTION_CALL_BACK_FROM_NOTIFICATION,
-                Uri.fromParts(Constants.SCHEME_TEL, number, null),
-                context, NotificationBroadcastReceiver.class);
-        return PendingIntent.getBroadcast(context, 0, intent, 0);
-    }
-
-    /* package */ static PendingIntent getSendSmsFromNotificationPendingIntent(
-            Context context, String number) {
-        Intent intent = new Intent(ACTION_SEND_SMS_FROM_NOTIFICATION,
-                Uri.fromParts(Constants.SCHEME_SMSTO, number, null),
                 context, NotificationBroadcastReceiver.class);
         return PendingIntent.getBroadcast(context, 0, intent, 0);
     }
@@ -950,36 +757,13 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
             cdmaPhoneCallState = new CdmaPhoneCallState();
             cdmaPhoneCallState.CdmaPhoneCallStateInit();
         }
-        if (TelephonyCapabilities.supportsOtasp(phone)) {
-            //create instances of CDMA OTA data classes
-            if (cdmaOtaProvisionData == null) {
-                cdmaOtaProvisionData = new OtaUtils.CdmaOtaProvisionData();
-            }
-            if (cdmaOtaConfigData == null) {
-                cdmaOtaConfigData = new OtaUtils.CdmaOtaConfigData();
-            }
-            if (cdmaOtaScreenState == null) {
-                cdmaOtaScreenState = new OtaUtils.CdmaOtaScreenState();
-            }
-            if (cdmaOtaInCallScreenUiState == null) {
-                cdmaOtaInCallScreenUiState = new OtaUtils.CdmaOtaInCallScreenUiState();
-            }
-        } else {
+        if (!TelephonyCapabilities.supportsOtasp(phone)) {
             //Clean up OTA data in GSM/UMTS. It is valid only for CDMA
             clearOtaState();
         }
 
-        ringer.updateRingerContextAfterRadioTechnologyChange(this.phone);
         notifier.updateCallNotifierRegistrationsAfterRadioTechnologyChange();
         callStateMonitor.updateAfterRadioTechnologyChange();
-
-        if (mBluetoothPhone != null) {
-            try {
-                mBluetoothPhone.updateBtHandsfreeAfterRadioTechnologyChange();
-            } catch (RemoteException e) {
-                Log.e(LOG_TAG, Log.getStackTraceString(new Throwable()));
-            }
-        }
 
         // Update registration for ICC status after radio technology change
         IccCard sim = phone.getIccCard();
@@ -988,20 +772,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
 
             //Register all events new to the new active phone
             sim.registerForNetworkLocked(mHandler, EVENT_SIM_NETWORK_LOCKED, null);
-        }
-    }
-
-
-    /**
-     * This is called when the wired headset state changes.
-     */
-    @Override
-    public void onWiredHeadsetConnection(boolean pluggedIn) {
-        PhoneConstants.State phoneState = mCM.getState();
-
-        // Force TTY state update according to new headset state
-        if (mTtyEnabled) {
-            mHandler.sendMessage(mHandler.obtainMessage(EVENT_TTY_PREFERRED_MODE_CHANGED, 0));
         }
     }
 
@@ -1066,54 +836,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
                         Intent.EXTRA_DOCK_STATE_UNDOCKED);
                 if (VDBG) Log.d(LOG_TAG, "ACTION_DOCK_EVENT -> mDockState = " + mDockState);
                 mHandler.sendMessage(mHandler.obtainMessage(EVENT_DOCK_STATE_CHANGED, 0));
-            } else if (action.equals(TtyIntent.TTY_PREFERRED_MODE_CHANGE_ACTION)) {
-                mPreferredTtyMode = intent.getIntExtra(TtyIntent.TTY_PREFFERED_MODE,
-                                                       Phone.TTY_MODE_OFF);
-                if (VDBG) Log.d(LOG_TAG, "mReceiver: TTY_PREFERRED_MODE_CHANGE_ACTION");
-                if (VDBG) Log.d(LOG_TAG, "    mode: " + mPreferredTtyMode);
-                mHandler.sendMessage(mHandler.obtainMessage(EVENT_TTY_PREFERRED_MODE_CHANGED, 0));
-            } else if (action.equals(AudioManager.RINGER_MODE_CHANGED_ACTION)) {
-                int ringerMode = intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE,
-                        AudioManager.RINGER_MODE_NORMAL);
-                if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
-                    notifier.silenceRinger();
-                }
-            }
-        }
-    }
-
-    /**
-     * Broadcast receiver for the ACTION_MEDIA_BUTTON broadcast intent.
-     *
-     * This functionality isn't lumped in with the other intents in
-     * PhoneAppBroadcastReceiver because we instantiate this as a totally
-     * separate BroadcastReceiver instance, since we need to manually
-     * adjust its IntentFilter's priority (to make sure we get these
-     * intents *before* the media player.)
-     */
-    private class MediaButtonBroadcastReceiver extends BroadcastReceiver {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            KeyEvent event = (KeyEvent) intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
-            if (VDBG) Log.d(LOG_TAG,
-                           "MediaButtonBroadcastReceiver.onReceive()...  event = " + event);
-            if ((event != null)
-                && (event.getKeyCode() == KeyEvent.KEYCODE_HEADSETHOOK)) {
-                if (VDBG) Log.d(LOG_TAG, "MediaButtonBroadcastReceiver: HEADSETHOOK");
-                boolean consumed = PhoneUtils.handleHeadsetHook(phone, event);
-                if (VDBG) Log.d(LOG_TAG, "==> handleHeadsetHook(): consumed = " + consumed);
-                if (consumed) {
-                    abortBroadcast();
-                }
-            } else {
-                if (mCM.getState() != PhoneConstants.State.IDLE) {
-                    // If the phone is anything other than completely idle,
-                    // then we consume and ignore any media key events,
-                    // Otherwise it is too easy to accidentally start
-                    // playing music while a phone call is in progress.
-                    if (VDBG) Log.d(LOG_TAG, "MediaButtonBroadcastReceiver: consumed");
-                    abortBroadcast();
-                }
             }
         }
     }
@@ -1134,38 +856,10 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
 
             if (action.equals(ACTION_HANG_UP_ONGOING_CALL)) {
                 PhoneUtils.hangup(PhoneGlobals.getInstance().mCM);
-            } else if (action.equals(ACTION_CALL_BACK_FROM_NOTIFICATION)) {
-                // Collapse the expanded notification and the notification item itself.
-                closeSystemDialogs(context);
-                clearMissedCallNotification(context);
-
-                Intent callIntent = new Intent(Intent.ACTION_CALL_PRIVILEGED, intent.getData());
-                callIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
-                context.startActivity(callIntent);
-            } else if (action.equals(ACTION_SEND_SMS_FROM_NOTIFICATION)) {
-                // Collapse the expanded notification and the notification item itself.
-                closeSystemDialogs(context);
-                clearMissedCallNotification(context);
-
-                Intent smsIntent = new Intent(Intent.ACTION_SENDTO, intent.getData());
-                smsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(smsIntent);
             } else {
                 Log.w(LOG_TAG, "Received hang-up request from notification,"
                         + " but there's no call the system can hang up.");
             }
-        }
-
-        private void closeSystemDialogs(Context context) {
-            Intent intent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
-            context.sendBroadcastAsUser(intent, UserHandle.ALL);
-        }
-
-        private void clearMissedCallNotification(Context context) {
-            Intent clearIntent = new Intent(context, ClearMissedCallsService.class);
-            clearIntent.setAction(ClearMissedCallsService.ACTION_CLEAR_MISSED_CALLS);
-            context.startService(clearIntent);
         }
     }
 
@@ -1216,53 +910,6 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
         }
     }
 
-    private void handleQueryTTYModeResponse(Message msg) {
-        AsyncResult ar = (AsyncResult) msg.obj;
-        if (ar.exception != null) {
-            if (DBG) Log.d(LOG_TAG, "handleQueryTTYModeResponse: Error getting TTY state.");
-        } else {
-            if (DBG) Log.d(LOG_TAG,
-                           "handleQueryTTYModeResponse: TTY enable state successfully queried.");
-
-            int ttymode = ((int[]) ar.result)[0];
-            if (DBG) Log.d(LOG_TAG, "handleQueryTTYModeResponse:ttymode=" + ttymode);
-
-            Intent ttyModeChanged = new Intent(TtyIntent.TTY_ENABLED_CHANGE_ACTION);
-            ttyModeChanged.putExtra("ttyEnabled", ttymode != Phone.TTY_MODE_OFF);
-            sendBroadcastAsUser(ttyModeChanged, UserHandle.ALL);
-
-            String audioTtyMode;
-            switch (ttymode) {
-            case Phone.TTY_MODE_FULL:
-                audioTtyMode = "tty_full";
-                break;
-            case Phone.TTY_MODE_VCO:
-                audioTtyMode = "tty_vco";
-                break;
-            case Phone.TTY_MODE_HCO:
-                audioTtyMode = "tty_hco";
-                break;
-            case Phone.TTY_MODE_OFF:
-            default:
-                audioTtyMode = "tty_off";
-                break;
-            }
-            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            audioManager.setParameters("tty_mode="+audioTtyMode);
-        }
-    }
-
-    private void handleSetTTYModeResponse(Message msg) {
-        AsyncResult ar = (AsyncResult) msg.obj;
-
-        if (ar.exception != null) {
-            if (DBG) Log.d (LOG_TAG,
-                    "handleSetTTYModeResponse: Error setting TTY mode, ar.exception"
-                    + ar.exception);
-        }
-        phone.queryTTYMode(mHandler.obtainMessage(EVENT_TTY_MODE_GET));
-    }
-
     /**
      * "Call origin" may be used by Contacts app to specify where the phone call comes from.
      * Currently, the only permitted value for this extra is {@link #ALLOWED_EXTRA_CALL_ORIGIN}.
@@ -1280,21 +927,4 @@ public class PhoneGlobals extends ContextWrapper implements WiredHeadsetListener
      * Used to determine if the preserved call origin is fresh enough.
      */
     private static final long CALL_ORIGIN_EXPIRATION_MILLIS = 30 * 1000;
-
-    /** Service connection */
-    private final ServiceConnection mBluetoothPhoneConnection = new ServiceConnection() {
-
-        /** Handle the task of binding the local object to the service */
-        public void onServiceConnected(ComponentName className, IBinder service) {
-            Log.i(LOG_TAG, "Headset phone created, binding local service.");
-            mBluetoothPhone = IBluetoothHeadsetPhone.Stub.asInterface(service);
-        }
-
-        /** Handle the task of cleaning up the local binding */
-        public void onServiceDisconnected(ComponentName className) {
-            Log.i(LOG_TAG, "Headset phone disconnected, cleaning local binding.");
-            mBluetoothPhone = null;
-        }
-    };
-
 }

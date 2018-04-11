@@ -10,14 +10,13 @@
 
 #include "base/callback.h"
 #include "base/time/time.h"
-#include "media/base/android/demuxer_stream_player_params.h"
 #include "media/base/media_export.h"
 #include "ui/gl/android/scoped_java_surface.h"
 #include "url/gurl.h"
 
 namespace media {
 
-class MediaDrmBridge;
+class BrowserCdm;
 class MediaPlayerManager;
 
 // This class serves as the base class for different media player
@@ -35,24 +34,11 @@ class MEDIA_EXPORT MediaPlayerAndroid {
     MEDIA_ERROR_INVALID_CODE,
   };
 
-  // Types of media source that this object will play.
-  enum SourceType {
-    SOURCE_TYPE_URL,
-    SOURCE_TYPE_MSE,     // W3C Media Source Extensions
-    SOURCE_TYPE_STREAM,  // W3C Media Stream, e.g. getUserMedia().
-  };
+  // Callback when the player needs decoding resources.
+  typedef base::Callback<void(int player_id)> RequestMediaResourcesCB;
 
-  // Construct a MediaPlayerAndroid object with all the needed media player
-  // callbacks. This object needs to call |manager_|'s RequestMediaResources()
-  // before decoding the media stream. This allows |manager_| to track
-  // unused resources and free them when needed. On the other hand, it needs
-  // to call ReleaseMediaResources() when it is done with decoding.
-  static MediaPlayerAndroid* Create(int player_id,
-                                    const GURL& url,
-                                    SourceType source_type,
-                                    const GURL& first_party_for_cookies,
-                                    bool hide_url_log,
-                                    MediaPlayerManager* manager);
+  // Callback when the player releases decoding resources.
+  typedef base::Callback<void(int player_id)> ReleaseMediaResourcesCB;
 
   // Passing an external java surface object to the player.
   virtual void SetVideoSurface(gfx::ScopedJavaSurface surface) = 0;
@@ -61,11 +47,12 @@ class MEDIA_EXPORT MediaPlayerAndroid {
   virtual void Start() = 0;
 
   // Pause the media.
-  virtual void Pause() = 0;
+  virtual void Pause(bool is_media_related_action) = 0;
 
-  // Seek to a particular position. When succeeds, OnSeekComplete() will be
-  // called. Otherwise, nothing will happen.
-  virtual void SeekTo(base::TimeDelta time) = 0;
+  // Seek to a particular position, based on renderer signaling actual seek
+  // with MediaPlayerHostMsg_Seek. If eventual success, OnSeekComplete() will be
+  // called.
+  virtual void SeekTo(base::TimeDelta timestamp) = 0;
 
   // Release the player resources.
   virtual void Release() = 0;
@@ -86,45 +73,28 @@ class MEDIA_EXPORT MediaPlayerAndroid {
   virtual GURL GetUrl();
   virtual GURL GetFirstPartyForCookies();
 
-  // Methods for DemuxerStreamPlayer.
-  // Informs DemuxerStreamPlayer that the demuxer is ready.
-  virtual void DemuxerReady(
-      const MediaPlayerHostMsg_DemuxerReady_Params& params);
-  // Called when the requested data is received from the demuxer.
-  virtual void ReadFromDemuxerAck(
-      const MediaPlayerHostMsg_ReadFromDemuxerAck_Params& params);
+  // Associates the |cdm| with this player.
+  virtual void SetCdm(BrowserCdm* cdm);
 
-  // Called when a seek request is acked by the render process.
-  virtual void OnSeekRequestAck(unsigned seek_request_id);
-
-  // Called when the demuxer has changed the duration.
-  virtual void DurationChanged(const base::TimeDelta& duration);
-
-  // Pass a drm bridge to a player.
-  virtual void SetDrmBridge(MediaDrmBridge* drm_bridge);
+  // Check whether the player still uses the current surface.
+  virtual bool IsSurfaceInUse() const = 0;
 
   int player_id() { return player_id_; }
 
+  GURL frame_url() { return frame_url_; }
+
  protected:
   MediaPlayerAndroid(int player_id,
-                     MediaPlayerManager* manager);
-
-  // Called when player status changes.
-  virtual void OnMediaError(int error_type);
-  virtual void OnVideoSizeChanged(int width, int height);
-  virtual void OnBufferingUpdate(int percent);
-  virtual void OnPlaybackComplete();
-  virtual void OnSeekComplete();
-  virtual void OnMediaMetadataChanged(
-      base::TimeDelta duration, int width, int height, bool success);
-  virtual void OnMediaInterrupted();
-  virtual void OnTimeUpdated();
-
-  // Request or release decoding resources from |manager_|.
-  virtual void RequestMediaResourcesFromManager();
-  virtual void ReleaseMediaResourcesFromManager();
+                     MediaPlayerManager* manager,
+                     const RequestMediaResourcesCB& request_media_resources_cb,
+                     const ReleaseMediaResourcesCB& release_media_resources_cb,
+                     const GURL& frame_url);
 
   MediaPlayerManager* manager() { return manager_; }
+
+  RequestMediaResourcesCB request_media_resources_cb_;
+
+  ReleaseMediaResourcesCB release_media_resources_cb_;
 
  private:
   // Player ID assigned to this player.
@@ -132,6 +102,9 @@ class MEDIA_EXPORT MediaPlayerAndroid {
 
   // Resource manager for all the media players.
   MediaPlayerManager* manager_;
+
+  // Url for the frame that contains this player.
+  GURL frame_url_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaPlayerAndroid);
 };

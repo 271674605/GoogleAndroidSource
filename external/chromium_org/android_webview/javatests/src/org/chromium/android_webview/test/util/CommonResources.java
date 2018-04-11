@@ -1,14 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test.util;
 
 import android.util.Pair;
+
 import java.util.ArrayList;
 import java.util.List;
 
-// Auxiliary class providing common HTML and base64 resources using for testing.
+/**
+ * Auxiliary class providing common HTML and base64 resources using for testing.
+ */
 public class CommonResources {
 
     // Content-type headers used for HTML code.
@@ -101,5 +104,23 @@ public class CommonResources {
                      body +
                  "</body>" +
              "</html>";
+    }
+
+    public static String makeHtmlPageWithSimpleLinkTo(String headers, String destination) {
+        return makeHtmlPageFrom(headers,
+                        "<a href=\"" + destination + "\" id=\"link\">" +
+                           "<img class=\"big\" />" +
+                        "</a>");
+    }
+
+    public static String makeHtmlPageWithSimpleLinkTo(String destination) {
+        return makeHtmlPageWithSimpleLinkTo("", destination);
+    }
+
+    public static String makeHtmlPageWithSimplePostFormTo(String destination) {
+        return makeHtmlPageFrom("",
+                "<form action=\"" + destination + "\" method=\"post\">" +
+                  "<input type=\"submit\" value=\"post\" id=\"link\">" +
+                "</form>");
     }
 }

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2013 Broadcom Corporation
+ *  Copyright (C) 2003-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -58,6 +58,8 @@ typedef UINT8 tNFA_NV_CO_STATUS;
 #define  HC_F3_NV_BLOCK         0x02
 #define  HC_F4_NV_BLOCK         0x03
 #define  HC_DH_NV_BLOCK         0x04
+#define  HC_F5_NV_BLOCK         0x05
+
 
 /*****************************************************************************
 **  Function Declarations

@@ -27,8 +27,9 @@ import android.text.Html;
 import com.android.mail.providers.ConversationInfo;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.FolderList;
-import com.android.mail.providers.MessageInfo;
+import com.android.mail.providers.ParticipantInfo;
 import com.android.mail.providers.ReplyFromAccount;
+import com.android.mail.providers.Settings;
 import com.android.mail.providers.UIProvider.AccountCapabilities;
 import com.android.mail.providers.UIProvider.AccountColumns;
 import com.android.mail.providers.UIProvider.AccountColumns.SettingsColumns;
@@ -38,7 +39,6 @@ import com.android.mail.providers.UIProvider.ConversationCursorCommand;
 import com.android.mail.providers.UIProvider.FolderCapabilities;
 import com.android.mail.providers.UIProvider.FolderColumns;
 import com.android.mail.providers.UIProvider.MessageColumns;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -231,14 +231,13 @@ public final class MockUiProvider extends ContentProvider {
                 "firstUnread", "last");
         for (int i = 0; i < messageCount; i++) {
             if (i % 2 == 0) {
-                info.addMessage(new MessageInfo(false, false,
-                        i + "Test <testsender@test.com>", -1, "testsender@test.com"));
+                info.addParticipant(new ParticipantInfo(i + "Test", "testsender@test.com", -1,
+                        false));
             } else if (i % 3 == 0) {
-                info.addMessage(new MessageInfo(true, false, i + "sender@test.com", -1,
-                        "sender@test.com"));
+                info.addParticipant(new ParticipantInfo(i + "sender@test.com", "sender@test.com",
+                        -1, false));
             } else {
-                info.addMessage(new MessageInfo(false, false, MessageInfo.SENDER_LIST_TOKEN_ELIDED,
-                        -1, null));
+                info.addParticipant(new ParticipantInfo(" .. ", null, -1, false));
             }
         }
         return info.toBlob();
@@ -284,17 +283,13 @@ public final class MockUiProvider extends ContentProvider {
         final String folderUri = getMockAccountFolderUri(accountId, folderId);
 
         Map<String, Object> folderMap = Maps.newHashMap();
-        folderMap.put(BaseColumns._ID, Long.valueOf(folderId));
+        folderMap.put(BaseColumns._ID, folderId);
         folderMap.put(FolderColumns.URI, folderUri);
         folderMap.put(FolderColumns.NAME, "Folder " + name);
-        folderMap.put(FolderColumns.HAS_CHILDREN, new Integer(hasChildren ? 1 : 0));
+        folderMap.put(FolderColumns.HAS_CHILDREN, hasChildren ? 1 : 0);
         folderMap.put(FolderColumns.CONVERSATION_LIST_URI, folderUri + "/getConversations");
         folderMap.put(FolderColumns.CHILD_FOLDERS_LIST_URI, folderUri + "/getChildFolders");
-        folderMap.put(FolderColumns.CAPABILITIES,
-                Long.valueOf(
-                        FolderCapabilities.SYNCABLE |
-                        FolderCapabilities.PARENT |
-                        FolderCapabilities.CAN_ACCEPT_MOVED_MESSAGES));
+        folderMap.put(FolderColumns.CAPABILITIES, FolderCapabilities.CAN_ACCEPT_MOVED_MESSAGES);
         folderMap.put(FolderColumns.UNREAD_COUNT, unread);
         folderMap.put(FolderColumns.TOTAL_COUNT, total);
         folderMap.put(FolderColumns.SYNC_STATUS, 0);
@@ -310,6 +305,8 @@ public final class MockUiProvider extends ContentProvider {
         accountMap.put(AccountColumns.NAME, "account" + accountId + "@mockuiprovider.com");
         accountMap.put(AccountColumns.TYPE, "com.android.mail.providers.protos.mock");
         accountMap.put(AccountColumns.ACCOUNT_MANAGER_NAME,
+                "account" + accountId + "@mockuiprovider.com");
+        accountMap.put(AccountColumns.ACCOUNT_ID,
                 "account" + accountId + "@mockuiprovider.com");
         accountMap.put(AccountColumns.PROVIDER_VERSION, Long.valueOf(1));
         accountMap.put(AccountColumns.URI, Uri.parse(accountUri));
@@ -367,11 +364,9 @@ public final class MockUiProvider extends ContentProvider {
         // Add settings columns
         accountMap.put(SettingsColumns.SIGNATURE, "");
         accountMap.put(SettingsColumns.AUTO_ADVANCE, 1);
-        accountMap.put(SettingsColumns.MESSAGE_TEXT_SIZE, 1);
         accountMap.put(SettingsColumns.SNAP_HEADERS, 1);
         accountMap.put(SettingsColumns.REPLY_BEHAVIOR, 1);
         accountMap.put(SettingsColumns.CONV_LIST_ICON, 1);
-        accountMap.put(SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS, 1);
         accountMap.put(SettingsColumns.CONFIRM_DELETE, 1);
         accountMap.put(SettingsColumns.CONFIRM_ARCHIVE, 1);
         accountMap.put(SettingsColumns.CONFIRM_SEND, 1);
@@ -380,11 +375,13 @@ public final class MockUiProvider extends ContentProvider {
         accountMap.put(SettingsColumns.FORCE_REPLY_FROM_DEFAULT, 1);
         accountMap.put(SettingsColumns.MAX_ATTACHMENT_SIZE, 25 * 1024 * 1024);
         accountMap.put(SettingsColumns.SWIPE, 1);
-        accountMap.put(SettingsColumns.PRIORITY_ARROWS_ENABLED, 1);
+        accountMap.put(SettingsColumns.IMPORTANCE_MARKERS_ENABLED, 1);
+        accountMap.put(SettingsColumns.SHOW_CHEVRONS_ENABLED, 0);
         accountMap.put(SettingsColumns.SETUP_INTENT_URI, Uri.EMPTY);
         accountMap.put(SettingsColumns.CONVERSATION_VIEW_MODE, 1);
         accountMap.put(SettingsColumns.VEILED_ADDRESS_PATTERN, null);
         accountMap.put(SettingsColumns.MOVE_TO_INBOX, Uri.EMPTY);
+        accountMap.put(SettingsColumns.SHOW_IMAGES, Settings.ShowImages.ASK_FIRST);
         return accountMap;
     }
 

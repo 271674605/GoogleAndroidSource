@@ -31,11 +31,15 @@ class CC_EXPORT RenderSurfaceLayerList {
   Layer* back();
   size_t size() const;
   bool empty() const { return size() == 0u; }
+  scoped_refptr<Layer>& operator[](size_t i);
+  const scoped_refptr<Layer>& operator[](size_t i) const;
   LayerList::iterator begin();
   LayerList::iterator end();
   LayerList::const_iterator begin() const;
   LayerList::const_iterator end() const;
   void clear();
+  LayerList& AsLayerList() { return list_; }
+  const LayerList& AsLayerList() const { return list_; }
 
  private:
   LayerList list_;

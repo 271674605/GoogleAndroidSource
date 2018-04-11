@@ -322,10 +322,11 @@ OMX_BOOL Exynos_CSC_InputData(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX_DATA 
         Exynos_OSAL_GetInfoFromMetaData((OMX_BYTE)inputUseBuffer->bufferHeader->pBuffer, ppBuf);
         if (eColorFormat == OMX_COLOR_FormatAndroidOpaque) {
             ExynosVideoPlane planes[MAX_BUFFER_PLANE];
-            size_t i;
+            OMX_U32 stride;
+            int i;
 
             csc_src_color_format = omx_2_hal_pixel_format((unsigned int)Exynos_OSAL_GetANBColorFormat(ppBuf[0]));
-            Exynos_OSAL_LockANBHandle((OMX_U32)ppBuf[0], nFrameWidth, nFrameHeight, OMX_COLOR_FormatAndroidOpaque, planes);
+            Exynos_OSAL_LockANBHandle((OMX_U32)ppBuf[0], nFrameWidth, nFrameHeight, OMX_COLOR_FormatAndroidOpaque, &stride, planes);
 
 #if defined(USE_CSC_GSCALER) || defined(USE_CSC_G2D)
             csc_method = CSC_METHOD_HW;
@@ -472,8 +473,9 @@ OMX_BOOL Exynos_Preprocessor_InputData(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_
 
                     if (eColorFormat == OMX_COLOR_FormatAndroidOpaque) {
                         ExynosVideoPlane planes[MAX_BUFFER_PLANE];
+                        OMX_U32 stride;
 
-                        Exynos_OSAL_LockANBHandle((OMX_U32)ppBuf[0], nFrameWidth, nFrameHeight, OMX_COLOR_FormatYUV420SemiPlanar, planes);
+                        Exynos_OSAL_LockANBHandle((OMX_U32)ppBuf[0], nFrameWidth, nFrameHeight, OMX_COLOR_FormatYUV420SemiPlanar, &stride, planes);
 
                         srcInputData->buffer.multiPlaneBuffer.fd[0] = planes[0].fd;
                         srcInputData->buffer.multiPlaneBuffer.fd[1] = planes[1].fd;
@@ -563,7 +565,8 @@ OMX_BOOL Exynos_Preprocessor_InputData(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_
                 pExynosComponent->bBehaviorEOS = OMX_TRUE;
         }
 
-        if (pExynosComponent->checkTimeStamp.needSetStartTimeStamp == OMX_TRUE) {
+        if ((pExynosComponent->checkTimeStamp.needSetStartTimeStamp == OMX_TRUE) &&
+            (srcInputData->nFlags & OMX_BUFFERFLAG_CODECCONFIG) != OMX_BUFFERFLAG_CODECCONFIG) {
             pExynosComponent->checkTimeStamp.needCheckStartTimeStamp = OMX_TRUE;
             pExynosComponent->checkTimeStamp.startTimeStamp = srcInputData->timeStamp;
             pExynosComponent->checkTimeStamp.nStartFlags = srcInputData->nFlags;
@@ -682,28 +685,29 @@ OMX_ERRORTYPE Exynos_OMX_ExtensionSetup(OMX_HANDLETYPE hComponent)
             } else {
                 exynosInputPort->bufferProcessType = BUFFER_COPY;
             }
-
-            if ((exynosInputPort->bufferProcessType & BUFFER_COPY) == BUFFER_COPY) {
-                OMX_U32 nPlaneSize[MFC_INPUT_BUFFER_PLANE] = {0, };
-                nPlaneSize[0] = DEFAULT_MFC_INPUT_YBUFFER_SIZE;
-                nPlaneSize[1] = DEFAULT_MFC_INPUT_CBUFFER_SIZE;
-
-                Exynos_OSAL_SemaphoreCreate(&exynosInputPort->codecSemID);
-                Exynos_OSAL_QueueCreate(&exynosInputPort->codecBufferQ, MAX_QUEUE_ELEMENTS);
-
-                ret = Exynos_Allocate_CodecBuffers(pOMXComponent, INPUT_PORT_INDEX, MFC_INPUT_BUFFER_NUM_MAX, nPlaneSize);
-                if (ret != OMX_ErrorNone)
-                    goto EXIT;
-
-                for (i = 0; i < MFC_INPUT_BUFFER_NUM_MAX; i++)
-                    Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoEnc->pMFCEncInputBuffer[i]);
-            } else if (exynosInputPort->bufferProcessType == BUFFER_SHARE) {
-                /*************/
-                /*    TBD    */
-                /*************/
-                /* Does not require any actions. */
-            }
         }
+    }
+
+    if ((exynosInputPort->bufferProcessType & BUFFER_COPY) == BUFFER_COPY) {
+        OMX_U32 nPlaneSize[MFC_INPUT_BUFFER_PLANE] = {0, };
+        nPlaneSize[0] = ALIGN_TO_16B(exynosInputPort->portDefinition.format.video.nFrameWidth)
+                        * ALIGN_TO_16B(exynosInputPort->portDefinition.format.video.nFrameHeight);
+        nPlaneSize[1] = ALIGN((nPlaneSize[0] / 2), 256);
+
+        Exynos_OSAL_SemaphoreCreate(&exynosInputPort->codecSemID);
+        Exynos_OSAL_QueueCreate(&exynosInputPort->codecBufferQ, MAX_QUEUE_ELEMENTS);
+
+        ret = Exynos_Allocate_CodecBuffers(pOMXComponent, INPUT_PORT_INDEX, MFC_INPUT_BUFFER_NUM_MAX, nPlaneSize);
+        if (ret != OMX_ErrorNone)
+            goto EXIT;
+
+        for (i = 0; i < MFC_INPUT_BUFFER_NUM_MAX; i++)
+            Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoEnc->pMFCEncInputBuffer[i]);
+    } else if (exynosInputPort->bufferProcessType == BUFFER_SHARE) {
+        /*************/
+        /*    TBD    */
+        /*************/
+        /* Does not require any actions. */
     }
 
 EXIT:
@@ -1237,7 +1241,7 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeComponentInit(OMX_IN OMX_HANDLETYPE hCompone
     pExynosComponent->bSaveFlagEOS = OMX_FALSE;
     pExynosComponent->bBehaviorEOS = OMX_FALSE;
 
-    pVideoEnc->bFirstInput  = OMX_FALSE;
+    pVideoEnc->bFirstInput  = OMX_TRUE;
     pVideoEnc->bFirstOutput = OMX_FALSE;
     pVideoEnc->configChange = OMX_FALSE;
     pVideoEnc->quantization.nQpI = 4; // I frame quantization parameter

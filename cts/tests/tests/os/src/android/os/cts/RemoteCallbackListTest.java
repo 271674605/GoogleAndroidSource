@@ -17,7 +17,6 @@
 package android.os.cts;
 
 
-import android.app.cts.ISecondary;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -60,8 +59,12 @@ public class RemoteCallbackListTest extends AndroidTestCase {
             }
         };
         mIntent = new Intent(SERVICE_ACTION);
-        assertTrue(mContext.bindService(new Intent(ISecondary.class.getName()),
-                mSecondaryConnection, Context.BIND_AUTO_CREATE));
+        mIntent.setPackage(mContext.getPackageName());
+
+        Intent secondaryIntent = new Intent(ISecondary.class.getName());
+        secondaryIntent.setPackage(mContext.getPackageName());
+        assertTrue(mContext.bindService(secondaryIntent, mSecondaryConnection,
+                Context.BIND_AUTO_CREATE));
 
     }
 

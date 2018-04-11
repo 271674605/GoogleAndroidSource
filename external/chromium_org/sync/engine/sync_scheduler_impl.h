@@ -23,7 +23,6 @@
 #include "sync/engine/nudge_source.h"
 #include "sync/engine/sync_scheduler.h"
 #include "sync/engine/syncer.h"
-#include "sync/internal_api/public/base/model_type_invalidation_map.h"
 #include "sync/internal_api/public/engine/polling_constants.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/sessions/nudge_tracker.h"
@@ -53,9 +52,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   virtual ~SyncSchedulerImpl();
 
   virtual void Start(Mode mode) OVERRIDE;
-  virtual bool ScheduleConfiguration(
+  virtual void ScheduleConfiguration(
       const ConfigurationParams& params) OVERRIDE;
-  virtual void RequestStop() OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual void ScheduleLocalNudge(
       const base::TimeDelta& desired_delay,
       ModelTypeSet types,
@@ -66,7 +65,7 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
       const tracked_objects::Location& nudge_location) OVERRIDE;
   virtual void ScheduleInvalidationNudge(
       const base::TimeDelta& desired_delay,
-      const ModelTypeInvalidationMap& invalidation_map,
+      const ObjectIdInvalidationMap& invalidation_map,
       const tracked_objects::Location& nudge_location) OVERRIDE;
   virtual void SetNotificationsEnabled(bool notifications_enabled) OVERRIDE;
 
@@ -88,9 +87,13 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   virtual void OnReceivedSessionsCommitDelay(
       const base::TimeDelta& new_delay) OVERRIDE;
   virtual void OnReceivedClientInvalidationHintBufferSize(int size) OVERRIDE;
-  virtual void OnShouldStopSyncingPermanently() OVERRIDE;
   virtual void OnSyncProtocolError(
-      const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
+      const SyncProtocolError& sync_protocol_error) OVERRIDE;
+  virtual void OnReceivedGuRetryDelay(const base::TimeDelta& delay) OVERRIDE;
+  virtual void OnReceivedMigrationRequest(syncer::ModelTypeSet types) OVERRIDE;
+
+  // Returns true if the client is currently in exponential backoff.
+  bool IsBackingOff() const;
 
  private:
   enum JobPriority {
@@ -111,20 +114,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   friend class SyncSchedulerWhiteboxTest;
   friend class SyncerTest;
 
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, NoNudgesInConfigureMode);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
-      DropNudgeWhileExponentialBackOff);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, SaveNudge);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
-                           SaveNudgeWhileTypeThrottled);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, ContinueNudge);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, ContinueConfiguration);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
-                           SaveConfigurationWhileThrottled);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
-                           SaveNudgeWhileThrottled);
-  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
-                           ContinueCanaryJobConfig);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, TransientPollFailure);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest,
                            ServerConnectionChangeDuringBackoff);
@@ -132,6 +121,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
                            ConnectionChangeCanaryPreemptedByNudge);
   FRIEND_TEST_ALL_PREFIXES(BackoffTriggersSyncSchedulerTest,
                            FailGetEncryptionKey);
+  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, SuccessfulRetry);
+  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, FailedRetry);
+  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, ReceiveNewRetryDelay);
 
   struct SYNC_EXPORT_PRIVATE WaitInterval {
     enum Mode {
@@ -160,7 +152,7 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   void DoNudgeSyncSessionJob(JobPriority priority);
 
   // Invoke the syncer to perform a configuration job.
-  bool DoConfigurationSyncSessionJob(JobPriority priority);
+  void DoConfigurationSyncSessionJob(JobPriority priority);
 
   // Helper function for Do{Nudge,Configuration}SyncSessionJob.
   void HandleFailure(
@@ -168,6 +160,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
 
   // Invoke the Syncer to perform a poll job.
   void DoPollSyncSessionJob();
+
+  // Helper function to calculate poll interval.
+  base::TimeDelta GetPollInterval();
 
   // Adjusts the poll timer to account for new poll interval, and possibly
   // resets the poll interval, depedning on the flag's value.
@@ -182,9 +177,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // Determines if we're allowed to contact the server right now.
   bool CanRunNudgeJobNow(JobPriority priority);
 
-  // 'Impl' here refers to real implementation of public functions.
-  void StopImpl();
-
   // If the scheduler's current state supports it, this will create a job based
   // on the passed in parameters and coalesce it with any other pending jobs,
   // then post a delayed task to run it.  It may also choose to drop the job or
@@ -192,12 +184,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   void ScheduleNudgeImpl(
       const base::TimeDelta& delay,
       const tracked_objects::Location& nudge_location);
-
-  // Returns true if the client is currently in exponential backoff.
-  bool IsBackingOff() const;
-
-  // Helper to signal all listeners registered with |session_context_|.
-  void Notify(SyncEngineEvent::EventCause cause);
 
   // Helper to signal listeners about changed retry time.
   void NotifyRetryTime(base::Time retry_time);
@@ -208,6 +194,11 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // Looks for pending work and, if it finds any, run this work at "canary"
   // priority.
   void TryCanaryJob();
+
+  // At the moment TrySyncSessionJob just posts call to TrySyncSessionJobImpl on
+  // current thread. In the future it will request access token here.
+  void TrySyncSessionJob();
+  void TrySyncSessionJobImpl();
 
   // Transitions out of the THROTTLED WaitInterval then calls TryCanaryJob().
   void Unthrottle();
@@ -227,6 +218,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // Creates a session for a poll and performs the sync.
   void PollTimerCallback();
 
+  // Creates a session for a retry and performs the sync.
+  void RetryTimerCallback();
+
   // Returns the set of types that are enabled and not currently throttled.
   ModelTypeSet GetEnabledAndUnthrottledTypes();
 
@@ -241,16 +235,8 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // is the most flexible place to do this bookkeeping.
   void UpdateNudgeTimeRecords(ModelTypeSet types);
 
-  virtual void OnActionableError(const sessions::SyncSessionSnapshot& snapshot);
-
-  base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_;
-
-  // A second factory specially for weak_handle_this_, to allow the handle
-  // to be const and alleviate threading concerns.
-  base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_for_weak_handle_;
-
   // For certain methods that need to worry about X-thread posting.
-  const WeakHandle<SyncSchedulerImpl> weak_handle_this_;
+  WeakHandle<SyncSchedulerImpl> weak_handle_this_;
 
   // Used for logging.
   const std::string name_;
@@ -319,6 +305,28 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // The change is to remember that poll timer just fired and retry poll job
   // after credentials are updated.
   bool do_poll_after_credentials_updated_;
+
+  // TryJob might get called for multiple reasons. It should only call
+  // DoPollSyncSessionJob after some time since the last attempt.
+  // last_poll_reset_ keeps track of when was last attempt.
+  base::TimeTicks last_poll_reset_;
+
+  // next_sync_session_job_priority_ defines which priority will be used next
+  // time TrySyncSessionJobImpl is called. CANARY_PRIORITY allows syncer to run
+  // even if scheduler is in exponential backoff. This is needed for events that
+  // have chance of resolving previous error (e.g. network connection change
+  // after NETWORK_UNAVAILABLE error).
+  // It is reset back to NORMAL_PRIORITY on every call to TrySyncSessionJobImpl.
+  JobPriority next_sync_session_job_priority_;
+
+  // One-shot timer for scheduling GU retry according to delay set by server.
+  base::OneShotTimer<SyncSchedulerImpl> retry_timer_;
+
+  base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_;
+
+  // A second factory specially for weak_handle_this_, to allow the handle
+  // to be const and alleviate threading concerns.
+  base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_for_weak_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSchedulerImpl);
 };

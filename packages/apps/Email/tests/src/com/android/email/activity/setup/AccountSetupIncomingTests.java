@@ -16,16 +16,18 @@
 
 package com.android.email.activity.setup;
 
-import com.android.email.R;
-import com.android.emailcommon.provider.Account;
-import com.android.emailcommon.provider.HostAuth;
-
 import android.content.Context;
 import android.content.Intent;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.UiThreadTest;
 import android.test.suitebuilder.annotation.MediumTest;
+import android.test.suitebuilder.annotation.Suppress;
+import android.view.View;
 import android.widget.EditText;
+
+import com.android.email.R;
+import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.provider.HostAuth;
 
 import java.net.URISyntaxException;
 
@@ -34,17 +36,17 @@ import java.net.URISyntaxException;
  * You can run this entire test case with:
  *   runtest -c com.android.email.activity.setup.AccountSetupIncomingTests email
  */
+@Suppress
 @MediumTest
 public class AccountSetupIncomingTests extends
-        ActivityInstrumentationTestCase2<AccountSetupIncoming> {
+        ActivityInstrumentationTestCase2<AccountSetupFinal> {
 
-    private AccountSetupIncoming mActivity;
-    private AccountSetupIncomingFragment mFragment;
+    private AccountSetupFinal mActivity;
     private EditText mServerView;
-    private EditText mPasswordView;
+    private AuthenticationView mAuthenticationView;
 
     public AccountSetupIncomingTests() {
-        super(AccountSetupIncoming.class);
+        super(AccountSetupFinal.class);
     }
 
     /**
@@ -62,6 +64,11 @@ public class AccountSetupIncomingTests extends
         setActivityIntent(i);
     }
 
+    private boolean isNextButtonEnabled() {
+        final View nextButton = mActivity.findViewById(R.id.next);
+        return nextButton.isEnabled();
+    }
+
     /**
      * Test processing with a complete, good URI -> good fields
      */
@@ -70,7 +77,7 @@ public class AccountSetupIncomingTests extends
         Intent i = getTestIntent("imap://user:password@server.com:999");
         setActivityIntent(i);
         getActivityAndFields();
-        assertTrue(mActivity.mNextButtonEnabled);
+        assertTrue(isNextButtonEnabled());
     }
 
     /**
@@ -81,7 +88,7 @@ public class AccountSetupIncomingTests extends
         Intent i = getTestIntent("imap://:password@server.com:999");
         setActivityIntent(i);
         getActivityAndFields();
-        assertFalse(mActivity.mNextButtonEnabled);
+        assertFalse(isNextButtonEnabled());
     }
 
     /**
@@ -92,7 +99,7 @@ public class AccountSetupIncomingTests extends
         Intent i = getTestIntent("imap://user@server.com:999");
         setActivityIntent(i);
         getActivityAndFields();
-        assertFalse(mActivity.mNextButtonEnabled);
+        assertFalse(isNextButtonEnabled());
     }
 
     /**
@@ -103,7 +110,7 @@ public class AccountSetupIncomingTests extends
         Intent i = getTestIntent("imap://user:password@server.com");
         setActivityIntent(i);
         getActivityAndFields();
-        assertTrue(mActivity.mNextButtonEnabled);
+        assertTrue(isNextButtonEnabled());
     }
 
     /**
@@ -112,10 +119,10 @@ public class AccountSetupIncomingTests extends
     @UiThreadTest
     public void testGoodServerVariants() {
         getActivityAndFields();
-        assertTrue(mActivity.mNextButtonEnabled);
+        assertTrue(isNextButtonEnabled());
 
         mServerView.setText("  server.com  ");
-        assertTrue(mActivity.mNextButtonEnabled);
+        assertTrue(isNextButtonEnabled());
     }
 
     /**
@@ -124,13 +131,13 @@ public class AccountSetupIncomingTests extends
     @UiThreadTest
     public void testBadServerVariants() {
         getActivityAndFields();
-        assertTrue(mActivity.mNextButtonEnabled);
+        assertTrue(isNextButtonEnabled());
 
         mServerView.setText("  ");
-        assertFalse(mActivity.mNextButtonEnabled);
+        assertFalse(isNextButtonEnabled());
 
         mServerView.setText("serv$er.com");
-        assertFalse(mActivity.mNextButtonEnabled);
+        assertFalse(isNextButtonEnabled());
     }
 
     /**
@@ -158,11 +165,11 @@ public class AccountSetupIncomingTests extends
      * @param expectNext true if expected that this password will enable the "next" button
      */
     private void checkPassword(String password, boolean expectNext) throws URISyntaxException {
-        mPasswordView.setText(password);
+        mAuthenticationView.setPassword(password);
         if (expectNext) {
-            assertTrue(mActivity.mNextButtonEnabled);
+            assertTrue(isNextButtonEnabled());
         } else {
-            assertFalse(mActivity.mNextButtonEnabled);
+            assertFalse(isNextButtonEnabled());
         }
     }
 
@@ -176,9 +183,8 @@ public class AccountSetupIncomingTests extends
      */
     private void getActivityAndFields() {
         mActivity = getActivity();
-        mFragment = mActivity.mFragment;
         mServerView = (EditText) mActivity.findViewById(R.id.account_server);
-        mPasswordView = (EditText) mActivity.findViewById(R.id.account_password);
+        mAuthenticationView = (AuthenticationView) mActivity.findViewById(R.id.authentication_view);
     }
 
     /**
@@ -186,12 +192,16 @@ public class AccountSetupIncomingTests extends
      */
     private Intent getTestIntent(String storeUriString)
             throws URISyntaxException {
-        Account account = new Account();
-        Context context = getInstrumentation().getTargetContext();
-        HostAuth auth = account.getOrCreateHostAuthRecv(context);
-        HostAuth.setHostAuthFromString(auth, storeUriString);
-        SetupData.init(SetupData.FLOW_MODE_NORMAL, account);
-        return new Intent(Intent.ACTION_MAIN);
+        final Account account = new Account();
+        final Context context = getInstrumentation().getTargetContext();
+        final HostAuth auth = account.getOrCreateHostAuthRecv(context);
+        auth.setHostAuthFromString(storeUriString);
+        final SetupDataFragment setupDataFragment =
+                new SetupDataFragment();
+        setupDataFragment.setFlowMode(SetupDataFragment.FLOW_MODE_NORMAL);
+        setupDataFragment.setAccount(account);
+        final Intent i = new Intent(AccountSetupFinal.ACTION_JUMP_TO_INCOMING);
+        i.putExtra(SetupDataFragment.EXTRA_SETUP_DATA, setupDataFragment);
+        return i;
     }
-
 }

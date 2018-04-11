@@ -62,11 +62,13 @@ IPC_MESSAGE_ROUTED1(DevToolsClientMsg_DispatchOnInspectorFrontend,
 // These are messages sent from DevToolsClient to DevToolsAgent through the
 // browser.
 // Tells agent that there is a client host connected to it.
-IPC_MESSAGE_ROUTED0(DevToolsAgentMsg_Attach)
+IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_Attach,
+                    std::string /* host_id */)
 
 // Tells agent that a client host was disconnected from another agent and
 // connected to this one.
-IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_Reattach,
+IPC_MESSAGE_ROUTED2(DevToolsAgentMsg_Reattach,
+                    std::string /* host_id */,
                     std::string /* agent_state */)
 
 // Tells agent that there is no longer a client host connected to it.
@@ -77,7 +79,8 @@ IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_DispatchOnInspectorBackend,
                     std::string /* message */)
 
 // Inspect element with the given coordinates.
-IPC_MESSAGE_ROUTED2(DevToolsAgentMsg_InspectElement,
+IPC_MESSAGE_ROUTED3(DevToolsAgentMsg_InspectElement,
+                    std::string /* host_id */,
                     int /* x */,
                     int /* y */)
 
@@ -85,11 +88,6 @@ IPC_MESSAGE_ROUTED2(DevToolsAgentMsg_InspectElement,
 IPC_MESSAGE_ROUTED2(DevToolsAgentMsg_AddMessageToConsole,
                     content::ConsoleMessageLevel /* level */,
                     std::string /* message */)
-
-// Notifies worker devtools agent that it should pause worker context
-// when it starts and wait until either DevTools client is attached or
-// explicit resume notification is received.
-IPC_MESSAGE_ROUTED0(DevToolsAgentMsg_PauseWorkerContextOnStart)
 
 // Worker DevTools agent should resume worker execution.
 IPC_MESSAGE_ROUTED0(DevToolsAgentMsg_ResumeWorkerContext)
@@ -107,77 +105,29 @@ IPC_MESSAGE_ROUTED0(DevToolsMsg_SetupDevToolsClient)
 //-----------------------------------------------------------------------------
 // These are messages sent from the renderer to the browser.
 
-// Activates (brings to the front) corresponding dev tools window.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_ActivateWindow)
-
-// Sets the height of corresponding dev tools window.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_ChangeAttachedWindowHeight,
-                    unsigned /* height */)
-
-// Closes dev tools window that is inspecting current render_view_host.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_CloseWindow)
-
-// Moves the corresponding dev tools window by the specified offset.
-IPC_MESSAGE_ROUTED2(DevToolsHostMsg_MoveWindow,
-                    int /* x */,
-                    int /* y */)
-
-// Specifies side for devtools to dock to.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_RequestSetDockSide,
-                    std::string /* side */)
-
-// Opens given URL in the new tab.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_OpenInNewTab,
-                    std::string /* url */)
-
-// Shows Save As dialog for content.
-IPC_MESSAGE_ROUTED3(DevToolsHostMsg_Save,
-                    std::string /* url */,
-                    std::string /* content */,
-                    bool /* save_as */)
-
-// Appends given |content| to the file that has been associated with the
-// given |url| by Save message handler.
-IPC_MESSAGE_ROUTED2(DevToolsHostMsg_Append,
-                    std::string /* url */,
-                    std::string /* content */)
-
-// Requests the list of filesystems previously added for devtools.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_RequestFileSystems)
-
-// Shows a dialog to select a folder to which an isolated filesystem is added.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_AddFileSystem)
-
-// Removes a previously added devtools filesystem given by |file_system_path|.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_RemoveFileSystem,
-                    std::string /* file_system_path */)
-
-// Performs file system indexing for given |file_system_path| and sends progress
-// callbacks.
-IPC_MESSAGE_ROUTED2(DevToolsHostMsg_IndexPath,
-                    int /* request_id */,
-                    std::string /* file_system_path */)
-
-// Stops file system indexing.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_StopIndexing, int /* request_id */)
-
-// Performs trigram search for given |query| in |file_system_path|.
-IPC_MESSAGE_ROUTED3(DevToolsHostMsg_SearchInPath,
-                    int /* request_id */,
-                    std::string /* file_system_path */,
-                    std::string /* query */)
+// Transport from Inspector frontend to frontend host.
+IPC_MESSAGE_ROUTED1(DevToolsHostMsg_DispatchOnEmbedder,
+                    std::string /* message */)
 
 // Updates agent runtime state stored in devtools manager in order to support
 // cross-navigation instrumentation.
 IPC_MESSAGE_ROUTED1(DevToolsHostMsg_SaveAgentRuntimeState,
                     std::string /* state */)
 
-// Clears browser cache.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_ClearBrowserCache)
+//-----------------------------------------------------------------------------
+// These are messages sent from the GPU process to the inspected renderer.
 
-// Clears browser cookies.
-IPC_MESSAGE_ROUTED0(DevToolsHostMsg_ClearBrowserCookies)
+IPC_STRUCT_BEGIN(GpuTaskInfo)
+  IPC_STRUCT_MEMBER(double, timestamp)
+  IPC_STRUCT_MEMBER(int, phase)
+  IPC_STRUCT_MEMBER(bool, foreign)
+  IPC_STRUCT_MEMBER(uint64, gpu_memory_used_bytes)
+  IPC_STRUCT_MEMBER(uint64, gpu_memory_limit_bytes)
+IPC_STRUCT_END()
 
+// Recorded events are passed in chunks to the renderer process.
+IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_GpuTasksChunk,
+                    std::vector<GpuTaskInfo> /* gpu_tasks */)
 
 //-----------------------------------------------------------------------------
 // These are messages sent from the inspected page renderer to the worker

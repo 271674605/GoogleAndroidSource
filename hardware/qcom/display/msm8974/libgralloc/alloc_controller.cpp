@@ -139,7 +139,6 @@ int AdrenoMemInfo::getStride(int width, int format)
         switch (format)
         {
             case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
-            case HAL_PIXEL_FORMAT_RAW_SENSOR:
                 stride = ALIGN(width, 32);
                 break;
             case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
@@ -150,6 +149,8 @@ int AdrenoMemInfo::getStride(int width, int format)
             case HAL_PIXEL_FORMAT_YV12:
             case HAL_PIXEL_FORMAT_YCbCr_422_SP:
             case HAL_PIXEL_FORMAT_YCrCb_422_SP:
+            case HAL_PIXEL_FORMAT_RAW16:
+            case HAL_PIXEL_FORMAT_RAW_OPAQUE:
                 stride = ALIGN(width, 16);
                 break;
             case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
@@ -183,12 +184,6 @@ IAllocController* IAllocController::getInstance(void)
 IonController::IonController()
 {
     mIonAlloc = new IonAlloc();
-    mUseTZProtection = false;
-    char property[PROPERTY_VALUE_MAX];
-    if ((property_get("persist.gralloc.cp.level3", property, NULL) <= 0) ||
-                            (atoi(property) != 1)) {
-        mUseTZProtection = true;
-    }
 }
 
 int IonController::allocate(alloc_data& data, int usage)
@@ -209,12 +204,14 @@ int IonController::allocate(alloc_data& data, int usage)
         ionFlags |= ION_HEAP(ION_IOMMU_HEAP_ID);
 
     if(usage & GRALLOC_USAGE_PROTECTED) {
-        if ((mUseTZProtection) && (usage & GRALLOC_USAGE_PRIVATE_MM_HEAP)) {
+        if (usage & GRALLOC_USAGE_PRIVATE_MM_HEAP) {
             ionFlags |= ION_HEAP(ION_CP_MM_HEAP_ID);
             ionFlags |= ION_SECURE;
         } else {
             // for targets/OEMs which do not need HW level protection
-            // do not set ion secure flag & MM heap. Fallback to IOMMU heap.
+            // do not set ion secure flag & MM heap. Fallback to IOMMU heap
+            // and use DRM for such buffers
+            data.allocType |= private_handle_t::PRIV_FLAGS_L3_SECURE_BUFFER;
             ionFlags |= ION_HEAP(ION_IOMMU_HEAP_ID);
         }
     } else if(usage & GRALLOC_USAGE_PRIVATE_MM_HEAP) {
@@ -292,7 +289,8 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
             size = alignedw * alignedh * 3;
             break;
         case HAL_PIXEL_FORMAT_RGB_565:
-        case HAL_PIXEL_FORMAT_RAW_SENSOR:
+        case HAL_PIXEL_FORMAT_RAW16:
+        case HAL_PIXEL_FORMAT_RAW_OPAQUE:
             size = alignedw * alignedh * 2;
             break;
 

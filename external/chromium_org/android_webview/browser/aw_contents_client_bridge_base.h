@@ -16,6 +16,7 @@ class WebContents;
 }
 
 namespace net {
+class SSLCertRequestInfo;
 class X509Certificate;
 }
 
@@ -28,13 +29,16 @@ namespace android_webview {
 // native/ from browser/ layer.
 class AwContentsClientBridgeBase {
  public:
+  typedef base::Callback<void(net::X509Certificate*)> SelectCertificateCallback;
+
   // Adds the handler to the UserData registry.
   static void Associate(content::WebContents* web_contents,
                         AwContentsClientBridgeBase* handler);
+  static void Disassociate(content::WebContents* web_contents);
   static AwContentsClientBridgeBase* FromWebContents(
       content::WebContents* web_contents);
   static AwContentsClientBridgeBase* FromID(int render_process_id,
-                                            int render_view_id);
+                                            int render_frame_id);
 
   virtual ~AwContentsClientBridgeBase();
 
@@ -43,17 +47,21 @@ class AwContentsClientBridgeBase {
                                      const GURL& request_url,
                                      const base::Callback<void(bool)>& callback,
                                      bool* cancel_request) = 0;
+  virtual void SelectClientCertificate(
+      net::SSLCertRequestInfo* cert_request_info,
+      const SelectCertificateCallback& callback) = 0;
 
   virtual void RunJavaScriptDialog(
       content::JavaScriptMessageType message_type,
       const GURL& origin_url,
-      const string16& message_text,
-      const string16& default_prompt_text,
+      const base::string16& message_text,
+      const base::string16& default_prompt_text,
       const content::JavaScriptDialogManager::DialogClosedCallback& callback)
       = 0;
+
   virtual void RunBeforeUnloadDialog(
       const GURL& origin_url,
-      const string16& message_text,
+      const base::string16& message_text,
       const content::JavaScriptDialogManager::DialogClosedCallback& callback)
       = 0;
 

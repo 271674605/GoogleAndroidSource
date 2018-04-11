@@ -17,10 +17,12 @@
 package com.android.mail.utils;
 
 import android.test.AndroidTestCase;
+import android.test.suitebuilder.annotation.SmallTest;
 
 import com.android.mail.utils.NotificationUtils.MailMessagePlainTextConverter;
 import com.google.android.mail.common.html.parser.HtmlTree;
 
+@SmallTest
 public class NotificationUtilsTest extends AndroidTestCase {
     /**
      * Verifies that we strip out <style /> tags.
@@ -36,9 +38,9 @@ public class NotificationUtilsTest extends AndroidTestCase {
 
         // Get the html "tree" for this message body
         final HtmlTree htmlTree = Utils.getHtmlTree(html);
-        htmlTree.setPlainTextConverterFactory(new HtmlTree.PlainTextConverterFactory() {
+        htmlTree.setConverterFactory(new HtmlTree.ConverterFactory() {
             @Override
-            public HtmlTree.PlainTextConverter createInstance() {
+            public HtmlTree.Converter<String> createInstance() {
                 return new MailMessagePlainTextConverter();
             }
         });
@@ -63,9 +65,9 @@ public class NotificationUtilsTest extends AndroidTestCase {
 
         // Get the html "tree" for this message body
         final HtmlTree htmlTree = Utils.getHtmlTree(html);
-        htmlTree.setPlainTextConverterFactory(new HtmlTree.PlainTextConverterFactory() {
+        htmlTree.setConverterFactory(new HtmlTree.ConverterFactory() {
             @Override
-            public HtmlTree.PlainTextConverter createInstance() {
+            public HtmlTree.Converter<String> createInstance() {
                 return new MailMessagePlainTextConverter();
             }
         });

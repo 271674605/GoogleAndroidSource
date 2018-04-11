@@ -51,19 +51,17 @@ class RSObjectRefCount : public clang::StmtVisitor<RSObjectRefCount> {
 
    public:
     explicit Scope(clang::CompoundStmt *CS) : mCS(CS) {
-      return;
     }
 
     inline void addRSObject(clang::VarDecl* VD) {
       mRSO.push_back(VD);
-      return;
     }
 
     void ReplaceRSObjectAssignment(clang::BinaryOperator *AS);
 
     void AppendRSObjectInit(clang::VarDecl *VD,
                             clang::DeclStmt *DS,
-                            RSExportPrimitiveType::DataType DT,
+                            DataType DT,
                             clang::Expr *InitExpr);
 
     void InsertLocalVarDestructors();
@@ -91,13 +89,13 @@ class RSObjectRefCount : public clang::StmtVisitor<RSObjectRefCount> {
   // Return false if the type of variable declared in VD does not contain
   // an RS object type.
   static bool InitializeRSObject(clang::VarDecl *VD,
-                                 RSExportPrimitiveType::DataType *DT,
+                                 DataType *DT,
                                  clang::Expr **InitExpr);
 
   // Return a zero-initializer expr of the type DT. This processes both
   // RS matrix type and RS object type.
   static clang::Expr *CreateZeroInitializerForRSSpecificType(
-      RSExportPrimitiveType::DataType DT,
+      DataType DT,
       clang::ASTContext &C,
       const clang::SourceLocation &Loc);
 
@@ -105,7 +103,6 @@ class RSObjectRefCount : public clang::StmtVisitor<RSObjectRefCount> {
   explicit RSObjectRefCount(clang::ASTContext &C)
       : mCtx(C),
         RSInitFD(false) {
-    return;
   }
 
   void Init() {
@@ -113,23 +110,30 @@ class RSObjectRefCount : public clang::StmtVisitor<RSObjectRefCount> {
       GetRSRefCountingFunctions(mCtx);
       RSInitFD = true;
     }
-    return;
   }
 
-  static clang::FunctionDecl *GetRSSetObjectFD(
-      RSExportPrimitiveType::DataType DT) {
+  static clang::FunctionDecl *GetRSSetObjectFD(DataType DT) {
     slangAssert(RSExportPrimitiveType::IsRSObjectType(DT));
-    return RSSetObjectFD[(DT - RSExportPrimitiveType::FirstRSObjectType)];
+    if (DT >= 0 && DT < DataTypeMax) {
+      return RSSetObjectFD[DT];
+    } else {
+      slangAssert(false && "incorrect type");
+      return NULL;
+    }
   }
 
   static clang::FunctionDecl *GetRSSetObjectFD(const clang::Type *T) {
     return GetRSSetObjectFD(RSExportPrimitiveType::GetRSSpecificType(T));
   }
 
-  static clang::FunctionDecl *GetRSClearObjectFD(
-      RSExportPrimitiveType::DataType DT) {
+  static clang::FunctionDecl *GetRSClearObjectFD(DataType DT) {
     slangAssert(RSExportPrimitiveType::IsRSObjectType(DT));
-    return RSClearObjectFD[(DT - RSExportPrimitiveType::FirstRSObjectType)];
+    if (DT >= 0 && DT < DataTypeMax) {
+      return RSClearObjectFD[DT];
+    } else {
+      slangAssert(false && "incorrect type");
+      return NULL;
+    }
   }
 
   static clang::FunctionDecl *GetRSClearObjectFD(const clang::Type *T) {

@@ -5,17 +5,16 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_EXECUTE_CODE_FUNCTION_H_
 #define CHROME_BROWSER_EXTENSIONS_API_EXECUTE_CODE_FUNCTION_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chrome/browser/extensions/script_executor.h"
 #include "chrome/common/extensions/api/tabs.h"
 
 namespace extensions {
 
-class ScriptExecutor;
-
 // Base class for javascript code injection.
 // This is used by both chrome.webview.executeScript and
 // chrome.tabs.executeScript.
-class ExecuteCodeFunction : public AsyncExtensionFunction {
+class ExecuteCodeFunction : public ChromeAsyncExtensionFunction {
  public:
   ExecuteCodeFunction();
 
@@ -24,7 +23,7 @@ class ExecuteCodeFunction : public AsyncExtensionFunction {
 
   // ExtensionFunction implementation.
   virtual bool HasPermission() OVERRIDE;
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   // Initialize |details_| if it hasn't already been.
   virtual bool Init() = 0;
@@ -32,7 +31,7 @@ class ExecuteCodeFunction : public AsyncExtensionFunction {
   virtual bool CanExecuteScriptOnPage() = 0;
   virtual ScriptExecutor* GetScriptExecutor() = 0;
   virtual bool IsWebView() const = 0;
-
+  virtual const GURL& GetWebViewSrc() const = 0;
   virtual void OnExecuteCodeFinished(const std::string& error,
                                      int32 on_page_id,
                                      const GURL& on_url,
@@ -48,7 +47,8 @@ class ExecuteCodeFunction : public AsyncExtensionFunction {
 
   // Runs on FILE thread. Loads message bundles for the extension and
   // localizes the CSS data. Calls back DidLoadAndLocalizeFile on the UI thread.
-  void LocalizeCSS(
+  void GetFileURLAndLocalizeCSS(
+      ScriptExecutor::ScriptType script_type,
       const std::string& data,
       const std::string& extension_id,
       const base::FilePath& extension_path,
@@ -64,6 +64,9 @@ class ExecuteCodeFunction : public AsyncExtensionFunction {
   // Contains extension resource built from path of file which is
   // specified in JSON arguments.
   ExtensionResource resource_;
+
+  // The URL of the file being injected into the page.
+  GURL file_url_;
 };
 
 }  // namespace extensions

@@ -1,5 +1,5 @@
 <!--
-    Copyright 2010 The Android Open Source Project
+    Copyright 2013 The Android Open Source Project
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
       <li><a href="<?cs var:toroot ?>source/code-lines.html">Codelines, Branches, and Releases</a></li>
       <li><a href="<?cs var:toroot ?>source/build-numbers.html">Codenames, Tags, and Build Numbers</a></li>
       <li><a href="<?cs var:toroot ?>source/roles.html">Project Roles</a></li>
+      <li><a href="<?cs var:toroot ?>source/brands.html">Brand Guidelines</a></li>
       <li><a href="<?cs var:toroot ?>source/licenses.html">Licenses</a></li>
       <li><a href="<?cs var:toroot ?>source/faqs.html">FAQ</a></li>
     </ul>

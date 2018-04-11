@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2010 The Android Open Source Project
  *
@@ -6,7 +5,6 @@
  * found in the LICENSE file.
  */
 
-#include "Test.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkData.h"
@@ -20,6 +18,7 @@
 #include "SkScalar.h"
 #include "SkStream.h"
 #include "SkTypes.h"
+#include "Test.h"
 
 class SkPDFTestDict : public SkPDFDict {
 public:
@@ -39,9 +38,11 @@ private:
     SkTDArray<SkPDFObject*> fResources;
 };
 
-static bool encode_to_dct_stream(SkWStream* stream, const SkBitmap& bitmap, const SkIRect& rect) {
-    stream->writeText("DCT compessed stream.");
-    return true;
+#define DUMMY_TEXT "DCT compessed stream."
+
+static SkData* encode_to_dct_data(size_t* pixelRefOffset, const SkBitmap& bitmap) {
+    *pixelRefOffset = 0;
+    return SkData::NewWithProc(DUMMY_TEXT, sizeof(DUMMY_TEXT) - 1, NULL, NULL);
 }
 
 static bool stream_equals(const SkDynamicMemoryWStream& stream, size_t offset,
@@ -242,18 +243,17 @@ static void TestSubstitute(skiatest::Reporter* reporter) {
 
 // Create a bitmap that would be very eficiently compressed in a ZIP.
 static void setup_bitmap(SkBitmap* bitmap, int width, int height) {
-    bitmap->setConfig(SkBitmap::kARGB_8888_Config, width, height);
-    bitmap->allocPixels();
+    bitmap->allocN32Pixels(width, height);
     bitmap->eraseColor(SK_ColorWHITE);
 }
 
 static void TestImage(skiatest::Reporter* reporter, const SkBitmap& bitmap,
                       const char* expected, bool useDCTEncoder) {
     SkISize pageSize = SkISize::Make(bitmap.width(), bitmap.height());
-    SkPDFDevice* dev = new SkPDFDevice(pageSize, pageSize, SkMatrix::I());
+    SkAutoTUnref<SkPDFDevice> dev(new SkPDFDevice(pageSize, pageSize, SkMatrix::I()));
 
     if (useDCTEncoder) {
-        dev->setDCTEncoder(encode_to_dct_stream);
+        dev->setDCTEncoder(encode_to_dct_data);
     }
 
     SkCanvas c(dev);
@@ -344,14 +344,13 @@ static void test_issue1083() {
     doc.emitPDF(&stream);
 }
 
-static void TestPDFPrimitives(skiatest::Reporter* reporter) {
+DEF_TEST(PDFPrimitives, reporter) {
     SkAutoTUnref<SkPDFInt> int42(new SkPDFInt(42));
     SimpleCheckObjectOutput(reporter, int42.get(), "42");
 
     SkAutoTUnref<SkPDFScalar> realHalf(new SkPDFScalar(SK_ScalarHalf));
     SimpleCheckObjectOutput(reporter, realHalf.get(), "0.5");
 
-#if defined(SK_SCALAR_IS_FLOAT)
     SkAutoTUnref<SkPDFScalar> bigScalar(new SkPDFScalar(110999.75f));
 #if !defined(SK_ALLOW_LARGE_PDF_SCALARS)
     SimpleCheckObjectOutput(reporter, bigScalar.get(), "111000");
@@ -363,7 +362,6 @@ static void TestPDFPrimitives(skiatest::Reporter* reporter) {
 
     SkAutoTUnref<SkPDFScalar> smallestScalar(new SkPDFScalar(1.0/65536));
     SimpleCheckObjectOutput(reporter, smallestScalar.get(), "0.00001526");
-#endif
 #endif
 
     SkAutoTUnref<SkPDFString> stringSimple(
@@ -430,6 +428,3 @@ static void TestPDFPrimitives(skiatest::Reporter* reporter) {
 
     TestImages(reporter);
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("PDFPrimitives", PDFPrimitivesTestClass, TestPDFPrimitives)

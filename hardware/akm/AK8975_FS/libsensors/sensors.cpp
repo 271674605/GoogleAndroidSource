@@ -66,30 +66,30 @@ static const struct sensor_t sSensorList[] = {
           1,
 		  SENSORS_MAGNETIC_FIELD_HANDLE,
           SENSOR_TYPE_MAGNETIC_FIELD, 1228.8f,
-		  CONVERT_M, 0.35f, 10000, 0, 0, { } },
+		  CONVERT_M, 0.35f, 10000, 0, 0, 0, 0, 0, 0, { } },
 #ifdef SENSORHAL_ACC_ADXL346
         { "Analog Devices ADXL345/6 3-axis Accelerometer",
           "ADI",
           1, SENSORS_ACCELERATION_HANDLE,
           SENSOR_TYPE_ACCELEROMETER, (GRAVITY_EARTH * 16.0f),
-		  (GRAVITY_EARTH * 16.0f) / 4096.0f, 0.145f, 10000, 0, 0, { } },
+		  (GRAVITY_EARTH * 16.0f) / 4096.0f, 0.145f, 10000, 0, 0, 0, 0, 0, 0, { } },
         { "AK8975 Orientation sensor",
           "Asahi Kasei Microdevices",
           1, SENSORS_ORIENTATION_HANDLE,
           SENSOR_TYPE_ORIENTATION, 360.0f,
-		  CONVERT_O, 0.495f, 10000, 0, 0, { } }
+		  CONVERT_O, 0.495f, 10000, 0, 0, 0, 0, 0, 0, { } }
 #endif
 #ifdef SENSORHAL_ACC_KXTF9
         { "Kionix KXTF9 3-axis Accelerometer",
           "Kionix",
           1, SENSORS_ACCELERATION_HANDLE,
           SENSOR_TYPE_ACCELEROMETER, (GRAVITY_EARTH * 2.0f),
-		  (GRAVITY_EARTH) / 1024.0f, 0.7f, 10000, 0,0, { } },
+		  (GRAVITY_EARTH) / 1024.0f, 0.7f, 10000, 0, 0, 0, 0, 0, 0, { } },
         { "AK8975 Orientation sensor",
           "Asahi Kasei Microdevices",
           1, SENSORS_ORIENTATION_HANDLE,
           SENSOR_TYPE_ORIENTATION, 360.0f,
-		  CONVERT_O, 1.05f, 10000, 0, 0, { } }
+		  CONVERT_O, 1.05f, 10000, 0, 0, 0, 0, 0, 0, { } }
 #endif
 };
 
@@ -98,27 +98,27 @@ static int open_sensors(const struct hw_module_t* module, const char* id,
                         struct hw_device_t** device);
 
 static int sensors__get_sensors_list(struct sensors_module_t* module,
-                                     struct sensor_t const** list) 
+                                     struct sensor_t const** list)
 {
         *list = sSensorList;
         return ARRAY_SIZE(sSensorList);
 }
 
 static struct hw_module_methods_t sensors_module_methods = {
-        open: open_sensors
+        .open = open_sensors
 };
 
 struct sensors_module_t HAL_MODULE_INFO_SYM = {
-        common: {
-                tag: HARDWARE_MODULE_TAG,
-                version_major: 1,
-                version_minor: 0,
-                id: SENSORS_HARDWARE_MODULE_ID,
-                name: "AKM Sensor module",
-                author: "Asahi Kasei Microdevices",
-                methods: &sensors_module_methods,
+        .common = {
+                .tag = HARDWARE_MODULE_TAG,
+                .version_major = 1,
+                .version_minor = 0,
+                .id = SENSORS_HARDWARE_MODULE_ID,
+                .name = "AKM Sensor module",
+                .author = "Asahi Kasei Microdevices",
+                .methods = &sensors_module_methods,
         },
-        get_sensors_list: sensors__get_sensors_list,
+        .get_sensors_list = sensors__get_sensors_list,
 };
 
 struct sensors_poll_context_t {
@@ -145,7 +145,7 @@ private:
     int mWritePipeFd;
     SensorBase* mSensors[numSensorDrivers];
 
-	/* These function will be different depends on 
+	/* These function will be different depends on
 	 * which sensor is implemented in AKMD program.
 	 */
     int handleToDriver(int handle);
@@ -266,7 +266,7 @@ int sensors_poll_context_t::setDelay_sub(int handle, int64_t ns) {
 		/* has dependencies, choose shorter interval */
 		if (cur > ns) {
 			err = mSensors[drv]->setDelay(handle, ns);
-		} 
+		}
 	}
 	return err;
 }

@@ -52,6 +52,10 @@ class SessionRestore {
                                  uint32 behavior,
                                  const std::vector<GURL>& urls_to_open);
 
+  // Restores the last session when the last session crashed. It's a wrapper
+  // of function RestoreSession.
+  static void RestoreSessionAfterCrash(Browser* browser);
+
   // Specifically used in the restoration of a foreign session.  This function
   // restores the given session windows to multiple browsers all of which
   // will be created on the desktop specified by |host_desktop_type|. Returns
@@ -65,7 +69,8 @@ class SessionRestore {
   // Specifically used in the restoration of a foreign session.  This method
   // restores the given session tab to the browser of |source_web_contents| if
   // the disposition is not NEW_WINDOW. Returns the WebContents corresponding
-  // to the restored tab.
+  // to the restored tab. If |disposition| is CURRENT_TAB, |source_web_contents|
+  // may be destroyed.
   static content::WebContents* RestoreForeignSessionTab(
       content::WebContents* source_web_contents,
       const SessionTab& tab,

@@ -1,23 +1,37 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import collections
 import json
 import os
 
+from metrics import power
 from telemetry import test
-from telemetry.core import util
 from telemetry.page import page_measurement
 from telemetry.page import page_set
 
 
-class SunspiderMeasurement(page_measurement.PageMeasurement):
-  def MeasurePage(self, _, tab, results):
-    js_is_done = ('window.location.pathname.indexOf("results.html") >= 0'
-                  '&& typeof(output) != "undefined"')
-    def _IsDone():
-      return tab.EvaluateJavaScript(js_is_done)
-    util.WaitFor(_IsDone, 300, poll_interval=1)
+_URL = 'http://www.webkit.org/perf/sunspider-1.0.2/sunspider-1.0.2/driver.html'
+
+
+class _SunspiderMeasurement(page_measurement.PageMeasurement):
+  def __init__(self):
+    super(_SunspiderMeasurement, self).__init__()
+    self._power_metric = power.PowerMetric()
+
+  def CustomizeBrowserOptions(self, options):
+    power.PowerMetric.CustomizeBrowserOptions(options)
+
+  def DidNavigateToPage(self, page, tab):
+    self._power_metric.Start(page, tab)
+
+  def MeasurePage(self, page, tab, results):
+    tab.WaitForJavaScriptExpression(
+        'window.location.pathname.indexOf("results.html") >= 0'
+        '&& typeof(output) != "undefined"', 300)
+
+    self._power_metric.Stop(page, tab)
+    self._power_metric.AddResults(tab, results)
 
     js_get_results = 'JSON.stringify(output);'
     js_results = json.loads(tab.EvaluateJavaScript(js_get_results))
@@ -39,14 +53,12 @@ class SunspiderMeasurement(page_measurement.PageMeasurement):
 
 class Sunspider(test.Test):
   """Apple's SunSpider JavaScript benchmark."""
-  test = SunspiderMeasurement
+  test = _SunspiderMeasurement
 
   def CreatePageSet(self, options):
-    sunspider_dir = os.path.join(util.GetChromiumSrcDir(),
-                                 'chrome', 'test', 'data', 'sunspider')
-    return page_set.PageSet.FromDict(
-        {
-          'serving_dirs': [''],
-          'pages': [{ 'url': 'file:///sunspider-1.0/driver.html' }],
-        },
-        sunspider_dir)
+    ps = page_set.PageSet(
+      archive_data_file='../page_sets/data/sunspider.json',
+      make_javascript_deterministic=False,
+      file_path=os.path.abspath(__file__))
+    ps.AddPageWithDefaultRunNavigate(_URL)
+    return ps

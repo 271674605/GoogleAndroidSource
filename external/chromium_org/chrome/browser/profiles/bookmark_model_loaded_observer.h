@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
+#include "components/bookmarks/browser/base_bookmark_model_observer.h"
 
 class Profile;
 
@@ -17,7 +17,8 @@ class BookmarkModelLoadedObserver : public BaseBookmarkModelObserver {
 
  private:
   virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
+  virtual void BookmarkModelLoaded(BookmarkModel* model,
+                                   bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
 
   Profile* profile_;

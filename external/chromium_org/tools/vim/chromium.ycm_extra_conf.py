@@ -78,10 +78,19 @@ def FindChromeSrcFromFilename(filename):
 
 # Largely copied from ninja-build.vim (guess_configuration)
 def GetNinjaOutputDirectory(chrome_root):
-  """Returns either <chrome_root>/out/Release or <chrome_root>/out/Debug.
+  """Returns <chrome_root>/<output_dir>/(Release|Debug).
 
-  The configuration chosen is the one most recently generated/built."""
-  root = os.path.join(chrome_root, 'out')
+  The configuration chosen is the one most recently generated/built. Detects
+  a custom output_dir specified by GYP_GENERATOR_FLAGS."""
+
+  output_dir = 'out'
+  generator_flags = os.getenv('GYP_GENERATOR_FLAGS', '').split(' ')
+  for flag in generator_flags:
+    name_value = flag.split('=', 1)
+    if len(name_value) == 2 and name_value[0] == 'output_dir':
+      output_dir = name_value[1]
+
+  root = os.path.join(chrome_root, output_dir)
   debug_path = os.path.join(root, 'Debug')
   release_path = os.path.join(root, 'Release')
 
@@ -160,8 +169,7 @@ def GetClangCommandFromNinjaForFilename(chrome_root, filename):
   else:
     return chrome_flags
 
-  # Parse out the -I and -D flags. These seem to be the only ones that are
-  # important for YCM's purposes.
+  # Parse flags that are important for YCM's purposes.
   for flag in clang_line.split(' '):
     if flag.startswith('-I'):
       # Relative paths need to be resolved, because they're relative to the
@@ -171,6 +179,8 @@ def GetClangCommandFromNinjaForFilename(chrome_root, filename):
       else:
         abs_path = os.path.normpath(os.path.join(out_dir, flag[2:]))
         chrome_flags.append('-I' + abs_path)
+    elif flag.startswith('-std'):
+      chrome_flags.append(flag)
     elif flag.startswith('-') and flag[1] in 'DWFfmO':
       if flag == '-Wno-deprecated-register' or flag == '-Wno-header-guard':
         # These flags causes libclang (3.3) to crash. Remove it until things

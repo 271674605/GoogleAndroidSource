@@ -10,12 +10,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/base/ui_export.h"
+#include "ui/gfx/gfx_export.h"
 #include "ui/gfx/matrix3_f.h"
 
 class SkBitmap;
 
 namespace color_utils {
+
+struct HSL;
 
 // This class exposes the sampling method to the caller, which allows
 // stubbing out for things like unit tests. Might be useful to pass more
@@ -25,7 +27,7 @@ namespace color_utils {
 // Note: Samplers should be deterministic, as the same image may be analyzed
 // twice with two sampler instances and the results displayed side-by-side
 // to the user.
-class UI_EXPORT KMeanImageSampler {
+class GFX_EXPORT KMeanImageSampler {
  public:
   virtual int GetSample(int width, int height) = 0;
 
@@ -35,7 +37,7 @@ class UI_EXPORT KMeanImageSampler {
 };
 
 // This sampler will pick pixels from an evenly spaced grid.
-class UI_EXPORT GridSampler : public KMeanImageSampler {
+class GFX_EXPORT GridSampler : public KMeanImageSampler {
   public:
    GridSampler();
    virtual ~GridSampler();
@@ -49,17 +51,16 @@ class UI_EXPORT GridSampler : public KMeanImageSampler {
 
 // Returns the color in an ARGB |image| that is closest in RGB-space to the
 // provided |color|. Exported for testing.
-UI_EXPORT SkColor FindClosestColor(const uint8_t* image, int width, int height,
-                                   SkColor color);
+GFX_EXPORT SkColor FindClosestColor(const uint8_t* image, int width, int height,
+                                    SkColor color);
 
-// Returns an SkColor that represents the calculated dominant color in the png.
-// This uses a KMean clustering algorithm to find clusters of pixel colors in
-// RGB space.
-// |png| represents the data of a png encoded image.
-// |darkness_limit| represents the minimum sum of the RGB components that is
-// acceptable as a color choice. This can be from 0 to 765.
-// |brightness_limit| represents the maximum sum of the RGB components that is
-// acceptable as a color choice. This can be from 0 to 765.
+// Returns an SkColor that represents the calculated dominant color in the
+// image. This uses a KMean clustering algorithm to find clusters of pixel
+// colors in RGB space.
+// |png|/|bitmap| represents the data of a png/bitmap encoded image.
+// |lower_bound| represents the minimum bound of HSL values to allow.
+// |upper_bound| represents the maximum bound of HSL values to allow.
+// See color_utils::IsWithinHSLRange() for description of these bounds.
 //
 // RGB KMean Algorithm (N clusters, M iterations):
 // 1.Pick N starting colors by randomly sampling the pixels. If you see a
@@ -82,25 +83,32 @@ UI_EXPORT SkColor FindClosestColor(const uint8_t* image, int width, int height,
 //   the clusters by weight (where weight is the number of pixels that make up
 //   this cluster).
 // 6.Going through the sorted list of clusters, pick the first cluster with the
-//   largest weight that's centroid fulfills the equation
-//   |darkness_limit| < SUM(R, G, B) < |brightness_limit|. Return that color.
+//   largest weight that's centroid falls between |lower_bound| and
+//   |upper_bound|. Return that color.
 //   If no color fulfills that requirement return the color with the largest
 //   weight regardless of whether or not it fulfills the equation above.
-//
-// Note: Switching to HSV space did not improve the results of this algorithm
-// for typical favicon images.
-UI_EXPORT SkColor CalculateKMeanColorOfPNG(
-    scoped_refptr<base::RefCountedMemory> png,
-    uint32_t darkness_limit,
-    uint32_t brightness_limit,
-    KMeanImageSampler* sampler);
+GFX_EXPORT SkColor
+    CalculateKMeanColorOfPNG(scoped_refptr<base::RefCountedMemory> png,
+                             const HSL& lower_bound,
+                             const HSL& upper_bound,
+                             KMeanImageSampler* sampler);
+// Computes a dominant color using the above algorithm and reasonable defaults
+// for |lower_bound|, |upper_bound| and |sampler|.
+GFX_EXPORT SkColor CalculateKMeanColorOfPNG(
+    scoped_refptr<base::RefCountedMemory> png);
 
-// Computes a dominant color for an SkBitmap using the above algorithm and
-// reasonable defaults for |darkness_limit|, |brightness_limit| and |sampler|.
-UI_EXPORT SkColor CalculateKMeanColorOfBitmap(const SkBitmap& bitmap);
+// Returns an SkColor that represents the calculated dominant color in the
+// image. See CalculateKMeanColorOfPNG() for details.
+GFX_EXPORT SkColor CalculateKMeanColorOfBitmap(const SkBitmap& bitmap,
+                                               const HSL& lower_bound,
+                                               const HSL& upper_bound,
+                                               KMeanImageSampler* sampler);
+// Computes a dominant color using the above algorithm and reasonable defaults
+// for |lower_bound|, |upper_bound| and |sampler|.
+GFX_EXPORT SkColor CalculateKMeanColorOfBitmap(const SkBitmap& bitmap);
 
 // Compute color covariance matrix for the input bitmap.
-UI_EXPORT gfx::Matrix3F ComputeColorCovariance(const SkBitmap& bitmap);
+GFX_EXPORT gfx::Matrix3F ComputeColorCovariance(const SkBitmap& bitmap);
 
 // Apply a color reduction transform defined by |color_transform| vector to
 // |source_bitmap|. The result is put into |target_bitmap|, which is expected
@@ -108,7 +116,7 @@ UI_EXPORT gfx::Matrix3F ComputeColorCovariance(const SkBitmap& bitmap);
 // If |fit_to_range|, result is transfored linearly to fit 0-0xFF range.
 // Otherwise, data is clipped.
 // Returns true if the target has been computed.
-UI_EXPORT bool ApplyColorReduction(const SkBitmap& source_bitmap,
+GFX_EXPORT bool ApplyColorReduction(const SkBitmap& source_bitmap,
                                    const gfx::Vector3dF& color_transform,
                                    bool fit_to_range,
                                    SkBitmap* target_bitmap);
@@ -119,7 +127,7 @@ UI_EXPORT bool ApplyColorReduction(const SkBitmap& source_bitmap,
 // Returns true if the conversion succeeded. Note that there might be legitimate
 // reasons for the process to fail even if all input was correct. This is a
 // condition the caller must be able to handle.
-UI_EXPORT bool ComputePrincipalComponentImage(const SkBitmap& source_bitmap,
+GFX_EXPORT bool ComputePrincipalComponentImage(const SkBitmap& source_bitmap,
                                               SkBitmap* target_bitmap);
 
 }  // namespace color_utils

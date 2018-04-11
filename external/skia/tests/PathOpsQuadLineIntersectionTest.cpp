@@ -59,6 +59,13 @@ static struct oneLineQuad {
     SkDQuad quad;
     SkDLine line;
 } oneOffs[] = {
+    {{{{97.9337616,100}, {88,112.94265}, {88,130}}},
+     {{{88.919838,120}, {107.058823,120}}}},
+    {{{{447.96701049804687, 894.4381103515625}, {448.007080078125, 894.4239501953125},
+       {448.0140380859375, 894.4215087890625}}},
+     {{{490.43548583984375, 879.40740966796875}, {405.59262084960937, 909.435546875}}}},
+    {{{{142.589081, 102.283646}, {149.821579, 100}, {158, 100}}},
+        {{{90, 230}, {160, 60}}}},
     {{{{1101, 10}, {1101, 8.3431453704833984}, {1099.828857421875, 7.1711997985839844}}},
         {{{1099.828857421875,7.1711711883544922}, {1099.121337890625,7.8786783218383789}}}},
     {{{{973, 507}, {973, 508.24264526367187}, {972.12158203125, 509.12161254882812}}},
@@ -83,16 +90,20 @@ static void testOneOffs(skiatest::Reporter* reporter) {
             SkDPoint quadXY = quad.ptAtT(quadT);
             double lineT = intersections[1][inner];
             SkDPoint lineXY = line.ptAtT(lineT);
+            if (!quadXY.approximatelyEqual(lineXY)) {
+                quadXY.approximatelyEqual(lineXY);
+                SkDebugf("");
+            }
             REPORTER_ASSERT(reporter, quadXY.approximatelyEqual(lineXY));
         }
     }
 }
 
-static void PathOpsQuadLineIntersectionTestOne(skiatest::Reporter* reporter) {
+DEF_TEST(PathOpsQuadLineIntersectionOneOff, reporter) {
     testOneOffs(reporter);
 }
 
-static void PathOpsQuadLineIntersectionTest(skiatest::Reporter* reporter) {
+DEF_TEST(PathOpsQuadLineIntersection, reporter) {
     for (size_t index = 0; index < lineQuadTests_count; ++index) {
         int iIndex = static_cast<int>(index);
         const SkDQuad& quad = lineQuadTests[index].quad;
@@ -100,7 +111,7 @@ static void PathOpsQuadLineIntersectionTest(skiatest::Reporter* reporter) {
         const SkDLine& line = lineQuadTests[index].line;
         SkASSERT(ValidLine(line));
         SkReduceOrder reducer1, reducer2;
-        int order1 = reducer1.reduce(quad, SkReduceOrder::kFill_Style);
+        int order1 = reducer1.reduce(quad);
         int order2 = reducer2.reduce(line);
         if (order1 < 3) {
             SkDebugf("%s [%d] quad order=%d\n", __FUNCTION__, iIndex, order1);
@@ -138,8 +149,3 @@ static void PathOpsQuadLineIntersectionTest(skiatest::Reporter* reporter) {
         }
     }
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS_SHORT(PathOpsQuadLineIntersectionTest)
-
-DEFINE_TESTCLASS_SHORT(PathOpsQuadLineIntersectionTestOne)

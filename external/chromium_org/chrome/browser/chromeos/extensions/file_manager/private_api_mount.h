@@ -7,7 +7,6 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MOUNT_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MOUNT_H_
 
-#include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -18,67 +17,58 @@ namespace ui {
 struct SelectedFileInfo;
 }
 
-namespace file_manager {
+namespace extensions {
 
 // Implements chrome.fileBrowserPrivate.addMount method.
-// Mounts a device or a file.
-class AddMountFunction : public LoggedAsyncExtensionFunction {
+// Mounts removable devices and archive files.
+class FileBrowserPrivateAddMountFunction : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.addMount",
                              FILEBROWSERPRIVATE_ADDMOUNT)
 
-  AddMountFunction();
-
  protected:
-  virtual ~AddMountFunction();
+  virtual ~FileBrowserPrivateAddMountFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  // A callback method to handle the result of MarkCacheAsMounted.
-  void OnMountedStateSet(const std::string& mount_type,
-                         const base::FilePath::StringType& file_name,
-                         drive::FileError error,
-                         const base::FilePath& file_path);
+  // Part of Run(). Called after MarkCacheFielAsMounted for Drive File System.
+  // (or directly called from RunAsync() for other file system).
+  void RunAfterMarkCacheFileAsMounted(const base::FilePath& display_name,
+                                      drive::FileError error,
+                                      const base::FilePath& file_path);
 };
 
 // Implements chrome.fileBrowserPrivate.removeMount method.
-// Unmounts selected device. Expects mount point path as an argument.
-class RemoveMountFunction : public LoggedAsyncExtensionFunction {
+// Unmounts selected volume. Expects volume id as an argument.
+class FileBrowserPrivateRemoveMountFunction
+    : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.removeMount",
                              FILEBROWSERPRIVATE_REMOVEMOUNT)
 
-  RemoveMountFunction();
-
  protected:
-  virtual ~RemoveMountFunction();
+  virtual ~FileBrowserPrivateRemoveMountFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-
- private:
-  // A callback method to handle the result of GetSelectedFileInfo.
-  void GetSelectedFileInfoResponse(
-      const std::vector<ui::SelectedFileInfo>& files);
+  virtual bool RunAsync() OVERRIDE;
 };
 
-// Implements chrome.fileBrowserPrivate.getMountPoints method.
-class GetMountPointsFunction : public LoggedAsyncExtensionFunction {
+// Implements chrome.fileBrowserPrivate.getVolumeMetadataList method.
+class FileBrowserPrivateGetVolumeMetadataListFunction
+    : public LoggedAsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getMountPoints",
-                             FILEBROWSERPRIVATE_GETMOUNTPOINTS)
-
-  GetMountPointsFunction();
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getVolumeMetadataList",
+                             FILEBROWSERPRIVATE_GETVOLUMEMETADATALIST)
 
  protected:
-  virtual ~GetMountPointsFunction();
+  virtual ~FileBrowserPrivateGetVolumeMetadataListFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
-}  // namespace file_manager
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MOUNT_H_

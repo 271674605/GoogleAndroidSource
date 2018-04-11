@@ -28,12 +28,10 @@ import android.renderscript.Type;
 
 import android.renderscript.cts.ScriptC_negate;
 
-import com.android.cts.stub.R;
-
 public class ScriptTest extends RSBaseCompute {
 
     public void testScript() {
-        Script S = new ScriptC_primitives(mRS, mRes, R.raw.primitives);
+        Script S = new ScriptC_primitives(mRS);
 
         S.setTimeZone("America/New_York");
 

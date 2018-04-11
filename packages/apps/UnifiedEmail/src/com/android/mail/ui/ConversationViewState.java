@@ -56,14 +56,6 @@ public class ConversationViewState implements Parcelable {
         public static boolean isSuperCollapsed(int state) {
             return state == SUPER_COLLAPSED;
         }
-
-        /**
-         * Returns true if the {@link ExpansionState} is
-         * {@link #COLLAPSED} or {@link #SUPER_COLLAPSED}.
-         */
-        public static boolean isCollapsed(int state) {
-            return state > EXPANDED;
-        }
     }
 
     public ConversationViewState() {}
@@ -129,7 +121,7 @@ public class ConversationViewState implements Parcelable {
     }
 
     public void setInfoForConversation(Conversation conv) {
-        mConversationInfo = conv.conversationInfo != null ? conv.conversationInfo.toBlob() : null;
+        mConversationInfo = conv.conversationInfo.toBlob();
     }
 
     /**

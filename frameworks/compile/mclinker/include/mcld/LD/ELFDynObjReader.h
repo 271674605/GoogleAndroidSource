@@ -6,13 +6,9 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ELF_DYNAMIC_SHARED_OBJECT_READER_H
-#define MCLD_ELF_DYNAMIC_SHARED_OBJECT_READER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_ELFDYNOBJREADER_H
+#define MCLD_LD_ELFDYNOBJREADER_H
 #include <mcld/LD/DynObjReader.h>
-#include <llvm/Support/system_error.h>
 
 namespace mcld {
 
@@ -35,7 +31,7 @@ public:
   ~ELFDynObjReader();
 
   // -----  observers  ----- //
-  bool isMyFormat(Input &pFile) const;
+  bool isMyFormat(Input &pFile, bool &pContinue) const;
 
   // -----  readers  ----- //
   bool readHeader(Input& pFile);

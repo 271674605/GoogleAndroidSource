@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_DISPATCHER_HOST_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
@@ -30,6 +31,8 @@ class CONTENT_EXPORT SpeechRecognitionDispatcherHost
       int render_process_id,
       net::URLRequestContextGetter* context_getter);
 
+  base::WeakPtr<SpeechRecognitionDispatcherHost> AsWeakPtr();
+
   // SpeechRecognitionEventListener methods.
   virtual void OnRecognitionStart(int session_id) OVERRIDE;
   virtual void OnAudioStart(int session_id) OVERRIDE;
@@ -49,11 +52,12 @@ class CONTENT_EXPORT SpeechRecognitionDispatcherHost
                                    float noise_volume) OVERRIDE;
 
   // BrowserMessageFilter implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       BrowserThread::ID* thread) OVERRIDE;
+
+  virtual void OnChannelClosing() OVERRIDE;
 
  private:
   virtual ~SpeechRecognitionDispatcherHost();
@@ -61,13 +65,21 @@ class CONTENT_EXPORT SpeechRecognitionDispatcherHost
   void OnStartRequest(
       const SpeechRecognitionHostMsg_StartRequest_Params& params);
   void OnStartRequestOnIO(
+      int embedder_render_process_id,
+      int embedder_render_view_id,
       const SpeechRecognitionHostMsg_StartRequest_Params& params,
       bool filter_profanities);
   void OnAbortRequest(int render_view_id, int request_id);
   void OnStopCaptureRequest(int render_view_id, int request_id);
+  void OnAbortAllRequests(int render_view_id);
 
   int render_process_id_;
   scoped_refptr<net::URLRequestContextGetter> context_getter_;
+
+  // Used for posting asynchronous tasks (on the IO thread) without worrying
+  // about this class being destroyed in the meanwhile (due to browser shutdown)
+  // since tasks pending on a destroyed WeakPtr are automatically discarded.
+  base::WeakPtrFactory<SpeechRecognitionDispatcherHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SpeechRecognitionDispatcherHost);
 };

@@ -106,12 +106,13 @@ static HRESULT create_id(wchar_t* buffer, size_t bufferSize,
 
 static SkBitmap make_fake_bitmap(int width, int height) {
     SkBitmap bitmap;
-    bitmap.setConfig(SkBitmap::kNo_Config, width, height);
+    bitmap.setInfo(SkImageInfo::MakeUnknown(width, height));
     return bitmap;
 }
 
+// TODO: should inherit from SkBaseDevice instead of SkBitmapDevice...
 SkXPSDevice::SkXPSDevice()
-    : SkDevice(make_fake_bitmap(10000, 10000))
+    : SkBitmapDevice(make_fake_bitmap(10000, 10000))
     , fCurrentPage(0) {
 }
 
@@ -476,7 +477,7 @@ static XPS_SPREAD_METHOD xps_spread_method(SkShader::TileMode tileMode) {
     case SkShader::kMirror_TileMode:
         return XPS_SPREAD_METHOD_REFLECT;
     default:
-        SkASSERT(!"Unknown tile mode.");
+        SkDEBUGFAIL("Unknown tile mode.");
     }
     return XPS_SPREAD_METHOD_PAD;
 }
@@ -1159,10 +1160,6 @@ HRESULT SkXPSDevice::createXpsQuad(const SkPoint (&points)[4],
     return S_OK;
 }
 
-uint32_t SkXPSDevice::getDeviceCapabilities() {
-    return kVector_Capability;
-}
-
 void SkXPSDevice::clear(SkColor color) {
     //TODO: override this for XPS
     SkDEBUGF(("XPS clear not yet implemented."));
@@ -1201,6 +1198,14 @@ void SkXPSDevice::drawRect(const SkDraw& d,
                            const SkRect& r,
                            const SkPaint& paint) {
     this->internalDrawRect(d, r, true, paint);
+}
+
+void SkXPSDevice::drawRRect(const SkDraw& d,
+                            const SkRRect& rr,
+                            const SkPaint& paint) {
+    SkPath path;
+    path.addRRect(rr);
+    this->drawPath(d, path, paint, NULL, true);
 }
 
 void SkXPSDevice::internalDrawRect(const SkDraw& d,
@@ -1370,7 +1375,7 @@ HRESULT SkXPSDevice::addXpsPathGeometry(
                 // the corresponding line/quad/cubic verbs
                 break;
             default:
-                SkASSERT(!"unexpected verb");
+                SkDEBUGFAIL("unexpected verb");
                 break;
         }
     }
@@ -1584,11 +1589,7 @@ HRESULT SkXPSDevice::applyMask(const SkDraw& d,
     xy[1] = (SkShader::TileMode)3;
 
     SkBitmap bm;
-    bm.setConfig(SkBitmap::kA8_Config,
-                 mask.fBounds.width(),
-                 mask.fBounds.height(),
-                 mask.fRowBytes);
-    bm.setPixels(mask.fImage);
+    bm.installMaskPixels(mask);
 
     SkTScopedComPtr<IXpsOMTileBrush> maskBrush;
     HR(this->createXpsImageBrush(bm, m, xy, 0xFF, &maskBrush));
@@ -1691,9 +1692,7 @@ void SkXPSDevice::drawPath(const SkDraw& d,
             }
             platonicPath.transform(*prePathMatrix, skeletalPath);
         } else {
-            if (!matrix.preConcat(*prePathMatrix)) {
-                return;
-            }
+            matrix.preConcat(*prePathMatrix);
         }
     }
 
@@ -1879,7 +1878,7 @@ void SkXPSDevice::drawPath(const SkDraw& d,
             break;
         }
         default:
-            SkASSERT(!"Unknown SkPath::FillType.");
+            SkDEBUGFAIL("Unknown SkPath::FillType.");
     }
     HRVM(shadedGeometry->SetFillRule(xpsFillRule),
          "Could not set fill rule for shaded path.");
@@ -2051,6 +2050,7 @@ HRESULT SkXPSDevice::CreateTypefaceUse(const SkPaint& paint,
     SkTScopedComPtr<IStream> fontStream;
     int ttcIndex;
     SkStream* fontData = typeface->openStream(&ttcIndex);
+    //TODO: cannot handle FON fonts.
     HRM(SkIStream::CreateFromSkStream(fontData, true, &fontStream),
         "Could not create font stream.");
 
@@ -2085,7 +2085,7 @@ HRESULT SkXPSDevice::CreateTypefaceUse(const SkPaint& paint,
     newTypefaceUse.fontData = fontData;
     newTypefaceUse.xpsFont = xpsFontResource.release();
 
-    SkAutoGlyphCache agc = SkAutoGlyphCache(paint, NULL, &SkMatrix::I());
+    SkAutoGlyphCache agc(paint, NULL, &SkMatrix::I());
     SkGlyphCache* glyphCache = agc.getCache();
     unsigned int glyphCount = glyphCache->getGlyphCount();
     newTypefaceUse.glyphsUsed = new SkBitSet(glyphCount);
@@ -2125,7 +2125,7 @@ HRESULT SkXPSDevice::AddGlyphs(const SkDraw& d,
                 "Could not set transform matrix.");
             useCanvasForClip = true;
         } else {
-            SkASSERT(!"Attempt to add glyphs in perspective.");
+            SkDEBUGFAIL("Attempt to add glyphs in perspective.");
             useCanvasForClip = false;
         }
     }
@@ -2249,7 +2249,7 @@ static void text_draw_init(const SkPaint& paint,
             numGlyphGuess = byteLength / 2;
             break;
         default:
-            SK_DEBUGBREAK(true);
+            SK_ALWAYSBREAK(true);
     }
     procs.xpsGlyphs.setReserve(numGlyphGuess);
     procs.glyphUse = &glyphsUsed;
@@ -2286,6 +2286,7 @@ void SkXPSDevice::drawText(const SkDraw& d,
     HRV(CreateTypefaceUse(paint, &typeface));
 
     SkDraw myDraw(d);
+    myDraw.fMatrix = &SkMatrix::I();
     SkXPSDrawProcs procs;
     text_draw_init(paint, text, byteLen, *typeface->glyphsUsed, myDraw, procs);
 
@@ -2336,6 +2337,7 @@ void SkXPSDevice::drawPosText(const SkDraw& d,
     HRV(CreateTypefaceUse(paint, &typeface));
 
     SkDraw myDraw(d);
+    myDraw.fMatrix = &SkMatrix::I();
     SkXPSDrawProcs procs;
     text_draw_init(paint, text, byteLen, *typeface->glyphsUsed, myDraw, procs);
 
@@ -2375,7 +2377,7 @@ void SkXPSDevice::drawTextOnPath(const SkDraw& d, const void* text, size_t len,
      d.drawTextOnPath((const char*)text, len, path, matrix, paint);
 }
 
-void SkXPSDevice::drawDevice(const SkDraw& d, SkDevice* dev,
+void SkXPSDevice::drawDevice(const SkDraw& d, SkBaseDevice* dev,
                              int x, int y,
                              const SkPaint&) {
     SkXPSDevice* that = static_cast<SkXPSDevice*>(dev);
@@ -2402,16 +2404,10 @@ void SkXPSDevice::drawDevice(const SkDraw& d, SkDevice* dev,
          "Could not add layer to current visuals.");
 }
 
-bool SkXPSDevice::onReadPixels(const SkBitmap& bitmap, int x, int y,
-                               SkCanvas::Config8888) {
-    return false;
-}
-
-SkDevice* SkXPSDevice::onCreateCompatibleDevice(SkBitmap::Config config,
-                                                int width, int height,
-                                                bool isOpaque,
-                                                Usage usage) {
-    if (SkDevice::kGeneral_Usage == usage) {
+SkBaseDevice* SkXPSDevice::onCreateDevice(const SkImageInfo&, Usage) {
+//Conditional for bug compatibility with PDF device.
+#if 0
+    if (SkBaseDevice::kGeneral_Usage == usage) {
         return NULL;
         SK_CRASH();
         //To what stream do we write?
@@ -2420,12 +2416,12 @@ SkDevice* SkXPSDevice::onCreateCompatibleDevice(SkBitmap::Config config,
         //dev->BeginCanvas(s, s, SkMatrix::I());
         //return dev;
     }
-
+#endif
     return new SkXPSDevice(this->fXpsFactory.get());
 }
 
 SkXPSDevice::SkXPSDevice(IXpsOMObjectFactory* xpsFactory)
-    : SkDevice(make_fake_bitmap(10000, 10000))
+    : SkBitmapDevice(make_fake_bitmap(10000, 10000))
     , fCurrentPage(0) {
 
     HRVM(CoCreateInstance(
@@ -2439,6 +2435,6 @@ SkXPSDevice::SkXPSDevice(IXpsOMObjectFactory* xpsFactory)
          "Could not create canvas for layer.");
 }
 
-bool SkXPSDevice::allowImageFilter(SkImageFilter*) {
+bool SkXPSDevice::allowImageFilter(const SkImageFilter*) {
     return false;
 }

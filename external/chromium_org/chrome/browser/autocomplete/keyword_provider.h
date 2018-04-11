@@ -15,11 +15,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "components/metrics/proto/omnibox_input_type.pb.h"
 
+class KeywordExtensionsDelegate;
 class Profile;
 class TemplateURL;
 class TemplateURLService;
@@ -46,8 +47,7 @@ class TemplateURLService;
 // action "[keyword] %s".  If the user has typed a (possibly partial) keyword
 // but no search terms, the suggested result is shown greyed out, with
 // "<enter term(s)>" as the substituted input, and does nothing when selected.
-class KeywordProvider : public AutocompleteProvider,
-                        public content::NotificationObserver {
+class KeywordProvider : public AutocompleteProvider {
  public:
   KeywordProvider(AutocompleteProviderListener* listener, Profile* profile);
   // For testing.
@@ -59,17 +59,18 @@ class KeywordProvider : public AutocompleteProvider,
   // the first intervening whitespace).
   // If |trim_leading_whitespace| is true then leading whitespace in
   // |*remaining_input| will be trimmed.
-  static string16 SplitKeywordFromInput(const string16& input,
-                                        bool trim_leading_whitespace,
-                                        string16* remaining_input);
+  static base::string16 SplitKeywordFromInput(const base::string16& input,
+                                              bool trim_leading_whitespace,
+                                              base::string16* remaining_input);
 
   // Returns the replacement string from the user input. The replacement
   // string is the portion of the input that does not contain the keyword.
   // For example, the replacement string for "b blah" is blah.
   // If |trim_leading_whitespace| is true then leading whitespace in
   // replacement string will be trimmed.
-  static string16 SplitReplacementStringFromInput(const string16& input,
-                                                  bool trim_leading_whitespace);
+  static base::string16 SplitReplacementStringFromInput(
+      const base::string16& input,
+      bool trim_leading_whitespace);
 
   // Returns the matching substituting keyword for |input|, or NULL if there
   // is no keyword for the specified input.  If the matching keyword was found,
@@ -81,11 +82,11 @@ class KeywordProvider : public AutocompleteProvider,
   // If |text| corresponds (in the sense of
   // TemplateURLModel::CleanUserInputKeyword()) to an enabled, substituting
   // keyword, returns that keyword; returns the empty string otherwise.
-  string16 GetKeywordForText(const string16& text) const;
+  base::string16 GetKeywordForText(const base::string16& text) const;
 
   // Creates a fully marked-up AutocompleteMatch for a specific keyword.
-  AutocompleteMatch CreateVerbatimMatch(const string16& text,
-                                        const string16& keyword,
+  AutocompleteMatch CreateVerbatimMatch(const base::string16& text,
+                                        const base::string16& keyword,
                                         const AutocompleteInput& input);
 
   // AutocompleteProvider:
@@ -94,8 +95,7 @@ class KeywordProvider : public AutocompleteProvider,
   virtual void Stop(bool clear_cached_results) OVERRIDE;
 
  private:
-  class ScopedEndExtensionKeywordMode;
-  friend class ScopedEndExtensionKeywordMode;
+  friend class KeywordExtensionsDelegateImpl;
 
   virtual ~KeywordProvider();
 
@@ -107,15 +107,15 @@ class KeywordProvider : public AutocompleteProvider,
   // In general use this instead of SplitKeywordFromInput.
   // Leading whitespace in |*remaining_input| will be trimmed.
   static bool ExtractKeywordFromInput(const AutocompleteInput& input,
-                                      string16* keyword,
-                                      string16* remaining_input);
+                                      base::string16* keyword,
+                                      base::string16* remaining_input);
 
   // Determines the relevance for some input, given its type, whether the user
   // typed the complete keyword, and whether the user is in "prefer keyword
   // matches" mode, and whether the keyword supports replacement.
   // If |allow_exact_keyword_match| is false, the relevance for complete
   // keywords that support replacements is degraded.
-  static int CalculateRelevance(AutocompleteInput::Type type,
+  static int CalculateRelevance(metrics::OmniboxInputType::Type type,
                                 bool complete,
                                 bool support_replacement,
                                 bool prefer_keyword,
@@ -123,26 +123,19 @@ class KeywordProvider : public AutocompleteProvider,
 
   // Creates a fully marked-up AutocompleteMatch from the user's input.
   // If |relevance| is negative, calculate a relevance based on heuristics.
-  AutocompleteMatch CreateAutocompleteMatch(const TemplateURL* template_url,
-                                            const AutocompleteInput& input,
-                                            size_t prefix_length,
-                                            const string16& remaining_input,
-                                            bool allowed_to_be_default_match,
-                                            int relevance);
+  AutocompleteMatch CreateAutocompleteMatch(
+      const TemplateURL* template_url,
+      const AutocompleteInput& input,
+      size_t prefix_length,
+      const base::string16& remaining_input,
+      bool allowed_to_be_default_match,
+      int relevance);
 
   // Fills in the "destination_url" and "contents" fields of |match| with the
   // provided user input and keyword data.
-  void FillInURLAndContents(const string16& remaining_input,
+  void FillInURLAndContents(const base::string16& remaining_input,
                             const TemplateURL* element,
                             AutocompleteMatch* match) const;
-
-  void EnterExtensionKeywordMode(const std::string& extension_id);
-  void MaybeEndExtensionKeywordMode();
-
-  // content::NotificationObserver interface.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   TemplateURLService* GetTemplateURLService() const;
 
@@ -150,24 +143,9 @@ class KeywordProvider : public AutocompleteProvider,
   // TemplateURLService from the Profile is used.
   TemplateURLService* model_;
 
-  // Identifies the current input state. This is incremented each time the
-  // autocomplete edit's input changes in any way. It is used to tell whether
-  // suggest results from the extension are current.
-  int current_input_id_;
-
-  // The input state at the time we last asked the extension for suggest
-  // results.
-  AutocompleteInput extension_suggest_last_input_;
-
-  // We remember the last suggestions we've received from the extension in case
-  // we need to reset our matches without asking the extension again.
-  std::vector<AutocompleteMatch> extension_suggest_matches_;
-
-  // If non-empty, holds the ID of the extension whose keyword is currently in
-  // the URL bar while the autocomplete popup is open.
-  std::string current_keyword_extension_id_;
-
-  content::NotificationRegistrar registrar_;
+  // Delegate to handle the extensions-only logic for KeywordProvider.
+  // NULL when extensions are not enabled. May be NULL for tests.
+  scoped_ptr<KeywordExtensionsDelegate> extensions_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(KeywordProvider);
 };

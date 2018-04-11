@@ -5,8 +5,8 @@
 #ifndef REMOTING_PROTOCOL_SESSION_CONFIG_H_
 #define REMOTING_PROTOCOL_SESSION_CONFIG_H_
 
+#include <list>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -32,6 +32,7 @@ struct ChannelConfig {
     CODEC_VERBATIM,
     CODEC_ZIP,
     CODEC_VP8,
+    CODEC_VP9,
     CODEC_OPUS,
     CODEC_SPEEX,
   };
@@ -47,7 +48,7 @@ struct ChannelConfig {
   ChannelConfig(TransportType transport, int version, Codec codec);
 
   // operator== is overloaded so that std::find() works with
-  // std::vector<ChannelConfig>.
+  // std::list<ChannelConfig>.
   bool operator==(const ChannelConfig& b) const;
 
   TransportType transport;
@@ -100,37 +101,42 @@ class SessionConfig {
 // because it allows one to specify multiple configurations for each channel.
 class CandidateSessionConfig {
  public:
+  static scoped_ptr<CandidateSessionConfig> CreateEmpty();
+  static scoped_ptr<CandidateSessionConfig> CreateFrom(
+      const SessionConfig& config);
+  static scoped_ptr<CandidateSessionConfig> CreateDefault();
+
   ~CandidateSessionConfig();
 
-  const std::vector<ChannelConfig>& control_configs() const {
+  const std::list<ChannelConfig>& control_configs() const {
     return control_configs_;
   }
 
-  std::vector<ChannelConfig>* mutable_control_configs() {
+  std::list<ChannelConfig>* mutable_control_configs() {
     return &control_configs_;
   }
 
-  const std::vector<ChannelConfig>& event_configs() const {
+  const std::list<ChannelConfig>& event_configs() const {
     return event_configs_;
   }
 
-  std::vector<ChannelConfig>* mutable_event_configs() {
+  std::list<ChannelConfig>* mutable_event_configs() {
     return &event_configs_;
   }
 
-  const std::vector<ChannelConfig>& video_configs() const {
+  const std::list<ChannelConfig>& video_configs() const {
     return video_configs_;
   }
 
-  std::vector<ChannelConfig>* mutable_video_configs() {
+  std::list<ChannelConfig>* mutable_video_configs() {
     return &video_configs_;
   }
 
-  const std::vector<ChannelConfig>& audio_configs() const {
+  const std::list<ChannelConfig>& audio_configs() const {
     return audio_configs_;
   }
 
-  std::vector<ChannelConfig>* mutable_audio_configs() {
+  std::list<ChannelConfig>* mutable_audio_configs() {
     return &audio_configs_;
   }
 
@@ -152,13 +158,9 @@ class CandidateSessionConfig {
 
   scoped_ptr<CandidateSessionConfig> Clone() const;
 
-  static scoped_ptr<CandidateSessionConfig> CreateEmpty();
-  static scoped_ptr<CandidateSessionConfig> CreateFrom(
-      const SessionConfig& config);
-  static scoped_ptr<CandidateSessionConfig> CreateDefault();
-
-  // Helper method that modifies |config| to disable audio support.
-  static void DisableAudioChannel(CandidateSessionConfig* config);
+  // Helpers for enabling/disabling specific features.
+  void DisableAudioChannel();
+  void EnableVideoCodec(ChannelConfig::Codec codec);
 
  private:
   CandidateSessionConfig();
@@ -166,16 +168,16 @@ class CandidateSessionConfig {
   CandidateSessionConfig& operator=(const CandidateSessionConfig& b);
 
   static bool SelectCommonChannelConfig(
-      const std::vector<ChannelConfig>& host_configs_,
-      const std::vector<ChannelConfig>& client_configs_,
+      const std::list<ChannelConfig>& host_configs_,
+      const std::list<ChannelConfig>& client_configs_,
       ChannelConfig* config);
-  static bool IsChannelConfigSupported(const std::vector<ChannelConfig>& vector,
+  static bool IsChannelConfigSupported(const std::list<ChannelConfig>& list,
                                        const ChannelConfig& value);
 
-  std::vector<ChannelConfig> control_configs_;
-  std::vector<ChannelConfig> event_configs_;
-  std::vector<ChannelConfig> video_configs_;
-  std::vector<ChannelConfig> audio_configs_;
+  std::list<ChannelConfig> control_configs_;
+  std::list<ChannelConfig> event_configs_;
+  std::list<ChannelConfig> video_configs_;
+  std::list<ChannelConfig> audio_configs_;
 };
 
 }  // namespace protocol

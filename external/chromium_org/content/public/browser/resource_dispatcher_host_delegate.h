@@ -33,7 +33,6 @@ class Sender;
 
 namespace net {
 class AuthChallengeInfo;
-class SSLCertRequestInfo;
 class URLRequest;
 }
 
@@ -63,7 +62,6 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       ResourceType::Type resource_type,
       int child_id,
       int route_id,
-      bool is_continuation_of_transferred_request,
       ScopedVector<ResourceThrottle>* throttles);
 
   // Allows an embedder to add additional resource handlers for a download.
@@ -77,19 +75,6 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       bool is_content_initiated,
       bool must_download,
       ScopedVector<ResourceThrottle>* throttles);
-
-  // Called when an SSL Client Certificate is requested. If false is returned,
-  // the request is canceled. Otherwise, the certificate is chosen.
-  virtual bool AcceptSSLClientCertificateRequest(
-      net::URLRequest* request,
-      net::SSLCertRequestInfo* cert_request_info);
-
-  // Called when authentication is required and credentials are needed. If
-  // false is returned, CancelAuth() is called on the URLRequest and the error
-  // page is shown. If true is returned, the user will be prompted for
-  // authentication credentials.
-  virtual bool AcceptAuthRequest(net::URLRequest* request,
-                                 net::AuthChallengeInfo* auth_info);
 
   // Creates a ResourceDispatcherHostLoginDelegate that asks the user for a
   // username and password.
@@ -108,32 +93,28 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   virtual bool ShouldForceDownloadResource(
       const GURL& url, const std::string& mime_type);
 
-  // Returns true and sets |origin| and |target_id| if a Stream should be
-  // created for the resource.
+  // Returns true and sets |origin| if a Stream should be created for the
+  // resource.
   // If true is returned, a new Stream will be created and OnStreamCreated()
   // will be called with
-  // - the |target_id| returned by this function
   // - a StreamHandle instance for the Stream. The handle contains the URL for
   //   reading the Stream etc.
   // The Stream's origin will be set to |origin|.
+  //
+  // If the stream will be rendered in a BrowserPlugin, |payload| will contain
+  // the data that should be given to the old ResourceHandler to forward to the
+  // renderer process.
   virtual bool ShouldInterceptResourceAsStream(
-      content::ResourceContext* resource_context,
-      const GURL& url,
+      net::URLRequest* request,
       const std::string& mime_type,
       GURL* origin,
-      std::string* target_id);
+      std::string* payload);
 
-  // Informs the delegate that a Stream was created. |target_id| will be filled
-  // with the parameter returned by ShouldInterceptResourceAsStream(). The
-  // Stream can be read from the blob URL of the Stream, but can only be read
-  // once.
+  // Informs the delegate that a Stream was created. The Stream can be read from
+  // the blob URL of the Stream, but can only be read once.
   virtual void OnStreamCreated(
-      content::ResourceContext* resource_context,
-      int render_process_id,
-      int render_view_id,
-      const std::string& target_id,
-      scoped_ptr<StreamHandle> stream,
-      int64 expected_content_size);
+      net::URLRequest* request,
+      scoped_ptr<content::StreamHandle> stream);
 
   // Informs the delegate that a response has started.
   virtual void OnResponseStarted(
@@ -148,6 +129,9 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       net::URLRequest* request,
       ResourceContext* resource_context,
       ResourceResponse* response);
+
+  // Notification that a request has completed.
+  virtual void RequestComplete(net::URLRequest* url_request);
 
  protected:
   ResourceDispatcherHostDelegate();

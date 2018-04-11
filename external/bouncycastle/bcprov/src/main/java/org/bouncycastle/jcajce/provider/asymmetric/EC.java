@@ -79,11 +79,16 @@ public class EC
             provider.addAlgorithm("Alg.Alias.Signature.1.2.840.10045.4.1", "ECDSA");
             // BEGIN android-removed
             // provider.addAlgorithm("Alg.Alias.Signature." + TeleTrusTObjectIdentifiers.ecSignWithSha1, "ECDSA");
+            //
+            // provider.addAlgorithm("Signature.DETECDSA", PREFIX + "SignatureSpi$ecDetDSA");
+            // provider.addAlgorithm("Signature.SHA1WITHDETECDSA", PREFIX + "SignatureSpi$ecDetDSA");
+            // provider.addAlgorithm("Signature.SHA224WITHDETECDSA", PREFIX + "SignatureSpi$ecDetDSA224");
+            // provider.addAlgorithm("Signature.SHA256WITHDETECDSA", PREFIX + "SignatureSpi$ecDetDSA256");
+            // provider.addAlgorithm("Signature.SHA384WITHDETECDSA", PREFIX + "SignatureSpi$ecDetDSA384");
+            // provider.addAlgorithm("Signature.SHA512WITHDETECDSA", PREFIX + "SignatureSpi$ecDetDSA512");
             // END android-removed
 
-            // BEGIN android-removed
-            // addSignatureAlgorithm(provider, "SHA224", "ECDSA", PREFIX + "SignatureSpi$ecDSA224", X9ObjectIdentifiers.ecdsa_with_SHA224);
-            // END android-removed
+            addSignatureAlgorithm(provider, "SHA224", "ECDSA", PREFIX + "SignatureSpi$ecDSA224", X9ObjectIdentifiers.ecdsa_with_SHA224);
             addSignatureAlgorithm(provider, "SHA256", "ECDSA", PREFIX + "SignatureSpi$ecDSA256", X9ObjectIdentifiers.ecdsa_with_SHA256);
             addSignatureAlgorithm(provider, "SHA384", "ECDSA", PREFIX + "SignatureSpi$ecDSA384", X9ObjectIdentifiers.ecdsa_with_SHA384);
             addSignatureAlgorithm(provider, "SHA512", "ECDSA", PREFIX + "SignatureSpi$ecDSA512", X9ObjectIdentifiers.ecdsa_with_SHA512);

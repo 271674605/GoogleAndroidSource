@@ -33,7 +33,9 @@
 
 #include <map>
 #include <set>
+#include <vector>
 #include "ceres/internal/port.h"
+#include "glog/logging.h"
 
 namespace ceres {
 
@@ -84,11 +86,8 @@ class OrderedGroups {
     element_to_group_.clear();
   }
 
-  // Remove the element, no matter what group it is in. If the element
-  // is not a member of any group, calling this method will result in
-  // a crash.
-  //
-  // Return value indicates if the element was actually removed.
+  // Remove the element, no matter what group it is in. Return value
+  // indicates if the element was actually removed.
   bool Remove(const T element) {
     const int current_group = GroupId(element);
     if (current_group < 0) {
@@ -104,6 +103,20 @@ class OrderedGroups {
 
     element_to_group_.erase(element);
     return true;
+  }
+
+  // Bulk remove elements. The return value indicates the number of
+  // elements successfully removed.
+  int Remove(const vector<T>& elements) {
+    if (NumElements() == 0 || elements.size() == 0) {
+      return 0;
+    }
+
+    int num_removed = 0;
+    for (int i = 0; i < elements.size(); ++i) {
+      num_removed += Remove(elements[i]);
+    }
+    return num_removed;
   }
 
   // Reverse the order of the groups in place.
@@ -159,8 +172,20 @@ class OrderedGroups {
     return group_to_elements_.size();
   }
 
+  // The first group with one or more elements. Calling this when
+  // there are no groups with non-zero elements will result in a
+  // crash.
+  int MinNonZeroGroup() const {
+    CHECK_NE(NumGroups(), 0);
+    return group_to_elements_.begin()->first;
+  }
+
   const map<int, set<T> >& group_to_elements() const {
     return group_to_elements_;
+  }
+
+  const map<T, int>& element_to_group() const {
+    return element_to_group_;
   }
 
  private:

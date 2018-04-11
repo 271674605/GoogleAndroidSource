@@ -22,7 +22,6 @@
 namespace clang {
   class DiagnosticsEngine;
   class SourceLocation;
-  struct WarningOption;
 
   // Import the diagnostic enums themselves.
   namespace diag {
@@ -49,7 +48,7 @@ namespace clang {
     // Get typedefs for common diagnostics.
     enum {
 #define DIAG(ENUM,FLAGS,DEFAULT_MAPPING,DESC,GROUP,\
-             SFINAE,ACCESS,CATEGORY,NOWERROR,SHOWINSYSHEADER) ENUM,
+             SFINAE,CATEGORY,NOWERROR,SHOWINSYSHEADER) ENUM,
 #define COMMONSTART
 #include "clang/Basic/DiagnosticCommonKinds.inc"
       NUM_BUILTIN_COMMON_DIAGNOSTICS
@@ -57,48 +56,43 @@ namespace clang {
     };
 
     /// Enum values that allow the client to map NOTEs, WARNINGs, and EXTENSIONs
-    /// to either MAP_IGNORE (nothing), MAP_WARNING (emit a warning), MAP_ERROR
-    /// (emit as an error).  It allows clients to map errors to
-    /// MAP_ERROR/MAP_DEFAULT or MAP_FATAL (stop emitting diagnostics after this
-    /// one).
-    enum Mapping {
+    /// to either Ignore (nothing), Remark (emit a remark), Warning
+    /// (emit a warning) or Error (emit as an error).  It allows clients to
+    /// map ERRORs to Error or Fatal (stop emitting diagnostics after this one).
+    enum class Severity {
       // NOTE: 0 means "uncomputed".
-      MAP_IGNORE  = 1,     ///< Map this diagnostic to nothing, ignore it.
-      MAP_WARNING = 2,     ///< Map this diagnostic to a warning.
-      MAP_ERROR   = 3,     ///< Map this diagnostic to an error.
-      MAP_FATAL   = 4      ///< Map this diagnostic to a fatal error.
+      Ignored = 1, ///< Do not present this diagnostic, ignore it.
+      Remark = 2,  ///< Present this diagnostic as a remark.
+      Warning = 3, ///< Present this diagnostic as a warning.
+      Error = 4,   ///< Present this diagnostic as an error.
+      Fatal = 5    ///< Present this diagnostic as a fatal error.
     };
   }
 
-class DiagnosticMappingInfo {
-  unsigned Mapping : 3;
+class DiagnosticMapping {
+  unsigned Severity : 3;
   unsigned IsUser : 1;
   unsigned IsPragma : 1;
-  unsigned HasShowInSystemHeader : 1;
   unsigned HasNoWarningAsError : 1;
   unsigned HasNoErrorAsFatal : 1;
 
 public:
-  static DiagnosticMappingInfo Make(diag::Mapping Mapping, bool IsUser,
-                                    bool IsPragma) {
-    DiagnosticMappingInfo Result;
-    Result.Mapping = Mapping;
+  static DiagnosticMapping Make(diag::Severity Severity, bool IsUser,
+                                bool IsPragma) {
+    DiagnosticMapping Result;
+    Result.Severity = (unsigned)Severity;
     Result.IsUser = IsUser;
     Result.IsPragma = IsPragma;
-    Result.HasShowInSystemHeader = 0;
     Result.HasNoWarningAsError = 0;
     Result.HasNoErrorAsFatal = 0;
     return Result;
   }
 
-  diag::Mapping getMapping() const { return diag::Mapping(Mapping); }
-  void setMapping(diag::Mapping Value) { Mapping = Value; }
+  diag::Severity getSeverity() const { return (diag::Severity)Severity; }
+  void setSeverity(diag::Severity Value) { Severity = (unsigned)Value; }
 
   bool isUser() const { return IsUser; }
   bool isPragma() const { return IsPragma; }
-
-  bool hasShowInSystemHeader() const { return HasShowInSystemHeader; }
-  void setShowInSystemHeader(bool Value) { HasShowInSystemHeader = Value; }
 
   bool hasNoWarningAsError() const { return HasNoWarningAsError; }
   void setNoWarningAsError(bool Value) { HasNoWarningAsError = Value; }
@@ -114,7 +108,7 @@ class DiagnosticIDs : public RefCountedBase<DiagnosticIDs> {
 public:
   /// \brief The level of the diagnostic, after it has been through mapping.
   enum Level {
-    Ignored, Note, Warning, Error, Fatal
+    Ignored, Note, Remark, Warning, Error, Fatal
   };
 
 private:
@@ -125,11 +119,16 @@ public:
   DiagnosticIDs();
   ~DiagnosticIDs();
 
-  /// \brief Return an ID for a diagnostic with the specified message and level.
+  /// \brief Return an ID for a diagnostic with the specified format string and
+  /// level.
   ///
   /// If this is the first request for this diagnostic, it is registered and
   /// created, otherwise the existing ID is returned.
-  unsigned getCustomDiagID(Level L, StringRef Message);
+
+  // FIXME: Replace this function with a create-only facilty like
+  // createCustomDiagIDFromFormatString() to enforce safe usage. At the time of
+  // writing, nearly all callers of this function were invalid.
+  unsigned getCustomDiagID(Level L, StringRef FormatString);
 
   //===--------------------------------------------------------------------===//
   // Diagnostic classification and reporting interfaces.
@@ -240,12 +239,6 @@ public:
   static StringRef getNearestWarningOption(StringRef Group);
 
 private:
-  /// \brief Get the set of all diagnostic IDs in the given group.
-  ///
-  /// \param[out] Diags - On return, the diagnostics in the group.
-  void getDiagnosticsInGroup(const WarningOption *Group,
-                             SmallVectorImpl<diag::kind> &Diags) const;
- 
   /// \brief Classify the specified diagnostic ID into a Level, consumable by
   /// the DiagnosticClient.
   /// 
@@ -254,15 +247,13 @@ private:
   ///
   /// \param Loc The source location for which we are interested in finding out
   /// the diagnostic state. Can be null in order to query the latest state.
-  DiagnosticIDs::Level getDiagnosticLevel(unsigned DiagID, SourceLocation Loc,
-                                          const DiagnosticsEngine &Diag) const;
+  DiagnosticIDs::Level
+  getDiagnosticLevel(unsigned DiagID, SourceLocation Loc,
+                     const DiagnosticsEngine &Diag) const LLVM_READONLY;
 
-  /// \brief An internal implementation helper used when \p DiagClass is
-  /// already known.
-  DiagnosticIDs::Level getDiagnosticLevel(unsigned DiagID,
-                                          unsigned DiagClass,
-                                          SourceLocation Loc,
-                                          const DiagnosticsEngine &Diag) const;
+  diag::Severity
+  getDiagnosticSeverity(unsigned DiagID, SourceLocation Loc,
+                        const DiagnosticsEngine &Diag) const LLVM_READONLY;
 
   /// \brief Used to report a diagnostic that is finally fully formed.
   ///

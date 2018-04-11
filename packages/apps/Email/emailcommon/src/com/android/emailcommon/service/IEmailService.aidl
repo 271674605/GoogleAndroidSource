@@ -17,49 +17,50 @@
 
 package com.android.emailcommon.service;
 
-import com.android.emailcommon.provider.HostAuth;
-import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.service.HostAuthCompat;
 import com.android.emailcommon.service.IEmailServiceCallback;
 import com.android.emailcommon.service.SearchParams;
+
 import android.os.Bundle;
 
 interface IEmailService {
-    Bundle validate(in HostAuth hostauth);
+    // Core email operations.
+    // Many of these functions return status codes. The valid status codes are defined in
+    // EmailServiceStatus.java
+    oneway void loadAttachment(IEmailServiceCallback cb, long accountId, long attachmentId,
+            boolean background);
 
-    oneway void startSync(long mailboxId, boolean userRequest, int deltaMessageCount);
-    oneway void stopSync(long mailboxId);
+    void updateFolderList(long accountId);
 
-    // TODO: loadMore appears to be unused; if so, delete it.
-    oneway void loadMore(long messageId);
-    oneway void loadAttachment(IEmailServiceCallback cb, long attachmentId, boolean background);
-
-    oneway void updateFolderList(long accountId);
-
-    boolean createFolder(long accountId, String name);
-    boolean deleteFolder(long accountId, String name);
-    boolean renameFolder(long accountId, String oldName, String newName);
-
-    oneway void setLogging(int on);
-
-    oneway void hostChanged(long accountId);
-
-    Bundle autoDiscover(String userName, String password);
-
-    oneway void sendMeetingResponse(long messageId, int response);
-
-    // Must not be oneway; unless an exception is thrown, the caller is guaranteed that the action
-    // has been completed
-    void deleteAccountPIMData(String emailAddress);
-
-    int getApiLevel();
-
-    // API level 2
-    int searchMessages(long accountId, in SearchParams params, long destMailboxId);
-
+    // TODO: For Eas, sync() will also sync the outbox. We should make IMAP and POP work the same
+    // way and get rid of sendMail().
     void sendMail(long accountId);
 
-    // API level 3
-    int getCapabilities(in Account acct);
+    int sync(long accountId, inout Bundle syncExtras);
 
-    void serviceUpdated(String emailAddress);
+    // Push-related functionality.
+
+    // Notify the service that the push configuration has changed for an account.
+    void pushModify(long accountId);
+
+    // Other email operations.
+    Bundle validate(in HostAuthCompat hostauth);
+
+    int searchMessages(long accountId, in SearchParams params, long destMailboxId);
+
+    // PIM functionality (not strictly EAS specific).
+    oneway void sendMeetingResponse(long messageId, int response);
+
+    // Specific to EAS protocol.
+    // TODO: this passes a HostAuth back in the bundle. We should be using a HostAuthCom for that.
+    Bundle autoDiscover(String userName, String password);
+
+    // Service control operations (i.e. does not generate a client-server message).
+    // TODO: We should store the logging flags in the contentProvider, and this call should just
+    // trigger the service to reload the flags.
+    oneway void setLogging(int flags);
+
+    void deleteExternalAccountPIMData(String emailAddress);
+
+    int getApiVersion();
 }

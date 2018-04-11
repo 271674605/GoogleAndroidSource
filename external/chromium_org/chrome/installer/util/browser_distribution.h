@@ -11,6 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/version.h"
 #include "chrome/installer/util/util_constants.h"
@@ -18,6 +19,8 @@
 #if defined(OS_WIN)
 #include <windows.h>  // NOLINT
 #endif
+
+class AppRegistrationData;
 
 class BrowserDistribution {
  public:
@@ -29,7 +32,24 @@ class BrowserDistribution {
     NUM_TYPES
   };
 
-  virtual ~BrowserDistribution() {}
+  enum ShortcutType {
+    SHORTCUT_CHROME,
+    SHORTCUT_CHROME_ALTERNATE,
+    SHORTCUT_APP_LAUNCHER
+  };
+
+  enum Subfolder {
+    SUBFOLDER_CHROME,
+    SUBFOLDER_APPS,
+  };
+
+  enum DefaultBrowserControlPolicy {
+    DEFAULT_BROWSER_UNSUPPORTED,
+    DEFAULT_BROWSER_OS_CONTROL_ONLY,
+    DEFAULT_BROWSER_FULL_CONTROL
+  };
+
+  virtual ~BrowserDistribution();
 
   static BrowserDistribution* GetDistribution();
 
@@ -37,78 +57,98 @@ class BrowserDistribution {
 
   Type GetType() const { return type_; }
 
-  virtual void DoPostUninstallOperations(const Version& version,
-                                         const base::FilePath& local_data_path,
-                                         const string16& distribution_data);
+  // Getter and adaptors for the underlying |app_reg_data_|.
+  const AppRegistrationData& GetAppRegistrationData() const;
+  base::string16 GetAppGuid() const;
+  base::string16 GetStateKey() const;
+  base::string16 GetStateMediumKey() const;
+  base::string16 GetVersionKey() const;
+
+  virtual void DoPostUninstallOperations(
+      const Version& version,
+      const base::FilePath& local_data_path,
+      const base::string16& distribution_data);
 
   // Returns the GUID to be used when registering for Active Setup.
-  virtual string16 GetActiveSetupGuid();
-
-  virtual string16 GetAppGuid();
+  virtual base::string16 GetActiveSetupGuid();
 
   // Returns the unsuffixed application name of this program.
   // This is the base of the name registered with Default Programs on Windows.
   // IMPORTANT: This should only be called by the installer which needs to make
   // decisions on the suffixing of the upcoming install, not by external callers
   // at run-time.
-  virtual string16 GetBaseAppName();
+  virtual base::string16 GetBaseAppName();
 
-  // Returns the localized name of the program.
-  virtual string16 GetAppShortCutName();
+  // Returns the localized display name of this distribution.
+  virtual base::string16 GetDisplayName();
 
-  virtual string16 GetAlternateApplicationName();
+  // Returns the localized name of the shortcut identified by |shortcut_type|
+  // for this distribution.
+  virtual base::string16 GetShortcutName(ShortcutType shortcut_type);
+
+  // Returns the index of the icon for the product identified by
+  // |shortcut_type|, inside the file specified by GetIconFilename().
+  virtual int GetIconIndex(ShortcutType shortcut_type);
+
+  // Returns the executable filename (not path) that contains the product icon.
+  virtual base::string16 GetIconFilename();
+
+  // Returns the localized name of the subfolder in the Start Menu identified by
+  // |subfolder_type| that this distribution should create shortcuts in. For
+  // SUBFOLDER_CHROME this returns GetShortcutName(SHORTCUT_CHROME).
+  virtual base::string16 GetStartMenuShortcutSubfolder(
+      Subfolder subfolder_type);
 
   // Returns the unsuffixed appid of this program.
   // The AppUserModelId is a property of Windows programs.
   // IMPORTANT: This should only be called by ShellUtil::GetAppId as the appid
   // should be suffixed in all scenarios.
-  virtual string16 GetBaseAppId();
+  virtual base::string16 GetBaseAppId();
 
-  virtual string16 GetInstallSubDir();
+  // Returns the Browser ProgId prefix (e.g. ChromeHTML, ChromiumHTM, etc...).
+  // The full id is of the form |prefix|.|suffix| and is limited to a maximum
+  // length of 39 characters including null-terminator.  See
+  // http://msdn.microsoft.com/library/aa911706.aspx for details.  We define
+  // |suffix| as a fixed-length 26-character alphanumeric identifier, therefore
+  // the return value of this function must have a maximum length of
+  // 39 - 1(null-term) - 26(|suffix|) - 1(dot separator) = 11 characters.
+  virtual base::string16 GetBrowserProgIdPrefix();
 
-  virtual string16 GetPublisherName();
+  // Returns the Browser ProgId description.
+  virtual base::string16 GetBrowserProgIdDesc();
 
-  virtual string16 GetAppDescription();
+  virtual base::string16 GetInstallSubDir();
 
-  virtual string16 GetLongAppDescription();
+  virtual base::string16 GetPublisherName();
+
+  virtual base::string16 GetAppDescription();
+
+  virtual base::string16 GetLongAppDescription();
 
   virtual std::string GetSafeBrowsingName();
 
-  virtual string16 GetStateKey();
-
-  virtual string16 GetStateMediumKey();
-
   virtual std::string GetNetworkStatsServer() const;
 
-  virtual std::string GetHttpPipeliningTestServer() const;
-
 #if defined(OS_WIN)
-  virtual string16 GetDistributionData(HKEY root_key);
+  virtual base::string16 GetDistributionData(HKEY root_key);
 #endif
 
-  virtual string16 GetUninstallLinkName();
+  virtual base::string16 GetUninstallLinkName();
 
-  virtual string16 GetUninstallRegPath();
+  virtual base::string16 GetUninstallRegPath();
 
-  virtual string16 GetVersionKey();
-
-  virtual bool CanSetAsDefault();
+  // Returns an enum specifying the different ways in which this distribution
+  // is allowed to be set as default.
+  virtual DefaultBrowserControlPolicy GetDefaultBrowserControlPolicy();
 
   virtual bool CanCreateDesktopShortcuts();
 
-  // Returns the executable filename (not path) that contains the product icon.
-  virtual string16 GetIconFilename();
-
-  // Returns the index of the icon for the product, inside the file specified by
-  // GetIconFilename().
-  virtual int GetIconIndex();
-
-  virtual bool GetChromeChannel(string16* channel);
+  virtual bool GetChromeChannel(base::string16* channel);
 
   // Returns true if this distribution includes a DelegateExecute verb handler,
   // and provides the CommandExecuteImpl class UUID if |handler_class_uuid| is
   // non-NULL.
-  virtual bool GetCommandExecuteImplClsid(string16* handler_class_uuid);
+  virtual bool GetCommandExecuteImplClsid(base::string16* handler_class_uuid);
 
   // Returns true if this distribution uses app_host.exe to run platform apps.
   virtual bool AppHostIsSupported();
@@ -124,13 +164,15 @@ class BrowserDistribution {
   virtual bool HasUserExperiments();
 
  protected:
-  explicit BrowserDistribution(Type type);
+  BrowserDistribution(Type type, scoped_ptr<AppRegistrationData> app_reg_data);
 
   template<class DistributionClass>
   static BrowserDistribution* GetOrCreateBrowserDistribution(
       BrowserDistribution** dist);
 
   const Type type_;
+
+  scoped_ptr<AppRegistrationData> app_reg_data_;
 
  private:
   BrowserDistribution();

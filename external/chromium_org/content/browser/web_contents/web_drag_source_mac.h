@@ -83,7 +83,10 @@ CONTENT_EXPORT
 - (void)endDragAt:(NSPoint)screenPoint
         operation:(NSDragOperation)operation;
 
-// Drag moved; hook up to -draggedImage:movedTo:.
-- (void)moveDragTo:(NSPoint)screenPoint;
+// Call to drag a promised file to the given path (should be called before
+// -endDragAt:...); hook up to -namesOfPromisedFilesDroppedAtDestination:.
+// Returns the file name (not including path) of the file deposited (or which
+// will be deposited).
+- (NSString*)dragPromisedFileTo:(NSString*)path;
 
 @end

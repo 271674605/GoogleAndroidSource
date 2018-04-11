@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -179,12 +179,14 @@ tNFA_STATUS NFA_RwWriteNDef (UINT8 *p_data, UINT32 len)
 **                  The NFA_RW_PRESENCE_CHECK_EVT w/ status is used to
 **                  indicate presence or non-presence.
 **
+**                  option is used only with ISO-DEP protocol
+**
 ** Returns
 **                  NFA_STATUS_OK if successfully initiated
 **                  NFA_STATUS_FAILED otherwise
 **
 *****************************************************************************/
-tNFA_STATUS NFA_RwPresenceCheck (void)
+tNFA_STATUS NFA_RwPresenceCheck (tNFA_RW_PRES_CHK_OPTION option)
 {
     tNFA_RW_OPERATION *p_msg;
 
@@ -194,6 +196,7 @@ tNFA_STATUS NFA_RwPresenceCheck (void)
     {
         p_msg->hdr.event = NFA_RW_OP_REQUEST_EVT;
         p_msg->op        = NFA_RW_OP_PRESENCE_CHECK;
+        p_msg->params.option    = option;
 
         nfa_sys_sendmsg (p_msg);
 

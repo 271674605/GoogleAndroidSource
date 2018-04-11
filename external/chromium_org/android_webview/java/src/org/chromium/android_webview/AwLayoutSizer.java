@@ -1,21 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview;
 
-import android.util.Pair;
-import android.view.View.MeasureSpec;
 import android.view.View;
-
-import org.chromium.content.browser.ContentViewCore;
+import android.view.View.MeasureSpec;
 
 /**
  * Helper methods used to manage the layout of the View that contains AwContents.
  */
 public class AwLayoutSizer {
-    public static final int FIXED_LAYOUT_HEIGHT = 0;
-
     // These are used to prevent a re-layout if the content size changes within a dimension that is
     // fixed by the view system.
     private boolean mWidthMeasurementIsFixed;
@@ -28,8 +23,6 @@ public class AwLayoutSizer {
     // Page scale factor. This is set to zero initially so that we don't attempt to do a layout if
     // we get the content size change notification first and a page scale change second.
     private float mPageScaleFactor = 0.0f;
-    // The page scale factor that was used in the most recent onMeasure call.
-    private float mLastMeasuredPageScaleFactor = 0.0f;
 
     // Whether to postpone layout requests.
     private boolean mFreezeLayoutRequests;
@@ -43,21 +36,17 @@ public class AwLayoutSizer {
     // If mHeightMeasurementLimited is true then this contains the height limit.
     private int mHeightMeasurementLimit;
 
-    // The most recent width and height seen in onSizeChanged.
-    private int mLastWidth;
-    private int mLastHeight;
-
-    // Used to prevent sending multiple setFixedLayoutSize notifications with the same values.
-    private int mLastSentFixedLayoutSizeWidth = -1;
-    private int mLastSentFixedLayoutSizeHeight = -1;
-
     // Callback object for interacting with the View.
     private Delegate mDelegate;
 
+    /**
+     * Delegate interface through which the AwLayoutSizer communicates with the view it's sizing.
+     */
     public interface Delegate {
         void requestLayout();
         void setMeasuredDimension(int measuredWidth, int measuredHeight);
-        void setFixedLayoutSize(int widthDip, int heightDip);
+        boolean isLayoutParamsHeightWrapContent();
+        void setForceZeroLayoutHeight(boolean forceZeroHeight);
     }
 
     /**
@@ -138,10 +127,6 @@ public class AwLayoutSizer {
             } else {
                 mDelegate.requestLayout();
             }
-        } else if (pageScaleChanged && mLastWidth != 0) {
-            // Because the fixed layout size is directly impacted by the pageScaleFactor we must
-            // update it even if the physical size of the view doesn't change.
-            updateFixedLayoutSize(mLastWidth, mLastHeight, mPageScaleFactor);
         }
     }
 
@@ -160,8 +145,6 @@ public class AwLayoutSizer {
 
         int measuredHeight = contentHeightPix;
         int measuredWidth = contentWidthPix;
-
-        mLastMeasuredPageScaleFactor = mPageScaleFactor;
 
         // Always use the given size unless unspecified. This matches WebViewClassic behavior.
         mWidthMeasurementIsFixed = (widthMode != MeasureSpec.UNSPECIFIED);
@@ -195,9 +178,7 @@ public class AwLayoutSizer {
      * changed.
      */
     public void onSizeChanged(int w, int h, int ow, int oh) {
-        mLastWidth = w;
-        mLastHeight = h;
-        updateFixedLayoutSize(mLastWidth, mLastHeight, mLastMeasuredPageScaleFactor);
+        updateLayoutSettings();
     }
 
     /**
@@ -206,52 +187,12 @@ public class AwLayoutSizer {
      * This should be called after onSizeChanged regardless of whether the size has changed or not.
      */
     public void onLayoutChange() {
-        updateFixedLayoutSize(mLastWidth, mLastHeight, mLastMeasuredPageScaleFactor);
+        updateLayoutSettings();
     }
 
-    private void setFixedLayoutSize(int widthDip, int heightDip) {
-        if (widthDip == mLastSentFixedLayoutSizeWidth &&
-                heightDip == mLastSentFixedLayoutSizeHeight)
-            return;
-        mLastSentFixedLayoutSizeWidth = widthDip;
-        mLastSentFixedLayoutSizeHeight = heightDip;
-
-        mDelegate.setFixedLayoutSize(widthDip, heightDip);
-    }
-
-    // This needs to be called every time either the physical size of the view is changed or the
-    // pageScale is changed.  Since we need to ensure that this is called immediately after
-    // onSizeChanged we can't just wait for onLayoutChange. At the same time we can't only make this
-    // call from onSizeChanged, since onSizeChanged won't fire if the view's physical size doesn't
-    // change.
-    private void updateFixedLayoutSize(int w, int h, float pageScaleFactor) {
-        // If the WebView's measuredDimension depends on the size of it's contents (which is the
-        // case if any of the measurement modes are AT_MOST or UNSPECIFIED) the viewport size
-        // cannot be directly calculated from the size as that can result in the layout being
-        // unstable or unpredictable.
-        // If both the width and height are fixed (specified by the parent) then content size
-        // changes will not cause subsequent layout passes and so we don't need to do anything
-        // special.
-        if ((mWidthMeasurementIsFixed && mHeightMeasurementIsFixed) || pageScaleFactor == 0) {
-            setFixedLayoutSize(0, 0);
-            return;
-        }
-
-        final double dipAndPageScale = pageScaleFactor * mDIPScale;
-        final int contentWidthPix = (int) (mContentWidthCss * dipAndPageScale);
-
-        int widthDip = (int) Math.ceil(w / dipAndPageScale);
-
-        // Make sure that we don't introduce rounding errors if the viewport is to be exactly as
-        // wide as the contents.
-        if (w == contentWidthPix) {
-            widthDip = mContentWidthCss;
-        }
-
-        // This is workaround due to the fact that in wrap content mode we need to use a fixed
-        // layout size independent of view height, otherwise things like <div style="height:120%">
-        // cause the webview to grow indefinitely. We need to use a height independent of the
-        // webview's height. 0 is the value used in WebViewClassic.
-        setFixedLayoutSize(widthDip, FIXED_LAYOUT_HEIGHT);
+    // This needs to be called every time either the physical size of the view is changed or layout
+    // params are updated.
+    private void updateLayoutSettings() {
+        mDelegate.setForceZeroLayoutHeight(mDelegate.isLayoutParamsHeightWrapContent());
     }
 }

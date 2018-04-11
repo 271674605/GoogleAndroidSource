@@ -34,6 +34,13 @@ Element::~Element() {
     clear();
 }
 
+void Element::operator delete(void* ptr) {
+    if (ptr) {
+        Element *e = (Element*) ptr;
+        e->getContext()->mHal.funcs.freeRuntimeMem(ptr);
+    }
+}
+
 void Element::preDestroy() const {
     for (uint32_t ct = 0; ct < mRSC->mStateElement.mElements.size(); ct++) {
         if (mRSC->mStateElement.mElements[ct] == this) {
@@ -238,10 +245,23 @@ ObjectBaseRef<const Element> Element::createRef(Context *rsc, RsDataType dt, RsD
     }
     ObjectBase::asyncUnlock();
 
-    Element *e = new Element(rsc);
+    // Element objects must use allocator specified by the driver
+    void* allocMem = rsc->mHal.funcs.allocRuntimeMem(sizeof(Element), 0);
+    if (!allocMem) {
+        rsc->setError(RS_ERROR_FATAL_DRIVER, "Couldn't allocate memory for Element");
+        return NULL;
+    }
+
+    Element *e = new (allocMem) Element(rsc);
     returnRef.set(e);
     e->mComponent.set(dt, dk, isNorm, vecSize);
     e->compute();
+
+#ifdef RS_FIND_OFFSETS
+    ALOGE("pointer for element: %p", e);
+    ALOGE("pointer for element.drv: %p", &e->mHal.drv);
+#endif
+
 
     ObjectBase::asyncLock();
     rsc->mStateElement.mElements.push(e);
@@ -289,7 +309,14 @@ ObjectBaseRef<const Element> Element::createRef(Context *rsc, size_t count, cons
     }
     ObjectBase::asyncUnlock();
 
-    Element *e = new Element(rsc);
+    // Element objects must use allocator specified by the driver
+    void* allocMem = rsc->mHal.funcs.allocRuntimeMem(sizeof(Element), 0);
+    if (!allocMem) {
+        rsc->setError(RS_ERROR_FATAL_DRIVER, "Couldn't allocate memory for Element");
+        return NULL;
+    }
+
+    Element *e = new (allocMem) Element(rsc);
     returnRef.set(e);
     e->mFields = new ElementField_t [count];
     e->mFieldCount = count;
@@ -359,6 +386,14 @@ void Element::decRefs(const void *ptr) const {
                 p2 += mFields[i].e->getSizeBytes();
             }
         }
+    }
+}
+
+void Element::callUpdateCacheObject(const Context *rsc, void *dstObj) const {
+    if (rsc->mHal.funcs.element.updateCachedObject != NULL) {
+        rsc->mHal.funcs.element.updateCachedObject(rsc, this, (rs_element *)dstObj);
+    } else {
+        *((const void **)dstObj) = this;
     }
 }
 

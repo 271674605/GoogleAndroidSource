@@ -1,4 +1,4 @@
-//===- header.h -----------------------------------------------------------===//
+//===- DynObjFileFormat.h -------------------------------------------------===//
 //
 //                     The MCLinker Project
 //
@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef DYNOBJFORMAT_H
-#define DYNOBJFORMAT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_DYNOBJFILEFORMAT_H
+#define MCLD_LD_DYNOBJFILEFORMAT_H
 
 namespace mcld
 {

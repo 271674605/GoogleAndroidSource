@@ -1,4 +1,4 @@
-// REQUIRES: disabled
+// REQUIRES: x86-registered-target
 // RUN: %clang_cc1 %s -triple i386-apple-darwin10 -verify -fasm-blocks
 
 #define M __asm int 0x2c
@@ -33,6 +33,17 @@ void t8() {
 }
 void t9() {
   __asm nop __asm nop ; __asm nop
+}
+void t10() {
+  __asm {
+    mov eax, 0
+    __asm {
+      mov eax, 1
+      {
+        mov eax, 2
+      }
+    }
+  }
 }
 int t_fail() { // expected-note {{to match this}}
   __asm 

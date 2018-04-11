@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2012-2013 Broadcom Corporation
+ *  Copyright (C) 2012-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -119,6 +119,11 @@
 
 #ifndef NFC_HAL_I93_FLAG_DATA_RATE
 #define NFC_HAL_I93_FLAG_DATA_RATE              NFC_HAL_I93_FLAG_DATA_RATE_HIGH
+#endif
+
+/* NFC HAL HCI */
+#ifndef NFC_HAL_HCI_INCLUDED
+#define NFC_HAL_HCI_INCLUDED                    TRUE
 #endif
 
 /* Quick Timer */

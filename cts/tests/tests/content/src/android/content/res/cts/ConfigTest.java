@@ -16,6 +16,8 @@
 
 package android.content.res.cts;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 import android.content.res.AssetManager;
@@ -29,12 +31,14 @@ import android.test.suitebuilder.annotation.SmallTest;
 import android.util.DisplayMetrics;
 import android.util.Log;
 
-import com.android.cts.stub.R;
+import com.android.cts.content.R;
 
 public class ConfigTest extends AndroidTestCase {
     enum Properties {
         LANGUAGE,
         COUNTRY,
+        SCRIPT,
+        VARIANT,
         MCC,
         MNC,
         TOUCHSCREEN,
@@ -88,7 +92,7 @@ public class ConfigTest extends AndroidTestCase {
         public TotalConfig() {
             mConfig = new Configuration();
             mMetrics = new DisplayMetrics();
-            mConfig.locale = new Locale("++", "++");
+            mConfig.locale = Locale.ROOT;
         }
 
         public void setProperty(final Properties p, final int value) {
@@ -149,12 +153,28 @@ public class ConfigTest extends AndroidTestCase {
         public void setProperty(final Properties p, final String value) {
             switch(p) {
                 case LANGUAGE:
-                    final String oldCountry = mConfig.locale.getCountry();
-                    mConfig.locale = new Locale(value, oldCountry);
+                    mConfig.locale = new Locale.Builder()
+                            .setLocale(mConfig.locale)
+                            .setLanguage(value)
+                            .build();
                     break;
                 case COUNTRY:
-                    final String oldLanguage = mConfig.locale.getLanguage();
-                    mConfig.locale = new Locale(oldLanguage, value);
+                    mConfig.locale = new Locale.Builder()
+                            .setLocale(mConfig.locale)
+                            .setRegion(value)
+                            .build();
+                    break;
+                case SCRIPT:
+                    mConfig.locale = new Locale.Builder()
+                            .setLocale(mConfig.locale)
+                            .setScript(value)
+                            .build();
+                    break;
+                case VARIANT:
+                    mConfig.locale = new Locale.Builder()
+                            .setLocale(mConfig.locale)
+                            .setVariant(value)
+                            .build();
                     break;
                 default:
                     assert(false);
@@ -1130,5 +1150,134 @@ public class ConfigTest extends AndroidTestCase {
         assertEquals(expected, mContext.getResources().getString(R.string.version_cur));
         assertEquals("base",  mContext.getResources().getString(R.string.version_old));
         assertEquals("v3",  mContext.getResources().getString(R.string.version_v3));
+    }
+
+    @MediumTest
+    public void testExtendedLocales() {
+        TotalConfig config = makeClassicConfig();
+        // BCP 47 Locale kok
+        config.setProperty(Properties.LANGUAGE, "kok");
+        Resources res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok"});
+
+        // BCP 47 Locale kok-IN
+        config.setProperty(Properties.COUNTRY, "IN");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok IN");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok IN"});
+
+        // BCP 47 Locale kok-419
+        config.setProperty(Properties.COUNTRY, "419");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok 419");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok 419"});
+
+
+        // BCP 47 Locale kok-419-VARIANT
+        config.setProperty(Properties.VARIANT, "VARIANT");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok 419 VARIANT");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok 419 VARIANT"});
+
+        // BCP 47 Locale kok-Knda
+        config = makeClassicConfig();
+        config.setProperty(Properties.LANGUAGE, "kok");
+        config.setProperty(Properties.SCRIPT, "Knda");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok Knda");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok Knda"});
+
+        // BCP 47 Locale kok-Knda-419
+        config.setProperty(Properties.COUNTRY, "419");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok Knda 419");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok Knda 419"});
+
+        // BCP 47 Locale kok-Knda-419-VARIANT
+        config.setProperty(Properties.VARIANT, "VARIANT");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok Knda 419 VARIANT");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok Knda 419 VARIANT"});
+
+        // BCP 47 Locale kok-VARIANT
+        config = makeClassicConfig();
+        config.setProperty(Properties.LANGUAGE, "kok");
+        config.setProperty(Properties.VARIANT, "VARIANT");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple kok VARIANT");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[]{"bag kok VARIANT"});
+    }
+
+    @MediumTest
+    public void testTlAndFilConversion() {
+        TotalConfig config = makeClassicConfig();
+
+        // Ensure that "fil" is mapped to "tl" correctly.
+        config.setProperty(Properties.LANGUAGE, "fil");
+        config.setProperty(Properties.COUNTRY, "US");
+        Resources res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple tl");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[] { "bag tl" });
+
+        // Ensure that "fil-PH" is mapped to "tl-PH" correctly.
+        config = makeClassicConfig();
+        config.setProperty(Properties.LANGUAGE, "fil");
+        config.setProperty(Properties.COUNTRY, "PH");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple tl PH");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[] { "bag tl PH" });
+
+        config = makeClassicConfig();
+        config.setProperty(Properties.LANGUAGE, "tgl");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple tgl");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[] { "bag tgl" });
+
+        config = makeClassicConfig();
+        config.setProperty(Properties.LANGUAGE, "tgl");
+        config.setProperty(Properties.COUNTRY, "PH");
+        res = config.getResources();
+        checkValue(res, R.configVarying.simple, "simple tgl PH");
+        checkValue(res, R.configVarying.bag,
+                R.styleable.TestConfig, new String[] { "bag tgl PH" });
+    }
+
+    @MediumTest
+    public void testGetLocalesConvertsTlToFil() {
+        TotalConfig config = makeClassicConfig();
+
+        // Check that the list of locales doesn't contain any of the
+        // "tl" variants. They should've been converted to "fil"
+        // locales.
+        AssetManager am = config.getResources().getAssets();
+        String[] locales = am.getLocales();
+        final List<String> tlLocales = new ArrayList<String>(4);
+        final List<String> filLocales = new ArrayList<String>(4);
+        for (String locale : locales) {
+            if (locale.startsWith("tl-") || locale.equals("tl")) {
+                tlLocales.add(locale);
+            }
+
+            if (locale.startsWith("fil-") || locale.equals("fil")) {
+                filLocales.add(locale);
+            }
+        }
+
+        assertEquals(0, tlLocales.size());
+        assertEquals(2, filLocales.size());
+        assertTrue(filLocales.contains("fil"));
+        assertTrue(filLocales.contains("fil-PH"));
     }
 }

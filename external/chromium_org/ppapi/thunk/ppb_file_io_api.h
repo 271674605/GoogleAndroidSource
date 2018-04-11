@@ -42,16 +42,12 @@ class PPAPI_THUNK_EXPORT PPB_FileIO_API {
                         scoped_refptr<TrackedCallback> callback) = 0;
   virtual int32_t SetLength(int64_t length,
                             scoped_refptr<TrackedCallback> callback) = 0;
+  virtual int64_t GetMaxWrittenOffset() const = 0;
+  virtual int64_t GetAppendModeWriteAmount() const = 0;
+  virtual void SetMaxWrittenOffset(int64_t max_written_offset) = 0;
+  virtual void SetAppendModeWriteAmount(int64_t append_mode_write_amount) = 0;
   virtual int32_t Flush(scoped_refptr<TrackedCallback> callback) = 0;
   virtual void Close() = 0;
-
-  // Trusted API.
-  virtual int32_t GetOSFileDescriptor() = 0;
-  virtual int32_t WillWrite(int64_t offset,
-                            int32_t bytes_to_write,
-                            scoped_refptr<TrackedCallback> callback) = 0;
-  virtual int32_t WillSetLength(int64_t length,
-                                scoped_refptr<TrackedCallback> callback) = 0;
 
   // Private API.
   virtual int32_t RequestOSFileHandle(

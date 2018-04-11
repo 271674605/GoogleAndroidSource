@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm-disassembler"
-
 #include "llvm/MC/MCDisassembler.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
@@ -28,6 +26,8 @@
 #include <vector>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "arm-disassembler"
 
 typedef MCDisassembler::DecodeStatus DecodeStatus;
 
@@ -90,20 +90,18 @@ class ARMDisassembler : public MCDisassembler {
 public:
   /// Constructor     - Initializes the disassembler.
   ///
-  ARMDisassembler(const MCSubtargetInfo &STI) :
-    MCDisassembler(STI) {
+  ARMDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx) :
+    MCDisassembler(STI, Ctx) {
   }
 
   ~ARMDisassembler() {
   }
 
   /// getInstruction - See MCDisassembler.
-  DecodeStatus getInstruction(MCInst &instr,
-                              uint64_t &size,
-                              const MemoryObject &region,
-                              uint64_t address,
+  DecodeStatus getInstruction(MCInst &instr, uint64_t &size,
+                              const MemoryObject &region, uint64_t address,
                               raw_ostream &vStream,
-                              raw_ostream &cStream) const;
+                              raw_ostream &cStream) const override;
 };
 
 /// ThumbDisassembler - Thumb disassembler for all Thumb platforms.
@@ -111,20 +109,18 @@ class ThumbDisassembler : public MCDisassembler {
 public:
   /// Constructor     - Initializes the disassembler.
   ///
-  ThumbDisassembler(const MCSubtargetInfo &STI) :
-    MCDisassembler(STI) {
+  ThumbDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx) :
+    MCDisassembler(STI, Ctx) {
   }
 
   ~ThumbDisassembler() {
   }
 
   /// getInstruction - See MCDisassembler.
-  DecodeStatus getInstruction(MCInst &instr,
-                              uint64_t &size,
-                              const MemoryObject &region,
-                              uint64_t address,
+  DecodeStatus getInstruction(MCInst &instr, uint64_t &size,
+                              const MemoryObject &region, uint64_t address,
                               raw_ostream &vStream,
-                              raw_ostream &cStream) const;
+                              raw_ostream &cStream) const override;
 
 private:
   mutable ITStatus ITBlock;
@@ -323,8 +319,6 @@ static DecodeStatus DecodeVCVTD(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
-static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
-                                 const void *Decoder);
 
 
 static DecodeStatus DecodeThumbAddSpecialReg(MCInst &Inst, uint16_t Insn,
@@ -406,12 +400,16 @@ static DecodeStatus DecodeMRRC2(llvm::MCInst &Inst, unsigned Val,
                                 uint64_t Address, const void *Decoder);
 #include "ARMGenDisassemblerTables.inc"
 
-static MCDisassembler *createARMDisassembler(const Target &T, const MCSubtargetInfo &STI) {
-  return new ARMDisassembler(STI);
+static MCDisassembler *createARMDisassembler(const Target &T,
+                                             const MCSubtargetInfo &STI,
+                                             MCContext &Ctx) {
+  return new ARMDisassembler(STI, Ctx);
 }
 
-static MCDisassembler *createThumbDisassembler(const Target &T, const MCSubtargetInfo &STI) {
-  return new ThumbDisassembler(STI);
+static MCDisassembler *createThumbDisassembler(const Target &T,
+                                               const MCSubtargetInfo &STI,
+                                               MCContext &Ctx) {
+  return new ThumbDisassembler(STI, Ctx);
 }
 
 DecodeStatus ARMDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
@@ -500,6 +498,14 @@ DecodeStatus ARMDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
 
   MI.clear();
   result = decodeInstruction(DecoderTablev8NEON32, MI, insn, Address,
+                             this, STI);
+  if (result != MCDisassembler::Fail) {
+    Size = 4;
+    return result;
+  }
+
+  MI.clear();
+  result = decodeInstruction(DecoderTablev8Crypto32, MI, insn, Address,
                              this, STI);
   if (result != MCDisassembler::Fail) {
     Size = 4;
@@ -823,16 +829,28 @@ DecodeStatus ThumbDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
       Check(result, AddThumbPredicate(MI));
       return result;
     }
-  }
 
-  MI.clear();
-  uint32_t NEONv8Insn = insn32;
-  NEONv8Insn &= 0xF3FFFFFF; // Clear bits 27-26
-  result = decodeInstruction(DecoderTablev8NEON32, MI, NEONv8Insn, Address,
-                             this, STI);
-  if (result != MCDisassembler::Fail) {
-    Size = 4;
-    return result;
+    MI.clear();
+    uint32_t NEONCryptoInsn = insn32;
+    NEONCryptoInsn &= 0xF0FFFFFF; // Clear bits 27-24
+    NEONCryptoInsn |= (NEONCryptoInsn & 0x10000000) >> 4; // Move bit 28 to bit 24
+    NEONCryptoInsn |= 0x12000000; // Set bits 28 and 25
+    result = decodeInstruction(DecoderTablev8Crypto32, MI, NEONCryptoInsn,
+                               Address, this, STI);
+    if (result != MCDisassembler::Fail) {
+      Size = 4;
+      return result;
+    }
+
+    MI.clear();
+    uint32_t NEONv8Insn = insn32;
+    NEONv8Insn &= 0xF3FFFFFF; // Clear bits 27-26
+    result = decodeInstruction(DecoderTablev8NEON32, MI, NEONv8Insn, Address,
+                               this, STI);
+    if (result != MCDisassembler::Fail) {
+      Size = 4;
+      return result;
+    }
   }
 
   MI.clear();
@@ -842,9 +860,13 @@ DecodeStatus ThumbDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
 
 
 extern "C" void LLVMInitializeARMDisassembler() {
-  TargetRegistry::RegisterMCDisassembler(TheARMTarget,
+  TargetRegistry::RegisterMCDisassembler(TheARMLETarget,
                                          createARMDisassembler);
-  TargetRegistry::RegisterMCDisassembler(TheThumbTarget,
+  TargetRegistry::RegisterMCDisassembler(TheARMBETarget,
+                                         createARMDisassembler);
+  TargetRegistry::RegisterMCDisassembler(TheThumbLETarget,
+                                         createThumbDisassembler);
+  TargetRegistry::RegisterMCDisassembler(TheThumbBETarget,
                                          createThumbDisassembler);
 }
 
@@ -1185,20 +1207,22 @@ static DecodeStatus DecodeRegListOperand(MCInst &Inst, unsigned Val,
                                  uint64_t Address, const void *Decoder) {
   DecodeStatus S = MCDisassembler::Success;
 
-  bool writebackLoad = false;
-  unsigned writebackReg = 0;
+  bool NeedDisjointWriteback = false;
+  unsigned WritebackReg = 0;
   switch (Inst.getOpcode()) {
-    default:
-      break;
-    case ARM::LDMIA_UPD:
-    case ARM::LDMDB_UPD:
-    case ARM::LDMIB_UPD:
-    case ARM::LDMDA_UPD:
-    case ARM::t2LDMIA_UPD:
-    case ARM::t2LDMDB_UPD:
-      writebackLoad = true;
-      writebackReg = Inst.getOperand(0).getReg();
-      break;
+  default:
+    break;
+  case ARM::LDMIA_UPD:
+  case ARM::LDMDB_UPD:
+  case ARM::LDMIB_UPD:
+  case ARM::LDMDA_UPD:
+  case ARM::t2LDMIA_UPD:
+  case ARM::t2LDMDB_UPD:
+  case ARM::t2STMIA_UPD:
+  case ARM::t2STMDB_UPD:
+    NeedDisjointWriteback = true;
+    WritebackReg = Inst.getOperand(0).getReg();
+    break;
   }
 
   // Empty register lists are not allowed.
@@ -1208,7 +1232,7 @@ static DecodeStatus DecodeRegListOperand(MCInst &Inst, unsigned Val,
       if (!Check(S, DecodeGPRRegisterClass(Inst, i, Address, Decoder)))
         return MCDisassembler::Fail;
       // Writeback not allowed if Rn is in the target list.
-      if (writebackLoad && writebackReg == Inst.end()[-1].getReg())
+      if (NeedDisjointWriteback && WritebackReg == Inst.end()[-1].getReg())
         Check(S, MCDisassembler::SoftFail);
     }
   }
@@ -1342,6 +1366,11 @@ static DecodeStatus DecodeCopMemInstruction(MCInst &Inst, unsigned Insn,
     default:
       break;
   }
+
+  uint64_t featureBits = ((const MCDisassembler*)Decoder)->getSubtargetInfo()
+                                                          .getFeatureBits();
+  if ((featureBits & ARM::HasV8Ops) && (coproc != 14))
+    return MCDisassembler::Fail;
 
   Inst.addOperand(MCOperand::CreateImm(coproc));
   Inst.addOperand(MCOperand::CreateImm(CRd));
@@ -3794,6 +3823,11 @@ static DecodeStatus DecodeCoprocessor(MCInst &Inst, unsigned Val,
   if (Val == 0xA || Val == 0xB)
     return MCDisassembler::Fail;
 
+  uint64_t featureBits = ((const MCDisassembler*)Decoder)->getSubtargetInfo()
+                                                          .getFeatureBits();
+  if ((featureBits & ARM::HasV8Ops) && !(Val == 14 || Val == 15))
+    return MCDisassembler::Fail;
+
   Inst.addOperand(MCOperand::CreateImm(Val));
   return MCDisassembler::Success;
 }
@@ -4899,15 +4933,6 @@ static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
   Inst.addOperand(MCOperand::CreateImm(64 - imm));
 
   return S;
-}
-
-static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
-                                 const void *Decoder)
-{
-  unsigned Imm = fieldFromInstruction(Insn, 0, 3);
-  if (Imm > 4) return MCDisassembler::Fail;
-  Inst.addOperand(MCOperand::CreateImm(Imm));
-  return MCDisassembler::Success;
 }
 
 static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,

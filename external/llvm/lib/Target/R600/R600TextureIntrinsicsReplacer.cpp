@@ -18,7 +18,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/InstVisitor.h"
+#include "llvm/IR/InstVisitor.h"
 
 using namespace llvm;
 
@@ -35,9 +35,9 @@ class R600TextureIntrinsicsReplacer :
   FunctionType *TexSign;
   FunctionType *TexQSign;
 
-  void getAdjustementFromTextureTarget(unsigned TextureType, bool hasLOD,
-                                       unsigned SrcSelect[4], unsigned CT[4],
-                                       bool &useShadowVariant) {
+  void getAdjustmentFromTextureTarget(unsigned TextureType, bool hasLOD,
+                                      unsigned SrcSelect[4], unsigned CT[4],
+                                      bool &useShadowVariant) {
     enum TextureTypes {
       TEXTURE_1D = 1,
       TEXTURE_2D,
@@ -60,6 +60,7 @@ class R600TextureIntrinsicsReplacer :
 
     switch (TextureType) {
     case 0:
+      useShadowVariant = false;
       return;
     case TEXTURE_RECT:
     case TEXTURE_1D:
@@ -93,9 +94,8 @@ class R600TextureIntrinsicsReplacer :
     }
 
     if (TextureType == TEXTURE_CUBE_ARRAY ||
-        TextureType == TEXTURE_SHADOWCUBE_ARRAY) {
+        TextureType == TEXTURE_SHADOWCUBE_ARRAY)
       CT[2] = 0;
-    }
 
     if (TextureType == TEXTURE_1D_ARRAY ||
         TextureType == TEXTURE_SHADOW1D_ARRAY) {
@@ -114,9 +114,8 @@ class R600TextureIntrinsicsReplacer :
         TextureType == TEXTURE_SHADOW2D ||
         TextureType == TEXTURE_SHADOWRECT ||
         TextureType == TEXTURE_SHADOW1D_ARRAY) &&
-        !(hasLOD && useShadowVariant)) {
+        !(hasLOD && useShadowVariant))
       SrcSelect[3] = 2;
-    }
   }
 
   void ReplaceCallInst(CallInst &I, FunctionType *FT, const char *Name,
@@ -174,8 +173,8 @@ class R600TextureIntrinsicsReplacer :
     };
     bool useShadowVariant;
 
-    getAdjustementFromTextureTarget(TextureType, hasLOD, SrcSelect, CT,
-                                    useShadowVariant);
+    getAdjustmentFromTextureTarget(TextureType, hasLOD, SrcSelect, CT,
+                                   useShadowVariant);
 
     ReplaceCallInst(I, FT, useShadowVariant?ShadowInt:VanillaInt, SrcSelect,
                     Offset, ResourceId, SamplerId, CT, Coord);
@@ -198,8 +197,8 @@ class R600TextureIntrinsicsReplacer :
     };
     bool useShadowVariant;
 
-    getAdjustementFromTextureTarget(TextureType, false, SrcSelect, CT,
-                                    useShadowVariant);
+    getAdjustmentFromTextureTarget(TextureType, false, SrcSelect, CT,
+                                   useShadowVariant);
 
     ReplaceCallInst(I, TexQSign, "llvm.R600.txf", SrcSelect,
                     Offset, ResourceId, SamplerId, CT, Coord);
@@ -210,7 +209,7 @@ public:
     FunctionPass(ID) {
   }
 
-  virtual bool doInitialization(Module &M) {
+  bool doInitialization(Module &M) override {
     LLVMContext &Ctx = M.getContext();
     Mod = &M;
     FloatType = Type::getFloatTy(Ctx);
@@ -246,19 +245,22 @@ public:
     return false;
   }
 
-  virtual bool runOnFunction(Function &F) {
+  bool runOnFunction(Function &F) override {
     visit(F);
     return false;
   }
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Texture Intrinsics Replacer";
   }
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
   }
 
   void visitCallInst(CallInst &I) {
+    if (!I.getCalledFunction())
+      return;
+
     StringRef Name = I.getCalledFunction()->getName();
     if (Name == "llvm.AMDGPU.tex") {
       ReplaceTexIntrinsic(I, false, TexSign, "llvm.R600.tex", "llvm.R600.texc");

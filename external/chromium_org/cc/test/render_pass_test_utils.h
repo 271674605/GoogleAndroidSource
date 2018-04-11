@@ -6,6 +6,7 @@
 #define CC_TEST_RENDER_PASS_TEST_UTILS_H_
 
 #include "cc/base/scoped_ptr_vector.h"
+#include "cc/output/filter_operations.h"
 #include "cc/quads/render_pass.h"
 #include "cc/resources/resource_provider.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -25,22 +26,22 @@ class TestRenderPass;
 TestRenderPass* AddRenderPass(
     RenderPassList* pass_list,
     RenderPass::Id id,
-    gfx::Rect output_rect,
+    const gfx::Rect& output_rect,
     const gfx::Transform& root_transform);
 
 // Adds a solid quad to a given render pass.
 SolidColorDrawQuad* AddQuad(TestRenderPass* pass,
-                            gfx::Rect rect,
+                            const gfx::Rect& rect,
                             SkColor color);
 
 // Adds a solid quad to a given render pass and sets is_clipped=true.
 SolidColorDrawQuad* AddClippedQuad(TestRenderPass* pass,
-                                   gfx::Rect rect,
+                                   const gfx::Rect& rect,
                                    SkColor color);
 
 // Adds a solid quad with a transform to a given render pass.
 SolidColorDrawQuad* AddTransformedQuad(TestRenderPass* pass,
-                                       gfx::Rect rect,
+                                       const gfx::Rect& rect,
                                        SkColor color,
                                        const gfx::Transform& transform);
 
@@ -50,9 +51,9 @@ void AddRenderPassQuad(TestRenderPass* to_pass,
 
 // Adds a render pass quad with the given mask resource, filter, and transform.
 void AddRenderPassQuad(TestRenderPass* toPass,
-                       TestRenderPass* contributingPass,
+                       TestRenderPass* contributing_pass,
                        ResourceProvider::ResourceId mask_resource_id,
-                       skia::RefPtr<SkImageFilter> filter,
+                       const FilterOperations& filters,
                        gfx::Transform transform);
 
 }  // namespace cc

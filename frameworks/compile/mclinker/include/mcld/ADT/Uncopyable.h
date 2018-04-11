@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_UNCOPYABLE_H
-#define MCLD_UNCOPYABLE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_UNCOPYABLE_H
+#define MCLD_ADT_UNCOPYABLE_H
 
 namespace mcld
 {

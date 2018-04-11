@@ -11,12 +11,14 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "content/common/content_export.h"
 
 namespace content {
 
 class BrowserContext;
 class ResourceContext;
+class WebContents;
 
 // Maps hostnames to custom zoom levels.  Written on the UI thread and read on
 // any thread.  One instance per browser context. Must be created on the UI
@@ -48,8 +50,19 @@ class HostZoomMap {
     double zoom_level;
   };
 
+  typedef std::vector<ZoomLevelChange> ZoomLevelVector;
+
   CONTENT_EXPORT static HostZoomMap* GetForBrowserContext(
       BrowserContext* browser_context);
+
+  // Returns the current zoom level for the specified WebContents. May be
+  // temporary or host-specific.
+  CONTENT_EXPORT static double GetZoomLevel(const WebContents* web_contents);
+
+  // Sets the current zoom level for the specified WebContents. The level may
+  // be temporary or host-specific depending on the particular WebContents.
+  CONTENT_EXPORT static void SetZoomLevel(const WebContents* web_contents,
+                                          double level);
 
   // Copy the zoom levels from the given map. Can only be called on the UI
   // thread.
@@ -64,6 +77,16 @@ class HostZoomMap {
   virtual double GetZoomLevelForHostAndScheme(
       const std::string& scheme,
       const std::string& host) const = 0;
+
+  // Returns true if the specified |scheme| and/or |host| has a zoom level
+  // currently set.
+  //
+  // This may be called on any thread.
+  virtual bool HasZoomLevel(const std::string& scheme,
+                            const std::string& host) const = 0;
+
+  // Returns all non-temporary zoom levels. Can be called on any thread.
+  virtual ZoomLevelVector GetAllZoomLevels() const = 0;
 
   // Here |host| is the host portion of URL, or (in the absence of a host)
   // the complete spec of the URL.
@@ -86,16 +109,34 @@ class HostZoomMap {
                                             const std::string& host,
                                             double level) = 0;
 
+  // Returns whether the view manages its zoom level independently of other
+  // views displaying content from the same host.
+  virtual bool UsesTemporaryZoomLevel(int render_process_id,
+                                      int render_view_id) const = 0;
+
+  // Sets the temporary zoom level that's only valid for the lifetime of this
+  // WebContents.
+  //
+  // This should only be called on the UI thread.
+  virtual void SetTemporaryZoomLevel(int render_process_id,
+                                     int render_view_id,
+                                     double level) = 0;
+
+  // Clears the temporary zoom level stored for this WebContents.
+  //
+  // This should only be called on the UI thread.
+  virtual void ClearTemporaryZoomLevel(int render_process_id,
+                                       int render_view_id) = 0;
+
   // Get/Set the default zoom level for pages that don't override it.
   virtual double GetDefaultZoomLevel() const = 0;
   virtual void SetDefaultZoomLevel(double level) = 0;;
 
   typedef base::Callback<void(const ZoomLevelChange&)> ZoomLevelChangedCallback;
-
+  typedef base::CallbackList<void(const ZoomLevelChange&)>::Subscription
+      Subscription;
   // Add and remove zoom level changed callbacks.
-  virtual void AddZoomLevelChangedCallback(
-      const ZoomLevelChangedCallback& callback) = 0;
-  virtual void RemoveZoomLevelChangedCallback(
+  virtual scoped_ptr<Subscription> AddZoomLevelChangedCallback(
       const ZoomLevelChangedCallback& callback) = 0;
 
  protected:

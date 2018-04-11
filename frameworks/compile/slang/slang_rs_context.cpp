@@ -47,41 +47,24 @@ RSContext::RSContext(clang::Preprocessor &PP,
                      const clang::TargetInfo &Target,
                      PragmaList *Pragmas,
                      unsigned int TargetAPI,
-                     std::vector<std::string> *GeneratedFileNames)
+                     bool Verbose)
     : mPP(PP),
       mCtx(Ctx),
-      mTarget(Target),
       mPragmas(Pragmas),
       mTargetAPI(TargetAPI),
-      mGeneratedFileNames(GeneratedFileNames),
+      mVerbose(Verbose),
       mDataLayout(NULL),
       mLLVMContext(llvm::getGlobalContext()),
       mLicenseNote(NULL),
       mRSPackageName("android.renderscript"),
       version(0),
-      mIsCompatLib(false),
-      mMangleCtx(Ctx.createMangleContext()) {
-  slangAssert(mGeneratedFileNames && "Must supply GeneratedFileNames");
+      mMangleCtx(Ctx.createMangleContext()),
+      mIs64Bit(Target.getPointerWidth(0) == 64) {
 
-  // For #pragma rs export_type
-  PP.AddPragmaHandler(
-      "rs", RSPragmaHandler::CreatePragmaExportTypeHandler(this));
-
-  // For #pragma rs java_package_name
-  PP.AddPragmaHandler(
-      "rs", RSPragmaHandler::CreatePragmaJavaPackageNameHandler(this));
-
-  // For #pragma rs set_reflect_license
-  PP.AddPragmaHandler(
-      "rs", RSPragmaHandler::CreatePragmaReflectLicenseHandler(this));
-
-  // For #pragma version
-  PP.AddPragmaHandler(RSPragmaHandler::CreatePragmaVersionHandler(this));
+  AddPragmaHandlers(PP, this);
 
   // Prepare target data
   mDataLayout = new llvm::DataLayout(Target.getTargetDescription());
-
-  return;
 }
 
 bool RSContext::processExportVar(const clang::VarDecl *VD) {
@@ -115,12 +98,10 @@ bool RSContext::processExportFunc(const clang::FunctionDecl *FD) {
     return false;
   }
 
-  clang::DiagnosticsEngine *DiagEngine = getDiagnostics();
   if (RSExportForEach::isSpecialRSFunc(mTargetAPI, FD)) {
     // Do not reflect specialized functions like init, dtor, or graphics root.
-    return RSExportForEach::validateSpecialFuncDecl(mTargetAPI,
-                                                    DiagEngine, FD);
-  } else if (RSExportForEach::isRSForEachFunc(mTargetAPI, DiagEngine, FD)) {
+    return RSExportForEach::validateSpecialFuncDecl(mTargetAPI, this, FD);
+  } else if (RSExportForEach::isRSForEachFunc(mTargetAPI, this, FD)) {
     RSExportForEach *EFE = RSExportForEach::Create(this, FD);
     if (EFE == NULL)
       return false;
@@ -270,8 +251,7 @@ bool RSContext::processExport() {
 bool RSContext::insertExportType(const llvm::StringRef &TypeName,
                                  RSExportType *ET) {
   ExportTypeMap::value_type *NewItem =
-      ExportTypeMap::value_type::Create(TypeName.begin(),
-                                        TypeName.end(),
+      ExportTypeMap::value_type::Create(TypeName,
                                         mExportTypes.getAllocator(),
                                         ET);
 
@@ -281,30 +261,6 @@ bool RSContext::insertExportType(const llvm::StringRef &TypeName,
     free(NewItem);
     return false;
   }
-}
-
-bool RSContext::reflectToJava(const std::string &OutputPathBase,
-                              const std::string &RSPackageName,
-                              const std::string &InputFileName,
-                              const std::string &OutputBCFileName) {
-  if (!RSPackageName.empty()) {
-    mRSPackageName = RSPackageName;
-  }
-
-  // If we are not targeting the actual Android Renderscript classes,
-  // we should reflect code that works with the compatibility library.
-  if (mRSPackageName.compare("android.renderscript") != 0) {
-    mIsCompatLib = true;
-  }
-
-  RSReflection *R = new RSReflection(this, mGeneratedFileNames);
-  bool ret = R->reflect(OutputPathBase, mReflectJavaPackageName, mRSPackageName,
-                        InputFileName, OutputBCFileName);
-  if (!ret)
-    fprintf(stderr, "RSContext::reflectToJava : failed to do reflection "
-                    "(%s)\n", R->getLastError());
-  delete R;
-  return ret;
 }
 
 RSContext::~RSContext() {

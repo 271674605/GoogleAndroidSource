@@ -7,7 +7,6 @@
 
 #include <list>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -17,11 +16,10 @@
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_server_properties.h"
-#include "net/socket/ssl_client_socket.h"
 // This file can be included from net/http even though
 // it is in net/websockets because it doesn't
 // introduce any link dependency to net/websockets.
-#include "net/websockets/websocket_stream_base.h"
+#include "net/websockets/websocket_handshake_stream_base.h"
 
 class GURL;
 
@@ -36,6 +34,7 @@ class BoundNetLog;
 class HostMappingRules;
 class HostPortPair;
 class HttpAuthController;
+class HttpNetworkSession;
 class HttpResponseInfo;
 class HttpServerProperties;
 class HttpStreamBase;
@@ -71,17 +70,17 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
         const ProxyInfo& used_proxy_info,
         HttpStreamBase* stream) = 0;
 
-    // This is the success case for RequestWebSocketStream.
+    // This is the success case for RequestWebSocketHandshakeStream.
     // |stream| is now owned by the delegate.
     // |used_ssl_config| indicates the actual SSL configuration used for this
     // stream, since the HttpStreamRequest may have modified the configuration
     // during stream processing.
     // |used_proxy_info| indicates the actual ProxyInfo used for this stream,
     // since the HttpStreamRequest performs the proxy resolution.
-    virtual void OnWebSocketStreamReady(
+    virtual void OnWebSocketHandshakeStreamReady(
         const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
-        WebSocketStreamBase* stream) = 0;
+        WebSocketHandshakeStreamBase* stream) = 0;
 
     // This is the failure to create a stream case.
     // |used_ssl_config| indicates the actual SSL configuration used for this
@@ -157,6 +156,9 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   virtual int RestartTunnelWithProxyAuth(
       const AuthCredentials& credentials) = 0;
 
+  // Called when the priority of the parent transaction changes.
+  virtual void SetPriority(RequestPriority priority) = 0;
+
   // Returns the LoadState for the request.
   virtual LoadState GetLoadState() const = 0;
 
@@ -178,7 +180,8 @@ class NET_EXPORT HttpStreamFactory {
   void ProcessAlternateProtocol(
       const base::WeakPtr<HttpServerProperties>& http_server_properties,
       const std::string& alternate_protocol_str,
-      const HostPortPair& http_host_port_pair);
+      const HostPortPair& http_host_port_pair,
+      const HttpNetworkSession& session);
 
   GURL ApplyHostMappingRules(const GURL& url, HostPortPair* endpoint);
 
@@ -194,15 +197,16 @@ class NET_EXPORT HttpStreamFactory {
       HttpStreamRequest::Delegate* delegate,
       const BoundNetLog& net_log) = 0;
 
-  // Request a WebSocket stream.
-  // Will call delegate->OnWebSocketStreamReady on successful completion.
-  virtual HttpStreamRequest* RequestWebSocketStream(
+  // Request a WebSocket handshake stream.
+  // Will call delegate->OnWebSocketHandshakeStreamReady on successful
+  // completion.
+  virtual HttpStreamRequest* RequestWebSocketHandshakeStream(
       const HttpRequestInfo& info,
       RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      WebSocketStreamBase::Factory* factory,
+      WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       const BoundNetLog& net_log) = 0;
 
   // Requests that enough connections for |num_streams| be opened.
@@ -212,11 +216,6 @@ class NET_EXPORT HttpStreamFactory {
                                  const SSLConfig& server_ssl_config,
                                  const SSLConfig& proxy_ssl_config) = 0;
 
-  // If pipelining is supported, creates a Value summary of the currently active
-  // pipelines. Caller assumes ownership of the returned value. Otherwise,
-  // returns an empty Value.
-  virtual base::Value* PipelineInfoToValue() const = 0;
-
   virtual const HostMappingRules* GetHostMappingRules() const = 0;
 
   // Static settings
@@ -225,83 +224,18 @@ class NET_EXPORT HttpStreamFactory {
   static void ResetStaticSettingsToInit();
 
   // Turns spdy on or off.
+  // TODO(mmenke):  Figure out if this can be made a property of the
+  //                HttpNetworkSession.
   static void set_spdy_enabled(bool value) {
     spdy_enabled_ = value;
-    if (!spdy_enabled_) {
-      delete next_protos_;
-      next_protos_ = NULL;
-    }
   }
   static bool spdy_enabled() { return spdy_enabled_; }
-
-  // Controls whether or not we use the Alternate-Protocol header.
-  static void set_use_alternate_protocols(bool value) {
-    use_alternate_protocols_ = value;
-  }
-  static bool use_alternate_protocols() { return use_alternate_protocols_; }
-
-  // Controls whether or not we use ssl when in spdy mode.
-  static void set_force_spdy_over_ssl(bool value) {
-    force_spdy_over_ssl_ = value;
-  }
-  static bool force_spdy_over_ssl() {
-    return force_spdy_over_ssl_;
-  }
-
-  // Controls whether or not we use spdy without npn.
-  static void set_force_spdy_always(bool value) {
-    force_spdy_always_ = value;
-  }
-  static bool force_spdy_always() { return force_spdy_always_; }
-
-  // Add a URL to exclude from forced SPDY.
-  static void add_forced_spdy_exclusion(const std::string& value);
-  // Check if a HostPortPair is excluded from using spdy.
-  static bool HasSpdyExclusion(const HostPortPair& endpoint);
-
-  // Sets http/1.1 as the only protocol supported via NPN or Alternate-Protocol.
-  static void EnableNpnHttpOnly();
-
-  // Sets http/1.1, quic and spdy/2 (the default spdy protocol) as the protocols
-  // supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy();
-
-  // Sets http/1.1, quic, spdy/2, and spdy/3 as the protocols supported via NPN
-  // or Alternate-Protocol.
-  static void EnableNpnSpdy3();
-
-  // Sets http/1.1, quic, spdy/2, spdy/3, and spdy/3.1 as the protocols
-  // supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy31();
-
-  // Sets http/1.1, quic, spdy/2, spdy/3, spdy/3.1, and spdy/4a2 as
-  // the protocols supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy4a2();
-
-  // Sets http/1.1, quic, spdy/2, spdy/3, spdy/3.1, spdy/4a2, and
-  // http/2 draft 04 as the protocols supported via NPN or
-  // Alternate-Protocol.
-  static void EnableNpnHttp2Draft04();
-
-  // Sets the protocols supported by NPN (next protocol negotiation) during the
-  // SSL handshake as well as by HTTP Alternate-Protocol.
-  static void SetNextProtos(const std::vector<NextProto>& value);
-  static bool has_next_protos() { return next_protos_ != NULL; }
-  static const std::vector<std::string>& next_protos() {
-    return *next_protos_;
-  }
 
  protected:
   HttpStreamFactory();
 
  private:
-  static std::vector<std::string>* next_protos_;
-  static bool enabled_protocols_[NUM_ALTERNATE_PROTOCOLS];
   static bool spdy_enabled_;
-  static bool use_alternate_protocols_;
-  static bool force_spdy_over_ssl_;
-  static bool force_spdy_always_;
-  static std::list<HostPortPair>* forced_spdy_exclusions_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactory);
 };

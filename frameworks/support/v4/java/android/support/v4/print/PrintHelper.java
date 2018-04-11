@@ -47,6 +47,29 @@ public final class PrintHelper {
      */
     public static final int COLOR_MODE_COLOR = 2;
 
+    /**
+     * Print the image in landscape orientation (default).
+     */
+    public static final int ORIENTATION_LANDSCAPE = 1;
+
+    /**
+     * Print the image in  portrait orientation.
+     */
+    public static final int ORIENTATION_PORTRAIT = 2;
+
+    /**
+     * Callback for observing when a print operation is completed.
+     * When print is finished either the system acquired the
+     * document to print or printing was cancelled.
+     */
+    public interface OnPrintFinishCallback {
+
+        /**
+         * Called when a print operation is finished.
+         */
+        public void onFinish();
+    }
+
     PrintHelperVersionImpl mImpl;
 
     /**
@@ -75,9 +98,13 @@ public final class PrintHelper {
 
         public int getColorMode();
 
-        public void printBitmap(String jobName, Bitmap bitmap);
+        public void setOrientation(int orientation);
 
-        public void printBitmap(String jobName, Uri imageFile)
+        public int getOrientation();
+
+        public void printBitmap(String jobName, Bitmap bitmap, OnPrintFinishCallback callback);
+
+        public void printBitmap(String jobName, Uri imageFile, OnPrintFinishCallback callback)
                 throws FileNotFoundException;
     }
 
@@ -87,7 +114,7 @@ public final class PrintHelper {
     private static final class PrintHelperStubImpl implements PrintHelperVersionImpl {
         int mScaleMode = SCALE_MODE_FILL;
         int mColorMode = COLOR_MODE_COLOR;
-
+        int mOrientation = ORIENTATION_LANDSCAPE;
         @Override
         public void setScaleMode(int scaleMode) {
             mScaleMode = scaleMode;
@@ -104,16 +131,22 @@ public final class PrintHelper {
         }
 
         @Override
+        public void setOrientation(int orientation) { mOrientation = orientation; }
+
+        @Override
+        public int getOrientation() { return mOrientation; }
+
+        @Override
         public int getScaleMode() {
             return mScaleMode;
         }
 
         @Override
-        public void printBitmap(String jobName, Bitmap bitmap) {
+        public void printBitmap(String jobName, Bitmap bitmap, OnPrintFinishCallback callback) {
         }
 
         @Override
-        public void printBitmap(String jobName, Uri imageFile) {
+        public void printBitmap(String jobName, Uri imageFile, OnPrintFinishCallback callback) {
         }
     }
 
@@ -121,40 +154,70 @@ public final class PrintHelper {
      * Implementation used on KitKat (and above)
      */
     private static final class PrintHelperKitkatImpl implements PrintHelperVersionImpl {
-        private final PrintHelperKitkat printHelper;
+        private final PrintHelperKitkat mPrintHelper;
 
         PrintHelperKitkatImpl(Context context) {
-            printHelper = new PrintHelperKitkat(context);
+            mPrintHelper = new PrintHelperKitkat(context);
         }
 
         @Override
         public void setScaleMode(int scaleMode) {
-            printHelper.setScaleMode(scaleMode);
+            mPrintHelper.setScaleMode(scaleMode);
         }
 
         @Override
         public int getScaleMode() {
-            return printHelper.getScaleMode();
+            return mPrintHelper.getScaleMode();
         }
 
         @Override
         public void setColorMode(int colorMode) {
-            printHelper.setColorMode(colorMode);
+            mPrintHelper.setColorMode(colorMode);
         }
 
         @Override
         public int getColorMode() {
-            return printHelper.getColorMode();
+            return mPrintHelper.getColorMode();
         }
 
         @Override
-        public void printBitmap(String jobName, Bitmap bitmap) {
-            printHelper.printBitmap(jobName, bitmap);
+        public void setOrientation(int orientation) {
+            mPrintHelper.setOrientation(orientation);
         }
 
         @Override
-        public void printBitmap(String jobName, Uri imageFile) throws FileNotFoundException {
-            printHelper.printBitmap(jobName, imageFile);
+        public int getOrientation() {
+            return mPrintHelper.getOrientation();
+        }
+
+        @Override
+        public void printBitmap(String jobName, Bitmap bitmap,
+                final OnPrintFinishCallback callback) {
+            PrintHelperKitkat.OnPrintFinishCallback delegateCallback = null;
+            if (callback != null) {
+                delegateCallback = new PrintHelperKitkat.OnPrintFinishCallback() {
+                    @Override
+                    public void onFinish() {
+                        callback.onFinish();
+                    }
+                };
+            }
+            mPrintHelper.printBitmap(jobName, bitmap, delegateCallback);
+        }
+
+        @Override
+        public void printBitmap(String jobName, Uri imageFile,
+                final OnPrintFinishCallback callback) throws FileNotFoundException {
+            PrintHelperKitkat.OnPrintFinishCallback delegateCallback = null;
+            if (callback != null) {
+                delegateCallback = new PrintHelperKitkat.OnPrintFinishCallback() {
+                    @Override
+                    public void onFinish() {
+                        callback.onFinish();
+                    }
+                };
+            }
+            mPrintHelper.printBitmap(jobName, imageFile, delegateCallback);
         }
     }
 
@@ -218,13 +281,46 @@ public final class PrintHelper {
     }
 
     /**
+     * Sets whether the image will be printed in landscape {@link #ORIENTATION_LANDSCAPE} (default)
+     * or portrait {@link #ORIENTATION_PORTRAIT}.
+     *
+     * @param orientation The page orientation which is one of
+     *                    {@link #ORIENTATION_LANDSCAPE} or {@link #ORIENTATION_PORTRAIT}.
+     */
+    public void setOrientation(int orientation) {
+        mImpl.setOrientation(orientation);
+    }
+
+    /**
+     * Gets whether the image will be printed in landscape or portrait.
+     *
+     * @return The page orientation which is one of
+     * {@link #ORIENTATION_LANDSCAPE} or {@link #ORIENTATION_PORTRAIT}.
+     */
+    public int getOrientation() {
+        return mImpl.getOrientation();
+    }
+
+
+    /**
      * Prints a bitmap.
      *
      * @param jobName The print job name.
      * @param bitmap  The bitmap to print.
      */
     public void printBitmap(String jobName, Bitmap bitmap) {
-        mImpl.printBitmap(jobName, bitmap);
+        mImpl.printBitmap(jobName, bitmap, null);
+    }
+
+    /**
+     * Prints a bitmap.
+     *
+     * @param jobName The print job name.
+     * @param bitmap  The bitmap to print.
+     * @param callback Optional callback to observe when printing is finished.
+     */
+    public void printBitmap(String jobName, Bitmap bitmap, OnPrintFinishCallback callback) {
+        mImpl.printBitmap(jobName, bitmap, callback);
     }
 
     /**
@@ -237,6 +333,21 @@ public final class PrintHelper {
      * @throws FileNotFoundException if <code>Uri</code> is not pointing to a valid image.
      */
     public void printBitmap(String jobName, Uri imageFile) throws FileNotFoundException {
-        mImpl.printBitmap(jobName, imageFile);
+        mImpl.printBitmap(jobName, imageFile, null);
+    }
+
+    /**
+     * Prints an image located at the Uri. Image types supported are those of
+     * {@link android.graphics.BitmapFactory#decodeStream(java.io.InputStream)
+     * android.graphics.BitmapFactory.decodeStream(java.io.InputStream)}
+     *
+     * @param jobName   The print job name.
+     * @param imageFile The <code>Uri</code> pointing to an image to print.
+     * @throws FileNotFoundException if <code>Uri</code> is not pointing to a valid image.
+     * @param callback Optional callback to observe when printing is finished.
+     */
+    public void printBitmap(String jobName, Uri imageFile, OnPrintFinishCallback callback)
+            throws FileNotFoundException {
+        mImpl.printBitmap(jobName, imageFile, callback);
     }
 }

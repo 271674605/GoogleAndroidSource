@@ -5,32 +5,48 @@
 #ifndef CHROME_BROWSER_CHROMEOS_DRIVE_RESOURCE_ENTRY_CONVERSION_H_
 #define CHROME_BROWSER_CHROMEOS_DRIVE_RESOURCE_ENTRY_CONVERSION_H_
 
-namespace base {
-struct PlatformFileInfo;
-}
+#include <string>
+
+#include "base/files/file.h"
 
 namespace google_apis {
-class ResourceEntry;
+class ChangeResource;
+class FileResource;
 }
 
 namespace drive {
 
 class ResourceEntry;
 
-// Converts a google_apis::ResourceEntry into a drive::ResourceEntry.
-// If the conversion succeeded, return true and sets the result to |output|.
-// If failed, it returns false and keeps |*output| untouched.
-bool ConvertToResourceEntry(const google_apis::ResourceEntry& input,
-                            ResourceEntry* output);
+// Converts a google_apis::ChangeResource into a drive::ResourceEntry.
+// If the conversion succeeded, return true and sets the result to |out_entry|.
+// |out_parent_resource_id| will be set to the resource ID of the parent entry.
+// If failed, it returns false and keeps output arguments untouched.
+//
+// Every entry is guaranteed to have one parent resource ID in ResourceMetadata.
+// This requirement is needed to represent contents in Drive as a file system
+// tree, and achieved as follows:
+//
+// 1) Entries without parents are allowed on drive.google.com. These entries are
+// collected to "drive/other", and have "drive/other" as the parent.
+//
+// 2) Entries with multiple parents are allowed on drive.google.com. For these
+// entries, the first parent is chosen.
+bool ConvertChangeResourceToResourceEntry(
+    const google_apis::ChangeResource& input,
+    ResourceEntry* out_entry,
+    std::string* out_parent_resource_id);
+
+// Converts a google_apis::FileResource into a drive::ResourceEntry.
+// Also see the comment for ConvertChangeResourceToResourceEntry above.
+bool ConvertFileResourceToResourceEntry(
+    const google_apis::FileResource& input,
+    ResourceEntry* out_entry,
+    std::string* out_parent_resource_id);
 
 // Converts the resource entry to the platform file info.
-void ConvertResourceEntryToPlatformFileInfo(const ResourceEntry& entry,
-                                            base::PlatformFileInfo* file_info);
-
-// Converts the platform file info and sets it to the .file_info field of
-// the resource entry.
-void SetPlatformFileInfoToResourceEntry(const base::PlatformFileInfo& file_info,
-                                        ResourceEntry* entry);
+void ConvertResourceEntryToFileInfo(const ResourceEntry& entry,
+                                    base::File::Info* file_info);
 
 }  // namespace drive
 

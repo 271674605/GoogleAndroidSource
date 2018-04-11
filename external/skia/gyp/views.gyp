@@ -13,7 +13,6 @@
       'standalone_static_library': 1,
       'dependencies': [
         'skia_lib.gyp:skia_lib',
-        'angle.gyp:*',
         'xml.gyp:*',
       ],
       'include_dirs': [
@@ -140,9 +139,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

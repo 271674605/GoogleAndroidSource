@@ -38,9 +38,6 @@ inline int ToNativeHandle(const FileDescriptor& desc) {
 
 
 // Parameters sent to the NaCl process when we start it.
-//
-// If you change this, you will also need to update the IPC serialization in
-// nacl_messages.h.
 struct NaClStartParams {
   NaClStartParams();
   ~NaClStartParams();
@@ -60,6 +57,9 @@ struct NaClStartParams {
   bool enable_ipc_proxy;
   bool uses_irt;
   bool enable_dyncode_syscalls;
+  // NOTE: Any new fields added here must also be added to the IPC
+  // serialization in nacl_messages.h and (for POD fields) the constructor
+  // in nacl_types.cc.
 };
 
 // Parameters sent to the browser process to have it launch a NaCl process.
@@ -68,9 +68,12 @@ struct NaClStartParams {
 // nacl_host_messages.h.
 struct NaClLaunchParams {
   NaClLaunchParams();
-  NaClLaunchParams(const std::string& u, int r, uint32 p, bool uses_irt,
+  NaClLaunchParams(const std::string& u, int r, uint32 p,
+                   bool uses_irt,
+                   bool uses_nonsfi_mode,
                    bool enable_dyncode_syscalls,
-                   bool enable_exception_handling);
+                   bool enable_exception_handling,
+                   bool enable_crash_throttling);
   NaClLaunchParams(const NaClLaunchParams& l);
   ~NaClLaunchParams();
 
@@ -78,20 +81,36 @@ struct NaClLaunchParams {
   int render_view_id;
   uint32 permission_bits;
   bool uses_irt;
+  bool uses_nonsfi_mode;
   bool enable_dyncode_syscalls;
   bool enable_exception_handling;
+  bool enable_crash_throttling;
 };
 
 struct NaClLaunchResult {
   NaClLaunchResult();
-  NaClLaunchResult(FileDescriptor imc_channel_handle,
-                   const IPC::ChannelHandle& ipc_channel_handle,
-                   base::ProcessId plugin_pid,
-                   int plugin_child_id);
+  NaClLaunchResult(
+      FileDescriptor imc_channel_handle,
+      const IPC::ChannelHandle& ppapi_ipc_channel_handle,
+      const IPC::ChannelHandle& trusted_ipc_channel_handle,
+      const IPC::ChannelHandle& manifest_service_ipc_channel_handle,
+      base::ProcessId plugin_pid,
+      int plugin_child_id);
   ~NaClLaunchResult();
 
+  // For plugin loader <-> renderer IMC communication.
   FileDescriptor imc_channel_handle;
-  IPC::ChannelHandle ipc_channel_handle;
+
+  // For plugin <-> renderer PPAPI communication.
+  IPC::ChannelHandle ppapi_ipc_channel_handle;
+
+  // For plugin loader <-> renderer control communication (loading and
+  // starting nexe).
+  IPC::ChannelHandle trusted_ipc_channel_handle;
+
+  // For plugin <-> renderer ManifestService communication.
+  IPC::ChannelHandle manifest_service_ipc_channel_handle;
+
   base::ProcessId plugin_pid;
   int plugin_child_id;
 };

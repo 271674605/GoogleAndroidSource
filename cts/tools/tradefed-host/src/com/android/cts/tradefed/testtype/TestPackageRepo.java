@@ -15,6 +15,7 @@
  */
 package com.android.cts.tradefed.testtype;
 
+import com.android.cts.util.AbiUtils;
 import com.android.ddmlib.Log;
 import com.android.tradefed.util.xml.AbstractXmlParser.ParseException;
 
@@ -25,11 +26,12 @@ import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
-import java.util.Hashtable;
+import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Retrieves CTS test package definitions from the repository.
@@ -40,19 +42,27 @@ public class TestPackageRepo implements ITestPackageRepo {
 
     private final File mTestCaseDir;
 
-    /** mapping of uri to test definition */
-    private final Map<String, TestPackageDef> mTestMap;
-
+    /** mapping of ABI to a mapping of appPackageName to test definition */
+    private final Map<String, Map<String, TestPackageDef>> mTestMap;
+    /** set of ABIs */
+    private final Set<String> mAbis;
     private final boolean mIncludeKnownFailures;
 
     /**
      * Creates a {@link TestPackageRepo}, initialized from provided repo files
      *
      * @param testCaseDir directory containing all test case definition xml and build files
+     * @param abis Holds the ABIs which the test must be run against. This must be a subset of the
+     * ABIs supported by the device under test.
+     * @param includeKnownFailures Whether to run tests which are known to fail.
      */
-    public TestPackageRepo(File testCaseDir, boolean includeKnownFailures) {
+    public TestPackageRepo(File testCaseDir, Set<String> abis, boolean includeKnownFailures) {
         mTestCaseDir = testCaseDir;
-        mTestMap = new Hashtable<String, TestPackageDef>();
+        mTestMap = new HashMap<String, Map<String, TestPackageDef>>();
+        mAbis = abis;
+        for (String abi : abis) {
+            mTestMap.put(abi, new HashMap<String, TestPackageDef>());
+        }
         mIncludeKnownFailures = includeKnownFailures;
         parse(mTestCaseDir);
     }
@@ -68,12 +78,21 @@ public class TestPackageRepo implements ITestPackageRepo {
     }
 
     private void parseTestFromXml(File xmlFile)  {
-        TestPackageXmlParser parser = new TestPackageXmlParser(mIncludeKnownFailures);
+        TestPackageXmlParser parser = new TestPackageXmlParser(mAbis, mIncludeKnownFailures);
         try {
             parser.parse(createStreamFromFile(xmlFile));
-            TestPackageDef def = parser.getTestPackageDef();
-            if (def != null) {
-                mTestMap.put(def.getUri(), def);
+            Set<TestPackageDef> defs = parser.getTestPackageDefs();
+            if (!defs.isEmpty()) {
+                for (TestPackageDef def : defs) {
+                    String name = def.getAppPackageName();
+                    String abi = def.getAbi().getName();
+                    if (def.getTests().size() > 0) {
+                        mTestMap.get(abi).put(name, def);
+                    } else {
+                        Log.d(LOG_TAG, String.format("No tests in %s for %s, skipping",
+                                name, abi));
+                    }
+                }
             } else {
                 Log.w(LOG_TAG, String.format("Could not find test package info in xml file %s",
                         xmlFile.getAbsolutePath()));
@@ -117,30 +136,74 @@ public class TestPackageRepo implements ITestPackageRepo {
      * {@inheritDoc}
      */
     @Override
-    public ITestPackageDef getTestPackage(String testUri) {
-        return mTestMap.get(testUri);
+    public ITestPackageDef getTestPackage(String id) {
+        String[] parts = AbiUtils.parseId(id);
+        String abi = parts[0];
+        String name = parts[1];
+        if (mTestMap.containsKey(abi) && mTestMap.get(abi).containsKey(name)) {
+            return mTestMap.get(abi).get(name);
+        }
+        return null;
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public String findPackageForTest(String testClassName) {
-        for (Map.Entry<String, TestPackageDef> entry : mTestMap.entrySet()) {
-            if (entry.getValue().isKnownTestClass(testClassName)) {
-                return entry.getKey();
+    public Set<ITestPackageDef> getTestPackages(String appPackageName) {
+        Set<ITestPackageDef> defs = new HashSet<ITestPackageDef>();
+        for (String abi : mAbis) {
+            if (mTestMap.get(abi).containsKey(appPackageName)) {
+                defs.add(mTestMap.get(abi).get(appPackageName));
             }
         }
-        return null;
+        return defs;
     }
 
     /**
-     * @return list of all package names found in repo
+     * {@inheritDoc}
      */
     @Override
-    public Collection<String> getPackageNames() {
-        List<String> packageNames = new ArrayList<String>();
-        packageNames.addAll(mTestMap.keySet());
+    public List<String> findPackageIdsForTest(String testClassName) {
+        Set<String> ids = new HashSet<String>();
+        for (String abi : mTestMap.keySet()) {
+            for (String name : mTestMap.get(abi).keySet()) {
+                if (mTestMap.get(abi).get(name).isKnownTestClass(testClassName)) {
+                    ids.add(AbiUtils.createId(abi, name));
+                }
+            }
+        }
+        List<String> idList = new ArrayList<String>(ids);
+        Collections.sort(idList);
+        return idList;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<String> getPackageIds() {
+        Set<String> ids = new HashSet<String>();
+        for (String abi : mAbis) {
+            for (String name : mTestMap.get(abi).keySet()) {
+                ids.add(AbiUtils.createId(abi, name));
+            }
+        }
+        List<String> idList = new ArrayList<String>(ids);
+        Collections.sort(idList);
+        return idList;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<String> getPackageNames() {
+        Set<String> names = new HashSet<String>();
+        for (String abi : mAbis) {
+            names.addAll(mTestMap.get(abi).keySet());
+        }
+        List<String> packageNames = new ArrayList<String>(names);
         Collections.sort(packageNames);
         return packageNames;
     }

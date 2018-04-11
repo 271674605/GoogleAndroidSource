@@ -1008,6 +1008,7 @@ OMX_ERRORTYPE H264CodecDstSetup(OMX_COMPONENTTYPE *pOMXComponent)
         /*************/
         /*    TBD    */
         /*************/
+        ExynosVideoErrorType codecReturn = VIDEO_ERROR_NONE;
         ExynosVideoPlane plane;
         for (i = 0; i < pExynosOutputPort->portDefinition.nBufferCountActual; i++) {
             plane.addr = pExynosOutputPort->extendBufferHeader[i].OMXBufferHeader->pBuffer;
@@ -1018,8 +1019,13 @@ OMX_ERRORTYPE H264CodecDstSetup(OMX_COMPONENTTYPE *pOMXComponent)
                 ret = OMX_ErrorInsufficientResources;
                 goto EXIT;
             }
-            pOutbufOps->Enqueue(hMFCHandle, (unsigned char **)&pExynosOutputPort->extendBufferHeader[i].OMXBufferHeader->pBuffer,
+            codecReturn = pOutbufOps->Enqueue(hMFCHandle, (unsigned char **)&pExynosOutputPort->extendBufferHeader[i].OMXBufferHeader->pBuffer,
                                    (unsigned int *)dataLen, MFC_OUTPUT_BUFFER_PLANE, NULL);
+            if (codecReturn != VIDEO_ERROR_NONE) {
+                Exynos_OSAL_Log(EXYNOS_LOG_ERROR, "Output buffer that has been entered is invalid.");
+                ret = OMX_ErrorUndefined;
+                goto EXIT;
+            }
         }
     }
 
@@ -1626,30 +1632,6 @@ OMX_ERRORTYPE Exynos_H264Enc_Init(OMX_COMPONENTTYPE *pOMXComponent)
     pInbufOps  = pH264Enc->hMFCH264Handle.pInbufOps;
     pOutbufOps = pH264Enc->hMFCH264Handle.pOutbufOps;
 
-    if ((pExynosInputPort->bStoreMetaData != OMX_TRUE) &&
-        (eColorFormat != OMX_COLOR_FormatAndroidOpaque)) {
-        if ((pExynosInputPort->bufferProcessType & BUFFER_COPY) == BUFFER_COPY) {
-            OMX_U32 nPlaneSize[MFC_INPUT_BUFFER_PLANE] = {0, };
-            nPlaneSize[0] = DEFAULT_MFC_INPUT_YBUFFER_SIZE;
-            nPlaneSize[1] = DEFAULT_MFC_INPUT_CBUFFER_SIZE;
-
-            Exynos_OSAL_SemaphoreCreate(&pExynosInputPort->codecSemID);
-            Exynos_OSAL_QueueCreate(&pExynosInputPort->codecBufferQ, MAX_QUEUE_ELEMENTS);
-
-            ret = Exynos_Allocate_CodecBuffers(pOMXComponent, INPUT_PORT_INDEX, MFC_INPUT_BUFFER_NUM_MAX, nPlaneSize);
-            if (ret != OMX_ErrorNone)
-                goto EXIT;
-
-            for (i = 0; i < MFC_INPUT_BUFFER_NUM_MAX; i++)
-                Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoEnc->pMFCEncInputBuffer[i]);
-        } else if (pExynosInputPort->bufferProcessType == BUFFER_SHARE) {
-            /*************/
-            /*    TBD    */
-            /*************/
-            /* Does not require any actions. */
-        }
-    }
-
     if ((pExynosOutputPort->bufferProcessType & BUFFER_COPY) == BUFFER_COPY) {
         Exynos_OSAL_SemaphoreCreate(&pExynosOutputPort->codecSemID);
         Exynos_OSAL_QueueCreate(&pExynosOutputPort->codecBufferQ, MAX_QUEUE_ELEMENTS);
@@ -1719,6 +1701,7 @@ OMX_ERRORTYPE Exynos_H264Enc_Terminate(OMX_COMPONENTTYPE *pOMXComponent)
         Exynos_Free_CodecBuffers(pOMXComponent, INPUT_PORT_INDEX);
         Exynos_OSAL_QueueTerminate(&pExynosInputPort->codecBufferQ);
         Exynos_OSAL_SemaphoreTerminate(pExynosInputPort->codecSemID);
+        pVideoEnc->bFirstInput  = OMX_TRUE;
     } else if (pExynosInputPort->bufferProcessType == BUFFER_SHARE) {
         /*************/
         /*    TBD    */
@@ -1758,6 +1741,9 @@ OMX_ERRORTYPE Exynos_H264Enc_SrcIn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX_
     }
     if (pH264Enc->hMFCH264Handle.bConfiguredMFCDst == OMX_FALSE) {
         ret = H264CodecDstSetup(pOMXComponent);
+        if (ret != OMX_ErrorNone) {
+            goto EXIT;
+        }
     }
 
     if (pVideoEnc->configChange == OMX_TRUE) {

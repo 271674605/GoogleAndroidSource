@@ -12,22 +12,22 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/files/file.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/platform_file.h"
 #include "base/strings/string_piece.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_handle.h"
-#include "ui/base/ui_export.h"
+#include "ui/base/ui_base_export.h"
 
 namespace base {
 class FilePath;
-class MemoryMappedFile;
 class RefCountedStaticMemory;
 }
 
 namespace ui {
 
-class UI_EXPORT DataPack : public ResourceHandle {
+class UI_BASE_EXPORT DataPack : public ResourceHandle {
  public:
   DataPack(ui::ScaleFactor scale_factor);
   virtual ~DataPack();
@@ -36,7 +36,11 @@ class UI_EXPORT DataPack : public ResourceHandle {
   bool LoadFromPath(const base::FilePath& path);
 
   // Loads a pack file from |file|, returning false on error.
-  bool LoadFromFile(base::PlatformFile file);
+  bool LoadFromFile(base::File file);
+
+  // Loads a pack file from |region| of |file|, returning false on error.
+  bool LoadFromFileRegion(base::File file,
+                          const base::MemoryMappedFile::Region& region);
 
   // Writes a pack file containing |resources| to |path|. If there are any
   // text resources to be written, their encoding must already agree to the

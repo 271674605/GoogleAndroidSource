@@ -21,9 +21,9 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.provider.MediaStore.Images;
-import android.util.Log;
 
 import com.android.camera.data.LocalMediaData.PhotoData;
+import com.android.camera.debug.Log;
 import com.android.camera.exif.ExifInterface;
 import com.android.camera.exif.ExifTag;
 import com.android.camera2.R;
@@ -37,7 +37,7 @@ import java.io.IOException;
  * data from jpeg file. Note that only {@link PhotoData}  can be rotated.
  */
 public class RotationTask extends AsyncTask<LocalData, Void, LocalData> {
-    private static final String TAG = "CAM_RotationTask";
+    private static final Log.Tag TAG = new Log.Tag("RotationTask");
     private final Context mContext;
     private final LocalDataAdapter mAdapter;
     private final int mCurrentDataId;
@@ -82,7 +82,7 @@ public class RotationTask extends AsyncTask<LocalData, Void, LocalData> {
         }
 
         PhotoData imageData = (PhotoData) data;
-        int originRotation = imageData.getOrientation();
+        int originRotation = imageData.getRotation();
         int finalRotationDegrees;
         if (mClockwise) {
             finalRotationDegrees = (originRotation + 90) % 360;
@@ -123,7 +123,7 @@ public class RotationTask extends AsyncTask<LocalData, Void, LocalData> {
         if (success) {
             // MediaStore using SQLite is thread safe.
             values.put(Images.Media.ORIENTATION, finalRotationDegrees);
-            mContext.getContentResolver().update(imageData.getContentUri(),
+            mContext.getContentResolver().update(imageData.getUri(),
                     values, null, null);
             double[] latLong = data.getLatLong();
             double latitude = 0;

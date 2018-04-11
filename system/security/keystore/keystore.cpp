@@ -44,8 +44,8 @@
 
 #include <keymaster/softkeymaster.h>
 
+#include <UniquePtr.h>
 #include <utils/String8.h>
-#include <utils/UniquePtr.h>
 #include <utils/Vector.h>
 
 #include <keystore/IKeystoreService.h>
@@ -57,6 +57,8 @@
 #include <private/android_filesystem_config.h>
 
 #include <keystore/keystore.h>
+
+#include <selinux/android.h>
 
 #include "defaults.h"
 
@@ -134,22 +136,25 @@ static void keymaster_device_release(keymaster_device_t* dev) {
 
 /* Here are the permissions, actions, users, and the main function. */
 typedef enum {
-    P_TEST      = 1 << 0,
-    P_GET       = 1 << 1,
-    P_INSERT    = 1 << 2,
-    P_DELETE    = 1 << 3,
-    P_EXIST     = 1 << 4,
-    P_SAW       = 1 << 5,
-    P_RESET     = 1 << 6,
-    P_PASSWORD  = 1 << 7,
-    P_LOCK      = 1 << 8,
-    P_UNLOCK    = 1 << 9,
-    P_ZERO      = 1 << 10,
-    P_SIGN      = 1 << 11,
-    P_VERIFY    = 1 << 12,
-    P_GRANT     = 1 << 13,
-    P_DUPLICATE = 1 << 14,
-    P_CLEAR_UID = 1 << 15,
+    P_TEST          = 1 << 0,
+    P_GET           = 1 << 1,
+    P_INSERT        = 1 << 2,
+    P_DELETE        = 1 << 3,
+    P_EXIST         = 1 << 4,
+    P_SAW           = 1 << 5,
+    P_RESET         = 1 << 6,
+    P_PASSWORD      = 1 << 7,
+    P_LOCK          = 1 << 8,
+    P_UNLOCK        = 1 << 9,
+    P_ZERO          = 1 << 10,
+    P_SIGN          = 1 << 11,
+    P_VERIFY        = 1 << 12,
+    P_GRANT         = 1 << 13,
+    P_DUPLICATE     = 1 << 14,
+    P_CLEAR_UID     = 1 << 15,
+    P_RESET_UID     = 1 << 16,
+    P_SYNC_UID      = 1 << 17,
+    P_PASSWORD_UID  = 1 << 18,
 } perm_t;
 
 static struct user_euid {
@@ -159,6 +164,29 @@ static struct user_euid {
     {AID_VPN, AID_SYSTEM},
     {AID_WIFI, AID_SYSTEM},
     {AID_ROOT, AID_SYSTEM},
+};
+
+/* perm_labels associcated with keystore_key SELinux class verbs. */
+const char *perm_labels[] = {
+    "test",
+    "get",
+    "insert",
+    "delete",
+    "exist",
+    "saw",
+    "reset",
+    "password",
+    "lock",
+    "unlock",
+    "zero",
+    "sign",
+    "verify",
+    "grant",
+    "duplicate",
+    "clear_uid",
+    "reset_uid",
+    "sync_uid",
+    "password_uid",
 };
 
 static struct user_perm {
@@ -173,6 +201,19 @@ static struct user_perm {
 
 static const perm_t DEFAULT_PERMS = static_cast<perm_t>(P_TEST | P_GET | P_INSERT | P_DELETE | P_EXIST | P_SAW | P_SIGN
         | P_VERIFY);
+
+static char *tctx;
+static int ks_is_selinux_enabled;
+
+static const char *get_perm_label(perm_t perm) {
+    unsigned int index = ffs(perm);
+    if (index > 0 && index <= (sizeof(perm_labels) / sizeof(perm_labels[0]))) {
+        return perm_labels[index - 1];
+    } else {
+        ALOGE("Keystore: Failed to retrieve permission label.\n");
+        abort();
+    }
+}
 
 /**
  * Returns the app ID (in the Android multi-user sense) for the current
@@ -190,8 +231,31 @@ static uid_t get_user_id(uid_t uid) {
     return uid / AID_USER;
 }
 
+static bool keystore_selinux_check_access(uid_t uid, perm_t perm, pid_t spid) {
+    if (!ks_is_selinux_enabled) {
+        return true;
+    }
 
-static bool has_permission(uid_t uid, perm_t perm) {
+    char *sctx = NULL;
+    const char *selinux_class = "keystore_key";
+    const char *str_perm = get_perm_label(perm);
+
+    if (!str_perm) {
+        return false;
+    }
+
+    if (getpidcon(spid, &sctx) != 0) {
+        ALOGE("SELinux: Failed to get source pid context.\n");
+        return false;
+    }
+
+    bool allowed = selinux_check_access(sctx, tctx, selinux_class, str_perm,
+            NULL) == 0;
+    freecon(sctx);
+    return allowed;
+}
+
+static bool has_permission(uid_t uid, perm_t perm, pid_t spid) {
     // All system users are equivalent for multi-user support.
     if (get_app_id(uid) == AID_SYSTEM) {
         uid = AID_SYSTEM;
@@ -200,11 +264,13 @@ static bool has_permission(uid_t uid, perm_t perm) {
     for (size_t i = 0; i < sizeof(user_perms)/sizeof(user_perms[0]); i++) {
         struct user_perm user = user_perms[i];
         if (user.uid == uid) {
-            return user.perms & perm;
+            return (user.perms & perm) &&
+                keystore_selinux_check_access(uid, perm, spid);
         }
     }
 
-    return DEFAULT_PERMS & perm;
+    return (DEFAULT_PERMS & perm) &&
+        keystore_selinux_check_access(uid, perm, spid);
 }
 
 /**
@@ -236,6 +302,15 @@ static bool is_granted_to(uid_t callingUid, uid_t targetUid) {
     }
 
     return false;
+}
+
+/**
+ * Allow the system to perform some privileged tasks that have to do with
+ * system maintenance. This should not be used for any function that uses
+ * the keys in any way (e.g., signing).
+ */
+static bool is_self_or_system(uid_t callingUid, uid_t targetUid) {
+    return callingUid == targetUid || callingUid == AID_SYSTEM;
 }
 
 /* Here is the encoding of keys. This is necessary in order to allow arbitrary
@@ -692,6 +767,18 @@ public:
         return ::NO_ERROR;
     }
 
+    ResponseCode copyMasterKey(UserState* src) {
+        if (mState != STATE_UNINITIALIZED) {
+            return ::SYSTEM_ERROR;
+        }
+        if (src->getState() != STATE_NO_ERROR) {
+            return ::SYSTEM_ERROR;
+        }
+        memcpy(mMasterKey, src->mMasterKey, MASTER_KEY_SIZE_BYTES);
+        setupMasterKeys();
+        return ::NO_ERROR;
+    }
+
     ResponseCode writeMasterKey(const android::String8& pw, Entropy* entropy) {
         uint8_t passwordKey[MASTER_KEY_SIZE_BYTES];
         generateKeyFromPassword(passwordKey, MASTER_KEY_SIZE_BYTES, pw, mSalt);
@@ -782,19 +869,7 @@ public:
             }
 
             // Skip anything that starts with a "."
-            if (file->d_name[0] == '.') {
-                continue;
-            }
-
-            // Find the current file's UID.
-            char* end;
-            unsigned long thisUid = strtoul(file->d_name, &end, 10);
-            if (end[0] != '_' || end[1] == 0) {
-                continue;
-            }
-
-            // Skip if this is not our user.
-            if (get_user_id(thisUid) != mUserId) {
+            if (file->d_name[0] == '.' && strcmp(".masterkey", file->d_name)) {
                 continue;
             }
 
@@ -880,14 +955,14 @@ public:
         for (android::Vector<grant_t*>::iterator it(mGrants.begin());
                 it != mGrants.end(); it++) {
             delete *it;
-            mGrants.erase(it);
         }
+        mGrants.clear();
 
         for (android::Vector<UserState*>::iterator it(mMasterKeys.begin());
                 it != mMasterKeys.end(); it++) {
             delete *it;
-            mMasterKeys.erase(it);
         }
+        mMasterKeys.clear();
     }
 
     keymaster_device_t* getDevice() const {
@@ -912,15 +987,19 @@ public:
         return userState->initialize(pw, mEntropy);
     }
 
+    ResponseCode copyMasterKey(uid_t src, uid_t uid) {
+        UserState *userState = getUserState(uid);
+        UserState *initState = getUserState(src);
+        return userState->copyMasterKey(initState);
+    }
+
     ResponseCode writeMasterKey(const android::String8& pw, uid_t uid) {
-        uid_t user_id = get_user_id(uid);
-        UserState* userState = getUserState(user_id);
+        UserState* userState = getUserState(uid);
         return userState->writeMasterKey(pw, mEntropy);
     }
 
     ResponseCode readMasterKey(const android::String8& pw, uid_t uid) {
-        uid_t user_id = get_user_id(uid);
-        UserState* userState = getUserState(user_id);
+        UserState* userState = getUserState(uid);
         return userState->readMasterKey(pw, mEntropy);
     }
 
@@ -944,7 +1023,20 @@ public:
     }
 
     bool reset(uid_t uid) {
+        android::String8 prefix("");
+        android::Vector<android::String16> aliases;
+        if (saw(prefix, &aliases, uid) != ::NO_ERROR) {
+            return ::SYSTEM_ERROR;
+        }
+
         UserState* userState = getUserState(uid);
+        for (uint32_t i = 0; i < aliases.size(); i++) {
+            android::String8 filename(aliases[i]);
+            filename = android::String8::format("%s/%s", userState->getUserDirName(),
+                    getKeyName(filename).string());
+            del(filename, ::TYPE_ANY, uid);
+        }
+
         userState->zeroizeMasterKeysInMemory();
         userState->setState(STATE_UNINITIALIZED);
         return userState->reset();
@@ -952,20 +1044,17 @@ public:
 
     bool isEmpty(uid_t uid) const {
         const UserState* userState = getUserState(uid);
-        if (userState == NULL) {
+        if (userState == NULL || userState->getState() == STATE_UNINITIALIZED) {
             return true;
         }
 
         DIR* dir = opendir(userState->getUserDirName());
-        struct dirent* file;
         if (!dir) {
             return true;
         }
+
         bool result = true;
-
-        char filename[NAME_MAX];
-        int n = snprintf(filename, sizeof(filename), "%u_", uid);
-
+        struct dirent* file;
         while ((file = readdir(dir)) != NULL) {
             // We only care about files.
             if (file->d_type != DT_REG) {
@@ -977,10 +1066,8 @@ public:
                 continue;
             }
 
-            if (!strncmp(file->d_name, filename, n)) {
-                result = false;
-                break;
-            }
+            result = false;
+            break;
         }
         closedir(dir);
         return result;
@@ -1046,6 +1133,71 @@ public:
                 mEntropy);
     }
 
+    ResponseCode del(const char *filename, const BlobType type, uid_t uid) {
+        Blob keyBlob;
+        ResponseCode rc = get(filename, &keyBlob, type, uid);
+        if (rc != ::NO_ERROR) {
+            return rc;
+        }
+
+        if (keyBlob.getType() == ::TYPE_KEY_PAIR) {
+            // A device doesn't have to implement delete_keypair.
+            if (mDevice->delete_keypair != NULL && !keyBlob.isFallback()) {
+                if (mDevice->delete_keypair(mDevice, keyBlob.getValue(), keyBlob.getLength())) {
+                    rc = ::SYSTEM_ERROR;
+                }
+            }
+        }
+        if (rc != ::NO_ERROR) {
+            return rc;
+        }
+
+        return (unlink(filename) && errno != ENOENT) ? ::SYSTEM_ERROR : ::NO_ERROR;
+    }
+
+    ResponseCode saw(const android::String8& prefix, android::Vector<android::String16> *matches,
+            uid_t uid) {
+
+        UserState* userState = getUserState(uid);
+        size_t n = prefix.length();
+
+        DIR* dir = opendir(userState->getUserDirName());
+        if (!dir) {
+            ALOGW("can't open directory for user: %s", strerror(errno));
+            return ::SYSTEM_ERROR;
+        }
+
+        struct dirent* file;
+        while ((file = readdir(dir)) != NULL) {
+            // We only care about files.
+            if (file->d_type != DT_REG) {
+                continue;
+            }
+
+            // Skip anything that starts with a "."
+            if (file->d_name[0] == '.') {
+                continue;
+            }
+
+            if (!strncmp(prefix.string(), file->d_name, n)) {
+                const char* p = &file->d_name[n];
+                size_t plen = strlen(p);
+
+                size_t extra = decode_key_length(p, plen);
+                char *match = (char*) malloc(extra + 1);
+                if (match != NULL) {
+                    decode_key(match, p, plen);
+                    matches->push(android::String16(match, extra));
+                    free(match);
+                } else {
+                    ALOGW("could not allocate match of size %zd", extra);
+                }
+            }
+        }
+        closedir(dir);
+        return ::NO_ERROR;
+    }
+
     void addGrant(const char* filename, uid_t granteeUid) {
         const grant_t* existing = getGrant(filename, granteeUid);
         if (existing == NULL) {
@@ -1087,11 +1239,14 @@ public:
         bool isFallback = false;
         rc = mDevice->import_keypair(mDevice, key, keyLen, &data, &dataLength);
         if (rc) {
-            // If this is an old device HAL, try to fall back to an old version
-            if (mDevice->common.module->module_api_version < KEYMASTER_MODULE_API_VERSION_0_2) {
-                rc = openssl_import_keypair(mDevice, key, keyLen, &data, &dataLength);
-                isFallback = true;
-            }
+            /*
+             * Maybe the device doesn't support this type of key. Try to use the
+             * software fallback keymaster implementation. This is a little bit
+             * lazier than checking the PKCS#8 key type, but the software
+             * implementation will do that anyway.
+             */
+            rc = openssl_import_keypair(mDevice, key, keyLen, &data, &dataLength);
+            isFallback = true;
 
             if (rc) {
                 ALOGE("Error while importing keypair: %d", rc);
@@ -1438,7 +1593,8 @@ public:
 
     int32_t test() {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_TEST)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_TEST, spid)) {
             ALOGW("permission denied for %d: test", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1448,7 +1604,8 @@ public:
 
     int32_t get(const String16& name, uint8_t** item, size_t* itemLength) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_GET)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_GET, spid)) {
             ALOGW("permission denied for %d: get", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1474,8 +1631,9 @@ public:
 
     int32_t insert(const String16& name, const uint8_t* item, size_t itemLength, int targetUid,
             int32_t flags) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_INSERT)) {
+        if (!has_permission(callingUid, P_INSERT, spid)) {
             ALOGW("permission denied for %d: insert", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1498,12 +1656,13 @@ public:
         Blob keyBlob(item, itemLength, NULL, 0, ::TYPE_GENERIC);
         keyBlob.setEncrypted(flags & KEYSTORE_FLAG_ENCRYPTED);
 
-        return mKeyStore->put(filename.string(), &keyBlob, callingUid);
+        return mKeyStore->put(filename.string(), &keyBlob, targetUid);
     }
 
     int32_t del(const String16& name, int targetUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_DELETE)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_DELETE, spid)) {
             ALOGW("permission denied for %d: del", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1516,19 +1675,13 @@ public:
 
         String8 name8(name);
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
-
-        Blob keyBlob;
-        ResponseCode responseCode = mKeyStore->get(filename.string(), &keyBlob, TYPE_GENERIC,
-                callingUid);
-        if (responseCode != ::NO_ERROR) {
-            return responseCode;
-        }
-        return (unlink(filename) && errno != ENOENT) ? ::SYSTEM_ERROR : ::NO_ERROR;
+        return mKeyStore->del(filename.string(), ::TYPE_GENERIC, targetUid);
     }
 
     int32_t exist(const String16& name, int targetUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_EXIST)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_EXIST, spid)) {
             ALOGW("permission denied for %d: exist", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1550,7 +1703,8 @@ public:
 
     int32_t saw(const String16& prefix, int targetUid, Vector<String16>* matches) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_SAW)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_SAW, spid)) {
             ALOGW("permission denied for %d: saw", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1561,75 +1715,24 @@ public:
             return ::PERMISSION_DENIED;
         }
 
-        UserState* userState = mKeyStore->getUserState(targetUid);
-        DIR* dir = opendir(userState->getUserDirName());
-        if (!dir) {
-            ALOGW("can't open directory for user: %s", strerror(errno));
-            return ::SYSTEM_ERROR;
-        }
-
         const String8 prefix8(prefix);
         String8 filename(mKeyStore->getKeyNameForUid(prefix8, targetUid));
-        size_t n = filename.length();
 
-        struct dirent* file;
-        while ((file = readdir(dir)) != NULL) {
-            // We only care about files.
-            if (file->d_type != DT_REG) {
-                continue;
-            }
-
-            // Skip anything that starts with a "."
-            if (file->d_name[0] == '.') {
-                continue;
-            }
-
-            if (!strncmp(filename.string(), file->d_name, n)) {
-                const char* p = &file->d_name[n];
-                size_t plen = strlen(p);
-
-                size_t extra = decode_key_length(p, plen);
-                char *match = (char*) malloc(extra + 1);
-                if (match != NULL) {
-                    decode_key(match, p, plen);
-                    matches->push(String16(match, extra));
-                    free(match);
-                } else {
-                    ALOGW("could not allocate match of size %zd", extra);
-                }
-            }
+        if (mKeyStore->saw(filename, matches, targetUid) != ::NO_ERROR) {
+            return ::SYSTEM_ERROR;
         }
-        closedir(dir);
-
         return ::NO_ERROR;
     }
 
     int32_t reset() {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_RESET)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_RESET, spid)) {
             ALOGW("permission denied for %d: reset", callingUid);
             return ::PERMISSION_DENIED;
         }
 
-        ResponseCode rc = mKeyStore->reset(callingUid) ? ::NO_ERROR : ::SYSTEM_ERROR;
-
-        const keymaster_device_t* device = mKeyStore->getDevice();
-        if (device == NULL) {
-            ALOGE("No keymaster device!");
-            return ::SYSTEM_ERROR;
-        }
-
-        if (device->delete_all == NULL) {
-            ALOGV("keymaster device doesn't implement delete_all");
-            return rc;
-        }
-
-        if (device->delete_all(device)) {
-            ALOGE("Problem calling keymaster's delete_all");
-            return ::SYSTEM_ERROR;
-        }
-
-        return rc;
+        return mKeyStore->reset(callingUid) ? ::NO_ERROR : ::SYSTEM_ERROR;
     }
 
     /*
@@ -1641,7 +1744,8 @@ public:
      */
     int32_t password(const String16& password) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_PASSWORD)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_PASSWORD, spid)) {
             ALOGW("permission denied for %d: password", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1667,7 +1771,8 @@ public:
 
     int32_t lock() {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_LOCK)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_LOCK, spid)) {
             ALOGW("permission denied for %d: lock", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1684,7 +1789,8 @@ public:
 
     int32_t unlock(const String16& pw) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_UNLOCK)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_UNLOCK, spid)) {
             ALOGW("permission denied for %d: unlock", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1701,7 +1807,8 @@ public:
 
     int32_t zero() {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_ZERO)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_ZERO, spid)) {
             ALOGW("permission denied for %d: zero", callingUid);
             return -1;
         }
@@ -1712,7 +1819,8 @@ public:
     int32_t generate(const String16& name, int32_t targetUid, int32_t keyType, int32_t keySize,
             int32_t flags, Vector<sp<KeystoreArg> >* args) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_INSERT)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_INSERT, spid)) {
             ALOGW("permission denied for %d: generate", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1779,7 +1887,7 @@ public:
                 return ::SYSTEM_ERROR;
             }
 
-            if (device->common.module->module_api_version >= KEYMASTER_MODULE_API_VERSION_0_2) {
+            if (isKeyTypeSupported(device, TYPE_DSA)) {
                 rc = device->generate_keypair(device, TYPE_DSA, &dsa_params, &data, &dataLength);
             } else {
                 isFallback = true;
@@ -1797,7 +1905,7 @@ public:
             }
             ec_params.field_size = keySize;
 
-            if (device->common.module->module_api_version >= KEYMASTER_MODULE_API_VERSION_0_2) {
+            if (isKeyTypeSupported(device, TYPE_EC)) {
                 rc = device->generate_keypair(device, TYPE_EC, &ec_params, &data, &dataLength);
             } else {
                 isFallback = true;
@@ -1817,7 +1925,7 @@ public:
             rsa_params.modulus_size = keySize;
 
             if (args->size() > 1) {
-                ALOGI("invalid number of arguments: %d", args->size());
+                ALOGI("invalid number of arguments: %zu", args->size());
                 return ::SYSTEM_ERROR;
             } else if (args->size() == 1) {
                 sp<KeystoreArg> pubExpBlob = args->itemAt(0);
@@ -1863,7 +1971,8 @@ public:
     int32_t import(const String16& name, const uint8_t* data, size_t length, int targetUid,
             int32_t flags) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_INSERT)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_INSERT, spid)) {
             ALOGW("permission denied for %d: import", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1874,7 +1983,7 @@ public:
             return ::PERMISSION_DENIED;
         }
 
-        State state = mKeyStore->getState(callingUid);
+        State state = mKeyStore->getState(targetUid);
         if ((flags & KEYSTORE_FLAG_ENCRYPTED) && !isKeystoreUnlocked(state)) {
             ALOGD("calling import in state: %d", state);
             return state;
@@ -1883,13 +1992,14 @@ public:
         String8 name8(name);
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
 
-        return mKeyStore->importKey(data, length, filename.string(), callingUid, flags);
+        return mKeyStore->importKey(data, length, filename.string(), targetUid, flags);
     }
 
     int32_t sign(const String16& name, const uint8_t* data, size_t length, uint8_t** out,
             size_t* outLength) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_SIGN)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_SIGN, spid)) {
             ALOGW("permission denied for %d: saw", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -1939,7 +2049,8 @@ public:
     int32_t verify(const String16& name, const uint8_t* data, size_t dataLength,
             const uint8_t* signature, size_t signatureLength) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_VERIFY)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_VERIFY, spid)) {
             ALOGW("permission denied for %d: verify", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -2000,7 +2111,8 @@ public:
      */
     int32_t get_pubkey(const String16& name, uint8_t** pubkey, size_t* pubkeyLength) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_GET)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_GET, spid)) {
             ALOGW("permission denied for %d: get_pubkey", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -2043,7 +2155,8 @@ public:
 
     int32_t del_key(const String16& name, int targetUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_DELETE)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_DELETE, spid)) {
             ALOGW("permission denied for %d: del_key", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -2055,39 +2168,14 @@ public:
         }
 
         String8 name8(name);
-        String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, callingUid));
-
-        Blob keyBlob;
-        ResponseCode responseCode = mKeyStore->get(filename.string(), &keyBlob, ::TYPE_KEY_PAIR,
-                callingUid);
-        if (responseCode != ::NO_ERROR) {
-            return responseCode;
-        }
-
-        ResponseCode rc = ::NO_ERROR;
-
-        const keymaster_device_t* device = mKeyStore->getDevice();
-        if (device == NULL) {
-            rc = ::SYSTEM_ERROR;
-        } else {
-            // A device doesn't have to implement delete_keypair.
-            if (device->delete_keypair != NULL && !keyBlob.isFallback()) {
-                if (device->delete_keypair(device, keyBlob.getValue(), keyBlob.getLength())) {
-                    rc = ::SYSTEM_ERROR;
-                }
-            }
-        }
-
-        if (rc != ::NO_ERROR) {
-            return rc;
-        }
-
-        return (unlink(filename) && errno != ENOENT) ? ::SYSTEM_ERROR : ::NO_ERROR;
+        String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
+        return mKeyStore->del(filename.string(), ::TYPE_KEY_PAIR, targetUid);
     }
 
     int32_t grant(const String16& name, int32_t granteeUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_GRANT)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_GRANT, spid)) {
             ALOGW("permission denied for %d: grant", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -2111,7 +2199,8 @@ public:
 
     int32_t ungrant(const String16& name, int32_t granteeUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_GRANT)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_GRANT, spid)) {
             ALOGW("permission denied for %d: ungrant", callingUid);
             return ::PERMISSION_DENIED;
         }
@@ -2134,7 +2223,8 @@ public:
 
     int64_t getmtime(const String16& name) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_GET)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_GET, spid)) {
             ALOGW("permission denied for %d: getmtime", callingUid);
             return -1L;
         }
@@ -2167,7 +2257,8 @@ public:
     int32_t duplicate(const String16& srcKey, int32_t srcUid, const String16& destKey,
             int32_t destUid) {
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_DUPLICATE)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_DUPLICATE, spid)) {
             ALOGW("permission denied for %d: duplicate", callingUid);
             return -1L;
         }
@@ -2206,7 +2297,7 @@ public:
         String8 sourceFile(mKeyStore->getKeyNameForUidWithDir(source8, srcUid));
 
         String8 target8(destKey);
-        String8 targetFile(mKeyStore->getKeyNameForUidWithDir(target8, srcUid));
+        String8 targetFile(mKeyStore->getKeyNameForUidWithDir(target8, destUid));
 
         if (access(targetFile.string(), W_OK) != -1 || errno != ENOENT) {
             ALOGD("destination already exists: %s", targetFile.string());
@@ -2215,29 +2306,32 @@ public:
 
         Blob keyBlob;
         ResponseCode responseCode = mKeyStore->get(sourceFile.string(), &keyBlob, TYPE_ANY,
-                callingUid);
+                srcUid);
         if (responseCode != ::NO_ERROR) {
             return responseCode;
         }
 
-        return mKeyStore->put(targetFile.string(), &keyBlob, callingUid);
+        return mKeyStore->put(targetFile.string(), &keyBlob, destUid);
     }
 
     int32_t is_hardware_backed(const String16& keyType) {
         return mKeyStore->isHardwareBacked(keyType) ? 1 : 0;
     }
 
-    int32_t clear_uid(int64_t targetUid) {
+    int32_t clear_uid(int64_t targetUid64) {
+        uid_t targetUid = static_cast<uid_t>(targetUid64);
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
-        if (!has_permission(callingUid, P_CLEAR_UID)) {
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_CLEAR_UID, spid)) {
             ALOGW("permission denied for %d: clear_uid", callingUid);
             return ::PERMISSION_DENIED;
         }
 
-        State state = mKeyStore->getState(callingUid);
-        if (!isKeystoreUnlocked(state)) {
-            ALOGD("calling clear_uid in state: %d", state);
-            return state;
+        if (targetUid64 == -1) {
+            targetUid = callingUid;
+        } else if (!is_self_or_system(callingUid, targetUid)) {
+            ALOGW("permission denied for %d: clear_uid %d", callingUid, targetUid);
+            return ::PERMISSION_DENIED;
         }
 
         const keymaster_device_t* device = mKeyStore->getDevice();
@@ -2246,60 +2340,84 @@ public:
             return ::SYSTEM_ERROR;
         }
 
-        UserState* userState = mKeyStore->getUserState(callingUid);
-        DIR* dir = opendir(userState->getUserDirName());
-        if (!dir) {
-            ALOGW("can't open user directory: %s", strerror(errno));
+        String8 prefix = String8::format("%u_", targetUid);
+        Vector<String16> aliases;
+        if (mKeyStore->saw(prefix, &aliases, targetUid) != ::NO_ERROR) {
             return ::SYSTEM_ERROR;
         }
 
-        char prefix[NAME_MAX];
-        int n = snprintf(prefix, NAME_MAX, "%u_", static_cast<uid_t>(targetUid));
+        for (uint32_t i = 0; i < aliases.size(); i++) {
+            String8 name8(aliases[i]);
+            String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
+            mKeyStore->del(filename.string(), ::TYPE_ANY, targetUid);
+        }
+        return ::NO_ERROR;
+    }
 
-        ResponseCode rc = ::NO_ERROR;
+    int32_t reset_uid(int32_t targetUid) {
+        uid_t callingUid = IPCThreadState::self()->getCallingUid();
+        pid_t spid = IPCThreadState::self()->getCallingPid();
 
-        struct dirent* file;
-        while ((file = readdir(dir)) != NULL) {
-            // We only care about files.
-            if (file->d_type != DT_REG) {
-                continue;
+        if (!has_permission(callingUid, P_RESET_UID, spid)) {
+            ALOGW("permission denied for %d: reset_uid %d", callingUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+        if (!is_self_or_system(callingUid, targetUid)) {
+            ALOGW("permission denied for %d: reset_uid %d", callingUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+
+        return mKeyStore->reset(targetUid) ? ::NO_ERROR : ::SYSTEM_ERROR;
+    }
+
+    int32_t sync_uid(int32_t sourceUid, int32_t targetUid) {
+        uid_t callingUid = IPCThreadState::self()->getCallingUid();
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_SYNC_UID, spid)) {
+            ALOGW("permission denied for %d: sync_uid %d -> %d", callingUid, sourceUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+        if (callingUid != AID_SYSTEM) {
+            ALOGW("permission denied for %d: sync_uid %d -> %d", callingUid, sourceUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+        if (sourceUid == targetUid) {
+            return ::SYSTEM_ERROR;
+        }
+
+        // Initialise user keystore with existing master key held in-memory
+        return mKeyStore->copyMasterKey(sourceUid, targetUid);
+    }
+
+    int32_t password_uid(const String16& pw, int32_t targetUid) {
+        uid_t callingUid = IPCThreadState::self()->getCallingUid();
+        pid_t spid = IPCThreadState::self()->getCallingPid();
+        if (!has_permission(callingUid, P_PASSWORD_UID, spid)) {
+            ALOGW("permission denied for %d: password_uid %d", callingUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+        if (callingUid != AID_SYSTEM) {
+            ALOGW("permission denied for %d: password_uid %d", callingUid, targetUid);
+            return ::PERMISSION_DENIED;
+        }
+
+        const String8 password8(pw);
+
+        switch (mKeyStore->getState(targetUid)) {
+            case ::STATE_UNINITIALIZED: {
+                // generate master key, encrypt with password, write to file, initialize mMasterKey*.
+                return mKeyStore->initializeUser(password8, targetUid);
             }
-
-            // Skip anything that starts with a "."
-            if (file->d_name[0] == '.') {
-                continue;
+            case ::STATE_NO_ERROR: {
+                // rewrite master key with new password.
+                return mKeyStore->writeMasterKey(password8, targetUid);
             }
-
-            if (strncmp(prefix, file->d_name, n)) {
-                continue;
-            }
-
-            String8 filename(String8::format("%s/%s", userState->getUserDirName(), file->d_name));
-            Blob keyBlob;
-            if (mKeyStore->get(filename.string(), &keyBlob, ::TYPE_ANY, callingUid)
-                    != ::NO_ERROR) {
-                ALOGW("couldn't open %s", filename.string());
-                continue;
-            }
-
-            if (keyBlob.getType() == ::TYPE_KEY_PAIR) {
-                // A device doesn't have to implement delete_keypair.
-                if (device->delete_keypair != NULL && !keyBlob.isFallback()) {
-                    if (device->delete_keypair(device, keyBlob.getValue(), keyBlob.getLength())) {
-                        rc = ::SYSTEM_ERROR;
-                        ALOGW("device couldn't remove %s", filename.string());
-                    }
-                }
-            }
-
-            if (unlinkat(dirfd(dir), file->d_name, 0) && errno != ENOENT) {
-                rc = ::SYSTEM_ERROR;
-                ALOGW("couldn't unlink %s", filename.string());
+            case ::STATE_LOCKED: {
+                // read master key, decrypt with password, initialize mMasterKey*.
+                return mKeyStore->readMasterKey(password8, targetUid);
             }
         }
-        closedir(dir);
-
-        return rc;
+        return ::SYSTEM_ERROR;
     }
 
 private:
@@ -2312,6 +2430,33 @@ private:
             return false;
         }
         return false;
+    }
+
+    bool isKeyTypeSupported(const keymaster_device_t* device, keymaster_keypair_t keyType) {
+        const int32_t device_api = device->common.module->module_api_version;
+        if (device_api == KEYMASTER_MODULE_API_VERSION_0_2) {
+            switch (keyType) {
+                case TYPE_RSA:
+                case TYPE_DSA:
+                case TYPE_EC:
+                    return true;
+                default:
+                    return false;
+            }
+        } else if (device_api >= KEYMASTER_MODULE_API_VERSION_0_3) {
+            switch (keyType) {
+                case TYPE_RSA:
+                    return true;
+                case TYPE_DSA:
+                    return device->flags & KEYMASTER_SUPPORTS_DSA;
+                case TYPE_EC:
+                    return device->flags & KEYMASTER_SUPPORTS_EC;
+                default:
+                    return false;
+            }
+        } else {
+            return keyType == TYPE_RSA;
+        }
     }
 
     ::KeyStore* mKeyStore;
@@ -2338,6 +2483,19 @@ int main(int argc, char* argv[]) {
     if (keymaster_device_initialize(&dev)) {
         ALOGE("keystore keymaster could not be initialized; exiting");
         return 1;
+    }
+
+    ks_is_selinux_enabled = is_selinux_enabled();
+    if (ks_is_selinux_enabled) {
+        union selinux_callback cb;
+        cb.func_log = selinux_log_callback;
+        selinux_set_callback(SELINUX_CB_LOG, cb);
+        if (getcon(&tctx) != 0) {
+            ALOGE("SELinux: Could not acquire target context. Aborting keystore.\n");
+            return -1;
+        }
+    } else {
+        ALOGI("SELinux: Keystore SELinux is disabled.\n");
     }
 
     KeyStore keyStore(&entropy, dev);

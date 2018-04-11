@@ -15,55 +15,50 @@
  */
 package android.hardware.cts.helpers;
 
-import android.content.Context;
-
-import android.hardware.Sensor;
-import android.hardware.SensorManager;
-
-import android.os.Environment;
-
-import android.test.AndroidTestCase;
-
-import android.util.Log;
-
-import java.io.DataOutputStream;
+import java.io.File;
 import java.io.IOException;
-
-import java.text.SimpleDateFormat;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
-
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Set of static helper methods for CTS tests.
  */
+//TODO: Refactor this class into several more well defined helper classes, look at StatisticsUtils
 public class SensorCtsHelper {
+
+    private static final long NANOS_PER_MILLI = 1000000;
+
     /**
-     * This is an static class.
+     * Private constructor for static class.
      */
     private SensorCtsHelper() {}
 
-    public static <TValue extends Comparable> TValue get95PercentileValue(
+    /**
+     * Get the value of the 95th percentile using nearest rank algorithm.
+     *
+     * @throws IllegalArgumentException if the collection is null or empty
+     */
+    public static <TValue extends Comparable<? super TValue>> TValue get95PercentileValue(
             Collection<TValue> collection) {
         validateCollection(collection);
 
-        ArrayList<TValue> arrayCopy = new ArrayList<TValue>(collection);
+        List<TValue> arrayCopy = new ArrayList<TValue>(collection);
         Collections.sort(arrayCopy);
 
         // zero-based array index
-        int arrayIndex = (int)(arrayCopy.size() * 0.95) - 1;
-        if(arrayIndex < 0) {
-            arrayIndex = 0;
-        }
+        int arrayIndex = (int) Math.round(arrayCopy.size() * 0.95 + .5) - 1;
 
         return arrayCopy.get(arrayIndex);
     }
 
-    // TODO: are there any internal libraries for this?
+    /**
+     * Calculate the mean of a collection.
+     *
+     * @throws IllegalArgumentException if the collection is null or empty
+     */
     public static <TValue extends Number> double getMean(Collection<TValue> collection) {
         validateCollection(collection);
 
@@ -74,171 +69,173 @@ public class SensorCtsHelper {
         return sum / collection.size();
     }
 
+    /**
+     * Calculate the bias-corrected sample variance of a collection.
+     *
+     * @throws IllegalArgumentException if the collection is null or empty
+     */
     public static <TValue extends Number> double getVariance(Collection<TValue> collection) {
         validateCollection(collection);
 
         double mean = getMean(collection);
-        ArrayList<Double> squaredDifferences = new ArrayList<Double>();
+        ArrayList<Double> squaredDiffs = new ArrayList<Double>();
         for(TValue value : collection) {
             double difference = mean - value.doubleValue();
-            squaredDifferences.add(Math.pow(difference, 2));
+            squaredDiffs.add(Math.pow(difference, 2));
         }
 
-        double variance = getMean(squaredDifferences);
-        return variance;
-    }
-
-    public static <TValue extends Number> double getStandardDeviation(Collection<TValue> collection) {
-        validateCollection(collection);
-
-        double variance = getVariance(collection);
-        return Math.sqrt(variance);
+        double sum = 0.0;
+        for (Double value : squaredDiffs) {
+            sum += value;
+        }
+        return sum / (squaredDiffs.size() - 1);
     }
 
     /**
-     * Gets the jitter values associated with a set of sensor events.
+     * @return The (measured) sampling rate of a collection of {@link TestSensorEvent}.
+     */
+    public static long getSamplingPeriodNs(List<TestSensorEvent> collection) {
+        int collectionSize = collection.size();
+        if (collectionSize < 2) {
+            return 0;
+        }
+        TestSensorEvent firstEvent = collection.get(0);
+        TestSensorEvent lastEvent = collection.get(collectionSize - 1);
+        return (lastEvent.timestamp - firstEvent.timestamp) / (collectionSize - 1);
+    }
+
+    /**
+     * Calculate the bias-corrected standard deviation of a collection.
      *
-     * @param events The events to use to obtain the jittering information.
-     * @param jitterValues The Collection that will contain the computed jitter values.
-     * @return The mean of the jitter Values.
+     * @throws IllegalArgumentException if the collection is null or empty
      */
-    public static double getJitterMean(TestSensorEvent events[], Collection<Double> jitterValues) {
-        ArrayList<Long> timestampDelayValues = new ArrayList<Long>();
-        double averageTimestampDelay = SensorCtsHelper.getAverageTimestampDelayWithValues(events,
-                timestampDelayValues);
-        for(long frequency : timestampDelayValues) {
-            jitterValues.add(Math.abs(averageTimestampDelay - frequency));
-        }
-
-        double jitterMean = SensorCtsHelper.getMean(timestampDelayValues);
-        return jitterMean;
+    public static <TValue extends Number> double getStandardDeviation(
+            Collection<TValue> collection) {
+        return Math.sqrt(getVariance(collection));
     }
 
     /**
-     * Gets the frequency values associated with a set of sensor events.
+     * Convert a period to frequency in Hz.
+     */
+    public static <TValue extends Number> double getFrequency(TValue period, TimeUnit unit) {
+        return 1000000000 / (TimeUnit.NANOSECONDS.convert(1, unit) * period.doubleValue());
+    }
+
+    /**
+     * Convert a frequency in Hz into a period.
+     */
+    public static <TValue extends Number> double getPeriod(TValue frequency, TimeUnit unit) {
+        return 1000000000 / (TimeUnit.NANOSECONDS.convert(1, unit) * frequency.doubleValue());
+    }
+
+    /**
+     * @return The magnitude (norm) represented by the given array of values.
+     */
+    public static double getMagnitude(float[] values) {
+        float sumOfSquares = 0.0f;
+        for (float value : values) {
+            sumOfSquares += value * value;
+        }
+        double magnitude = Math.sqrt(sumOfSquares);
+        return magnitude;
+    }
+
+    /**
+     * Helper method to sleep for a given duration.
+     */
+    public static void sleep(long duration, TimeUnit timeUnit) throws InterruptedException {
+        long durationNs = TimeUnit.NANOSECONDS.convert(duration, timeUnit);
+        Thread.sleep(durationNs / NANOS_PER_MILLI, (int) (durationNs % NANOS_PER_MILLI));
+    }
+
+    /**
+     * Format an assertion message.
      *
-     * @param events The events to use to obtain the frequency information.
-     * @param timestampDelayValues The Collection that will contain the computed frequency values.
-     * @return The mean of the frequency values.
+     * @param label the verification name
+     * @param environment the environment of the test
+     *
+     * @return The formatted string
      */
-    public static double getAverageTimestampDelayWithValues(
-            TestSensorEvent events[],
-            Collection<Long> timestampDelayValues) {
-        for(int i = 1; i < events.length; ++i) {
-            long previousTimestamp = events[i-1].timestamp;
-            long timestamp = events[i].timestamp;
-            timestampDelayValues.add(timestamp - previousTimestamp);
-        }
-
-        double timestampDelayMean = SensorCtsHelper.getMean(timestampDelayValues);
-        return timestampDelayMean;
-    }
-
-    public static int getSecondsAsMicroSeconds(int seconds) {
-        return (int) TimeUnit.MICROSECONDS.convert(seconds, TimeUnit.SECONDS);
+    public static String formatAssertionMessage(String label, TestSensorEnvironment environment) {
+        return formatAssertionMessage(label, environment, "Failed");
     }
 
     /**
-     * NOTE:
-     * - The bug report is usually written to /sdcard/Downloads
-     * - In order for the test Instrumentation to gather useful data the following permissions are
-     *   required:
-     *      . android.permission.READ_LOGS
-     *      . android.permission.DUMP
+     * Format an assertion message with a custom message.
+     *
+     * @param label the verification name
+     * @param environment the environment of the test
+     * @param format the additional format string
+     * @param params the additional format params
+     *
+     * @return The formatted string
      */
-    public static void collectBugreport(String collectorId)
-            throws IOException, InterruptedException {
-        String commands[] = new String[] {
-                "dumpstate",
-                "dumpsys",
-                "logcat -d -v threadtime",
-                "exit"
-        };
-
-        SimpleDateFormat dateFormat = new SimpleDateFormat("M-d-y_H:m:s.S");
-        String outputFile = String.format(
-                "%s/%s_%s",
-                collectorId,
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                dateFormat.format(new Date()));
-
-        DataOutputStream processOutput = null;
-        try {
-            Process process = Runtime.getRuntime().exec("/system/bin/sh -");
-            processOutput = new DataOutputStream(process.getOutputStream());
-
-            for(String command : commands) {
-                processOutput.writeBytes(String.format("%s >> %s\n", command, outputFile));
-            }
-
-            processOutput.flush();
-            process.waitFor();
-
-            Log.d(collectorId, String.format("Bug-Report collected at: %s", outputFile));
-        } finally {
-            if(processOutput != null) {
-                try {
-                    processOutput.close();
-                } catch(IOException e) {}
-            }
-        }
-    }
-
-    public static Sensor getSensor(AndroidTestCase testCase, int sensorType) {
-        SensorManager sensorManager = (SensorManager)testCase.getContext().getSystemService(
-                Context.SENSOR_SERVICE);
-        testCase.assertNotNull(sensorManager);
-        Sensor sensor = sensorManager.getDefaultSensor(sensorType);
-        if(sensor == null) {
-            throw new SensorNotSupportedException(sensorType);
-        }
-        return sensor;
-    }
-
-    public static <TReference extends Number> double getFrequencyInHz(TReference samplingRateInUs) {
-        return 1000000000 / samplingRateInUs.doubleValue();
-    }
-
     public static String formatAssertionMessage(
-            String verificationName,
-            Sensor sensor,
+            String label,
+            TestSensorEnvironment environment,
             String format,
             Object ... params) {
-        return formatAssertionMessage(verificationName, null, sensor, format, params);
-    }
-
-    public static String formatAssertionMessage(
-            String verificationName,
-            SensorTestOperation test,
-            Sensor sensor,
-            String format,
-            Object ... params) {
-        StringBuilder builder = new StringBuilder();
-
-        // identify the verification
-        builder.append(verificationName);
-        builder.append("| ");
-        // add test context information
-        if(test != null) {
-            builder.append(test.toString());
-            builder.append("| ");
-        }
-        // add context information
-        builder.append(
-                SensorTestInformation.getSensorName(sensor.getType()));
-        builder.append(", handle:");
-        builder.append(sensor.getHandle());
-        builder.append("| ");
-        // add the custom formatting
-        builder.append(String.format(format, params));
-
-        return builder.toString();
+        return formatAssertionMessage(label, environment, String.format(format, params));
     }
 
     /**
-     * Private helpers
+     * Format an assertion message.
+     *
+     * @param label the verification name
+     * @param environment the environment of the test
+     * @param extras the additional information for the assertion
+     *
+     * @return The formatted string
      */
-    private static void validateCollection(Collection collection) {
+    public static String formatAssertionMessage(
+            String label,
+            TestSensorEnvironment environment,
+            String extras) {
+        return String.format(
+                "%s | sensor='%s', samplingPeriodUs=%d, maxReportLatencyUs=%d | %s",
+                label,
+                environment.getSensor().getName(),
+                environment.getRequestedSamplingPeriodUs(),
+                environment.getMaxReportLatencyUs(),
+                extras);
+    }
+
+    /**
+     * @return A {@link File} representing a root directory to store sensor tests data.
+     */
+    public static File getSensorTestDataDirectory() throws IOException {
+        File dataDirectory = new File(System.getenv("EXTERNAL_STORAGE"), "sensorTests/");
+        return createDirectoryStructure(dataDirectory);
+    }
+
+    /**
+     * Creates the directory structure for the given sensor test data sub-directory.
+     *
+     * @param subdirectory The sub-directory's name.
+     */
+    public static File getSensorTestDataDirectory(String subdirectory) throws IOException {
+        File subdirectoryFile = new File(getSensorTestDataDirectory(), subdirectory);
+        return createDirectoryStructure(subdirectoryFile);
+    }
+
+    /**
+     * Ensures that the directory structure represented by the given {@link File} is created.
+     */
+    private static File createDirectoryStructure(File directoryStructure) throws IOException {
+        directoryStructure.mkdirs();
+        if (!directoryStructure.isDirectory()) {
+            throw new IOException("Unable to create directory structure for "
+                    + directoryStructure.getAbsolutePath());
+        }
+        return directoryStructure;
+    }
+
+    /**
+     * Validate that a collection is not null or empty.
+     *
+     * @throws IllegalStateException if collection is null or empty.
+     */
+    private static <T> void validateCollection(Collection<T> collection) {
         if(collection == null || collection.size() == 0) {
             throw new IllegalStateException("Collection cannot be null or empty");
         }

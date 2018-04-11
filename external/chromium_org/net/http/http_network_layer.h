@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/power_monitor/power_observer.h"
@@ -36,14 +38,13 @@ class NET_EXPORT HttpNetworkLayer
   // when network session is shared.
   static HttpTransactionFactory* CreateFactory(HttpNetworkSession* session);
 
-  // Forces an alternate protocol of SPDY/2 on port 443.
+  // Forces an alternate protocol of SPDY/3 on port 443.
   // TODO(rch): eliminate this method.
   static void ForceAlternateProtocol();
 
   // HttpTransactionFactory methods:
   virtual int CreateTransaction(RequestPriority priority,
-                                scoped_ptr<HttpTransaction>* trans,
-                                HttpTransactionDelegate* delegate) OVERRIDE;
+                                scoped_ptr<HttpTransaction>* trans) OVERRIDE;
   virtual HttpCache* GetCache() OVERRIDE;
   virtual HttpNetworkSession* GetSession() OVERRIDE;
 
@@ -54,6 +55,8 @@ class NET_EXPORT HttpNetworkLayer
  private:
   const scoped_refptr<HttpNetworkSession> session_;
   bool suspended_;
+
+  DISALLOW_COPY_AND_ASSIGN(HttpNetworkLayer);
 };
 
 }  // namespace net

@@ -5,12 +5,11 @@
 #ifndef COMPONENTS_WEB_CONTENTS_DELEGATE_ANDROID_WEB_CONTENTS_DELEGATE_ANDROID_H_
 #define COMPONENTS_WEB_CONTENTS_DELEGATE_ANDROID_WEB_CONTENTS_DELEGATE_ANDROID_H_
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "ui/gfx/vector2d.h"
 
 class GURL;
 
@@ -22,6 +21,8 @@ struct OpenURLParams;
 }
 
 namespace web_contents_delegate_android {
+
+class ValidationMessageBubbleAndroid;
 
 enum WebContentsDelegateLogLevel {
   // Equivalent of WebCore::WebConsoleMessage::LevelDebug.
@@ -53,19 +54,18 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) OVERRIDE;
-  virtual content::ColorChooser* OpenColorChooser(content::WebContents* source,
-                                                  SkColor color) OVERRIDE;
+  virtual content::ColorChooser* OpenColorChooser(
+      content::WebContents* source,
+      SkColor color,
+      const std::vector<content::ColorSuggestion>& suggestions) OVERRIDE;
   virtual void NavigationStateChanged(const content::WebContents* source,
                                       unsigned changed_flags) OVERRIDE;
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
+  virtual void VisibleSSLStateChanged(
+      const content::WebContents* source) OVERRIDE;
   virtual void ActivateContents(content::WebContents* contents) OVERRIDE;
   virtual void DeactivateContents(content::WebContents* contents) OVERRIDE;
-  virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
+  virtual void LoadingStateChanged(content::WebContents* source,
+                                   bool to_different_document) OVERRIDE;
   virtual void LoadProgressChanged(content::WebContents* source,
                                    double load_progress) OVERRIDE;
   virtual void RendererUnresponsive(content::WebContents* source) OVERRIDE;
@@ -91,9 +91,15 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
                                           bool enter_fullscreen) OVERRIDE;
   virtual bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const OVERRIDE;
-  virtual void DidProgrammaticallyScroll(
+  virtual void ShowValidationMessage(content::WebContents* web_contents,
+                                     const gfx::Rect& anchor_in_root_view,
+                                     const base::string16& main_text,
+                                     const base::string16& sub_text) OVERRIDE;
+  virtual void HideValidationMessage(
+      content::WebContents* web_contents) OVERRIDE;
+  virtual void MoveValidationMessage(
       content::WebContents* web_contents,
-      const gfx::Vector2d& scroll_point) OVERRIDE;
+      const gfx::Rect& anchor_in_root_view) OVERRIDE;
 
  protected:
   base::android::ScopedJavaLocalRef<jobject> GetJavaDelegate(JNIEnv* env) const;
@@ -103,6 +109,8 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   // strong reference to that object as long as they want to receive callbacks
   // on it. Using a weak ref here allows it to be correctly GCed.
   JavaObjectWeakGlobalRef weak_java_delegate_;
+
+  scoped_ptr<ValidationMessageBubbleAndroid> validation_message_bubble_;
 };
 
 bool RegisterWebContentsDelegateAndroid(JNIEnv* env);

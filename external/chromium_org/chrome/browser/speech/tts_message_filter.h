@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SPEECH_TTS_MESSAGE_FILTER_H_
 #define CHROME_BROWSER_SPEECH_TTS_MESSAGE_FILTER_H_
 
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/common/tts_messages.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -14,7 +15,8 @@ class Profile;
 class TtsMessageFilter
     : public content::BrowserMessageFilter,
       public UtteranceEventDelegate,
-      public VoicesChangedDelegate {
+      public VoicesChangedDelegate,
+      public base::SupportsWeakPtr<TtsMessageFilter> {
  public:
   TtsMessageFilter(int render_process_id, Profile* profile);
 
@@ -22,9 +24,9 @@ class TtsMessageFilter
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       content::BrowserThread::ID* thread) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
 
   // UtteranceEventDelegate implementation.
   virtual void OnTtsEvent(Utterance* utterance,
@@ -36,6 +38,9 @@ class TtsMessageFilter
   virtual void OnVoicesChanged() OVERRIDE;
 
  private:
+  friend class content::BrowserThread;
+  friend class base::DeleteHelper<TtsMessageFilter>;
+
   virtual ~TtsMessageFilter();
 
   void OnInitializeVoiceList();
@@ -43,6 +48,8 @@ class TtsMessageFilter
   void OnPause();
   void OnResume();
   void OnCancel();
+
+  void OnChannelClosingInUIThread();
 
   int render_process_id_;
   Profile* profile_;

@@ -29,6 +29,7 @@ import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.test.AndroidTestCase;
 import android.util.DisplayMetrics;
@@ -72,6 +73,8 @@ public class VirtualDisplayTest extends AndroidTestCase {
     private ImageReader mImageReader;
     private Surface mSurface;
     private ImageListener mImageListener;
+    private HandlerThread mCheckThread;
+    private Handler mCheckHandler;
 
     @Override
     protected void setUp() throws Exception {
@@ -80,11 +83,15 @@ public class VirtualDisplayTest extends AndroidTestCase {
         mDisplayManager = (DisplayManager)mContext.getSystemService(Context.DISPLAY_SERVICE);
         mHandler = new Handler(Looper.getMainLooper());
         mImageListener = new ImageListener();
+        // thread for image checking
+        mCheckThread = new HandlerThread("TestHandler");
+        mCheckThread.start();
+        mCheckHandler = new Handler(mCheckThread.getLooper());
 
         mImageReaderLock.lock();
         try {
             mImageReader = ImageReader.newInstance(WIDTH, HEIGHT, PixelFormat.RGBA_8888, 2);
-            mImageReader.setOnImageAvailableListener(mImageListener, mHandler);
+            mImageReader.setOnImageAvailableListener(mImageListener, mCheckHandler);
             mSurface = mImageReader.getSurface();
         } finally {
             mImageReaderLock.unlock();
@@ -94,7 +101,6 @@ public class VirtualDisplayTest extends AndroidTestCase {
     @Override
     protected void tearDown() throws Exception {
         super.tearDown();
-
         mImageReaderLock.lock();
         try {
             mImageReader.close();
@@ -103,6 +109,7 @@ public class VirtualDisplayTest extends AndroidTestCase {
         } finally {
             mImageReaderLock.unlock();
         }
+        mCheckThread.quit();
     }
 
     /**
@@ -117,6 +124,7 @@ public class VirtualDisplayTest extends AndroidTestCase {
         Display display = virtualDisplay.getDisplay();
         try {
             assertDisplayRegistered(display, Display.FLAG_PRIVATE);
+            assertEquals(mSurface, virtualDisplay.getSurface());
 
             // Show a private presentation on the display.
             assertDisplayCanShowPresentation("private presentation window",
@@ -141,11 +149,44 @@ public class VirtualDisplayTest extends AndroidTestCase {
         Display display = virtualDisplay.getDisplay();
         try {
             assertDisplayRegistered(display, Display.FLAG_PRIVATE | Display.FLAG_PRESENTATION);
+            assertEquals(mSurface, virtualDisplay.getSurface());
 
             // Show a private presentation on the display.
             assertDisplayCanShowPresentation("private presentation window",
                     display, BLUEISH,
                     WindowManager.LayoutParams.TYPE_PRIVATE_PRESENTATION, 0);
+        } finally {
+            virtualDisplay.release();
+        }
+        assertDisplayUnregistered(display);
+    }
+
+    /**
+     * Ensures that an application can create a private virtual display and show
+     * its own windows on it where the surface is attached or detached dynamically.
+     */
+    public void testPrivateVirtualDisplayWithDynamicSurface() throws Exception {
+        VirtualDisplay virtualDisplay = mDisplayManager.createVirtualDisplay(NAME,
+                WIDTH, HEIGHT, DENSITY, null, 0);
+        assertNotNull("virtual display must not be null", virtualDisplay);
+
+        Display display = virtualDisplay.getDisplay();
+        try {
+            assertDisplayRegistered(display, Display.FLAG_PRIVATE);
+            assertNull(virtualDisplay.getSurface());
+
+            // Attach the surface.
+            virtualDisplay.setSurface(mSurface);
+            assertEquals(mSurface, virtualDisplay.getSurface());
+
+            // Show a private presentation on the display.
+            assertDisplayCanShowPresentation("private presentation window",
+                    display, BLUEISH,
+                    WindowManager.LayoutParams.TYPE_PRIVATE_PRESENTATION, 0);
+
+            // Detach the surface.
+            virtualDisplay.setSurface(null);
+            assertNull(virtualDisplay.getSurface());
         } finally {
             virtualDisplay.release();
         }

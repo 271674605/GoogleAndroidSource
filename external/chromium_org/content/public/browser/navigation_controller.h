@@ -13,6 +13,7 @@
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/session_storage_namespace.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
 #include "url/gurl.h"
@@ -27,13 +28,7 @@ namespace content {
 
 class BrowserContext;
 class NavigationEntry;
-class SessionStorageNamespace;
 class WebContents;
-
-// Used to store the mapping of a StoragePartition id to
-// SessionStorageNamespace.
-typedef std::map<std::string, scoped_refptr<SessionStorageNamespace> >
-    SessionStorageNamespaceMap;
 
 // A NavigationController maintains the back-forward list for a WebContents and
 // manages all navigation within that list.
@@ -116,8 +111,15 @@ class NavigationController {
     // Note the default value in constructor below.
     PageTransition transition_type;
 
+    // The FrameTreeNode ID for the frame to navigate, or -1 for the main frame.
+    int64 frame_tree_node_id;
+
     // Referrer for this load. Empty if none.
     Referrer referrer;
+
+    // Any redirect URLs that occurred for this navigation before |url|.
+    // Defaults to an empty vector.
+    std::vector<GURL> redirect_chain;
 
     // Extra headers for this load, separated by \n.
     std::string extra_headers;
@@ -212,21 +214,23 @@ class NavigationController {
 
   // Active entry --------------------------------------------------------------
 
+  // THIS IS DEPRECATED. DO NOT USE. Use GetVisibleEntry instead.
+  // See http://crbug.com/273710.
+  //
   // Returns the active entry, which is the transient entry if any, the pending
   // entry if a navigation is in progress or the last committed entry otherwise.
   // NOTE: This can be NULL!!
-  //
-  // If you are trying to get the current state of the NavigationController,
-  // this is the method you will typically want to call.  If you want to display
-  // the active entry to the user (e.g., in the location bar), use
-  // GetVisibleEntry instead.
   virtual NavigationEntry* GetActiveEntry() const = 0;
 
-  // Returns the same entry as GetActiveEntry, except that it ignores pending
-  // history navigation entries.  This should be used when displaying info to
-  // the user, so that the location bar and other indicators do not update for
-  // a back/forward navigation until the pending entry commits.  This approach
-  // guards against URL spoofs on slow history navigations.
+  // Returns the entry that should be displayed to the user in the address bar.
+  // This is the transient entry if any, the pending entry if a navigation is
+  // in progress *and* is safe to display to the user (see below), or the last
+  // committed entry otherwise.
+  // NOTE: This can be NULL if no entry has committed!
+  //
+  // A pending entry is safe to display if it started in the browser process or
+  // if it's a renderer-initiated navigation in a new tab which hasn't been
+  // accessed by another tab.  (If it has been accessed, it risks a URL spoof.)
   virtual NavigationEntry* GetVisibleEntry() const = 0;
 
   // Returns the index from which we would go back/forward or reload.  This is
@@ -300,7 +304,8 @@ class NavigationController {
   virtual void LoadURLWithParams(const LoadURLParams& params) = 0;
 
   // Loads the current page if this NavigationController was restored from
-  // history and the current page has not loaded yet.
+  // history and the current page has not loaded yet or if the load was
+  // explicitly requested using SetNeedsReload().
   virtual void LoadIfNecessary() = 0;
 
   // Renavigation --------------------------------------------------------------
@@ -342,11 +347,11 @@ class NavigationController {
 
   // Random --------------------------------------------------------------------
 
-  // Session storage depends on dom_storage that depends on WebKit::WebString,
+  // Session storage depends on dom_storage that depends on blink::WebString,
   // which cannot be used on iOS.
 #if !defined(OS_IOS)
   // Returns all the SessionStorageNamespace objects that this
-  // NavigationController knows about.
+  // NavigationController knows about, the map key is a StoragePartition id.
   virtual const SessionStorageNamespaceMap&
       GetSessionStorageNamespaceMap() const = 0;
 
@@ -364,8 +369,14 @@ class NavigationController {
   virtual int32 GetMaxRestoredPageID() const = 0;
 
   // Returns true if a reload happens when activated (SetActive(true) is
-  // invoked). This is true for session/tab restore and cloned tabs.
+  // invoked). This is true for session/tab restore, cloned tabs and tabs that
+  // requested a reload (using SetNeedsReload()) after their renderer was
+  // killed.
   virtual bool NeedsReload() const = 0;
+
+  // Request a reload to happen when activated. This can be used when a renderer
+  // backing a background tab is killed by the system on Android or ChromeOS.
+  virtual void SetNeedsReload() = 0;
 
   // Cancels a repost that brought up a warning.
   virtual void CancelPendingReload() = 0;
@@ -392,12 +403,15 @@ class NavigationController {
   // this:   E F *G*
   // result: A B C *G*
   // If there is a pending entry after *G* in |this|, it is also preserved.
+  // If |replace_entry| is true, the current entry in |source| is replaced. So
+  // the result above would be A B *G*.
   // This ignores any pending or transient entries in |source|.  Callers must
-  // ensure that |CanPruneAllButVisible| returns true before calling this, or it
-  // will crash.
-  virtual void CopyStateFromAndPrune(NavigationController* source) = 0;
+  // ensure that |CanPruneAllButLastCommitted| returns true before calling this,
+  // or it will crash.
+  virtual void CopyStateFromAndPrune(NavigationController* source,
+                                     bool replace_entry) = 0;
 
-  // Returns whether it is safe to call PruneAllButVisible or
+  // Returns whether it is safe to call PruneAllButLastCommitted or
   // CopyStateFromAndPrune.  There must be a last committed entry, no transient
   // entry, and if there is a pending entry, it must be new and not an existing
   // entry.
@@ -413,12 +427,13 @@ class NavigationController {
   // sensible place to put the pending entry when it did commit, after all other
   // entries are pruned.  For example, it could be going back several entries.
   // (New pending entries are safe, because they can always commit to the end.)
-  virtual bool CanPruneAllButVisible() = 0;
+  virtual bool CanPruneAllButLastCommitted() = 0;
 
   // Removes all the entries except the last committed entry. If there is a new
   // pending navigation it is preserved.  Callers must ensure
-  // |CanPruneAllButVisible| returns true before calling this, or it will crash.
-  virtual void PruneAllButVisible() = 0;
+  // |CanPruneAllButLastCommitted| returns true before calling this, or it will
+  // crash.
+  virtual void PruneAllButLastCommitted() = 0;
 
   // Clears all screenshots associated with navigation entries in this
   // controller. Useful to reduce memory consumption in low-memory situations.

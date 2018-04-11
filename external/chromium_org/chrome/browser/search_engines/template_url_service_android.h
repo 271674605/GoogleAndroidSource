@@ -5,24 +5,25 @@
 #ifndef CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_SERVICE_ANDROID_H_
 #define CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_SERVICE_ANDROID_H_
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 
 class TemplateURL;
-class TemplateURLService;
 
 
 // Android wrapper of the TemplateUrlService which provides access from the Java
 // layer. Note that on Android, there's only a single profile, and therefore
 // a single instance of this wrapper.
-class TemplateUrlServiceAndroid : public content::NotificationObserver {
+class TemplateUrlServiceAndroid {
  public:
   TemplateUrlServiceAndroid(JNIEnv* env, jobject obj);
 
   void Load(JNIEnv* env, jobject obj);
-  void SetDefaultSearchProvider(JNIEnv* env, jobject obj, jint selected_index);
+  void SetUserSelectedDefaultSearchProvider(JNIEnv* env,
+                                            jobject obj,
+                                            jint selected_index);
   jint GetDefaultSearchProvider(JNIEnv* env, jobject obj);
   jint GetTemplateUrlCount(JNIEnv* env, jobject obj);
   jboolean IsLoaded(JNIEnv* env, jobject obj);
@@ -31,24 +32,39 @@ class TemplateUrlServiceAndroid : public content::NotificationObserver {
   jboolean IsSearchProviderManaged(JNIEnv* env, jobject obj);
   jboolean IsSearchByImageAvailable(JNIEnv* env, jobject obj);
   jboolean IsDefaultSearchEngineGoogle(JNIEnv* env, jobject obj);
-
-  // NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  base::android::ScopedJavaLocalRef<jstring> GetUrlForSearchQuery(
+      JNIEnv* env,
+      jobject obj,
+      jstring jquery);
+  base::android::ScopedJavaLocalRef<jstring> GetUrlForVoiceSearchQuery(
+      JNIEnv* env,
+      jobject obj,
+      jstring jquery);
+  base::android::ScopedJavaLocalRef<jstring> ReplaceSearchTermsInUrl(
+      JNIEnv* env,
+      jobject obj,
+      jstring jquery,
+      jstring jcurrent_url);
+  base::android::ScopedJavaLocalRef<jstring> GetUrlForContextualSearchQuery(
+      JNIEnv* env,
+      jobject obj,
+      jstring jquery);
 
   static bool Register(JNIEnv* env);
 
  private:
-  virtual ~TemplateUrlServiceAndroid();
+  ~TemplateUrlServiceAndroid();
 
   bool IsPrepopulatedTemplate(TemplateURL* url);
 
+  void OnTemplateURLServiceLoaded();
+
   JavaObjectWeakGlobalRef weak_java_obj_;
-  content::NotificationRegistrar registrar_;
 
   // Pointer to the TemplateUrlService for the main profile.
   TemplateURLService* template_url_service_;
+
+  scoped_ptr<TemplateURLService::Subscription> template_url_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateUrlServiceAndroid);
 };

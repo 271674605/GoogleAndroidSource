@@ -1,4 +1,5 @@
 #include <cmath>
+#include <math.h>
 
 #include "SkBitmap.h"
 #include "skpdiff_util.h"
@@ -123,8 +124,14 @@ static void adobergb_to_cielab(float r, float g, float b, LAB* lab) {
 }
 
 /// Converts a 8888 bitmap to LAB color space and puts it into the output
-static void bitmap_to_cielab(const SkBitmap* bitmap, ImageLAB* outImageLAB) {
-    SkASSERT(bitmap->config() == SkBitmap::kARGB_8888_Config);
+static bool bitmap_to_cielab(const SkBitmap* bitmap, ImageLAB* outImageLAB) {
+    SkBitmap bm8888;
+    if (bitmap->colorType() != kN32_SkColorType) {
+        if (!bitmap->copyTo(&bm8888, kN32_SkColorType)) {
+            return false;
+        }
+        bitmap = &bm8888;
+    }
 
     int width = bitmap->width();
     int height = bitmap->height();
@@ -146,16 +153,19 @@ static void bitmap_to_cielab(const SkBitmap* bitmap, ImageLAB* outImageLAB) {
         }
     }
     bitmap->unlockPixels();
+    return true;
 }
 
 // From Barten SPIE 1989
 static float contrast_sensitivity(float cyclesPerDegree, float luminance) {
     float a = 440.0f * powf(1.0f + 0.7f / luminance, -0.2f);
     float b = 0.3f * powf(1.0f + 100.0f / luminance, 0.15f);
-    return a *
-           cyclesPerDegree *
-           expf(-b * cyclesPerDegree) *
-           sqrtf(1.0f + 0.06f * expf(b * cyclesPerDegree));
+    float exp = expf(-b * cyclesPerDegree);
+    float root = sqrtf(1.0f + 0.06f * expf(b * cyclesPerDegree));
+    if (!SkScalarIsFinite(exp)  || !SkScalarIsFinite(root)) {
+        return 0;
+    }
+    return a * cyclesPerDegree * exp * root;
 }
 
 #if 0
@@ -258,7 +268,11 @@ static void convolve(const ImageL* imageL, bool vertical, ImageL* outImageL) {
     }
 }
 
-static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, SkTDArray<SkIPoint>* poi) {
+static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, int* poiCount) {
+    SkASSERT(baselineLAB);
+    SkASSERT(testLAB);
+    SkASSERT(poiCount);
+
     int width = baselineLAB->width;
     int height = baselineLAB->height;
     int maxLevels = 0;
@@ -267,6 +281,12 @@ static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, SkTD
     int smallerDimension = width < height ? width : height;
     for ( ; smallerDimension > 1; smallerDimension /= 2) {
         maxLevels++;
+    }
+
+    // We'll be creating new arrays with maxLevels - 2, and ImageL3D requires maxLevels > 0,
+    // so just return failure if we're less than 3.
+    if (maxLevels <= 2) {
+        return 0.0;
     }
 
     const float fov = SK_ScalarPI / 180.0f * 45.0f;
@@ -316,7 +336,6 @@ static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, SkTD
                                                contrast_sensitivity(cpd, 100.0f);
     }
 
-    int failures = 0;
     // Calculate F
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -411,8 +430,7 @@ static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, SkTD
             }
 
             if (isFailure) {
-                failures++;
-                poi->push()->set(x, y);
+                (*poiCount)++;
             }
         }
     }
@@ -421,56 +439,28 @@ static double pmetric(const ImageLAB* baselineLAB, const ImageLAB* testLAB, SkTD
     SkDELETE_ARRAY(contrast);
     SkDELETE_ARRAY(thresholdFactorFrequency);
     SkDELETE_ARRAY(contrastSensitivityTable);
-    return 1.0 - (double)failures / (width * height);
+    return 1.0 - (double)(*poiCount) / (width * height);
 }
 
-const char* SkPMetric::getName() {
-    return "perceptual";
-}
-
-int SkPMetric::queueDiff(SkBitmap* baseline, SkBitmap* test) {
+bool SkPMetric::diff(SkBitmap* baseline, SkBitmap* test, bool computeMask, Result* result) const {
     double startTime = get_seconds();
-    int diffID = fQueuedDiffs.count();
-    QueuedDiff& diff = fQueuedDiffs.push_back();
-    diff.result = 0.0;
 
     // Ensure the images are comparable
     if (baseline->width() != test->width() || baseline->height() != test->height() ||
                     baseline->width() <= 0 || baseline->height() <= 0) {
-        diff.finished = true;
-        return diffID;
+        return false;
     }
 
     ImageLAB baselineLAB(baseline->width(), baseline->height());
     ImageLAB testLAB(baseline->width(), baseline->height());
 
-    bitmap_to_cielab(baseline, &baselineLAB);
-    bitmap_to_cielab(test, &testLAB);
+    if (!bitmap_to_cielab(baseline, &baselineLAB) || !bitmap_to_cielab(test, &testLAB)) {
+        return true;
+    }
 
-    diff.result = pmetric(&baselineLAB, &testLAB, &diff.poi);
+    result->poiCount = 0;
+    result->result = pmetric(&baselineLAB, &testLAB, &result->poiCount);
+    result->timeElapsed = get_seconds() - startTime;
 
-    SkDebugf("Time: %f\n", (get_seconds() - startTime));
-
-    return diffID;
-}
-
-
-void SkPMetric::deleteDiff(int id) {
-
-}
-
-bool SkPMetric::isFinished(int id) {
-    return fQueuedDiffs[id].finished;
-}
-
-double SkPMetric::getResult(int id) {
-    return fQueuedDiffs[id].result;
-}
-
-int SkPMetric::getPointsOfInterestCount(int id) {
-    return fQueuedDiffs[id].poi.count();
-}
-
-SkIPoint* SkPMetric::getPointsOfInterest(int id) {
-    return fQueuedDiffs[id].poi.begin();
+    return true;
 }

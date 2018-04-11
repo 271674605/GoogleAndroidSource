@@ -26,11 +26,9 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Support/system_error.h>
 
 #include <bcc/BCCContext.h>
 #include <bcc/Compiler.h>
-#include <bcc/Config/BuildInfo.h>
 #include <bcc/Config/Config.h>
 #include <bcc/ExecutionEngine/SymbolResolverProxy.h>
 #include <bcc/ExecutionEngine/SymbolResolvers.h>
@@ -41,7 +39,6 @@
 #include <bcc/Support/Initialization.h>
 #include <bcc/Support/InputFile.h>
 #include <bcc/Support/OutputFile.h>
-#include <bcc/Support/TargetCompilerConfigs.h>
 
 using namespace bcc;
 
@@ -62,7 +59,6 @@ llvm::cl::opt<std::string>
 OptRuntimePath("rt-path", llvm::cl::desc("Specify the runtime library path"),
                llvm::cl::value_desc("path"));
 
-#ifndef TARGET_BUILD
 llvm::cl::opt<std::string>
 OptTargetTriple("mtriple",
                 llvm::cl::desc("Specify the target triple (default: "
@@ -73,7 +69,6 @@ OptTargetTriple("mtriple",
 llvm::cl::alias OptTargetTripleC("C", llvm::cl::NotHidden,
                                  llvm::cl::desc("Alias for -mtriple"),
                                  llvm::cl::aliasopt(OptTargetTriple));
-#endif
 
 //===----------------------------------------------------------------------===//
 // Compiler Options
@@ -112,14 +107,8 @@ OptShared("shared", llvm::cl::desc("Create a shared library from input bitcode "
 void BCCVersionPrinter() {
   llvm::raw_ostream &os = llvm::outs();
   os << "libbcc (The Android Open Source Project, http://www.android.com/):\n"
-     << "  Build time: " << BuildInfo::GetBuildTime() << "\n"
-     << "  Build revision: " << BuildInfo::GetBuildRev() << "\n"
-     << "  Build source blob: " << BuildInfo::GetBuildSourceBlob() << "\n"
-     << "  Default target: " << DEFAULT_TARGET_TRIPLE_STRING << "\n";
-
-  os << "\n";
-
-  os << "LLVM (http://llvm.org/):\n"
+     << "  Default target: " << DEFAULT_TARGET_TRIPLE_STRING << "\n\n"
+     << "LLVM (http://llvm.org/):\n"
      << "  Version: " << PACKAGE_VERSION << "\n";
   return;
 }
@@ -165,11 +154,7 @@ bool ConfigCompiler(RSCompilerDriver &pCompilerDriver) {
   RSCompiler *compiler = pCompilerDriver.getCompiler();
   CompilerConfig *config = NULL;
 
-#ifdef TARGET_BUILD
-  config = new (std::nothrow) DefaultCompilerConfig();
-#else
   config = new (std::nothrow) CompilerConfig(OptTargetTriple);
-#endif
   if (config == NULL) {
     llvm::errs() << "Out of memory when create the compiler configuration!\n";
     return false;
@@ -184,6 +169,7 @@ bool ConfigCompiler(RSCompilerDriver &pCompilerDriver) {
     fv.push_back("-neonfp");
     config->setFeatureString(fv);
   }
+
   // Compatibility mode on x86 requires atom code generation.
   if (config->getTriple().find("i686") != std::string::npos) {
     config->setCPU("atom");
@@ -233,8 +219,8 @@ std::string DetermineOutputFilename(const std::string &pOutputPath) {
   const std::string &input_path = OptInputFilenames[0];
   llvm::SmallString<200> output_path(input_path);
 
-  llvm::error_code err = llvm::sys::fs::make_absolute(output_path);
-  if (err != llvm::errc::success) {
+  std::error_code err = llvm::sys::fs::make_absolute(output_path);
+  if (err) {
     llvm::errs() << "Failed to determine the absolute path of `" << input_path
                  << "'! (detail: " << err.message() << ")\n";
     return "";
@@ -279,7 +265,7 @@ int main(int argc, char **argv) {
 
   RSScript *s = NULL;
   s = PrepareRSScript(context, OptInputFilenames);
-  if (!rscd.build(*s, OutputFilename.c_str(), OptRuntimePath.c_str())) {
+  if (!rscd.buildForCompatLib(*s, OutputFilename.c_str(), OptRuntimePath.c_str())) {
     fprintf(stderr, "Failed to compile script!");
     return EXIT_FAILURE;
   }

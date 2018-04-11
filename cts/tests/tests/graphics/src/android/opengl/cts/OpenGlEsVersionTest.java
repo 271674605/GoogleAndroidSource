@@ -36,7 +36,7 @@ import javax.microedition.khronos.egl.EGLDisplay;
  * Test for checking whether the ro.opengles.version property is set to the correct value.
  */
 public class OpenGlEsVersionTest
-        extends ActivityInstrumentationTestCase2<OpenGlEsVersionStubActivity> {
+        extends ActivityInstrumentationTestCase2<OpenGlEsVersionCtsActivity> {
 
     private static final String TAG = OpenGlEsVersionTest.class.getSimpleName();
 
@@ -45,10 +45,10 @@ public class OpenGlEsVersionTest
     private static final int EGL_OPENGL_ES2_BIT = 0x0004;
     private static final int EGL_OPENGL_ES3_BIT_KHR = 0x0040;
 
-    private OpenGlEsVersionStubActivity mActivity;
+    private OpenGlEsVersionCtsActivity mActivity;
 
     public OpenGlEsVersionTest() {
-        super("com.android.cts.stub", OpenGlEsVersionStubActivity.class);
+        super("com.android.cts.graphics", OpenGlEsVersionCtsActivity.class);
     }
 
     @Override
@@ -58,40 +58,89 @@ public class OpenGlEsVersionTest
     }
 
     public void testOpenGlEsVersion() throws InterruptedException {
-        int detectedVersion = getDetectedVersion();
+        int detectedMajorVersion = getDetectedMajorVersion();
         int reportedVersion = getVersionFromActivityManager(mActivity);
 
-        assertEquals("Detected OpenGL ES major version " + detectedVersion
-                + " but Activity Manager is reporting " +  reportedVersion
-                + " (Check ro.opengles.version)", detectedVersion, reportedVersion);
+        assertEquals("Detected OpenGL ES major version " + detectedMajorVersion
+                + " but Activity Manager is reporting " +  getMajorVersion(reportedVersion)
+                + " (Check ro.opengles.version)",
+                detectedMajorVersion, getMajorVersion(reportedVersion));
         assertEquals("Reported OpenGL ES version from ActivityManager differs from PackageManager",
                 reportedVersion, getVersionFromPackageManager(mActivity));
 
         assertGlVersionString(1);
-        if (detectedVersion == 2) {
+        if (detectedMajorVersion == 2) {
             restartActivityWithClientVersion(2);
             assertGlVersionString(2);
-        } else if (detectedVersion == 3) {
+        } else if (detectedMajorVersion == 3) {
             restartActivityWithClientVersion(3);
             assertGlVersionString(3);
         }
     }
 
-    private static boolean hasExtension(String extensions, String name) {
-        int start = extensions.indexOf(name);
-        while (start >= 0) {
-            // check that we didn't find a prefix of a longer extension name
-            int end = start + name.length();
-            if (end == extensions.length() || extensions.charAt(end) == ' ') {
-                return true;
-            }
-            start = extensions.indexOf(name, end);
+    public void testRequiredExtensions() throws InterruptedException {
+        int reportedVersion = getVersionFromActivityManager(mActivity);
+        // We only have required extensions on ES3.1
+        if (getMajorVersion(reportedVersion) != 3 || getMinorVersion(reportedVersion) != 1)
+            return;
+
+        restartActivityWithClientVersion(3);
+
+        String extensions = mActivity.getExtensionsString();
+        final String requiredList[] = {
+            "EXT_texture_sRGB_decode",
+            "KHR_blend_equation_advanced",
+            "KHR_debug",
+            "OES_shader_image_atomic",
+            "OES_texture_stencil8",
+            "OES_texture_storage_multisample_2d_array"
+        };
+
+        for (int i = 0; i < requiredList.length; ++i) {
+            assertTrue("OpenGL ES version 3.1 is missing extension " + requiredList[i],
+                    hasExtension(extensions, requiredList[i]));
         }
-        return false;
+    }
+
+    public void testExtensionPack() throws InterruptedException {
+        // Requirements:
+        // 1. If the device claims support for the system feature, the extension must be available.
+        // 2. If the extension is available, it must be correct:
+        //    - ES 3.1 must be supported
+        //    - All included extensions must be available
+        //
+        // Supporting the extension but not claiming support for the system feature is allowed,
+        // just like the ES context version can be higher than the ro.opengles.version property.
+
+        int reportedVersion = getVersionFromActivityManager(mActivity);
+        boolean hasAepFeature = mActivity.getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_OPENGLES_EXTENSION_PACK);
+
+        if (getMajorVersion(reportedVersion) != 3 || getMinorVersion(reportedVersion) != 1) {
+            assertFalse("FEATURE_OPENGLES_EXTENSION_PACK is available without OpenGL ES 3.1",
+                    hasAepFeature);
+            return;
+        }
+
+        restartActivityWithClientVersion(3);
+
+        String extensions = mActivity.getExtensionsString();
+        if (!hasExtension(extensions, "ANDROID_extension_pack_es31a")) {
+            assertFalse("FEATURE_OPENGLES_EXTENSION_PACK is available but ANDROID_extension_pack_es31a isn't in the extension list",
+                    hasAepFeature);
+            return;
+        }
+
+        assertTrue("ANDROID_extension_pack_es31a is present, but support is incomplete",
+                mActivity.getAepEs31Support());
+    }
+
+    private static boolean hasExtension(String extensions, String name) {
+        return OpenGlEsVersionCtsActivity.hasExtension(extensions, name);
     }
 
     /** @return OpenGL ES major version 1, 2, or 3 or some non-positive number for error */
-    private static int getDetectedVersion() {
+    private static int getDetectedMajorVersion() {
         /*
          * Get all the device configurations and check the EGL_RENDERABLE_TYPE attribute
          * to determine the highest ES version supported by any config. The
@@ -156,9 +205,9 @@ public class OpenGlEsVersionTest
             (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         ConfigurationInfo configInfo = activityManager.getDeviceConfigurationInfo();
         if (configInfo.reqGlEsVersion != ConfigurationInfo.GL_ES_VERSION_UNDEFINED) {
-            return getMajorVersion(configInfo.reqGlEsVersion);
+            return configInfo.reqGlEsVersion;
         } else {
-            return 1; // Lack of property means OpenGL ES version 1
+            return 1 << 16; // Lack of property means OpenGL ES version 1
         }
     }
 
@@ -170,9 +219,9 @@ public class OpenGlEsVersionTest
                 // Null feature name means this feature is the open gl es version feature.
                 if (featureInfo.name == null) {
                     if (featureInfo.reqGlEsVersion != FeatureInfo.GL_ES_VERSION_UNDEFINED) {
-                        return getMajorVersion(featureInfo.reqGlEsVersion);
+                        return featureInfo.reqGlEsVersion;
                     } else {
-                        return 1; // Lack of property means OpenGL ES version 1
+                        return 1 << 16; // Lack of property means OpenGL ES version 1
                     }
                 }
             }
@@ -183,6 +232,11 @@ public class OpenGlEsVersionTest
     /** @see FeatureInfo#getGlEsVersion() */
     private static int getMajorVersion(int glEsVersion) {
         return ((glEsVersion & 0xffff0000) >> 16);
+    }
+
+    /** @see FeatureInfo#getGlEsVersion() */
+    private static int getMinorVersion(int glEsVersion) {
+        return glEsVersion & 0xffff;
     }
 
     /**
@@ -197,13 +251,13 @@ public class OpenGlEsVersionTest
                 mActivity.getVersionString()));
     }
 
-    /** Restart {@link GLSurfaceViewStubActivity} with a specific client version. */
+    /** Restart {@link GLSurfaceViewCtsActivity} with a specific client version. */
     private void restartActivityWithClientVersion(int version) {
         mActivity.finish();
         setActivity(null);
 
         try {
-            Intent intent = OpenGlEsVersionStubActivity.createIntent(version);
+            Intent intent = OpenGlEsVersionCtsActivity.createIntent(version);
             setActivityIntent(intent);
             mActivity = getActivity();
         } finally {

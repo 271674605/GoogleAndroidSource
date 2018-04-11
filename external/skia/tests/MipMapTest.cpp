@@ -5,22 +5,21 @@
  * found in the LICENSE file.
  */
 
-#include "Test.h"
-#include "SkMipMap.h"
 #include "SkBitmap.h"
+#include "SkMipMap.h"
 #include "SkRandom.h"
+#include "Test.h"
 
 static void make_bitmap(SkBitmap* bm, SkRandom& rand) {
     // for now, Build needs a min size of 2, otherwise it will return NULL.
     // should fix that to support 1 X N, where N > 1 to return non-null.
     int w = 2 + rand.nextU() % 1000;
     int h = 2 + rand.nextU() % 1000;
-    bm->setConfig(SkBitmap::kARGB_8888_Config, w, h);
-    bm->allocPixels();
+    bm->allocN32Pixels(w, h);
     bm->eraseColor(SK_ColorWHITE);
 }
 
-static void TestMipMap(skiatest::Reporter* reporter) {
+DEF_TEST(MipMap, reporter) {
     SkBitmap bm;
     SkRandom rand;
 
@@ -54,6 +53,3 @@ static void TestMipMap(skiatest::Reporter* reporter) {
         }
     }
 }
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("MipMap", MipMapTestClass, TestMipMap)

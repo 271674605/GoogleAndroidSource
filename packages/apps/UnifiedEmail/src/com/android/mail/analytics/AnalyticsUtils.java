@@ -45,6 +45,8 @@ public class AnalyticsUtils {
             s = "delete";
         } else if (id == R.id.discard_drafts) {
             s = "discard_drafts";
+        } else if (id == R.id.discard_outbox) {
+            s = "discard_outbox";
         } else if (id == R.id.mark_important) {
             s = "mark important";
         } else if (id == R.id.mark_not_important) {
@@ -65,14 +67,10 @@ public class AnalyticsUtils {
             s = "refresh";
         } else if (id == R.id.settings) {
             s = "settings";
-        } else if (id == R.id.folder_options) {
-            s = "folder_options";
         } else if (id == R.id.help_info_menu_item) {
             s = "help";
         } else if (id == R.id.feedback_menu_item) {
             s = "feedback";
-        } else if (id == R.id.manage_folders_item) {
-            s = "manage_folders";
         } else if (id == R.id.move_to) {
             s = "move_to";
         } else if (id == R.id.change_folders) {
@@ -93,10 +91,10 @@ public class AnalyticsUtils {
             s = "mark_unread";
         } else if (id == R.id.show_original) {
             s = "show_original";
+        } else if (id == R.id.add_file_attachment) {
+            s = "add_file_attachment";
         } else if (id == R.id.add_photo_attachment) {
             s = "add_photo_attachment";
-        } else if (id == R.id.add_video_attachment) {
-            s = "add_video_attachment";
         } else if (id == R.id.add_cc_bcc) {
             s = "add_cc_bcc";
         } else if (id == R.id.save) {
@@ -107,6 +105,40 @@ public class AnalyticsUtils {
             s = "compose_discard_draft";
         } else if (id == R.id.search) {
             s = "search";
+        } else if (id == R.id.print_all) {
+            s = "print_all";
+        } else if (id == R.id.print_message) {
+            s = "print_message";
+        } else if (id == R.id.star) {
+            s = "star";
+        } else if (id == R.id.remove_star) {
+            s = "unstar";
+        } else if (id == R.id.reply) {
+            s = "reply";
+        } else if (id == R.id.reply_all) {
+            s = "reply_all";
+        } else if (id == R.id.forward) {
+            s = "forward";
+        } else if (id == R.id.edit_draft) {
+            s = "edit_draft";
+        } else if (id == R.id.send_date) {
+            s = "expand_message_details";
+        } else if (id == R.id.details_expanded_content || id == R.id.hide_details) {
+            s = "collapse_message_details";
+        } else if (id == R.id.upper_header) {
+            s = "message_upper_header";
+        } else if (id == R.id.download_again || id == R.id.menu_download_again) {
+            s = "download_again";
+        } else if (id == R.id.menu_save) {
+            s = "photo_save";
+        } else if (id == R.id.menu_save_all) {
+            s = "photo_save_all";
+        } else if (id == R.id.menu_share) {
+            s = "photo_share";
+        } else if (id == R.id.menu_share_all) {
+            s = "photo_share_all";
+        } else if (id == R.id.show_pictures_text) {
+            s = "show_pictures";
         } else {
             s = null;
         }

@@ -21,13 +21,16 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapRegionDecoder;
 import android.graphics.Matrix;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.net.Uri;
 import android.os.AsyncTask;
-import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
+
+import com.android.camera.data.LocalDataUtil;
+import com.android.camera.debug.Log;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -35,21 +38,25 @@ import java.io.InputStream;
 
 public class ZoomView extends ImageView {
 
-    private static final String TAG = "ZoomView";
+    private static final Log.Tag TAG = new Log.Tag("ZoomView");
 
     private int mViewportWidth = 0;
     private int mViewportHeight = 0;
 
-    private int mFullResImageWidth;
-    private int mFullResImageHeight;
-
     private BitmapRegionDecoder mRegionDecoder;
+    // This is null when there's no decoding going on.
     private DecodePartialBitmap mPartialDecodingTask;
 
     private Uri mUri;
     private int mOrientation;
 
     private class DecodePartialBitmap extends AsyncTask<RectF, Void, Bitmap> {
+        BitmapRegionDecoder mDecoder;
+
+        @Override
+        protected void onPreExecute() {
+            mDecoder = mRegionDecoder;
+        }
 
         @Override
         protected Bitmap doInBackground(RectF... params) {
@@ -57,15 +64,30 @@ public class ZoomView extends ImageView {
 
             // Calculate the rotation matrix to apply orientation on the original image
             // rect.
-            RectF fullResRect = new RectF(0, 0, mFullResImageWidth - 1, mFullResImageHeight - 1);
+            InputStream isForDimensions = getInputStream();
+            if (isForDimensions == null) {
+                return null;
+            }
+
+            Point imageSize = LocalDataUtil.decodeBitmapDimension(isForDimensions);
+            try {
+                isForDimensions.close();
+            } catch (IOException e) {
+                Log.e(TAG, "exception closing dimensions inputstream", e);
+            }
+            if (imageSize == null) {
+                return null;
+            }
+
+            RectF fullResRect = new RectF(0, 0, imageSize.x - 1, imageSize.y - 1);
             Matrix rotationMatrix = new Matrix();
             rotationMatrix.setRotate(mOrientation, 0, 0);
             rotationMatrix.mapRect(fullResRect);
             // Set the translation of the matrix so that after rotation, the top left
             // of the image rect is at (0, 0)
             rotationMatrix.postTranslate(-fullResRect.left, -fullResRect.top);
-            rotationMatrix.mapRect(fullResRect, new RectF(0, 0, mFullResImageWidth - 1,
-                    mFullResImageHeight - 1));
+            rotationMatrix.mapRect(fullResRect, new RectF(0, 0, imageSize.x - 1,
+                    imageSize.y - 1));
 
             // Find intersection with the screen
             RectF visibleRect = new RectF(endRect);
@@ -91,7 +113,7 @@ public class ZoomView extends ImageView {
             visibleInImage.round(region);
 
             // Make sure region to decode is inside the image.
-            region.intersect(0, 0, mFullResImageWidth - 1, mFullResImageHeight - 1);
+            region.intersect(0, 0, imageSize.x - 1, imageSize.y - 1);
 
             if (region.width() == 0 || region.height() == 0) {
                 Log.e(TAG, "Invalid size for partial region. Region: " + region.toString());
@@ -103,7 +125,6 @@ public class ZoomView extends ImageView {
             }
 
             BitmapFactory.Options options = new BitmapFactory.Options();
-
             if ((mOrientation + 360) % 180 == 0) {
                 options.inSampleSize = getSampleFactor(region.width(), region.height());
             } else {
@@ -114,19 +135,23 @@ public class ZoomView extends ImageView {
                 options.inSampleSize = getSampleFactor(region.height(), region.width());
             }
 
-            if (mRegionDecoder == null) {
+            if (mDecoder == null) {
                 InputStream is = getInputStream();
+                if (is == null) {
+                    return null;
+                }
+
                 try {
-                    mRegionDecoder = BitmapRegionDecoder.newInstance(is, false);
+                    mDecoder = BitmapRegionDecoder.newInstance(is, false);
                     is.close();
                 } catch (IOException e) {
                     Log.e(TAG, "Failed to instantiate region decoder");
                 }
             }
-            if (mRegionDecoder == null) {
+            if (mDecoder == null) {
                 return null;
             }
-            Bitmap b = mRegionDecoder.decodeRegion(region, options);
+            Bitmap b = mDecoder.decodeRegion(region, options);
             if (isCancelled()) {
                 return null;
             }
@@ -137,12 +162,15 @@ public class ZoomView extends ImageView {
 
         @Override
         protected void onPostExecute(Bitmap b) {
-            if (b == null) {
-                return;
-            }
-            setImageBitmap(b);
-            showPartiallyDecodedImage(true);
             mPartialDecodingTask = null;
+            if (mDecoder != mRegionDecoder) {
+                // This decoder will no longer be used, recycle it.
+                mDecoder.recycle();
+            }
+            if (b != null) {
+                setImageBitmap(b);
+                showPartiallyDecodedImage(true);
+            }
         }
     }
 
@@ -163,14 +191,22 @@ public class ZoomView extends ImageView {
         });
     }
 
+    public void resetDecoder() {
+        if (mRegionDecoder != null) {
+            cancelPartialDecodingTask();
+            if (mPartialDecodingTask == null) {
+                // No ongoing decoding task, safe to recycle the decoder.
+                mRegionDecoder.recycle();
+            }
+            mRegionDecoder = null;
+        }
+    }
+
     public void loadBitmap(Uri uri, int orientation, RectF imageRect) {
         if (!uri.equals(mUri)) {
+            resetDecoder();
             mUri = uri;
             mOrientation = orientation;
-            mFullResImageHeight = 0;
-            mFullResImageWidth = 0;
-            decodeImageSize();
-            mRegionDecoder = null;
         }
         startPartialDecodingTask(imageRect);
     }
@@ -181,7 +217,6 @@ public class ZoomView extends ImageView {
         } else {
             setVisibility(View.GONE);
         }
-        mPartialDecodingTask = null;
     }
 
     public void cancelPartialDecodingTask() {
@@ -189,7 +224,6 @@ public class ZoomView extends ImageView {
             mPartialDecodingTask.cancel(true);
             setVisibility(GONE);
         }
-        mPartialDecodingTask = null;
     }
 
     /**
@@ -231,20 +265,6 @@ public class ZoomView extends ImageView {
         cancelPartialDecodingTask();
         mPartialDecodingTask = new DecodePartialBitmap();
         mPartialDecodingTask.execute(endRect);
-    }
-
-    private void decodeImageSize() {
-        BitmapFactory.Options option = new BitmapFactory.Options();
-        option.inJustDecodeBounds = true;
-        InputStream is = getInputStream();
-        BitmapFactory.decodeStream(is, null, option);
-        try {
-            is.close();
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to close input stream");
-        }
-        mFullResImageWidth = option.outWidth;
-        mFullResImageHeight = option.outHeight;
     }
 
     // TODO: Cache the inputstream

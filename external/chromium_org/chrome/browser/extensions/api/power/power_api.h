@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_POWER_POWER_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_POWER_POWER_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "extensions/browser/extension_function.h"
 
 namespace extensions {
 
@@ -18,7 +18,7 @@ class PowerRequestKeepAwakeFunction : public SyncExtensionFunction {
   virtual ~PowerRequestKeepAwakeFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implementation of the chrome.power.releaseKeepAwake API.
@@ -30,7 +30,7 @@ class PowerReleaseKeepAwakeFunction : public SyncExtensionFunction {
   virtual ~PowerReleaseKeepAwakeFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

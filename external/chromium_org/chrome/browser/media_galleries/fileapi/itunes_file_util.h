@@ -9,9 +9,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/media_galleries/fileapi/native_media_file_util.h"
 
-namespace chrome {
 class ImportedMediaGalleryRegistry;
-}
 
 namespace itunes {
 
@@ -22,9 +20,9 @@ extern const char kITunesMediaDir[];
 extern const char kITunesMusicDir[];
 extern const char kITunesAutoAddDir[];
 
-class ITunesFileUtil : public chrome::NativeMediaFileUtil {
+class ITunesFileUtil : public NativeMediaFileUtil {
  public:
-  explicit ITunesFileUtil(chrome::MediaPathFilter* media_path_filter);
+  explicit ITunesFileUtil(MediaPathFilter* media_path_filter);
   virtual ~ITunesFileUtil();
 
  protected:
@@ -41,22 +39,28 @@ class ITunesFileUtil : public chrome::NativeMediaFileUtil {
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback) OVERRIDE;
-  virtual base::PlatformFileError GetFileInfoSync(
+  virtual base::File::Error GetFileInfoSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
-      base::PlatformFileInfo* file_info,
+      base::File::Info* file_info,
       base::FilePath* platform_path) OVERRIDE;
-  virtual base::PlatformFileError ReadDirectorySync(
+  virtual base::File::Error ReadDirectorySync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
       EntryList* file_list) OVERRIDE;
-  virtual base::PlatformFileError CreateSnapshotFileSync(
+  virtual base::File::Error DeleteDirectorySync(
+      fileapi::FileSystemOperationContext* context,
+      const fileapi::FileSystemURL& url) OVERRIDE;
+  virtual base::File::Error DeleteFileSync(
+      fileapi::FileSystemOperationContext* context,
+      const fileapi::FileSystemURL& url) OVERRIDE;
+  virtual base::File::Error CreateSnapshotFileSync(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
-      base::PlatformFileInfo* file_info,
+      base::File::Info* file_info,
       base::FilePath* platform_path,
       scoped_refptr<webkit_blob::ShareableFileReference>* file_ref) OVERRIDE;
-  virtual base::PlatformFileError GetLocalFilePath(
+  virtual base::File::Error GetLocalFilePath(
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& url,
       base::FilePath* local_file_path) OVERRIDE;
@@ -82,7 +86,7 @@ class ITunesFileUtil : public chrome::NativeMediaFileUtil {
 
   base::WeakPtrFactory<ITunesFileUtil> weak_factory_;
 
-  chrome::ImportedMediaGalleryRegistry* imported_registry_;
+  ImportedMediaGalleryRegistry* imported_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(ITunesFileUtil);
 };

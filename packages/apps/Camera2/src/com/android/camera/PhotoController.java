@@ -16,6 +16,7 @@
 
 package com.android.camera;
 
+import android.graphics.Rect;
 import android.view.View;
 
 import com.android.camera.ShutterButton.OnShutterButtonListener;
@@ -31,8 +32,7 @@ public interface PhotoController extends OnShutterButtonListener {
     // Switching between cameras.
     public static final int SWITCHING_CAMERA = 4;
 
-    // returns the actual set zoom value
-    public int onZoomChanged(int requestedZoom);
+    public void onZoomChanged(float requestedZoom);
 
     public boolean isImageCaptureIntent();
 
@@ -52,13 +52,9 @@ public interface PhotoController extends OnShutterButtonListener {
 
     public void onSingleTapUp(View view, int x, int y);
 
-    public void onCountDownFinished();
-
-    public void onScreenSizeChanged(int width, int height);
+    public void updatePreviewAspectRatio(float aspectRatio);
 
     public void updateCameraOrientation();
-
-    public void enableRecordingLocation(boolean enable);
 
     /**
      * This is the callback when the UI or buffer holder for camera preview,
@@ -74,4 +70,12 @@ public interface PhotoController extends OnShutterButtonListener {
      * The controller should try to stop the preview in this callback.
      */
     public void onPreviewUIDestroyed();
+
+    /********************** Capture animation **********************/
+
+    /**
+     * Starts the pre-capture animation.
+     */
+    public void startPreCaptureAnimation();
+
 }

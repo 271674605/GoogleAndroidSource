@@ -4,6 +4,8 @@
 
 """Class for running uiautomator tests on a single device."""
 
+from pylib import constants
+from pylib import flag_changer
 from pylib.instrumentation import test_options as instr_test_options
 from pylib.instrumentation import test_runner as instr_test_runner
 
@@ -11,8 +13,7 @@ from pylib.instrumentation import test_runner as instr_test_runner
 class TestRunner(instr_test_runner.TestRunner):
   """Responsible for running a series of tests connected to a single device."""
 
-  def __init__(self, test_options, device, shard_index, test_pkg,
-               ports_to_forward):
+  def __init__(self, test_options, device, shard_index, test_pkg):
     """Create a new TestRunner.
 
     Args:
@@ -20,12 +21,9 @@ class TestRunner(instr_test_runner.TestRunner):
       device: Attached android device.
       shard_index: Shard index.
       test_pkg: A TestPackage object.
-      ports_to_forward: A list of port numbers for which to set up forwarders.
-          Can be optionally requested by a test case.
     """
     # Create an InstrumentationOptions object to pass to the super class
     instrumentation_options = instr_test_options.InstrumentationOptions(
-        test_options.build_type,
         test_options.tool,
         test_options.cleanup_test_files,
         test_options.push_deps,
@@ -36,17 +34,23 @@ class TestRunner(instr_test_runner.TestRunner):
         test_options.save_perf_json,
         test_options.screenshot_failures,
         wait_for_debugger=False,
+        coverage_dir=None,
         test_apk=None,
         test_apk_path=None,
         test_apk_jar_path=None)
     super(TestRunner, self).__init__(instrumentation_options, device,
-                                     shard_index, test_pkg, ports_to_forward)
+                                     shard_index, test_pkg)
 
-    self.package_name = test_options.package_name
+    cmdline_file = constants.PACKAGE_INFO[test_options.package].cmdline_file
+    self.flags = None
+    if cmdline_file:
+      self.flags = flag_changer.FlagChanger(self.device, cmdline_file)
+    self._package = constants.PACKAGE_INFO[test_options.package].package
+    self._activity = constants.PACKAGE_INFO[test_options.package].activity
 
   #override
   def InstallTestPackage(self):
-    self.test_pkg.Install(self.adb)
+    self.test_pkg.Install(self.device)
 
   #override
   def PushDataDeps(self):
@@ -54,10 +58,16 @@ class TestRunner(instr_test_runner.TestRunner):
 
   #override
   def _RunTest(self, test, timeout):
-    self.adb.ClearApplicationState(self.package_name)
-    if 'Feature:FirstRunExperience' in self.test_pkg.GetTestAnnotations(test):
-      self.flags.RemoveFlags(['--disable-fre'])
-    else:
-      self.flags.AddFlags(['--disable-fre'])
-    return self.adb.RunUIAutomatorTest(
+    self.device.old_interface.ClearApplicationState(self._package)
+    if self.flags:
+      if 'Feature:FirstRunExperience' in self.test_pkg.GetTestAnnotations(test):
+        self.flags.RemoveFlags(['--disable-fre'])
+      else:
+        self.flags.AddFlags(['--disable-fre'])
+    self.device.old_interface.StartActivity(self._package,
+                           self._activity,
+                           wait_for_completion=True,
+                           action='android.intent.action.MAIN',
+                           force_stop=True)
+    return self.device.old_interface.RunUIAutomatorTest(
         test, self.test_pkg.GetPackageName(), timeout)

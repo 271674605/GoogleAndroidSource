@@ -21,6 +21,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ParceledListSlice;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
@@ -28,16 +29,24 @@ import android.database.sqlite.SQLiteOpenHelper;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Process;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.security.Credentials;
 import android.security.IKeyChainService;
 import android.security.KeyChain;
 import android.security.KeyStore;
 import android.util.Log;
+import com.android.internal.util.ParcelableString;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.cert.CertificateException;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
 
 import com.android.org.conscrypt.TrustedCertificateStore;
 
@@ -93,9 +102,11 @@ public class KeyChainService extends IntentService {
             if (!mKeyStore.grant(keystoreAlias, uid)) {
                 return null;
             }
+            final int userHandle = UserHandle.getUserId(uid);
+            final int systemUidForUser = UserHandle.getUid(userHandle, Process.SYSTEM_UID);
 
             final StringBuilder sb = new StringBuilder();
-            sb.append(Process.SYSTEM_UID);
+            sb.append(systemUidForUser);
             sb.append('_');
             sb.append(keystoreAlias);
 
@@ -125,6 +136,7 @@ public class KeyChainService extends IntentService {
 
         @Override public void installCaCertificate(byte[] caCertificate) {
             checkCertInstallerOrSystemCaller();
+            checkUserRestriction();
             try {
                 synchronized (mTrustedCertificateStore) {
                     mTrustedCertificateStore.installCertificate(parseCertificate(caCertificate));
@@ -137,6 +149,26 @@ public class KeyChainService extends IntentService {
             broadcastStorageChange();
         }
 
+        @Override public boolean installKeyPair(byte[] privateKey, byte[] userCertificate,
+                String alias) {
+            checkCertInstallerOrSystemCaller();
+            if (!mKeyStore.importKey(Credentials.USER_PRIVATE_KEY + alias, privateKey, -1,
+                    KeyStore.FLAG_ENCRYPTED)) {
+                Log.e(TAG, "Failed to import private key " + alias);
+                return false;
+            }
+            if (!mKeyStore.put(Credentials.USER_CERTIFICATE + alias, userCertificate, -1,
+                    KeyStore.FLAG_ENCRYPTED)) {
+                Log.e(TAG, "Failed to import user certificate " + userCertificate);
+                if (!mKeyStore.delKey(Credentials.USER_PRIVATE_KEY + alias)) {
+                    Log.e(TAG, "Failed to delete private key after certificate importing failed");
+                }
+                return false;
+            }
+            broadcastStorageChange();
+            return true;
+        }
+
         private X509Certificate parseCertificate(byte[] bytes) throws CertificateException {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             return (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(bytes));
@@ -145,6 +177,7 @@ public class KeyChainService extends IntentService {
         @Override public boolean reset() {
             // only Settings should be able to reset
             checkSystemCaller();
+            checkUserRestriction();
             removeAllGrants(mDatabaseHelper.getWritableDatabase());
             boolean ok = true;
             synchronized (mTrustedCertificateStore) {
@@ -164,6 +197,7 @@ public class KeyChainService extends IntentService {
         @Override public boolean deleteCaCertificate(String alias) {
             // only Settings should be able to delete
             checkSystemCaller();
+            checkUserRestriction();
             boolean ok = true;
             synchronized (mTrustedCertificateStore) {
                 ok = deleteCertificateEntry(alias);
@@ -198,6 +232,12 @@ public class KeyChainService extends IntentService {
                 throw new IllegalStateException(actual);
             }
         }
+        private void checkUserRestriction() {
+            UserManager um = (UserManager) getSystemService(USER_SERVICE);
+            if (um.hasUserRestriction(UserManager.DISALLOW_CONFIG_CREDENTIALS)) {
+                throw new SecurityException("User cannot modify credentials");
+            }
+        }
         /**
          * Returns null if actually caller is expected, otherwise return bad package to report
          */
@@ -215,6 +255,82 @@ public class KeyChainService extends IntentService {
             checkSystemCaller();
             setGrantInternal(mDatabaseHelper.getWritableDatabase(), uid, alias, value);
             broadcastStorageChange();
+        }
+
+        private ParceledListSlice<ParcelableString> makeAliasesParcelableSynchronised(
+                Set<String> aliasSet) {
+            List<ParcelableString> aliases = new ArrayList<ParcelableString>(aliasSet.size());
+            for (String alias : aliasSet) {
+                ParcelableString parcelableString = new ParcelableString();
+                parcelableString.string = alias;
+                aliases.add(parcelableString);
+            }
+            return new ParceledListSlice<ParcelableString>(aliases);
+        }
+
+        @Override
+        public ParceledListSlice<ParcelableString> getUserCaAliases() {
+            synchronized (mTrustedCertificateStore) {
+                Set<String> aliasSet = mTrustedCertificateStore.userAliases();
+                return makeAliasesParcelableSynchronised(aliasSet);
+            }
+        }
+
+        @Override
+        public ParceledListSlice<ParcelableString> getSystemCaAliases() {
+            synchronized (mTrustedCertificateStore) {
+                Set<String> aliasSet = mTrustedCertificateStore.allSystemAliases();
+                return makeAliasesParcelableSynchronised(aliasSet);
+            }
+        }
+
+        @Override
+        public boolean containsCaAlias(String alias) {
+            return mTrustedCertificateStore.containsAlias(alias);
+        }
+
+        @Override
+        public byte[] getEncodedCaCertificate(String alias, boolean includeDeletedSystem) {
+            synchronized (mTrustedCertificateStore) {
+                X509Certificate certificate = (X509Certificate) mTrustedCertificateStore
+                        .getCertificate(alias, includeDeletedSystem);
+                if (certificate == null) {
+                    Log.w(TAG, "Could not find CA certificate " + alias);
+                    return null;
+                }
+                try {
+                    return certificate.getEncoded();
+                } catch (CertificateEncodingException e) {
+                    Log.w(TAG, "Error while encoding CA certificate " + alias);
+                    return null;
+                }
+            }
+        }
+
+        @Override
+        public List<String> getCaCertificateChainAliases(String rootAlias,
+                boolean includeDeletedSystem) {
+            synchronized (mTrustedCertificateStore) {
+                X509Certificate root = (X509Certificate) mTrustedCertificateStore.getCertificate(
+                        rootAlias, includeDeletedSystem);
+                try {
+                    List<X509Certificate> chain = mTrustedCertificateStore.getCertificateChain(
+                            root);
+                    List<String> aliases = new ArrayList<String>(chain.size());
+                    final int n = chain.size();
+                    for (int i = 0; i < n; ++i) {
+                        String alias = mTrustedCertificateStore.getCertificateAlias(chain.get(i),
+                                true);
+                        if (alias != null) {
+                            aliases.add(alias);
+                        }
+                    }
+                    return aliases;
+                } catch (CertificateException e) {
+                    Log.w(TAG, "Error retrieving cert chain for root " + rootAlias);
+                    return Collections.emptyList();
+                }
+            }
         }
     };
 

@@ -16,9 +16,7 @@
 #include "chrome/browser/history/in_memory_url_index_cache.pb.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
-#include "content/public/browser/notification_details.h"
 
-class BookmarkService;
 class HistoryQuickProviderTest;
 
 namespace in_memory_url_index {
@@ -29,12 +27,13 @@ namespace history {
 
 namespace imui = in_memory_url_index;
 
+class HistoryClient;
 class HistoryDatabase;
 class InMemoryURLIndex;
 class RefCountedBool;
 
 // Current version of the cache file.
-static const int kCurrentCacheFileVersion = 3;
+static const int kCurrentCacheFileVersion = 5;
 
 // A structure private to InMemoryURLIndex describing its internal data and
 // providing for restoring, rebuilding and updating that internal data. As
@@ -48,11 +47,11 @@ class URLIndexPrivateData
  public:
   URLIndexPrivateData();
 
-  // Given a string16 in |term_string|, scans the history index and returns a
-  // vector with all scored, matching history items. The |term_string| is
-  // broken down into individual terms (words), each of which must occur in the
-  // candidate history item's URL or page title for the item to qualify;
-  // however, the terms do not necessarily have to be adjacent. We
+  // Given a base::string16 in |term_string|, scans the history index and
+  // returns a vector with all scored, matching history items. The
+  // |term_string| is broken down into individual terms (words), each of which
+  // must occur in the candidate history item's URL or page title for the item
+  // to qualify; however, the terms do not necessarily have to be adjacent. We
   // also allow breaking |term_string| at |cursor_position| (if
   // set). Once we have a set of candidates, they are filtered to ensure
   // that all |term_string| terms, as separated by whitespace and the
@@ -64,13 +63,16 @@ class URLIndexPrivateData
   // will be found in nearly all history candidates. Results are sorted by
   // descending score. The full results set (i.e. beyond the
   // |kItemsToScoreLimit| limit) will be retained and used for subsequent calls
-  // to this function. |bookmark_service| is used to boost a result's score if
+  // to this function. |history_client| is used to boost a result's score if
   // its URL is referenced by one or more of the user's bookmarks.  |languages|
-  // is used to help parse/format the URLs in the history index.
-  ScoredHistoryMatches HistoryItemsForTerms(string16 term_string,
+  // is used to help parse/format the URLs in the history index.  In total,
+  // |max_matches| of items will be returned in the |ScoredHistoryMatches|
+  // vector.
+  ScoredHistoryMatches HistoryItemsForTerms(base::string16 term_string,
                                             size_t cursor_position,
+                                            size_t max_matches,
                                             const std::string& languages,
-                                            BookmarkService* bookmark_service);
+                                            HistoryClient* history_client);
 
   // Adds the history item in |row| to the index if it does not already already
   // exist and it meets the minimum 'quick' criteria. If the row already exists
@@ -189,7 +191,7 @@ class URLIndexPrivateData
     HistoryIDSet history_id_set_;
     bool used_;  // True if this item has been used for the current term search.
   };
-  typedef std::map<string16, SearchTermCacheItem> SearchTermCacheMap;
+  typedef std::map<base::string16, SearchTermCacheItem> SearchTermCacheMap;
 
   // A helper class which performs the final filter on each candidate
   // history URL match, inserting accepted matches into |scored_matches_|.
@@ -197,8 +199,8 @@ class URLIndexPrivateData
    public:
     AddHistoryMatch(const URLIndexPrivateData& private_data,
                     const std::string& languages,
-                    BookmarkService* bookmark_service,
-                    const string16& lower_string,
+                    HistoryClient* history_client,
+                    const base::string16& lower_string,
                     const String16Vector& lower_terms,
                     const base::Time now);
     ~AddHistoryMatch();
@@ -210,10 +212,11 @@ class URLIndexPrivateData
    private:
     const URLIndexPrivateData& private_data_;
     const std::string& languages_;
-    BookmarkService* bookmark_service_;
+    HistoryClient* history_client_;
     ScoredHistoryMatches scored_matches_;
-    const string16& lower_string_;
+    const base::string16& lower_string_;
     const String16Vector& lower_terms_;
+    WordStarts lower_terms_to_word_starts_offsets_;
     const base::Time now_;
   };
 
@@ -239,7 +242,7 @@ class URLIndexPrivateData
 
   // Helper function to HistoryIDSetFromWords which composes a set of history
   // ids for the given term given in |term|.
-  HistoryIDSet HistoryIDsForTerm(const string16& term);
+  HistoryIDSet HistoryIDsForTerm(const base::string16& term);
 
   // Given a set of Char16s, finds words containing those characters.
   WordIDSet WordIDSetForTermChars(const Char16Set& term_chars);
@@ -270,11 +273,11 @@ class URLIndexPrivateData
 
   // Given a single word in |uni_word|, adds a reference for the containing
   // history item identified by |history_id| to the index.
-  void AddWordToIndex(const string16& uni_word, HistoryID history_id);
+  void AddWordToIndex(const base::string16& uni_word, HistoryID history_id);
 
   // Creates a new entry in the word/history map for |word_id| and add
   // |history_id| as the initial element of the word's set.
-  void AddWordHistory(const string16& uni_word, HistoryID history_id);
+  void AddWordHistory(const base::string16& uni_word, HistoryID history_id);
 
   // Updates an existing entry in the word/history index by adding the
   // |history_id| to set for |word_id| in the word_id_history_map_.

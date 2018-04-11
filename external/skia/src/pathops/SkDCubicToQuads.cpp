@@ -20,7 +20,6 @@ If this is a degree-elevated cubic, then both equations will give the same answe
 
 P1 = -1/4 Q0 + 3/4 Q1 + 3/4 Q2 - 1/4 Q3
 
-
 SkDCubic defined by: P1/2 - anchor points, C1/C2 control points
 |x| is the euclidean norm of x
 mid-point approx of cubic: a quad that shares the same anchors with the cubic and has the
@@ -118,7 +117,7 @@ static void addTs(const SkDCubic& cubic, double precision, double start, double 
 // it would still take the prechopped cubic for reduce order and find cubic inflections
 void SkDCubic::toQuadraticTs(double precision, SkTArray<double, true>* ts) const {
     SkReduceOrder reducer;
-    int order = reducer.reduce(*this, SkReduceOrder::kAllow_Quadratics, SkReduceOrder::kFill_Style);
+    int order = reducer.reduce(*this, SkReduceOrder::kAllow_Quadratics);
     if (order < 3) {
         return;
     }
@@ -136,30 +135,27 @@ void SkDCubic::toQuadraticTs(double precision, SkTArray<double, true>* ts) const
         memmove(inflectT, &inflectT[1], sizeof(inflectT[0]) * --inflections);
     }
     int start = 0;
-    do {
-        int next = start + 1;
-        if (next >= inflections) {
-            break;
-        }
+    int next = 1;
+    while (next < inflections) {
         if (!approximately_equal(inflectT[start], inflectT[next])) {
             ++start;
+        ++next;
             continue;
         }
         memmove(&inflectT[start], &inflectT[next], sizeof(inflectT[0]) * (--inflections - start));
-    } while (true);
+    }
+
     while (inflections && approximately_greater_than_one(inflectT[inflections - 1])) {
         --inflections;
     }
     SkDCubicPair pair;
     if (inflections == 1) {
         pair = chopAt(inflectT[0]);
-        int orderP1 = reducer.reduce(pair.first(), SkReduceOrder::kNo_Quadratics,
-                SkReduceOrder::kFill_Style);
+        int orderP1 = reducer.reduce(pair.first(), SkReduceOrder::kNo_Quadratics);
         if (orderP1 < 2) {
             --inflections;
         } else {
-            int orderP2 = reducer.reduce(pair.second(), SkReduceOrder::kNo_Quadratics,
-                    SkReduceOrder::kFill_Style);
+            int orderP2 = reducer.reduce(pair.second(), SkReduceOrder::kNo_Quadratics);
             if (orderP2 < 2) {
                 --inflections;
             }

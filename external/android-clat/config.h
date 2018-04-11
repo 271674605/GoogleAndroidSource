@@ -22,10 +22,13 @@
 #include <sys/system_properties.h>
 
 #define DEFAULT_IPV4_LOCAL_SUBNET "192.168.255.1"
+#define DEFAULT_IPV6_LOCAL_ADDRESS "fe80::c000:0004"
+
 #define DEFAULT_DNS64_DETECTION_HOSTNAME "ipv4.google.com"
 
 struct clat_config {
   int16_t mtu, ipv4mtu;
+  struct in6_addr ipv6_local_address;
   struct in6_addr ipv6_local_subnet;
   struct in6_addr ipv6_host_id;
   struct in_addr ipv4_local_subnet;
@@ -36,7 +39,8 @@ struct clat_config {
 
 extern struct clat_config Global_Clatd_Config;
 
-int read_config(const char *file, const char *uplink_interface, const char *plat_prefix);
+int read_config(const char *file, const char *uplink_interface, const char *plat_prefix,
+        unsigned net_id);
 void config_generate_local_ipv6_subnet(struct in6_addr *interface_ip);
 
 #endif /* __CONFIG_H__ */

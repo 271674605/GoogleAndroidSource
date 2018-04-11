@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 // Multiply-included message header, no traditional include guard.
+#include <map>
 #include <string>
 #include <vector>
 
@@ -12,8 +13,8 @@
 #include "base/process/process.h"
 #include "base/strings/string16.h"
 #include "base/sync_socket.h"
-#include "base/values.h"
 #include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/ipc/gpu_command_buffer_traits.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -25,6 +26,7 @@
 #include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_codecs.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
@@ -34,6 +36,7 @@
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_time.h"
 #include "ppapi/c/ppb_audio_config.h"
+#include "ppapi/c/ppb_compositor_layer.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_tcp_socket.h"
 #include "ppapi/c/ppb_text_input_controller.h"
@@ -42,11 +45,13 @@
 #include "ppapi/c/private/pp_private_font_charset.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
+#include "ppapi/c/private/ppb_isolated_file_system_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/private/ppb_talk_private.h"
 #include "ppapi/c/private/ppp_flash_browser_operations.h"
 #include "ppapi/proxy/host_resolver_private_resource.h"
+#include "ppapi/proxy/network_list_resource.h"
 #include "ppapi/proxy/ppapi_param_traits.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
 #include "ppapi/proxy/resource_message_params.h"
@@ -54,41 +59,53 @@
 #include "ppapi/proxy/serialized_handle.h"
 #include "ppapi/proxy/serialized_structs.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/compositor_layer_data.h"
 #include "ppapi/shared_impl/dir_contents.h"
+#include "ppapi/shared_impl/file_growth.h"
 #include "ppapi/shared_impl/file_path.h"
 #include "ppapi/shared_impl/file_ref_create_info.h"
-#include "ppapi/shared_impl/ppapi_nacl_channel_args.h"
+#include "ppapi/shared_impl/media_stream_audio_track_shared.h"
+#include "ppapi/shared_impl/media_stream_video_track_shared.h"
+#include "ppapi/shared_impl/ppapi_nacl_plugin_args.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_device_ref_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
-#include "ppapi/shared_impl/ppb_network_list_private_shared.h"
+#include "ppapi/shared_impl/ppb_tcp_socket_shared.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 #include "ppapi/shared_impl/ppp_flash_browser_operations_shared.h"
 #include "ppapi/shared_impl/private/ppb_x509_certificate_private_shared.h"
 #include "ppapi/shared_impl/socket_option_data.h"
 #include "ppapi/shared_impl/url_request_info_data.h"
 #include "ppapi/shared_impl/url_response_info_data.h"
+#include "ui/events/ipc/latency_info_param_traits.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT PPAPI_PROXY_EXPORT
 
 #define IPC_MESSAGE_START PpapiMsgStart
 
+IPC_ENUM_TRAITS_MAX_VALUE(ppapi::TCPSocketVersion,
+                          ppapi::TCP_SOCKET_VERSION_1_1_OR_ABOVE)
 IPC_ENUM_TRAITS(PP_AudioSampleRate)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_BlendMode, PP_BLENDMODE_LAST)
 IPC_ENUM_TRAITS(PP_DeviceType_Dev)
 IPC_ENUM_TRAITS(PP_DecryptorStreamType)
-IPC_ENUM_TRAITS(PP_FileSystemType)
-IPC_ENUM_TRAITS(PP_FileType)
+IPC_ENUM_TRAITS(PP_SessionType)
+IPC_ENUM_TRAITS(PP_CdmExceptionCode)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_FileSystemType, PP_FILESYSTEMTYPE_ISOLATED)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_FileType, PP_FILETYPE_OTHER)
 IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_Permission)
 IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_SettingType)
 IPC_ENUM_TRAITS(PP_FlashSetting)
 IPC_ENUM_TRAITS(PP_ImageDataFormat)
 IPC_ENUM_TRAITS(PP_InputEvent_MouseButton)
 IPC_ENUM_TRAITS(PP_InputEvent_Type)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_IsolatedFileSystemType_Private,
+                          PP_ISOLATEDFILESYSTEMTYPE_PRIVATE_PLUGINPRIVATE)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_NetAddressFamily_Private,
                           PP_NETADDRESSFAMILY_PRIVATE_IPV6)
-IPC_ENUM_TRAITS(PP_NetworkListState_Private)
-IPC_ENUM_TRAITS(PP_NetworkListType_Private)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_NetworkList_State, PP_NETWORKLIST_STATE_UP)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_NetworkList_Type, PP_NETWORKLIST_TYPE_CELLULAR)
 IPC_ENUM_TRAITS(PP_PrintOrientation_Dev)
 IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
 IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
@@ -110,6 +127,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(PP_UDPSocket_Option,
                           PP_UDPSOCKET_OPTION_RECV_BUFFER_SIZE)
 IPC_ENUM_TRAITS(PP_VideoDecodeError_Dev)
 IPC_ENUM_TRAITS(PP_VideoDecoder_Profile)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_VideoFrame_Format, PP_VIDEOFRAME_FORMAT_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_VideoProfile, PP_VIDEOPROFILE_MAX)
 
 IPC_STRUCT_TRAITS_BEGIN(PP_Point)
   IPC_STRUCT_TRAITS_MEMBER(x)
@@ -126,7 +145,17 @@ IPC_STRUCT_TRAITS_BEGIN(PP_Size)
   IPC_STRUCT_TRAITS_MEMBER(width)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(PP_FloatSize)
+  IPC_STRUCT_TRAITS_MEMBER(height)
+  IPC_STRUCT_TRAITS_MEMBER(width)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(PP_Rect)
+  IPC_STRUCT_TRAITS_MEMBER(point)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PP_FloatRect)
   IPC_STRUCT_TRAITS_MEMBER(point)
   IPC_STRUCT_TRAITS_MEMBER(size)
 IPC_STRUCT_TRAITS_END()
@@ -191,6 +220,55 @@ IPC_STRUCT_TRAITS_BEGIN(PP_URLComponents_Dev)
   IPC_STRUCT_TRAITS_MEMBER(ref)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(PP_FileInfo)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+  IPC_STRUCT_TRAITS_MEMBER(type)
+  IPC_STRUCT_TRAITS_MEMBER(system_type)
+  IPC_STRUCT_TRAITS_MEMBER(creation_time)
+  IPC_STRUCT_TRAITS_MEMBER(last_access_time)
+  IPC_STRUCT_TRAITS_MEMBER(last_modified_time)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::FileGrowth)
+  IPC_STRUCT_TRAITS_MEMBER(max_written_offset)
+  IPC_STRUCT_TRAITS_MEMBER(append_mode_write_amount)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData)
+  IPC_STRUCT_TRAITS_MEMBER(common)
+  IPC_STRUCT_TRAITS_MEMBER(color)
+  IPC_STRUCT_TRAITS_MEMBER(texture)
+  IPC_STRUCT_TRAITS_MEMBER(image)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData::LayerCommon)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+  IPC_STRUCT_TRAITS_MEMBER(clip_rect)
+  IPC_STRUCT_TRAITS_MEMBER(transform)
+  IPC_STRUCT_TRAITS_MEMBER(blend_mode)
+  IPC_STRUCT_TRAITS_MEMBER(opacity)
+  IPC_STRUCT_TRAITS_MEMBER(resource_id)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData::ColorLayer)
+  IPC_STRUCT_TRAITS_MEMBER(red)
+  IPC_STRUCT_TRAITS_MEMBER(green)
+  IPC_STRUCT_TRAITS_MEMBER(blue)
+  IPC_STRUCT_TRAITS_MEMBER(alpha)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData::ImageLayer)
+  IPC_STRUCT_TRAITS_MEMBER(resource)
+  IPC_STRUCT_TRAITS_MEMBER(source_rect)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData::TextureLayer)
+  IPC_STRUCT_TRAITS_MEMBER(mailbox)
+  IPC_STRUCT_TRAITS_MEMBER(sync_point)
+  IPC_STRUCT_TRAITS_MEMBER(source_rect)
+  IPC_STRUCT_TRAITS_MEMBER(premult_alpha)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(ppapi::DeviceRefData)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(name)
@@ -202,17 +280,29 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::DirEntry)
   IPC_STRUCT_TRAITS_MEMBER(is_dir)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(ppapi::FileRef_CreateInfo)
+IPC_STRUCT_TRAITS_BEGIN(ppapi::FileRefCreateInfo)
   IPC_STRUCT_TRAITS_MEMBER(file_system_type)
   IPC_STRUCT_TRAITS_MEMBER(internal_path)
   IPC_STRUCT_TRAITS_MEMBER(display_name)
-  IPC_STRUCT_TRAITS_MEMBER(pending_host_resource_id)
+  IPC_STRUCT_TRAITS_MEMBER(browser_pending_host_resource_id)
+  IPC_STRUCT_TRAITS_MEMBER(renderer_pending_host_resource_id)
   IPC_STRUCT_TRAITS_MEMBER(file_system_plugin_resource)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::FlashSiteSetting)
   IPC_STRUCT_TRAITS_MEMBER(site)
   IPC_STRUCT_TRAITS_MEMBER(permission)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::MediaStreamAudioTrackShared::Attributes)
+  IPC_STRUCT_TRAITS_MEMBER(buffers)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::MediaStreamVideoTrackShared::Attributes)
+  IPC_STRUCT_TRAITS_MEMBER(buffers)
+  IPC_STRUCT_TRAITS_MEMBER(width)
+  IPC_STRUCT_TRAITS_MEMBER(height)
+  IPC_STRUCT_TRAITS_MEMBER(format)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::ViewData)
@@ -222,6 +312,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::ViewData)
   IPC_STRUCT_TRAITS_MEMBER(clip_rect)
   IPC_STRUCT_TRAITS_MEMBER(device_scale)
   IPC_STRUCT_TRAITS_MEMBER(css_scale)
+  IPC_STRUCT_TRAITS_MEMBER(scroll_offset)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(PP_TouchPoint)
@@ -243,6 +334,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::Preferences)
   IPC_STRUCT_TRAITS_MEMBER(is_3d_supported)
   IPC_STRUCT_TRAITS_MEMBER(is_stage3d_supported)
   IPC_STRUCT_TRAITS_MEMBER(is_stage3d_baseline_supported)
+  IPC_STRUCT_TRAITS_MEMBER(is_accelerated_video_decode_enabled)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
@@ -258,7 +350,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
   IPC_STRUCT_TRAITS_MEMBER(wheel_ticks)
   IPC_STRUCT_TRAITS_MEMBER(wheel_scroll_by_page)
   IPC_STRUCT_TRAITS_MEMBER(key_code)
-  IPC_STRUCT_TRAITS_MEMBER(usb_key_code)
+  IPC_STRUCT_TRAITS_MEMBER(code)
   IPC_STRUCT_TRAITS_MEMBER(character_text)
   IPC_STRUCT_TRAITS_MEMBER(composition_segment_offsets)
   IPC_STRUCT_TRAITS_MEMBER(composition_target_segment)
@@ -267,6 +359,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
   IPC_STRUCT_TRAITS_MEMBER(touches)
   IPC_STRUCT_TRAITS_MEMBER(changed_touches)
   IPC_STRUCT_TRAITS_MEMBER(target_touches)
+  IPC_STRUCT_TRAITS_MEMBER(latency_info)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::HostPortPair)
@@ -298,8 +391,7 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(ppapi::URLRequestInfoData::BodyItem)
   IPC_STRUCT_TRAITS_MEMBER(is_file)
   IPC_STRUCT_TRAITS_MEMBER(data)
-  // Note: we don't serialize file_ref.
-  IPC_STRUCT_TRAITS_MEMBER(file_ref_host_resource)
+  IPC_STRUCT_TRAITS_MEMBER(file_ref_pp_resource)
   IPC_STRUCT_TRAITS_MEMBER(start_offset)
   IPC_STRUCT_TRAITS_MEMBER(number_of_bytes)
   IPC_STRUCT_TRAITS_MEMBER(expected_last_modified_time)
@@ -314,7 +406,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::URLResponseInfoData)
   IPC_STRUCT_TRAITS_MEMBER(body_as_file_ref)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(ppapi::NetworkInfo)
+IPC_STRUCT_TRAITS_BEGIN(ppapi::proxy::SerializedNetworkInfo)
   IPC_STRUCT_TRAITS_MEMBER(name)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(state)
@@ -323,12 +415,13 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::NetworkInfo)
   IPC_STRUCT_TRAITS_MEMBER(mtu)
 IPC_STRUCT_TRAITS_END()
 
-// Only whitelisted switches passed through NaClChannelArgs.
+// Only whitelisted switches passed through PpapiNaClPluginArgs.
 // The list of switches can be found in:
-//   chrome/browser/nacl_host/nacl_process_host.cc
-IPC_STRUCT_TRAITS_BEGIN(ppapi::PpapiNaClChannelArgs)
+//   components/nacl/browser/nacl_process_host.cc
+IPC_STRUCT_TRAITS_BEGIN(ppapi::PpapiNaClPluginArgs)
   IPC_STRUCT_TRAITS_MEMBER(off_the_record)
   IPC_STRUCT_TRAITS_MEMBER(permissions)
+  IPC_STRUCT_TRAITS_MEMBER(keepalive_throttle_interval_milliseconds)
   IPC_STRUCT_TRAITS_MEMBER(switch_names)
   IPC_STRUCT_TRAITS_MEMBER(switch_values)
 IPC_STRUCT_TRAITS_END()
@@ -356,13 +449,9 @@ IPC_MESSAGE_CONTROL3(PpapiMsg_CreateChannel,
                      int /* renderer_child_id */,
                      bool /* incognito */)
 
-// Creates a channel to talk to a renderer. This message is only used by the
-// NaCl IPC proxy. It is intercepted by NaClIPCAdapter, which creates the
-// actual channel and rewrites the message for the untrusted side.
-IPC_MESSAGE_CONTROL3(PpapiMsg_CreateNaClChannel,
-                     int /* renderer_id */,
-                     ppapi::PpapiNaClChannelArgs /* args */,
-                     ppapi::proxy::SerializedHandle /* channel_handle */)
+// Initializes the IPC dispatchers in the NaCl plugin.
+IPC_MESSAGE_CONTROL1(PpapiMsg_InitializeNaClDispatcher,
+                     ppapi::PpapiNaClPluginArgs /* args */)
 
 // Instructs the plugin process to crash.
 IPC_MESSAGE_CONTROL0(PpapiMsg_Crash)
@@ -397,6 +486,9 @@ IPC_MESSAGE_CONTROL1(PpapiMsg_SetPreferences,
 IPC_SYNC_MESSAGE_CONTROL1_1(PpapiMsg_SupportsInterface,
                             std::string /* interface_name */,
                             bool /* result */)
+
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_LogInterfaceUsage,
+                     int /* interface_hash */)
 
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
 // Network state notification from the browser for implementing
@@ -485,36 +577,6 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPBAudio_NotifyAudioStreamCreated,
                     int32_t /* result_code (will be != PP_OK on failure) */,
                     ppapi::proxy::SerializedHandle /* socket_handle */,
                     ppapi::proxy::SerializedHandle /* handle */)
-
-// PPB_FileRef.
-// TODO(teravest): Remove these messages when we've switched over to the "new"
-// proxy.
-IPC_MESSAGE_ROUTED3(
-    PpapiMsg_PPBFileRef_CallbackComplete,
-    ppapi::HostResource /* resource */,
-    uint32_t /* callback_id */,
-    int32_t /* result */)
-
-IPC_MESSAGE_ROUTED4(
-    PpapiMsg_PPBFileRef_QueryCallbackComplete,
-    ppapi::HostResource /* resource */,
-    PP_FileInfo /* file_info */,
-    uint32_t /* callback_id */,
-    int32_t /* result */)
-
-IPC_MESSAGE_ROUTED5(
-    PpapiMsg_PPBFileRef_ReadDirectoryEntriesCallbackComplete,
-    ppapi::HostResource /* resource */,
-    std::vector<ppapi::PPB_FileRef_CreateInfo> /* files */,
-    std::vector<PP_FileType> /* file_types */,
-    uint32_t /* callback_id */,
-    int32_t /* result */)
-
-// PPB_FileSystem.
-IPC_MESSAGE_ROUTED2(
-    PpapiMsg_PPBFileSystem_OpenComplete,
-    ppapi::HostResource /* filesystem */,
-    int32_t /* result */)
 
 // PPB_Graphics3D.
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPBGraphics3D_SwapBuffersACK,
@@ -615,19 +677,47 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPPInstance_HandleDocumentLoad,
     int /* pending_loader_host_id */,
     ppapi::URLResponseInfoData /* response */)
 
-// PPP_Messaging.
+// PPP_Messaging and PPP_MessageHandler.
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPMessaging_HandleMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
+IPC_SYNC_MESSAGE_ROUTED2_2(PpapiMsg_PPPMessageHandler_HandleBlockingMessage,
+                           PP_Instance /* instance */,
+                           ppapi::proxy::SerializedVar /* message */,
+                           ppapi::proxy::SerializedVar /* result */,
+                           bool /* was_handled */);
 
 // PPP_MouseLock.
 IPC_MESSAGE_ROUTED1(PpapiMsg_PPPMouseLock_MouseLockLost,
                     PP_Instance /* instance */)
 
-// PPB_NetworkMonitor_Private.
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPBNetworkMonitor_NetworkList,
-                    uint32 /* plugin_dispatcher_id */,
-                    ppapi::NetworkList /* network_list */)
+// PPP_Pdf
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPPdf_Rotate,
+                    PP_Instance /* instance */,
+                    bool /* clockwise */)
+
+// Find
+IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_StartFind,
+                    PP_Instance /* instance */,
+                    std::string /* text */)
+IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_SelectFindResult,
+                    PP_Instance /* instance */,
+                    PP_Bool /* forward */)
+IPC_MESSAGE_ROUTED1(PpapiPluginMsg_PPPFind_StopFind,
+                    PP_Instance /* instance */)
+
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_SetPluginToHandleFindRequests,
+                    PP_Instance /* instance */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_NumberOfFindResultsChanged,
+                    PP_Instance /* instance */,
+                    int32_t /* total */,
+                    PP_Bool /* final_result */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SelectFindResultChanged,
+                    PP_Instance /* instance */,
+                    int32_t /* index */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SetTickmarks,
+                    PP_Instance /* instance */,
+                    std::vector<PP_Rect> /* tickmarks */)
 
 // PPP_Printing
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPPrinting_QuerySupportedFormats,
@@ -661,19 +751,28 @@ IPC_MESSAGE_ROUTED3(
     int32_t /* result */)
 
 // PPP_ContentDecryptor_Dev
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_GenerateKeyRequest,
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPContentDecryptor_Initialize,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* key_system, String */,
-                    ppapi::proxy::SerializedVar /* type, String */,
-                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_AddKey,
+                    ppapi::proxy::SerializedVar /* key_system, String */)
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPPContentDecryptor_CreateSession,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* session_id, String */,
-                    ppapi::proxy::SerializedVar /* key, ArrayBuffer */,
-                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPPContentDecryptor_CancelKeyRequest,
+                    uint32_t /* promise_id */,
+                    ppapi::proxy::SerializedVar /* init_data_type, String */,
+                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */,
+                    PP_SessionType /* session_type */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_LoadSession,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* session_id, String */)
+                    uint32_t /* promise_id */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_UpdateSession,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */,
+                    ppapi::proxy::SerializedVar /* response, ArrayBuffer */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_ReleaseSession,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */)
 IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_Decrypt,
                     PP_Instance /* instance */,
                     ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
@@ -701,69 +800,16 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_DecryptAndDecode,
                     PP_DecryptorStreamType /* decoder_type */,
                     ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
                     std::string /* serialized_block_info */)
-#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
-// PPB_TCPSocket and PPB_TCPSocket_Private.
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPBTCPSocket_ConnectACK,
-                    uint32 /* plugin_dispatcher_id */,
-                    uint32 /* socket_id */,
-                    int32_t /* result */,
-                    PP_NetAddress_Private /* local_addr */,
-                    PP_NetAddress_Private /* remote_addr */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
-                    uint32 /* plugin_dispatcher_id */,
-                    uint32 /* socket_id */,
-                    bool /* succeeded */,
-                    ppapi::PPB_X509Certificate_Fields /* certificate_fields */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPBTCPSocket_ReadACK,
-                    uint32 /* plugin_dispatcher_id */,
-                    uint32 /* socket_id */,
-                    int32_t /* result */,
-                    std::string /* data */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBTCPSocket_WriteACK,
-                    uint32 /* plugin_dispatcher_id */,
-                    uint32 /* socket_id */,
-                    int32_t /* result */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBTCPSocket_SetOptionACK,
-                    uint32 /* plugin_dispatcher_id */,
-                    uint32 /* socket_id */,
-                    int32_t /* result */)
-
-#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPP_Instance_Private.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPInstancePrivate_GetInstanceObject,
                            PP_Instance /* instance */,
                            ppapi::proxy::SerializedVar /* result */)
 
-// PPB_VideoDecoder_Dev.
-// (Messages from renderer to plugin to notify it to run callbacks.)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBVideoDecoder_EndOfBitstreamACK,
-                    ppapi::HostResource /* video_decoder */,
-                    int32_t /* bitstream buffer id */,
-                    int32_t /* PP_CompletionCallback result */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPBVideoDecoder_FlushACK,
-                    ppapi::HostResource /* video_decoder */,
-                    int32_t /* PP_CompletionCallback result  */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPBVideoDecoder_ResetACK,
-                    ppapi::HostResource /* video_decoder */,
-                    int32_t /* PP_CompletionCallback result */)
-
-// PPP_VideoDecoder_Dev.
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPPVideoDecoder_ProvidePictureBuffers,
-                    ppapi::HostResource /* video_decoder */,
-                    uint32_t /* requested number of buffers */,
-                    PP_Size /* dimensions of buffers */,
-                    uint32_t /* texture_target */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_DismissPictureBuffer,
-                    ppapi::HostResource /* video_decoder */,
-                    int32_t /* picture buffer id */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_PictureReady,
-                    ppapi::HostResource /* video_decoder */,
-                    PP_Picture_Dev /* output picture */)
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_NotifyError,
-                    ppapi::HostResource /* video_decoder */,
-                    PP_VideoDecodeError_Dev /* error */)
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
+
+// Reports to the browser that a plugin has been active.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Keepalive)
 
 // -----------------------------------------------------------------------------
 // These are from the plugin to the renderer.
@@ -774,6 +820,14 @@ IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_NotifyError,
 // initialize properly.
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_ChannelCreated,
                      IPC::ChannelHandle /* handle */)
+
+// Notify the renderer that the PPAPI channel gets ready in the plugin.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_StartupInitializationComplete);
+
+// Calls renderer to open a resource file for nacl_irt_open_resource().
+IPC_SYNC_MESSAGE_CONTROL1_1(PpapiHostMsg_OpenResource,
+                            std::string /* key */,
+                            ppapi::proxy::SerializedHandle /* fd */)
 
 // Logs the given message to the console of all instances.
 IPC_MESSAGE_CONTROL4(PpapiHostMsg_LogWithSource,
@@ -798,43 +852,6 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_AddRefResource,
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_ReleaseResource,
                     ppapi::HostResource)
 
-// PPB_FileRef.
-// TODO(teravest): Remove these messages when we've switched over to the "new"
-// proxy.
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBFileRef_Create,
-                           PP_Instance /* instance */,
-                           PP_Resource /* file_system */,
-                           std::string /* path */,
-                           ppapi::PPB_FileRef_CreateInfo /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFileRef_GetParent,
-                           ppapi::HostResource /* file_ref */,
-                           ppapi::PPB_FileRef_CreateInfo /* result */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBFileRef_MakeDirectory,
-                    ppapi::HostResource /* file_ref */,
-                    PP_Bool /* make_ancestors */,
-                    uint32_t /* callback_id */)
-IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBFileRef_Touch,
-                    ppapi::HostResource /* file_ref */,
-                    PP_Time /* last_access */,
-                    PP_Time /* last_modified */,
-                    uint32_t /* callback_id */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBFileRef_Delete,
-                    ppapi::HostResource /* file_ref */,
-                    uint32_t /* callback_id */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBFileRef_Rename,
-                    ppapi::HostResource /* file_ref */,
-                    ppapi::HostResource /* new_file_ref */,
-                    uint32_t /* callback_id */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBFileRef_Query,
-                    ppapi::HostResource /* file_ref */,
-                    uint32_t /* callback_id */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFileRef_GetAbsolutePath,
-                           ppapi::HostResource /* file_ref */,
-                           ppapi::proxy::SerializedVar /* result */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBFileRef_ReadDirectoryEntries,
-                    ppapi::HostResource /* file_ref */,
-                    uint32_t /* callback_id */)
-
 // PPB_Graphics3D.
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics3D_Create,
                            PP_Instance /* instance */,
@@ -844,30 +861,29 @@ IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics3D_Create,
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_SetGetBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* transfer_buffer_id */)
-IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBGraphics3D_GetState,
+IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForTokenInRange,
                            ppapi::HostResource /* context */,
+                           int32 /* start */,
+                           int32 /* end */,
                            gpu::CommandBuffer::State /* state */,
                            bool /* success */)
-IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_Flush,
+IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForGetOffsetInRange,
                            ppapi::HostResource /* context */,
-                           int32 /* put_offset */,
-                           int32 /* last_known_get */,
+                           int32 /* start */,
+                           int32 /* end */,
                            gpu::CommandBuffer::State /* state */,
                            bool /* success */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBGraphics3D_AsyncFlush,
                     ppapi::HostResource /* context */,
                     int32 /* put_offset */)
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer,
+IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer,
                            ppapi::HostResource /* context */,
                            uint32 /* size */,
-                           int32 /* id */)
+                           int32 /* id */,
+                           ppapi::proxy::SerializedHandle /* transfer_buffer */)
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_DestroyTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* id */)
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_GetTransferBuffer,
-                           ppapi::HostResource /* context */,
-                           int32 /* id */,
-                           ppapi::proxy::SerializedHandle /* transfer_buffer */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBGraphics3D_SwapBuffers,
                     ppapi::HostResource /* graphics_3d */)
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBGraphics3D_InsertSyncPoint,
@@ -936,6 +952,8 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_RequestInputEvents,
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_ClearInputEvents,
                     PP_Instance /* instance */,
                     uint32_t /* event_classes */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_StartTrackingLatency,
+                    PP_Instance /* instance */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PostMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
@@ -961,6 +979,9 @@ IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBInstance_GetDocumentURL,
                            ppapi::proxy::SerializedVar /* result */)
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetPluginInstanceURL,
                            PP_Instance /* active */,
+                           ppapi::proxy::SerializedVar /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetPluginReferrerURL,
+                           PP_Instance /* instance */,
                            ppapi::proxy::SerializedVar /* result */)
 IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_SetCursor,
                     PP_Instance /* instance */,
@@ -1056,27 +1077,36 @@ IPC_SYNC_MESSAGE_ROUTED2_2(
     ppapi::proxy::SerializedHandle /* result_shm_handle */)
 
 // PPB_ContentDecryptor_Dev messages handled in PPB_Instance_Proxy.
-IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_NeedKey,
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PromiseResolved,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* key_system, String */,
-                    ppapi::proxy::SerializedVar /* session_id, String */,
-                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_KeyAdded,
+                    uint32_t /* promise_id */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithSession,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* key_system, String */,
-                    ppapi::proxy::SerializedVar /* session_id, String */)
-IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_KeyMessage,
+                    uint32_t /* promise_id */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */)
+IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_PromiseRejected,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* key_system, String */,
-                    ppapi::proxy::SerializedVar /* session_id, String */,
+                    uint32_t /* promise_id */,
+                    PP_CdmExceptionCode /* exception_code */,
+                    int32_t /* system_code */,
+                    ppapi::proxy::SerializedVar /* error_description, String */)
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_SessionMessage,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */,
                     ppapi::proxy::SerializedVar /* message, ArrayBuffer */,
-                    ppapi::proxy::SerializedVar /* default_url, String */)
-IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_KeyError,
+                    ppapi::proxy::SerializedVar /* destination_url, String */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SessionReady,
                     PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* key_system, String */,
-                    ppapi::proxy::SerializedVar /* session_id, String */,
-                    int32_t /* media_error */,
-                    int32_t /* system_code */)
+                    ppapi::proxy::SerializedVar /* web_session_id, String */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SessionClosed,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */)
+IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_SessionError,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* web_session_id, String */,
+                    PP_CdmExceptionCode /* exception_code */,
+                    int32_t /* system_code */,
+                    ppapi::proxy::SerializedVar /* error_description, String */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverBlock,
                     PP_Instance /* instance */,
                     PP_Resource /* decrypted_block, PPB_Buffer_Dev */,
@@ -1104,12 +1134,6 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverSamples,
                     std::string /* serialized_block_info */)
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
-// PPB_NetworkMonitor_Private.
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBNetworkMonitor_Start,
-                     uint32 /* plugin_dispatcher_id */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBNetworkMonitor_Stop,
-                     uint32 /* plugin_dispatcher_id */)
-
 // PPB_Testing.
 IPC_SYNC_MESSAGE_ROUTED3_1(
     PpapiHostMsg_PPBTesting_ReadImageData,
@@ -1129,7 +1153,8 @@ IPC_SYNC_MESSAGE_ROUTED1_0(
 
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
 
-// PPB_VideoDecoder.
+// PPB_VideoDecoder_Dev.
+// (Messages from plugin to renderer.)
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBVideoDecoder_Create,
                            PP_Instance /* instance */,
                            ppapi::HostResource /* context */,
@@ -1153,55 +1178,35 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBVideoDecoder_Reset,
 IPC_SYNC_MESSAGE_ROUTED1_0(PpapiHostMsg_PPBVideoDecoder_Destroy,
                            ppapi::HostResource /* video_decoder */)
 
-// PPB_Flash_MessageLoop.
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFlashMessageLoop_Create,
-                           PP_Instance /* instance */,
-                           ppapi::HostResource /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFlashMessageLoop_Run,
-                           ppapi::HostResource /* flash_message_loop */,
-                           int32_t /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_0(PpapiHostMsg_PPBFlashMessageLoop_Quit,
-                           ppapi::HostResource /* flash_message_loop */)
-#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
+// PPB_VideoDecoder_Dev.
+// (Messages from renderer to plugin to notify it to run callbacks.)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPBVideoDecoder_EndOfBitstreamACK,
+                    ppapi::HostResource /* video_decoder */,
+                    int32_t /* bitstream buffer id */,
+                    int32_t /* PP_CompletionCallback result */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPBVideoDecoder_FlushACK,
+                    ppapi::HostResource /* video_decoder */,
+                    int32_t /* PP_CompletionCallback result  */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPBVideoDecoder_ResetACK,
+                    ppapi::HostResource /* video_decoder */,
+                    int32_t /* PP_CompletionCallback result */)
 
-// PPB_TCPSocket and PPB_TCPSocket_Private.
-// Creates a PPB_TCPSocket resource.
-IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBTCPSocket_Create,
-                            int32 /* routing_id */,
-                            uint32 /* plugin_dispatcher_id */,
-                            uint32 /* socket_id */)
-// Creates a PPB_TCPSocket_Private resource.
-IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBTCPSocket_CreatePrivate,
-                            int32 /* routing_id */,
-                            uint32 /* plugin_dispatcher_id */,
-                            uint32 /* socket_id */)
-IPC_MESSAGE_CONTROL4(PpapiHostMsg_PPBTCPSocket_Connect,
-                     int32 /* routing_id */,
-                     uint32 /* socket_id */,
-                     std::string /* host */,
-                     uint16_t /* port */)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBTCPSocket_ConnectWithNetAddress,
-                     int32 /* routing_id */,
-                     uint32 /* socket_id */,
-                     PP_NetAddress_Private /* net_addr */)
-IPC_MESSAGE_CONTROL5(PpapiHostMsg_PPBTCPSocket_SSLHandshake,
-                     uint32 /* socket_id */,
-                     std::string /* server_name */,
-                     uint16_t /* server_port */,
-                     std::vector<std::vector<char> > /* trusted_certs */,
-                     std::vector<std::vector<char> > /* untrusted_certs */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBTCPSocket_Read,
-                     uint32 /* socket_id */,
-                     int32_t /* bytes_to_read */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBTCPSocket_Write,
-                     uint32 /* socket_id */,
-                     std::string /* data */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBTCPSocket_Disconnect,
-                     uint32 /* socket_id */)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBTCPSocket_SetOption,
-                     uint32 /* socket_id */,
-                     PP_TCPSocket_Option /* name */,
-                     ppapi::SocketOptionData /* value */)
+// PPP_VideoDecoder_Dev.
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPVideoDecoder_ProvidePictureBuffers,
+                    ppapi::HostResource /* video_decoder */,
+                    uint32_t /* requested number of buffers */,
+                    PP_Size /* dimensions of buffers */,
+                    uint32_t /* texture_target */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_DismissPictureBuffer,
+                    ppapi::HostResource /* video_decoder */,
+                    int32_t /* picture buffer id */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_PictureReady,
+                    ppapi::HostResource /* video_decoder */,
+                    PP_Picture_Dev /* output picture */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_NotifyError,
+                    ppapi::HostResource /* video_decoder */,
+                    PP_VideoDecodeError_Dev /* error */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_X509Certificate_Private
 IPC_SYNC_MESSAGE_CONTROL1_2(PpapiHostMsg_PPBX509Certificate_ParseDER,
@@ -1267,7 +1272,6 @@ IPC_MESSAGE_ROUTED2(
     ppapi::proxy::ResourceMessageReplyParams /* reply_params */,
     IPC::Message /* nested_msg */)
 
-
 IPC_SYNC_MESSAGE_CONTROL2_2(PpapiHostMsg_ResourceSyncCall,
     ppapi::proxy::ResourceMessageCallParams /* call_params */,
     IPC::Message /* nested_msg */,
@@ -1275,27 +1279,27 @@ IPC_SYNC_MESSAGE_CONTROL2_2(PpapiHostMsg_ResourceSyncCall,
     IPC::Message /* reply_msg */)
 
 // This message is sent from the renderer to the browser when it wants to create
-// a ResourceHost in the browser. It contains the process ID of the plugin and
+// ResourceHosts in the browser. It contains the process ID of the plugin and
 // the instance of the plugin for which to create the resource for. params
 // contains the sequence number for the message to track the response.
-// The nested message is a ResourceHost creation message.
+// The nested messages are ResourceHost creation messages.
 IPC_MESSAGE_CONTROL5(
-    PpapiHostMsg_CreateResourceHostFromHost,
+    PpapiHostMsg_CreateResourceHostsFromHost,
     int /* routing_id */,
     int /* child_process_id */,
     ppapi::proxy::ResourceMessageCallParams /* params */,
     PP_Instance /* instance */,
-    IPC::Message /* nested_msg */)
+    std::vector<IPC::Message> /* nested_msgs */)
 
-// This message is sent from the browser to the renderer when it has created a
-// ResourceHost for the renderer. It contains the sequence number that was sent
-// in the request and the ID of the pending ResourceHost which was created in
-// the browser. This ID is only useful for the plugin which can attach to the
-// ResourceHost in the browser.
+// This message is sent from the browser to the renderer when it has created
+// ResourceHosts for the renderer. It contains the sequence number that was sent
+// in the request and the IDs of the pending ResourceHosts which were created in
+// the browser. These IDs are only useful for the plugin which can attach to the
+// ResourceHosts in the browser.
 IPC_MESSAGE_ROUTED2(
-    PpapiHostMsg_CreateResourceHostFromHostReply,
+    PpapiHostMsg_CreateResourceHostsFromHostReply,
     int32_t /* sequence */,
-    int /* pending_host_id */)
+    std::vector<int> /* pending_host_ids */)
 
 //-----------------------------------------------------------------------------
 // Messages for resources using call/reply above.
@@ -1308,30 +1312,37 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_Broker_Create)
 // ResourceMessageReplyParams in the reply message.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Broker_IsAllowed)
 
-// Extensions common -----------------------------------------------------------
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_ExtensionsCommon_Create)
+// UMA
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_UMA_Create)
+IPC_MESSAGE_CONTROL5(PpapiHostMsg_UMA_HistogramCustomTimes,
+                     std::string /* name */,
+                     int64_t /* sample */,
+                     int64_t /* min */,
+                     int64_t /* max */,
+                     uint32_t /* bucket_count */)
+IPC_MESSAGE_CONTROL5(PpapiHostMsg_UMA_HistogramCustomCounts,
+                     std::string /* name */,
+                     int32_t /* sample */,
+                     int32_t /* min */,
+                     int32_t /* max */,
+                     uint32_t /* bucket_count */)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_UMA_HistogramEnumeration,
+                     std::string /* name */,
+                     int32_t /* sample */,
+                     int32_t /* boundary_value */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_UMA_IsCrashReportingEnabled);
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_UMA_IsCrashReportingEnabledReply);
 
-// Starts an extension API request which doesn't expect a response.
-// |request_name| is an API function name. |args| is a list of input arguments.
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_ExtensionsCommon_Post,
-                     std::string /* request_name */,
-                     base::ListValue /* args */)
-
-// Starts an extension API request which expects a response sent back using a
-// PpapiPluginMsg_ExtensionsCommon_CallReply message.
-// |request_name| is an API function name. |args| is a list of input arguments.
-// |output| is a list of output results.
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_ExtensionsCommon_Call,
-                     std::string /* request_name */,
-                     base::ListValue /* args */)
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_ExtensionsCommon_CallReply,
-                     base::ListValue /* output */)
-
-// Ext_CrxFileSystem
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Ext_CrxFileSystem_Create)
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Ext_CrxFileSystem_BrowserOpen)
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Ext_CrxFileSystem_BrowserOpenReply,
-                     std::string /* fsid */)
+// Compositor
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Compositor_Create)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_Compositor_CommitLayers,
+                     std::vector<ppapi::CompositorLayerData> /* layers */,
+                     bool /* reset */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Compositor_CommitLayersReply)
+IPC_MESSAGE_CONTROL3(PpapiPluginMsg_Compositor_ReleaseResource,
+                     int32_t /* id */,
+                     uint32_t /* sync_point */,
+                     bool /* is_lost */)
 
 // File chooser.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileChooser_Create)
@@ -1341,32 +1352,24 @@ IPC_MESSAGE_CONTROL4(PpapiHostMsg_FileChooser_Show,
                      std::string /* suggested_file_name */,
                      std::vector<std::string> /* accept_mime_types */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FileChooser_ShowReply,
-                     std::vector<ppapi::PPB_FileRef_CreateInfo> /* files */)
+                     std::vector<ppapi::FileRefCreateInfo> /* files */)
 
 // FileIO
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileIO_Create)
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileIO_Open,
                      PP_Resource /* file_ref_resource */,
                      int32_t /* open_flags */)
-IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileIO_OpenReply)
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileIO_Close)
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_FileIO_OpenReply,
+                     PP_Resource /* quota_file_system */,
+                     int64_t /* file_size */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileIO_Close,
+                     ppapi::FileGrowth /* file_growth */)
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileIO_Touch,
                      PP_Time /* last_access_time */,
                      PP_Time /* last_modified_time */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileIO_Write,
-                     int64_t /* offset */,
-                     std::string /* data */)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileIO_SetLength,
                      int64_t /* length */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileIO_Flush)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileIO_WillWrite,
-                     int64_t /* offset */,
-                     int32_t /* bytes_to_write */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileIO_WillSetLength,
-                     int64_t /* length */)
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileIO_GetOSFileDescriptor)
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FileIO_GetOSFileDescriptorReply,
-                     int32_t /* file descriptor */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileIO_RequestOSFileHandle)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileIO_RequestOSFileHandleReply)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileIO_GeneralReply)
@@ -1374,19 +1377,19 @@ IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileIO_GeneralReply)
 // FileRef
 // Creates a FileRef to a path on an external file system. This message may
 // only be sent from the renderer.
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileRef_CreateExternal,
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileRef_CreateForRawFS,
                      base::FilePath /* external_path */)
 
-// Creates a FileRef to a path on an internal file system. This message may
-// be sent from the renderer or the plugin.
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileRef_CreateInternal,
+// Creates a FileRef to a path on a file system that uses fileapi.
+// This message may be sent from the renderer or the plugin.
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileRef_CreateForFileAPI,
                      PP_Resource /* file_system */,
                      std::string /* internal_path */)
 
 // Requests that the browser create a directory at the location indicated by
 // the FileRef.
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileRef_MakeDirectory,
-                     bool /* make_ancestors */)
+                     int32_t /* make_directory_flags */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileRef_MakeDirectoryReply)
 
 // Requests that the browser update the last accessed and last modified times
@@ -1417,10 +1420,10 @@ IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FileRef_QueryReply,
 // location indicated by the FileRef.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FileRef_ReadDirectoryEntries)
 
-// FileRef_CreateInfo does not provide file type information, so two
+// FileRefCreateInfo does not provide file type information, so two
 // corresponding vectors are returned.
 IPC_MESSAGE_CONTROL2(PpapiPluginMsg_FileRef_ReadDirectoryEntriesReply,
-                     std::vector<ppapi::FileRef_CreateInfo> /* files */,
+                     std::vector<ppapi::FileRefCreateInfo> /* files */,
                      std::vector<PP_FileType> /* file_types */)
 
 // Requests that the browser reply with the absolute path to the indicated
@@ -1435,32 +1438,26 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileSystem_Create,
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileSystem_Open,
                      int64_t /* expected_size */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileSystem_OpenReply)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_FileSystem_InitIsolatedFileSystem,
-                     std::string /* fsid */)
-
-// Flash DRM ------------------------------------------------------------------
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_Create)
-
-// Requests the device ID.
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetDeviceID)
-// Reply for GetDeviceID which includes the device ID as a string.
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetDeviceIDReply,
-                     std::string /* id */)
-
-// Requests the HMONITOR corresponding to the monitor on which the instance is
-// displayed.
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetHmonitor)
-// Reply message for GetHmonitor which contains the HMONITOR as an int64_t.
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetHmonitorReply,
-                     int64_t /* hmonitor */)
-
-// Requests the voucher file which is used to verify the integrity of the Flash
-// module. A PPB_FileRef resource will be created.
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetVoucherFile)
-// Reply message for GetVoucherFile which contains the CreateInfo for a
-// PPB_FileRef which points to the voucher file.
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetVoucherFileReply,
-                     ppapi::PPB_FileRef_CreateInfo /* file_info */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileSystem_InitIsolatedFileSystem,
+                     std::string /* fsid */,
+                     PP_IsolatedFileSystemType_Private /* type */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_FileSystem_InitIsolatedFileSystemReply)
+// Passed from renderer to browser. Creates an already-open file system with a
+// given |root_url| and |file_system_type|.
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileSystem_CreateFromRenderer,
+                     std::string /* root_url */,
+                     PP_FileSystemType /* file_system_type */)
+// Nested within a ResourceVar for file systems being passed from the renderer
+// to the plugin. Creates an already-open file system resource on the plugin,
+// linked to the existing resource host given in the ResourceVar.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FileSystem_CreateFromPendingHost,
+                     PP_FileSystemType /* file_system_type */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_FileSystem_ReserveQuota,
+                     int64_t /* amount */,
+                     ppapi::FileGrowthMap /* file_growths */)
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_FileSystem_ReserveQuotaReply,
+                     int64_t /* amount */,
+                     ppapi::FileSizeMap /* file_sizes */)
 
 // Gamepad.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Gamepad_Create)
@@ -1489,17 +1486,61 @@ IPC_MESSAGE_CONTROL3(PpapiHostMsg_Graphics2D_Scroll,
                      PP_Point /* amount */)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_ReplaceContents,
                      ppapi::HostResource /* image_data */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_Dev_SetScale,
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_SetScale,
                      float /* scale */)
 
 // Graphics2D, plugin -> host -> plugin
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Graphics2D_Flush)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_Flush,
+                     std::vector<ui::LatencyInfo> /* latency_info */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Graphics2D_FlushAck)
 
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_Graphics2D_ReadImageData,
                      PP_Resource /* image */,
                      PP_Point /* top_left */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Graphics2D_ReadImageDataAck)
+
+// IsolatedFileSystem
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_IsolatedFileSystem_Create)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_IsolatedFileSystem_BrowserOpen,
+                     PP_IsolatedFileSystemType_Private /* type */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_IsolatedFileSystem_BrowserOpenReply,
+                     std::string /* fsid */)
+
+// MediaStream -----------------------------------------------------------------
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_MediaStreamAudioTrack_CreateFromPendingHost,
+                     std::string /* track_id */)
+IPC_MESSAGE_CONTROL1(
+    PpapiHostMsg_MediaStreamAudioTrack_Configure,
+    ppapi::MediaStreamAudioTrackShared::Attributes /* attributes */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_MediaStreamAudioTrack_ConfigureReply)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_MediaStreamVideoTrack_CreateFromPendingHost,
+                     std::string /* track_id */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_MediaStreamVideoTrack_Create)
+IPC_MESSAGE_CONTROL1(
+    PpapiHostMsg_MediaStreamVideoTrack_Configure,
+    ppapi::MediaStreamVideoTrackShared::Attributes /* attributes */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_MediaStreamVideoTrack_ConfigureReply,
+                     std::string /* track_id */)
+
+// Message for init buffers. It also takes a shared memory handle which is put
+// in the outer ResourceReplyMessage.
+IPC_MESSAGE_CONTROL3(PpapiPluginMsg_MediaStreamTrack_InitBuffers,
+                     int32_t /* number_of_buffers */,
+                     int32_t /* buffer_size */,
+                     bool /* readonly */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_MediaStreamTrack_EnqueueBuffer,
+                     int32_t /* index */);
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_MediaStreamTrack_EnqueueBuffer,
+                     int32_t /* index */);
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_MediaStreamTrack_EnqueueBuffers,
+                     std::vector<int32_t> /* indices */);
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_MediaStreamTrack_Close)
+
+// NetworkMonitor.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_NetworkMonitor_Create)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_NetworkMonitor_NetworkList,
+                     ppapi::proxy::SerializedNetworkList /* network_list */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_NetworkMonitor_Forbidden)
 
 // NetworkProxy ----------------------------------------------------------------
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_NetworkProxy_Create)
@@ -1556,11 +1597,69 @@ IPC_MESSAGE_CONTROL2(PpapiPluginMsg_HostResolver_ResolveReply,
                      std::string /* canonical_name */,
                      std::vector<PP_NetAddress_Private> /* net_address_list */)
 
+// Platform Verification -------------------------------------------------------
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_PlatformVerification_Create)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PlatformVerification_ChallengePlatform,
+                     std::string /* service_id  */,
+                     std::vector<uint8_t> /* challenge */)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_PlatformVerification_ChallengePlatformReply,
+                     std::vector<uint8_t> /* signed_data */,
+                     std::vector<uint8_t> /* signed_data_signature */,
+                     std::string /* platform_key_certificate */)
+
 // Printing.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_Create)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_GetDefaultPrintSettings)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Printing_GetDefaultPrintSettingsReply,
                      PP_PrintSettings_Dev /* print_settings */)
+
+// TCP Socket ------------------------------------------------------------------
+// Creates a PPB_TCPSocket resource.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_Create,
+                     ppapi::TCPSocketVersion /* version */)
+
+// Creates a PPB_TCPSocket_Private resource.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_TCPSocket_CreatePrivate)
+
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_Bind,
+                     PP_NetAddress_Private /* net_addr */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_TCPSocket_BindReply,
+                     PP_NetAddress_Private /* local_addr */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_TCPSocket_Connect,
+                     std::string /* host */,
+                     uint16_t /* port */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_ConnectWithNetAddress,
+                     PP_NetAddress_Private /* net_addr */)
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_TCPSocket_ConnectReply,
+                     PP_NetAddress_Private /* local_addr */,
+                     PP_NetAddress_Private /* remote_addr */)
+IPC_MESSAGE_CONTROL4(PpapiHostMsg_TCPSocket_SSLHandshake,
+                     std::string /* server_name */,
+                     uint16_t /* server_port */,
+                     std::vector<std::vector<char> > /* trusted_certs */,
+                     std::vector<std::vector<char> > /* untrusted_certs */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_TCPSocket_SSLHandshakeReply,
+                     ppapi::PPB_X509Certificate_Fields /* certificate_fields */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_Read,
+                     int32_t /* bytes_to_read */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_TCPSocket_ReadReply,
+                     std::string /* data */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_Write,
+                     std::string /* data */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_TCPSocket_WriteReply)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPSocket_Listen,
+                     int32_t /* backlog */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_TCPSocket_ListenReply)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_TCPSocket_Accept)
+IPC_MESSAGE_CONTROL3(PpapiPluginMsg_TCPSocket_AcceptReply,
+                     int /* pending_host_id*/,
+                     PP_NetAddress_Private /* local_addr */,
+                     PP_NetAddress_Private /* remote_addr */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_TCPSocket_Close)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_TCPSocket_SetOption,
+                     PP_TCPSocket_Option /* name */,
+                     ppapi::SocketOptionData /* value */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_TCPSocket_SetOptionReply)
 
 // TCP Server Socket -----------------------------------------------------------
 // Creates a PPB_TCPServerSocket_Private resource.
@@ -1571,10 +1670,9 @@ IPC_MESSAGE_CONTROL2(PpapiHostMsg_TCPServerSocket_Listen,
                      int32_t /* backlog */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_TCPServerSocket_ListenReply,
                      PP_NetAddress_Private /* local_addr */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_TCPServerSocket_Accept,
-                     uint32 /* plugin_dispatcher_id */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_TCPServerSocket_Accept)
 IPC_MESSAGE_CONTROL3(PpapiPluginMsg_TCPServerSocket_AcceptReply,
-                     uint32 /* accepted_socket_id */,
+                     int /* pending_resource_id */,
                      PP_NetAddress_Private /* local_addr */,
                      PP_NetAddress_Private /* remote_addr */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_TCPServerSocket_StopListening)
@@ -1777,6 +1875,59 @@ IPC_MESSAGE_CONTROL4(PpapiPluginMsg_WebSocket_ClosedReply,
                      uint16_t /* code */,
                      std::string /* reason */)
 
+// OutputProtection -----------------------------------------------------------
+
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_OutputProtection_Create)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_OutputProtection_EnableProtection,
+                     uint32_t /* desired_method_mask */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_OutputProtection_EnableProtectionReply)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_OutputProtection_QueryStatus)
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_OutputProtection_QueryStatusReply,
+                     uint32_t /* link_mask */,
+                     uint32_t /* protection_mask */)
+
+// VideoDecoder ------------------------------------------------------
+
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoDecoder_Create)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_VideoDecoder_Initialize,
+                     ppapi::HostResource /* graphics_context */,
+                     PP_VideoProfile /* profile */,
+                     bool /* allow_software_fallback */)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_VideoDecoder_InitializeReply)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_VideoDecoder_GetShm,
+                     uint32_t /* shm_id */,
+                     uint32_t /* shm_size */)
+// On success, a shm handle is passed in the ReplyParams struct.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoDecoder_GetShmReply,
+                     uint32_t /* shm_size */)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_VideoDecoder_Decode,
+                     uint32_t /* shm_id */,
+                     uint32_t /* size */,
+                     int32_t /* decode_id */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoDecoder_DecodeReply,
+                     uint32_t /* shm_id */)
+IPC_MESSAGE_CONTROL4(PpapiPluginMsg_VideoDecoder_RequestTextures,
+                     uint32_t /* num_textures */,
+                     PP_Size /* size */,
+                     uint32_t /* texture_target */,
+                     std::vector<gpu::Mailbox> /* mailboxes*/)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_VideoDecoder_AssignTextures,
+                     PP_Size /* size */,
+                     std::vector<uint32_t> /* texture_ids */)
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_VideoDecoder_PictureReady,
+                     int32_t /* decode_id */,
+                     uint32_t /* texture_id */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_VideoDecoder_RecyclePicture,
+                     uint32_t /* texture_id */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoDecoder_DismissPicture,
+                     uint32_t /* texture_id */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoDecoder_Flush)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_VideoDecoder_FlushReply)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoDecoder_Reset)
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_VideoDecoder_ResetReply)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoDecoder_NotifyError,
+                     int32_t /* error */)
+
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // Audio input.
@@ -1804,30 +1955,6 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_BrowserFontSingleton_GetFontFamilies)
 // by a null character.
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_BrowserFontSingleton_GetFontFamiliesReply,
                      std::string /* families */)
-
-// FileRef.
-// Requests that the browser reply with file system and path information about
-// the resource indicated in |params| which exists in the given
-// |child_process_id|. |routing_id| is sent so that the reply can be routed
-// properly in the renderer.
-// Only sent from the renderer to the browser.
-IPC_MESSAGE_CONTROL4(PpapiHostMsg_FileRef_GetInfoForRenderer,
-                     int /* routing_id */,
-                     int /* child_process_id */,
-                     int32_t /* sequence */,
-                     std::vector<PP_Resource> /* resources */)
-
-// Reply to PpapiHostMsg_FileRef_GetInfoForRenderer with a sequence number for
-// invoking the right callback, |fs_type| which indicates the file system, and
-// path information in either |file_system_url_spec| (for internal file systems)
-// or |external_path| (for external file systems).
-// Only sent from the browser to the renderer.
-IPC_MESSAGE_ROUTED5(PpapiHostMsg_FileRef_GetInfoForRendererReply,
-                    int32_t /* sequence */,
-                    std::vector<PP_Resource> /* resources */,
-                    std::vector<PP_FileSystemType> /* fs_type */,
-                    std::vector<std::string> /* file_system_url_spec */,
-                    std::vector<base::FilePath> /* external_path */)
 
 // Flash -----------------------------------------------------------------------
 
@@ -1917,6 +2044,42 @@ IPC_MESSAGE_CONTROL3(PpapiHostMsg_FlashClipboard_WriteData,
                      uint32_t /* clipboard_type */,
                      std::vector<uint32_t> /* formats */,
                      std::vector<std::string> /* data */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashClipboard_GetSequenceNumber,
+                     uint32_t /* clipboard_type */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashClipboard_GetSequenceNumberReply,
+                     uint64_t /* sequence_number */)
+
+// Flash DRM.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_Create)
+
+// Requests the device ID.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetDeviceID)
+// Reply for GetDeviceID which includes the device ID as a string.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetDeviceIDReply,
+                     std::string /* id */)
+
+// Requests the HMONITOR corresponding to the monitor on which the instance is
+// displayed.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetHmonitor)
+// Reply message for GetHmonitor which contains the HMONITOR as an int64_t.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetHmonitorReply,
+                     int64_t /* hmonitor */)
+
+// Requests the voucher file which is used to verify the integrity of the Flash
+// module. A PPB_FileRef resource will be created.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_GetVoucherFile)
+// Reply message for GetVoucherFile which contains the CreateInfo for a
+// PPB_FileRef which points to the voucher file.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_GetVoucherFileReply,
+                     ppapi::FileRefCreateInfo /* file_info */)
+
+// Requests a value indicating whether the monitor on which the instance is
+// displayed is external.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDRM_MonitorIsExternal)
+// Reply message for MonitorIsExternal which contains the value indicating if
+// the monitor is external.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDRM_MonitorIsExternalReply,
+                     PP_Bool /* is_external */)
 
 // Flash file.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashFile_Create)
@@ -1934,7 +2097,7 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFile_CreateDir,
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFile_QueryFile,
                      ppapi::PepperFilePath /* path */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashFile_QueryFileReply,
-                     base::PlatformFileInfo /* file_info */)
+                     base::File::Info /* file_info */)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFile_GetDirContents,
                      ppapi::PepperFilePath /* path */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashFile_GetDirContentsReply,
@@ -1955,7 +2118,7 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashFullscreen_Create)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFullscreen_SetFullscreen,
                      bool /* fullscreen */)
 
-// FlashMenu ------------------------------------------------------------------
+// FlashMenu.
 
 // Creates the flash menu with the given data.
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashMenu_Create,
@@ -1969,6 +2132,16 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashMenu_Show,
 // will be the menu item ID chosen by the user.
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashMenu_ShowReply,
                      int32_t /* selected_id */)
+
+// PPB_Flash_MessageLoop.
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFlashMessageLoop_Create,
+                           PP_Instance /* instance */,
+                           ppapi::HostResource /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFlashMessageLoop_Run,
+                           ppapi::HostResource /* flash_message_loop */,
+                           int32_t /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_0(PpapiHostMsg_PPBFlashMessageLoop_Quit,
+                           ppapi::HostResource /* flash_message_loop */)
 
 // PDF ------------------------------------------------------------------------
 
@@ -2017,6 +2190,14 @@ IPC_MESSAGE_CONTROL2(PpapiHostMsg_PDF_GetResourceImage,
 IPC_MESSAGE_CONTROL2(PpapiPluginMsg_PDF_GetResourceImageReply,
                      ppapi::HostResource /* resource_id */,
                      PP_ImageDataDesc /* image_data_desc */)
+
+// Called by the plugin when its selection changes.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PDF_SetSelectedText,
+                     base::string16 /* selected_text */)
+
+// Called by the plugin to set the link under the cursor.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PDF_SetLinkUnderCursor,
+                     std::string /* url */)
 
 // VideoCapture_Dev, plugin -> host
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoCapture_Create)

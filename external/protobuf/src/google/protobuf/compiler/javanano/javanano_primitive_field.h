@@ -46,16 +46,20 @@ namespace javanano {
 
 class PrimitiveFieldGenerator : public FieldGenerator {
  public:
-  explicit PrimitiveFieldGenerator(const FieldDescriptor* descriptor, const Params &params);
+  explicit PrimitiveFieldGenerator(
+      const FieldDescriptor* descriptor, const Params &params);
   ~PrimitiveFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------
-  void GenerateMembers(io::Printer* printer) const;
-  void GenerateParsingCode(io::Printer* printer) const;
+  bool SavedDefaultNeeded() const;
+  void GenerateInitSavedDefaultCode(io::Printer* printer) const;
+  void GenerateMembers(io::Printer* printer, bool lazy_init) const;
+  void GenerateClearCode(io::Printer* printer) const;
+  void GenerateMergingCode(io::Printer* printer) const;
   void GenerateSerializationCode(io::Printer* printer) const;
   void GenerateSerializedSizeCode(io::Printer* printer) const;
-
-  string GetBoxedType() const;
+  void GenerateEqualsCode(io::Printer* printer) const;
+  void GenerateHashCodeCode(io::Printer* printer) const;
 
  private:
   void GenerateSerializationConditional(io::Printer* printer) const;
@@ -66,18 +70,44 @@ class PrimitiveFieldGenerator : public FieldGenerator {
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(PrimitiveFieldGenerator);
 };
 
+class AccessorPrimitiveFieldGenerator : public FieldGenerator {
+ public:
+  explicit AccessorPrimitiveFieldGenerator(const FieldDescriptor* descriptor,
+      const Params &params, int has_bit_index);
+  ~AccessorPrimitiveFieldGenerator();
+
+  // implements FieldGenerator ---------------------------------------
+  bool SavedDefaultNeeded() const;
+  void GenerateInitSavedDefaultCode(io::Printer* printer) const;
+  void GenerateMembers(io::Printer* printer, bool lazy_init) const;
+  void GenerateClearCode(io::Printer* printer) const;
+  void GenerateMergingCode(io::Printer* printer) const;
+  void GenerateSerializationCode(io::Printer* printer) const;
+  void GenerateSerializedSizeCode(io::Printer* printer) const;
+  void GenerateEqualsCode(io::Printer* printer) const;
+  void GenerateHashCodeCode(io::Printer* printer) const;
+
+ private:
+  const FieldDescriptor* descriptor_;
+  map<string, string> variables_;
+
+  GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(AccessorPrimitiveFieldGenerator);
+};
+
 class RepeatedPrimitiveFieldGenerator : public FieldGenerator {
  public:
   explicit RepeatedPrimitiveFieldGenerator(const FieldDescriptor* descriptor, const Params& params);
   ~RepeatedPrimitiveFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------
-  void GenerateMembers(io::Printer* printer) const;
-  void GenerateParsingCode(io::Printer* printer) const;
+  void GenerateMembers(io::Printer* printer, bool lazy_init) const;
+  void GenerateClearCode(io::Printer* printer) const;
+  void GenerateMergingCode(io::Printer* printer) const;
+  void GenerateMergingCodeFromPacked(io::Printer* printer) const;
   void GenerateSerializationCode(io::Printer* printer) const;
   void GenerateSerializedSizeCode(io::Printer* printer) const;
-
-  string GetBoxedType() const;
+  void GenerateEqualsCode(io::Printer* printer) const;
+  void GenerateHashCodeCode(io::Printer* printer) const;
 
  private:
   void GenerateRepeatedDataSizeCode(io::Printer* printer) const;

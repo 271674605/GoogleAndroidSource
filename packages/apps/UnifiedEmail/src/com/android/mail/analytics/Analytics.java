@@ -39,6 +39,7 @@ public final class Analytics {
 
     public static final int CD_INDEX_SENDER_IMAGES_ENABLED = 3;
 
+    /** @deprecated Attachment Previews entirely removed from Conversation List */
     public static final int CD_INDEX_ATTACHMENT_PREVIEWS_ENABLED = 4;
 
     public static final int CD_INDEX_INBOX_TYPE = 5;
@@ -46,6 +47,8 @@ public final class Analytics {
     public static final int CD_INDEX_INBOX_SECTIONS_ENABLED = 6;
 
     public static final int CD_INDEX_REPLY_ALL_SETTING = 7;
+
+    public static final int CD_INDEX_AUTO_ADVANCE = 8;
 
     private static Tracker sInstance;
 
@@ -81,6 +84,9 @@ public final class Analytics {
 
         @Override
         public void sendEvent(String category, String action, String label, long value) {}
+
+        @Override
+        public void sendTiming(String category, long millis, String name, String label) {}
 
         @Override
         public void sendMenuItemEvent(String category, int itemResId, String label, long value) {}

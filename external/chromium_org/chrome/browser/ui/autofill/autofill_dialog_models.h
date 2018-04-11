@@ -37,26 +37,28 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   virtual ~SuggestionsMenuModel();
 
   // Adds an item and its identifying key to the model. Keys needn't be unique.
-  void AddKeyedItem(const std::string& key, const string16& display_label);
+  void AddKeyedItem(const std::string& key,
+                    const base::string16& display_label);
 
   // As above, but also accepts an image which will be displayed alongside the
   // text.
   void AddKeyedItemWithIcon(const std::string& key,
-                            const string16& display_label,
+                            const base::string16& display_label,
                             const gfx::Image& icon);
 
-  // Adds a label with a sublabel and its identifying key to the model.
+  // Adds a label with a minor text and its identifying key to the model.
   // Keys needn't be unique.
-  void AddKeyedItemWithSublabel(const std::string& key,
-                                const string16& display_label,
-                                const string16& display_sublabel);
+  void AddKeyedItemWithMinorText(const std::string& key,
+                                const base::string16& display_label,
+                                const base::string16& display_minor_text);
 
   // As above, but also accepts an image which will be displayed alongside the
   // text.
-  void AddKeyedItemWithSublabelAndIcon(const std::string& key,
-                                       const string16& display_label,
-                                       const string16& display_sublabel,
-                                       const gfx::Image& icon);
+  void AddKeyedItemWithMinorTextAndIcon(
+      const std::string& key,
+      const base::string16& display_label,
+      const base::string16& display_minor_text,
+      const gfx::Image& icon);
 
   // Resets the model to empty.
   void Reset();
@@ -71,12 +73,6 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   // Sets which item is checked.
   void SetCheckedItem(const std::string& item_key);
   void SetCheckedIndex(size_t index);
-
-  // Sets the item to be checked to the |n|th item that has key |item_key|.
-  // If there are fewer than |n| items that share |item_key|, the last one
-  // becomes checked. If there is no item with |item_key|, nothing happens.
-  // |n| is 1-indexed.
-  void SetCheckedItemNthWithKey(const std::string& item_key, size_t n);
 
   int checked_item() const { return checked_item_; }
 
@@ -119,11 +115,11 @@ class MonthComboboxModel : public ui::ComboboxModel {
   MonthComboboxModel();
   virtual ~MonthComboboxModel();
 
-  static string16 FormatMonth(int index);
+  static base::string16 FormatMonth(int index);
 
   // ui::Combobox implementation:
   virtual int GetItemCount() const OVERRIDE;
-  virtual string16 GetItemAt(int index) OVERRIDE;
+  virtual base::string16 GetItemAt(int index) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MonthComboboxModel);
@@ -137,7 +133,7 @@ class YearComboboxModel : public ui::ComboboxModel {
 
   // ui::Combobox implementation:
   virtual int GetItemCount() const OVERRIDE;
-  virtual string16 GetItemAt(int index) OVERRIDE;
+  virtual base::string16 GetItemAt(int index) OVERRIDE;
 
  private:
   // The current year (e.g., 2012).
@@ -146,6 +142,6 @@ class YearComboboxModel : public ui::ComboboxModel {
   DISALLOW_COPY_AND_ASSIGN(YearComboboxModel);
 };
 
-}  // autofill
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_MODELS_H_

@@ -17,6 +17,7 @@
 
 #include "asan_internal.h"
 #include "asan_interceptors.h"
+#include "sanitizer_common/sanitizer_allocator.h"
 #include "sanitizer_common/sanitizer_list.h"
 
 namespace __asan {
@@ -31,16 +32,19 @@ static const uptr kNumberOfSizeClasses = 255;
 struct AsanChunk;
 
 void InitializeAllocator();
+void ReInitializeAllocator();
 
 class AsanChunkView {
  public:
   explicit AsanChunkView(AsanChunk *chunk) : chunk_(chunk) {}
-  bool IsValid() { return chunk_ != 0; }
-  uptr Beg();       // first byte of user memory.
-  uptr End();       // last byte of user memory.
-  uptr UsedSize();  // size requested by the user.
+  bool IsValid();   // Checks if AsanChunkView points to a valid allocated
+                    // or quarantined chunk.
+  uptr Beg();       // First byte of user memory.
+  uptr End();       // Last byte of user memory.
+  uptr UsedSize();  // Size requested by the user.
   uptr AllocTid();
   uptr FreeTid();
+  bool Eq(const AsanChunkView &c) const { return chunk_ == c.chunk_; }
   void GetAllocStack(StackTrace *stack);
   void GetFreeStack(StackTrace *stack);
   bool AddrIsInside(uptr addr, uptr access_size, sptr *offset) {
@@ -89,17 +93,50 @@ class AsanChunkFifoList: public IntrusiveList<AsanChunk> {
   uptr size_;
 };
 
-struct AsanThreadLocalMallocStorage {
-  explicit AsanThreadLocalMallocStorage(LinkerInitialized x)
-      { }
-  AsanThreadLocalMallocStorage() {
-    CHECK(REAL(memset));
-    REAL(memset)(this, 0, sizeof(AsanThreadLocalMallocStorage));
-  }
+struct AsanMapUnmapCallback {
+  void OnMap(uptr p, uptr size) const;
+  void OnUnmap(uptr p, uptr size) const;
+};
 
+#if SANITIZER_CAN_USE_ALLOCATOR64
+# if defined(__powerpc64__)
+const uptr kAllocatorSpace =  0xa0000000000ULL;
+const uptr kAllocatorSize  =  0x20000000000ULL;  // 2T.
+# else
+const uptr kAllocatorSpace = 0x600000000000ULL;
+const uptr kAllocatorSize  =  0x40000000000ULL;  // 4T.
+# endif
+typedef DefaultSizeClassMap SizeClassMap;
+typedef SizeClassAllocator64<kAllocatorSpace, kAllocatorSize, 0 /*metadata*/,
+    SizeClassMap, AsanMapUnmapCallback> PrimaryAllocator;
+#else  // Fallback to SizeClassAllocator32.
+static const uptr kRegionSizeLog = 20;
+static const uptr kNumRegions = SANITIZER_MMAP_RANGE_SIZE >> kRegionSizeLog;
+# if SANITIZER_WORDSIZE == 32
+typedef FlatByteMap<kNumRegions> ByteMap;
+# elif SANITIZER_WORDSIZE == 64
+typedef TwoLevelByteMap<(kNumRegions >> 12), 1 << 12> ByteMap;
+# endif
+typedef CompactSizeClassMap SizeClassMap;
+typedef SizeClassAllocator32<0, SANITIZER_MMAP_RANGE_SIZE, 16,
+  SizeClassMap, kRegionSizeLog,
+  ByteMap,
+  AsanMapUnmapCallback> PrimaryAllocator;
+#endif  // SANITIZER_CAN_USE_ALLOCATOR64
+
+typedef SizeClassAllocatorLocalCache<PrimaryAllocator> AllocatorCache;
+typedef LargeMmapAllocator<AsanMapUnmapCallback> SecondaryAllocator;
+typedef CombinedAllocator<PrimaryAllocator, AllocatorCache,
+    SecondaryAllocator> Allocator;
+
+
+struct AsanThreadLocalMallocStorage {
   uptr quarantine_cache[16];
-  uptr allocator2_cache[96 * (512 * 8 + 16)];  // Opaque.
+  AllocatorCache allocator2_cache;
   void CommitBack();
+ private:
+  // These objects are allocated via mmap() and are zero-initialized.
+  AsanThreadLocalMallocStorage() {}
 };
 
 void *asan_memalign(uptr alignment, uptr size, StackTrace *stack,
@@ -114,7 +151,7 @@ void *asan_pvalloc(uptr size, StackTrace *stack);
 
 int asan_posix_memalign(void **memptr, uptr alignment, uptr size,
                           StackTrace *stack);
-uptr asan_malloc_usable_size(void *ptr, StackTrace *stack);
+uptr asan_malloc_usable_size(void *ptr, uptr pc, uptr bp);
 
 uptr asan_mz_size(const void *ptr);
 void asan_mz_force_lock();

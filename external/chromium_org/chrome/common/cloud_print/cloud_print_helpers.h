@@ -27,7 +27,7 @@ typedef std::map<std::string, std::string> PrinterTags;
 // URL's path does not end with a slash. It is assumed that |path| does not
 // begin with a '/'.
 // NOTE: Since we ALWAYS want to append here, we simply append the path string
-// instead of calling url_utils::ResolveRelative. The input |url| may or may not
+// instead of calling url::ResolveRelative. The input |url| may or may not
 // contain a '/' at the end.
 std::string AppendPathToUrl(const GURL& url, const std::string& path);
 
@@ -44,11 +44,15 @@ GURL GetUrlForPrinterDelete(const GURL& cloud_print_server_url,
 GURL GetUrlForJobFetch(const GURL& cloud_print_server_url,
                        const std::string& printer_id,
                        const std::string& reason);
+GURL GetUrlForJobCjt(const GURL& cloud_print_server_url,
+                     const std::string& job_id,
+                     const std::string& reason);
 GURL GetUrlForJobDelete(const GURL& cloud_print_server_url,
                         const std::string& job_id);
 GURL GetUrlForJobStatusUpdate(const GURL& cloud_print_server_url,
                               const std::string& job_id,
-                              const std::string& status_string);
+                              const std::string& status_string,
+                              int connector_code);
 GURL GetUrlForUserMessage(const GURL& cloud_print_server_url,
                           const std::string& message_id);
 GURL GetUrlForGetAuthCode(const GURL& cloud_print_server_url,

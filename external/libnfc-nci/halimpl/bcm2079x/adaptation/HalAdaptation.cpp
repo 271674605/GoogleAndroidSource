@@ -32,14 +32,18 @@
 #include "nfc_hal_post_reset.h"
 #include <errno.h>
 #include <pthread.h>
+#include <cutils/properties.h>
 #include "buildcfg.h"
+#include "android_logmsg.h"
 extern void delete_hal_non_volatile_store (bool forceDelete);
 extern void verify_hal_non_volatile_store ();
+extern void resetConfig ();
 extern "C"
 {
 #include "userial.h"
 }
 
+extern void configureCrystalFrequency ();
 
 ///////////////////////////////////////
 // private declaration, definition
@@ -56,9 +60,21 @@ UINT32 ScrProtocolTraceFlag = SCR_PROTO_TRACE_ALL; //0x017F00;
 static void BroadcomHalCallback (UINT8 event, tHAL_NFC_STATUS status);
 static void BroadcomHalDataCallback (UINT16 data_len, UINT8* p_data);
 
+static bool isColdBoot = true;
+
 extern tNFC_HAL_CFG *p_nfc_hal_cfg;
 extern const UINT8  nfca_version_string [];
 extern const UINT8  nfa_version_string [];
+
+tNFC_HAL_DM_PRE_SET_MEM nfc_hal_pre_set_mem_20795a1 [] =
+{
+    {0x0016403c,    0x00000008},
+    {0x0016403c,    0x00000000},
+    {0x0014008c,    0x00000001},
+    {0,         0}
+};
+
+extern tNFC_HAL_DM_PRE_SET_MEM *p_nfc_hal_dm_pre_set_mem;
 
 ///////////////////////////////////////
 
@@ -71,10 +87,21 @@ int HaiInitializeLibrary (const bcm2079x_dev_t* device)
     unsigned long freq = 0;
     unsigned long num = 0;
     char temp[120];
+    int8_t prop_value;
     UINT8 logLevel = 0;
 
     logLevel = InitializeGlobalAppLogLevel ();
 
+    if ( GetNumValue ( NAME_GLOBAL_RESET, &num, sizeof ( num ) ) )
+    {
+        if (num == 1)
+        {
+            // Send commands to disable boc
+            p_nfc_hal_dm_pre_set_mem = nfc_hal_pre_set_mem_20795a1;
+        }
+    }
+
+    configureCrystalFrequency ();
     verify_hal_non_volatile_store ();
     if ( GetNumValue ( NAME_PRESERVE_STORAGE, (char*)&num, sizeof ( num ) ) &&
             (num == 1) )
@@ -82,6 +109,15 @@ int HaiInitializeLibrary (const bcm2079x_dev_t* device)
     else
     {
         delete_hal_non_volatile_store (false);
+    }
+
+    if ( GetNumValue ( NAME_USE_RAW_NCI_TRACE, &num, sizeof ( num ) ) )
+    {
+        if (num == 1)
+        {
+            // display protocol traces in raw format
+            ProtoDispAdapterUseRawOutput (TRUE);
+        }
     }
 
     // Initialize protocol logging level
@@ -170,6 +206,15 @@ int HaiInitializeLibrary (const bcm2079x_dev_t* device)
         p_nfc_hal_cfg->nfc_hal_hci_uicc_support = 0;
     }
 
+    prop_value = property_get_bool("nfc.bcm2079x.isColdboot", 0);
+    if (prop_value) {
+        isColdBoot = true;
+        property_set("nfc.bcm2079x.isColdboot", "0");
+    }
+    // Set 'first boot' flag based on static variable that will get set to false
+    // after the stack has first initialized the EE.
+    p_nfc_hal_cfg->nfc_hal_first_boot = isColdBoot ? TRUE : FALSE;
+
     HAL_NfcInitialize ();
     HAL_NfcSetTraceLevel (logLevel); // Initialize HAL's logging level
 
@@ -188,6 +233,7 @@ int HaiTerminateLibrary ()
     gAndroidHalCallback = NULL;
     gAndroidHalDataCallback = NULL;
     GKI_shutdown ();
+    resetConfig ();
     retval = 0;
     ALOGD ("%s: exit %d", __FUNCTION__, retval);
     return retval;
@@ -316,6 +362,9 @@ int HaiPreDiscover (const bcm2079x_dev_t* device)
     ALOGD ("%s: enter", __FUNCTION__);
     int retval = EACCES;
 
+    // This function is a clear indication that the stack is initializing
+    // EE.  So we can reset the cold-boot flag here.
+    isColdBoot = false;
     retval = HAL_NfcPreDiscover () ? 1 : 0;
     ALOGD ("%s: exit %d", __FUNCTION__, retval);
     return retval;
@@ -351,21 +400,17 @@ int HaiGetMaxNfcee (const bcm2079x_dev_t* device, uint8_t* maxNfcee)
     ALOGD ("%s: enter", __FUNCTION__);
     int retval = EACCES;
 
+    // This function is a clear indication that the stack is initializing
+    // EE.  So we can reset the cold-boot flag here.
+    isColdBoot = false;
+
     if ( maxNfcee )
     {
-        unsigned long num;
-
-        // At this point we can see if there is a chip-specific value for max ee.
-        if ( GetNumValue ( NAME_NFA_MAX_EE_SUPPORTED, &num, sizeof ( num ) ) )
-        {
-            *maxNfcee = num;
-        }
-        else
-            *maxNfcee = HAL_NfcGetMaxNfcee ();
-
+        *maxNfcee = HAL_NfcGetMaxNfcee ();
         ALOGD("%s: max_ee from HAL to use %d", __FUNCTION__, *maxNfcee);
         retval = 0;
     }
     ALOGD ("%s: exit %d", __FUNCTION__, retval);
     return retval;
 }
+

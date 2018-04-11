@@ -8,12 +8,13 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "ui/base/x/x11_util.h"
+#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/vsync_provider.h"
+#include "ui/gfx/x/x11_types.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
-#include "ui/gl/vsync_provider.h"
 
 namespace gfx {
 
@@ -48,7 +49,8 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
 };
 
 // A surface used to render to a view.
-class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
+class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX,
+                                         public ui::PlatformEventDispatcher {
  public:
   explicit NativeViewGLSurfaceGLX(gfx::AcceleratedWidget window);
 
@@ -60,18 +62,28 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
   virtual bool SwapBuffers() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
   virtual void* GetHandle() OVERRIDE;
-  virtual std::string GetExtensions() OVERRIDE;
+  virtual bool SupportsPostSubBuffer() OVERRIDE;
   virtual void* GetConfig() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual VSyncProvider* GetVSyncProvider() OVERRIDE;
 
  protected:
-  NativeViewGLSurfaceGLX();
   virtual ~NativeViewGLSurfaceGLX();
 
+ private:
+  // The handle for the drawable to make current or swap.
+  gfx::AcceleratedWidget GetDrawableHandle() const;
+
+  // PlatformEventDispatcher implementation
+  virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+  virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+
+  // Window passed in at creation. Always valid.
+  gfx::AcceleratedWidget parent_window_;
+
+  // Child window, used to control resizes so that they're in-order with GL.
   gfx::AcceleratedWidget window_;
 
- private:
   void* config_;
   gfx::Size size_;
 

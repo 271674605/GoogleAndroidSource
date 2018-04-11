@@ -9,9 +9,9 @@
 #ifndef SkTileGrid_DEFINED
 #define SkTileGrid_DEFINED
 
+#include "SkBBHFactory.h"
 #include "SkBBoxHierarchy.h"
 #include "SkPictureStateTree.h"
-#include "SkTileGridPicture.h" // for TileGridInfo
 
 /**
  * Subclass of SkBBoxHierarchy that stores elements in buckets that correspond
@@ -25,9 +25,17 @@
  */
 class SkTileGrid : public SkBBoxHierarchy {
 public:
-    typedef void* (*SkTileGridNextDatumFunctionPtr)(SkTDArray<void*>** tileData, SkTDArray<int>& tileIndices);
+    enum {
+        // Number of tiles for which data is allocated on the stack in
+        // SkTileGrid::search. If malloc becomes a bottleneck, we may consider
+        // increasing this number. Typical large web page, say 2k x 16k, would
+        // require 512 tiles of size 256 x 256 pixels.
+        kStackAllocationTileCount = 1024
+    };
 
-    SkTileGrid(int xTileCount, int yTileCount, const SkTileGridPicture::TileGridInfo& info,
+    typedef void* (*SkTileGridNextDatumFunctionPtr)(SkTDArray<void*>** tileData, SkAutoSTArray<kStackAllocationTileCount, int>& tileIndices);
+
+    SkTileGrid(int xTileCount, int yTileCount, const SkTileGridFactory::TileGridInfo& info,
         SkTileGridNextDatumFunctionPtr nextDatumFunction);
 
     virtual ~SkTileGrid();
@@ -55,23 +63,27 @@ public:
      */
     virtual int getCount() const SK_OVERRIDE;
 
+    virtual int getDepth() const SK_OVERRIDE { return -1; }
+
     virtual void rewindInserts() SK_OVERRIDE;
 
     // Used by search() and in SkTileGridHelper implementations
     enum {
         kTileFinished = -1,
     };
+
+    int tileCount(int x, int y);  // For testing only.
+
 private:
     SkTDArray<void*>& tile(int x, int y);
 
     int fXTileCount, fYTileCount, fTileCount;
-    SkTileGridPicture::TileGridInfo fInfo;
+    SkTileGridFactory::TileGridInfo fInfo;
     SkTDArray<void*>* fTileData;
     int fInsertionCount;
     SkIRect fGridBounds;
     SkTileGridNextDatumFunctionPtr fNextDatumFunction;
 
-    friend class TileGridTest;
     typedef SkBBoxHierarchy INHERITED;
 };
 
@@ -91,7 +103,7 @@ private:
  *     such that 'a < b' is true if 'a' was inserted into the tile grid before 'b'.
  */
 template <typename T>
-void* SkTileGridNextDatum(SkTDArray<void*>** tileData, SkTDArray<int>& tileIndices) {
+void* SkTileGridNextDatum(SkTDArray<void*>** tileData, SkAutoSTArray<SkTileGrid::kStackAllocationTileCount, int>& tileIndices) {
     T* minVal = NULL;
     int tileCount = tileIndices.count();
     int minIndex = tileCount;

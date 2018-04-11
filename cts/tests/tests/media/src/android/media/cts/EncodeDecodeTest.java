@@ -51,7 +51,8 @@ public class EncodeDecodeTest extends AndroidTestCase {
     private static final String DEBUG_FILE_NAME_BASE = "/sdcard/test.";
 
     // parameters for the encoder
-    private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
+    private static final String MIME_TYPE_AVC = "video/avc";    // H.264 Advanced Video Coding
+    private static final String MIME_TYPE_VP8 = "video/x-vnd.on2.vp8";
     private static final int FRAME_RATE = 15;               // 15fps
     private static final int IFRAME_INTERVAL = 10;          // 10 seconds between I-frames
 
@@ -61,22 +62,32 @@ public class EncodeDecodeTest extends AndroidTestCase {
     private static final int TEST_Y = 120;                  // YUV values for colored rect
     private static final int TEST_U = 160;
     private static final int TEST_V = 200;
-    private static final int TEST_R0 = 0;                   // RGB equivalent of {0,0,0}
+    private static final int TEST_R0 = 0;                   // RGB equivalent of {0,0,0} (BT.601)
     private static final int TEST_G0 = 136;
     private static final int TEST_B0 = 0;
-    private static final int TEST_R1 = 236;                 // RGB equivalent of {120,160,200}
+    private static final int TEST_R1 = 236;                 // RGB equivalent of {120,160,200} (BT.601)
     private static final int TEST_G1 = 50;
     private static final int TEST_B1 = 186;
+    private static final int TEST_R0_BT709 = 0;             // RGB equivalent of {0,0,0} (BT.709)
+    private static final int TEST_G0_BT709 = 77;
+    private static final int TEST_B0_BT709 = 0;
+    private static final int TEST_R1_BT709 = 250;           // RGB equivalent of {120,160,200} (BT.709)
+    private static final int TEST_G1_BT709 = 76;
+    private static final int TEST_B1_BT709 = 189;
 
     // size of a frame, in pixels
     private int mWidth = -1;
     private int mHeight = -1;
     // bit rate, in bits per second
     private int mBitRate = -1;
+    private String mMimeType = MIME_TYPE_AVC;
 
     // largest color component delta seen (i.e. actual vs. expected)
     private int mLargestColorDelta;
 
+    // validate YUV->RGB decoded frames against BT.601 and/or BT.709
+    private boolean mAllowBT601 = true;
+    private boolean mAllowBT709 = false;
 
     /**
      * Tests streaming of AVC video through the encoder and decoder.  Data is encoded from
@@ -84,15 +95,33 @@ public class EncodeDecodeTest extends AndroidTestCase {
      * validity.
      */
     public void testEncodeDecodeVideoFromBufferToBufferQCIF() throws Exception {
-        setParameters(176, 144, 1000000);
+        setParameters(176, 144, 1000000, MIME_TYPE_AVC, true, false);
         encodeDecodeVideoFromBuffer(false);
     }
     public void testEncodeDecodeVideoFromBufferToBufferQVGA() throws Exception {
-        setParameters(320, 240, 2000000);
+        setParameters(320, 240, 2000000, MIME_TYPE_AVC, true, false);
         encodeDecodeVideoFromBuffer(false);
     }
     public void testEncodeDecodeVideoFromBufferToBuffer720p() throws Exception {
-        setParameters(1280, 720, 6000000);
+        setParameters(1280, 720, 6000000, MIME_TYPE_AVC, true, false);
+        encodeDecodeVideoFromBuffer(false);
+    }
+
+    /**
+     * Tests streaming of VP8 video through the encoder and decoder.  Data is encoded from
+     * a series of byte[] buffers and decoded into ByteBuffers.  The output is checked for
+     * validity.
+     */
+    public void testVP8EncodeDecodeVideoFromBufferToBufferQCIF() throws Exception {
+        setParameters(176, 144, 1000000, MIME_TYPE_VP8, true, false);
+        encodeDecodeVideoFromBuffer(false);
+    }
+    public void testVP8EncodeDecodeVideoFromBufferToBufferQVGA() throws Exception {
+        setParameters(320, 240, 2000000, MIME_TYPE_VP8, true, false);
+        encodeDecodeVideoFromBuffer(false);
+    }
+    public void testVP8EncodeDecodeVideoFromBufferToBuffer720p() throws Exception {
+        setParameters(1280, 720, 6000000, MIME_TYPE_VP8, true, false);
         encodeDecodeVideoFromBuffer(false);
     }
 
@@ -109,15 +138,33 @@ public class EncodeDecodeTest extends AndroidTestCase {
      * the test.
      */
     public void testEncodeDecodeVideoFromBufferToSurfaceQCIF() throws Throwable {
-        setParameters(176, 144, 1000000);
+        setParameters(176, 144, 1000000, MIME_TYPE_AVC, true, false);
         BufferToSurfaceWrapper.runTest(this);
     }
     public void testEncodeDecodeVideoFromBufferToSurfaceQVGA() throws Throwable {
-        setParameters(320, 240, 2000000);
+        setParameters(320, 240, 2000000, MIME_TYPE_AVC, true, false);
         BufferToSurfaceWrapper.runTest(this);
     }
     public void testEncodeDecodeVideoFromBufferToSurface720p() throws Throwable {
-        setParameters(1280, 720, 6000000);
+        setParameters(1280, 720, 6000000, MIME_TYPE_AVC, true, true);
+        BufferToSurfaceWrapper.runTest(this);
+    }
+
+    /**
+     * Tests streaming of VP8 video through the encoder and decoder.  Data is encoded from
+     * a series of byte[] buffers and decoded into Surfaces.  The output is checked for
+     * validity.
+     */
+    public void testVP8EncodeDecodeVideoFromBufferToSurfaceQCIF() throws Throwable {
+        setParameters(176, 144, 1000000, MIME_TYPE_VP8, true, false);
+        BufferToSurfaceWrapper.runTest(this);
+    }
+    public void testVP8EncodeDecodeVideoFromBufferToSurfaceQVGA() throws Throwable {
+        setParameters(320, 240, 2000000, MIME_TYPE_VP8, true, false);
+        BufferToSurfaceWrapper.runTest(this);
+    }
+    public void testVP8EncodeDecodeVideoFromBufferToSurface720p() throws Throwable {
+        setParameters(1280, 720, 6000000, MIME_TYPE_VP8, true, true);
         BufferToSurfaceWrapper.runTest(this);
     }
 
@@ -158,15 +205,32 @@ public class EncodeDecodeTest extends AndroidTestCase {
      * a Surface and decoded onto a Surface.  The output is checked for validity.
      */
     public void testEncodeDecodeVideoFromSurfaceToSurfaceQCIF() throws Throwable {
-        setParameters(176, 144, 1000000);
+        setParameters(176, 144, 1000000, MIME_TYPE_AVC, true, false);
         SurfaceToSurfaceWrapper.runTest(this);
     }
     public void testEncodeDecodeVideoFromSurfaceToSurfaceQVGA() throws Throwable {
-        setParameters(320, 240, 2000000);
+        setParameters(320, 240, 2000000, MIME_TYPE_AVC, true, false);
         SurfaceToSurfaceWrapper.runTest(this);
     }
     public void testEncodeDecodeVideoFromSurfaceToSurface720p() throws Throwable {
-        setParameters(1280, 720, 6000000);
+        setParameters(1280, 720, 6000000, MIME_TYPE_AVC, true, false);
+        SurfaceToSurfaceWrapper.runTest(this);
+    }
+
+    /**
+     * Tests streaming of VP8 video through the encoder and decoder.  Data is provided through
+     * a Surface and decoded onto a Surface.  The output is checked for validity.
+     */
+    public void testVP8EncodeDecodeVideoFromSurfaceToSurfaceQCIF() throws Throwable {
+        setParameters(176, 144, 1000000, MIME_TYPE_VP8, true, false);
+        SurfaceToSurfaceWrapper.runTest(this);
+    }
+    public void testVP8EncodeDecodeVideoFromSurfaceToSurfaceQVGA() throws Throwable {
+        setParameters(320, 240, 2000000, MIME_TYPE_VP8, true, false);
+        SurfaceToSurfaceWrapper.runTest(this);
+    }
+    public void testVP8EncodeDecodeVideoFromSurfaceToSurface720p() throws Throwable {
+        setParameters(1280, 720, 6000000, MIME_TYPE_VP8, true, false);
         SurfaceToSurfaceWrapper.runTest(this);
     }
 
@@ -205,13 +269,17 @@ public class EncodeDecodeTest extends AndroidTestCase {
     /**
      * Sets the desired frame size and bit rate.
      */
-    private void setParameters(int width, int height, int bitRate) {
+    private void setParameters(int width, int height, int bitRate, String mimeType,
+	        boolean allowBT601, boolean allowBT709) {
         if ((width % 16) != 0 || (height % 16) != 0) {
             Log.w(TAG, "WARNING: width or height not multiple of 16");
         }
         mWidth = width;
         mHeight = height;
         mBitRate = bitRate;
+        mMimeType = mimeType;
+        mAllowBT601 = allowBT601;
+        mAllowBT709 = allowBT709;
     }
 
     /**
@@ -229,20 +297,20 @@ public class EncodeDecodeTest extends AndroidTestCase {
         mLargestColorDelta = -1;
 
         try {
-            MediaCodecInfo codecInfo = selectCodec(MIME_TYPE);
+            MediaCodecInfo codecInfo = selectCodec(mMimeType);
             if (codecInfo == null) {
                 // Don't fail CTS if they don't have an AVC codec (not here, anyway).
-                Log.e(TAG, "Unable to find an appropriate codec for " + MIME_TYPE);
+                Log.e(TAG, "Unable to find an appropriate codec for " + mMimeType);
                 return;
             }
             if (VERBOSE) Log.d(TAG, "found codec: " + codecInfo.getName());
 
-            int colorFormat = selectColorFormat(codecInfo, MIME_TYPE);
+            int colorFormat = selectColorFormat(codecInfo, mMimeType);
             if (VERBOSE) Log.d(TAG, "found colorFormat: " + colorFormat);
 
             // We avoid the device-specific limitations on width and height by using values that
             // are multiples of 16, which all tested devices seem to be able to handle.
-            MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
+            MediaFormat format = MediaFormat.createVideoFormat(mMimeType, mWidth, mHeight);
 
             // Set some properties.  Failing to specify some of these can cause the MediaCodec
             // configure() call to throw an unhelpful exception.
@@ -260,7 +328,8 @@ public class EncodeDecodeTest extends AndroidTestCase {
 
             // Create a MediaCodec for the decoder, just based on the MIME type.  The various
             // format details will be passed through the csd-0 meta-data later on.
-            decoder = MediaCodec.createDecoderByType(MIME_TYPE);
+            decoder = MediaCodec.createDecoderByType(mMimeType);
+            if (VERBOSE) Log.d(TAG, "got decoder: " + decoder.getName());
 
             doEncodeDecodeVideoFromBuffer(encoder, colorFormat, decoder, toSurface);
         } finally {
@@ -293,10 +362,10 @@ public class EncodeDecodeTest extends AndroidTestCase {
         mLargestColorDelta = -1;
 
         try {
-            MediaCodecInfo codecInfo = selectCodec(MIME_TYPE);
+            MediaCodecInfo codecInfo = selectCodec(mMimeType);
             if (codecInfo == null) {
                 // Don't fail CTS if they don't have an AVC codec (not here, anyway).
-                Log.e(TAG, "Unable to find an appropriate codec for " + MIME_TYPE);
+                Log.e(TAG, "Unable to find an appropriate codec for " + mMimeType);
                 return;
             }
             if (VERBOSE) Log.d(TAG, "found codec: " + codecInfo.getName());
@@ -305,7 +374,7 @@ public class EncodeDecodeTest extends AndroidTestCase {
 
             // We avoid the device-specific limitations on width and height by using values that
             // are multiples of 16, which all tested devices seem to be able to handle.
-            MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
+            MediaFormat format = MediaFormat.createVideoFormat(mMimeType, mWidth, mHeight);
 
             // Set some properties.  Failing to specify some of these can cause the MediaCodec
             // configure() call to throw an unhelpful exception.
@@ -320,8 +389,8 @@ public class EncodeDecodeTest extends AndroidTestCase {
 
             // Create a MediaCodec for the decoder, just based on the MIME type.  The various
             // format details will be passed through the csd-0 meta-data later on.
-            decoder = MediaCodec.createDecoderByType(MIME_TYPE);
-            MediaFormat decoderFormat = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
+            decoder = MediaCodec.createDecoderByType(mMimeType);
+            if (VERBOSE) Log.d(TAG, "got decoder: " + decoder.getName());
             decoder.configure(format, outputSurface.getSurface(), null, 0);
             decoder.start();
 
@@ -536,7 +605,7 @@ public class EncodeDecodeTest extends AndroidTestCase {
                     encoderOutputBuffers = encoder.getOutputBuffers();
                     if (VERBOSE) Log.d(TAG, "encoder output buffers changed");
                 } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    // not expected for an encoder
+                    // expected on API 18+
                     MediaFormat newFormat = encoder.getOutputFormat();
                     if (VERBOSE) Log.d(TAG, "encoder output format changed: " + newFormat);
                 } else if (encoderStatus < 0) {
@@ -563,14 +632,18 @@ public class EncodeDecodeTest extends AndroidTestCase {
                             throw new RuntimeException(ioe);
                         }
                     }
-                    if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                    if (!decoderConfigured) {
                         // Codec config info.  Only expected on first packet.  One way to
                         // handle this is to manually stuff the data into the MediaFormat
                         // and pass that to configure().  We do that here to exercise the API.
-                        assertFalse(decoderConfigured);
+                        // For codecs that don't have codec config data (such as VP8),
+                        // initialize the decoder before trying to decode the first packet.
+                        assertTrue((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0 ||
+                                   mMimeType.equals(MIME_TYPE_VP8));
                         MediaFormat format =
-                                MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
-                        format.setByteBuffer("csd-0", encodedData);
+                                MediaFormat.createVideoFormat(mMimeType, mWidth, mHeight);
+                        if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0)
+                            format.setByteBuffer("csd-0", encodedData);
                         decoder.configure(format, toSurface ? outputSurface.getSurface() : null,
                                 null, 0);
                         decoder.start();
@@ -578,7 +651,8 @@ public class EncodeDecodeTest extends AndroidTestCase {
                         decoderOutputBuffers = decoder.getOutputBuffers();
                         decoderConfigured = true;
                         if (VERBOSE) Log.d(TAG, "decoder configured (" + info.size + " bytes)");
-                    } else {
+                    }
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                         // Get a decoder input buffer, blocking until it's available.
                         assertTrue(decoderConfigured);
                         int inputBufIndex = decoder.dequeueInputBuffer(-1);
@@ -820,7 +894,7 @@ public class EncodeDecodeTest extends AndroidTestCase {
                         encoderOutputBuffers = encoder.getOutputBuffers();
                         if (VERBOSE) Log.d(TAG, "encoder output buffers changed");
                     } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        // not expected for an encoder
+                        // expected on API 18+
                         MediaFormat newFormat = encoder.getOutputFormat();
                         if (VERBOSE) Log.d(TAG, "encoder output format changed: " + newFormat);
                     } else if (encoderStatus < 0) {
@@ -910,7 +984,7 @@ public class EncodeDecodeTest extends AndroidTestCase {
         // Set to zero.  In YUV this is a dull green.
         Arrays.fill(frameData, (byte) 0);
 
-        int startX, startY, countX, countY;
+        int startX, startY;
 
         frameIndex %= 8;
         //frameIndex = (frameIndex / 8) % 8;    // use this instead for debug -- easier to see
@@ -999,16 +1073,17 @@ public class EncodeDecodeTest extends AndroidTestCase {
             x += cropLeft;
 
             int testY, testU, testV;
+            int off = frameData.position();
             if (semiPlanar) {
                 // Galaxy Nexus uses OMX_TI_COLOR_FormatYUV420PackedSemiPlanar
-                testY = frameData.get(y * width + x) & 0xff;
-                testU = frameData.get(width*height + 2*(y/2) * halfWidth + 2*(x/2)) & 0xff;
-                testV = frameData.get(width*height + 2*(y/2) * halfWidth + 2*(x/2) + 1) & 0xff;
+                testY = frameData.get(off + y * width + x) & 0xff;
+                testU = frameData.get(off + width*height + 2*(y/2) * halfWidth + 2*(x/2)) & 0xff;
+                testV = frameData.get(off + width*height + 2*(y/2) * halfWidth + 2*(x/2) + 1) & 0xff;
             } else {
                 // Nexus 10, Nexus 7 use COLOR_FormatYUV420Planar
-                testY = frameData.get(y * width + x) & 0xff;
-                testU = frameData.get(width*height + (y/2) * halfWidth + (x/2)) & 0xff;
-                testV = frameData.get(width*height + halfWidth * (height / 2) +
+                testY = frameData.get(off + y * width + x) & 0xff;
+                testU = frameData.get(off + width*height + (y/2) * halfWidth + (x/2)) & 0xff;
+                testV = frameData.get(off + width*height + halfWidth * (height / 2) +
                         (y/2) * halfWidth + (x/2)) & 0xff;
             }
 
@@ -1087,22 +1162,41 @@ public class EncodeDecodeTest extends AndroidTestCase {
             int b = pixelBuf.get(2) & 0xff;
             //Log.d(TAG, "GOT(" + frameIndex + "/" + i + "): r=" + r + " g=" + g + " b=" + b);
 
-            int expR, expG, expB;
+            int expR, expG, expB, expR_bt709, expG_bt709, expB_bt709;
             if (i == frameIndex % 8) {
                 // colored rect
                 expR = TEST_R1;
                 expG = TEST_G1;
                 expB = TEST_B1;
+                expR_bt709 = TEST_R1_BT709;
+                expG_bt709 = TEST_G1_BT709;
+                expB_bt709 = TEST_B1_BT709;
             } else {
                 // zero background color
                 expR = TEST_R0;
                 expG = TEST_G0;
                 expB = TEST_B0;
+                expR_bt709 = TEST_R0_BT709;
+                expG_bt709 = TEST_G0_BT709;
+                expB_bt709 = TEST_B0_BT709;
             }
-            if (!isColorClose(r, expR) ||
-                    !isColorClose(g, expG) ||
-                    !isColorClose(b, expB)) {
-                Log.w(TAG, "Bad frame " + frameIndex + " (rect=" + i + ": rgb=" + r +
+
+            // Some decoders use BT.709 when converting HD (i.e. >= 720p)
+            // frames from YUV to RGB, so check against both BT.601 and BT.709
+            if (mAllowBT601 &&
+                    isColorClose(r, expR) &&
+                    isColorClose(g, expG) &&
+                    isColorClose(b, expB)) {
+                // frame OK on BT.601
+                mAllowBT709 = false;
+            } else if (mAllowBT709 &&
+                           isColorClose(r, expR_bt709) &&
+                           isColorClose(g, expG_bt709) &&
+                           isColorClose(b, expB_bt709)) {
+                // frame OK on BT.709
+                mAllowBT601 = false;
+            } else {
+                Log.w(TAG, "Bad frame " + frameIndex + " (rect=" + i + " @ " + x + " " + y + ": rgb=" + r +
                         "," + g + "," + b + " vs. expected " + expR + "," + expG +
                         "," + expB + ")");
                 frameFailed = true;

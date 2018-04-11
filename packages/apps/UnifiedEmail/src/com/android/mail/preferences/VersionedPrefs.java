@@ -51,7 +51,7 @@ public abstract class VersionedPrefs {
      * The current version number for {@link SharedPreferences}. This is a constant for all
      * applications based on UnifiedEmail.
      */
-    protected static final int CURRENT_VERSION_NUMBER = 3;
+    protected static final int CURRENT_VERSION_NUMBER = 4;
 
     protected static final String LOG_TAG = LogTag.getLogTag();
 
@@ -70,8 +70,16 @@ public abstract class VersionedPrefs {
         setCurrentVersion(CURRENT_VERSION_NUMBER);
 
         if (!hasMigrationCompleted()) {
-            final boolean migrationComplete = PreferenceMigratorHolder.createPreferenceMigrator()
-                    .performMigration(context, oldVersion, CURRENT_VERSION_NUMBER);
+            final BasePreferenceMigrator preferenceMigrator =
+                    PreferenceMigratorHolder.createPreferenceMigrator();
+            final boolean migrationComplete;
+            if (preferenceMigrator != null) {
+                migrationComplete = preferenceMigrator
+                        .performMigration(context, oldVersion, CURRENT_VERSION_NUMBER);
+            } else {
+                LogUtils.w(LogUtils.TAG, "No preference migrator found, not migrating preferences");
+                migrationComplete = false;
+            }
 
             if (migrationComplete) {
                 setMigrationComplete();
@@ -93,6 +101,16 @@ public abstract class VersionedPrefs {
 
     protected Editor getEditor() {
         return mEditor;
+    }
+
+    public void registerOnSharedPreferenceChangeListener(
+            SharedPreferences.OnSharedPreferenceChangeListener listener) {
+        mSharedPreferences.registerOnSharedPreferenceChangeListener(listener);
+    }
+
+    public void unregisterOnSharedPreferenceChangeListener(
+            SharedPreferences.OnSharedPreferenceChangeListener listener) {
+        mSharedPreferences.unregisterOnSharedPreferenceChangeListener(listener);
     }
 
     /**

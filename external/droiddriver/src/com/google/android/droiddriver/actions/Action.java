@@ -16,26 +16,23 @@
 
 package com.google.android.droiddriver.actions;
 
-import android.view.InputEvent;
-
-import com.google.android.droiddriver.InputInjector;
 import com.google.android.droiddriver.UiElement;
 
 /**
  * Interface for performing action on a UiElement. An action is a high-level
- * user interaction that consists of a series of {@link InputEvent}s.
+ * user interaction that can be performed in various ways, for example, via
+ * synthesized events, or the Accessibility API.
  */
 public interface Action {
   /**
    * Performs the action.
    *
-   * @param injector the injector to inject {@link InputEvent}s
    * @param element the Ui element to perform the action on
    * @return Whether the action is successful. Some actions throw exceptions in
    *         case of failure, when that behavior is more appropriate. For
-   *         example, ClickAction.
+   *         example, if event injection returns false.
    */
-  boolean perform(InputInjector injector, UiElement element);
+  boolean perform(UiElement element);
 
   /**
    * Gets the timeout to wait for an indicator that the action has been carried
@@ -51,7 +48,7 @@ public interface Action {
    *
    * <p>
    * It is recommended that this method return the description of the action,
-   * for example, "TypeAction{text to type}".
+   * for example, "SwipeAction{DOWN}".
    */
   @Override
   String toString();

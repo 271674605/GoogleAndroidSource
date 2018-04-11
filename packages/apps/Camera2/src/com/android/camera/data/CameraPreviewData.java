@@ -18,7 +18,8 @@ package com.android.camera.data;
 
 import android.view.View;
 
-import com.android.camera.ui.FilmStripView.ImageData;
+import com.android.camera.filmstrip.ImageData;
+import com.android.camera2.R;
 
 /**
  * A class implementing {@link LocalData} to represent a camera preview.
@@ -35,7 +36,8 @@ public class CameraPreviewData extends SimpleViewData {
      * @param height The height of the camera preview.
      */
     public CameraPreviewData(View v, int width, int height) {
-        super(v, width, height, -1, -1);
+        super(v, LocalDataViewType.CAMERA_PREVIEW, width, height, -1, -1);
+        v.setTag(R.id.mediadata_tag_viewtype, LocalDataViewType.CAMERA_PREVIEW.ordinal());
         mPreviewLocked = true;
     }
 

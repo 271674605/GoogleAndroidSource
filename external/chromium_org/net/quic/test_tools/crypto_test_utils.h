@@ -7,8 +7,10 @@
 
 #include <stdarg.h>
 
+#include <utility>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "net/quic/crypto/crypto_framer.h"
@@ -17,10 +19,11 @@
 
 namespace net {
 
-class ChannelIDSigner;
+class ChannelIDSource;
 class CommonCertSets;
 class ProofSource;
 class ProofVerifier;
+class ProofVerifyContext;
 class QuicClock;
 class QuicConfig;
 class QuicCryptoClientStream;
@@ -45,8 +48,7 @@ class CryptoTestUtils {
     bool dont_verify_certs;
 
     // If channel_id_enabled is true then the client will attempt to send a
-    // ChannelID. The key will be the same as is returned by
-    // ChannelIDSigner's |GetKeyForHostname|.
+    // ChannelID.
     bool channel_id_enabled;
   };
 
@@ -74,6 +76,16 @@ class CryptoTestUtils {
                                            PacketSavingConnection* b_conn,
                                            QuicCryptoStream* b);
 
+  // AdvanceHandshake attempts to moves messages from |a| to |b| and |b| to |a|.
+  // Returns the number of messages moved.
+  static std::pair<size_t, size_t> AdvanceHandshake(
+      PacketSavingConnection* a_conn,
+      QuicCryptoStream* a,
+      size_t a_i,
+      PacketSavingConnection* b_conn,
+      QuicCryptoStream* b,
+      size_t b_i);
+
   // Returns the value for the tag |tag| in the tag value map of |message|.
   static std::string GetValueForTag(const CryptoHandshakeMessage& message,
                                     QuicTag tag);
@@ -83,6 +95,10 @@ class CryptoTestUtils {
 
   // Returns a |ProofVerifier| that uses the QUIC testing root CA.
   static ProofVerifier* ProofVerifierForTesting();
+
+  // Returns a |ProofVerifyContext| that must be used with the verifier
+  // returned by |ProofVerifierForTesting|.
+  static ProofVerifyContext* ProofVerifyContextForTesting();
 
   // MockCommonCertSets returns a CommonCertSets that contains a single set with
   // hash |hash|, consisting of the certificate |cert| at index |index|.
@@ -116,13 +132,17 @@ class CryptoTestUtils {
   static CryptoHandshakeMessage BuildMessage(const char* message_tag,
                                              va_list ap);
 
-  // ChannelIDSignerForTesting returns a ChannelIDSigner that generates keys
-  // deterministically based on the hostname given in the Sign call.
-  static ChannelIDSigner* ChannelIDSignerForTesting();
+  // ChannelIDSourceForTesting returns a ChannelIDSource that generates keys
+  // deterministically based on the hostname given in the GetChannelIDKey call.
+  // This ChannelIDSource works in synchronous mode, i.e., its GetChannelIDKey
+  // method never returns QUIC_PENDING.
+  static ChannelIDSource* ChannelIDSourceForTesting();
 
  private:
   static void CompareClientAndServerKeys(QuicCryptoClientStream* client,
                                          QuicCryptoServerStream* server);
+
+  DISALLOW_COPY_AND_ASSIGN(CryptoTestUtils);
 };
 
 }  // namespace test

@@ -14,11 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_ANDROID_OS      // just want PAGE_SIZE define
-# include <asm/page.h>
-#else
-# include <sys/user.h>
-#endif
 #include <limits.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -42,7 +37,6 @@
 
 #include "gralloc_priv.h"
 #include "exynos_format.h"
-#include "gr.h"
 
 #define ION_HEAP_EXYNOS_CONTIG_MASK (1 << 4)
 #define ION_EXYNOS_FIMD_VIDEO_MASK  (1 << 28)
@@ -113,6 +107,7 @@ flags: 0,
 numBuffers: 0,
 bufferMask: 0,
 lock: PTHREAD_MUTEX_INITIALIZER,
+refcount: 0,
 currentBuffer: 0,
 ionfd: -1,
 };
@@ -157,6 +152,8 @@ static int gralloc_alloc_rgb(int ionfd, int w, int h, int format, int usage,
         case HAL_PIXEL_FORMAT_RGBA_8888:
         case HAL_PIXEL_FORMAT_RGBX_8888:
         case HAL_PIXEL_FORMAT_BGRA_8888:
+        case HAL_PIXEL_FORMAT_sRGB_A_8888:
+        case HAL_PIXEL_FORMAT_sRGB_X_8888:
             bpp = 4;
             break;
         case HAL_PIXEL_FORMAT_RGB_888:
@@ -358,9 +355,10 @@ static int gralloc_alloc(alloc_device_t* dev,
         err = gralloc_alloc_yuv(m->ionfd, w, h, format, usage, ion_flags,
                                 &hnd, &stride);
     if (err)
-        return err;
+        goto err;
 
-    if (err != 0)
+    err = gralloc_register_buffer(module, hnd);
+    if (err)
         goto err;
 
     *pHandle = hnd;
@@ -386,8 +384,8 @@ static int gralloc_free(alloc_device_t* dev,
     private_handle_t const* hnd = reinterpret_cast<private_handle_t const*>(handle);
     gralloc_module_t* module = reinterpret_cast<gralloc_module_t*>(
                                                                    dev->common.module);
-    if (hnd->base)
-        grallocUnmap(module, const_cast<private_handle_t*>(hnd));
+
+    gralloc_unregister_buffer(module, hnd);
 
     close(hnd->fd);
     if (hnd->fd1 >= 0)
@@ -405,6 +403,14 @@ static int gralloc_close(struct hw_device_t *dev)
 {
     gralloc_context_t* ctx = reinterpret_cast<gralloc_context_t*>(dev);
     if (ctx) {
+        private_module_t *p = reinterpret_cast<private_module_t*>(ctx->device.common.module);
+        pthread_mutex_lock(&p->lock);
+        LOG_ALWAYS_FATAL_IF(!p->refcount);
+        p->refcount--;
+        if (!p->refcount)
+            close(p->ionfd);
+        pthread_mutex_unlock(&p->lock);
+
         /* TODO: keep a list of all buffer_handle_t created, and free them
          * all here.
          */
@@ -434,7 +440,11 @@ int gralloc_device_open(const hw_module_t* module, const char* name,
         dev->device.free = gralloc_free;
 
         private_module_t *p = reinterpret_cast<private_module_t*>(dev->device.common.module);
-        p->ionfd = ion_open();
+        pthread_mutex_lock(&p->lock);
+        if (!p->refcount)
+            p->ionfd = ion_open();
+        p->refcount++;
+        pthread_mutex_unlock(&p->lock);
 
         *device = &dev->device.common;
         status = 0;

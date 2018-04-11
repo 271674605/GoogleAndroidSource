@@ -5,7 +5,7 @@ ifeq ($(LOCAL_MODULE_CLASS),)
     LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 endif
 
-intermediates := $(call local-intermediates-dir)
+intermediates := $(call local-generated-sources-dir)
 
 LLVMVersion := $(shell grep PACKAGE_VERSION $(LLVM_ROOT_PATH)/host/include/llvm/Config/config.h | sed -e 's/\#define PACKAGE_VERSION "\(.*\)"/\1/g')
 
@@ -23,7 +23,8 @@ else
 endif
 
 LOCAL_GENERATED_SOURCES += $(intermediates)/include/clang/Basic/Version.inc
-$(intermediates)/include/clang/Basic/Version.inc: $(CLANG_ROOT_PATH)/include/clang/Basic/Version.inc.in
+$(intermediates)/include/clang/Basic/Version.inc: $(CLANG_ROOT_PATH)/include/clang/Basic/Version.inc.in \
+  $(LLVM_ROOT_PATH)/host/include/llvm/Config/config.h
 	@echo "Updating Clang version info."
 	@mkdir -p $(dir $@)
 	$(hide) sed -e "s#@CLANG_VERSION@#$(CLANG_VERSION)#g" \
@@ -32,4 +33,3 @@ $(intermediates)/include/clang/Basic/Version.inc: $(CLANG_ROOT_PATH)/include/cla
 	-e "s#@CLANG_VERSION_PATCHLEVEL@#$(CLANG_VERSION_PATCHLEVEL)#g" \
 	-e "s#@CLANG_HAS_VERSION_PATCHLEVEL@#$(CLANG_HAS_VERSION_PATCHLEVEL)#g" \
 	$< > $@
-

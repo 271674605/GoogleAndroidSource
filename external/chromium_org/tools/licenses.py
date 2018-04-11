@@ -35,7 +35,9 @@ PRUNE_PATHS = set([
     os.path.join('third_party','valgrind'),
 
     # Used for development and test, not in the shipping product.
+    os.path.join('build','secondary'),
     os.path.join('third_party','bison'),
+    os.path.join('third_party','blanketjs'),
     os.path.join('third_party','cygwin'),
     os.path.join('third_party','gnu_binutils'),
     os.path.join('third_party','gold'),
@@ -49,13 +51,14 @@ PRUNE_PATHS = set([
     os.path.join('third_party','perl'),
     os.path.join('third_party','psyco_win32'),
     os.path.join('third_party','pylib'),
-    os.path.join('third_party','python_26'),
     os.path.join('third_party','pywebsocket'),
+    os.path.join('third_party','qunit'),
+    os.path.join('third_party','sinonjs'),
     os.path.join('third_party','syzygy'),
-    os.path.join('tools','gn'),
 
     # Chromium code in third_party.
     os.path.join('third_party','fuzzymatch'),
+    os.path.join('tools', 'swarming_client'),
 
     # Stuff pulled in from chrome-internal for official builds/tools.
     os.path.join('third_party', 'clear_cache'),
@@ -83,10 +86,7 @@ ADDITIONAL_PATHS = (
     os.path.join('chrome', 'test', 'chromeos', 'autotest'),
     os.path.join('chrome', 'test', 'data'),
     os.path.join('native_client'),
-    os.path.join('native_client_sdk'),
     os.path.join('net', 'tools', 'spdyshark'),
-    os.path.join('ppapi'),
-    os.path.join('sandbox', 'linux', 'seccomp-legacy'),
     os.path.join('sdch', 'open-vcdiff'),
     os.path.join('testing', 'gmock'),
     os.path.join('testing', 'gtest'),
@@ -110,11 +110,6 @@ SPECIAL_CASES = {
     os.path.join('native_client'): {
         "Name": "native client",
         "URL": "http://code.google.com/p/nativeclient",
-        "License": "BSD",
-    },
-    os.path.join('sandbox', 'linux', 'seccomp-legacy'): {
-        "Name": "seccompsandbox",
-        "URL": "http://code.google.com/p/seccompsandbox",
         "License": "BSD",
     },
     os.path.join('sdch', 'open-vcdiff'): {
@@ -147,12 +142,6 @@ SPECIAL_CASES = {
         # Absolute path here is resolved as relative to the source root.
         "License File": "/LICENSE.chromium_os",
     },
-    os.path.join('third_party', 'GTM'): {
-        "Name": "Google Toolbox for Mac",
-        "URL": "http://code.google.com/p/google-toolbox-for-mac/",
-        "License": "Apache 2.0",
-        "License File": "COPYING",
-    },
     os.path.join('third_party', 'lss'): {
         "Name": "linux-syscall-support",
         "URL": "http://code.google.com/p/linux-syscall-support/",
@@ -162,6 +151,11 @@ SPECIAL_CASES = {
     os.path.join('third_party', 'ots'): {
         "Name": "OTS (OpenType Sanitizer)",
         "URL": "http://code.google.com/p/ots/",
+        "License": "BSD",
+    },
+    os.path.join('third_party', 'pdfium'): {
+        "Name": "PDFium",
+        "URL": "http://code.google.com/p/pdfium/",
         "License": "BSD",
     },
     os.path.join('third_party', 'pdfsqueeze'): {
@@ -341,7 +335,7 @@ def FilterDirsWithFiles(dirs_list, root):
 
 def FindThirdPartyDirs(prune_paths, root):
     """Find all third_party directories underneath the source root."""
-    third_party_dirs = []
+    third_party_dirs = set()
     for path, dirs, files in os.walk(root):
         path = path[len(root)+1:]  # Pretty up the path.
 
@@ -361,7 +355,7 @@ def FindThirdPartyDirs(prune_paths, root):
             for dir in dirs:
                 dirpath = os.path.join(path, dir)
                 if dirpath not in prune_paths:
-                    third_party_dirs.append(dirpath)
+                    third_party_dirs.add(dirpath)
 
             # Don't recurse into any subdirs from here.
             dirs[:] = []
@@ -374,7 +368,7 @@ def FindThirdPartyDirs(prune_paths, root):
 
     for dir in ADDITIONAL_PATHS:
         if dir not in prune_paths:
-            third_party_dirs.append(dir)
+            third_party_dirs.add(dir)
 
     return third_party_dirs
 

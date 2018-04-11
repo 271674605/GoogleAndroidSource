@@ -7,12 +7,14 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/extensions/extension_view_views.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/views/bubble/bubble_delegate.h"
-#include "ui/views/focus/widget_focus_manager.h"
+#include "ui/wm/public/activation_change_observer.h"
 #include "url/gurl.h"
+
 
 class Browser;
 namespace views {
@@ -23,13 +25,19 @@ namespace content {
 class DevToolsAgentHost;
 }
 
+namespace extensions {
+class ExtensionViewHost;
+}
+
 class ExtensionPopup : public views::BubbleDelegateView,
+                       public aura::client::ActivationChangeObserver,
                        public ExtensionViewViews::Container,
-                       public content::NotificationObserver {
+                       public content::NotificationObserver,
+                       public TabStripModelObserver {
  public:
   enum ShowAction {
     SHOW,
-    SHOW_AND_INSPECT
+    SHOW_AND_INSPECT,
   };
 
   virtual ~ExtensionPopup();
@@ -49,7 +57,7 @@ class ExtensionPopup : public views::BubbleDelegateView,
                                    views::BubbleBorder::Arrow arrow,
                                    ShowAction show_action);
 
-  extensions::ExtensionHost* host() const { return extension_host_.get(); }
+  extensions::ExtensionViewHost* host() const { return host_.get(); }
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
@@ -60,11 +68,24 @@ class ExtensionPopup : public views::BubbleDelegateView,
   virtual void OnExtensionSizeChanged(ExtensionViewViews* view) OVERRIDE;
 
   // views::View overrides.
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
-  // views::BubbleDelegateView overrides.
-  virtual void OnWidgetActivationChanged(views::Widget* widget, bool active)
-      OVERRIDE;
+  // views::WidgetObserver overrides.
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetActivationChanged(views::Widget* widget,
+                                         bool active) OVERRIDE;
+
+  // aura::client::ActivationChangeObserver overrides.
+  virtual void OnWindowActivated(aura::Window* gained_active,
+                                 aura::Window* lost_active) OVERRIDE;
+
+  // TabStripModelObserver overrides.
+  virtual void ActiveTabChanged(content::WebContents* old_contents,
+                                content::WebContents* new_contents,
+                                int index,
+                                int reason) OVERRIDE;
 
   // The min/max height of popups.
   static const int kMinWidth;
@@ -73,7 +94,7 @@ class ExtensionPopup : public views::BubbleDelegateView,
   static const int kMaxHeight;
 
  private:
-  ExtensionPopup(extensions::ExtensionHost* host,
+  ExtensionPopup(extensions::ExtensionViewHost* host,
                  views::View* anchor_view,
                  views::BubbleBorder::Arrow arrow,
                  ShowAction show_action);
@@ -84,7 +105,7 @@ class ExtensionPopup : public views::BubbleDelegateView,
   void OnDevToolsStateChanged(content::DevToolsAgentHost*, bool attached);
 
   // The contained host for the view.
-  scoped_ptr<extensions::ExtensionHost> extension_host_;
+  scoped_ptr<extensions::ExtensionViewHost> host_;
 
   // Flag used to indicate if the pop-up should open a devtools window once
   // it is shown inspecting it.
@@ -93,6 +114,8 @@ class ExtensionPopup : public views::BubbleDelegateView,
   content::NotificationRegistrar registrar_;
 
   base::Callback<void(content::DevToolsAgentHost*, bool)> devtools_callback_;
+
+  bool widget_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopup);
 };

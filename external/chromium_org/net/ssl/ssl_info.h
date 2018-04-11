@@ -10,7 +10,12 @@
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/cert/sct_status_flags.h"
 #include "net/cert/x509_cert_types.h"
+#include "net/ssl/signed_certificate_timestamp_and_status.h"
+
+class Pickle;
+class PickleIterator;
 
 namespace net {
 
@@ -74,6 +79,15 @@ class NET_EXPORT SSLInfo {
   // The hashes, in several algorithms, of the SubjectPublicKeyInfos from
   // each certificate in the chain.
   HashValueVector public_key_hashes;
+
+  // pinning_failure_log contains a message produced by
+  // TransportSecurityState::DomainState::CheckPublicKeyPins in the event of a
+  // pinning failure. It is a (somewhat) human-readable string.
+  std::string pinning_failure_log;
+
+  // List of SignedCertificateTimestamps and their corresponding validation
+  // status.
+  SignedCertificateTimestampAndStatusList signed_certificate_timestamps;
 };
 
 }  // namespace net

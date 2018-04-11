@@ -33,7 +33,7 @@
 % for typedef in metadata.types:
   <typedef name="${typedef.name}">
     % for (language, klass) in typedef.languages.iteritems():
-      <language name="${language}">${klass}</language>
+      <language name="${language}">${klass | h}</language>
     % endfor
   </typedef>
 % endfor
@@ -71,8 +71,12 @@
         % if prop.is_clone():
             <clone entry="${prop.name}" kind="${prop.target_kind}">
 
-              % if prop.notes is not None:
-                <notes>${prop.notes}</notes>
+              % if prop.details is not None:
+                <details>${prop.details}</details>
+              % endif
+
+              % if prop.hal_details is not None:
+                <hal_details>${prop.hal_details}</hal_details>
               % endif
 
               % for tag in prop.tags:
@@ -84,6 +88,12 @@
             <entry name="${prop.name_short}" type="${prop.type}"
           % if prop.visibility:
                 visibility="${prop.visibility}"
+          % endif
+          % if prop.synthetic:
+                synthetic="true"
+          % endif
+          % if prop.deprecated:
+                deprecated="true"
           % endif
           % if prop.optional:
                 optional="${str(prop.optional).lower()}"
@@ -100,6 +110,10 @@
 
           % if prop.typedef is not None:
                 typedef="${prop.typedef.name}"
+          % endif
+
+          % if prop.hwlevel:
+                hwlevel="${prop.hwlevel}"
           % endif
             >
 
@@ -122,6 +136,9 @@
                       <value
                     % if value.optional:
                              optional="true"
+                    % endif:
+                    % if value.hidden:
+                             hidden="true"
                     % endif:
                     % if value.id is not None:
                              id="${value.id}"
@@ -147,8 +164,12 @@
                 <range>${prop.range | x}</range>
               % endif
 
-              % if prop.notes is not None:
-                <notes>${prop.notes | x}</notes>
+              % if prop.details is not None:
+                <details>${prop.details | x}</details>
+              % endif
+
+              % if prop.hal_details is not None:
+                <hal_details>${prop.hal_details | x}</hal_details>
               % endif
 
               % for tag in prop.tags:

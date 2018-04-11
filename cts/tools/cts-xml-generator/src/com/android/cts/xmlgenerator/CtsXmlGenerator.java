@@ -24,7 +24,9 @@ import vogar.ModeId;
 
 import java.io.File;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -36,7 +38,8 @@ public class CtsXmlGenerator {
         System.err.println("Arguments: " + Arrays.asList(args));
         System.err.println("Usage: cts-xml-generator -p PACKAGE_NAME -n NAME [-t TEST_TYPE]"
                 + " [-j JAR_PATH] [-i INSTRUMENTATION] [-m MANIFEST_FILE] [-e EXPECTATION_FILE]"
-                + " [-o OUTPUT_FILE]");
+                + " [-b UNSUPPORTED_ABI_FILE] [-a ARCHITECTURE] [-o OUTPUT_FILE]"
+                + " [-s APP_NAME_SPACE] [-x ADDITIONAL_ATTRIBUTE_KEY->VALUE]");
         System.exit(1);
     }
 
@@ -45,12 +48,15 @@ public class CtsXmlGenerator {
         String name = null;
         String outputPath = null;
         Set<File> expectationFiles = new HashSet<File>();
+        Set<File> abiFiles = new HashSet<File>();
+        String architecture = null;
         File manifestFile = null;
         String instrumentation = null;
         String testType = null;
         String jarPath = null;
         String appNameSpace = null;
         String targetNameSpace = null;
+        Map<String, String> additionalAttributes = new HashMap<String, String>();
 
         for (int i = 0; i < args.length; i++) {
             if ("-p".equals(args[i])) {
@@ -68,12 +74,30 @@ public class CtsXmlGenerator {
             } else if ("-e".equals(args[i])) {
                 expectationFiles.add(new File(getArg(args, ++i,
                         "Missing value for expectation store")));
+            } else if ("-b".equals(args[i])) {
+                abiFiles.add(new File(getArg(args, ++i, "Missing value for abi store")));
+            } else if ("-a".equals(args[i])) {
+                architecture = getArg(args, ++i, "Missing value for architecture");
             } else if ("-o".equals(args[i])) {
                 outputPath = getArg(args, ++i, "Missing value for output file");
-            } else if ("-a".equals(args[i])) {
+            } else if ("-s".equals(args[i])) {
                 appNameSpace =  getArg(args, ++i, "Missing value for app name space");
             } else if ("-r".equals(args[i])) {
                 targetNameSpace =  getArg(args, ++i, "Missing value for target name space");
+            } else if ("-x".equals(args[i])) {
+                String value = getArg(args, ++i, "Missing value for additional attribute");
+                String[] tokens = value.split("->");
+                if (tokens.length != 2) {
+                    System.err.println(
+                            "For specifying additional attributes; use the format KEY->VALUE");
+                    usage(args);
+                }
+                if (additionalAttributes.containsKey(tokens[0])) {
+                    System.err.println(String.format(
+                            "Additional attribute %s has already been specified", tokens[0]));
+                    usage(args);
+                }
+                additionalAttributes.put(tokens[0], tokens[1]);
             } else {
                 System.err.println("Unsupported flag: " + args[i]);
                 usage(args);
@@ -101,9 +125,11 @@ public class CtsXmlGenerator {
             usage(args);
         }
 
-        ExpectationStore store = ExpectationStore.parse(expectationFiles, ModeId.DEVICE);
-        XmlGenerator generator = new XmlGenerator(store, appNameSpace, appPackageName,
-                name, runner, instrumentation, targetNameSpace, jarPath, testType, outputPath);
+        ExpectationStore failuresStore = ExpectationStore.parse(expectationFiles, ModeId.DEVICE);
+        ExpectationStore abiStore = ExpectationStore.parse(abiFiles, ModeId.DEVICE);
+        XmlGenerator generator = new XmlGenerator(failuresStore, abiStore, architecture,
+                appNameSpace, appPackageName, name, runner, instrumentation, targetNameSpace,
+                jarPath, testType, outputPath, additionalAttributes);
         generator.writePackageXml();
     }
 

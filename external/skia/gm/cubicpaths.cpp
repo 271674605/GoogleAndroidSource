@@ -16,6 +16,10 @@ public:
     ClippedCubicGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     SkString onShortName() {
         return SkString("clippedcubic");
     }
@@ -55,6 +59,10 @@ public:
     CubicPathGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     SkString onShortName() {
         return SkString("cubicpath");
     }
@@ -131,7 +139,7 @@ protected:
                             20 * SK_Scalar1,
                             titlePaint);
 
-        SkRandom rand;
+        SkLCGRandom rand;
         SkRect rect = SkRect::MakeWH(100*SK_Scalar1, 30*SK_Scalar1);
         canvas->save();
         canvas->translate(10 * SK_Scalar1, 30 * SK_Scalar1);
@@ -198,6 +206,10 @@ public:
     CubicClosePathGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     SkString onShortName() {
         return SkString("cubicclosepath");
     }
@@ -275,7 +287,7 @@ protected:
                             20 * SK_Scalar1,
                             titlePaint);
 
-        SkRandom rand;
+        SkLCGRandom rand;
         SkRect rect = SkRect::MakeWH(100*SK_Scalar1, 30*SK_Scalar1);
         canvas->save();
         canvas->translate(10 * SK_Scalar1, 30 * SK_Scalar1);

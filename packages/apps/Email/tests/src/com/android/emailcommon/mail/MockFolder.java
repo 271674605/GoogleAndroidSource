@@ -16,13 +16,15 @@
 
 package com.android.emailcommon.mail;
 
+import android.content.Context;
+
 import com.android.emailcommon.service.SearchParams;
 
 
 public class MockFolder extends Folder {
 
     @Override
-    public void appendMessages(Message[] messages) {
+    public void appendMessage(Context context, Message message, boolean noTimeout) {
     }
 
     @Override
@@ -122,6 +124,16 @@ public class MockFolder extends Folder {
 
     @Override
     public Message[] getMessages(SearchParams params, MessageRetrievalListener listener)
+            throws MessagingException {
+        return null;
+    }
+
+    /* (non-Javadoc)
+     * @see com.android.emailcommon.mail.Folder#getMessages(long, long,
+     * com.android.emailcommon.mail.Folder.MessageRetrievalListener)
+     */
+    @Override
+    public Message[] getMessages(long startDate, long endDate, MessageRetrievalListener listener)
             throws MessagingException {
         return null;
     }

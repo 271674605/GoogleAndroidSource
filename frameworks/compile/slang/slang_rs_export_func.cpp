@@ -32,16 +32,14 @@ namespace slang {
 namespace {
 
 // Ensure that the exported function is actually valid
-static bool ValidateFuncDecl(clang::DiagnosticsEngine *DiagEngine,
+static bool ValidateFuncDecl(slang::RSContext *Context,
                              const clang::FunctionDecl *FD) {
-  slangAssert(DiagEngine && FD);
+  slangAssert(Context && FD);
   const clang::ASTContext &C = FD->getASTContext();
-  if (FD->getResultType().getCanonicalType() != C.VoidTy) {
-    DiagEngine->Report(
-      clang::FullSourceLoc(FD->getLocation(), DiagEngine->getSourceManager()),
-      DiagEngine->getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                  "invokable non-static functions are "
-                                  "required to return void"));
+  if (FD->getReturnType().getCanonicalType() != C.VoidTy) {
+    Context->ReportError(
+        FD->getLocation(),
+        "invokable non-static functions are required to return void");
     return false;
   }
   return true;
@@ -56,7 +54,7 @@ RSExportFunc *RSExportFunc::Create(RSContext *Context,
 
   slangAssert(!Name.empty() && "Function must have a name");
 
-  if (!ValidateFuncDecl(Context->getDiagnostics(), FD)) {
+  if (!ValidateFuncDecl(Context, FD)) {
     return NULL;
   }
 
@@ -68,8 +66,7 @@ RSExportFunc *RSExportFunc::Create(RSContext *Context,
   } else {
     clang::ASTContext &Ctx = Context->getASTContext();
 
-    std::string Id(DUMMY_RS_TYPE_NAME_PREFIX"helper_func_param:");
-    Id.append(F->getName()).append(DUMMY_RS_TYPE_NAME_POSTFIX);
+    std::string Id = CreateDummyName("helper_func_param", F->getName());
 
     clang::RecordDecl *RD =
         clang::RecordDecl::Create(Ctx, clang::TTK_Struct,
@@ -163,7 +160,7 @@ RSExportFunc::checkParameterPacketType(llvm::StructType *ParamTy) const {
       return false;
 
     // Check size
-    size_t T1Size = RSExportType::GetTypeAllocSize(F->getType());
+    size_t T1Size = F->getType()->getAllocSize();
     size_t T2Size = getRSContext()->getDataLayout()->getTypeAllocSize(T2);
 
     if (T1Size != T2Size)

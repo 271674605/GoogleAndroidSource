@@ -8,15 +8,23 @@
 #include <set>
 #include <string>
 
-class ExtensionSet;
 class GURL;
+
+namespace extensions {
+class ExtensionSet;
+}
 
 namespace chrome {
 
 // Returns true if the extension (or an imported module if any) is whitelisted.
+// Module imports are at most one level deep (ie, a module that exports cannot
+// import another extension).  The extension is identified by the host of |url|
+// (if it is a chrome-extension URL).  |extension_set| is the list of installed
+// and enabled extensions for a given profile.  |whitelist| is a set of
+// (possibly hashed) extension IDs to check against.
 bool IsExtensionOrSharedModuleWhitelisted(
     const GURL& url,
-    const ExtensionSet* extension_set,
+    const extensions::ExtensionSet* extension_set,
     const std::set<std::string>& whitelist);
 
 // Checks whether the host of |url| is allowed by |command_line_switch|.
@@ -26,7 +34,7 @@ bool IsExtensionOrSharedModuleWhitelisted(
 // (2) a list of host names separated by ',': returns true if |host| is in the
 //     list. (NOTE: In this case, |url| doesn't have to belong to an extension.)
 bool IsHostAllowedByCommandLine(const GURL& url,
-                                const ExtensionSet* extension_set,
+                                const extensions::ExtensionSet* extension_set,
                                 const char* command_line_switch);
 }  // namespace chrome
 

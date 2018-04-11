@@ -119,7 +119,6 @@ class DiagnosticLogMessage {
   std::string extra_;
 
   std::ostringstream print_stream_;
-  std::ostringstream print_stream_with_timestamp_;
 };
 
 // This class is used to explicitly ignore values in the conditional
@@ -151,9 +150,14 @@ void LogMultiline(LoggingSeverity level, const char* label, bool input,
                   const void* data, size_t len, bool hex_mode,
                   LogMultilineState* state);
 
+// TODO(grunell): Change name to InitDiagnosticLoggingDelegate or
+// InitDiagnosticLogging. Change also in init_webrtc.h/cc.
+// TODO(grunell): typedef the delegate function.
 void InitDiagnosticLoggingDelegateFunction(
     void (*delegate)(const std::string&));
 
+void SetExtraLoggingInit(
+    void (*function)(void (*delegate)(const std::string&)));
 }  // namespace talk_base
 
 //////////////////////////////////////////////////////////////////////

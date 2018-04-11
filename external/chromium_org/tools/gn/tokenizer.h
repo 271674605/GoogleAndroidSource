@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "tools/gn/err.h"
 #include "tools/gn/token.h"
 
@@ -32,12 +33,12 @@ class Tokenizer {
   static bool IsNewline(const base::StringPiece& buffer, size_t offset);
 
   static bool IsIdentifierFirstChar(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+    return IsAsciiAlpha(c) || c == '_';
   }
 
   static bool IsIdentifierContinuingChar(char c) {
     // Also allow digits after the first char.
-    return IsIdentifierFirstChar(c) || (c >= '0' && c <= '9');
+    return IsIdentifierFirstChar(c) || IsAsciiDigit(c);
   }
 
  private:
@@ -71,6 +72,8 @@ class Tokenizer {
   char cur_char() const { return input_[cur_]; }
 
   bool has_error() const { return err_->has_error(); }
+
+  std::vector<Token> tokens_;
 
   const InputFile* input_file_;
   const base::StringPiece input_;

@@ -17,18 +17,8 @@
  */
 #include <string.h>
 
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/udp.h>
-#include <netinet/tcp.h>
-#include <netinet/ip6.h>
-#include <netinet/icmp6.h>
-#include <linux/icmp.h>
-
 #include "translate.h"
 #include "checksum.h"
-#include "ipv4.h"
 #include "logging.h"
 #include "debug.h"
 #include "dump.h"
@@ -41,9 +31,9 @@
  * len      - size of ip payload
  * returns: the highest position in the output clat_packet that's filled in
  */
-int icmp_packet(clat_packet out, int pos, const struct icmphdr *icmp, uint32_t checksum,
-                size_t len) {
-  const char *payload;
+int icmp_packet(clat_packet out, clat_packet_index pos, const struct icmphdr *icmp,
+                uint32_t checksum, size_t len) {
+  const uint8_t *payload;
   size_t payload_size;
 
   if(len < sizeof(struct icmphdr)) {
@@ -51,7 +41,7 @@ int icmp_packet(clat_packet out, int pos, const struct icmphdr *icmp, uint32_t c
     return 0;
   }
 
-  payload = (const char *) (icmp + 1);
+  payload = (const uint8_t *) (icmp + 1);
   payload_size = len - sizeof(struct icmphdr);
 
   return icmp_to_icmp6(out, pos, icmp, checksum, payload, payload_size);
@@ -64,24 +54,19 @@ int icmp_packet(clat_packet out, int pos, const struct icmphdr *icmp, uint32_t c
  * len    - size of packet
  * returns: the highest position in the output clat_packet that's filled in
  */
-int ipv4_packet(clat_packet out, int pos, const char *packet, size_t len) {
+int ipv4_packet(clat_packet out, clat_packet_index pos, const uint8_t *packet, size_t len) {
   const struct iphdr *header = (struct iphdr *) packet;
   struct ip6_hdr *ip6_targ = (struct ip6_hdr *) out[pos].iov_base;
-  uint16_t frag_flags;
+  struct ip6_frag *frag_hdr;
+  size_t frag_hdr_len;
   uint8_t nxthdr;
-  const char *next_header;
+  const uint8_t *next_header;
   size_t len_left;
-  uint32_t checksum;
+  uint32_t old_sum, new_sum;
   int iov_len;
 
   if(len < sizeof(struct iphdr)) {
     logmsg_dbg(ANDROID_LOG_ERROR, "ip_packet/too short for an ip header");
-    return 0;
-  }
-
-  frag_flags = ntohs(header->frag_off);
-  if(frag_flags & IP_MF) { // this could theoretically be supported, but isn't
-    logmsg_dbg(ANDROID_LOG_ERROR, "ip_packet/more fragments set, dropping");
     return 0;
   }
 
@@ -121,15 +106,32 @@ int ipv4_packet(clat_packet out, int pos, const char *packet, size_t len) {
   fill_ip6_header(ip6_targ, 0, nxthdr, header);
   out[pos].iov_len = sizeof(struct ip6_hdr);
 
-  // Calculate the pseudo-header checksum.
-  checksum = ipv6_pseudo_header_checksum(0, ip6_targ, len_left);
+  /* Calculate the pseudo-header checksum.
+   * Technically, the length that is used in the pseudo-header checksum is the transport layer
+   * length, which is not the same as len_left in the case of fragmented packets. But since
+   * translation does not change the transport layer length, the checksum is unaffected.
+   */
+  old_sum = ipv4_pseudo_header_checksum(header, len_left);
+  new_sum = ipv6_pseudo_header_checksum(ip6_targ, len_left, nxthdr);
 
-  if(nxthdr == IPPROTO_ICMPV6) {
-    iov_len = icmp_packet(out, pos + 1, (const struct icmphdr *) next_header, checksum, len_left);
-  } else if(nxthdr == IPPROTO_TCP) {
-    iov_len = tcp_packet(out, pos + 1, (const struct tcphdr *) next_header, checksum, len_left);
-  } else if(nxthdr == IPPROTO_UDP) {
-    iov_len = udp_packet(out, pos + 1, (const struct udphdr *) next_header, checksum, len_left);
+  // If the IPv4 packet is fragmented, add a Fragment header.
+  frag_hdr = (struct ip6_frag *) out[pos + 1].iov_base;
+  frag_hdr_len = maybe_fill_frag_header(frag_hdr, ip6_targ, header);
+  out[pos + 1].iov_len = frag_hdr_len;
+
+  if (frag_hdr_len && frag_hdr->ip6f_offlg & IP6F_OFF_MASK) {
+    // Non-first fragment. Copy the rest of the packet as is.
+    iov_len = generic_packet(out, pos + 2, next_header, len_left);
+  } else if (nxthdr == IPPROTO_ICMPV6) {
+    iov_len = icmp_packet(out, pos + 2, (const struct icmphdr *) next_header, new_sum, len_left);
+  } else if (nxthdr == IPPROTO_TCP) {
+    iov_len = tcp_packet(out, pos + 2, (const struct tcphdr *) next_header, old_sum, new_sum,
+                         len_left);
+  } else if (nxthdr == IPPROTO_UDP) {
+    iov_len = udp_packet(out, pos + 2, (const struct udphdr *) next_header, old_sum, new_sum,
+                         len_left);
+  } else if (nxthdr == IPPROTO_GRE) {
+    iov_len = generic_packet(out, pos + 2, next_header, len_left);
   } else {
 #if CLAT_DEBUG
     logmsg_dbg(ANDROID_LOG_ERROR, "ip_packet/unknown protocol: %x",header->protocol);

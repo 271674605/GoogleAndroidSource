@@ -19,9 +19,11 @@ package com.android.camera.util;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.net.Uri;
 
 import com.android.camera.CameraModule;
+import com.android.camera.app.AppController;
 
 public class PhotoSphereHelper {
     public static class PanoramaMetadata {
@@ -50,11 +52,28 @@ public class PhotoSphereHelper {
             /* Do nothing */
         }
 
+        public void onResume() {
+            /* Do nothing */
+        }
+
+        public void onPause() {
+            /* Do nothing */
+        }
+
         public void onStop() {
             /* Do nothing */
         }
 
-        public void showPanorama(Uri uri) {
+        /**
+         * @return The {@link android.content.Intent} to invoke the external
+         * PhotoSphere viewer.
+         */
+        public Intent showPanorama(Activity activity, Uri uri) {
+            /* Do nothing */
+            return null;
+        }
+
+        public void showRgbz(Uri uri) {
             /* Do nothing */
         }
     }
@@ -69,7 +88,11 @@ public class PhotoSphereHelper {
         return NOT_PANORAMA;
     }
 
-    public static CameraModule createPanoramaModule() {
+    public static CameraModule createPanoramaModule(AppController app) {
+        return null;
+    }
+
+    public static CameraModule createWideAnglePanoramaModule(AppController app) {
         return null;
     }
 
@@ -84,6 +107,41 @@ public class PhotoSphereHelper {
      * Get the modified time from a Media storage URI.
      */
     public static long getModifiedTimeFromURI(ContentResolver contentResolver, Uri contentUri) {
+        return 0;
+    }
+
+    /**
+     * Get the resource id of the panorama horizontal icon.
+     */
+    public static int getPanoramaHorizontalDrawableId() {
+        return 0;
+    }
+
+    /**
+     * Get the resource id of the panorama vertical icon.
+     */
+    public static int getPanoramaVerticalDrawableId() {
+        return 0;
+    }
+
+    /**
+     * Get the resource id of the panorama orientation option icon array.
+     */
+    public static int getPanoramaOrientationOptionArrayId() {
+        return 0;
+    }
+
+    /**
+     * Get the resource id of the panorama orientation descriptions array.
+     */
+    public static int getPanoramaOrientationDescriptions() {
+        return 0;
+    }
+
+    /**
+     * Get the resource id of the panorama orientation indicator array.
+     */
+    public static int getPanoramaOrientationIndicatorArrayId() {
         return 0;
     }
 }

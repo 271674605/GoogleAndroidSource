@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 import com.android.internal.util.FastMath;
 
 import org.xmlpull.v1.XmlPullParserException;
@@ -28,6 +28,7 @@ import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.res.Resources.NotFoundException;
 import android.cts.util.PollingCheck;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -69,7 +70,6 @@ import android.text.method.TextKeyListener.Capitalize;
 import android.text.method.TimeKeyListener;
 import android.text.method.TransformationMethod;
 import android.text.style.URLSpan;
-import android.text.style.cts.MockURLSpanTestActivity;
 import android.text.util.Linkify;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
@@ -98,7 +98,7 @@ import java.io.IOException;
 /**
  * Test {@link TextView}.
  */
-public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubActivity> {
+public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewCtsActivity> {
 
     private TextView mTextView;
     private Activity mActivity;
@@ -112,7 +112,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
     private CharSequence mTransformedText;
 
     public TextViewTest() {
-        super("com.android.cts.stub", TextViewStubActivity.class);
+        super("com.android.cts.widget", TextViewCtsActivity.class);
     }
 
     @Override
@@ -1300,7 +1300,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
         mTextView = findTextView(R.id.textview_text);
         assertNull(mTextView.getError());
 
-        final String errorText = "Opps! There is an error";
+        final String errorText = "Oops! There is an error";
 
         mActivity.runOnUiThread(new Runnable() {
             public void run() {
@@ -1344,7 +1344,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
         // a key event that will not change the TextView's text
         assertEquals("", mTextView.getText().toString());
         // The icon and error message will not be reset to null
-        assertNull(mTextView.getError());
+        assertEquals(errorText, mTextView.getError().toString());
 
         mActivity.runOnUiThread(new Runnable() {
             public void run() {
@@ -1810,7 +1810,8 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
 
         // getTypeface
         // getTypeface will be null if android:typeface is set to normal,
-        // and android:style is not set or is set to normal
+        // and android:style is not set or is set to normal, and
+        // android:fontFamily is not set
         assertNull(mTextView.getTypeface());
 
         mTextView.setTypeface(Typeface.DEFAULT);
@@ -2833,6 +2834,17 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
     }
 
     @UiThreadTest
+    public void testSetTextLong() {
+        final int MAX_COUNT = 1 << 21;
+        char[] longText = new char[MAX_COUNT];
+        for (int n = 0; n < MAX_COUNT; n++) {
+            longText[n] = 'm';
+        }
+        mTextView = findTextView(R.id.textview_text);
+        mTextView.setText(new String(longText));
+    }
+
+    @UiThreadTest
     public void testSetExtractedText() {
         mTextView = findTextView(R.id.textview_text);
         assertEquals(mActivity.getResources().getString(R.string.text_view_hello),
@@ -3282,7 +3294,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
 
     @UiThreadTest
     public void testResetTextAlignment() {
-        TextViewStubActivity activity = getActivity();
+        TextViewCtsActivity activity = getActivity();
 
         LinearLayout ll = (LinearLayout) activity.findViewById(R.id.layout_textviewtest);
         TextView tv = (TextView) activity.findViewById(R.id.textview_rtl);
@@ -3308,7 +3320,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
         final int RIGHT = 2;
         final int BOTTOM = 3;
 
-        TextViewStubActivity activity = getActivity();
+        TextViewCtsActivity activity = getActivity();
 
         // Case 1.1: left / right drawable defined in default LTR mode
         TextView tv = (TextView) activity.findViewById(R.id.textview_drawable_1_1);
@@ -3452,7 +3464,7 @@ public class TextViewTest extends ActivityInstrumentationTestCase2<TextViewStubA
         final int RIGHT = 2;
         final int BOTTOM = 3;
 
-        TextViewStubActivity activity = getActivity();
+        TextViewCtsActivity activity = getActivity();
 
         // Case 1.1: left / right drawable defined in default LTR mode
         TextView tv = (TextView) activity.findViewById(R.id.textview_drawable_1_1);

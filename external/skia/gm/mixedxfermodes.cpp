@@ -27,12 +27,12 @@ protected:
     }
 
     virtual SkISize onISize() SK_OVERRIDE {
-        return make_isize(790, 640);
+        return SkISize::Make(790, 640);
     }
 
     void drawShape(SkCanvas* canvas,
                    const SkPaint& paint,
-                   SkMWCRandom* random) {
+                   SkRandom* random) {
         static const SkRect kRect = SkRect::MakeXYWH(SkIntToScalar(-50), SkIntToScalar(-50),
                                                      SkIntToScalar(75), SkIntToScalar(105));
         int shape = random->nextULessThan(5);
@@ -84,25 +84,22 @@ protected:
                                                     0xFFCCCCCC,
                                                     0xFFFFFFFF };
             SkBitmap bitmap;
-            bitmap.setConfig(SkBitmap::kARGB_8888_Config, 2, 2, 2 * sizeof(uint32_t));
-            bitmap.allocPixels();
-            bitmap.lockPixels();
+            bitmap.allocN32Pixels(2, 2);
             memcpy(bitmap.getPixels(), kCheckerPixelData, sizeof(kCheckerPixelData));
-            bitmap.unlockPixels();
+            SkMatrix lm;
+            lm.setScale(SkIntToScalar(20), SkIntToScalar(20));
             fBG.reset(SkShader::CreateBitmapShader(bitmap,
                                                    SkShader::kRepeat_TileMode,
-                                                   SkShader::kRepeat_TileMode));
+                                                   SkShader::kRepeat_TileMode,
+                                                   &lm));
         }
-        SkMatrix lm;
-        lm.setScale(SkIntToScalar(20), SkIntToScalar(20));
-        fBG->setLocalMatrix(lm);
 
         SkPaint bgPaint;
         bgPaint.setShader(fBG.get());
         canvas->drawPaint(bgPaint);
         SkISize size = canvas->getDeviceSize();
         SkScalar maxScale = SkScalarSqrt((SkIntToScalar(size.fWidth * size.fHeight))) / 300;
-        SkMWCRandom random;
+        SkRandom random;
         for (int i = 0; i < kNumShapes; ++i) {
             SkScalar s = random.nextRangeScalar(SK_Scalar1 / 8, SK_Scalar1) * maxScale;
             SkScalar r = random.nextRangeScalar(0, SkIntToScalar(360));
@@ -123,6 +120,11 @@ protected:
             this->drawShape(canvas, p, &random);
             canvas->restore();
         }
+    }
+
+    virtual uint32_t onGetFlags() const {
+        // Skip PDF rasterization since rendering this PDF takes forever.
+        return kSkipPDFRasterization_Flag | kSkipTiled_Flag;
     }
 
 private:

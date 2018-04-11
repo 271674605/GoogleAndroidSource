@@ -134,41 +134,87 @@ float rsrGetDt(Context *rsc, const Script *sc) {
 //
 //////////////////////////////////////////////////////////////////////////////
 
-void rsrSetObject(const Context *rsc, ObjectBase **dst, ObjectBase * src) {
-    //ALOGE("rsiSetObject  %p,%p  %p", vdst, *vdst, vsrc);
+static void SetObjectRef(const Context *rsc, const ObjectBase *dst, const ObjectBase *src) {
+    //ALOGE("setObjectRef  %p,%p  %p", rsc, dst, src);
     if (src) {
         CHECK_OBJ(src);
         src->incSysRef();
     }
-    if (dst[0]) {
-        CHECK_OBJ(dst[0]);
-        dst[0]->decSysRef();
+    if (dst) {
+        CHECK_OBJ(dst);
+        dst->decSysRef();
     }
-    *dst = src;
 }
 
-void rsrClearObject(const Context *rsc, ObjectBase **dst) {
-    //ALOGE("rsiClearObject  %p,%p", vdst, *vdst);
-    if (dst[0]) {
-        CHECK_OBJ(dst[0]);
-        dst[0]->decSysRef();
+// Legacy, remove when drivers are updated
+void rsrSetObject(const Context *rsc, void *dst, ObjectBase *src) {
+    ObjectBase **odst = (ObjectBase **)dst;
+    //ALOGE("rsrSetObject (base) %p,%p  %p", dst, *odst, src);
+    SetObjectRef(rsc, odst[0], src);
+    if (src != NULL) {
+        src->callUpdateCacheObject(rsc, dst);
     }
-    *dst = NULL;
 }
 
-bool rsrIsObject(const Context *rsc, const ObjectBase *src) {
-    return src != NULL;
+void rsrSetObject(const Context *rsc, rs_object_base *dst, const ObjectBase *src) {
+    ObjectBase **odst = (ObjectBase **)dst;
+    //ALOGE("rsrSetObject (base) %p,%p  %p", dst, *odst, src);
+    SetObjectRef(rsc, odst[0], src);
+    if (src != NULL) {
+        src->callUpdateCacheObject(rsc, dst);
+    }
+}
+
+// Legacy, remove when drivers are updated
+void rsrClearObject(const Context *rsc, void *dst) {
+    ObjectBase **odst = (ObjectBase **)dst;
+    //ALOGE("rsrClearObject  %p,%p", odst, *odst);
+    if (odst[0]) {
+        CHECK_OBJ(odst[0]);
+        odst[0]->decSysRef();
+    }
+    *odst = NULL;
+}
+
+void rsrClearObject(const Context *rsc, rs_object_base *dst) {
+    //ALOGE("rsrClearObject  %p,%p", odst, *odst);
+    if (dst->p) {
+        CHECK_OBJ(dst->p);
+        dst->p->decSysRef();
+    }
+    dst->p = NULL;
+}
+
+// Legacy, remove when drivers are updated
+bool rsrIsObject(const Context *, ObjectBase* src) {
+    ObjectBase **osrc = (ObjectBase **)src;
+    return osrc != NULL;
+}
+
+bool rsrIsObject(const Context *rsc, rs_object_base o) {
+    return o.p != NULL;
 }
 
 
-uint32_t rsrToClient(Context *rsc, int cmdID, void *data, int len) {
+
+uint32_t rsrToClient(Context *rsc, int cmdID, const void *data, int len) {
     //ALOGE("SC_toClient %i %i %i", cmdID, len);
     return rsc->sendMessageToClient(data, RS_MESSAGE_TO_CLIENT_USER, cmdID, len, false);
 }
 
-uint32_t rsrToClientBlocking(Context *rsc, int cmdID, void *data, int len) {
+uint32_t rsrToClientBlocking(Context *rsc, int cmdID, const void *data, int len) {
     //ALOGE("SC_toClientBlocking %i %i", cmdID, len);
     return rsc->sendMessageToClient(data, RS_MESSAGE_TO_CLIENT_USER, cmdID, len, true);
+}
+
+// Keep these two routines (using non-const void pointers) so that we can
+// still use existing GPU drivers.
+uint32_t rsrToClient(Context *rsc, int cmdID, void *data, int len) {
+    return rsrToClient(rsc, cmdID, (const void *)data, len);
+}
+
+uint32_t rsrToClientBlocking(Context *rsc, int cmdID, void *data, int len) {
+    return rsrToClientBlocking(rsc, cmdID, (const void *)data, len);
 }
 
 void rsrAllocationIoSend(Context *rsc, Allocation *src) {
@@ -217,4 +263,3 @@ void rsrAllocationCopy2DRange(Context *rsc, Allocation *dstAlloc,
 
 }
 }
-

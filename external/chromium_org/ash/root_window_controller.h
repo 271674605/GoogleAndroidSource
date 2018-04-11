@@ -13,13 +13,14 @@
 #include "ash/system/user/login_status.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/ui_base_types.h"
 
 class SkBitmap;
 
 namespace aura {
 class EventFilter;
-class RootWindow;
 class Window;
 }
 
@@ -27,66 +28,92 @@ namespace gfx {
 class Point;
 }
 
-namespace views {
-class Widget;
-
-namespace corewm {
-class InputMethodEventFilter;
-class RootWindowEventFilter;
-}
-}
-
 namespace keyboard {
 class KeyboardController;
 }
 
+namespace ui {
+class EventHandler;
+}
+
+namespace views {
+class Widget;
+}
+
+namespace wm {
+class InputMethodEventFilter;
+class RootWindowEventFilter;
+class ScopedCaptureClient;
+}
+
 namespace ash {
-class StackingController;
-class ShelfWidget;
-class SystemTray;
-class ToplevelWindowEventHandler;
-
-namespace internal {
-
+class AshWindowTreeHost;
 class AlwaysOnTopController;
 class AnimatingDesktopController;
-class BootSplashScreen;
 class DesktopBackgroundWidgetController;
 class DockedWindowLayoutManager;
 class PanelLayoutManager;
 class RootWindowLayoutManager;
 class ScreenDimmer;
 class ShelfLayoutManager;
+class ShelfWidget;
+class StackingController;
 class StatusAreaWidget;
 class SystemBackgroundController;
 class SystemModalContainerLayoutManager;
+class SystemTray;
 class TouchHudDebug;
 class TouchHudProjection;
 class WorkspaceController;
 
+#if defined(OS_CHROMEOS)
+class BootSplashScreen;
+class AccessibilityObserver;
+#endif
+
 // This class maintains the per root window state for ash. This class
 // owns the root window and other dependent objects that should be
-// deleted upon the deletion of the root window.  The RootWindowController
-// for particular root window is stored as a property and can be obtained
-// using |GetRootWindowController(aura::RootWindow*)| function.
+// deleted upon the deletion of the root window. This object is
+// indirectly owned and deleted by |DisplayController|.
+// The RootWindowController for particular root window is stored in
+// its property (RootWindowSettings) and can be obtained using
+// |GetRootWindowController(aura::WindowEventDispatcher*)| function.
 class ASH_EXPORT RootWindowController : public ShellObserver {
  public:
-  explicit RootWindowController(aura::RootWindow* root_window);
-  virtual ~RootWindowController();
+  // Creates and Initialize the RootWindowController for primary display.
+  static void CreateForPrimaryDisplay(AshWindowTreeHost* host);
 
-  // Returns a RootWindowController that has a launcher for given
+  // Creates and Initialize the RootWindowController for secondary displays.
+  static void CreateForSecondaryDisplay(AshWindowTreeHost* host);
+
+  // Creates and Initialize the RootWindowController for virtual
+  // keyboard displays.
+  static void CreateForVirtualKeyboardDisplay(AshWindowTreeHost* host);
+
+  // Returns a RootWindowController that has a shelf for given
   // |window|. This returns the RootWindowController for the |window|'s
-  // root window when multiple launcher mode is enabled, or the primary
+  // root window when multiple shelf mode is enabled, or the primary
   // RootWindowController otherwise.
-  static RootWindowController* ForLauncher(aura::Window* window);
+  static RootWindowController* ForShelf(const aura::Window* window);
 
   // Returns a RootWindowController of the window's root window.
   static RootWindowController* ForWindow(const aura::Window* window);
 
-  // Returns the RootWindowController of the active root window.
-  static internal::RootWindowController* ForActiveRootWindow();
+  // Returns the RootWindowController of the target root window.
+  static RootWindowController* ForTargetRootWindow();
 
-  aura::RootWindow* root_window() { return root_window_.get(); }
+  // Returns container which contains a given |window|.
+  static aura::Window* GetContainerForWindow(aura::Window* window);
+
+  virtual ~RootWindowController();
+
+  AshWindowTreeHost* ash_host() { return ash_host_.get(); }
+  const AshWindowTreeHost* ash_host() const { return ash_host_.get(); }
+
+  aura::WindowTreeHost* GetHost();
+  const aura::WindowTreeHost* GetHost() const;
+  aura::Window* GetRootWindow();
+  const aura::Window* GetRootWindow() const;
 
   RootWindowLayoutManager* root_window_layout() { return root_window_layout_; }
 
@@ -137,7 +164,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   ShelfLayoutManager* GetShelfLayoutManager();
 
   // Returns the system tray on this root window. Note that
-  // calling this on the root window that doesn't have a launcher will
+  // calling this on the root window that doesn't have a shelf will
   // lead to a crash.
   SystemTray* GetSystemTray();
 
@@ -159,15 +186,11 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   aura::Window* GetContainer(int container_id);
   const aura::Window* GetContainer(int container_id) const;
 
-  // Initializes the RootWindowController. |first_run_after_boot| is
-  // set to true only for primary root window after boot.
-  void Init(bool first_run_after_boot);
+  // Show shelf view if it was created hidden (before session has started).
+  void ShowShelf();
 
-  // Show launcher view if it was created hidden (before session has started).
-  void ShowLauncher();
-
-  // Called when the launcher associated with this root window is created.
-  void OnLauncherCreated();
+  // Called when the shelf associated with this root window is created.
+  void OnShelfCreated();
 
   // Called when the login status changes after login (such as lock/unlock).
   // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
@@ -194,7 +217,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   void CloseChildWindows();
 
   // Moves child windows to |dest|.
-  void MoveWindowsTo(aura::RootWindow* dest);
+  void MoveWindowsTo(aura::Window* dest);
 
   // Force the shelf to query for it's current visibility state.
   void UpdateShelfVisibility();
@@ -202,12 +225,32 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // Initialize touch HUDs if necessary.
   void InitTouchHuds();
 
-  // Returns the window, if any, which is in fullscreen mode in the active
-  // workspace. Exposed here so clients of Ash don't need to know the details
-  // of workspace management.
-  const aura::Window* GetFullscreenWindow() const;
+  // Returns the topmost window or one of its transient parents, if any of them
+  // are in fullscreen mode.
+  const aura::Window* GetWindowForFullscreenMode() const;
+
+  // Activate virtual keyboard on current root window controller.
+  void ActivateKeyboard(keyboard::KeyboardController* keyboard_controller);
+
+  // Deactivate virtual keyboard on current root window controller.
+  void DeactivateKeyboard(keyboard::KeyboardController* keyboard_controller);
+
+  // Tests if a window is associated with the virtual keyboard.
+  bool IsVirtualKeyboardWindow(aura::Window* window);
 
  private:
+  explicit RootWindowController(AshWindowTreeHost* host);
+  enum RootWindowType {
+    PRIMARY,
+    SECONDARY,
+    VIRTUAL_KEYBOARD
+  };
+
+  // Initializes the RootWindowController.  |is_primary| is true if
+  // the controller is for primary display.  |first_run_after_boot| is
+  // set to true only for primary root window after boot.
+  void Init(RootWindowType root_window_type, bool first_run_after_boot);
+
   void InitLayoutManagers();
 
   // Initializes |system_background_| and possibly also |boot_splash_screen_|.
@@ -216,10 +259,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   // Creates each of the special window containers that holds windows of various
   // types in the shell UI.
-  void CreateContainersInRootWindow(aura::RootWindow* root_window);
-
-  // Initializes the virtual keyboard.
-  void InitKeyboard();
+  void CreateContainersInRootWindow(aura::Window* root_window);
 
   // Enables projection touch HUD.
   void EnableTouchHudProjection();
@@ -231,14 +271,12 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   virtual void OnLoginStateChanged(user::LoginStatus status) OVERRIDE;
   virtual void OnTouchHudProjectionToggled(bool enabled) OVERRIDE;
 
-  scoped_ptr<aura::RootWindow> root_window_;
+  scoped_ptr<AshWindowTreeHost> ash_host_;
   RootWindowLayoutManager* root_window_layout_;
 
   scoped_ptr<StackingController> stacking_controller_;
 
-  scoped_ptr<keyboard::KeyboardController> keyboard_controller_;
-
-  // The shelf for managing the launcher and the status widget.
+  // The shelf for managing the shelf and the status widget.
   scoped_ptr<ShelfWidget> shelf_;
 
   // An invisible/empty window used as a event target for
@@ -255,7 +293,13 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   PanelLayoutManager* panel_layout_manager_;
 
   scoped_ptr<SystemBackgroundController> system_background_;
+
+#if defined(OS_CHROMEOS)
   scoped_ptr<BootSplashScreen> boot_splash_screen_;
+  // Responsible for initializing TouchExplorationController when spoken
+  // feedback is on.
+  scoped_ptr<AccessibilityObserver> cros_accessibility_observer_;
+#endif
 
   scoped_ptr<ScreenDimmer> screen_dimmer_;
   scoped_ptr<WorkspaceController> workspace_controller_;
@@ -266,21 +310,21 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   TouchHudDebug* touch_hud_debug_;
   TouchHudProjection* touch_hud_projection_;
 
-  // We need to own event handlers for various containers.
-  scoped_ptr<ToplevelWindowEventHandler> default_container_handler_;
-  scoped_ptr<ToplevelWindowEventHandler> always_on_top_container_handler_;
-  scoped_ptr<ToplevelWindowEventHandler> modal_container_handler_;
-  scoped_ptr<ToplevelWindowEventHandler> lock_modal_container_handler_;
-  scoped_ptr<ToplevelWindowEventHandler> panel_container_handler_;
-  scoped_ptr<ToplevelWindowEventHandler> docked_container_handler_;
+  // Handles double clicks on the panel window header.
+  scoped_ptr<ui::EventHandler> panel_container_handler_;
 
   scoped_ptr<DesktopBackgroundWidgetController> wallpaper_controller_;
   scoped_ptr<AnimatingDesktopController> animating_wallpaper_controller_;
+  scoped_ptr< ::wm::ScopedCaptureClient> capture_client_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };
 
-}  // namespace internal
-}  // ash
 
-#endif  //  ASH_ROOT_WINDOW_CONTROLLER_H_
+// Gets the RootWindowController for |root_window|.
+ASH_EXPORT RootWindowController* GetRootWindowController(
+    const aura::Window* root_window);
+
+}  // namespace ash
+
+#endif  // ASH_ROOT_WINDOW_CONTROLLER_H_

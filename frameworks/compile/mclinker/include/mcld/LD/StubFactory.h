@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_LD_STUB_FACTORY_H
-#define MCLD_LD_STUB_FACTORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_STUBFACTORY_H
+#define MCLD_LD_STUBFACTORY_H
 
 #include <llvm/Support/DataTypes.h>
 #include <vector>

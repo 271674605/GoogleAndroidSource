@@ -27,6 +27,8 @@ import com.android.emailcommon.mail.PackedString;
 import com.android.emailcommon.mail.Part;
 import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.EmailContent;
+import com.android.emailcommon.provider.EmailContent.MessageColumns;
+import com.android.emailcommon.provider.EmailContent.SyncColumns;
 import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.provider.Policy;
 import com.android.emailcommon.provider.ProviderUnavailableException;
@@ -43,6 +45,7 @@ import com.google.common.annotations.VisibleForTesting;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -53,8 +56,8 @@ import java.util.Map;
 public class EmailSyncParser extends AbstractSyncParser {
     private static final String TAG = Eas.LOG_TAG;
 
-    private static final String WHERE_SERVER_ID_AND_MAILBOX_KEY = EmailContent.SyncColumns.SERVER_ID
-            + "=? and " + EmailContent.MessageColumns.MAILBOX_KEY + "=?";
+    private static final String WHERE_SERVER_ID_AND_MAILBOX_KEY = SyncColumns.SERVER_ID
+            + "=? and " + MessageColumns.MAILBOX_KEY + "=?";
 
     private final String mMailboxIdAsString;
 
@@ -68,7 +71,7 @@ public class EmailSyncParser extends AbstractSyncParser {
     private static final int MESSAGE_ID_SUBJECT_ID_COLUMN = 0;
     private static final int MESSAGE_ID_SUBJECT_SUBJECT_COLUMN = 1;
     private static final String[] MESSAGE_ID_SUBJECT_PROJECTION =
-            new String[] { EmailContent.Message.RECORD_ID, EmailContent.MessageColumns.SUBJECT };
+            new String[] { MessageColumns._ID, MessageColumns.SUBJECT };
 
     @VisibleForTesting
     static final int LAST_VERB_REPLY = 1;
@@ -102,6 +105,23 @@ public class EmailSyncParser extends AbstractSyncParser {
         }
     }
 
+    public EmailSyncParser(final Parser parser, final Context context,
+            final ContentResolver resolver, final Mailbox mailbox, final Account account)
+                    throws IOException {
+        super(parser, context, resolver, mailbox, account);
+        mMailboxIdAsString = Long.toString(mMailbox.mId);
+        if (mAccount.mPolicyKey != 0) {
+            mPolicy = Policy.restorePolicyWithId(mContext, mAccount.mPolicyKey);
+        } else {
+            mPolicy = null;
+        }
+    }
+
+    public EmailSyncParser(final Context context, final InputStream in, final Mailbox mailbox,
+            final Account account) throws IOException {
+        this(context, context.getContentResolver(), in, mailbox, account);
+    }
+
     public boolean fetchNeeded() {
         return mFetchNeeded;
     }
@@ -110,7 +130,7 @@ public class EmailSyncParser extends AbstractSyncParser {
         return mMessageUpdateStatus;
     }
 
-    public void addData (EmailContent.Message msg, int endingTag) throws IOException {
+    public void addData(EmailContent.Message msg, int endingTag) throws IOException {
         ArrayList<EmailContent.Attachment> atts = new ArrayList<EmailContent.Attachment>();
         boolean truncated = false;
 
@@ -118,26 +138,30 @@ public class EmailSyncParser extends AbstractSyncParser {
             switch (tag) {
                 case Tags.EMAIL_ATTACHMENTS:
                 case Tags.BASE_ATTACHMENTS: // BASE_ATTACHMENTS is used in EAS 12.0 and up
-                    attachmentsParser(atts, msg);
+                    attachmentsParser(atts, msg, tag);
                     break;
                 case Tags.EMAIL_TO:
-                    msg.mTo = Address.pack(Address.parse(getValue()));
+                    msg.mTo = Address.toString(Address.parse(getValue()));
                     break;
                 case Tags.EMAIL_FROM:
                     Address[] froms = Address.parse(getValue());
                     if (froms != null && froms.length > 0) {
                         msg.mDisplayName = froms[0].toFriendly();
                     }
-                    msg.mFrom = Address.pack(froms);
+                    msg.mFrom = Address.toString(froms);
                     break;
                 case Tags.EMAIL_CC:
-                    msg.mCc = Address.pack(Address.parse(getValue()));
+                    msg.mCc = Address.toString(Address.parse(getValue()));
                     break;
                 case Tags.EMAIL_REPLY_TO:
-                    msg.mReplyTo = Address.pack(Address.parse(getValue()));
+                    msg.mReplyTo = Address.toString(Address.parse(getValue()));
                     break;
                 case Tags.EMAIL_DATE_RECEIVED:
-                    msg.mTimeStamp = Utility.parseEmailDateTimeToMillis(getValue());
+                    try {
+                        msg.mTimeStamp = Utility.parseEmailDateTimeToMillis(getValue());
+                    } catch (ParseException e) {
+                        LogUtils.w(TAG, "Parse error for EMAIL_DATE_RECEIVED tag.", e);
+                    }
                     break;
                 case Tags.EMAIL_SUBJECT:
                     msg.mSubject = getValue();
@@ -231,8 +255,13 @@ public class EmailSyncParser extends AbstractSyncParser {
                             CalendarContract.Events.EVENT_LOCATION);
                     String dtstart = ps.get(MeetingInfo.MEETING_DTSTART);
                     if (!TextUtils.isEmpty(dtstart)) {
-                        long startTime = Utility.parseEmailDateTimeToMillis(dtstart);
-                        values.put(CalendarContract.Events.DTSTART, startTime);
+                        try {
+                            final long startTime =
+                                Utility.parseEmailDateTimeToMillis(dtstart);
+                            values.put(CalendarContract.Events.DTSTART, startTime);
+                        } catch (ParseException e) {
+                            LogUtils.w(TAG, "Parse error for MEETING_DTSTART tag.", e);
+                        }
                     }
                     putFromMeeting(ps, MeetingInfo.MEETING_ALL_DAY, values,
                             CalendarContract.Events.ALL_DAY);
@@ -323,7 +352,7 @@ public class EmailSyncParser extends AbstractSyncParser {
      * @return the parsed Message
      * @throws IOException
      */
-    private EmailContent.Message addParser() throws IOException, CommandStatusException {
+    private EmailContent.Message addParser(final int endingTag) throws IOException, CommandStatusException {
         EmailContent.Message msg = new EmailContent.Message();
         msg.mAccountKey = mAccount.mId;
         msg.mMailboxKey = mMailbox.mId;
@@ -331,7 +360,7 @@ public class EmailSyncParser extends AbstractSyncParser {
         // Default to 1 (success) in case we don't get this tag
         int status = 1;
 
-        while (nextTag(Tags.SYNC_ADD) != END) {
+        while (nextTag(endingTag) != END) {
             switch (tag) {
                 case Tags.SYNC_SERVER_ID:
                     msg.mServerId = getValue();
@@ -371,7 +400,7 @@ public class EmailSyncParser extends AbstractSyncParser {
     private void bodyParser(EmailContent.Message msg) throws IOException {
         String bodyType = Eas.BODY_PREFERENCE_TEXT;
         String body = "";
-        while (nextTag(Tags.EMAIL_BODY) != END) {
+        while (nextTag(Tags.BASE_BODY) != END) {
             switch (tag) {
                 case Tags.BASE_TYPE:
                     bodyType = getValue();
@@ -422,13 +451,13 @@ public class EmailSyncParser extends AbstractSyncParser {
         }
     }
 
-    private void attachmentsParser(ArrayList<EmailContent.Attachment> atts,
-            EmailContent.Message msg) throws IOException {
-        while (nextTag(Tags.EMAIL_ATTACHMENTS) != END) {
+    private void attachmentsParser(final ArrayList<EmailContent.Attachment> atts,
+            final EmailContent.Message msg, final int endingTag) throws IOException {
+        while (nextTag(endingTag) != END) {
             switch (tag) {
                 case Tags.EMAIL_ATTACHMENT:
                 case Tags.BASE_ATTACHMENT:  // BASE_ATTACHMENT is used in EAS 12.0 and up
-                    attachmentParser(atts, msg);
+                    attachmentParser(atts, msg, tag);
                     break;
                 default:
                     skipTag();
@@ -436,15 +465,15 @@ public class EmailSyncParser extends AbstractSyncParser {
         }
     }
 
-    private void attachmentParser(ArrayList<EmailContent.Attachment> atts,
-            EmailContent.Message msg) throws IOException {
+    private void attachmentParser(final ArrayList<EmailContent.Attachment> atts,
+            final EmailContent.Message msg, final int endingTag) throws IOException {
         String fileName = null;
         String length = null;
         String location = null;
         boolean isInline = false;
         String contentId = null;
 
-        while (nextTag(Tags.EMAIL_ATTACHMENT) != END) {
+        while (nextTag(endingTag) != END) {
             switch (tag) {
                 // We handle both EAS 2.5 and 12.0+ attachments here
                 case Tags.EMAIL_DISPLAY_NAME:
@@ -654,7 +683,7 @@ public class EmailSyncParser extends AbstractSyncParser {
     public void commandsParser() throws IOException, CommandStatusException {
         while (nextTag(Tags.SYNC_COMMANDS) != END) {
             if (tag == Tags.SYNC_ADD) {
-                newEmails.add(addParser());
+                newEmails.add(addParser(tag));
             } else if (tag == Tags.SYNC_DELETE || tag == Tags.SYNC_SOFT_DELETE) {
                 deleteParser(deletedEmails, tag);
             } else if (tag == Tags.SYNC_CHANGE) {
@@ -714,7 +743,7 @@ public class EmailSyncParser extends AbstractSyncParser {
                 messageUpdateParser(tag);
             } else if (tag == Tags.SYNC_FETCH) {
                 try {
-                    fetchedEmails.add(addParser());
+                    fetchedEmails.add(addParser(tag));
                 } catch (CommandStatusException sse) {
                     if (sse.mStatus == 8) {
                         // 8 = object not found; delete the message from EmailProvider
@@ -731,7 +760,7 @@ public class EmailSyncParser extends AbstractSyncParser {
 
     @Override
     protected void wipe() {
-        LogUtils.i(TAG, "Wiping mailbox " + mMailbox);
+        LogUtils.i(TAG, "Wiping mailbox %s", mMailbox);
         Mailbox.resyncMailbox(mContentResolver, new android.accounts.Account(mAccount.mEmailAddress,
                 Eas.EXCHANGE_ACCOUNT_MANAGER_TYPE), mMailbox.mId);
     }
@@ -807,11 +836,11 @@ public class EmailSyncParser extends AbstractSyncParser {
                 final String[] bindArgument = new String[] {id};
                 ops.add(ContentProviderOperation.newUpdate(EmailContent.Body.CONTENT_URI)
                         .withSelection(EmailContent.Body.SELECTION_BY_MESSAGE_KEY, bindArgument)
-                        .withValue(EmailContent.Body.TEXT_CONTENT, msg.mText)
+                        .withValue(EmailContent.BodyColumns.TEXT_CONTENT, msg.mText)
                         .build());
                 ops.add(ContentProviderOperation.newUpdate(EmailContent.Message.CONTENT_URI)
-                        .withSelection(EmailContent.RECORD_ID + "=?", bindArgument)
-                        .withValue(EmailContent.Message.FLAG_LOADED,
+                        .withSelection(MessageColumns._ID + "=?", bindArgument)
+                        .withValue(MessageColumns.FLAG_LOADED,
                                 EmailContent.Message.FLAG_LOADED_COMPLETE)
                         .build());
             }

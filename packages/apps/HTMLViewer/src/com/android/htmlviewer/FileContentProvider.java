@@ -30,13 +30,13 @@ import android.os.Process;
 
 /**
  * WebView does not support file: loading. This class wraps a file load
- * with a content provider. 
+ * with a content provider.
  * As HTMLViewer does not have internet access nor does it allow
  * Javascript to be run, it is safe to load file based HTML content.
 */
 public class FileContentProvider extends ContentProvider {
-    
-    public static final String BASE_URI = 
+
+    public static final String BASE_URI =
             "content://com.android.htmlfileprovider";
 
     @Override
@@ -45,7 +45,7 @@ public class FileContentProvider extends ContentProvider {
         String mimetype = uri.getQuery();
         return mimetype == null ? "" : mimetype;
     }
-    
+
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         // android:exported="false" is broken in older releases so we have to
@@ -57,10 +57,13 @@ public class FileContentProvider extends ContentProvider {
             throw new FileNotFoundException("Bad mode for " + uri + ": " + mode);
         }
         String filename = uri.getPath();
-        return ParcelFileDescriptor.open(new File(filename),
-            ParcelFileDescriptor.MODE_READ_ONLY);
+        File f = new File(filename);
+        if (f.isDirectory()) {
+            return null;
+        }
+        return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
     }
-    
+
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         throw new UnsupportedOperationException();

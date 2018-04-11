@@ -11,24 +11,6 @@
 
 namespace media {
 
-class MEDIA_EXPORT DataSourceHost {
- public:
-  // Set the total size of the media file.
-  virtual void SetTotalBytes(int64 total_bytes) = 0;
-
-  // Notify the host that byte range [start,end] has been buffered.
-  // TODO(fischman): remove this method when demuxing is push-based instead of
-  // pull-based.  http://crbug.com/131444
-  virtual void AddBufferedByteRange(int64 start, int64 end) = 0;
-
-  // Notify the host that time range [start,end] has been buffered.
-  virtual void AddBufferedTimeRange(base::TimeDelta start,
-                                    base::TimeDelta end) = 0;
-
- protected:
-  virtual ~DataSourceHost();
-};
-
 class MEDIA_EXPORT DataSource {
  public:
   typedef base::Callback<void(int64, int64)> StatusCallback;
@@ -38,16 +20,11 @@ class MEDIA_EXPORT DataSource {
   DataSource();
   virtual ~DataSource();
 
-  virtual void set_host(DataSourceHost* host);
-
   // Reads |size| bytes from |position| into |data|. And when the read is done
   // or failed, |read_cb| is called with the number of bytes read or
   // kReadError in case of error.
   virtual void Read(int64 position, int size, uint8* data,
                     const DataSource::ReadCB& read_cb) = 0;
-
-  // Notifies the DataSource of a change in the current playback rate.
-  virtual void SetPlaybackRate(float playback_rate);
 
   // Stops the DataSource. Once this is called all future Read() calls will
   // return an error.
@@ -65,12 +42,7 @@ class MEDIA_EXPORT DataSource {
   // Values of |bitrate| <= 0 are invalid and should be ignored.
   virtual void SetBitrate(int bitrate) = 0;
 
- protected:
-  DataSourceHost* host();
-
  private:
-  DataSourceHost* host_;
-
   DISALLOW_COPY_AND_ASSIGN(DataSource);
 };
 

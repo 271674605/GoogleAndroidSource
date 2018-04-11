@@ -46,8 +46,6 @@ class GPU_EXPORT GpuControlList {
   // Loads control list information from a json file.
   // If failed, the current GpuControlList is un-touched.
   bool LoadList(const std::string& json_context, OsFilter os_filter);
-  bool LoadList(const std::string& browser_version_string,
-                const std::string& json_context, OsFilter os_filter);
 
   // Collects system information and combines them with gpu_info and control
   // list information to decide which entries are applied to the current
@@ -72,7 +70,8 @@ class GPU_EXPORT GpuControlList {
   //    "crBugs": [1234],
   //    "webkitBugs": []
   // }
-  void GetReasons(base::ListValue* problem_list) const;
+  void GetReasons(
+      base::ListValue* problem_list, const std::string& tag) const;
 
   // Return the largest entry id.  This is used for histogramming.
   uint32 max_entry_id() const;
@@ -85,9 +84,6 @@ class GPU_EXPORT GpuControlList {
   // If yes, we should create a gl context and do a full gpu info collection.
   bool needs_more_info() const { return needs_more_info_; }
 
-  // Check if any entries contain unknown fields.  This is only for tests.
-  bool contains_unknown_fields() const { return contains_unknown_fields_; }
-
   // Returns the number of entries.  This is only for tests.
   size_t num_entries() const;
 
@@ -96,6 +92,13 @@ class GPU_EXPORT GpuControlList {
   // Register whether "all" is recognized as all features.
   void set_supports_feature_type_all(bool supported);
 
+  // Enables logging of control list decisions.
+  void enable_control_list_logging(
+      const std::string& control_list_logging_name) {
+    control_list_logging_enabled_ = true;
+    control_list_logging_name_ = control_list_logging_name;
+  }
+
  private:
   friend class GpuControlListEntryTest;
   friend class MachineModelInfoTest;
@@ -103,12 +106,6 @@ class GPU_EXPORT GpuControlList {
   friend class OsInfoTest;
   friend class StringInfoTest;
   friend class VersionInfoTest;
-
-  enum BrowserVersionSupport {
-    kSupported,
-    kUnsupported,
-    kMalformed
-  };
 
   enum NumericOp {
     kBetween,  // <= * <=
@@ -257,24 +254,15 @@ class GPU_EXPORT GpuControlList {
     int value2_;
   };
 
-  class GPU_EXPORT MachineModelInfo {
+  class GPU_EXPORT BoolInfo {
    public:
-    MachineModelInfo(const std::string& name_op,
-                     const std::string& name_value,
-                     const std::string& version_op,
-                     const std::string& version_string,
-                     const std::string& version_string2);
-    ~MachineModelInfo();
+    explicit BoolInfo(bool value);
 
-    // Determines if a given name/version is included in the MachineModelInfo.
-    bool Contains(const std::string& name, const std::string& version) const;
-
-    // Determines if the MachineModelInfo contains valid information.
-    bool IsValid() const;
+    // Determines if a given bool is included in the BoolInfo.
+    bool Contains(bool value) const;
 
    private:
-    scoped_ptr<StringInfo> name_info_;
-    scoped_ptr<VersionInfo> version_info_;
+    bool value_;
   };
 
   class GpuControlListEntry;
@@ -291,6 +279,11 @@ class GPU_EXPORT GpuControlList {
         const base::DictionaryValue* value, bool top_level,
         const FeatureMap& feature_map,
         bool supports_feature_type_all);
+
+    // Logs a control list match for this rule in the list identified by
+    // |control_list_logging_name|.
+    void LogControlListMatch(
+        const std::string& control_list_logging_name) const;
 
     // Determines if a given os/gc/machine_model/driver is included in the
     // Entry set.
@@ -320,14 +313,10 @@ class GPU_EXPORT GpuControlList {
     // Returns the blacklisted features in this entry.
     const std::set<int>& features() const;
 
-    // Returns true if an unknown field is encountered.
-    bool contains_unknown_fields() const {
-      return contains_unknown_fields_;
-    }
-    // Returns true if an unknown blacklist feature is encountered.
-    bool contains_unknown_features() const {
-      return contains_unknown_features_;
-    }
+    // Returns a list of blacklisted feature names in this entry.
+    void GetFeatureNames(base::ListValue* feature_names,
+                         const FeatureMap& feature_map,
+                         bool supports_feature_type_all) const;
 
    private:
     friend class base::RefCounted<GpuControlListEntry>;
@@ -335,14 +324,28 @@ class GPU_EXPORT GpuControlList {
     enum MultiGpuStyle {
       kMultiGpuStyleOptimus,
       kMultiGpuStyleAMDSwitchable,
+      kMultiGpuStyleAMDSwitchableIntegrated,
+      kMultiGpuStyleAMDSwitchableDiscrete,
       kMultiGpuStyleNone
     };
 
     enum MultiGpuCategory {
+      // This entry applies if this is the primary GPU on the system.
       kMultiGpuCategoryPrimary,
+      // This entry applies if this is a secondary GPU on the system.
       kMultiGpuCategorySecondary,
+      // This entry applies if this is the active GPU on the system.
+      kMultiGpuCategoryActive,
+      // This entry applies if this is any of the GPUs on the system.
       kMultiGpuCategoryAny,
       kMultiGpuCategoryNone
+    };
+
+    enum GLType {
+      kGLTypeGL,  // This is default on MacOSX, Linux, ChromeOS
+      kGLTypeGLES,  // This is default on Android
+      kGLTypeANGLE,  // This is default on Windows
+      kGLTypeNone
     };
 
     GpuControlListEntry();
@@ -365,6 +368,8 @@ class GPU_EXPORT GpuControlList {
 
     bool SetMultiGpuCategory(const std::string& multi_gpu_category_string);
 
+    bool SetGLType(const std::string& gl_type_string);
+
     bool SetDriverVendorInfo(const std::string& vendor_op,
                              const std::string& vendor_value);
 
@@ -376,6 +381,10 @@ class GPU_EXPORT GpuControlList {
     bool SetDriverDateInfo(const std::string& date_op,
                            const std::string& date_string,
                            const std::string& date_string2);
+
+    bool SetGLVersionInfo(const std::string& version_op,
+                          const std::string& version_string,
+                          const std::string& version_string2);
 
     bool SetGLVendorInfo(const std::string& vendor_op,
                          const std::string& vendor_value);
@@ -405,15 +414,17 @@ class GPU_EXPORT GpuControlList {
                             const std::string& float_string,
                             const std::string& float_string2);
 
-    bool SetMachineModelInfo(const std::string& name_op,
-                             const std::string& name_value,
-                             const std::string& version_op,
-                             const std::string& version_string,
-                             const std::string& version_string2);
+    bool AddMachineModelName(const std::string& model_name);
+
+    bool SetMachineModelVersionInfo(const std::string& version_op,
+                                    const std::string& version_string,
+                                    const std::string& version_string2);
 
     bool SetGpuCountInfo(const std::string& op,
                          const std::string& int_string,
                          const std::string& int_string2);
+
+    void SetDirectRenderingInfo(bool value);
 
     bool SetFeatures(const std::vector<std::string>& features,
                      const FeatureMap& feature_map,
@@ -421,16 +432,26 @@ class GPU_EXPORT GpuControlList {
 
     void AddException(ScopedGpuControlListEntry exception);
 
+    // Return true if GL_VERSION string does not fit the entry info
+    // on GL type and GL version.
+    bool GLVersionInfoMismatch(const std::string& gl_version) const;
+
     static MultiGpuStyle StringToMultiGpuStyle(const std::string& style);
 
     static MultiGpuCategory StringToMultiGpuCategory(
         const std::string& category);
+
+    static GLType StringToGLType(const std::string& gl_type);
 
     // map a feature_name to feature_id. If the string is not a registered
     // feature name, return false.
     static bool StringToFeature(const std::string& feature_name,
                                 int* feature_id,
                                 const FeatureMap& feature_map);
+
+    // Return the default GL type, depending on the OS.
+    // See GLType declaration.
+    static GLType GetDefaultGLType();
 
     uint32 id_;
     bool disabled_;
@@ -442,9 +463,11 @@ class GPU_EXPORT GpuControlList {
     std::vector<uint32> device_id_list_;
     MultiGpuStyle multi_gpu_style_;
     MultiGpuCategory multi_gpu_category_;
+    GLType gl_type_;
     scoped_ptr<StringInfo> driver_vendor_info_;
     scoped_ptr<VersionInfo> driver_version_info_;
     scoped_ptr<VersionInfo> driver_date_info_;
+    scoped_ptr<VersionInfo> gl_version_info_;
     scoped_ptr<StringInfo> gl_vendor_info_;
     scoped_ptr<StringInfo> gl_renderer_info_;
     scoped_ptr<StringInfo> gl_extensions_info_;
@@ -453,12 +476,12 @@ class GPU_EXPORT GpuControlList {
     scoped_ptr<FloatInfo> perf_graphics_info_;
     scoped_ptr<FloatInfo> perf_gaming_info_;
     scoped_ptr<FloatInfo> perf_overall_info_;
-    scoped_ptr<MachineModelInfo> machine_model_info_;
+    std::vector<std::string> machine_model_name_list_;
+    scoped_ptr<VersionInfo> machine_model_version_info_;
     scoped_ptr<IntInfo> gpu_count_info_;
+    scoped_ptr<BoolInfo> direct_rendering_info_;
     std::set<int> features_;
     std::vector<ScopedGpuControlListEntry> exceptions_;
-    bool contains_unknown_fields_;
-    bool contains_unknown_features_;
   };
 
   // Gets the current OS type.
@@ -468,18 +491,10 @@ class GPU_EXPORT GpuControlList {
 
   void Clear();
 
-  // Check if the entry is supported by the current version of browser.
-  // By default, if there is no browser version information in the entry,
-  // return kSupported;
-  BrowserVersionSupport IsEntrySupportedByCurrentBrowserVersion(
-      const base::DictionaryValue* value);
-
   static NumericOp StringToNumericOp(const std::string& op);
 
   std::string version_;
   std::vector<ScopedGpuControlListEntry> entries_;
-
-  std::string browser_version_;
 
   // This records all the blacklist entries that are appliable to the current
   // user machine.  It is updated everytime MakeDecision() is called and is
@@ -488,13 +503,14 @@ class GPU_EXPORT GpuControlList {
 
   uint32 max_entry_id_;
 
-  bool contains_unknown_fields_;
-
   bool needs_more_info_;
 
   // The features a GpuControlList recognizes and handles.
   FeatureMap feature_map_;
   bool supports_feature_type_all_;
+
+  bool control_list_logging_enabled_;
+  std::string control_list_logging_name_;
 };
 
 }  // namespace gpu

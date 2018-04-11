@@ -22,33 +22,30 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.Cursor;
-import android.graphics.Bitmap;
+import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.LoaderManager;
 import android.support.v4.content.Loader;
-import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-
 
 import com.android.ex.photo.Intents;
 import com.android.ex.photo.PhotoViewCallbacks;
 import com.android.ex.photo.PhotoViewCallbacks.CursorChangedListener;
 import com.android.ex.photo.PhotoViewCallbacks.OnScreenListener;
+import com.android.ex.photo.PhotoViewController.ActivityInterface;
 import com.android.ex.photo.R;
 import com.android.ex.photo.adapters.PhotoPagerAdapter;
-import com.android.ex.photo.loaders.PhotoBitmapLoaderInterface.BitmapResult;
 import com.android.ex.photo.loaders.PhotoBitmapLoaderInterface;
-import com.android.ex.photo.util.ImageUtils;
+import com.android.ex.photo.loaders.PhotoBitmapLoaderInterface.BitmapResult;
 import com.android.ex.photo.views.PhotoView;
 import com.android.ex.photo.views.ProgressBarWrapper;
 
@@ -91,9 +88,6 @@ public class PhotoViewFragment extends Fragment implements
     protected final static String ARG_INTENT = "arg-intent";
     protected final static String ARG_POSITION = "arg-position";
     protected final static String ARG_SHOW_SPINNER = "arg-show-spinner";
-
-    /** The size of the photo */
-    public static Integer sPhotoSize;
 
     /** The URL of a photo to display */
     protected String mResolvedPhotoUri;
@@ -149,19 +143,24 @@ public class PhotoViewFragment extends Fragment implements
      */
     public static PhotoViewFragment newInstance(
             Intent intent, int position, boolean onlyShowSpinner) {
+        final PhotoViewFragment f = new PhotoViewFragment();
+        initializeArguments(intent, position, onlyShowSpinner, f);
+        return f;
+    }
+
+    public static void initializeArguments(
+            Intent intent, int position, boolean onlyShowSpinner, PhotoViewFragment f) {
         final Bundle b = new Bundle();
         b.putParcelable(ARG_INTENT, intent);
         b.putInt(ARG_POSITION, position);
         b.putBoolean(ARG_SHOW_SPINNER, onlyShowSpinner);
-        final PhotoViewFragment f = new PhotoViewFragment();
         f.setArguments(b);
-        return f;
     }
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        mCallback = (PhotoViewCallbacks) getActivity();
+        mCallback = getCallbacks();
         if (mCallback == null) {
             throw new IllegalArgumentException(
                     "Activity must be a derived class of PhotoViewActivity");
@@ -174,6 +173,10 @@ public class PhotoViewFragment extends Fragment implements
         setViewVisibility();
     }
 
+    protected PhotoViewCallbacks getCallbacks() {
+        return ((ActivityInterface) getActivity()).getController();
+    }
+
     @Override
     public void onDetach() {
         mCallback = null;
@@ -183,26 +186,6 @@ public class PhotoViewFragment extends Fragment implements
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (sPhotoSize == null) {
-            final DisplayMetrics metrics = new DisplayMetrics();
-            final WindowManager wm =
-                    (WindowManager) getActivity().getSystemService(Context.WINDOW_SERVICE);
-            final ImageUtils.ImageSize imageSize = ImageUtils.sUseImageSize;
-            wm.getDefaultDisplay().getMetrics(metrics);
-            switch (imageSize) {
-                case EXTRA_SMALL:
-                    // Use a photo that's 80% of the "small" size
-                    sPhotoSize = (Math.min(metrics.heightPixels, metrics.widthPixels) * 800) / 1000;
-                    break;
-                case SMALL:
-                    // Fall through.
-                case NORMAL:
-                    // Fall through.
-                default:
-                    sPhotoSize = Math.min(metrics.heightPixels, metrics.widthPixels);
-                    break;
-            }
-        }
 
         final Bundle bundle = getArguments();
         if (bundle == null) {
@@ -353,11 +336,14 @@ public class PhotoViewFragment extends Fragment implements
 
     @Override
     public void onLoadFinished(Loader<BitmapResult> loader, BitmapResult result) {
-        Bitmap data = result.bitmap;
         // If we don't have a view, the fragment has been paused. We'll get the cursor again later.
-        if (getView() == null) {
+        // If we're not added, the fragment has detached during the loading process. We no longer
+        // need the result.
+        if (getView() == null || !isAdded()) {
             return;
         }
+
+        final Drawable data = result.getDrawable(getResources());
 
         final int id = loader.getId();
         switch (id) {
@@ -377,7 +363,7 @@ public class PhotoViewFragment extends Fragment implements
                         mThumbnailShown = false;
                     } else {
                         // show preview
-                        mPhotoPreviewImage.setImageBitmap(data);
+                        mPhotoPreviewImage.setImageDrawable(data);
                         mThumbnailShown = true;
                     }
                     mPhotoPreviewImage.setVisibility(View.VISIBLE);
@@ -407,13 +393,13 @@ public class PhotoViewFragment extends Fragment implements
     }
 
     private void displayPhoto(BitmapResult result) {
-        Bitmap data = result.bitmap;
         if (result.status == BitmapResult.STATUS_EXCEPTION) {
             mProgressBarNeeded = false;
             mEmptyText.setText(R.string.failed);
             mEmptyText.setVisibility(View.VISIBLE);
             mCallback.onFragmentPhotoLoadComplete(this, false /* success */);
         } else {
+            final Drawable data = result.getDrawable(getResources());
             bindPhoto(data);
             mCallback.onFragmentPhotoLoadComplete(this, true /* success */);
         }
@@ -422,15 +408,19 @@ public class PhotoViewFragment extends Fragment implements
     /**
      * Binds an image to the photo view.
      */
-    private void bindPhoto(Bitmap bitmap) {
-        if (bitmap != null) {
+    private void bindPhoto(Drawable drawable) {
+        if (drawable != null) {
             if (mPhotoView != null) {
-                mPhotoView.bindPhoto(bitmap);
+                mPhotoView.bindDrawable(drawable);
             }
             enableImageTransforms(true);
             mPhotoPreviewAndProgress.setVisibility(View.GONE);
             mProgressBarNeeded = false;
         }
+    }
+
+    public Drawable getDrawable() {
+        return (mPhotoView != null ? mPhotoView.getDrawable() : null);
     }
 
     /**
@@ -463,6 +453,11 @@ public class PhotoViewFragment extends Fragment implements
     @Override
     public void onFullScreenChanged(boolean fullScreen) {
         setViewVisibility();
+    }
+
+    @Override
+    public void onViewUpNext() {
+        resetViews();
     }
 
     @Override

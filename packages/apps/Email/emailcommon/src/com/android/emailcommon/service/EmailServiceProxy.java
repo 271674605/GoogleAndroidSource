@@ -22,11 +22,9 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 
-import com.android.emailcommon.Api;
 import com.android.emailcommon.Device;
 import com.android.emailcommon.TempDirectory;
 import com.android.emailcommon.mail.MessagingException;
-import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.HostAuth;
 import com.android.emailcommon.provider.Policy;
 import com.android.mail.utils.LogUtils;
@@ -35,7 +33,7 @@ import java.io.IOException;
 
 /**
  * The EmailServiceProxy class provides a simple interface for the UI to call into the various
- * EmailService classes (e.g. ExchangeService for EAS).  It wraps the service connect/disconnect
+ * EmailService classes (e.g. EasService for EAS).  It wraps the service connect/disconnect
  * process so that the caller need not be concerned with it.
  *
  * Use the class like this:
@@ -103,11 +101,6 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
         return isRemote;
     }
 
-    @Override
-    public int getApiLevel() {
-        return Api.LEVEL;
-    }
-
     /**
      * Request an attachment to be loaded; the service MUST give higher priority to
      * non-background loading.  The service MUST use the loadAttachmentStatus callback when
@@ -115,19 +108,20 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
      * possible.
      *
      * @param cb The {@link IEmailServiceCallback} to use for this operation.
+     * @param accountId the id of the account in question
      * @param attachmentId the id of the attachment record
      * @param background whether or not this request corresponds to a background action (i.e.
      * prefetch) vs a foreground action (user request)
      */
     @Override
-    public void loadAttachment(final IEmailServiceCallback cb, final long attachmentId,
-            final boolean background)
+    public void loadAttachment(final IEmailServiceCallback cb, final long accountId,
+            final long attachmentId, final boolean background)
             throws RemoteException {
         setTask(new ProxyTask() {
             @Override
             public void run() throws RemoteException {
                 try {
-                    mService.loadAttachment(cb, attachmentId, background);
+                    mService.loadAttachment(cb, accountId, attachmentId, background);
                 } catch (RemoteException e) {
                     try {
                         // Try to send a callback (if set)
@@ -143,60 +137,21 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
     }
 
     /**
-     * Request the sync of a mailbox; the service MUST send the syncMailboxStatus callback
-     * indicating "starting" and "finished" (or error), regardless of whether the mailbox is
-     * actually syncable.
-     * TODO: Remove this from IEmailService in favor of ContentResolver.requestSync.
-     *
-     * @param mailboxId the id of the mailbox record
-     * @param userRequest whether or not the user specifically asked for the sync
-     * @param deltaMessageCount amount by which to change the number of messages synced.
-     */
-    @Deprecated
-    @Override
-    public void startSync(final long mailboxId, final boolean userRequest,
-            final int deltaMessageCount) throws RemoteException {
-        setTask(new ProxyTask() {
-            @Override
-            public void run() throws RemoteException {
-                mService.startSync(mailboxId, userRequest, deltaMessageCount);
-            }
-        }, "startSync");
-    }
-
-    /**
-     * Request the immediate termination of a mailbox sync. Although the service is not required to
-     * acknowledge this request, it MUST send a "finished" (or error) syncMailboxStatus callback if
-     * the sync was started via the startSync service call.
-     *
-     * @param mailboxId the id of the mailbox record
-     */
-    @Override
-    public void stopSync(final long mailboxId) throws RemoteException {
-        setTask(new ProxyTask() {
-            @Override
-            public void run() throws RemoteException {
-                mService.stopSync(mailboxId);
-            }
-        }, "stopSync");
-    }
-
-    /**
      * Validate a user account, given a protocol, host address, port, ssl status, and credentials.
      * The result of this call is returned in a Bundle which MUST include a result code and MAY
      * include a PolicySet that is required by the account. A successful validation implies a host
      * address that serves the specified protocol and credentials sufficient to be authorized
      * by the server to do so.
      *
-     * @param hostAuth the hostauth object to validate
+     * @param hostAuthCom the hostAuthCom object to validate
      * @return a Bundle as described above
      */
     @Override
-    public Bundle validate(final HostAuth hostAuth) throws RemoteException {
+    public Bundle validate(final HostAuthCompat hostAuthCom) throws RemoteException {
         setTask(new ProxyTask() {
             @Override
             public void run() throws RemoteException{
-                mReturn = mService.validate(hostAuth);
+                mReturn = mService.validate(hostAuthCom);
             }
         }, "validate");
         waitForCompletion();
@@ -276,23 +231,6 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
     }
 
     /**
-     * Alert the sync adapter that the account's host information has (or may have) changed; the
-     * service MUST stop all in-process or pending syncs, clear error states related to the
-     * account and its mailboxes, and restart necessary sync adapters (e.g. pushed mailboxes)
-     *
-     * @param accountId the id of the account whose host information has changed
-     */
-    @Override
-    public void hostChanged(final long accountId) throws RemoteException {
-        setTask(new ProxyTask() {
-            @Override
-            public void run() throws RemoteException {
-                mService.hostChanged(accountId);
-            }
-        }, "hostChanged");
-    }
-
-    /**
      * Send a meeting response for the specified message
      *
      * @param messageId the id of the message containing the meeting request
@@ -310,56 +248,6 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
     }
 
     /**
-     * Request the sync adapter to load a complete message
-     *
-     * @param messageId the id of the message to be loaded
-     */
-    @Override
-    public void loadMore(final long messageId) throws RemoteException {
-        setTask(new ProxyTask() {
-            @Override
-            public void run() throws RemoteException {
-                mService.loadMore(messageId);
-            }
-        }, "startSync");
-    }
-
-    /**
-     * Not yet used
-     *
-     * @param accountId the account in which the folder is to be created
-     * @param name the name of the folder to be created
-    */
-    @Override
-    public boolean createFolder(long accountId, String name) throws RemoteException {
-        return false;
-    }
-
-    /**
-     * Not yet used
-     *
-     * @param accountId the account in which the folder resides
-     * @param name the name of the folder to be deleted
-     */
-    @Override
-    public boolean deleteFolder(long accountId, String name) throws RemoteException {
-        return false;
-    }
-
-    /**
-     * Not yet used
-     *
-     * @param accountId the account in which the folder resides
-     * @param oldName the name of the existing folder
-     * @param newName the new name for the folder
-     */
-    @Override
-    public boolean renameFolder(long accountId, String oldName, String newName)
-            throws RemoteException {
-        return false;
-    }
-
-    /**
      * Request the service to delete the account's PIM (personal information management) data. This
      * data includes any data that is 1) associated with the account and 2) created/stored by the
      * service or its sync adapters and 3) not stored in the EmailProvider database (e.g. contact
@@ -368,13 +256,17 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
      * @param emailAddress the email address for the account whose data should be deleted
      */
     @Override
-    public void deleteAccountPIMData(final String emailAddress) throws RemoteException {
+    public void deleteExternalAccountPIMData(final String emailAddress) throws RemoteException {
         setTask(new ProxyTask() {
             @Override
             public void run() throws RemoteException {
-                mService.deleteAccountPIMData(emailAddress);
+                mService.deleteExternalAccountPIMData(emailAddress);
             }
         }, "deleteAccountPIMData");
+        // This can be called when deleting accounts. After making this call, the caller will
+        // ask for account reconciliation, which will kill the processes. We wait for completion
+        // to avoid the race.
+        waitForCompletion();
     }
 
     /**
@@ -404,14 +296,14 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
         if (mReturn == null) {
             return 0;
         } else {
-            return (Integer)mReturn;
+            return (Integer) mReturn;
         }
     }
 
     /**
      * Request the service to send mail in the specified account's Outbox
      *
-     * @param accountId the account whose outgoing mail should be sent
+     * @param accountId the account whose outgoing mail should be sent.
      */
     @Override
     public void sendMail(final long accountId) throws RemoteException {
@@ -423,40 +315,58 @@ public class EmailServiceProxy extends ServiceProxy implements IEmailService {
         }, "sendMail");
     }
 
+    /**
+     * Request the service to refresh its push notification status (e.g. to start or stop receiving
+     * them, or to change which folders we want notifications for).
+     * @param accountId The account whose push settings to modify.
+     */
     @Override
-    public int getCapabilities(final Account acct) throws RemoteException {
+    public void pushModify(final long accountId) throws RemoteException {
         setTask(new ProxyTask() {
             @Override
             public void run() throws RemoteException{
-                mReturn = mService.getCapabilities(acct);
+                mService.pushModify(accountId);
             }
-        }, "getCapabilities");
+        }, "pushModify");
+    }
+
+    @Override
+    public int sync(final long accountId, final Bundle syncExtras) {
+        setTask(new ProxyTask() {
+            @Override
+            public void run() throws RemoteException{
+                mReturn = mService.sync(accountId, syncExtras);
+            }
+        }, "sync");
         waitForCompletion();
         if (mReturn == null) {
-            return 0;
+            // This occurs if sync times out.
+            // TODO: Sync may take a long time, maybe we should extend the timeout here.
+            return EmailServiceStatus.IO_ERROR;
         } else {
             return (Integer)mReturn;
         }
     }
-    /**
-     * Request that the account be updated for this service; this call is synchronous
-     *
-     * @param emailAddress the email address of the account to be updated
-     */
-    @Override
-    public void serviceUpdated(final String emailAddress) throws RemoteException {
-        setTask(new ProxyTask() {
-            @Override
-            public void run() throws RemoteException{
-                mService.serviceUpdated(emailAddress);
-            }
-        }, "settingsUpdate");
-        waitForCompletion();
-    }
-
 
     @Override
     public IBinder asBinder() {
         return null;
+    }
+
+    public int getApiVersion() {
+        setTask(new ProxyTask() {
+            @Override
+            public void run() throws RemoteException{
+                mReturn = mService.getApiVersion();
+            }
+        }, "getApiVersion");
+        waitForCompletion();
+        if (mReturn == null) {
+            // This occurs if there is a timeout or remote exception. Is not expected to happen.
+            LogUtils.wtf(TAG, "failed to get api version");
+            return -1;
+        } else {
+            return (Integer) mReturn;
+        }
     }
 }

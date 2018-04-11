@@ -5,12 +5,16 @@
 #ifndef WEBKIT_BROWSER_FILEAPI_SANDBOX_ORIGIN_DATABASE_H_
 #define WEBKIT_BROWSER_FILEAPI_SANDBOX_ORIGIN_DATABASE_H_
 
+#include <string>
+#include <vector>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "webkit/browser/fileapi/sandbox_origin_database_interface.h"
 
 namespace leveldb {
 class DB;
+class Env;
 class Status;
 }
 
@@ -27,7 +31,8 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxOriginDatabase
  public:
   // Only one instance of SandboxOriginDatabase should exist for a given path
   // at a given time.
-  explicit SandboxOriginDatabase(const base::FilePath& file_system_directory);
+  SandboxOriginDatabase(const base::FilePath& file_system_directory,
+                        leveldb::Env* env_override);
   virtual ~SandboxOriginDatabase();
 
   // SandboxOriginDatabaseInterface overrides.
@@ -61,6 +66,7 @@ class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE SandboxOriginDatabase
   bool GetLastPathNumber(int* number);
 
   base::FilePath file_system_directory_;
+  leveldb::Env* env_override_;
   scoped_ptr<leveldb::DB> db_;
   base::Time last_reported_time_;
   DISALLOW_COPY_AND_ASSIGN(SandboxOriginDatabase);

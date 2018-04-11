@@ -23,13 +23,13 @@ import android.content.Context;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 
 import com.android.documentsui.model.DocumentInfo;
 
@@ -42,6 +42,7 @@ public class SaveFragment extends Fragment {
     private DocumentInfo mReplaceTarget;
     private EditText mDisplayName;
     private Button mSave;
+    private ProgressBar mProgress;
     private boolean mIgnoreNextEdit;
 
     private static final String EXTRA_MIME_TYPE = "mime_type";
@@ -83,6 +84,8 @@ public class SaveFragment extends Fragment {
         mSave.setOnClickListener(mSaveListener);
         mSave.setEnabled(false);
 
+        mProgress = (ProgressBar) view.findViewById(android.R.id.progress);
+
         return view;
     }
 
@@ -92,7 +95,6 @@ public class SaveFragment extends Fragment {
             if (mIgnoreNextEdit) {
                 mIgnoreNextEdit = false;
             } else {
-                Log.d(TAG, "onTextChanged!");
                 mReplaceTarget = null;
             }
         }
@@ -139,5 +141,10 @@ public class SaveFragment extends Fragment {
 
     public void setSaveEnabled(boolean enabled) {
         mSave.setEnabled(enabled);
+    }
+
+    public void setPending(boolean pending) {
+        mSave.setVisibility(pending ? View.INVISIBLE : View.VISIBLE);
+        mProgress.setVisibility(pending ? View.VISIBLE : View.GONE);
     }
 }

@@ -20,7 +20,6 @@ import static com.android.dialer.CallDetailActivity.EXTRA_VOICEMAIL_START_PLAYBA
 import static com.android.dialer.CallDetailActivity.EXTRA_VOICEMAIL_URI;
 
 import android.app.Activity;
-import android.app.Fragment;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -43,6 +42,7 @@ import com.android.common.io.MoreCloseables;
 import com.android.dialer.ProximitySensorAware;
 import com.android.dialer.R;
 import com.android.dialer.util.AsyncTaskExecutors;
+import com.android.dialerbind.analytics.AnalyticsFragment;
 import com.android.ex.variablespeed.MediaPlayerProxy;
 import com.android.ex.variablespeed.VariableSpeed;
 import com.google.common.base.Preconditions;
@@ -66,7 +66,7 @@ import javax.annotation.concurrent.NotThreadSafe;
  * methods on this class are expected to come from the main ui thread.
  */
 @NotThreadSafe
-public class VoicemailPlaybackFragment extends Fragment {
+public class VoicemailPlaybackFragment extends AnalyticsFragment {
     private static final String TAG = "VoicemailPlayback";
     private static final int NUMBER_OF_THREADS_IN_POOL = 2;
     private static final String[] HAS_CONTENT_PROJECTION = new String[] {
@@ -74,7 +74,9 @@ public class VoicemailPlaybackFragment extends Fragment {
     };
 
     private VoicemailPlaybackPresenter mPresenter;
-    private ScheduledExecutorService mScheduledExecutorService;
+    private static int mMediaPlayerRefCount = 0;
+    private static MediaPlayerProxy mMediaPlayerInstance;
+    private static ScheduledExecutorService mScheduledExecutorService;
     private View mPlaybackLayout;
 
     @Override
@@ -87,7 +89,6 @@ public class VoicemailPlaybackFragment extends Fragment {
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        mScheduledExecutorService = createScheduledExecutorService();
         Bundle arguments = getArguments();
         Preconditions.checkNotNull(arguments, "fragment must be started with arguments");
         Uri voicemailUri = arguments.getParcelable(EXTRA_VOICEMAIL_URI);
@@ -99,8 +100,8 @@ public class VoicemailPlaybackFragment extends Fragment {
                 powerManager.newWakeLock(
                         PowerManager.SCREEN_DIM_WAKE_LOCK, getClass().getSimpleName());
         mPresenter = new VoicemailPlaybackPresenter(createPlaybackViewImpl(),
-                createMediaPlayer(mScheduledExecutorService), voicemailUri,
-                mScheduledExecutorService, startPlayback,
+                getMediaPlayerInstance(), voicemailUri,
+                getScheduledExecutorServiceInstance(), startPlayback,
                 AsyncTaskExecutors.createAsyncTaskExecutor(), wakeLock);
         mPresenter.onCreate(savedInstanceState);
     }
@@ -113,8 +114,8 @@ public class VoicemailPlaybackFragment extends Fragment {
 
     @Override
     public void onDestroy() {
+        shutdownMediaPlayer();
         mPresenter.onDestroy();
-        mScheduledExecutorService.shutdown();
         super.onDestroy();
     }
 
@@ -129,12 +130,36 @@ public class VoicemailPlaybackFragment extends Fragment {
                 mPlaybackLayout);
     }
 
-    private MediaPlayerProxy createMediaPlayer(ExecutorService executorService) {
-        return VariableSpeed.createVariableSpeed(executorService);
+    private static synchronized MediaPlayerProxy getMediaPlayerInstance() {
+        ++mMediaPlayerRefCount;
+        if (mMediaPlayerInstance == null) {
+            mMediaPlayerInstance = VariableSpeed.createVariableSpeed(
+                    getScheduledExecutorServiceInstance());
+        }
+        return mMediaPlayerInstance;
     }
 
-    private ScheduledExecutorService createScheduledExecutorService() {
-        return Executors.newScheduledThreadPool(NUMBER_OF_THREADS_IN_POOL);
+    private static synchronized ScheduledExecutorService getScheduledExecutorServiceInstance() {
+        if (mScheduledExecutorService == null) {
+            mScheduledExecutorService = Executors.newScheduledThreadPool(
+                    NUMBER_OF_THREADS_IN_POOL);
+        }
+        return mScheduledExecutorService;
+    }
+
+    private static synchronized void shutdownMediaPlayer() {
+        --mMediaPlayerRefCount;
+        if (mMediaPlayerRefCount > 0) {
+            return;
+        }
+        if (mScheduledExecutorService != null) {
+            mScheduledExecutorService.shutdown();
+            mScheduledExecutorService = null;
+        }
+        if (mMediaPlayerInstance != null) {
+            mMediaPlayerInstance.release();
+            mMediaPlayerInstance = null;
+        }
     }
 
     /**
@@ -398,8 +423,14 @@ public class VoicemailPlaybackFragment extends Fragment {
             getAudioManager().setSpeakerphoneOn(on);
             if (on) {
                 mPlaybackSpeakerphone.setImageResource(R.drawable.ic_speakerphone_on);
+                // Speaker is now on, tapping button will turn it off.
+                mPlaybackSpeakerphone.setContentDescription(
+                        mApplicationContext.getString(R.string.voicemail_speaker_off));
             } else {
                 mPlaybackSpeakerphone.setImageResource(R.drawable.ic_speakerphone_off);
+                // Speaker is now off, tapping button will turn it on.
+                mPlaybackSpeakerphone.setContentDescription(
+                        mApplicationContext.getString(R.string.voicemail_speaker_on));
             }
         }
 

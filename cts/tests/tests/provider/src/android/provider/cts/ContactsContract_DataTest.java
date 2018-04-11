@@ -26,10 +26,12 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.SystemClock;
 import android.provider.ContactsContract;
+import android.provider.ContactsContract.CommonDataKinds.Callable;
 import android.provider.ContactsContract.CommonDataKinds.Contactables;
 import android.provider.ContactsContract.CommonDataKinds.Email;
 import android.provider.ContactsContract.CommonDataKinds.Organization;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
+import android.provider.ContactsContract.CommonDataKinds.SipAddress;
 import android.provider.ContactsContract.CommonDataKinds.StructuredName;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Data;
@@ -48,6 +50,60 @@ import java.util.ArrayList;
 public class ContactsContract_DataTest extends InstrumentationTestCase {
     private ContentResolver mResolver;
     private ContactsContract_TestDataBuilder mBuilder;
+
+    private static ContentValues[] sContentValues = new ContentValues[7];
+    static {
+        ContentValues cv1 = new ContentValues();
+        cv1.put(Contacts.DISPLAY_NAME, "Hot Tamale");
+        cv1.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
+        cv1.put(Email.DATA, "tamale@acme.com");
+        cv1.put(Email.TYPE, Email.TYPE_HOME);
+        sContentValues[0] = cv1;
+
+        ContentValues cv2 = new ContentValues();
+        cv2.put(Contacts.DISPLAY_NAME, "Hot Tamale");
+        cv2.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
+        cv2.put(Phone.DATA, "510-123-5769");
+        cv2.put(Phone.TYPE, Phone.TYPE_HOME);
+        sContentValues[1] = cv2;
+
+        ContentValues cv3 = new ContentValues();
+        cv3.put(Contacts.DISPLAY_NAME, "Hot Tamale");
+        cv3.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
+        cv3.put(Email.DATA, "hot@google.com");
+        cv3.put(Email.TYPE, Email.TYPE_WORK);
+        sContentValues[2] = cv3;
+
+        ContentValues cv4 = new ContentValues();
+        cv4.put(Contacts.DISPLAY_NAME, "Cold Tamago");
+        cv4.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
+        cv4.put(Email.DATA, "eggs@farmers.org");
+        cv4.put(Email.TYPE, Email.TYPE_HOME);
+        sContentValues[3] = cv4;
+
+        ContentValues cv5 = new ContentValues();
+        cv5.put(Contacts.DISPLAY_NAME, "John Doe");
+        cv5.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
+        cv5.put(Email.DATA, "doeassociates@deer.com");
+        cv5.put(Email.TYPE, Email.TYPE_WORK);
+        sContentValues[4] = cv5;
+
+        ContentValues cv6 = new ContentValues();
+        cv6.put(Contacts.DISPLAY_NAME, "John Doe");
+        cv6.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
+        cv6.put(Phone.DATA, "518-354-1111");
+        cv6.put(Phone.TYPE, Phone.TYPE_HOME);
+        sContentValues[5] = cv6;
+
+        ContentValues cv7 = new ContentValues();
+        cv7.put(Contacts.DISPLAY_NAME, "Cold Tamago");
+        cv7.put(Data.MIMETYPE, SipAddress.CONTENT_ITEM_TYPE);
+        cv7.put(SipAddress.DATA, "mysip@sipaddress.com");
+        cv7.put(SipAddress.TYPE, SipAddress.TYPE_HOME);
+        sContentValues[6] = cv7;
+    }
+
+    private TestRawContact[] mRawContacts = new TestRawContact[3];
 
     @Override
     protected void setUp() throws Exception {
@@ -135,7 +191,7 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
             // Contactables Uri should return only email and phone data items.
             DatabaseAsserts.assertStoredValuesInUriMatchExactly(mResolver, contentUri, null,
                     Data.RAW_CONTACT_ID + "=?", new String[] {String.valueOf(rawContact.getId())},
-                    null, cv, cv2);
+                    null, false, cv, cv2);
         } finally {
             // Clean up
             rawContact.delete();
@@ -182,6 +238,37 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
         assertCursorStoredValuesWithRawContactsFilter(filterUri, ids, new ContentValues[0]);
     }
 
+    /**
+     * Verifies that Callable.CONTENT_URI returns only data items that can be called (i.e.
+     * phone numbers and sip addresses)
+     */
+    public void testCallableUri_returnsCorrectDataRows() throws Exception {
+        long[] ids = setupContactablesTestData();
+        Uri uri = Callable.CONTENT_URI;
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[1],
+                sContentValues[5], sContentValues[6]);
+    }
+
+    public void testCallableFilterByNameOrOrganization_returnsCorrectDataRows() throws Exception {
+        long[] ids = setupContactablesTestData();
+        Uri uri = Uri.withAppendedPath(Callable.CONTENT_FILTER_URI, "doe");
+        // Only callables belonging to John Doe (name) and Cold Tamago (organization) are returned.
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[5],
+                sContentValues[6]);
+    }
+
+    public void testCallableFilterByNumber_returnsCorrectDataRows() throws Exception {
+        long[] ids = setupContactablesTestData();
+        Uri uri = Uri.withAppendedPath(Callable.CONTENT_FILTER_URI, "510");
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[1]);
+    }
+
+    public void testCallableFilterBySipAddress_returnsCorrectDataRows() throws Exception {
+        long[] ids = setupContactablesTestData();
+        Uri uri = Uri.withAppendedPath(Callable.CONTENT_FILTER_URI, "mysip");
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[6]);
+    }
+
     public void testDataInsert_updatesContactLastUpdatedTimestamp() {
         DatabaseAsserts.ContactIdPair ids = DatabaseAsserts.assertAndCreateContact(mResolver);
         long baseTime = ContactUtil.queryContactLastUpdatedTimestamp(mResolver, ids.mContactId);
@@ -211,6 +298,70 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
 
         // Clean up
         RawContactUtil.delete(mResolver, ids.mRawContactId, true);
+    }
+
+    /**
+     * Tests that specifying the {@link android.provider.ContactsContract#REMOVE_DUPLICATE_ENTRIES}
+     * boolean parameter correctly results in deduped phone numbers.
+     */
+    public void testPhoneQuery_removeDuplicateEntries() throws Exception{
+        long[] ids = setupContactablesTestData();
+
+        // Insert duplicate data entry for raw contact 3. (existing phone number 518-354-1111)
+        mRawContacts[2].newDataRow(Phone.CONTENT_ITEM_TYPE)
+                .with(Phone.DATA, "518-354-1111")
+                .with(Phone.TYPE, Phone.TYPE_HOME)
+                .insert();
+
+        ContentValues dupe = new ContentValues();
+        dupe.put(Contacts.DISPLAY_NAME, "John Doe");
+        dupe.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
+        dupe.put(Phone.DATA, "518-354-1111");
+        dupe.put(Phone.TYPE, Phone.TYPE_HOME);
+
+        // Query for all phone numbers in the contacts database (without deduping).
+        // The phone number above should be listed twice, in its duplicated forms.
+        assertCursorStoredValuesWithRawContactsFilter(Phone.CONTENT_URI, ids, sContentValues[1],
+                sContentValues[5], dupe);
+
+        // Now query for all phone numbers in the contacts database but request deduping.
+        // The phone number should now be listed only once.
+        Uri uri = Phone.CONTENT_URI.buildUpon().
+                appendQueryParameter(ContactsContract.REMOVE_DUPLICATE_ENTRIES, "true").build();
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[1],
+                sContentValues[5]);
+    }
+
+    /**
+     * Tests that specifying the {@link android.provider.ContactsContract#REMOVE_DUPLICATE_ENTRIES}
+     * boolean parameter correctly results in deduped email addresses.
+     */
+    public void testEmailQuery_removeDuplicateEntries() throws Exception{
+        long[] ids = setupContactablesTestData();
+
+        // Insert duplicate data entry for raw contact 3. (existing email doeassociates@deer.com)
+        mRawContacts[2].newDataRow(Email.CONTENT_ITEM_TYPE)
+                .with(Email.DATA, "doeassociates@deer.com")
+                .with(Email.TYPE, Email.TYPE_WORK)
+                .insert();
+
+        ContentValues dupe = new ContentValues();
+        dupe.put(Contacts.DISPLAY_NAME, "John Doe");
+        dupe.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
+        dupe.put(Email.DATA, "doeassociates@deer.com");
+        dupe.put(Email.TYPE, Email.TYPE_WORK);
+
+        // Query for all email addresses in the contacts database (without deduping).
+        // The email address above should be listed twice, in its duplicated forms.
+        assertCursorStoredValuesWithRawContactsFilter(Email.CONTENT_URI, ids, sContentValues[0],
+                sContentValues[2], sContentValues[3], sContentValues[4], dupe);
+
+        // Now query for all email addresses in the contacts database but request deduping.
+        // The email address should now be listed only once.
+        Uri uri = Email.CONTENT_URI.buildUpon().
+                appendQueryParameter(ContactsContract.REMOVE_DUPLICATE_ENTRIES, "true").build();
+        assertCursorStoredValuesWithRawContactsFilter(uri, ids, sContentValues[0],
+                sContentValues[2], sContentValues[3], sContentValues[4]);
     }
 
     public void testDataUpdate_updatesContactLastUpdatedTimestamp() {
@@ -253,7 +404,7 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
         }
         sb.append(")");
         DatabaseAsserts.assertStoredValuesInUriMatchExactly(mResolver, uri, null, sb.toString(),
-                null, null, expected);
+                null, null, false, expected);
     }
 
 
@@ -277,6 +428,7 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
                 .with(Phone.DATA, "510-123-5769")
                 .with(Email.TYPE, Phone.TYPE_HOME)
                 .insert();
+        mRawContacts[0] = rawContact;
 
         TestRawContact rawContact2 = mBuilder.newRawContact()
                 .with(RawContacts.ACCOUNT_TYPE, "test_account")
@@ -289,6 +441,14 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
                 .with(Email.DATA, "eggs@farmers.org")
                 .with(Email.TYPE, Email.TYPE_HOME)
                 .insert();
+        rawContact2.newDataRow(SipAddress.CONTENT_ITEM_TYPE)
+                .with(SipAddress.DATA, "mysip@sipaddress.com")
+                .with(SipAddress.TYPE, SipAddress.TYPE_HOME)
+                .insert();
+        rawContact2.newDataRow(Organization.CONTENT_ITEM_TYPE)
+                .with(Organization.COMPANY, "Doe Corp")
+                .insert();
+        mRawContacts[1] = rawContact2;
 
         TestRawContact rawContact3 = mBuilder.newRawContact()
                 .with(RawContacts.ACCOUNT_TYPE, "test_account")
@@ -308,55 +468,12 @@ public class ContactsContract_DataTest extends InstrumentationTestCase {
         rawContact3.newDataRow(Organization.CONTENT_ITEM_TYPE)
                 .with(Organization.DATA, "Doe Industries")
                 .insert();
+        mRawContacts[2] = rawContact3;
         return new long[] {rawContact.getId(), rawContact2.getId(), rawContact3.getId()};
     }
 
     // Provides functionality to set up content values for the Contactables tests
     private static class ContactablesTestHelper {
-        private static ContentValues[] sContentValues = new ContentValues[6];
-        static {
-            ContentValues cv1 = new ContentValues();
-            cv1.put(Contacts.DISPLAY_NAME, "Hot Tamale");
-            cv1.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
-            cv1.put(Email.DATA, "tamale@acme.com");
-            cv1.put(Email.TYPE, Email.TYPE_HOME);
-            sContentValues[0] = cv1;
-
-            ContentValues cv2 = new ContentValues();
-            cv2.put(Contacts.DISPLAY_NAME, "Hot Tamale");
-            cv2.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
-            cv2.put(Phone.DATA, "510-123-5769");
-            cv2.put(Phone.TYPE, Phone.TYPE_HOME);
-            sContentValues[1] = cv2;
-
-            ContentValues cv3 = new ContentValues();
-            cv3.put(Contacts.DISPLAY_NAME, "Hot Tamale");
-            cv3.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
-            cv3.put(Email.DATA, "hot@google.com");
-            cv3.put(Email.TYPE, Email.TYPE_WORK);
-            sContentValues[2] = cv3;
-
-            ContentValues cv4 = new ContentValues();
-            cv4.put(Contacts.DISPLAY_NAME, "Cold Tamago");
-            cv4.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
-            cv4.put(Email.DATA, "eggs@farmers.org");
-            cv4.put(Email.TYPE, Email.TYPE_HOME);
-            sContentValues[3] = cv4;
-
-            ContentValues cv5 = new ContentValues();
-            cv5.put(Contacts.DISPLAY_NAME, "John Doe");
-            cv5.put(Data.MIMETYPE, Email.CONTENT_ITEM_TYPE);
-            cv5.put(Email.DATA, "doeassociates@deer.com");
-            cv5.put(Email.TYPE, Email.TYPE_WORK);
-            sContentValues[4] = cv5;
-
-            ContentValues cv6 = new ContentValues();
-            cv6.put(Contacts.DISPLAY_NAME, "John Doe");
-            cv6.put(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE);
-            cv6.put(Phone.DATA, "518-354-1111");
-            cv6.put(Phone.TYPE, Phone.TYPE_HOME);
-            sContentValues[5] = cv6;
-        }
 
         /**
          * @return An arraylist of contentValues that correspond to the provided raw contacts

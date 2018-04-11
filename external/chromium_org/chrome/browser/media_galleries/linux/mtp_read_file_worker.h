@@ -8,15 +8,13 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/files/file.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 
 namespace base {
 class FilePath;
 }
-
-namespace chrome {
 
 class SnapshotFileDetails;
 struct SnapshotRequestInfo;
@@ -35,7 +33,7 @@ class MTPReadFileWorker {
   // |snapshot_file_info| specifies the metadata of the snapshot file.
   void WriteDataIntoSnapshotFile(
       const SnapshotRequestInfo& request_info,
-      const base::PlatformFileInfo& snapshot_file_info);
+      const base::File::Info& snapshot_file_info);
 
  private:
   // Called when WriteDataIntoSnapshotFile() completes.
@@ -87,7 +85,5 @@ class MTPReadFileWorker {
 
   DISALLOW_COPY_AND_ASSIGN(MTPReadFileWorker);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_LINUX_MTP_READ_FILE_WORKER_H_

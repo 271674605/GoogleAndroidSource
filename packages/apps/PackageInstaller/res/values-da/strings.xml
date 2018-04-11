@@ -25,10 +25,10 @@
     <string name="unknown" msgid="4742479012767208045">"Ukendt"</string>
     <string name="installing" msgid="8613631001631998372">"Installerer..."</string>
     <string name="install_done" msgid="3682715442154357097">"Appen er installeret."</string>
-    <string name="install_confirm_question" msgid="7295206719219043890">"Vil du installere denne applikation? Den får adgang til:"</string>
+    <string name="install_confirm_question" msgid="7295206719219043890">"Vil du installere denne applikation? Den får adgang til følgende:"</string>
     <string name="install_confirm_question_no_perms" msgid="5918305641302873520">"Vil du installere denne applikation? Den kræver ingen særlig adgang."</string>
-    <string name="install_confirm_question_update" msgid="4624159567361487964">"Vil du installere en opdatering til den eksisterende applikation? Dine eksisterende data mistes ikke. Den opdaterede applikation får adgang til:"</string>
-    <string name="install_confirm_question_update_system" msgid="1302330093676416336">"Vil du installere en opdatering til den indbyggede applikation? Dine eksisterende data mistes ikke. Den opdaterede applikation får adgang til:"</string>
+    <string name="install_confirm_question_update" msgid="4624159567361487964">"Vil du installere en opdatering til den eksisterende app? Du mister ikke dine eksisterende data. Den opdaterede app kan gøre følgende:"</string>
+    <string name="install_confirm_question_update_system" msgid="1302330093676416336">"Vil du installere en opdatering til den indbyggede app? Du mister ikke dine eksisterende data. Den opdaterede app kan gøre følgende:"</string>
     <string name="install_confirm_question_update_no_perms" msgid="4885928136844618944">"Vil du installere en opdatering til denne eksisterende applikation? Dine eksisterende data vil ikke gå tabt. Det kræver ikke nogen særlig adgang."</string>
     <string name="install_confirm_question_update_system_no_perms" msgid="7676593512694724374">"Vil du installere en opdatering til denne indbyggede applikation? Dine eksisterende data vil ikke gå tabt. Det kræver ikke nogen særlig adgang."</string>
     <string name="install_failed" msgid="6579998651498970899">"Appen blev ikke installeret."</string>
@@ -64,11 +64,14 @@
     <string name="uninstall_activity_text" msgid="6680688689803932550">"<xliff:g id="ACTIVITY_NAME">%1$s</xliff:g> er en del af følgende app:"</string>
     <string name="uninstall_application_text" msgid="6691975835951187030">"Vil du afinstallere denne app?"</string>
     <string name="uninstall_application_text_all_users" msgid="5574704453233525222">"Vil du afinstallere denne app for "<b>"alle"</b>" brugere? Applikationen og dens data vil blive fjernet fra "<b>"alle"</b>" brugere på denne enhed."</string>
+    <string name="uninstall_application_text_user" msgid="8766882355635485733">"Vil du afinstallere denne app for brugeren <xliff:g id="USERNAME">%1$s</xliff:g>?"</string>
     <string name="uninstall_update_text" msgid="2056387942084605027">"Vil du erstatte denne app med fabriksversionen?"</string>
     <string name="uninstalling" msgid="5556217435895938250">"Afinstallerer..."</string>
     <string name="uninstall_done" msgid="3792487853420281888">"Afinstallationen er afsluttet."</string>
     <string name="uninstall_failed" msgid="631122574306299512">"Afinstallationen mislykkedes."</string>
     <string name="uninstall_failed_device_policy_manager" msgid="3493789239037852035">"Der kan ikke afinstalleres, fordi denne pakke er en aktiv enhedsadministrator."</string>
+    <string name="uninstall_blocked_profile_owner" msgid="5006234166226562439">"Denne app er nødvendig for din profil <xliff:g id="USERNAME">%1$s</xliff:g> og kan ikke afinstalleres."</string>
+    <string name="uninstall_blocked_device_owner" msgid="7074175526413453063">"Denne app er påkrævet af din enhedsadministrator og kan ikke afinstalleres."</string>
     <string name="manage_device_administrators" msgid="891392489300312370">"Administrer enhedsadministratorer"</string>
     <string name="uninstall_failed_msg" msgid="8969754702803951175">"<xliff:g id="APP_NAME">%1$s</xliff:g> kunne ikke afinstalleres."</string>
     <string name="Parse_error_dlg_title" msgid="6079580916889596257">"Parsingfejl"</string>

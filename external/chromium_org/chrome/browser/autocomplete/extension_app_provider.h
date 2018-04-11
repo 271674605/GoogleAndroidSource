@@ -13,6 +13,7 @@
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
+#include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/window_open_disposition.h"
@@ -46,10 +47,10 @@ class ExtensionAppProvider : public AutocompleteProvider,
   // eligible apps.
   struct ExtensionApp {
     // App's name.
-    string16 name;
+    base::string16 name;
     // App's launch URL (for platform apps, which don't have a launch URL, this
     // just points to the app's origin).
-    string16 launch_url;
+    base::string16 launch_url;
     // If false, then the launch_url will not be considered for matching,
     // not shown next to the match, and not displayed as the editable text if
     // the user selects the match with the arrow keys.
@@ -71,7 +72,7 @@ class ExtensionAppProvider : public AutocompleteProvider,
   void RefreshAppList();
 
   // Calculate the relevance of the match.
-  int CalculateRelevance(AutocompleteInput::Type type,
+  int CalculateRelevance(metrics::OmniboxInputType::Type type,
                          int input_length,
                          int target_length,
                          const GURL& url);

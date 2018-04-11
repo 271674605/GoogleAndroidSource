@@ -6,22 +6,18 @@ package org.chromium.android_webview.test;
 
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.View;
-import android.view.View.MeasureSpec;
 import android.view.ViewGroup.LayoutParams;
 import android.widget.LinearLayout;
-import android.util.Log;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwLayoutSizer;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Tests for certain edge cases related to integrating with the Android view system.
@@ -34,12 +30,12 @@ public class AndroidViewIntegrationTest extends AwTestBase {
         private int mHeight;
 
         public int getWidth() {
-            assert(getCallCount() > 0);
+            assert getCallCount() > 0;
             return mWidth;
         }
 
         public int getHeight() {
-            assert(getCallCount() > 0);
+            assert getCallCount() > 0;
             return mHeight;
         }
 
@@ -58,13 +54,15 @@ public class AndroidViewIntegrationTest extends AwTestBase {
         @Override
         public void onContentSizeChanged(int widthCss, int heightCss) {
             super.onContentSizeChanged(widthCss, heightCss);
-            mOnContentSizeChangedHelper.onContentSizeChanged(widthCss, heightCss);
+            if (mOnContentSizeChangedHelper != null)
+                mOnContentSizeChangedHelper.onContentSizeChanged(widthCss, heightCss);
         }
 
         @Override
         public void onPageScaleChanged(float pageScaleFactor) {
             super.onPageScaleChanged(pageScaleFactor);
-            mOnPageScaleChangedHelper.notifyCalled();
+            if (mOnPageScaleChangedHelper != null)
+                mOnPageScaleChangedHelper.notifyCalled();
         }
     }
 
@@ -317,7 +315,8 @@ public class AndroidViewIntegrationTest extends AwTestBase {
 
         // In wrap-content mode the AwLayoutSizer will size the view to be as wide as the parent
         // view.
-        final int expectedWidthCss = (int) (getRootLayoutWidthOnMainThread() / deviceDIPScale);
+        final int expectedWidthCss =
+            (int) Math.ceil(getRootLayoutWidthOnMainThread() / deviceDIPScale);
         final int expectedHeightCss = contentHeightCss;
 
         loadPageOfSizeAndWaitForSizeChange(testContainerView.getAwContents(),
@@ -342,11 +341,9 @@ public class AndroidViewIntegrationTest extends AwTestBase {
         final int contentWidthCss = 142;
         final int contentHeightCss = 180;
 
-        final int expectedWidthCss = (int) (getRootLayoutWidthOnMainThread() / deviceDIPScale);
-        final int expectedHeightCss = contentHeightCss +
-            // The second div in the contents is styled to have 150% of the viewport height, hence
-            // the 1.5.
-            (int) (AwLayoutSizer.FIXED_LAYOUT_HEIGHT * 1.5);
+        final int expectedWidthCss =
+            (int) Math.ceil(getRootLayoutWidthOnMainThread() / deviceDIPScale);
+        final int expectedHeightCss = contentHeightCss;
 
         loadPageOfSizeAndWaitForSizeChange(testContainerView.getAwContents(),
                 mOnContentSizeChangedHelper, expectedWidthCss, contentHeightCss, true);
@@ -354,5 +351,55 @@ public class AndroidViewIntegrationTest extends AwTestBase {
         waitForNoLayoutsPending();
         assertEquals(expectedWidthCss, mOnContentSizeChangedHelper.getWidth());
         assertEquals(expectedHeightCss, mOnContentSizeChangedHelper.getHeight());
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testReceivingSizeAfterLoadUpdatesLayout() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView = createDetachedTestContainerViewOnMainSync(
+                contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+
+        final double deviceDIPScale =
+            DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+        final int physicalWidth = 600;
+        final int spanWidth = 42;
+        final int expectedWidthCss =
+            (int) Math.ceil(physicalWidth / deviceDIPScale);
+
+        StringBuilder htmlBuilder = new StringBuilder("<html><body style='margin:0px;'>");
+        final String spanBlock =
+            "<span style='width: " + spanWidth + "px; display: inline-block;'>a</span>";
+        for (int i = 0; i < 10; ++i) {
+            htmlBuilder.append(spanBlock);
+        }
+        htmlBuilder.append("</body></html>");
+
+        int contentSizeChangeCallCount = mOnContentSizeChangedHelper.getCallCount();
+        loadDataAsync(awContents, htmlBuilder.toString(), "text/html", false);
+        // Because we're loading the contents into a detached WebView its layout size is 0x0 and as
+        // a result of that the paragraph will be formated such that each word is on a separate
+        // line.
+        waitForContentSizeToChangeTo(mOnContentSizeChangedHelper, contentSizeChangeCallCount,
+                spanWidth, -1);
+
+        final int narrowLayoutHeight = mOnContentSizeChangedHelper.getHeight();
+
+        contentSizeChangeCallCount = mOnContentSizeChangedHelper.getCallCount();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                testContainerView.onSizeChanged(physicalWidth, 0, 0, 0);
+            }
+        });
+        mOnContentSizeChangedHelper.waitForCallback(contentSizeChangeCallCount);
+
+        // As a result of calling the onSizeChanged method the layout size should be updated to
+        // match the width of the webview and the text we previously loaded should reflow making the
+        // contents width match the WebView width.
+        assertEquals(expectedWidthCss, mOnContentSizeChangedHelper.getWidth());
+        assertTrue(mOnContentSizeChangedHelper.getHeight() < narrowLayoutHeight);
+        assertTrue(mOnContentSizeChangedHelper.getHeight() > 0);
     }
 }

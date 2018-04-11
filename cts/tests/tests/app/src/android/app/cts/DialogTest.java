@@ -15,7 +15,7 @@
  */
 package android.app.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.app.stub.R;
 
 import android.app.Dialog;
 import android.app.Instrumentation;
@@ -38,6 +38,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
+import android.test.UiThreadTest;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -52,7 +53,7 @@ import java.lang.ref.WeakReference;
 public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActivity> {
 
     protected static final long SLEEP_TIME = 200;
-    private static final String STUB_ACTIVITY_PACKAGE = "com.android.cts.stub";
+    private static final String STUB_ACTIVITY_PACKAGE = "com.android.cts.app.stub";
     private static final long TEST_TIMEOUT = 1000L;
 
     /**
@@ -86,7 +87,8 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
         mActivity = DialogStubActivity.startDialogActivity(this, dialogNumber);
     }
 
-    public void testConstructor(){
+    @UiThreadTest
+    public void testConstructor() {
         new Dialog(mContext);
         Dialog d = new Dialog(mContext, 0);
         // According to javadoc of constructors, it will set theme to system default theme,
@@ -151,7 +153,7 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
         assertTrue(d.isOnStopCalled);
     }
 
-    public void testAccessOwnerActivity() {
+    public void testAccessOwnerActivity() throws Throwable {
         startDialogActivity(DialogStubActivity.TEST_DIALOG_WITHOUT_THEME);
         Dialog d = mActivity.getDialog();
         assertNotNull(d);
@@ -166,8 +168,13 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
             // expected
         }
 
-        d = new Dialog(mContext);
-        assertNull(d.getOwnerActivity());
+        runTestOnUiThread(new Runnable() {
+            public void run() {
+                Dialog dialog = new Dialog(mContext);
+                assertNull(dialog.getOwnerActivity());
+            }
+        });
+        mInstrumentation.waitForIdleSync();
     }
 
     public void testShow() throws Throwable {
@@ -812,10 +819,9 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
         assertTrue(d.isShowing());
         assertFalse(mCalledCallback);
         dialogDismiss(d);
+        ht.join(100);
         assertTrue(mCalledCallback);
         assertFalse(d.isShowing());
-
-        ht.join(100);
     }
 
     private void dialogDismiss(final Dialog d) throws Throwable {

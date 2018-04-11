@@ -5,17 +5,14 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkColorPriv.h"
 #include "SkPaint.h"
 #include "SkShader.h"
 #include "SkString.h"
-
-static const char* gConfigName[] = {
-    "ERROR", "a1", "a8", "index8", "565", "4444", "8888"
-};
+#include "sk_tool_utils.h"
 
 static void draw_into_bitmap(const SkBitmap& bm) {
     const int w = bm.width();
@@ -53,8 +50,8 @@ static uint8_t compute_666_index(SkPMColor c) {
 }
 
 static void convert_to_index666(const SkBitmap& src, SkBitmap* dst) {
-    SkColorTable* ctable = new SkColorTable(216);
-    SkPMColor* colors = ctable->lockColors();
+    SkPMColor storage[216];
+    SkPMColor* colors = storage;
     // rrr ggg bbb
     for (int r = 0; r < 6; r++) {
         int rr = conv_6_to_byte(r);
@@ -66,9 +63,10 @@ static void convert_to_index666(const SkBitmap& src, SkBitmap* dst) {
             }
         }
     }
-    ctable->unlockColors(true);
-    dst->setConfig(SkBitmap::kIndex8_Config, src.width(), src.height());
-    dst->allocPixels(ctable);
+    SkColorTable* ctable = new SkColorTable(storage, 216, kOpaque_SkAlphaType);
+    dst->allocPixels(SkImageInfo::Make(src.width(), src.height(),
+                                       kIndex_8_SkColorType, kOpaque_SkAlphaType),
+                     NULL, ctable);
     ctable->unref();
 
     SkAutoLockPixels alps(src);
@@ -83,27 +81,26 @@ static void convert_to_index666(const SkBitmap& src, SkBitmap* dst) {
     }
 }
 
-class RepeatTileBench : public SkBenchmark {
-    SkPaint          fPaint;
-    SkString         fName;
-    SkBitmap         fBitmap;
-    bool             fIsOpaque;
-    SkBitmap::Config fConfig;
-    enum { N = SkBENCHLOOP(20) };
+class RepeatTileBench : public Benchmark {
+    const SkColorType   fColorType;
+    const SkAlphaType   fAlphaType;
+    SkPaint             fPaint;
+    SkString            fName;
+    SkBitmap            fBitmap;
 public:
-    RepeatTileBench(void* param, SkBitmap::Config c, bool isOpaque = false) : INHERITED(param) {
+    RepeatTileBench(SkColorType ct, SkAlphaType at = kPremul_SkAlphaType)
+        : fColorType(ct), fAlphaType(at)
+    {
         const int w = 50;
         const int h = 50;
-        fConfig = c;
-        fIsOpaque = isOpaque;
 
-        if (SkBitmap::kIndex8_Config == fConfig) {
-            fBitmap.setConfig(SkBitmap::kARGB_8888_Config, w, h);
+        if (kIndex_8_SkColorType == ct) {
+            fBitmap.setInfo(SkImageInfo::MakeN32(w, h, at));
         } else {
-            fBitmap.setConfig(fConfig, w, h);
+            fBitmap.setInfo(SkImageInfo::Make(w, h, ct, at));
         }
         fName.printf("repeatTile_%s_%c",
-                     gConfigName[fBitmap.config()], isOpaque ? 'X' : 'A');
+                     sk_tool_utils::colortype_name(ct), kOpaque_SkAlphaType == at ? 'X' : 'A');
     }
 
 protected:
@@ -113,12 +110,11 @@ protected:
 
     virtual void onPreDraw() SK_OVERRIDE {
         fBitmap.allocPixels();
-        fBitmap.eraseColor(fIsOpaque ? SK_ColorWHITE : 0);
-        fBitmap.setIsOpaque(fIsOpaque);
+        fBitmap.eraseColor(kOpaque_SkAlphaType == fAlphaType ? SK_ColorWHITE : 0);
 
         draw_into_bitmap(fBitmap);
 
-        if (SkBitmap::kIndex8_Config == fConfig) {
+        if (kIndex_8_SkColorType == fColorType) {
             SkBitmap tmp;
             convert_to_index666(fBitmap, &tmp);
             fBitmap = tmp;
@@ -131,20 +127,20 @@ protected:
     }
 
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
         SkPaint paint(fPaint);
         this->setupPaint(&paint);
 
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < loops; i++) {
             canvas->drawPaint(paint);
         }
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
-DEF_BENCH(return new RepeatTileBench(p, SkBitmap::kARGB_8888_Config, true))
-DEF_BENCH(return new RepeatTileBench(p, SkBitmap::kARGB_8888_Config, false))
-DEF_BENCH(return new RepeatTileBench(p, SkBitmap::kRGB_565_Config))
-DEF_BENCH(return new RepeatTileBench(p, SkBitmap::kIndex8_Config))
+DEF_BENCH(return new RepeatTileBench(kN32_SkColorType, kOpaque_SkAlphaType))
+DEF_BENCH(return new RepeatTileBench(kN32_SkColorType, kPremul_SkAlphaType))
+DEF_BENCH(return new RepeatTileBench(kRGB_565_SkColorType, kOpaque_SkAlphaType))
+DEF_BENCH(return new RepeatTileBench(kIndex_8_SkColorType, kPremul_SkAlphaType))

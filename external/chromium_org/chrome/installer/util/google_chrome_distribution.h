@@ -16,6 +16,8 @@ namespace base {
 class FilePath;
 }
 
+class AppRegistrationData;
+
 class GoogleChromeDistribution : public BrowserDistribution {
  public:
   // Opens the Google Chrome uninstall survey window.
@@ -30,51 +32,45 @@ class GoogleChromeDistribution : public BrowserDistribution {
   virtual void DoPostUninstallOperations(
       const Version& version,
       const base::FilePath& local_data_path,
-      const string16& distribution_data) OVERRIDE;
+      const base::string16& distribution_data) OVERRIDE;
 
-  virtual string16 GetActiveSetupGuid() OVERRIDE;
+  virtual base::string16 GetActiveSetupGuid() OVERRIDE;
 
-  virtual string16 GetAppGuid() OVERRIDE;
+  virtual base::string16 GetShortcutName(ShortcutType shortcut_type) OVERRIDE;
 
-  virtual string16 GetBaseAppName() OVERRIDE;
+  virtual base::string16 GetIconFilename() OVERRIDE;
 
-  virtual string16 GetAppShortCutName() OVERRIDE;
+  virtual int GetIconIndex(ShortcutType shortcut_type) OVERRIDE;
 
-  virtual string16 GetAlternateApplicationName() OVERRIDE;
+  virtual base::string16 GetBaseAppName() OVERRIDE;
 
-  virtual string16 GetBaseAppId() OVERRIDE;
+  virtual base::string16 GetBaseAppId() OVERRIDE;
 
-  virtual string16 GetInstallSubDir() OVERRIDE;
+  virtual base::string16 GetBrowserProgIdPrefix() OVERRIDE;
 
-  virtual string16 GetPublisherName() OVERRIDE;
+  virtual base::string16 GetBrowserProgIdDesc() OVERRIDE;
 
-  virtual string16 GetAppDescription() OVERRIDE;
+  virtual base::string16 GetInstallSubDir() OVERRIDE;
+
+  virtual base::string16 GetPublisherName() OVERRIDE;
+
+  virtual base::string16 GetAppDescription() OVERRIDE;
 
   virtual std::string GetSafeBrowsingName() OVERRIDE;
 
-  virtual string16 GetStateKey() OVERRIDE;
-
-  virtual string16 GetStateMediumKey() OVERRIDE;
-
   virtual std::string GetNetworkStatsServer() const OVERRIDE;
-
-  virtual std::string GetHttpPipeliningTestServer() const OVERRIDE;
 
   // This method reads data from the Google Update ClientState key for
   // potential use in the uninstall survey. It must be called before the
   // key returned by GetVersionKey() is deleted.
-  virtual string16 GetDistributionData(HKEY root_key) OVERRIDE;
+  virtual base::string16 GetDistributionData(HKEY root_key) OVERRIDE;
 
-  virtual string16 GetUninstallLinkName() OVERRIDE;
+  virtual base::string16 GetUninstallLinkName() OVERRIDE;
 
-  virtual string16 GetUninstallRegPath() OVERRIDE;
-
-  virtual string16 GetVersionKey() OVERRIDE;
-
-  virtual string16 GetIconFilename() OVERRIDE;
+  virtual base::string16 GetUninstallRegPath() OVERRIDE;
 
   virtual bool GetCommandExecuteImplClsid(
-      string16* handler_class_uuid) OVERRIDE;
+      base::string16* handler_class_uuid) OVERRIDE;
 
   virtual bool AppHostIsSupported() OVERRIDE;
 
@@ -87,19 +83,15 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   virtual bool HasUserExperiments() OVERRIDE;
 
-  const string16& product_guid() { return product_guid_; }
-
  protected:
-  void set_product_guid(const string16& guid) { product_guid_ = guid; }
-
   // Disallow construction from others.
   GoogleChromeDistribution();
 
+  explicit GoogleChromeDistribution(
+      scoped_ptr<AppRegistrationData> app_reg_data);
+
  private:
   friend class BrowserDistribution;
-
-  // The product ID for Google Update.
-  string16 product_guid_;
 };
 
 #endif  // CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_

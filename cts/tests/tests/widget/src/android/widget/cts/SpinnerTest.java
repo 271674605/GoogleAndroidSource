@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import android.app.AlertDialog;
@@ -31,11 +31,11 @@ import android.widget.Spinner;
 /**
  * Test {@link Spinner}.
  */
-public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayoutStubActivity> {
+public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayoutCtsActivity> {
     private Context mTargetContext;
 
     public SpinnerTest() {
-        super("com.android.cts.stub", RelativeLayoutStubActivity.class);
+        super("com.android.cts.widget", RelativeLayoutCtsActivity.class);
     }
 
     @Override
@@ -44,6 +44,7 @@ public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayout
         mTargetContext = getInstrumentation().getTargetContext();
     }
 
+    @UiThreadTest
     public void testConstructor() {
         new Spinner(mTargetContext);
 
@@ -63,12 +64,13 @@ public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayout
 
         spinner = (Spinner) getActivity().findViewById(R.id.spinner1);
         ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(mTargetContext,
-                com.android.cts.stub.R.array.string, android.R.layout.simple_spinner_item);
+                com.android.cts.widget.R.array.string, android.R.layout.simple_spinner_item);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         assertTrue(spinner.getBaseline() > 0);
     }
 
+    @UiThreadTest
     public void testSetOnItemClickListener() {
         Spinner spinner = new Spinner(mTargetContext);
 
@@ -89,6 +91,7 @@ public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayout
         // Or do UI check?
     }
 
+    @UiThreadTest
     public void testOnClick() {
         Spinner spinner = new Spinner(mTargetContext);
         // normal value
@@ -129,7 +132,8 @@ public class SpinnerTest extends ActivityInstrumentationTestCase2<RelativeLayout
         // TODO: find the dialog and get its title to assert whether setPrompt() takes effect?
     }
 
-    public void testsetPromptId() {
+    @UiThreadTest
+    public void testSetPromptId() {
         Spinner spinner = new Spinner(mTargetContext);
 
         spinner.setPromptId(R.string.hello_world);

@@ -49,6 +49,7 @@ import java.util.Set;
 
 public abstract class BaseWidgetProvider extends AppWidgetProvider {
     public static final String EXTRA_FOLDER_TYPE = "folder-type";
+    public static final String EXTRA_FOLDER_CAPABILITIES = "folder-capabilities";
     public static final String EXTRA_FOLDER_URI = "folder-uri";
     public static final String EXTRA_FOLDER_CONVERSATION_LIST_URI = "folder-conversation-list-uri";
     public static final String EXTRA_FOLDER_DISPLAY_NAME = "folder-display-name";
@@ -127,16 +128,17 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
         final String action = intent.getAction();
         if (ACTION_UPDATE_WIDGET.equals(action)) {
             final int widgetId = intent.getIntExtra(EXTRA_WIDGET_ID, -1);
-            final Account account = Account.newinstance(intent.getStringExtra(Utils.EXTRA_ACCOUNT));
+            final Account account = Account.newInstance(intent.getStringExtra(Utils.EXTRA_ACCOUNT));
             final int folderType = intent.getIntExtra(EXTRA_FOLDER_TYPE, FolderType.DEFAULT);
+            final int folderCapabilities = intent.getIntExtra(EXTRA_FOLDER_CAPABILITIES, 0);
             final Uri folderUri = intent.getParcelableExtra(EXTRA_FOLDER_URI);
             final Uri folderConversationListUri =
                     intent.getParcelableExtra(EXTRA_FOLDER_CONVERSATION_LIST_URI);
             final String folderDisplayName = intent.getStringExtra(EXTRA_FOLDER_DISPLAY_NAME);
 
             if (widgetId != -1 && account != null && folderUri != null) {
-                updateWidgetInternal(context, widgetId, account, folderType, folderUri,
-                        folderConversationListUri, folderDisplayName);
+                updateWidgetInternal(context, widgetId, account, folderType, folderCapabilities,
+                        folderUri, folderConversationListUri, folderDisplayName);
             }
         } else if (ACTION_VALIDATE_ALL_WIDGETS.equals(action)) {
             validateAllWidgetInformation(context);
@@ -243,19 +245,23 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
                             mContext.getContentResolver().query(folderUri,
                                     UIProvider.FOLDERS_PROJECTION, null, null, null);
 
-                    try {
-                        if (folderCursor.moveToFirst()) {
-                            folder = new Folder(folderCursor);
+                    if (folderCursor != null) {
+                        try {
+                            if (folderCursor.moveToFirst()) {
+                                folder = new Folder(folderCursor);
+                            }
+                        } finally {
+                            folderCursor.close();
                         }
-                    } finally {
-                        folderCursor.close();
                     }
                 }
 
                 updateWidgetInternal(mContext, mAppWidgetIds[i], account,
-                        folder == null ? FolderType.DEFAULT : folder.type, folderUri,
-                        folder == null ? null : folder.conversationListUri, folder == null ? null
-                                : folder.name);
+                        folder == null ? FolderType.DEFAULT : folder.type,
+                        folder == null ? 0 : folder.capabilities,
+                        folderUri,
+                        folder == null ? null : folder.conversationListUri,
+                        folder == null ? null : folder.name);
             }
 
             return null;
@@ -272,7 +278,7 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
                     UIProvider.ACCOUNTS_PROJECTION, null, null, null);
             if (accountCursor != null) {
                 if (accountCursor.moveToFirst()) {
-                    account = new Account(accountCursor);
+                    account = Account.builder().buildFrom(accountCursor);
                 }
             }
         } finally {
@@ -287,8 +293,8 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
      * Update the widget appWidgetId with the given account and folder
      */
     public static void updateWidget(Context context, int appWidgetId, Account account,
-            final int folderType, final Uri folderUri, final Uri folderConversationListUri,
-            final String folderDisplayName) {
+            final int folderType, final int folderCapabilities, final Uri folderUri,
+            final Uri folderConversationListUri, final String folderDisplayName) {
         if (account == null || folderUri == null) {
             LogUtils.e(LOG_TAG,
                     "Missing account or folder.  account: %s folder %s", account, folderUri);
@@ -300,6 +306,7 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
         updateWidgetIntent.putExtra(EXTRA_WIDGET_ID, appWidgetId);
         updateWidgetIntent.putExtra(Utils.EXTRA_ACCOUNT, account.serialize());
         updateWidgetIntent.putExtra(EXTRA_FOLDER_TYPE, folderType);
+        updateWidgetIntent.putExtra(EXTRA_FOLDER_CAPABILITIES, folderCapabilities);
         updateWidgetIntent.putExtra(EXTRA_FOLDER_URI, folderUri);
         updateWidgetIntent.putExtra(EXTRA_FOLDER_CONVERSATION_LIST_URI, folderConversationListUri);
         updateWidgetIntent.putExtra(EXTRA_FOLDER_DISPLAY_NAME, folderDisplayName);
@@ -314,16 +321,13 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
     }
 
     protected void updateWidgetInternal(Context context, int appWidgetId, Account account,
-            final int folderType, final Uri folderUri, final Uri folderConversationListUri,
-            final String folderDisplayName) {
+            final int folderType, final int folderCapabilities, final Uri folderUri,
+            final Uri folderConversationListUri, final String folderDisplayName) {
         final RemoteViews remoteViews = new RemoteViews(context.getPackageName(), R.layout.widget);
 
-        final boolean isAccountValid = isAccountValid(context, account);
-        if (!isAccountValid || Utils.isEmpty(folderUri)) {
+        if (!isAccountValid(context, account) || !isFolderValid(context, folderUri)) {
             // Widget has not been configured yet
             remoteViews.setViewVisibility(R.id.widget_folder, View.GONE);
-            remoteViews.setViewVisibility(R.id.widget_account_noflip, View.GONE);
-            remoteViews.setViewVisibility(R.id.widget_account_unread_flipper, View.GONE);
             remoteViews.setViewVisibility(R.id.widget_compose, View.GONE);
             remoteViews.setViewVisibility(R.id.conversation_list, View.GONE);
             remoteViews.setViewVisibility(R.id.empty_conversation_list, View.GONE);
@@ -343,7 +347,7 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
         } else {
             // Set folder to a space here to avoid flicker.
             configureValidAccountWidget(context, remoteViews, appWidgetId, account, folderType,
-                    folderUri, folderConversationListUri,
+                    folderCapabilities, folderUri, folderConversationListUri,
                     folderDisplayName == null ? " " : folderDisplayName);
 
         }
@@ -363,7 +367,7 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
     }
 
     protected boolean isFolderValid(Context context, Uri folderUri) {
-        if (folderUri != null) {
+        if (!Utils.isEmpty(folderUri)) {
             final Cursor folderCursor =
                     context.getContentResolver().query(folderUri,
                             UIProvider.FOLDERS_PROJECTION, null, null, null);
@@ -380,10 +384,10 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
     }
 
     protected void configureValidAccountWidget(Context context, RemoteViews remoteViews,
-            int appWidgetId, Account account, final int folderType, final Uri folderUri,
-            final Uri folderConversationListUri, String folderDisplayName) {
+            int appWidgetId, Account account, final int folderType, final int folderCapabilities,
+            final Uri folderUri, final Uri folderConversationListUri, String folderDisplayName) {
         WidgetService.configureValidAccountWidget(context, remoteViews, appWidgetId, account,
-                folderType, folderUri, folderConversationListUri, folderDisplayName,
+                folderType, folderCapabilities, folderUri, folderConversationListUri, folderDisplayName,
                 WidgetService.class);
     }
 
@@ -427,7 +431,8 @@ public abstract class BaseWidgetProvider extends AppWidgetProvider {
 
             // unconfigure the widget if it is not valid
             if (!isAccountValid(context, account) || !isFolderValid(context, folderUri)) {
-                updateWidgetInternal(context, widgetId, null, FolderType.DEFAULT, null, null, null);
+                updateWidgetInternal(context, widgetId, null, FolderType.DEFAULT, 0, null, null,
+                        null);
             }
         }
     }

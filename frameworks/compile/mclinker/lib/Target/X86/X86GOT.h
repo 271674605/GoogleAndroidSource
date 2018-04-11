@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TARGET_X86_GOT_H
-#define MCLD_TARGET_X86_GOT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_X86_X86GOT_H
+#define TARGET_X86_X86GOT_H
 
 #include <mcld/Target/GOT.h>
 
@@ -41,12 +38,7 @@ public:
 
   ~X86_32GOT();
 
-  void reserve(size_t pNum = 1);
-
-  X86_32GOTEntry* consume();
-
-private:
-  X86_32GOTEntry* m_pLast; ///< the last consumed entry
+  X86_32GOTEntry* create();
 };
 
 /** \class X86_64GOTEntry
@@ -71,12 +63,7 @@ public:
 
   ~X86_64GOT();
 
-  void reserve(size_t pNum = 1);
-
-  X86_64GOTEntry* consume();
-
-private:
-  X86_64GOTEntry* m_pLast; ///< the last consumed entry
+  X86_64GOTEntry* create();
 };
 
 } // namespace of mcld

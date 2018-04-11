@@ -84,6 +84,8 @@ public class InputConnectionWrapperTest extends AndroidTestCase {
         assertTrue(inputConnection.isGetSelectedTextCalled);
         wrapper.setComposingRegion(0, 3);
         assertTrue(inputConnection.isSetComposingRegionCalled);
+        wrapper.requestCursorUpdates(InputConnection.CURSOR_UPDATE_IMMEDIATE);
+        assertTrue(inputConnection.isRequestCursorUpdatesCalled);
     }
 
     private class MockInputConnection implements InputConnection {
@@ -108,6 +110,7 @@ public class InputConnectionWrapperTest extends AndroidTestCase {
         public boolean isSetComposingTextCalled;
         public boolean isSetComposingRegionCalled;
         public boolean isSetSelectionCalled;
+        public boolean isRequestCursorUpdatesCalled;
 
         public boolean beginBatchEdit() {
             isBeginBatchEditCalled = true;
@@ -211,6 +214,11 @@ public class InputConnectionWrapperTest extends AndroidTestCase {
 
         public boolean setSelection(int start, int end) {
             isSetSelectionCalled = true;
+            return false;
+        }
+
+        public boolean requestCursorUpdates(int cursorUpdateMode) {
+            isRequestCursorUpdatesCalled = true;
             return false;
         }
     }

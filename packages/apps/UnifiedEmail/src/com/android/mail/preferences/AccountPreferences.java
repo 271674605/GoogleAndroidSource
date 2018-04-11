@@ -15,10 +15,11 @@
  */
 package com.android.mail.preferences;
 
+import android.content.Context;
+
+import com.android.mail.providers.Account;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-
-import android.content.Context;
 
 import java.util.Map;
 
@@ -54,25 +55,27 @@ public class AccountPreferences extends VersionedPrefs {
         public static final String LAST_SEEN_OUTBOX_COUNT = "last-seen-outbox-count";
 
         public static final ImmutableSet<String> BACKUP_KEYS =
-                new ImmutableSet.Builder<String>().add(NOTIFICATIONS_ENABLED).build();
+                new ImmutableSet.Builder<String>()
+                        .add(NOTIFICATIONS_ENABLED).build();
     }
 
     /**
-     * @param account The account email. This must never change for the account.
+     * @param account The account id
      */
-    public AccountPreferences(final Context context, final String account) {
-        super(context, buildSharedPrefsName(account));
+    public AccountPreferences(final Context context, final String accountId) {
+        super(context, buildSharedPrefsName(accountId));
     }
 
-    private static String buildSharedPrefsName(final String account) {
-        return PREFS_NAME_PREFIX + '-' + account;
+    private static String buildSharedPrefsName(final String accountId) {
+        return PREFS_NAME_PREFIX + '-' + accountId;
     }
 
-    public static synchronized AccountPreferences get(Context context, String accountEmail) {
-        AccountPreferences pref = mInstances.get(accountEmail);
+    public static synchronized AccountPreferences get(Context context, Account account) {
+        final String id = account.getAccountId();
+        AccountPreferences pref = mInstances.get(id);
         if (pref == null) {
-            pref = new AccountPreferences(context, accountEmail);
-            mInstances.put(accountEmail, pref);
+            pref = new AccountPreferences(context, id);
+            mInstances.put(id, pref);
         }
         return pref;
     }

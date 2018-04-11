@@ -34,7 +34,9 @@
 #include "media/base/decoder_buffer_queue.h"
 #include "media/base/demuxer.h"
 #include "media/base/pipeline.h"
+#include "media/base/text_track_config.h"
 #include "media/base/video_decoder_config.h"
+#include "media/ffmpeg/ffmpeg_deleters.h"
 #include "media/filters/blocking_url_protocol.h"
 
 // FFmpeg forward declarations.
@@ -44,21 +46,12 @@ struct AVStream;
 
 namespace media {
 
-// A new potentially encrypted stream has been parsed.
-// First parameter - The type of initialization data.
-// Second parameter - The initialization data associated with the stream.
-// Third parameter - Number of bytes of the initialization data.
-typedef base::Callback<void(const std::string& type,
-                            scoped_ptr<uint8[]> init_data,
-                            int init_data_size)> FFmpegNeedKeyCB;
-
 class MediaLog;
 class FFmpegDemuxer;
 class FFmpegGlue;
 class FFmpegH264ToAnnexBBitstreamConverter;
-class ScopedPtrAVFreePacket;
 
-typedef scoped_ptr_malloc<AVPacket, ScopedPtrAVFreePacket> ScopedAVPacket;
+typedef scoped_ptr<AVPacket, ScopedPtrAVFreePacket> ScopedAVPacket;
 
 class FFmpegDemuxerStream : public DemuxerStream {
  public:
@@ -88,6 +81,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
   virtual Type type() OVERRIDE;
   virtual void Read(const ReadCB& read_cb) OVERRIDE;
   virtual void EnableBitstreamConverter() OVERRIDE;
+  virtual bool SupportsConfigChanges() OVERRIDE;
   virtual AudioDecoderConfig audio_decoder_config() OVERRIDE;
   virtual VideoDecoderConfig video_decoder_config() OVERRIDE;
 
@@ -101,6 +95,15 @@ class FFmpegDemuxerStream : public DemuxerStream {
   // Returns true if this stream has capacity for additional data.
   bool HasAvailableCapacity();
 
+  // Returns the total buffer size FFMpegDemuxerStream is holding onto.
+  size_t MemoryUsage() const;
+
+  TextKind GetTextKind() const;
+
+  // Returns the value associated with |key| in the metadata for the avstream.
+  // Returns an empty string if the key is not present.
+  std::string GetMetadata(const char* key) const;
+
  private:
   friend class FFmpegDemuxerTest;
 
@@ -113,7 +116,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
                                                 int64 timestamp);
 
   FFmpegDemuxer* demuxer_;
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   AVStream* stream_;
   AudioDecoderConfig audio_config_;
   VideoDecoderConfig video_config_;
@@ -126,7 +129,10 @@ class FFmpegDemuxerStream : public DemuxerStream {
   DecoderBufferQueue buffer_queue_;
   ReadCB read_cb_;
 
+#if defined(USE_PROPRIETARY_CODECS)
   scoped_ptr<FFmpegH264ToAnnexBBitstreamConverter> bitstream_converter_;
+#endif
+
   bool bitstream_converter_enabled_;
 
   std::string encryption_key_id_;
@@ -136,21 +142,22 @@ class FFmpegDemuxerStream : public DemuxerStream {
 
 class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
  public:
-  FFmpegDemuxer(const scoped_refptr<base::MessageLoopProxy>& message_loop,
+  FFmpegDemuxer(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
                 DataSource* data_source,
-                const FFmpegNeedKeyCB& need_key_cb,
+                const NeedKeyCB& need_key_cb,
                 const scoped_refptr<MediaLog>& media_log);
   virtual ~FFmpegDemuxer();
 
   // Demuxer implementation.
   virtual void Initialize(DemuxerHost* host,
-                          const PipelineStatusCB& status_cb) OVERRIDE;
+                          const PipelineStatusCB& status_cb,
+                          bool enable_text_tracks) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
   virtual void Seek(base::TimeDelta time, const PipelineStatusCB& cb) OVERRIDE;
-  virtual void OnAudioRendererDisabled() OVERRIDE;
-  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
   virtual DemuxerStream* GetStream(DemuxerStream::Type type) OVERRIDE;
   virtual base::TimeDelta GetStartTime() const OVERRIDE;
+  virtual base::Time GetTimelineOffset() const OVERRIDE;
+  virtual Liveness GetLiveness() const OVERRIDE;
 
   // Calls |need_key_cb_| with the initialization data encountered in the file.
   void FireNeedKey(const std::string& init_data_type,
@@ -183,6 +190,9 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // go over capacity depending on how the file is muxed.
   bool StreamsHaveAvailableCapacity();
 
+  // Returns true if the maximum allowed memory usage has been reached.
+  bool IsMaxMemoryUsageReached() const;
+
   // Signal all FFmpegDemuxerStreams that the stream has ended.
   void StreamHasEnded();
 
@@ -193,11 +203,13 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // FFmpegDemuxerStream.
   FFmpegDemuxerStream* GetFFmpegStream(DemuxerStream::Type type) const;
 
+  // Called after the streams have been collected from the media, to allow
+  // the text renderer to bind each text stream to the cue rendering engine.
+  void AddTextStreams();
+
   DemuxerHost* host_;
 
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
-  base::WeakPtrFactory<FFmpegDemuxer> weak_factory_;
-  base::WeakPtr<FFmpegDemuxer> weak_this_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Thread on which all blocking FFmpeg operations are executed.
   base::Thread blocking_thread_;
@@ -238,19 +250,28 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // is 0.
   base::TimeDelta start_time_;
 
-  // Whether audio has been disabled for this demuxer (in which case this class
-  // drops packets destined for AUDIO demuxer streams on the floor).
-  bool audio_disabled_;
+  // The Time associated with timestamp 0. Set to a null
+  // time if the file doesn't have an association to Time.
+  base::Time timeline_offset_;
+
+  // Liveness of the stream.
+  Liveness liveness_;
+
+  // Whether text streams have been enabled for this demuxer.
+  bool text_enabled_;
 
   // Set if we know duration of the audio stream. Used when processing end of
   // stream -- at this moment we definitely know duration.
   bool duration_known_;
 
   // FFmpegURLProtocol implementation and corresponding glue bits.
-  BlockingUrlProtocol url_protocol_;
+  scoped_ptr<BlockingUrlProtocol> url_protocol_;
   scoped_ptr<FFmpegGlue> glue_;
 
-  const FFmpegNeedKeyCB need_key_cb_;
+  const NeedKeyCB need_key_cb_;
+
+  // NOTE: Weak pointers must be invalidated before all other member variables.
+  base::WeakPtrFactory<FFmpegDemuxer> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FFmpegDemuxer);
 };

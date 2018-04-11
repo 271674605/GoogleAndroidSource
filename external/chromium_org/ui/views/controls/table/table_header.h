@@ -5,7 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_TABLE_TABLE_HEADER_H_
 #define UI_VIEWS_CONTROLS_TABLE_TABLE_HEADER_H_
 
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 #include "ui/views/view.h"
 #include "ui/views/views_export.h"
 
@@ -25,17 +25,18 @@ class VIEWS_EXPORT TableHeader : public views::View {
   explicit TableHeader(TableView* table);
   virtual ~TableHeader();
 
-  const gfx::Font& font() const { return font_; }
+  const gfx::FontList& font_list() const { return font_list_; }
 
   // views::View overrides.
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
  private:
   // Used to track the column being resized.
@@ -52,13 +53,24 @@ class VIEWS_EXPORT TableHeader : public views::View {
     int initial_width;
   };
 
+  // If not already resizing and |event| is over a resizable column starts
+  // resizing.
+  bool StartResize(const ui::LocatedEvent& event);
+
+  // Continues a resize operation. Does nothing if not in the process of
+  // resizing.
+  void ContinueResize(const ui::LocatedEvent& event);
+
+  // Toggles the sort order of the column at the location in |event|.
+  void ToggleSortOrder(const ui::LocatedEvent& event);
+
   // Returns the column to resize given the specified x-coordinate, or -1 if |x|
   // is not in the resize range of any columns.
   int GetResizeColumn(int x) const;
 
   bool is_resizing() const { return resize_details_.get() != NULL; }
 
-  const gfx::Font font_;
+  const gfx::FontList font_list_;
 
   TableView* table_;
 

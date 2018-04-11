@@ -43,6 +43,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -55,6 +56,7 @@ import com.android.launcher2.LauncherSettings.Favorites;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -66,7 +68,7 @@ public class LauncherProvider extends ContentProvider {
 
     private static final String DATABASE_NAME = "launcher.db";
 
-    private static final int DATABASE_VERSION = 12;
+    private static final int DATABASE_VERSION = 13;
 
     static final String AUTHORITY = "com.android.launcher2.settings";
 
@@ -208,10 +210,13 @@ public class LauncherProvider extends ContentProvider {
     /**
      * @param workspaceResId that can be 0 to use default or non-zero for specific resource
      */
-    synchronized public void loadDefaultFavoritesIfNecessary(int origWorkspaceResId) {
+    synchronized public void loadDefaultFavoritesIfNecessary(int origWorkspaceResId,
+            boolean overridePrevious) {
         String spKey = LauncherApplication.getSharedPreferencesKey();
         SharedPreferences sp = getContext().getSharedPreferences(spKey, Context.MODE_PRIVATE);
-        if (sp.getBoolean(DB_CREATED_BUT_DEFAULT_WORKSPACE_NOT_LOADED, false)) {
+        boolean dbCreatedNoWorkspace =
+                sp.getBoolean(DB_CREATED_BUT_DEFAULT_WORKSPACE_NOT_LOADED, false);
+        if (dbCreatedNoWorkspace || overridePrevious) {
             int workspaceResId = origWorkspaceResId;
 
             // Use default workspace resource if none provided
@@ -225,9 +230,25 @@ public class LauncherProvider extends ContentProvider {
             if (origWorkspaceResId != 0) {
                 editor.putInt(DEFAULT_WORKSPACE_RESOURCE_ID, origWorkspaceResId);
             }
+            if (!dbCreatedNoWorkspace && overridePrevious) {
+                if (LOGD) Log.d(TAG, "Clearing old launcher database");
+                // Workspace has already been loaded, clear the database.
+                deleteDatabase();
+            }
             mOpenHelper.loadFavorites(mOpenHelper.getWritableDatabase(), workspaceResId);
             editor.commit();
         }
+    }
+
+    public void deleteDatabase() {
+        // Are you sure? (y/n)
+        final SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        final File dbFile = new File(db.getPath());
+        mOpenHelper.close();
+        if (dbFile.exists()) {
+            SQLiteDatabase.deleteDatabase(dbFile);
+        }
+        mOpenHelper = new DatabaseHelper(getContext());
     }
 
     private static class DatabaseHelper extends SQLiteOpenHelper {
@@ -272,6 +293,11 @@ public class LauncherProvider extends ContentProvider {
             if (LOGD) Log.d(TAG, "creating new launcher database");
 
             mMaxId = 1;
+            final UserManager um =
+                    (UserManager) mContext.getSystemService(Context.USER_SERVICE);
+            // Default profileId to the serial number of this user.
+            long userSerialNumber = um.getSerialNumberForUser(
+                    android.os.Process.myUserHandle());
 
             db.execSQL("CREATE TABLE favorites (" +
                     "_id INTEGER PRIMARY KEY," +
@@ -291,7 +317,8 @@ public class LauncherProvider extends ContentProvider {
                     "iconResource TEXT," +
                     "icon BLOB," +
                     "uri TEXT," +
-                    "displayMode INTEGER" +
+                    "displayMode INTEGER," +
+                    "profileId INTEGER DEFAULT " + userSerialNumber +
                     ");");
 
             // Database was just created, so wipe any previous widgets
@@ -503,10 +530,41 @@ public class LauncherProvider extends ContentProvider {
                 version = 12;
             }
 
+            if (version < 13) {
+                // Add userId column
+                if (addProfileColumn(db)) {
+                    version = 13;
+                }
+            }
+
             if (version != DATABASE_VERSION) {
                 Log.w(TAG, "Destroying all old data.");
                 db.execSQL("DROP TABLE IF EXISTS " + TABLE_FAVORITES);
                 onCreate(db);
+            }
+        }
+
+        private boolean addProfileColumn(SQLiteDatabase db) {
+            db.beginTransaction();
+            try {
+                final UserManager um =
+                        (UserManager) mContext.getSystemService(Context.USER_SERVICE);
+                // Default to the serial number of this user, for older
+                // shortcuts.
+                long userSerialNumber = um.getSerialNumberForUser(
+                        android.os.Process.myUserHandle());
+                // Insert new column for holding user serial number
+                db.execSQL("ALTER TABLE favorites " +
+                        "ADD COLUMN profileId INTEGER DEFAULT "
+                        + userSerialNumber + ";");
+                db.setTransactionSuccessful();
+                return true;
+            } catch (SQLException ex) {
+                // Old version remains, which means we wipe old data
+                Log.e(TAG, ex.getMessage(), ex);
+                return false;
+            } finally {
+                db.endTransaction();
             }
         }
 

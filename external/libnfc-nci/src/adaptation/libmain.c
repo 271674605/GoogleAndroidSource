@@ -21,20 +21,10 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "buildcfg.h"
-#include "nfa_mem_co.h"
 #include "nfa_nv_co.h"
-#include "nfa_nv_ci.h"
 #include "config.h"
+#include "nfc_hal_target.h"
 #include "nfc_hal_nv_co.h"
-
-#define LOG_TAG "BrcmNfcNfa"
-#define PRINT(s) __android_log_write(ANDROID_LOG_DEBUG, "BrcmNci", s)
-#define MAX_NCI_PACKET_SIZE  259
-#define MAX_LOGCAT_LINE     4096
-static char log_line[MAX_LOGCAT_LINE];
-
-extern UINT32 ScrProtocolTraceFlag;         // = SCR_PROTO_TRACE_ALL; // 0x017F;
-static const char* sTable = "0123456789abcdef";
 extern char bcm_nfc_location[];
 static const char* sNfaStorageBin = "/nfaStorage.bin";
 
@@ -49,7 +39,7 @@ static const char* sNfaStorageBin = "/nfaStorage.bin";
 **                  NULL otherwise
 **
 *******************************************************************************/
-NFC_API extern void *nfa_mem_co_alloc(UINT32 num_bytes)
+extern void *nfa_mem_co_alloc(UINT32 num_bytes)
 {
     return malloc(num_bytes);
 }
@@ -65,7 +55,7 @@ NFC_API extern void *nfa_mem_co_alloc(UINT32 num_bytes)
 **                  Nothing
 **
 *******************************************************************************/
-NFC_API extern void nfa_mem_co_free(void *pBuffer)
+extern void nfa_mem_co_free(void *pBuffer)
 {
     free(pBuffer);
 }
@@ -91,7 +81,7 @@ NFC_API extern void nfa_mem_co_free(void *pBuffer)
 **                        or an error has occurred.
 **
 *******************************************************************************/
-NFC_API extern void nfa_nv_co_read(UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
+extern void nfa_nv_co_read(UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
 {
     char filename[256], filename2[256];
 
@@ -116,7 +106,7 @@ NFC_API extern void nfa_nv_co_read(UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
         close (fileStream);
         if (actualReadData > 0)
         {
-            ALOGD ("%s: data size=%u", __FUNCTION__, actualReadData);
+            ALOGD ("%s: data size=%zu", __FUNCTION__, actualReadData);
             nfa_nv_ci_read (actualReadData, NFA_NV_CO_OK, block);
         }
         else
@@ -150,7 +140,7 @@ NFC_API extern void nfa_nv_co_read(UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
 **                        bytes have been written, or an error has been detected,
 **
 *******************************************************************************/
-NFC_API extern void nfa_nv_co_write(const UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
+extern void nfa_nv_co_write(const UINT8 *pBuffer, UINT16 nbytes, UINT8 block)
 {
     char filename[256], filename2[256];
 
@@ -174,7 +164,7 @@ NFC_API extern void nfa_nv_co_write(const UINT8 *pBuffer, UINT16 nbytes, UINT8 b
         unsigned short checksum = crcChecksumCompute (pBuffer, nbytes);
         size_t actualWrittenCrc = write (fileStream, &checksum, sizeof(checksum));
         size_t actualWrittenData = write (fileStream, pBuffer, nbytes);
-        ALOGD ("%s: %d bytes written", __FUNCTION__, actualWrittenData);
+        ALOGD ("%s: %zu bytes written", __FUNCTION__, actualWrittenData);
         if ((actualWrittenData == nbytes) && (actualWrittenCrc == sizeof(checksum)))
         {
             nfa_nv_ci_write (NFA_NV_CO_OK);
@@ -232,6 +222,8 @@ void delete_stack_non_volatile_store (BOOLEAN forceDelete)
     remove (filename);
     sprintf (filename, "%s%u", filename2, HC_F2_NV_BLOCK);
     remove (filename);
+    sprintf (filename, "%s%u", filename2, HC_F5_NV_BLOCK);
+    remove (filename);
 }
 
 /*******************************************************************************
@@ -272,7 +264,11 @@ void verify_stack_non_volatile_store ()
             {
                 sprintf (filename, "%s%u", filename2, HC_F2_NV_BLOCK);
                 if (crcChecksumVerifyIntegrity (filename))
-                    isValid = TRUE;
+                {
+                    sprintf (filename, "%s%u", filename2, HC_F5_NV_BLOCK);
+                    if (crcChecksumVerifyIntegrity (filename))
+                        isValid = TRUE;
+                }
             }
         }
     }
@@ -281,333 +277,3 @@ void verify_stack_non_volatile_store ()
         delete_stack_non_volatile_store (TRUE);
 }
 
-/*******************************************************************************
-**
-** Function         byte2hex
-**
-** Description      convert a byte array to hexadecimal string
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-static inline void byte2hex(const char* data, char** str)
-{
-    **str = sTable[(*data >> 4) & 0xf];
-    ++*str;
-    **str = sTable[*data & 0xf];
-    ++*str;
-}
-
-/*******************************************************************************
-**
-** Function         byte2char
-**
-** Description      convert a byte array to displayable text string
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-static inline void byte2char(const char* data, char** str)
-{
-    **str = *data < ' ' ? '.' : *data > '~' ? '.' : *data;
-    ++(*str);
-}
-
-/*******************************************************************************
-**
-** Function         word2hex
-**
-** Description      Convert a two byte into text string as little-endian WORD
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-static inline void word2hex(const char* data, char** hex)
-{
-    byte2hex(&data[1], hex);
-    byte2hex(&data[0], hex);
-}
-
-/*******************************************************************************
-**
-** Function         dumpbin
-**
-** Description      convert a byte array to a blob of text string for logging
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-void dumpbin(const char* data, int size, UINT32 trace_layer, UINT32 trace_type)
-{
-    char line_buff[256];
-    char *line;
-    int i, j, addr;
-    const int width = 16;
-    if(size <= 0)
-        return;
-#ifdef __RAW_HEADER
-    //write offset
-    line = line_buff;
-    *line++ = ' ';
-    *line++ = ' ';
-    *line++ = ' ';
-    *line++ = ' ';
-    *line++ = ' ';
-    *line++ = ' ';
-    for(j = 0; j < width; j++)
-    {
-        byte2hex((const char*)&j, &line);
-        *line++ = ' ';
-    }
-    *line = 0;
-    PRINT(line_buff);
-#endif
-    for(i = 0; i < size / width; i++)
-    {
-        line = line_buff;
-        //write address:
-        addr = i*width;
-        word2hex((const char*)&addr, &line);
-        *line++ = ':'; *line++ = ' ';
-        //write hex of data
-        for(j = 0; j < width; j++)
-        {
-            byte2hex(&data[j], &line);
-            *line++ = ' ';
-        }
-        //write char of data
-        for(j = 0; j < width; j++)
-            byte2char(data++, &line);
-        //wirte the end of line
-        *line = 0;
-        //output the line
-        PRINT(line_buff);
-    }
-    //last line of left over if any
-    int leftover = size % width;
-    if(leftover > 0)
-    {
-        line = line_buff;
-        //write address:
-        addr = i*width;
-        word2hex((const char*)&addr, &line);
-        *line++ = ':'; *line++ = ' ';
-        //write hex of data
-        for(j = 0; j < leftover; j++)
-        {
-            byte2hex(&data[j], &line);
-            *line++ = ' ';
-        }
-        //write hex padding
-        for(; j < width; j++)
-        {
-            *line++ = ' ';
-            *line++ = ' ';
-            *line++ = ' ';
-        }
-        //write char of data
-        for(j = 0; j < leftover; j++)
-            byte2char(data++, &line);
-        //write the end of line
-        *line = 0;
-        //output the line
-        PRINT(line_buff);
-    }
-}
-
-/*******************************************************************************
-**
-** Function         scru_dump_hex
-**
-** Description      print a text string to log
-**
-** Returns:
-**                  text string
-**
-*******************************************************************************/
-UINT8 *scru_dump_hex (UINT8 *p, char *pTitle, UINT32 len, UINT32 layer, UINT32 type)
-{
-    if(pTitle && *pTitle)
-        PRINT(pTitle);
-    dumpbin(p, len, layer, type);
-    return p;
-}
-
-/*******************************************************************************
-**
-** Function         DispHciCmd
-**
-** Description      Display a HCI command string
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-void DispHciCmd (BT_HDR *p_buf)
-{
-    int i,j;
-    int nBytes = ((BT_HDR_SIZE + p_buf->offset + p_buf->len)*2)+1;
-    UINT8 * data = (UINT8*) p_buf;
-    int data_len = BT_HDR_SIZE + p_buf->offset + p_buf->len;
-
-    if (!(ScrProtocolTraceFlag & SCR_PROTO_TRACE_HCI_SUMMARY))
-        return;
-
-    if (nBytes > sizeof(log_line))
-        return;
-
-    for(i = 0, j = 0; i < data_len && j < sizeof(log_line)-3; i++)
-    {
-        log_line[j++] = sTable[(*data >> 4) & 0xf];
-        log_line[j++] = sTable[*data & 0xf];
-        data++;
-    }
-    log_line[j] = '\0';
-
-    __android_log_write(ANDROID_LOG_DEBUG, "BrcmHciX", log_line);
-}
-
-
-/*******************************************************************************
-**
-** Function         DispHciEvt
-**
-** Description      display a NCI event
-**
-** Returns:
-**                  Nothing
-**
-*******************************************************************************/
-void DispHciEvt (BT_HDR *p_buf)
-{
-    int i,j;
-    int nBytes = ((BT_HDR_SIZE + p_buf->offset + p_buf->len)*2)+1;
-    UINT8 * data = (UINT8*) p_buf;
-    int data_len = BT_HDR_SIZE + p_buf->offset + p_buf->len;
-
-    if (!(ScrProtocolTraceFlag & SCR_PROTO_TRACE_HCI_SUMMARY))
-        return;
-
-    if (nBytes > sizeof(log_line))
-        return;
-
-    for(i = 0, j = 0; i < data_len && j < sizeof(log_line)-3; i++)
-    {
-        log_line[j++] = sTable[(*data >> 4) & 0xf];
-        log_line[j++] = sTable[*data & 0xf];
-        data++;
-    }
-    log_line[j] = '\0';
-
-    __android_log_write(ANDROID_LOG_DEBUG, "BrcmHciR", log_line);
-}
-
-/*******************************************************************************
-**
-** Function         DispNciDump
-**
-** Description      Log raw NCI packet as hex-ascii bytes
-**
-** Returns          None.
-**
-*******************************************************************************/
-void DispNciDump (UINT8 *data, UINT16 len, BOOLEAN is_recv)
-{
-    if (!(ScrProtocolTraceFlag & SCR_PROTO_TRACE_NCI))
-        return;
-
-    char line_buf[(MAX_NCI_PACKET_SIZE*2)+1];
-    int i,j;
-
-    for(i = 0, j = 0; i < len && j < sizeof(line_buf)-3; i++)
-    {
-        line_buf[j++] = sTable[(*data >> 4) & 0xf];
-        line_buf[j++] = sTable[*data & 0xf];
-        data++;
-    }
-    line_buf[j] = '\0';
-
-    __android_log_write(ANDROID_LOG_DEBUG, (is_recv) ? "BrcmNciR": "BrcmNciX", line_buf);
-}
-
-
-/*******************************************************************************
-**
-** Function         DispLLCP
-**
-** Description      Log raw LLCP packet as hex-ascii bytes
-**
-** Returns          None.
-**
-*******************************************************************************/
-void DispLLCP (BT_HDR *p_buf, BOOLEAN is_recv)
-{
-    int i,j;
-    int nBytes = ((BT_HDR_SIZE + p_buf->offset + p_buf->len)*2)+1;
-    UINT8 * data = (UINT8*) p_buf;
-    int data_len = BT_HDR_SIZE + p_buf->offset + p_buf->len;
-
-    if (appl_trace_level < BT_TRACE_LEVEL_DEBUG)
-        return;
-
-    for (i = 0; i < data_len; )
-    {
-        for(j = 0; i < data_len && j < sizeof(log_line)-3; i++)
-        {
-            log_line[j++] = sTable[(*data >> 4) & 0xf];
-            log_line[j++] = sTable[*data & 0xf];
-            data++;
-        }
-        log_line[j] = '\0';
-        __android_log_write(ANDROID_LOG_DEBUG, (is_recv) ? "BrcmLlcpR": "BrcmLlcpX", log_line);
-    }
-}
-
-
-/*******************************************************************************
-**
-** Function         DispHcp
-**
-** Description      Log raw HCP packet as hex-ascii bytes
-**
-** Returns          None.
-**
-*******************************************************************************/
-void DispHcp (UINT8 *data, UINT16 len, BOOLEAN is_recv)
-{
-    int i,j;
-    int nBytes = (len*2)+1;
-    char line_buf[400];
-
-    if (appl_trace_level < BT_TRACE_LEVEL_DEBUG)
-        return;
-
-    if (nBytes > sizeof(line_buf))
-        return;
-
-    // Only trace HCP if we're tracing HCI as well
-    if (!(ScrProtocolTraceFlag & SCR_PROTO_TRACE_HCI_SUMMARY))
-        return;
-
-    for(i = 0, j = 0; i < len && j < sizeof(line_buf)-3; i++)
-    {
-        line_buf[j++] = sTable[(*data >> 4) & 0xf];
-        line_buf[j++] = sTable[*data & 0xf];
-        data++;
-    }
-    line_buf[j] = '\0';
-
-    __android_log_write(ANDROID_LOG_DEBUG, (is_recv) ? "BrcmHcpR": "BrcmHcpX", line_buf);
-}
-
-void DispSNEP (UINT8 local_sap, UINT8 remote_sap, BT_HDR *p_buf, BOOLEAN is_first, BOOLEAN is_rx) {}
-void DispCHO (UINT8 *pMsg, UINT32 MsgLen, BOOLEAN is_rx) {}
-void DispT3TagMessage(BT_HDR *p_msg, BOOLEAN is_rx) {}
-void DispRWT4Tags (BT_HDR *p_buf, BOOLEAN is_rx) {}
-void DispCET4Tags (BT_HDR *p_buf, BOOLEAN is_rx) {}
-void DispRWI93Tag (BT_HDR *p_buf, BOOLEAN is_rx, UINT8 command_to_respond) {}
-void DispNDEFMsg (UINT8 *pMsg, UINT32 MsgLen, BOOLEAN is_recv) {}

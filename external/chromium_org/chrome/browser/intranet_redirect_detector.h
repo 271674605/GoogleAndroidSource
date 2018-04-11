@@ -26,7 +26,7 @@ class PrefRegistrySimple;
 // 302 redirect to "http://isp.domain.com/search?q=query" in order to display
 // custom pages on typos, nonexistent sites, etc.
 //
-// We use this information in the AlternateNavURLFetcher to avoid displaying
+// We use this information in the OmniboxNavigationObserver to avoid displaying
 // infobars for these cases.  Our infobars are designed to allow users to get at
 // intranet sites when they were erroneously taken to a search result page.  In
 // these cases, however, users would be shown a confusing and useless infobar
@@ -54,10 +54,6 @@ class IntranetRedirectDetector
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  // The number of characters the fetcher will use for its randomly-generated
-  // hostnames.
-  static const size_t kNumCharsInHostnames;
-
  private:
   typedef std::set<net::URLFetcher*> Fetchers;
 
@@ -72,30 +68,14 @@ class IntranetRedirectDetector
   virtual void OnIPAddressChanged() OVERRIDE;
 
   GURL redirect_origin_;
-  base::WeakPtrFactory<IntranetRedirectDetector> weak_factory_;
   Fetchers fetchers_;
   std::vector<GURL> resulting_origins_;
   bool in_sleep_;  // True if we're in the seven-second "no fetching" period
                    // that begins at browser start, or the one-second "no
                    // fetching" period that begins after network switches.
+  base::WeakPtrFactory<IntranetRedirectDetector> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(IntranetRedirectDetector);
-};
-
-// This is for use in testing, where we don't want our fetches to actually go
-// over the network.  It captures the requests and causes them to fail.
-class IntranetRedirectHostResolverProc : public net::HostResolverProc {
- public:
-  explicit IntranetRedirectHostResolverProc(net::HostResolverProc* previous);
-
-  virtual int Resolve(const std::string& host,
-                      net::AddressFamily address_family,
-                      net::HostResolverFlags host_resolver_flags,
-                      net::AddressList* addrlist,
-                      int* os_error) OVERRIDE;
-
- private:
-  virtual ~IntranetRedirectHostResolverProc() {}
 };
 
 #endif  // CHROME_BROWSER_INTRANET_REDIRECT_DETECTOR_H_

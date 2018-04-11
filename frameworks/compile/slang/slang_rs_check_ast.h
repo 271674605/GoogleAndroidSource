@@ -18,6 +18,7 @@
 #define _FRAMEWORKS_COMPILE_SLANG_SLANG_RS_CHECK_AST_H_
 
 #include "slang_assert.h"
+#include "slang_rs_context.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/StmtVisitor.h"
 
@@ -28,8 +29,8 @@ namespace slang {
 // casts (i.e. no pointers allowed in FS whatsoever).
 class RSCheckAST : public clang::StmtVisitor<RSCheckAST> {
  private:
+  slang::RSContext *Context;
   clang::ASTContext &C;
-  clang::DiagnosticsEngine &mDiagEngine;
   clang::SourceManager &mSM;
   bool mValid;
   unsigned int mTargetAPI;
@@ -45,12 +46,15 @@ class RSCheckAST : public clang::StmtVisitor<RSCheckAST> {
   void WarnOnSetElementAt(clang::CallExpr*);
 
  public:
-  explicit RSCheckAST(clang::ASTContext &Con, unsigned int TargetAPI,
+  explicit RSCheckAST(RSContext *Con, unsigned int TargetAPI,
                       bool IsFilterscript)
-      : C(Con), mDiagEngine(Con.getDiagnostics()), mSM(C.getSourceManager()),
-        mValid(true), mTargetAPI(TargetAPI), mIsFilterscript(IsFilterscript),
+      : Context(Con),
+        C(Con->getASTContext()),
+        mSM(C.getSourceManager()),
+        mValid(true),
+        mTargetAPI(TargetAPI),
+        mIsFilterscript(IsFilterscript),
         mInKernel(false) {
-    return;
   }
 
   void VisitStmt(clang::Stmt *S);

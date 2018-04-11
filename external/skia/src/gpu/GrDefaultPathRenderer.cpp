@@ -12,7 +12,8 @@
 #include "GrPathUtils.h"
 #include "SkString.h"
 #include "SkStrokeRec.h"
-#include "SkTrace.h"
+#include "SkTLazy.h"
+#include "SkTraceEvent.h"
 
 
 GrDefaultPathRenderer::GrDefaultPathRenderer(bool separateStencilSupport,
@@ -195,8 +196,6 @@ bool GrDefaultPathRenderer::createGeom(const SkPath& path,
                                        int* indexCnt,
                                        GrDrawTarget::AutoReleaseGeometry* arg) {
     {
-    SK_TRACE_EVENT0("GrDefaultPathRenderer::createGeom");
-
     SkScalar srcSpaceTolSqd = SkScalarMul(srcSpaceTol, srcSpaceTol);
     int contourCnt;
     int maxPts = GrPathUtils::worstCasePointCount(path, &contourCnt,
@@ -240,11 +239,11 @@ bool GrDefaultPathRenderer::createGeom(const SkPath& path,
     uint16_t* idx = idxBase;
     uint16_t subpathIdxStart = 0;
 
-    GrPoint* base = reinterpret_cast<GrPoint*>(arg->vertices());
-    GrAssert(NULL != base);
-    GrPoint* vert = base;
+    SkPoint* base = reinterpret_cast<SkPoint*>(arg->vertices());
+    SkASSERT(NULL != base);
+    SkPoint* vert = base;
 
-    GrPoint pts[4];
+    SkPoint pts[4];
 
     bool first = true;
     int subpath = 0;
@@ -314,22 +313,36 @@ bool GrDefaultPathRenderer::createGeom(const SkPath& path,
         first = false;
     }
 FINISHED:
-    GrAssert((vert - base) <= maxPts);
-    GrAssert((idx - idxBase) <= maxIdxs);
+    SkASSERT((vert - base) <= maxPts);
+    SkASSERT((idx - idxBase) <= maxIdxs);
 
-    *vertexCnt = vert - base;
-    *indexCnt = idx - idxBase;
+    *vertexCnt = static_cast<int>(vert - base);
+    *indexCnt = static_cast<int>(idx - idxBase);
 
     }
     return true;
 }
 
 bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
-                                             const SkStrokeRec& stroke,
+                                             const SkStrokeRec& origStroke,
                                              GrDrawTarget* target,
                                              bool stencilOnly) {
 
     SkMatrix viewM = target->getDrawState().getViewMatrix();
+    SkTCopyOnFirstWrite<SkStrokeRec> stroke(origStroke);
+
+    SkScalar hairlineCoverage;
+    if (IsStrokeHairlineOrEquivalent(*stroke, target->getDrawState().getViewMatrix(),
+                                     &hairlineCoverage)) {
+        uint8_t newCoverage = SkScalarRoundToInt(hairlineCoverage *
+                                                 target->getDrawState().getCoverage());
+        target->drawState()->setCoverage(newCoverage);
+
+        if (!stroke->isHairlineStyle()) {
+            stroke.writable()->setHairlineStyle();
+        }
+    }
+
     SkScalar tol = SK_Scalar1;
     tol = GrPathUtils::scaleToleranceToSrc(tol, viewM, path.getBounds());
 
@@ -338,7 +351,7 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
     GrPrimitiveType primType;
     GrDrawTarget::AutoReleaseGeometry arg;
     if (!this->createGeom(path,
-                          stroke,
+                          *stroke,
                           tol,
                           target,
                           &primType,
@@ -348,12 +361,12 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
         return false;
     }
 
-    GrAssert(NULL != target);
+    SkASSERT(NULL != target);
     GrDrawTarget::AutoStateRestore asr(target, GrDrawTarget::kPreserve_ASRInit);
     GrDrawState* drawState = target->drawState();
     bool colorWritesWereDisabled = drawState->isColorWriteDisabled();
     // face culling doesn't make sense here
-    GrAssert(GrDrawState::kBoth_DrawFace == drawState->getDrawFace());
+    SkASSERT(GrDrawState::kBoth_DrawFace == drawState->getDrawFace());
 
     int                         passCount = 0;
     const GrStencilSettings*    passes[3];
@@ -361,7 +374,7 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
     bool                        reverse = false;
     bool                        lastPassIsBounds;
 
-    if (stroke.isHairlineStyle()) {
+    if (stroke->isHairlineStyle()) {
         passCount = 1;
         if (stencilOnly) {
             passes[0] = &gDirectToStencil;
@@ -371,7 +384,7 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
         lastPassIsBounds = false;
         drawFace[0] = GrDrawState::kBoth_DrawFace;
     } else {
-        if (single_pass_path(path, stroke)) {
+        if (single_pass_path(path, *stroke)) {
             passCount = 1;
             if (stencilOnly) {
                 passes[0] = &gDirectToStencil;
@@ -441,7 +454,7 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
                     }
                     break;
                 default:
-                    GrAssert(!"Unknown path fFill!");
+                    SkDEBUGFAIL("Unknown path fFill!");
                     return false;
             }
         }
@@ -463,7 +476,7 @@ bool GrDefaultPathRenderer::internalDrawPath(const SkPath& path,
             SkRect bounds;
             GrDrawState::AutoViewMatrixRestore avmr;
             if (reverse) {
-                GrAssert(NULL != drawState->getRenderTarget());
+                SkASSERT(NULL != drawState->getRenderTarget());
                 // draw over the dev bounds (which will be the whole dst surface for inv fill).
                 bounds = devBounds;
                 SkMatrix vmi;
@@ -499,7 +512,10 @@ bool GrDefaultPathRenderer::canDrawPath(const SkPath& path,
                                         const GrDrawTarget* target,
                                         bool antiAlias) const {
     // this class can draw any path with any fill but doesn't do any anti-aliasing.
-    return (stroke.isFillStyle() || stroke.isHairlineStyle()) && !antiAlias;
+
+    return !antiAlias &&
+        (stroke.isFillStyle() ||
+         IsStrokeHairlineOrEquivalent(stroke, target->getDrawState().getViewMatrix(), NULL));
 }
 
 bool GrDefaultPathRenderer::onDrawPath(const SkPath& path,
@@ -515,7 +531,7 @@ bool GrDefaultPathRenderer::onDrawPath(const SkPath& path,
 void GrDefaultPathRenderer::onStencilPath(const SkPath& path,
                                           const SkStrokeRec& stroke,
                                           GrDrawTarget* target) {
-    GrAssert(SkPath::kInverseEvenOdd_FillType != path.getFillType());
-    GrAssert(SkPath::kInverseWinding_FillType != path.getFillType());
+    SkASSERT(SkPath::kInverseEvenOdd_FillType != path.getFillType());
+    SkASSERT(SkPath::kInverseWinding_FillType != path.getFillType());
     this->internalDrawPath(path, stroke, target, true);
 }

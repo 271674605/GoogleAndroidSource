@@ -23,25 +23,24 @@ import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.OperationApplicationException;
+import android.database.ContentObserver;
 import android.database.Cursor;
 import android.media.RingtoneManager;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.RemoteException;
-import android.text.TextUtils;
 
-import com.android.emailcommon.provider.EmailContent.AccountColumns;
 import com.android.emailcommon.utility.Utility;
 import com.android.mail.utils.LogUtils;
+import com.google.common.annotations.VisibleForTesting;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
 
-public final class Account extends EmailContent implements AccountColumns, Parcelable {
+public final class Account extends EmailContent implements Parcelable {
     public static final String TABLE_NAME = "Account";
 
     // Define all pseudo account IDs here to avoid conflict with one another.
@@ -131,22 +130,29 @@ public final class Account extends EmailContent implements AccountColumns, Parce
     public long mHostAuthKeyRecv;
     public long mHostAuthKeySend;
     public int mFlags;
-    public String mCompatibilityUuid;
     public String mSenderName;
     /** @deprecated Used only for migration */
     @Deprecated
     private String mRingtoneUri;
     public String mProtocolVersion;
-    public int mNewMessageCount;
     public String mSecuritySyncKey;
     public String mSignature;
     public long mPolicyKey;
     public long mPingDuration;
 
+    @VisibleForTesting
+    static final String JSON_TAG_HOST_AUTH_RECV = "hostAuthRecv";
+    @VisibleForTesting
+    static final String JSON_TAG_HOST_AUTH_SEND = "hostAuthSend";
+
     // Convenience for creating/working with an account
     public transient HostAuth mHostAuthRecv;
     public transient HostAuth mHostAuthSend;
     public transient Policy mPolicy;
+
+    // Marks this account as being a temporary entry, so we know to use it directly and not go
+    // through the database or any caches
+    private transient boolean mTemporary;
 
     public static final int CONTENT_ID_COLUMN = 0;
     public static final int CONTENT_DISPLAY_NAME_COLUMN = 1;
@@ -157,59 +163,39 @@ public final class Account extends EmailContent implements AccountColumns, Parce
     public static final int CONTENT_HOST_AUTH_KEY_RECV_COLUMN = 6;
     public static final int CONTENT_HOST_AUTH_KEY_SEND_COLUMN = 7;
     public static final int CONTENT_FLAGS_COLUMN = 8;
-    public static final int CONTENT_COMPATIBILITY_UUID_COLUMN = 9;
-    public static final int CONTENT_SENDER_NAME_COLUMN = 10;
-    public static final int CONTENT_RINGTONE_URI_COLUMN = 11;
-    public static final int CONTENT_PROTOCOL_VERSION_COLUMN = 12;
-    public static final int CONTENT_NEW_MESSAGE_COUNT_COLUMN = 13;
-    public static final int CONTENT_SECURITY_SYNC_KEY_COLUMN = 14;
-    public static final int CONTENT_SIGNATURE_COLUMN = 15;
-    public static final int CONTENT_POLICY_KEY_COLUMN = 16;
-    public static final int CONTENT_PING_DURATION_COLUMN = 17;
+    public static final int CONTENT_SENDER_NAME_COLUMN = 9;
+    public static final int CONTENT_RINGTONE_URI_COLUMN = 10;
+    public static final int CONTENT_PROTOCOL_VERSION_COLUMN = 11;
+    public static final int CONTENT_SECURITY_SYNC_KEY_COLUMN = 12;
+    public static final int CONTENT_SIGNATURE_COLUMN = 13;
+    public static final int CONTENT_POLICY_KEY_COLUMN = 14;
+    public static final int CONTENT_PING_DURATION_COLUMN = 15;
+    public static final int CONTENT_MAX_ATTACHMENT_SIZE_COLUMN = 16;
 
-    public static final String[] CONTENT_PROJECTION = new String[] {
-        RECORD_ID, AccountColumns.DISPLAY_NAME,
+    public static final String[] CONTENT_PROJECTION = {
+        AttachmentColumns._ID, AccountColumns.DISPLAY_NAME,
         AccountColumns.EMAIL_ADDRESS, AccountColumns.SYNC_KEY, AccountColumns.SYNC_LOOKBACK,
         AccountColumns.SYNC_INTERVAL, AccountColumns.HOST_AUTH_KEY_RECV,
         AccountColumns.HOST_AUTH_KEY_SEND, AccountColumns.FLAGS,
-        AccountColumns.COMPATIBILITY_UUID, AccountColumns.SENDER_NAME,
+        AccountColumns.SENDER_NAME,
         AccountColumns.RINGTONE_URI, AccountColumns.PROTOCOL_VERSION,
-        AccountColumns.NEW_MESSAGE_COUNT, AccountColumns.SECURITY_SYNC_KEY,
-        AccountColumns.SIGNATURE, AccountColumns.POLICY_KEY, AccountColumns.PING_DURATION
-    };
-
-    public static final int CONTENT_MAILBOX_TYPE_COLUMN = 1;
-
-    /**
-     * This projection is for listing account id's only
-     */
-    public static final String[] ID_TYPE_PROJECTION = new String[] {
-        RECORD_ID, MailboxColumns.TYPE
+        AccountColumns.SECURITY_SYNC_KEY,
+        AccountColumns.SIGNATURE, AccountColumns.POLICY_KEY, AccountColumns.PING_DURATION,
+        AccountColumns.MAX_ATTACHMENT_SIZE
     };
 
     public static final int ACCOUNT_FLAGS_COLUMN_ID = 0;
     public static final int ACCOUNT_FLAGS_COLUMN_FLAGS = 1;
-    public static final String[] ACCOUNT_FLAGS_PROJECTION = new String[] {
-            AccountColumns.ID, AccountColumns.FLAGS};
-
-    public static final String MAILBOX_SELECTION =
-        MessageColumns.MAILBOX_KEY + " =?";
-
-    public static final String UNREAD_COUNT_SELECTION =
-        MessageColumns.MAILBOX_KEY + " =? and " + MessageColumns.FLAG_READ + "= 0";
-
-    private static final String UUID_SELECTION = AccountColumns.COMPATIBILITY_UUID + " =?";
+    public static final String[] ACCOUNT_FLAGS_PROJECTION = {
+            AccountColumns._ID, AccountColumns.FLAGS};
 
     public static final String SECURITY_NONZERO_SELECTION =
-        Account.POLICY_KEY + " IS NOT NULL AND " + Account.POLICY_KEY + "!=0";
+        AccountColumns.POLICY_KEY + " IS NOT NULL AND " + AccountColumns.POLICY_KEY + "!=0";
 
     private static final String FIND_INBOX_SELECTION =
             MailboxColumns.TYPE + " = " + Mailbox.TYPE_INBOX +
             " AND " + MailboxColumns.ACCOUNT_KEY + " =?";
 
-    /**
-     * no public constructor since this is a utility class
-     */
     public Account() {
         mBaseUri = CONTENT_URI;
 
@@ -218,21 +204,37 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         mSyncInterval = -1;
         mSyncLookback = -1;
         mFlags = 0;
-        mCompatibilityUuid = UUID.randomUUID().toString();
     }
 
     public static Account restoreAccountWithId(Context context, long id) {
-        return EmailContent.restoreContentWithId(context, Account.class,
-                Account.CONTENT_URI, Account.CONTENT_PROJECTION, id);
+        return restoreAccountWithId(context, id, null);
     }
 
-    /**
-     * Returns {@code true} if the given account ID is a "normal" account. Normal accounts
-     * always have an ID greater than {@code 0} and not equal to any pseudo account IDs
-     * (such as {@link #ACCOUNT_ID_COMBINED_VIEW})
-     */
-    public static boolean isNormalAccount(long accountId) {
-        return (accountId > 0L) && (accountId != ACCOUNT_ID_COMBINED_VIEW);
+    public static Account restoreAccountWithId(Context context, long id, ContentObserver observer) {
+        return EmailContent.restoreContentWithId(context, Account.class,
+                Account.CONTENT_URI, Account.CONTENT_PROJECTION, id, observer);
+    }
+
+    public static Account restoreAccountWithAddress(Context context, String emailAddress) {
+        return restoreAccountWithAddress(context, emailAddress, null);
+    }
+
+    public static Account restoreAccountWithAddress(Context context, String emailAddress,
+            ContentObserver observer) {
+        final Cursor c = context.getContentResolver().query(CONTENT_URI,
+                new String[] {AccountColumns._ID},
+                AccountColumns.EMAIL_ADDRESS + "=?", new String[] {emailAddress},
+                null);
+        if (c == null || !c.moveToFirst()) {
+            return null;
+        }
+        final long id = c.getLong(c.getColumnIndex(AccountColumns._ID));
+        return restoreAccountWithId(context, id, observer);
+    }
+
+    @Override
+    protected Uri getContentNotificationUri() {
+        return Account.CONTENT_URI;
     }
 
     /**
@@ -264,15 +266,21 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         mHostAuthKeyRecv = cursor.getLong(CONTENT_HOST_AUTH_KEY_RECV_COLUMN);
         mHostAuthKeySend = cursor.getLong(CONTENT_HOST_AUTH_KEY_SEND_COLUMN);
         mFlags = cursor.getInt(CONTENT_FLAGS_COLUMN);
-        mCompatibilityUuid = cursor.getString(CONTENT_COMPATIBILITY_UUID_COLUMN);
         mSenderName = cursor.getString(CONTENT_SENDER_NAME_COLUMN);
         mRingtoneUri = cursor.getString(CONTENT_RINGTONE_URI_COLUMN);
         mProtocolVersion = cursor.getString(CONTENT_PROTOCOL_VERSION_COLUMN);
-        mNewMessageCount = cursor.getInt(CONTENT_NEW_MESSAGE_COUNT_COLUMN);
         mSecuritySyncKey = cursor.getString(CONTENT_SECURITY_SYNC_KEY_COLUMN);
         mSignature = cursor.getString(CONTENT_SIGNATURE_COLUMN);
         mPolicyKey = cursor.getLong(CONTENT_POLICY_KEY_COLUMN);
         mPingDuration = cursor.getLong(CONTENT_PING_DURATION_COLUMN);
+    }
+
+    public boolean isTemporary() {
+        return mTemporary;
+    }
+
+    public void setTemporary(boolean temporary) {
+        mTemporary = temporary;
     }
 
     private static long getId(Uri u) {
@@ -284,7 +292,9 @@ public final class Account extends EmailContent implements AccountColumns, Parce
     }
 
     /**
-     * @return the user-visible name for the account
+     * Returns the user-visible name for the account, eg. "My work address"
+     * or "foo@exemple.com".
+     * @return the user-visible name for the account.
      */
     public String getDisplayName() {
         return mDisplayName;
@@ -332,6 +342,7 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         return mSignature;
     }
 
+    @VisibleForTesting
     public void setSignature(String signature) {
         mSignature = signature;
     }
@@ -426,15 +437,6 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         return (mFlags & FLAGS_DELETE_POLICY_MASK) >> FLAGS_DELETE_POLICY_SHIFT;
     }
 
-    /**
-     * Return the Uuid associated with this account.  This is primarily for compatibility
-     * with accounts set up by previous versions, because there are externals references
-     * to the Uuid (e.g. desktop shortcuts).
-     */
-    public String getUuid() {
-        return mCompatibilityUuid;
-    }
-
     public HostAuth getOrCreateHostAuthSend(Context context) {
         if (mHostAuthSend == null) {
             if (mHostAuthKeySend != 0) {
@@ -455,88 +457,6 @@ public final class Account extends EmailContent implements AccountColumns, Parce
             }
         }
         return mHostAuthRecv;
-    }
-
-    /**
-     * For compatibility while converting to provider model, generate a "local store URI"
-     *
-     * @return a string in the form of a Uri, as used by the other parts of the email app
-     */
-    public String getLocalStoreUri(Context context) {
-        return "local://localhost/" + context.getDatabasePath(getUuid() + ".db");
-    }
-
-    /**
-     * @return true if the account supports "search".
-     */
-    public static boolean supportsServerSearch(Context context, long accountId) {
-        Account account = Account.restoreAccountWithId(context, accountId);
-        if (account == null) return false;
-        return (account.mFlags & Account.FLAGS_SUPPORTS_SEARCH) != 0;
-    }
-
-    /**
-     * @return {@link Uri} to this {@link Account} in the
-     * {@code content://com.android.email.provider/account/UUID} format, which is safe to use
-     * for desktop shortcuts.
-     *
-     * <p>We don't want to store _id in shortcuts, because
-     * {@link com.android.email.provider.AccountBackupRestore} won't preserve it.
-     */
-    public Uri getShortcutSafeUri() {
-        return getShortcutSafeUriFromUuid(mCompatibilityUuid);
-    }
-
-    /**
-     * @return {@link Uri} to an {@link Account} with a {@code uuid}.
-     */
-    public static Uri getShortcutSafeUriFromUuid(String uuid) {
-        return CONTENT_URI.buildUpon().appendEncodedPath(uuid).build();
-    }
-
-    /**
-     * Parse {@link Uri} in the {@code content://com.android.email.provider/account/ID} format
-     * where ID = account id (used on Eclair, Android 2.0-2.1) or UUID, and return _id of
-     * the {@link Account} associated with it.
-     *
-     * @param context context to access DB
-     * @param uri URI of interest
-     * @return _id of the {@link Account} associated with ID, or -1 if none found.
-     */
-    public static long getAccountIdFromShortcutSafeUri(Context context, Uri uri) {
-        // Make sure the URI is in the correct format.
-        if (!"content".equals(uri.getScheme())
-                || !EmailContent.AUTHORITY.equals(uri.getAuthority())) {
-            return -1;
-        }
-
-        final List<String> ps = uri.getPathSegments();
-        if (ps.size() != 2 || !"account".equals(ps.get(0))) {
-            return -1;
-        }
-
-        // Now get the ID part.
-        final String id = ps.get(1);
-
-        // First, see if ID can be parsed as long.  (Eclair-style)
-        // (UUIDs have '-' in them, so they are always non-parsable.)
-        try {
-            return Long.parseLong(id);
-        } catch (NumberFormatException ok) {
-            // OK, it's not a long.  Continue...
-        }
-
-        // Now id is a UUId.
-        return getAccountIdFromUuid(context, id);
-    }
-
-    /**
-     * @return ID of the account with the given UUID.
-     */
-    public static long getAccountIdFromUuid(Context context, String uuid) {
-        return Utility.getFirstRowLong(context,
-                CONTENT_URI, ID_PROJECTION,
-                UUID_SELECTION, new String[] {uuid}, null, 0, -1L);
     }
 
     /**
@@ -595,7 +515,7 @@ public final class Account extends EmailContent implements AccountColumns, Parce
      * @return the account's protocol (or null if the HostAuth doesn't not exist)
      */
     public String getProtocol(Context context) {
-        HostAuth hostAuth = HostAuth.restoreHostAuthWithId(context, mHostAuthKeyRecv);
+        HostAuth hostAuth = getOrCreateHostAuthRecv(context);
         if (hostAuth != null) {
             return hostAuth.mProtocol;
         }
@@ -692,34 +612,6 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         }
     }
 
-    /**
-     * Given an account id, determine whether the account is currently prohibited from automatic
-     * sync, due to roaming while the account's policy disables this
-     * @param context the caller's context
-     * @param accountId the account id
-     * @return true if the account can't automatically sync due to roaming; false otherwise
-     */
-    public static boolean isAutomaticSyncDisabledByRoaming(Context context, long accountId) {
-        Account account = Account.restoreAccountWithId(context, accountId);
-        // Account being deleted; just return
-        if (account == null) return false;
-        long policyKey = account.mPolicyKey;
-        // If no security policy, we're good
-        if (policyKey <= 0) return false;
-
-        ConnectivityManager cm =
-            (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo info = cm.getActiveNetworkInfo();
-        // If we're not on mobile, we're good
-        if (info == null || (info.getType() != ConnectivityManager.TYPE_MOBILE)) return false;
-        // If we're not roaming, we're good
-        if (!info.isRoaming()) return false;
-        Policy policy = Policy.restorePolicyWithId(context, policyKey);
-        // Account being deleted; just return
-        if (policy == null) return false;
-        return policy.mRequireManualSyncWhenRoaming;
-    }
-
     /*
      * Override this so that we can store the HostAuth's first and link them to the Account
      * (non-Javadoc)
@@ -739,22 +631,54 @@ public final class Account extends EmailContent implements AccountColumns, Parce
 
         int index = 0;
         int recvIndex = -1;
+        int recvCredentialsIndex = -1;
         int sendIndex = -1;
+        int sendCredentialsIndex = -1;
 
-        // Create operations for saving the send and recv hostAuths
+        // Create operations for saving the send and recv hostAuths, and their credentials.
         // Also, remember which operation in the array they represent
         ArrayList<ContentProviderOperation> ops = new ArrayList<ContentProviderOperation>();
         if (mHostAuthRecv != null) {
-            recvIndex = index++;
-            ops.add(ContentProviderOperation.newInsert(mHostAuthRecv.mBaseUri)
-                    .withValues(mHostAuthRecv.toContentValues())
+            if (mHostAuthRecv.mCredential != null) {
+                recvCredentialsIndex = index++;
+                ops.add(ContentProviderOperation.newInsert(mHostAuthRecv.mCredential.mBaseUri)
+                        .withValues(mHostAuthRecv.mCredential.toContentValues())
                     .build());
+            }
+            recvIndex = index++;
+            final ContentProviderOperation.Builder b = ContentProviderOperation.newInsert(
+                    mHostAuthRecv.mBaseUri);
+            b.withValues(mHostAuthRecv.toContentValues());
+            if (recvCredentialsIndex >= 0) {
+                final ContentValues cv = new ContentValues();
+                cv.put(HostAuthColumns.CREDENTIAL_KEY, recvCredentialsIndex);
+                b.withValueBackReferences(cv);
+            }
+            ops.add(b.build());
         }
         if (mHostAuthSend != null) {
+            if (mHostAuthSend.mCredential != null) {
+                if (mHostAuthRecv.mCredential != null &&
+                        mHostAuthRecv.mCredential.equals(mHostAuthSend.mCredential)) {
+                    // These two credentials are identical, use the same row.
+                    sendCredentialsIndex = recvCredentialsIndex;
+                } else {
+                    sendCredentialsIndex = index++;
+                    ops.add(ContentProviderOperation.newInsert(mHostAuthSend.mCredential.mBaseUri)
+                            .withValues(mHostAuthSend.mCredential.toContentValues())
+                            .build());
+                }
+            }
             sendIndex = index++;
-            ops.add(ContentProviderOperation.newInsert(mHostAuthSend.mBaseUri)
-                    .withValues(mHostAuthSend.toContentValues())
-                    .build());
+            final ContentProviderOperation.Builder b = ContentProviderOperation.newInsert(
+                    mHostAuthSend.mBaseUri);
+            b.withValues(mHostAuthSend.toContentValues());
+            if (sendCredentialsIndex >= 0) {
+                final ContentValues cv = new ContentValues();
+                cv.put(HostAuthColumns.CREDENTIAL_KEY, sendCredentialsIndex);
+                b.withValueBackReferences(cv);
+            }
+            ops.add(b.build());
         }
 
         // Now do the Account
@@ -762,10 +686,10 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         if (recvIndex >= 0 || sendIndex >= 0) {
             cv = new ContentValues();
             if (recvIndex >= 0) {
-                cv.put(Account.HOST_AUTH_KEY_RECV, recvIndex);
+                cv.put(AccountColumns.HOST_AUTH_KEY_RECV, recvIndex);
             }
             if (sendIndex >= 0) {
-                cv.put(Account.HOST_AUTH_KEY_SEND, sendIndex);
+                cv.put(AccountColumns.HOST_AUTH_KEY_SEND, sendIndex);
             }
         }
 
@@ -812,16 +736,104 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         values.put(AccountColumns.HOST_AUTH_KEY_RECV, mHostAuthKeyRecv);
         values.put(AccountColumns.HOST_AUTH_KEY_SEND, mHostAuthKeySend);
         values.put(AccountColumns.FLAGS, mFlags);
-        values.put(AccountColumns.COMPATIBILITY_UUID, mCompatibilityUuid);
         values.put(AccountColumns.SENDER_NAME, mSenderName);
         values.put(AccountColumns.RINGTONE_URI, mRingtoneUri);
         values.put(AccountColumns.PROTOCOL_VERSION, mProtocolVersion);
-        values.put(AccountColumns.NEW_MESSAGE_COUNT, mNewMessageCount);
         values.put(AccountColumns.SECURITY_SYNC_KEY, mSecuritySyncKey);
         values.put(AccountColumns.SIGNATURE, mSignature);
         values.put(AccountColumns.POLICY_KEY, mPolicyKey);
         values.put(AccountColumns.PING_DURATION, mPingDuration);
         return values;
+    }
+
+    public String toJsonString(final Context context) {
+        ensureLoaded(context);
+        final JSONObject json = toJson();
+        if (json != null) {
+            return json.toString();
+        }
+        return null;
+    }
+
+    protected JSONObject toJson() {
+        try {
+            final JSONObject json = new JSONObject();
+            json.putOpt(AccountColumns.DISPLAY_NAME, mDisplayName);
+            json.put(AccountColumns.EMAIL_ADDRESS, mEmailAddress);
+            json.put(AccountColumns.SYNC_LOOKBACK, mSyncLookback);
+            json.put(AccountColumns.SYNC_INTERVAL, mSyncInterval);
+            final JSONObject recvJson = mHostAuthRecv.toJson();
+            json.put(JSON_TAG_HOST_AUTH_RECV, recvJson);
+            if (mHostAuthSend != null) {
+                final JSONObject sendJson = mHostAuthSend.toJson();
+                json.put(JSON_TAG_HOST_AUTH_SEND, sendJson);
+            }
+            json.put(AccountColumns.FLAGS, mFlags);
+            json.putOpt(AccountColumns.SENDER_NAME, mSenderName);
+            json.putOpt(AccountColumns.PROTOCOL_VERSION, mProtocolVersion);
+            json.putOpt(AccountColumns.SIGNATURE, mSignature);
+            json.put(AccountColumns.PING_DURATION, mPingDuration);
+            return json;
+        } catch (final JSONException e) {
+            LogUtils.d(LogUtils.TAG, e, "Exception while serializing Account");
+        }
+        return null;
+    }
+
+    public static Account fromJsonString(final String jsonString) {
+        try {
+            final JSONObject json = new JSONObject(jsonString);
+            return fromJson(json);
+        } catch (final JSONException e) {
+            LogUtils.d(LogUtils.TAG, e, "Could not parse json for account");
+        }
+        return null;
+    }
+
+    protected static Account fromJson(final JSONObject json) {
+        try {
+            final Account a = new Account();
+            a.mDisplayName = json.optString(AccountColumns.DISPLAY_NAME);
+            a.mEmailAddress = json.getString(AccountColumns.EMAIL_ADDRESS);
+            // SYNC_KEY is not stored
+            a.mSyncLookback = json.getInt(AccountColumns.SYNC_LOOKBACK);
+            a.mSyncInterval = json.getInt(AccountColumns.SYNC_INTERVAL);
+            final JSONObject recvJson = json.getJSONObject(JSON_TAG_HOST_AUTH_RECV);
+            a.mHostAuthRecv = HostAuth.fromJson(recvJson);
+            final JSONObject sendJson = json.optJSONObject(JSON_TAG_HOST_AUTH_SEND);
+            if (sendJson != null) {
+                a.mHostAuthSend = HostAuth.fromJson(sendJson);
+            }
+            a.mFlags = json.getInt(AccountColumns.FLAGS);
+            a.mSenderName = json.optString(AccountColumns.SENDER_NAME);
+            a.mProtocolVersion = json.optString(AccountColumns.PROTOCOL_VERSION);
+            // SECURITY_SYNC_KEY is not stored
+            a.mSignature = json.optString(AccountColumns.SIGNATURE);
+            // POLICY_KEY is not stored
+            a.mPingDuration = json.optInt(AccountColumns.PING_DURATION, 0);
+            return a;
+        } catch (final JSONException e) {
+            LogUtils.d(LogUtils.TAG, e, "Exception while deserializing Account");
+        }
+        return null;
+    }
+
+    /**
+     * Ensure that all optionally-loaded fields are populated from the provider.
+     * @param context for provider loads
+     */
+    public void ensureLoaded(final Context context) {
+        if (mHostAuthKeyRecv == 0 && mHostAuthRecv == null) {
+            throw new IllegalStateException("Trying to load incomplete Account object");
+        }
+        getOrCreateHostAuthRecv(context).ensureLoaded(context);
+
+        if (mHostAuthKeySend != 0) {
+            getOrCreateHostAuthSend(context);
+            if (mHostAuthSend != null) {
+                mHostAuthSend.ensureLoaded(context);
+            }
+        }
     }
 
     /**
@@ -863,11 +875,11 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         dest.writeLong(mHostAuthKeyRecv);
         dest.writeLong(mHostAuthKeySend);
         dest.writeInt(mFlags);
-        dest.writeString(mCompatibilityUuid);
+        dest.writeString("" /* mCompatibilityUuid */);
         dest.writeString(mSenderName);
         dest.writeString(mRingtoneUri);
         dest.writeString(mProtocolVersion);
-        dest.writeInt(mNewMessageCount);
+        dest.writeInt(0 /* mNewMessageCount */);
         dest.writeString(mSecuritySyncKey);
         dest.writeString(mSignature);
         dest.writeLong(mPolicyKey);
@@ -901,11 +913,11 @@ public final class Account extends EmailContent implements AccountColumns, Parce
         mHostAuthKeyRecv = in.readLong();
         mHostAuthKeySend = in.readLong();
         mFlags = in.readInt();
-        mCompatibilityUuid = in.readString();
+        /* mCompatibilityUuid = */ in.readString();
         mSenderName = in.readString();
         mRingtoneUri = in.readString();
         mProtocolVersion = in.readString();
-        mNewMessageCount = in.readInt();
+        /* mNewMessageCount = */ in.readInt();
         mSecuritySyncKey = in.readString();
         mSignature = in.readString();
         mPolicyKey = in.readLong();
@@ -926,7 +938,7 @@ public final class Account extends EmailContent implements AccountColumns, Parce
      */
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder('[');
+        StringBuilder sb = new StringBuilder("[");
         if (mHostAuthRecv != null && mHostAuthRecv.mProtocol != null) {
             sb.append(mHostAuthRecv.mProtocol);
             sb.append(':');

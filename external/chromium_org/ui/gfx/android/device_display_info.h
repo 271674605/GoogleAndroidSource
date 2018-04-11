@@ -8,15 +8,14 @@
 #include <jni.h>
 #include <string>
 
-#include "base/android/scoped_java_ref.h"
 #include "base/basictypes.h"
-#include "ui/base/ui_export.h"
+#include "ui/gfx/gfx_export.h"
 
 namespace gfx {
 
 // Facilitates access to device information typically only
 // available using the Android SDK, including Display properties.
-class UI_EXPORT DeviceDisplayInfo {
+class GFX_EXPORT DeviceDisplayInfo {
  public:
   DeviceDisplayInfo();
   ~DeviceDisplayInfo();
@@ -26,6 +25,18 @@ class UI_EXPORT DeviceDisplayInfo {
 
   // Returns display width in physical pixels.
   int GetDisplayWidth();
+
+  // Returns real display height in physical pixels.
+  // This version does not subtract window decorations etc.
+  // WARNING: This is only supported on JB-MR1 (sdk >= 17). Either
+  //          check the SDK-level, or check for '0' being returned.
+  int GetPhysicalDisplayHeight();
+
+  // Returns real display width in physical pixels.
+  // This version does not subtract window decorations etc.
+  // WARNING: This is only supported on JB-MR1 (sdk >= 17). Either
+  //          check the SDK-level, or check for '0' being returned.
+  int GetPhysicalDisplayWidth();
 
   // Returns number of bits per pixel.
   int GetBitsPerPixel();
@@ -37,12 +48,15 @@ class UI_EXPORT DeviceDisplayInfo {
   // (1.0 is 160dpi, 0.75 is 120dpi, 2.0 is 320dpi).
   double GetDIPScale();
 
-  // Registers methods with JNI and returns true if succeeded.
-  static bool RegisterDeviceDisplayInfo(JNIEnv* env);
+  // Smallest possible screen size in density-independent pixels.
+  int GetSmallestDIPWidth();
+
+  // Returns the display rotation angle from its natural orientation. Expected
+  // values are one of { 0, 90, 180, 270 }.
+  // See DeviceDispayInfo.java for more information.
+  int GetRotationDegrees();
 
  private:
-  base::android::ScopedJavaGlobalRef<jobject> j_device_info_;
-
   DISALLOW_COPY_AND_ASSIGN(DeviceDisplayInfo);
 };
 

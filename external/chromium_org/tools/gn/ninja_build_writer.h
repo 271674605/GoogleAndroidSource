@@ -29,7 +29,8 @@ class NinjaBuildWriter {
   NinjaBuildWriter(const BuildSettings* settings,
                    const std::vector<const Settings*>& all_settings,
                    const std::vector<const Target*>& default_toolchain_targets,
-                   std::ostream& out);
+                   std::ostream& out,
+                   std::ostream& dep_out);
   ~NinjaBuildWriter();
 
   void Run();
@@ -38,10 +39,14 @@ class NinjaBuildWriter {
   void WriteSubninjas();
   void WritePhonyAndAllRules();
 
+  void WritePhonyRule(const Target* target, const OutputFile& target_file,
+                      const std::string& phony_name);
+
   const BuildSettings* build_settings_;
   std::vector<const Settings*> all_settings_;
   std::vector<const Target*> default_toolchain_targets_;
   std::ostream& out_;
+  std::ostream& dep_out_;
   PathOutput path_output_;
 
   NinjaHelper helper_;

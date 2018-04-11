@@ -28,32 +28,22 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:layout_alignParentEnd="true"
-        android:layout_alignParentRight="true"
         android:visibility="gone"
-        android:src="@drawable/folder_parent_icon" />
-
-    <ImageView
-        android:id="@+id/color_block"
-        style="@style/FolderItemIcon"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentTop="true" />
+        android:src="@drawable/folder_parent_icon"
+        style="@style/FolderParentIconStyle" />
 
     <FrameLayout
         android:id="@+id/message_counts"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
-        android:layout_alignParentEnd="true"
-        android:layout_alignParentRight="true"
         android:duplicateParentState="true"
         style="@style/FolderListItemEndStyle" >
 
         <TextView
             android:id="@+id/unread"
             android:duplicateParentState="true"
-            style="@style/UnreadCount" />
+            style="@style/UnreadCountRelativeLayout" />
 
         <TextView
             android:id="@+id/unseen"
@@ -66,11 +56,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentLeft="true"
         android:duplicateParentState="true"
-        android:visibility="gone"
-        style="@style/FolderListItemStartStyle" />
+        style="@style/FolderListIconStyle" />
 
     <TextView
         android:id="@+id/name"
@@ -86,8 +73,9 @@
         android:includeFontPadding="false"
         android:maxLines="2"
         android:ellipsize="end"
+        android:textAlignment="viewStart"
         android:textColor="@color/folder_item_text_color"
-        android:textAppearance="?android:attr/textAppearanceMedium"
+        android:textSize="@dimen/drawer_item_font_size"
         style="@style/FolderListItemStyle" />
 
 </com.android.mail.ui.FolderItemView>

@@ -18,14 +18,16 @@ struct ChildProcessData {
 
   // The name of the process.  i.e. for plugins it might be Flash, while for
   // for workers it might be the domain that it's from.
-  string16 name;
+  base::string16 name;
 
   // The unique identifier for this child process. This identifier is NOT a
   // process ID, and will be unique for all types of child process for
   // one run of the browser.
   int id;
 
-  // The handle to the process.
+  // The handle to the process. May have value kNullProcessHandle if no process
+  // exists - either because it hasn't been started yet or it's running in the
+  // current process.
   base::ProcessHandle handle;
 
   explicit ChildProcessData(int process_type)

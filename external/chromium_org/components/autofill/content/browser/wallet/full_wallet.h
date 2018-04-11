@@ -52,7 +52,8 @@ class FullWallet {
                                     scoped_ptr<Address> shipping_address);
 
   // Returns corresponding data for |type|.
-  base::string16 GetInfo(const AutofillType& type);
+  base::string16 GetInfo(const std::string& app_locale,
+                         const AutofillType& type);
 
   // Whether or not |action| is in |required_actions_|.
   bool HasRequiredAction(RequiredAction action) const;
@@ -60,6 +61,10 @@ class FullWallet {
   // The type of the card that this FullWallet contains and the last four digits
   // like this "Visa - 4111".
   base::string16 TypeAndLastFourDigits();
+
+  // Decrypts and returns the primary account number (PAN) using the generated
+  // one time pad, |one_time_pad_|.
+  const std::string& GetPan();
 
   bool operator==(const FullWallet& other) const;
   bool operator!=(const FullWallet& other) const;
@@ -83,7 +88,8 @@ class FullWallet {
 
  private:
   friend class FullWalletTest;
-  friend scoped_ptr<FullWallet> GetTestFullWallet();
+  friend scoped_ptr<FullWallet> GetTestFullWalletWithRequiredActions(
+      const std::vector<RequiredAction>& action);
   friend scoped_ptr<FullWallet> GetTestFullWalletInstrumentOnly();
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, CreateFullWallet);
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, CreateFullWalletWithRequiredActions);
@@ -101,10 +107,6 @@ class FullWallet {
 
   // Decrypts both |pan_| and |cvn_|.
   void DecryptCardInfo();
-
-  // Decrypts and returns the primary account number (PAN) using the generated
-  // one time pad, |one_time_pad_|.
-  const std::string& GetPan();
 
   // Decrypts and returns the card verification number (CVN) using the generated
   // one time pad, |one_time_pad_|.

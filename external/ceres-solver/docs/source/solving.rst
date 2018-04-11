@@ -9,7 +9,6 @@
 Solving
 =======
 
-
 Introduction
 ============
 
@@ -24,15 +23,21 @@ variables, and
 :math:`m`-dimensional function of :math:`x`.  We are interested in
 solving the following optimization problem [#f1]_ .
 
-.. math:: \arg \min_x \frac{1}{2}\|F(x)\|^2\ .
+.. math:: \arg \min_x \frac{1}{2}\|F(x)\|^2\ . \\
+          L \le x \le U
   :label: nonlinsq
 
-Here, the Jacobian :math:`J(x)` of :math:`F(x)` is an :math:`m\times
-n` matrix, where :math:`J_{ij}(x) = \partial_j f_i(x)` and the
-gradient vector :math:`g(x) = \nabla \frac{1}{2}\|F(x)\|^2 = J(x)^\top
-F(x)`. Since the efficient global minimization of :eq:`nonlinsq` for
+Where, :math:`L` and :math:`U` are lower and upper bounds on the
+parameter vector :math:`x`.
+
+Since the efficient global minimization of :eq:`nonlinsq` for
 general :math:`F(x)` is an intractable problem, we will have to settle
 for finding a local minimum.
+
+In the following, the Jacobian :math:`J(x)` of :math:`F(x)` is an
+:math:`m\times n` matrix, where :math:`J_{ij}(x) = \partial_j f_i(x)`
+and the gradient vector is :math:`g(x) = \nabla \frac{1}{2}\|F(x)\|^2
+= J(x)^\top F(x)`.
 
 The general strategy when solving non-linear optimization problems is
 to solve a sequence of approximations to the original problem
@@ -81,15 +86,20 @@ Trust Region Methods
 The basic trust region algorithm looks something like this.
 
    1. Given an initial point :math:`x` and a trust region radius :math:`\mu`.
-   2. :math:`\arg \min_{\Delta x} \frac{1}{2}\|J(x)\Delta
-      x + F(x)\|^2` s.t. :math:`\|D(x)\Delta x\|^2 \le \mu`
+   2. Solve
+
+      .. math::
+         \arg \min_{\Delta x}& \frac{1}{2}\|J(x)\Delta x + F(x)\|^2 \\
+         \text{such that} &\|D(x)\Delta x\|^2 \le \mu\\
+         &L \le x + \Delta x \le U.
+
    3. :math:`\rho = \frac{\displaystyle \|F(x + \Delta x)\|^2 -
       \|F(x)\|^2}{\displaystyle \|J(x)\Delta x + F(x)\|^2 -
       \|F(x)\|^2}`
    4. if :math:`\rho > \epsilon` then  :math:`x = x + \Delta x`.
    5. if :math:`\rho > \eta_1` then :math:`\rho = 2  \rho`
    6. else if :math:`\rho < \eta_2` then :math:`\rho = 0.5 * \rho`
-   7. Goto 2.
+   7. Go to 2.
 
 Here, :math:`\mu` is the trust region radius, :math:`D(x)` is some
 matrix used to define a metric on the domain of :math:`F(x)` and
@@ -103,21 +113,27 @@ in the value of :math:`\rho`.
 The key computational step in a trust-region algorithm is the solution
 of the constrained optimization problem
 
-.. math:: \arg\min_{\Delta x} \frac{1}{2}\|J(x)\Delta x +  F(x)\|^2\quad \text{such that}\quad  \|D(x)\Delta x\|^2 \le \mu
+.. math::
+   \arg \min_{\Delta x}& \frac{1}{2}\|J(x)\Delta x + F(x)\|^2 \\
+   \text{such that} &\|D(x)\Delta x\|^2 \le \mu\\
+    &L \le x + \Delta x \le U.
    :label: trp
 
 There are a number of different ways of solving this problem, each
 giving rise to a different concrete trust-region algorithm. Currently
 Ceres, implements two trust-region algorithms - Levenberg-Marquardt
-and Dogleg. The user can choose between them by setting
-:member:`Solver::Options::trust_region_strategy_type`.
+and Dogleg, each of which is augmented with a line search if bounds
+constraints are present [Kanzow]_. The user can choose between them by
+setting :member:`Solver::Options::trust_region_strategy_type`.
 
 .. rubric:: Footnotes
 
-.. [#f1] At the level of the non-linear solver, the block
-         structure is not relevant, therefore our discussion here is
-         in terms of an optimization problem defined over a state
-         vector of size :math:`n`.
+.. [#f1] At the level of the non-linear solver, the block structure is
+         not relevant, therefore our discussion here is in terms of an
+         optimization problem defined over a state vector of size
+         :math:`n`. Similarly the presence of loss functions is also
+         ignored as the problem is internally converted into a pure
+         non-linear least squares problem.
 
 
 .. _section-levenberg-marquardt:
@@ -291,9 +307,10 @@ In this case, we solve for the trust region step for the full problem,
 and then use it as the starting point to further optimize just `a_1`
 and `a_2`. For the linear case, this amounts to doing a single linear
 least squares solve. For non-linear problems, any method for solving
-the `a_1` and `a_2` optimization problems will do. The only constraint
-on `a_1` and `a_2` (if they are two different parameter block) is that
-they do not co-occur in a residual block.
+the :math:`a_1` and :math:`a_2` optimization problems will do. The
+only constraint on :math:`a_1` and :math:`a_2` (if they are two
+different parameter block) is that they do not co-occur in a residual
+block.
 
 This idea can be further generalized, by not just optimizing
 :math:`(a_1, a_2)`, but decomposing the graph corresponding to the
@@ -315,7 +332,7 @@ Non-monotonic Steps
 -------------------
 
 Note that the basic trust-region algorithm described in
-Algorithm~\ref{alg:trust-region} is a descent algorithm in that they
+:ref:`section-trust-region-methods` is a descent algorithm in that it
 only accepts a point if it strictly reduces the value of the objective
 function.
 
@@ -346,10 +363,9 @@ region strategies.
 Line Search Methods
 ===================
 
-**The implementation of line search algorithms in Ceres Solver is
-fairly new and not very well tested, so for now this part of the
-solver should be considered beta quality. We welcome reports of your
-experiences both good and bad on the mailinglist.**
+The line search method in Ceres Solver cannot handle bounds
+constraints right now, so it can only be used for solving
+unconstrained problems.
 
 Line search algorithms
 
@@ -362,7 +378,7 @@ Line search algorithms
 Here :math:`H(x)` is some approximation to the Hessian of the
 objective function, and :math:`g(x)` is the gradient at
 :math:`x`. Depending on the choice of :math:`H(x)` we get a variety of
-different search directions -`\Delta x`.
+different search directions :math:`\Delta x`.
 
 Step 4, which is a one dimensional optimization or `Line Search` along
 :math:`\Delta x` is what gives this class of methods its name.
@@ -383,7 +399,7 @@ directions, all aimed at large scale problems.
    Gradient method to non-linear functions. The generalization can be
    performed in a number of different ways, resulting in a variety of
    search directions. Ceres Solver currently supports
-   ``FLETCHER_REEVES``, ``POLAK_RIBIRERE`` and ``HESTENES_STIEFEL``
+   ``FLETCHER_REEVES``, ``POLAK_RIBIERE`` and ``HESTENES_STIEFEL``
    directions.
 
 3. ``BFGS`` A generalization of the Secant method to multiple
@@ -474,7 +490,9 @@ Cholesky factorization of the normal equations. Ceres uses
 Cholesky factorization of the normal equations. This leads to
 substantial savings in time and memory for large sparse
 problems. Ceres uses the sparse Cholesky factorization routines in
-Professor Tim Davis' ``SuiteSparse`` or ``CXSparse`` packages [Chen]_.
+Professor Tim Davis' ``SuiteSparse`` or ``CXSparse`` packages [Chen]_
+or the sparse Cholesky factorization algorithm in ``Eigen`` (which
+incidently is a port of the algorithm implemented inside ``CXSparse``)
 
 .. _section-schur:
 
@@ -775,9 +793,14 @@ elimination group [LiSaad]_.
 
 .. class:: Solver::Options
 
-  :class:`Solver::Options` controls the overall behavior of the
-  solver. We list the various settings and their default values below.
+   :class:`Solver::Options` controls the overall behavior of the
+   solver. We list the various settings and their default values below.
 
+.. function:: bool Solver::Options::IsValid(string* error) const
+
+   Validate the values in the options struct and returns true on
+   success. If there is a problem, the method returns false with
+   ``error`` containing a textual description of the cause.
 
 .. member:: MinimizerType Solver::Options::minimizer_type
 
@@ -807,7 +830,7 @@ elimination group [LiSaad]_.
 
    Default: ``FLETCHER_REEVES``
 
-   Choices are ``FLETCHER_REEVES``, ``POLAK_RIBIRERE`` and
+   Choices are ``FLETCHER_REEVES``, ``POLAK_RIBIERE`` and
    ``HESTENES_STIEFEL``.
 
 .. member:: int Solver::Options::max_lbfs_rank
@@ -1099,7 +1122,7 @@ elimination group [LiSaad]_.
 
    Solver terminates if
 
-   .. math:: \frac{|\Delta \text{cost}|}{\text{cost} < \text{function_tolerance}}
+   .. math:: \frac{|\Delta \text{cost}|}{\text{cost}} < \text{function_tolerance}
 
    where, :math:`\Delta \text{cost}` is the change in objective
    function value (up or down) in the current iteration of
@@ -1111,10 +1134,12 @@ elimination group [LiSaad]_.
 
    Solver terminates if
 
-   .. math:: \frac{\|g(x)\|_\infty}{\|g(x_0)\|_\infty} < \text{gradient_tolerance}
+   .. math:: \|x - \Pi \boxplus(x, -g(x))\|_\infty < \text{gradient_tolerance}
 
-   where :math:`\|\cdot\|_\infty` refers to the max norm, and :math:`x_0` is
-   the vector of initial parameter values.
+   where :math:`\|\cdot\|_\infty` refers to the max norm, :math:`\Pi`
+   is projection onto the bounds constraints and :math:`\boxplus` is
+   Plus operation for the overall local parameterization associated
+   with the parameter vector.
 
 .. member:: double Solver::Options::parameter_tolerance
 
@@ -1133,8 +1158,9 @@ elimination group [LiSaad]_.
 
    Type of linear solver used to compute the solution to the linear
    least squares problem in each iteration of the Levenberg-Marquardt
-   algorithm. If Ceres is build with ``SuiteSparse`` linked in then
-   the default is ``SPARSE_NORMAL_CHOLESKY``, it is ``DENSE_QR``
+   algorithm. If Ceres is built with support for ``SuiteSparse`` or
+   ``CXSparse`` or ``Eigen``'s sparse Cholesky factorization, the
+   default is ``SPARSE_NORMAL_CHOLESKY``, it is ``DENSE_QR``
    otherwise.
 
 .. member:: PreconditionerType Solver::Options::preconditioner_type
@@ -1146,6 +1172,28 @@ elimination group [LiSaad]_.
    order of complexity) ``IDENTITY``, ``JACOBI``, ``SCHUR_JACOBI``,
    ``CLUSTER_JACOBI`` and ``CLUSTER_TRIDIAGONAL``. See
    :ref:`section-preconditioner` for more details.
+
+.. member:: VisibilityClusteringType Solver::Options::visibility_clustering_type
+
+   Default: ``CANONICAL_VIEWS``
+
+   Type of clustering algorithm to use when constructing a visibility
+   based preconditioner. The original visibility based preconditioning
+   paper and implementation only used the canonical views algorithm.
+
+   This algorithm gives high quality results but for large dense
+   graphs can be particularly expensive. As its worst case complexity
+   is cubic in size of the graph.
+
+   Another option is to use ``SINGLE_LINKAGE`` which is a simple
+   thresholded single linkage clustering algorithm that only pays
+   attention to tightly coupled blocks in the Schur complement. This
+   is a fast algorithm that works well.
+
+   The optimal choice of the clustering algorithm depends on the
+   sparsity structure of the problem, but generally speaking we
+   recommend that you try ``CANONICAL_VIEWS`` first and if it is too
+   expensive try ``SINGLE_LINKAGE``.
 
 .. member:: DenseLinearAlgebraLibrary Solver::Options::dense_linear_algebra_library_type
 
@@ -1167,16 +1215,33 @@ elimination group [LiSaad]_.
 
    Default:``SUITE_SPARSE``
 
-   Ceres supports the use of two sparse linear algebra libraries,
+   Ceres supports the use of three sparse linear algebra libraries,
    ``SuiteSparse``, which is enabled by setting this parameter to
-   ``SUITE_SPARSE`` and ``CXSparse``, which can be selected by setting
-   this parameter to ```CX_SPARSE``. ``SuiteSparse`` is a
-   sophisticated and complex sparse linear algebra library and should
-   be used in general. If your needs/platforms prevent you from using
-   ``SuiteSparse``, consider using ``CXSparse``, which is a much
-   smaller, easier to build library. As can be expected, its
-   performance on large problems is not comparable to that of
-   ``SuiteSparse``.
+   ``SUITE_SPARSE``, ``CXSparse``, which can be selected by setting
+   this parameter to ```CX_SPARSE`` and ``Eigen`` which is enabled by
+   setting this parameter to ``EIGEN_SPARSE``.
+
+   ``SuiteSparse`` is a sophisticated and complex sparse linear
+   algebra library and should be used in general.
+
+   If your needs/platforms prevent you from using ``SuiteSparse``,
+   consider using ``CXSparse``, which is a much smaller, easier to
+   build library. As can be expected, its performance on large
+   problems is not comparable to that of ``SuiteSparse``.
+
+   Last but not the least you can use the sparse linear algebra
+   routines in ``Eigen``. Currently the performance of this library is
+   the poorest of the three. But this should change in the near
+   future.
+
+   Another thing to consider here is that the sparse Cholesky
+   factorization libraries in Eigen are licensed under ``LGPL`` and
+   building Ceres with support for ``EIGEN_SPARSE`` will result in an
+   LGPL licensed library (since the corresponding code from Eigen is
+   compiled into the library).
+
+   The upside is that you do not need to build and link to an external
+   library to use ``EIGEN_SPARSE``.
 
 .. member:: int Solver::Options::num_linear_solver_threads
 
@@ -1184,7 +1249,7 @@ elimination group [LiSaad]_.
 
    Number of threads used by the linear solver.
 
-.. member:: ParameterBlockOrdering* Solver::Options::linear_solver_ordering
+.. member:: shared_ptr<ParameterBlockOrdering> Solver::Options::linear_solver_ordering
 
    Default: ``NULL``
 
@@ -1220,6 +1285,22 @@ elimination group [LiSaad]_.
    algorithm which has slightly better runtime performance at the
    expense of an extra copy of the Jacobian matrix. Setting
    ``use_postordering`` to ``true`` enables this tradeoff.
+
+.. member:: bool Solver::Options::dynamic_sparsity
+
+   Some non-linear least squares problems are symbolically dense but
+   numerically sparse. i.e. at any given state only a small number of
+   Jacobian entries are non-zero, but the position and number of
+   non-zeros is different depending on the state. For these problems
+   it can be useful to factorize the sparse jacobian at each solver
+   iteration instead of including all of the zero entries in a single
+   general factorization.
+
+   If your problem does not have this property (or you do not know),
+   then it is probably best to keep this false, otherwise it will
+   likely lead to worse performance.
+
+   This settings affects the `SPARSE_NORMAL_CHOLESKY` solver.
 
 .. member:: int Solver::Options::min_linear_solver_iterations
 
@@ -1280,7 +1361,7 @@ elimination group [LiSaad]_.
    inner iterations in subsequent trust region minimizer iterations is
    disabled.
 
-.. member:: ParameterBlockOrdering*  Solver::Options::inner_iteration_ordering
+.. member:: shared_ptr<ParameterBlockOrdering> Solver::Options::inner_iteration_ordering
 
    Default: ``NULL``
 
@@ -1316,28 +1397,29 @@ elimination group [LiSaad]_.
 
    .. code-block:: bash
 
-      0: f: 1.250000e+01 d: 0.00e+00 g: 5.00e+00 h: 0.00e+00 rho: 0.00e+00 mu: 1.00e+04 li:  0 it: 6.91e-06 tt: 1.91e-03
-      1: f: 1.249750e-07 d: 1.25e+01 g: 5.00e-04 h: 5.00e+00 rho: 1.00e+00 mu: 3.00e+04 li:  1 it: 2.81e-05 tt: 1.99e-03
-      2: f: 1.388518e-16 d: 1.25e-07 g: 1.67e-08 h: 5.00e-04 rho: 1.00e+00 mu: 9.00e+04 li:  1 it: 1.00e-05 tt: 2.01e-03
+      iter      cost      cost_change  |gradient|   |step|    tr_ratio  tr_radius  ls_iter  iter_time  total_time
+         0  4.185660e+06    0.00e+00    1.09e+08   0.00e+00   0.00e+00  1.00e+04       0    7.59e-02    3.37e-01
+         1  1.062590e+05    4.08e+06    8.99e+06   5.36e+02   9.82e-01  3.00e+04       1    1.65e-01    5.03e-01
+         2  4.992817e+04    5.63e+04    8.32e+06   3.19e+02   6.52e-01  3.09e+04       1    1.45e-01    6.48e-01
 
    Here
 
-   #. ``f`` is the value of the objective function.
-   #. ``d`` is the change in the value of the objective function if
-      the step computed in this iteration is accepted.
-   #. ``g`` is the max norm of the gradient.
-   #. ``h`` is the change in the parameter vector.
-   #. ``rho`` is the ratio of the actual change in the objective
+   #. ``cost`` is the value of the objective function.
+   #. ``cost_change`` is the change in the value of the objective
+      function if the step computed in this iteration is accepted.
+   #. ``|gradient|`` is the max norm of the gradient.
+   #. ``|step|`` is the change in the parameter vector.
+   #. ``tr_ratio`` is the ratio of the actual change in the objective
       function value to the change in the the value of the trust
       region model.
-   #. ``mu`` is the size of the trust region radius.
-   #. ``li`` is the number of linear solver iterations used to compute
-      the trust region step. For direct/factorization based solvers it
-      is always 1, for iterative solvers like ``ITERATIVE_SCHUR`` it
-      is the number of iterations of the Conjugate Gradients
-      algorithm.
-   #. ``it`` is the time take by the current iteration.
-   #. ``tt`` is the the total time taken by the minimizer.
+   #. ``tr_radius`` is the size of the trust region radius.
+   #. ``ls_iter`` is the number of linear solver iterations used to
+      compute the trust region step. For direct/factorization based
+      solvers it is always 1, for iterative solvers like
+      ``ITERATIVE_SCHUR`` it is the number of iterations of the
+      Conjugate Gradients algorithm.
+   #. ``iter_time`` is the time take by the current iteration.
+   #. ``total_time`` is the the total time taken by the minimizer.
 
    For ``LINE_SEARCH_MINIMIZER`` the progress display looks like
 
@@ -1466,17 +1548,6 @@ elimination group [LiSaad]_.
    iteration. This setting is useful when building an interactive
    application using Ceres and using an :class:`IterationCallback`.
 
-.. member:: string Solver::Options::solver_log
-
-   Default: ``empty``
-
-   If non-empty, a summary of the execution of the solver is recorded
-   to this file.  This file is used for recording and Ceres'
-   performance. Currently, only the iteration number, total time and
-   the objective function value are logged. The format of this file is
-   expected to change over time as the performance evaluation
-   framework is fleshed out.
-
 :class:`ParameterBlockOrdering`
 -------------------------------
 
@@ -1542,94 +1613,126 @@ elimination group [LiSaad]_.
 
 .. class:: IterationSummary
 
-   :class:`IterationSummary` describes the state of the optimizer
-   after each iteration of the minimization. Note that all times are
-   wall times.
+   :class:`IterationSummary` describes the state of the minimizer at
+   the end of each iteration.
 
-   .. code-block:: c++
+.. member:: int32 IterationSummary::iteration
 
-     struct IterationSummary {
-       // Current iteration number.
-       int32 iteration;
+   Current iteration number.
 
-       // Step was numerically valid, i.e., all values are finite and the
-       // step reduces the value of the linearized model.
-       //
-       // Note: step_is_valid is false when iteration = 0.
-       bool step_is_valid;
+.. member:: bool IterationSummary::step_is_valid
 
-       // Step did not reduce the value of the objective function
-       // sufficiently, but it was accepted because of the relaxed
-       // acceptance criterion used by the non-monotonic trust region
-       // algorithm.
-       //
-       // Note: step_is_nonmonotonic is false when iteration = 0;
-       bool step_is_nonmonotonic;
+   Step was numerically valid, i.e., all values are finite and the
+   step reduces the value of the linearized model.
 
-       // Whether or not the minimizer accepted this step or not. If the
-       // ordinary trust region algorithm is used, this means that the
-       // relative reduction in the objective function value was greater
-       // than Solver::Options::min_relative_decrease. However, if the
-       // non-monotonic trust region algorithm is used
-       // (Solver::Options:use_nonmonotonic_steps = true), then even if the
-       // relative decrease is not sufficient, the algorithm may accept the
-       // step and the step is declared successful.
-       //
-       // Note: step_is_successful is false when iteration = 0.
-       bool step_is_successful;
+    **Note**: :member:`IterationSummary::step_is_valid` is `false`
+    when :member:`IterationSummary::iteration` = 0.
 
-       // Value of the objective function.
-       double cost;
+.. member::  bool IterationSummary::step_is_nonmonotonic
 
-       // Change in the value of the objective function in this
-       // iteration. This can be positive or negative.
-       double cost_change;
+    Step did not reduce the value of the objective function
+    sufficiently, but it was accepted because of the relaxed
+    acceptance criterion used by the non-monotonic trust region
+    algorithm.
 
-       // Infinity norm of the gradient vector.
-       double gradient_max_norm;
+    **Note**: :member:`IterationSummary::step_is_nonmonotonic` is
+    `false` when when :member:`IterationSummary::iteration` = 0.
 
-       // 2-norm of the size of the step computed by the optimization
-       // algorithm.
-       double step_norm;
+.. member:: bool IterationSummary::step_is_successful
 
-       // For trust region algorithms, the ratio of the actual change in
-       // cost and the change in the cost of the linearized approximation.
-       double relative_decrease;
+   Whether or not the minimizer accepted this step or not.
 
-       // Size of the trust region at the end of the current iteration. For
-       // the Levenberg-Marquardt algorithm, the regularization parameter
-       // mu = 1.0 / trust_region_radius.
-       double trust_region_radius;
+   If the ordinary trust region algorithm is used, this means that the
+   relative reduction in the objective function value was greater than
+   :member:`Solver::Options::min_relative_decrease`. However, if the
+   non-monotonic trust region algorithm is used
+   (:member:`Solver::Options::use_nonmonotonic_steps` = `true`), then
+   even if the relative decrease is not sufficient, the algorithm may
+   accept the step and the step is declared successful.
 
-       // For the inexact step Levenberg-Marquardt algorithm, this is the
-       // relative accuracy with which the Newton(LM) step is solved. This
-       // number affects only the iterative solvers capable of solving
-       // linear systems inexactly. Factorization-based exact solvers
-       // ignore it.
-       double eta;
+   **Note**: :member:`IterationSummary::step_is_successful` is `false`
+   when when :member:`IterationSummary::iteration` = 0.
 
-       // Step sized computed by the line search algorithm.
-       double step_size;
+.. member:: double IterationSummary::cost
 
-       // Number of function evaluations used by the line search algorithm.
-       int line_search_function_evaluations;
+   Value of the objective function.
 
-       // Number of iterations taken by the linear solver to solve for the
-       // Newton step.
-       int linear_solver_iterations;
+.. member:: double IterationSummary::cost_change
 
-       // Time (in seconds) spent inside the minimizer loop in the current
-       // iteration.
-       double iteration_time_in_seconds;
+   Change in the value of the objective function in this
+   iteration. This can be positive or negative.
 
-       // Time (in seconds) spent inside the trust region step solver.
-       double step_solver_time_in_seconds;
+.. member:: double IterationSummary::gradient_max_norm
 
-       // Time (in seconds) since the user called Solve().
-       double cumulative_time_in_seconds;
-    };
+   Infinity norm of the gradient vector.
+
+.. member:: double IterationSummary::gradient_norm
+
+   2-norm of the gradient vector.
+
+.. member:: double IterationSummary::step_norm
+
+   2-norm of the size of the step computed in this iteration.
+
+.. member:: double IterationSummary::relative_decrease
+
+   For trust region algorithms, the ratio of the actual change in cost
+   and the change in the cost of the linearized approximation.
+
+   This field is not used when a linear search minimizer is used.
+
+.. member:: double IterationSummary::trust_region_radius
+
+   Size of the trust region at the end of the current iteration. For
+   the Levenberg-Marquardt algorithm, the regularization parameter is
+   1.0 / member::`IterationSummary::trust_region_radius`.
+
+.. member:: double IterationSummary::eta
+
+   For the inexact step Levenberg-Marquardt algorithm, this is the
+   relative accuracy with which the step is solved. This number is
+   only applicable to the iterative solvers capable of solving linear
+   systems inexactly. Factorization-based exact solvers always have an
+   eta of 0.0.
+
+.. member:: double IterationSummary::step_size
+
+   Step sized computed by the line search algorithm.
+
+   This field is not used when a trust region minimizer is used.
+
+.. member:: int IterationSummary::line_search_function_evaluations
+
+   Number of function evaluations used by the line search algorithm.
+
+   This field is not used when a trust region minimizer is used.
+
+.. member:: int IterationSummary::linear_solver_iterations
+
+   Number of iterations taken by the linear solver to solve for the
+   trust region step.
+
+   Currently this field is not used when a line search minimizer is
+   used.
+
+.. member:: double IterationSummary::iteration_time_in_seconds
+
+   Time (in seconds) spent inside the minimizer loop in the current
+   iteration.
+
+.. member:: double IterationSummary::step_solver_time_in_seconds
+
+   Time (in seconds) spent inside the trust region step solver.
+
+.. member:: double IterationSummary::cumulative_time_in_seconds
+
+   Time (in seconds) since the user called Solve().
+
 
 .. class:: IterationCallback
+
+   Interface for specifying callbacks that are executed at the end of
+   each iteration of the minimizer.
 
    .. code-block:: c++
 
@@ -1639,16 +1742,16 @@ elimination group [LiSaad]_.
         virtual CallbackReturnType operator()(const IterationSummary& summary) = 0;
       };
 
-  Interface for specifying callbacks that are executed at the end of
-  each iteration of the Minimizer. The solver uses the return value of
-  ``operator()`` to decide whether to continue solving or to
-  terminate. The user can return three values.
+
+  The solver uses the return value of ``operator()`` to decide whether
+  to continue solving or to terminate. The user can return three
+  values.
 
   #. ``SOLVER_ABORT`` indicates that the callback detected an abnormal
      situation. The solver returns without updating the parameter
      blocks (unless ``Solver::Options::update_state_every_iteration`` is
      set true). Solver returns with ``Solver::Summary::termination_type``
-     set to ``USER_ABORT``.
+     set to ``USER_FAILURE``.
 
   #. ``SOLVER_TERMINATE_SUCCESSFULLY`` indicates that there is no need
      to optimize anymore (some user specified termination criterion
@@ -1658,8 +1761,8 @@ elimination group [LiSaad]_.
   #. ``SOLVER_CONTINUE`` indicates that the solver should continue
      optimizing.
 
-  For example, the following ``IterationCallback`` is used internally
-  by Ceres to log the progress of the optimization.
+  For example, the following :class:`IterationCallback` is used
+  internally by Ceres to log the progress of the optimization.
 
   .. code-block:: c++
 
@@ -1703,50 +1806,56 @@ elimination group [LiSaad]_.
 
 .. class:: CRSMatrix
 
-   .. code-block:: c++
-
-      struct CRSMatrix {
-        int num_rows;
-        int num_cols;
-        vector<int> cols;
-        vector<int> rows;
-        vector<double> values;
-      };
-
    A compressed row sparse matrix used primarily for communicating the
    Jacobian matrix to the user.
 
-   A compressed row matrix stores its contents in three arrays,
-   ``rows``, ``cols`` and ``values``.
+.. member:: int CRSMatrix::num_rows
 
-   ``rows`` is a ``num_rows + 1`` sized array that points into the ``cols`` and
-   ``values`` array. For each row ``i``:
+   Number of rows.
 
-   ``cols[rows[i]]`` ... ``cols[rows[i + 1] - 1]`` are the indices of the
-   non-zero columns of row ``i``.
+.. member:: int CRSMatrix::num_cols
 
-   ``values[rows[i]]`` ... ``values[rows[i + 1] - 1]`` are the values of the
-   corresponding entries.
+   Number of columns.
 
-   ``cols`` and ``values`` contain as many entries as there are
+.. member:: vector<int> CRSMatrix::rows
+
+   :member:`CRSMatrix::rows` is a :member:`CRSMatrix::num_rows` + 1
+   sized array that points into the :member:`CRSMatrix::cols` and
+   :member:`CRSMatrix::values` array.
+
+.. member:: vector<int> CRSMatrix::cols
+
+   :member:`CRSMatrix::cols` contain as many entries as there are
    non-zeros in the matrix.
 
-   e.g, consider the 3x4 sparse matrix
+   For each row ``i``, ``cols[rows[i]]`` ... ``cols[rows[i + 1] - 1]``
+   are the indices of the non-zero columns of row ``i``.
 
-   .. code-block:: c++
+.. member:: vector<int> CRSMatrix::values
 
-     0 10  0  4
-     0  2 -3  2
-     1  2  0  0
+   :member:`CRSMatrix::values` contain as many entries as there are
+   non-zeros in the matrix.
 
-   The three arrays will be:
+   For each row ``i``,
+   ``values[rows[i]]`` ... ``values[rows[i + 1] - 1]`` are the values
+   of the non-zero columns of row ``i``.
 
-   .. code-block:: c++
+e.g, consider the 3x4 sparse matrix
 
-                 -row0-  ---row1---  -row2-
-       rows   = [ 0,      2,          5,     7]
-       cols   = [ 1,  3,  1,  2,  3,  0,  1]
-       values = [10,  4,  2, -3,  2,  1,  2]
+.. code-block:: c++
+
+   0 10  0  4
+   0  2 -3  2
+   1  2  0  0
+
+The three arrays will be:
+
+.. code-block:: c++
+
+            -row0-  ---row1---  -row2-
+   rows   = [ 0,      2,          5,     7]
+   cols   = [ 1,  3,  1,  2,  3,  0,  1]
+   values = [10,  4,  2, -3,  2,  1,  2]
 
 
 :class:`Solver::Summary`
@@ -1754,113 +1863,289 @@ elimination group [LiSaad]_.
 
 .. class:: Solver::Summary
 
-  Note that all times reported in this struct are wall times.
+   Summary of the various stages of the solver after termination.
 
-  .. code-block:: c++
 
-     struct Summary {
-       // A brief one line description of the state of the solver after
-       // termination.
-       string BriefReport() const;
+.. function:: string Solver::Summary::BriefReport() const
 
-       // A full multiline description of the state of the solver after
-       // termination.
-       string FullReport() const;
+   A brief one line description of the state of the solver after
+   termination.
 
-       // Minimizer summary -------------------------------------------------
-       MinimizerType minimizer_type;
+.. function:: string Solver::Summary::FullReport() const
 
-       SolverTerminationType termination_type;
+   A full multiline description of the state of the solver after
+   termination.
 
-       // If the solver did not run, or there was a failure, a
-       // description of the error.
-       string error;
+.. function:: bool Solver::Summary::IsSolutionUsable() const
 
-       // Cost of the problem before and after the optimization. See
-       // problem.h for definition of the cost of a problem.
-       double initial_cost;
-       double final_cost;
+   Whether the solution returned by the optimization algorithm can be
+   relied on to be numerically sane. This will be the case if
+   `Solver::Summary:termination_type` is set to `CONVERGENCE`,
+   `USER_SUCCESS` or `NO_CONVERGENCE`, i.e., either the solver
+   converged by meeting one of the convergence tolerances or because
+   the user indicated that it had converged or it ran to the maximum
+   number of iterations or time.
 
-       // The part of the total cost that comes from residual blocks that
-       // were held fixed by the preprocessor because all the parameter
-       // blocks that they depend on were fixed.
-       double fixed_cost;
+.. member:: MinimizerType Solver::Summary::minimizer_type
 
-       vector<IterationSummary> iterations;
+   Type of minimization algorithm used.
 
-       int num_successful_steps;
-       int num_unsuccessful_steps;
-       int num_inner_iteration_steps;
+.. member:: TerminationType Solver::Summary::termination_type
 
-       // When the user calls Solve, before the actual optimization
-       // occurs, Ceres performs a number of preprocessing steps. These
-       // include error checks, memory allocations, and reorderings. This
-       // time is accounted for as preprocessing time.
-       double preprocessor_time_in_seconds;
+   The cause of the minimizer terminating.
 
-       // Time spent in the TrustRegionMinimizer.
-       double minimizer_time_in_seconds;
+.. member:: string Solver::Summary::message
 
-       // After the Minimizer is finished, some time is spent in
-       // re-evaluating residuals etc. This time is accounted for in the
-       // postprocessor time.
-       double postprocessor_time_in_seconds;
+   Reason why the solver terminated.
 
-       // Some total of all time spent inside Ceres when Solve is called.
-       double total_time_in_seconds;
+.. member:: double Solver::Summary::initial_cost
 
-       double linear_solver_time_in_seconds;
-       double residual_evaluation_time_in_seconds;
-       double jacobian_evaluation_time_in_seconds;
-       double inner_iteration_time_in_seconds;
+   Cost of the problem (value of the objective function) before the
+   optimization.
 
-       // Preprocessor summary.
-       int num_parameter_blocks;
-       int num_parameters;
-       int num_effective_parameters;
-       int num_residual_blocks;
-       int num_residuals;
+.. member:: double Solver::Summary::final_cost
 
-       int num_parameter_blocks_reduced;
-       int num_parameters_reduced;
-       int num_effective_parameters_reduced;
-       int num_residual_blocks_reduced;
-       int num_residuals_reduced;
+   Cost of the problem (value of the objective function) after the
+   optimization.
 
-       int num_eliminate_blocks_given;
-       int num_eliminate_blocks_used;
+.. member:: double Solver::Summary::fixed_cost
 
-       int num_threads_given;
-       int num_threads_used;
+   The part of the total cost that comes from residual blocks that
+   were held fixed by the preprocessor because all the parameter
+   blocks that they depend on were fixed.
 
-       int num_linear_solver_threads_given;
-       int num_linear_solver_threads_used;
+.. member:: vector<IterationSummary> Solver::Summary::iterations
 
-       LinearSolverType linear_solver_type_given;
-       LinearSolverType linear_solver_type_used;
+   :class:`IterationSummary` for each minimizer iteration in order.
 
-       vector<int> linear_solver_ordering_given;
-       vector<int> linear_solver_ordering_used;
+.. member:: int Solver::Summary::num_successful_steps
 
-       bool inner_iterations_given;
-       bool inner_iterations_used;
+   Number of minimizer iterations in which the step was
+   accepted. Unless :member:`Solver::Options::use_non_monotonic_steps`
+   is `true` this is also the number of steps in which the objective
+   function value/cost went down.
 
-       vector<int> inner_iteration_ordering_given;
-       vector<int> inner_iteration_ordering_used;
+.. member:: int Solver::Summary::num_unsuccessful_steps
 
-       PreconditionerType preconditioner_type;
+   Number of minimizer iterations in which the step was rejected
+   either because it did not reduce the cost enough or the step was
+   not numerically valid.
 
-       TrustRegionStrategyType trust_region_strategy_type;
-       DoglegType dogleg_type;
+.. member:: int Solver::Summary::num_inner_iteration_steps
 
-       DenseLinearAlgebraLibraryType dense_linear_algebra_library_type;
-       SparseLinearAlgebraLibraryType sparse_linear_algebra_library_type;
+   Number of times inner iterations were performed.
 
-       LineSearchDirectionType line_search_direction_type;
-       LineSearchType line_search_type;
-       int max_lbfgs_rank;
-    };
+.. member:: double Solver::Summary::preprocessor_time_in_seconds
 
+   Time (in seconds) spent in the preprocessor.
+
+.. member:: double Solver::Summary::minimizer_time_in_seconds
+
+   Time (in seconds) spent in the Minimizer.
+
+.. member:: double Solver::Summary::postprocessor_time_in_seconds
+
+   Time (in seconds) spent in the post processor.
+
+.. member:: double Solver::Summary::total_time_in_seconds
+
+   Time (in seconds) spent in the solver.
+
+.. member:: double Solver::Summary::linear_solver_time_in_seconds
+
+   Time (in seconds) spent in the linear solver computing the trust
+   region step.
+
+.. member:: double Solver::Summary::residual_evaluation_time_in_seconds
+
+   Time (in seconds) spent evaluating the residual vector.
+
+.. member:: double Solver::Summary::jacobian_evaluation_time_in_seconds
+
+   Time (in seconds) spent evaluating the Jacobian matrix.
+
+.. member:: double Solver::Summary::inner_iteration_time_in_seconds
+
+   Time (in seconds) spent doing inner iterations.
+
+.. member:: int Solver::Summary::num_parameter_blocks
+
+   Number of parameter blocks in the problem.
+
+.. member:: int Solver::Summary::num_parameters
+
+   Number of parameters in the problem.
+
+.. member:: int Solver::Summary::num_effective_parameters
+
+   Dimension of the tangent space of the problem (or the number of
+   columns in the Jacobian for the problem). This is different from
+   :member:`Solver::Summary::num_parameters` if a parameter block is
+   associated with a :class:`LocalParameterization`.
+
+.. member:: int Solver::Summary::num_residual_blocks
+
+   Number of residual blocks in the problem.
+
+.. member:: int Solver::Summary::num_residuals
+
+   Number of residuals in the problem.
+
+.. member:: int Solver::Summary::num_parameter_blocks_reduced
+
+   Number of parameter blocks in the problem after the inactive and
+   constant parameter blocks have been removed. A parameter block is
+   inactive if no residual block refers to it.
+
+.. member:: int Solver::Summary::num_parameters_reduced
+
+   Number of parameters in the reduced problem.
+
+.. member:: int Solver::Summary::num_effective_parameters_reduced
+
+   Dimension of the tangent space of the reduced problem (or the
+   number of columns in the Jacobian for the reduced problem). This is
+   different from :member:`Solver::Summary::num_parameters_reduced` if
+   a parameter block in the reduced problem is associated with a
+   :class:`LocalParameterization`.
+
+.. member:: int Solver::Summary::num_residual_blocks_reduced
+
+   Number of residual blocks in the reduced problem.
+
+.. member:: int Solver::Summary::num_residuals_reduced
+
+   Number of residuals in the reduced problem.
+
+.. member:: int Solver::Summary::num_threads_given
+
+   Number of threads specified by the user for Jacobian and residual
+   evaluation.
+
+.. member:: int Solver::Summary::num_threads_used
+
+   Number of threads actually used by the solver for Jacobian and
+   residual evaluation. This number is not equal to
+   :member:`Solver::Summary::num_threads_given` if `OpenMP` is not
+   available.
+
+.. member:: int Solver::Summary::num_linear_solver_threads_given
+
+   Number of threads specified by the user for solving the trust
+   region problem.
+
+.. member:: int Solver::Summary::num_linear_solver_threads_used
+
+   Number of threads actually used by the solver for solving the trust
+   region problem. This number is not equal to
+   :member:`Solver::Summary::num_linear_solver_threads_given` if
+   `OpenMP` is not available.
+
+.. member:: LinearSolverType Solver::Summary::linear_solver_type_given
+
+   Type of the linear solver requested by the user.
+
+.. member:: LinearSolverType Solver::Summary::linear_solver_type_used
+
+   Type of the linear solver actually used. This may be different from
+   :member:`Solver::Summary::linear_solver_type_given` if Ceres
+   determines that the problem structure is not compatible with the
+   linear solver requested or if the linear solver requested by the
+   user is not available, e.g. The user requested
+   `SPARSE_NORMAL_CHOLESKY` but no sparse linear algebra library was
+   available.
+
+.. member:: vector<int> Solver::Summary::linear_solver_ordering_given
+
+   Size of the elimination groups given by the user as hints to the
+   linear solver.
+
+.. member:: vector<int> Solver::Summary::linear_solver_ordering_used
+
+   Size of the parameter groups used by the solver when ordering the
+   columns of the Jacobian.  This maybe different from
+   :member:`Solver::Summary::linear_solver_ordering_given` if the user
+   left :member:`Solver::Summary::linear_solver_ordering_given` blank
+   and asked for an automatic ordering, or if the problem contains
+   some constant or inactive parameter blocks.
+
+.. member:: bool Solver::Summary::inner_iterations_given
+
+   `True` if the user asked for inner iterations to be used as part of
+   the optimization.
+
+.. member:: bool Solver::Summary::inner_iterations_used
+
+   `True` if the user asked for inner iterations to be used as part of
+   the optimization and the problem structure was such that they were
+   actually performed. e.g., in a problem with just one parameter
+   block, inner iterations are not performed.
+
+.. member:: vector<int> inner_iteration_ordering_given
+
+   Size of the parameter groups given by the user for performing inner
+   iterations.
+
+.. member:: vector<int> inner_iteration_ordering_used
+
+   Size of the parameter groups given used by the solver for
+   performing inner iterations. This maybe different from
+   :member:`Solver::Summary::inner_iteration_ordering_given` if the
+   user left :member:`Solver::Summary::inner_iteration_ordering_given`
+   blank and asked for an automatic ordering, or if the problem
+   contains some constant or inactive parameter blocks.
+
+.. member:: PreconditionerType Solver::Summary::preconditioner_type
+
+   Type of preconditioner used for solving the trust region step. Only
+   meaningful when an iterative linear solver is used.
+
+.. member:: VisibilityClusteringType Solver::Summary::visibility_clustering_type
+
+   Type of clustering algorithm used for visibility based
+   preconditioning. Only meaningful when the
+   :member:`Solver::Summary::preconditioner_type` is
+   ``CLUSTER_JACOBI`` or ``CLUSTER_TRIDIAGONAL``.
+
+.. member:: TrustRegionStrategyType Solver::Summary::trust_region_strategy_type
+
+   Type of trust region strategy.
+
+.. member:: DoglegType Solver::Summary::dogleg_type
+
+   Type of dogleg strategy used for solving the trust region problem.
+
+.. member:: DenseLinearAlgebraLibraryType Solver::Summary::dense_linear_algebra_library_type
+
+   Type of the dense linear algebra library used.
+
+.. member:: SparseLinearAlgebraLibraryType Solver::Summary::sparse_linear_algebra_library_type
+
+   Type of the sparse linear algebra library used.
+
+.. member:: LineSearchDirectionType Solver::Summary::line_search_direction_type
+
+   Type of line search direction used.
+
+.. member:: LineSearchType Solver::Summary::line_search_type
+
+   Type of the line search algorithm used.
+
+.. member:: LineSearchInterpolationType Solver::Summary::line_search_interpolation_type
+
+   When performing line search, the degree of the polynomial used to
+   approximate the objective function.
+
+.. member:: NonlinearConjugateGradientType Solver::Summary::nonlinear_conjugate_gradient_type
+
+   If the line search direction is `NONLINEAR_CONJUGATE_GRADIENT`,
+   then this indicates the particular variant of non-linear conjugate
+   gradient used.
+
+.. member:: int Solver::Summary::max_lbfgs_rank
+
+   If the type of the line search direction is `LBFGS`, then this
+   indicates the rank of the Hessian approximation.
 
 Covariance Estimation
 =====================
@@ -1997,7 +2282,8 @@ cases.
 
 .. member:: CovarianceAlgorithmType Covariance::Options::algorithm_type
 
-   Default: ``SPARSE_QR`` or ``DENSE_SVD``
+   Default: ``SUITE_SPARSE_QR`` if ``SuiteSparseQR`` is installed and
+   ``EIGEN_SPARSE_QR`` otherwise.
 
    Ceres supports three different algorithms for covariance
    estimation, which represent different tradeoffs in speed, accuracy
@@ -2016,47 +2302,23 @@ cases.
       small to moderate sized problems. It can handle full-rank as
       well as rank deficient Jacobians.
 
-   2. ``SPARSE_CHOLESKY`` uses the ``CHOLMOD`` sparse Cholesky
-      factorization library to compute the decomposition :
-
-      .. math::   R^\top R = J^\top J
-
-      and then
-
-      .. math::   \left(J^\top J\right)^{-1}  = \left(R^\top R\right)^{-1}
-
-      It a fast algorithm for sparse matrices that should be used when
-      the Jacobian matrix J is well conditioned. For ill-conditioned
-      matrices, this algorithm can fail unpredictabily. This is
-      because Cholesky factorization is not a rank-revealing
-      factorization, i.e., it cannot reliably detect when the matrix
-      being factorized is not of full
-      rank. ``SuiteSparse``/``CHOLMOD`` supplies a heuristic for
-      checking if the matrix is rank deficient (cholmod_rcond), but it
-      is only a heuristic and can have both false positive and false
-      negatives.
-
-      Recent versions of ``SuiteSparse`` (>= 4.2.0) provide a much more
-      efficient method for solving for rows of the covariance
-      matrix. Therefore, if you are doing ``SPARSE_CHOLESKY``, we strongly
-      recommend using a recent version of ``SuiteSparse``.
-
-   3. ``SPARSE_QR`` uses the ``SuiteSparseQR`` sparse QR factorization
-      library to compute the decomposition
+   2. ``EIGEN_SPARSE_QR`` uses the sparse QR factorization algorithm
+      in ``Eigen`` to compute the decomposition
 
        .. math::
 
           QR &= J\\
           \left(J^\top J\right)^{-1} &= \left(R^\top R\right)^{-1}
 
-      It is a moderately fast algorithm for sparse matrices, which at
-      the price of more time and memory than the ``SPARSE_CHOLESKY``
-      algorithm is numerically better behaved and is rank revealing,
-      i.e., it can reliably detect when the Jacobian matrix is rank
-      deficient.
+      It is a moderately fast algorithm for sparse matrices.
 
-   Neither ``SPARSE_CHOLESKY`` or ``SPARSE_QR`` are capable of computing
-   the covariance if the Jacobian is rank deficient.
+   3. ``SUITE_SPARSE_QR`` uses the sparse QR factorization algorithm
+      in ``SuiteSparse``. It uses dense linear algebra and is multi
+      threaded, so for large sparse sparse matrices it is
+      significantly faster than ``EIGEN_SPARSE_QR``.
+
+   Neither ``EIGEN_SPARSE_QR`` nor ``SUITE_SPARSE_QR`` are capable of
+   computing the covariance if the Jacobian is rank deficient.
 
 .. member:: int Covariance::Options::min_reciprocal_condition_number
 
@@ -2095,29 +2357,14 @@ cases.
       :math:`\sigma_{\text{max}}` are the minimum and maxiumum
       singular values of :math:`J` respectively.
 
-    2. ``SPARSE_CHOLESKY``
-
-       .. math::  \text{cholmod_rcond} < \text{min_reciprocal_conditioner_number}
-
-      Here cholmod_rcond is a crude estimate of the reciprocal
-      condition number of :math:`J^\top J` by using the maximum and
-      minimum diagonal entries of the Cholesky factor :math:`R`. There
-      are no theoretical guarantees associated with this test. It can
-      give false positives and negatives. Use at your own risk. The
-      default value of ``min_reciprocal_condition_number`` has been
-      set to a conservative value, and sometimes the
-      :func:`Covariance::Compute` may return false even if it is
-      possible to estimate the covariance reliably. In such cases, the
-      user should exercise their judgement before lowering the value
-      of ``min_reciprocal_condition_number``.
-
-    3. ``SPARSE_QR``
+   2. ``EIGEN_SPARSE_QR`` and ``SUITE_SPARSE_QR``
 
        .. math:: \operatorname{rank}(J) < \operatorname{num\_col}(J)
 
        Here :\math:`\operatorname{rank}(J)` is the estimate of the
-       rank of `J` returned by the ``SuiteSparseQR`` algorithm. It is
-       a fairly reliable indication of rank deficiency.
+       rank of `J` returned by the sparse QR factorization
+       algorithm. It is a fairly reliable indication of rank
+       deficiency.
 
 .. member:: int Covariance::Options::null_space_rank
 
@@ -2152,8 +2399,8 @@ cases.
 
     .. math::  \frac{\lambda_i}{\lambda_{\textrm{max}}} < \textrm{min_reciprocal_condition_number}
 
-    This option has no effect on ``SPARSE_QR`` and ``SPARSE_CHOLESKY``
-      algorithms.
+    This option has no effect on ``EIGEN_SPARSE_QR`` and
+    ``SUITE_SPARSE_QR``.
 
 .. member:: bool Covariance::Options::apply_loss_function
 
@@ -2243,4 +2490,3 @@ Example Usage
  covariance.GetCovarianceBlock(x, x, covariance_xx)
  covariance.GetCovarianceBlock(y, y, covariance_yy)
  covariance.GetCovarianceBlock(x, y, covariance_xy)
-

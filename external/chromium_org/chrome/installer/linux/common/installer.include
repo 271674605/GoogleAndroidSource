@@ -76,6 +76,8 @@ process_template() (
     -e "s#@@SHORTDESC@@#${SHORTDESC}#g" \
     -e "s#@@FULLDESC@@#${FULLDESC}#g" \
     -e "s#@@DEFAULT_FLAGS@@#${DEFAULT_FLAGS:-}#g" \
+    -e "s#@@SXS_USER_DATA_DIR@@#${SXS_USER_DATA_DIR:-}#g" \
+    -e "s#@@USR_BIN_SYMLINK_NAME@@#${USR_BIN_SYMLINK_NAME:-}#g" \
     > "$TMPLOUT" <<< "$TMPLINCL"
 )
 
@@ -113,12 +115,11 @@ stage_install_common() {
   # We need to add the debug link so gdb knows to look for the symbols.
   DEBUGFILE="${BUILDDIR}/${PROGNAME}.debug"
   STRIPPEDFILE="${BUILDDIR}/${PROGNAME}.stripped"
-  eu-strip -o "${STRIPPEDFILE}" -f "${DEBUGFILE}" "${BUILDDIR}/${PROGNAME}"
+  "${BUILDDIR}/installer/common/eu-strip" -o "${STRIPPEDFILE}" -f "${DEBUGFILE}" "${BUILDDIR}/${PROGNAME}"
   install -m 755 "${STRIPPEDFILE}" "${STAGEDIR}/${INSTALLDIR}/${PROGNAME}"
   rm "${DEBUGFILE}" "${STRIPPEDFILE}"
 
   # resources
-  install -m 644 "${BUILDDIR}/${PROGNAME}.pak" "${STAGEDIR}/${INSTALLDIR}/"
   install -m 644 "${BUILDDIR}/resources.pak" "${STAGEDIR}/${INSTALLDIR}/"
   # TODO(mmoss): This has broken a couple times on adding new .pak files. Maybe
   # we should flag all installer files in FILES.cfg and get them from there, so
@@ -130,6 +131,10 @@ stage_install_common() {
     install -m 644 "${BUILDDIR}/theme_resources_100_percent.pak" "${STAGEDIR}/${INSTALLDIR}/"
     install -m 644 "${BUILDDIR}/ui_resources_100_percent.pak" "${STAGEDIR}/${INSTALLDIR}/"
   fi
+
+  # ICU data file; only necessary when icu_use_data_file_flag is set to 1
+  # in build/common.gypi.
+  install -m 644 "${BUILDDIR}/icudtl.dat" "${STAGEDIR}/${INSTALLDIR}/"
 
   # sandbox
   # Rename sandbox binary with hyphen instead of underscore because that's what
@@ -168,6 +173,7 @@ stage_install_common() {
   # peerconnection shared library
   if [ -f "${BUILDDIR}/lib/libpeerconnection.so" ]; then
     install -m 755 -d "${STAGEDIR}/${INSTALLDIR}/lib/"
+
     install -m 644 -s "${BUILDDIR}/lib/libpeerconnection.so" "${STAGEDIR}/${INSTALLDIR}/lib/"
   fi
 
@@ -185,7 +191,7 @@ stage_install_common() {
     if [ -f "${buildfile}" ]; then
       strippedfile="${buildfile}.stripped"
       debugfile="${buildfile}.debug"
-      eu-strip -o "${strippedfile}" -f "${debugfile}" "${buildfile}"
+      "${BUILDDIR}/installer/common/eu-strip" -o "${strippedfile}" -f "${debugfile}" "${buildfile}"
       install -m 755 "${strippedfile}" "${STAGEDIR}/${INSTALLDIR}/${file}"
     fi
   done
@@ -212,9 +218,12 @@ stage_install_common() {
   process_template "${BUILDDIR}/installer/common/wrapper" \
     "${STAGEDIR}/${INSTALLDIR}/${PACKAGE}"
   chmod 755 "${STAGEDIR}/${INSTALLDIR}/${PACKAGE}"
-  pushd "${STAGEDIR}/usr/bin/"
-  ln -snf "${INSTALLDIR}/${PACKAGE}" "${PACKAGE}"
-  popd
+  if [ ! -f "${STAGEDIR}/${INSTALLDIR}/google-chrome" ]; then
+    ln -sn "${INSTALLDIR}/${PACKAGE}" \
+      "${STAGEDIR}/${INSTALLDIR}/google-chrome"
+  fi
+  ln -snf "${INSTALLDIR}/${PACKAGE}" \
+    "${STAGEDIR}/usr/bin/${USR_BIN_SYMLINK_NAME}"
 
   # app icons
   install -m 644 \
@@ -226,8 +235,8 @@ stage_install_common() {
   install -m 755 "${BUILDDIR}/xdg-mime" "${STAGEDIR}${INSTALLDIR}/"
   install -m 755 "${BUILDDIR}/xdg-settings" "${STAGEDIR}${INSTALLDIR}/"
   process_template "${BUILDDIR}/installer/common/desktop.template" \
-    "${STAGEDIR}/${INSTALLDIR}/${PACKAGE}.desktop"
-  chmod 644 "${STAGEDIR}/${INSTALLDIR}/${PACKAGE}.desktop"
+    "${STAGEDIR}/usr/share/applications/${PACKAGE}.desktop"
+  chmod 644 "${STAGEDIR}/usr/share/applications/${PACKAGE}.desktop"
   process_template "${BUILDDIR}/installer/common/default-app.template" \
     "${STAGEDIR}/usr/share/gnome-control-center/default-apps/${PACKAGE}.xml"
   chmod 644 "${STAGEDIR}/usr/share/gnome-control-center/default-apps/${PACKAGE}.xml"

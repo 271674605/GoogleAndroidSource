@@ -2,7 +2,7 @@ page.title=Downloading and Building
 @jd:body
 
 <!--
-    Copyright 2010 The Android Open Source Project
+    Copyright 2013 The Android Open Source Project
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ page.title=Downloading and Building
     limitations under the License.
 -->
 <p>The Android build is routinely tested in-house on recent versions of
-Ubuntu LTS (10.04), but most distributions should have the required
+Ubuntu LTS (12.04), but most distributions should have the required
 build tools available. We welcome reports of successes or failures on other
 distributions.</p>
 
@@ -49,8 +49,11 @@ distributions.</p>
   </li>
 
   <li>
-  JDK 6 if you wish to build Gingerbread or newer; JDK 5 for Froyo or older.
-  You can download both from <a href="http://java.sun.com/javase/downloads/">java.sun.com</a>.</p>
+  JDK 7 to build the master branch of Android in the <a
+  href="https://android.googlesource.com/">Android Open Source Project
+  (AOSP)</a>; JDK 6 to build Gingerbread through KitKat; JDK 5 for Cupcake through
+  Froyo. See <a href="initializing.html">Initializing a Build Environment</a>
+  for installation instructions by operating system.</p>
   </li>
 
   <li>

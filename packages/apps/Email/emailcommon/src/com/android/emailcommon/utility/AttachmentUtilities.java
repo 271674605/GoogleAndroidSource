@@ -31,8 +31,6 @@ import android.webkit.MimeTypeMap;
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.provider.EmailContent.Attachment;
 import com.android.emailcommon.provider.EmailContent.AttachmentColumns;
-import com.android.emailcommon.provider.EmailContent.Body;
-import com.android.emailcommon.provider.EmailContent.BodyColumns;
 import com.android.emailcommon.provider.EmailContent.Message;
 import com.android.emailcommon.provider.EmailContent.MessageColumns;
 import com.android.mail.providers.UIProvider;
@@ -148,6 +146,20 @@ public class AttachmentUtilities {
                 .appendPath(Long.toString(accountId))
                 .appendPath(Long.toString(id))
                 .appendPath(FORMAT_RAW)
+                .build();
+    }
+
+    // exposed for testing
+    public static Uri getAttachmentThumbnailUri(long accountId, long id, long width, long height) {
+        if (sUri == null) {
+            sUri = Uri.parse(Attachment.ATTACHMENT_PROVIDER_URI_PREFIX);
+        }
+        return sUri.buildUpon()
+                .appendPath(Long.toString(accountId))
+                .appendPath(Long.toString(id))
+                .appendPath(FORMAT_THUMBNAIL)
+                .appendPath(Long.toString(width))
+                .appendPath(Long.toString(height))
                 .build();
     }
 
@@ -382,12 +394,13 @@ public class AttachmentUtilities {
      * Save the attachment to its final resting place (cache or sd card)
      */
     public static void saveAttachment(Context context, InputStream in, Attachment attachment) {
-        Uri uri = ContentUris.withAppendedId(Attachment.CONTENT_URI, attachment.mId);
-        ContentValues cv = new ContentValues();
-        long attachmentId = attachment.mId;
-        long accountId = attachment.mAccountKey;
-        String contentUri = null;
-        long size;
+        final Uri uri = ContentUris.withAppendedId(Attachment.CONTENT_URI, attachment.mId);
+        final ContentValues cv = new ContentValues();
+        final long attachmentId = attachment.mId;
+        final long accountId = attachment.mAccountKey;
+        final String contentUri;
+        final long size;
+
         try {
             ContentResolver resolver = context.getContentResolver();
             if (attachment.mUiDestination == UIProvider.AttachmentDestination.CACHE) {
@@ -395,6 +408,13 @@ public class AttachmentUtilities {
                 size = copyFile(in, resolver.openOutputStream(attUri));
                 contentUri = attUri.toString();
             } else if (Utility.isExternalStorageMounted()) {
+                if (TextUtils.isEmpty(attachment.mFileName)) {
+                    // TODO: This will prevent a crash but does not surface the underlying problem
+                    // to the user correctly.
+                    LogUtils.w(Logging.LOG_TAG, "Trying to save an attachment with no name: %d",
+                            attachmentId);
+                    throw new IOException("Can't save an attachment with no name");
+                }
                 File downloads = Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOWNLOADS);
                 downloads.mkdirs();
@@ -409,14 +429,22 @@ public class AttachmentUtilities {
                 MediaScannerConnection.scanFile(context, new String[] {absolutePath},
                         null, null);
 
-                DownloadManager dm =
-                        (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-                long id = dm.addCompletedDownload(attachment.mFileName, attachment.mFileName,
-                        false /* do not use media scanner */,
-                        attachment.mMimeType, absolutePath, size,
-                        true /* show notification */);
-                contentUri = dm.getUriForDownloadedFile(id).toString();
+                final String mimeType = TextUtils.isEmpty(attachment.mMimeType) ?
+                        "application/octet-stream" :
+                        attachment.mMimeType;
 
+                try {
+                    DownloadManager dm =
+                            (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+                    long id = dm.addCompletedDownload(attachment.mFileName, attachment.mFileName,
+                            false /* do not use media scanner */,
+                            mimeType, absolutePath, size,
+                            true /* show notification */);
+                    contentUri = dm.getUriForDownloadedFile(id).toString();
+                } catch (final IllegalArgumentException e) {
+                    LogUtils.d(LogUtils.TAG, e, "IAE from DownloadManager while saving attachment");
+                    throw new IOException(e);
+                }
             } else {
                 LogUtils.w(Logging.LOG_TAG,
                         "Trying to save an attachment without external storage?");
@@ -432,21 +460,5 @@ public class AttachmentUtilities {
             cv.put(AttachmentColumns.UI_STATE, UIProvider.AttachmentState.FAILED);
         }
         context.getContentResolver().update(uri, cv, null, null);
-
-        // If this is an inline attachment, update the body
-        if (contentUri != null && attachment.mContentId != null) {
-            Body body = Body.restoreBodyWithMessageId(context, attachment.mMessageKey);
-            if (body != null && body.mHtmlContent != null) {
-                cv.clear();
-                String html = body.mHtmlContent;
-                String contentIdRe =
-                        "\\s+(?i)src=\"cid(?-i):\\Q" + attachment.mContentId + "\\E\"";
-                String srcContentUri = " src=\"" + contentUri + "\"";
-                html = html.replaceAll(contentIdRe, srcContentUri);
-                cv.put(BodyColumns.HTML_CONTENT, html);
-                context.getContentResolver().update(
-                        ContentUris.withAppendedId(Body.CONTENT_URI, body.mId), cv, null, null);
-            }
-        }
     }
 }

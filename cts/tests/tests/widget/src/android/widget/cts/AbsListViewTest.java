@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -25,6 +25,7 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.cts.util.PollingCheck;
+import android.cts.util.WidgetTestUtils;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
@@ -52,7 +53,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-public class AbsListViewTest extends ActivityInstrumentationTestCase2<ListViewStubActivity> {
+public class AbsListViewTest extends ActivityInstrumentationTestCase2<ListViewCtsActivity> {
     private final String[] mShortList = new String[] {
         "This", "is", "short", "!",
     };
@@ -72,7 +73,7 @@ public class AbsListViewTest extends ActivityInstrumentationTestCase2<ListViewSt
     private static final float DELTA = 0.001f;
 
     public AbsListViewTest() {
-        super("com.android.cts.stub", ListViewStubActivity.class);
+        super("com.android.cts.widget", ListViewCtsActivity.class);
     }
 
 

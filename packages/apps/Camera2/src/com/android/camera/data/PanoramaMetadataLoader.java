@@ -16,91 +16,75 @@
 
 package com.android.camera.data;
 
-import java.util.ArrayList;
-
 import android.content.Context;
 import android.net.Uri;
+import android.os.Bundle;
 
 import com.android.camera.util.PhotoSphereHelper;
-import com.android.camera.util.PhotoSphereHelper.PanoramaMetadata;
 
 /**
  * This class breaks out the off-thread panorama support.
  */
 public class PanoramaMetadataLoader {
     /**
-     * Classes implementing this interface can get information about loaded
-     * photo sphere metadata.
+     * The key for the metadata in {@link com.android.camera.data.LocalData} to
+     * indicate whether the data is a 360-degrees panorama.
      */
-    public static interface PanoramaMetadataCallback {
-        /**
-         * Called with the loaded metadata or <code>null</code>.
-         */
-        public void onPanoramaMetadataLoaded(PanoramaMetadata metadata);
-    }
-
-    private PanoramaMetadata mPanoramaMetadata;
-    private ArrayList<PanoramaMetadataCallback> mCallbacksWaiting;
-    private Uri mMediaUri;
+    private static final String KEY_PANORAMA_360 = "metadata_key_panorama_360";
 
     /**
-     * Instantiated the meta data loader for the image resource with the given
-     * URI.
+     * The key for the metadata in {@link com.android.camera.data.LocalData} to
+     * indicate whether the data is a panorama and the panorama viewer should be
+     * used to consume it.
      */
-    public PanoramaMetadataLoader(Uri uri) {
-        mMediaUri = uri;
-    }
+    private static final String KEY_USE_PANORAMA_VIEWER = "metadata_key_panorama_viewer";
 
     /**
-     * Asynchronously extract and return panorama metadata from the item with
-     * the given URI.
-     * <p>
-     * NOTE: This call is backed by a cache to speed up successive calls, which
-     * will return immediately. Use {@link #clearCachedValues()} is called.
+     * The key for the metadata in {@link com.android.camera.data.LocalData} to
+     * indicate whether the data is a panorama with it's metadata.
      */
-    public synchronized void getPanoramaMetadata(final Context context,
-            PanoramaMetadataCallback callback) {
-        if (mPanoramaMetadata != null) {
-            // Return the cached data right away, no need to fetch it again.
-            callback.onPanoramaMetadataLoaded(mPanoramaMetadata);
-        } else {
-            if (mCallbacksWaiting == null) {
-                mCallbacksWaiting = new ArrayList<PanoramaMetadataCallback>();
+    private static final String KEY_IS_PANORAMA = "metadata_key_is_panorama";
 
-                // TODO: Don't create a new thread each time, use a pool or
-                // single instance.
-                (new Thread() {
-                    @Override
-                    public void run() {
-                        onLoadingDone(PhotoSphereHelper.getPanoramaMetadata(context,
-                                mMediaUri));
-                    }
-                }).start();
-            }
-            mCallbacksWaiting.add(callback);
-        }
+    /**
+     * @return whether the {@code data} is a panorama.
+     */
+    public static boolean isPanorama(final LocalData data) {
+        return data.getMetadata().getBoolean(KEY_IS_PANORAMA);
     }
 
     /**
-     * Clear cached value and stop all running loading threads.
+     * @return whether the {@code data} is a panorama and the panorama viewer
+     *         should be used to consume it.
      */
-    public synchronized void clearCachedValues() {
-        if (mPanoramaMetadata != null) {
-            mPanoramaMetadata = null;
+    public static boolean isPanoramaAndUseViewer(final LocalData data) {
+        return data.getMetadata().getBoolean(KEY_USE_PANORAMA_VIEWER);
+    }
+
+    /**
+     * @return whether the {@code data} is a 360-degrees panorama.
+     */
+    public static boolean isPanorama360(final LocalData data) {
+        return data.getMetadata().getBoolean(KEY_PANORAMA_360);
+    }
+
+    /**
+     * Extracts panorama metadata from the item with the given URI and fills the
+     * {@code metadata}.
+     */
+    public static void loadPanoramaMetadata(final Context context, Uri contentUri,
+            Bundle metadata) {
+        PhotoSphereHelper.PanoramaMetadata panoramaMetadata =
+                PhotoSphereHelper.getPanoramaMetadata(context, contentUri);
+        if (panoramaMetadata == null) {
+            return;
         }
 
-        // TODO: Cancel running loading thread if active.
-     }
-
-    private synchronized void onLoadingDone(PanoramaMetadata metadata) {
-        mPanoramaMetadata = metadata;
-        if (mPanoramaMetadata == null) {
-            // Error getting panorama data from file. Treat as not panorama.
-            mPanoramaMetadata = PhotoSphereHelper.NOT_PANORAMA;
-        }
-        for (PanoramaMetadataCallback cb : mCallbacksWaiting) {
-            cb.onPanoramaMetadataLoaded(mPanoramaMetadata);
-        }
-        mCallbacksWaiting = null;
+        // Note: The use of '!=' here is in purpose as this is a singleton that
+        // is returned if this is not a panorama, so pointer comparison works.
+        boolean hasMetadata = panoramaMetadata != PhotoSphereHelper.NOT_PANORAMA;
+        metadata.putBoolean(KEY_IS_PANORAMA, hasMetadata);
+        metadata.putBoolean(KEY_PANORAMA_360, panoramaMetadata.mIsPanorama360);
+        metadata.putBoolean(KEY_USE_PANORAMA_VIEWER,
+                panoramaMetadata.mUsePanoramaViewer);
     }
 }

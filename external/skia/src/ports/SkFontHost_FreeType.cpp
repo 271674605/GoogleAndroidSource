@@ -6,6 +6,7 @@
  * found in the LICENSE file.
  */
 
+#include "SkAdvancedTypefaceMetrics.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkColorPriv.h"
@@ -17,8 +18,9 @@
 #include "SkGlyph.h"
 #include "SkMask.h"
 #include "SkMaskGamma.h"
+#include "SkMatrix22.h"
 #include "SkOTUtils.h"
-#include "SkAdvancedTypefaceMetrics.h"
+#include "SkOnce.h"
 #include "SkScalerContext.h"
 #include "SkStream.h"
 #include "SkString.h"
@@ -42,6 +44,8 @@
 #include FT_LCD_FILTER_H
 #endif
 
+// Defined in FreeType 2.3.8 and later.
+// This is a silly build time check, we would need a runtime check if we really cared.
 #ifdef   FT_ADVANCES_H
 #include FT_ADVANCES_H
 #endif
@@ -58,12 +62,25 @@
 #include <freetype/ftsynth.h>
 #endif
 
+// FT_LOAD_COLOR and the corresponding FT_Pixel_Mode::FT_PIXEL_MODE_BGRA
+// were introduced in FreeType 2.5.0.
+// The following may be removed once FreeType 2.5.0 is required to build.
+#ifndef FT_LOAD_COLOR
+#    define FT_LOAD_COLOR ( 1L << 20 )
+#    define FT_PIXEL_MODE_BGRA 7
+#endif
+
+// FT_HAS_COLOR and the corresponding FT_FACE_FLAG_COLOR
+// were introduced in FreeType 2.5.1
+// The following may be removed once FreeType 2.5.1 is required to build.
+#ifndef FT_HAS_COLOR
+#    define FT_HAS_COLOR(face) false
+#endif
+
 //#define ENABLE_GLYPH_SPEW     // for tracing calls
 //#define DUMP_STRIKE_CREATION
 
 //#define SK_GAMMA_APPLY_TO_A8
-
-//#define DEBUG_METRICS
 
 using namespace skia_advanced_typeface_metrics_utils;
 
@@ -147,17 +164,22 @@ static bool InitFreetype() {
     return true;
 }
 
+// Called while holding gFTMutex.
+static void determine_lcd_support(bool* lcdSupported) {
+    if (!gLCDSupportValid) {
+        // This will determine LCD support as a side effect.
+        InitFreetype();
+        FT_Done_FreeType(gFTLibrary);
+    }
+    SkASSERT(gLCDSupportValid);
+    *lcdSupported = gLCDSupport;
+}
+
 // Lazy, once, wrapper to ask the FreeType Library if it can support LCD text
 static bool is_lcd_supported() {
-    if (!gLCDSupportValid) {
-        SkAutoMutexAcquire  ac(gFTMutex);
-
-        if (!gLCDSupportValid) {
-            InitFreetype();
-            FT_Done_FreeType(gFTLibrary);
-        }
-    }
-    return gLCDSupport;
+    static bool lcdSupported = false;
+    SkOnce(&gLCDSupportValid, &gFTMutex, determine_lcd_support, &lcdSupported);
+    return lcdSupported;
 }
 
 class SkScalerContext_FreeType : public SkScalerContext_FreeType_Base {
@@ -200,8 +222,12 @@ private:
     FT_Error setupSize();
     void getBBoxForCurrentGlyph(SkGlyph* glyph, FT_BBox* bbox,
                                 bool snapToPixelBoundary = false);
+    bool getCBoxForLetter(char letter, FT_BBox* bbox);
     // Caller must lock gFTMutex before calling this function.
     void updateGlyphIfLCD(SkGlyph* glyph);
+    // Caller must lock gFTMutex before calling this function.
+    // update FreeType2 glyph slot with glyph emboldened
+    void emboldenIfNeeded(FT_Face face, FT_GlyphSlot glyph);
 };
 
 ///////////////////////////////////////////////////////////////////////////
@@ -414,11 +440,26 @@ static bool canEmbed(FT_Face face) {
 #endif
 }
 
+static bool canSubset(FT_Face face) {
+#ifdef FT_FSTYPE_NO_SUBSETTING
+    FT_UShort fsType = FT_Get_FSType_Flags(face);
+    return (fsType & FT_FSTYPE_NO_SUBSETTING) == 0;
+#else
+    // No subset is 0x100.
+    TT_OS2* os2_table;
+    if ((os2_table = (TT_OS2*)FT_Get_Sfnt_Table(face, ft_sfnt_os2)) != NULL) {
+        return (os2_table->fsType & 0x100) == 0;
+    }
+    return false;  // We tried, fail safe.
+#endif
+}
+
 static bool GetLetterCBox(FT_Face face, char letter, FT_BBox* bbox) {
     const FT_UInt glyph_id = FT_Get_Char_Index(face, letter);
     if (!glyph_id)
         return false;
-    FT_Load_Glyph(face, glyph_id, FT_LOAD_NO_SCALE);
+    if (FT_Load_Glyph(face, glyph_id, FT_LOAD_NO_SCALE) != 0)
+        return false;
     FT_Outline_Get_CBox(&face->glyph->outline, bbox);
     return true;
 }
@@ -498,7 +539,21 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
 
     SkAdvancedTypefaceMetrics* info = new SkAdvancedTypefaceMetrics;
     info->fFontName.set(FT_Get_Postscript_Name(face));
-    info->fMultiMaster = FT_HAS_MULTIPLE_MASTERS(face);
+    info->fFlags = SkAdvancedTypefaceMetrics::kEmpty_FontFlag;
+    if (FT_HAS_MULTIPLE_MASTERS(face)) {
+        info->fFlags = SkTBitOr<SkAdvancedTypefaceMetrics::FontFlags>(
+                info->fFlags, SkAdvancedTypefaceMetrics::kMultiMaster_FontFlag);
+    }
+    if (!canEmbed(face)) {
+        info->fFlags = SkTBitOr<SkAdvancedTypefaceMetrics::FontFlags>(
+                info->fFlags,
+                SkAdvancedTypefaceMetrics::kNotEmbeddable_FontFlag);
+    }
+    if (!canSubset(face)) {
+        info->fFlags = SkTBitOr<SkAdvancedTypefaceMetrics::FontFlags>(
+                info->fFlags,
+                SkAdvancedTypefaceMetrics::kNotSubsettable_FontFlag);
+    }
     info->fLastGlyphID = face->num_glyphs - 1;
     info->fEmSize = 1000;
 
@@ -519,6 +574,8 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
                                                       ft_sfnt_head)) != NULL) {
             info->fEmSize = ttHeader->Units_Per_EM;
         }
+    } else {
+        info->fType = SkAdvancedTypefaceMetrics::kOther_Font;
     }
 
     info->fStyle = 0;
@@ -567,8 +624,10 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
             info->fStyle |= SkAdvancedTypefaceMetrics::kSerif_Style;
         else if (serif_style >= 9 && serif_style <= 12)
             info->fStyle |= SkAdvancedTypefaceMetrics::kScript_Style;
-    } else if ((os2_table =
-                (TT_OS2*)FT_Get_Sfnt_Table(face, ft_sfnt_os2)) != NULL) {
+    } else if (((os2_table = (TT_OS2*)FT_Get_Sfnt_Table(face, ft_sfnt_os2)) != NULL) &&
+               // sCapHeight is available only when version 2 or later.
+               os2_table->version != 0xFFFF &&
+               os2_table->version >= 2) {
         info->fCapHeight = os2_table->sCapHeight;
     } else {
         // Figure out a good guess for CapHeight: average the height of M and X.
@@ -583,14 +642,16 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
             info->fCapHeight = m_bbox.yMax - m_bbox.yMin;
         } else if (!got_m && got_x) {
             info->fCapHeight = x_bbox.yMax - x_bbox.yMin;
+        } else {
+            // Last resort, use the ascent.
+            info->fCapHeight = info->fAscent;
         }
     }
 
     info->fBBox = SkIRect::MakeLTRB(face->bbox.xMin, face->bbox.yMax,
                                     face->bbox.xMax, face->bbox.yMin);
 
-    if (!canEmbed(face) || !FT_IS_SCALABLE(face) ||
-            info->fType == SkAdvancedTypefaceMetrics::kOther_Font) {
+    if (!FT_IS_SCALABLE(face)) {
         perGlyphInfo = SkAdvancedTypefaceMetrics::kNo_PerGlyphInfo;
     }
 
@@ -608,7 +669,7 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
                 FT_Fixed advances[128];
                 int advanceCount = 128;
                 if (gID + advanceCount > face->num_glyphs)
-                    advanceCount = face->num_glyphs - gID + 1;
+                    advanceCount = face->num_glyphs - gID;
                 getAdvances(face, gID, advanceCount, FT_LOAD_NO_SCALE,
                             advances);
                 for (int i = 0; i < advanceCount; i++) {
@@ -653,17 +714,11 @@ SkAdvancedTypefaceMetrics* SkTypeface_FreeType::onGetAdvancedTypefaceMetrics(
         populate_glyph_to_unicode(face, &(info->fGlyphToUnicode));
     }
 
-    if (!canEmbed(face))
-        info->fType = SkAdvancedTypefaceMetrics::kNotEmbeddable_Font;
-
     return info;
 #endif
 }
 
 ///////////////////////////////////////////////////////////////////////////
-
-#define BLACK_LUMINANCE_LIMIT   0x40
-#define WHITE_LUMINANCE_LIMIT   0xA0
 
 static bool bothZero(SkScalar a, SkScalar b) {
     return 0 == a && 0 == b;
@@ -732,60 +787,25 @@ int SkTypeface_FreeType::onGetUPEM() const {
     return face ? face->units_per_EM : 0;
 }
 
-#ifdef DEBUG_METRICS
-static void dumpFTFaceMetrics(const FT_Face face) {
-    SkASSERT(face);
-    SkDebugf("  units_per_EM: %hu\n", face->units_per_EM);
-    SkDebugf("  ascender: %hd\n", face->ascender);
-    SkDebugf("  descender: %hd\n", face->descender);
-    SkDebugf("  height: %hd\n", face->height);
-    SkDebugf("  max_advance_width: %hd\n", face->max_advance_width);
-    SkDebugf("  max_advance_height: %hd\n", face->max_advance_height);
-}
+bool SkTypeface_FreeType::onGetKerningPairAdjustments(const uint16_t glyphs[],
+                                      int count, int32_t adjustments[]) const {
+    AutoFTAccess fta(this);
+    FT_Face face = fta.face();
+    if (!face || !FT_HAS_KERNING(face)) {
+        return false;
+    }
 
-static void dumpFTSize(const FT_Size size) {
-    SkASSERT(size);
-    SkDebugf("  x_ppem: %hu\n", size->metrics.x_ppem);
-    SkDebugf("  y_ppem: %hu\n", size->metrics.y_ppem);
-    SkDebugf("  x_scale: %f\n", size->metrics.x_scale / 65536.0f);
-    SkDebugf("  y_scale: %f\n", size->metrics.y_scale / 65536.0f);
-    SkDebugf("  ascender: %f\n", size->metrics.ascender / 64.0f);
-    SkDebugf("  descender: %f\n", size->metrics.descender / 64.0f);
-    SkDebugf("  height: %f\n", size->metrics.height / 64.0f);
-    SkDebugf("  max_advance: %f\n", size->metrics.max_advance / 64.0f);
+    for (int i = 0; i < count - 1; ++i) {
+        FT_Vector delta;
+        FT_Error err = FT_Get_Kerning(face, glyphs[i], glyphs[i+1],
+                                      FT_KERNING_UNSCALED, &delta);
+        if (err) {
+            return false;
+        }
+        adjustments[i] = delta.x;
+    }
+    return true;
 }
-
-static void dumpBitmapStrikeMetrics(const FT_Face face, int strikeIndex) {
-    SkASSERT(face);
-    SkASSERT(strikeIndex >= 0 && strikeIndex < face->num_fixed_sizes);
-    SkDebugf("  height: %hd\n", face->available_sizes[strikeIndex].height);
-    SkDebugf("  width: %hd\n", face->available_sizes[strikeIndex].width);
-    SkDebugf("  size: %f\n", face->available_sizes[strikeIndex].size / 64.0f);
-    SkDebugf("  x_ppem: %f\n", face->available_sizes[strikeIndex].x_ppem / 64.0f);
-    SkDebugf("  y_ppem: %f\n", face->available_sizes[strikeIndex].y_ppem / 64.0f);
-}
-
-static void dumpSkFontMetrics(const SkPaint::FontMetrics& metrics) {
-    SkDebugf("  fTop: %f\n", metrics.fTop);
-    SkDebugf("  fAscent: %f\n", metrics.fAscent);
-    SkDebugf("  fDescent: %f\n", metrics.fDescent);
-    SkDebugf("  fBottom: %f\n", metrics.fBottom);
-    SkDebugf("  fLeading: %f\n", metrics.fLeading);
-    SkDebugf("  fAvgCharWidth: %f\n", metrics.fAvgCharWidth);
-    SkDebugf("  fXMin: %f\n", metrics.fXMin);
-    SkDebugf("  fXMax: %f\n", metrics.fXMax);
-    SkDebugf("  fXHeight: %f\n", metrics.fXHeight);
-}
-
-static void dumpSkGlyphMetrics(const SkGlyph& glyph) {
-    SkDebugf("  fAdvanceX: %f\n", SkFixedToScalar(glyph.fAdvanceX));
-    SkDebugf("  fAdvanceY: %f\n", SkFixedToScalar(glyph.fAdvanceY));
-    SkDebugf("  fWidth: %hu\n", glyph.fWidth);
-    SkDebugf("  fHeight: %hu\n", glyph.fHeight);
-    SkDebugf("  fTop: %hd\n", glyph.fTop);
-    SkDebugf("  fLeft: %hd\n", glyph.fLeft);
-}
-#endif
 
 static FT_Int chooseBitmapStrike(FT_Face face, SkFixed scaleY) {
     // early out if face is bad
@@ -821,11 +841,6 @@ static FT_Int chooseBitmapStrike(FT_Face face, SkFixed scaleY) {
     }
     if (chosenStrikeIndex != -1) {
         // use the chosen strike
-#ifdef DEBUG_METRICS
-        SkDebugf("chooseBitmapStrike: chose strike %d for face \"%s\" at size %f\n",
-                 chosenStrikeIndex, face->family_name, SkFixedToScalar(scaleY));
-        dumpBitmapStrikeMetrics(face, chosenStrikeIndex);
-#endif
         FT_Error err = FT_Select_Size(face, chosenStrikeIndex);
         if (err != 0) {
             SkDEBUGF(("FT_Select_Size(%s, %d) returned 0x%x\n", face->family_name,
@@ -858,78 +873,60 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
     }
     fFace = fFaceRec->fFace;
 
-    // compute our factors from the record
+    // A is the total matrix.
+    SkMatrix A;
+    fRec.getSingleMatrix(&A);
 
-    SkMatrix    m;
-
-    fRec.getSingleMatrix(&m);
-
-#ifdef DUMP_STRIKE_CREATION
-    SkString     keyString;
-    SkFontHost::GetDescriptorKeyString(desc, &keyString);
-    printf("========== strike [%g %g %g] [%g %g %g %g] hints %d format %d %s\n", SkScalarToFloat(fRec.fTextSize),
-           SkScalarToFloat(fRec.fPreScaleX), SkScalarToFloat(fRec.fPreSkewX),
-           SkScalarToFloat(fRec.fPost2x2[0][0]), SkScalarToFloat(fRec.fPost2x2[0][1]),
-           SkScalarToFloat(fRec.fPost2x2[1][0]), SkScalarToFloat(fRec.fPost2x2[1][1]),
-           fRec.getHinting(), fRec.fMaskFormat, keyString.c_str());
-#endif
-
-    //  now compute our scale factors
-    SkScalar    sx = m.getScaleX();
-    SkScalar    sy = m.getScaleY();
-
+    SkScalar sx = A.getScaleX();
+    SkScalar sy = A.getScaleY();
     fMatrix22Scalar.reset();
 
-    if (m.getSkewX() || m.getSkewY() || sx < 0 || sy < 0) {
-        // sort of give up on hinting
-        sx = SkMaxScalar(SkScalarAbs(sx), SkScalarAbs(m.getSkewX()));
-        sy = SkMaxScalar(SkScalarAbs(m.getSkewY()), SkScalarAbs(sy));
-        sx = sy = SkScalarAve(sx, sy);
+    // In GDI, the hinter is aware of the current transformation
+    // (the transform is in some sense applied before/with the hinting).
+    // The bytecode can then test if it is rotated or stretched and decide
+    // to apply instructions or not.
+    //
+    // FreeType, however, always does the transformation strictly after hinting.
+    // It just sets 'rotated' and 'stretched' to false and only applies the
+    // size before hinting.
+    //
+    // Also, FreeType respects the head::flags::IntegerScaling flag,
+    // (although this is patched out on most major distros)
+    // so it is critical to get the size correct on the request.
+    //
+    // This also gets us the actual closest size on bitmap fonts as well.
+    if (A.getSkewX() || A.getSkewY() || sx < 0 || sy < 0) {
+        // h is where A maps the horizontal baseline.
+        SkPoint h = SkPoint::Make(SK_Scalar1, 0);
+        A.mapPoints(&h, 1);
 
-        SkScalar inv = SkScalarInvert(sx);
+        // G is the Givens Matrix for A (rotational matrix where GA[0][1] == 0).
+        SkMatrix G;
+        SkComputeGivensRotation(h, &G);
 
-        // flip the skew elements to go from our Y-down system to FreeType's
-        fMatrix22.xx = SkScalarToFixed(SkScalarMul(m.getScaleX(), inv));
-        fMatrix22.xy = -SkScalarToFixed(SkScalarMul(m.getSkewX(), inv));
-        fMatrix22.yx = -SkScalarToFixed(SkScalarMul(m.getSkewY(), inv));
-        fMatrix22.yy = SkScalarToFixed(SkScalarMul(m.getScaleY(), inv));
+        // GA is the matrix A with rotation removed.
+        SkMatrix GA(G);
+        GA.preConcat(A);
 
-        fMatrix22Scalar.setScaleX(SkScalarMul(m.getScaleX(), inv));
-        fMatrix22Scalar.setSkewX(-SkScalarMul(m.getSkewX(), inv));
-        fMatrix22Scalar.setSkewY(-SkScalarMul(m.getSkewY(), inv));
-        fMatrix22Scalar.setScaleY(SkScalarMul(m.getScaleY(), inv));
-    } else {
-        fMatrix22.xx = fMatrix22.yy = SK_Fixed1;
-        fMatrix22.xy = fMatrix22.yx = 0;
+        sx = SkScalarAbs(GA.get(SkMatrix::kMScaleX));
+        sy = SkScalarAbs(GA.get(SkMatrix::kMScaleY));
+
+        // sA is the total matrix A without the text scale.
+        SkMatrix sA(A);
+        sA.preScale(SkScalarInvert(sx), SkScalarInvert(sy)); //remove text size
+
+        fMatrix22Scalar.setScaleX(sA.getScaleX());
+        fMatrix22Scalar.setSkewX(-sA.getSkewX());
+        fMatrix22Scalar.setSkewY(-sA.getSkewY());
+        fMatrix22Scalar.setScaleY(sA.getScaleY());
     }
-
-#ifdef SK_SUPPORT_HINTING_SCALE_FACTOR
-    if (fRec.getHinting() == SkPaint::kNo_Hinting) {
-        fScale.set(sx, sy);
-        fScaleX = SkScalarToFixed(sx);
-        fScaleY = SkScalarToFixed(sy);
-    } else {
-        SkScalar hintingScaleFactor = fRec.fHintingScaleFactor;
-
-        fScale.set(sx / hintingScaleFactor, sy / hintingScaleFactor);
-        fScaleX = SkScalarToFixed(fScale.fX);
-        fScaleY = SkScalarToFixed(fScale.fY);
-
-        fMatrix22.xx *= hintingScaleFactor;
-        fMatrix22.xy *= hintingScaleFactor;
-        fMatrix22.yx *= hintingScaleFactor;
-        fMatrix22.yy *= hintingScaleFactor;
-
-        fMatrix22Scalar.setScaleX(fMatrix22Scalar.getScaleX() * hintingScaleFactor);
-        fMatrix22Scalar.setSkewX(fMatrix22Scalar..getSkewX() * hintingScaleFactor);
-        fMatrix22Scalar.setSkewY(fMatrix22Scalar..getSkewY() * hintingScaleFactor);
-        fMatrix22Scalar.setScaleY(fMatrix22Scalar..getScaleY() * hintingScaleFactor);
-    }
-#else
     fScale.set(sx, sy);
     fScaleX = SkScalarToFixed(sx);
     fScaleY = SkScalarToFixed(sy);
-#endif
+    fMatrix22.xx = SkScalarToFixed(fMatrix22Scalar.getScaleX());
+    fMatrix22.xy = SkScalarToFixed(fMatrix22Scalar.getSkewX());
+    fMatrix22.yx = SkScalarToFixed(fMatrix22Scalar.getSkewY());
+    fMatrix22.yy = SkScalarToFixed(fMatrix22Scalar.getScaleY());
 
     fLCDIsVert = SkToBool(fRec.fFlags & SkScalerContext::kLCD_Vertical_Flag);
 
@@ -955,13 +952,16 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
                 loadFlags = FT_LOAD_TARGET_LIGHT;  // This implies FORCE_AUTOHINT
                 break;
             case SkPaint::kNormal_Hinting:
-                if (fRec.fFlags & SkScalerContext::kAutohinting_Flag)
+                if (fRec.fFlags & SkScalerContext::kForceAutohinting_Flag) {
                     loadFlags = FT_LOAD_FORCE_AUTOHINT;
-                else
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+                } else {
                     loadFlags = FT_LOAD_NO_AUTOHINT;
+#endif
+                }
                 break;
             case SkPaint::kFull_Hinting:
-                if (fRec.fFlags & SkScalerContext::kAutohinting_Flag) {
+                if (fRec.fFlags & SkScalerContext::kForceAutohinting_Flag) {
                     loadFlags = FT_LOAD_FORCE_AUTOHINT;
                     break;
                 }
@@ -994,9 +994,7 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
             loadFlags |= FT_LOAD_VERTICAL_LAYOUT;
         }
 
-#ifdef FT_LOAD_COLOR
         loadFlags |= FT_LOAD_COLOR;
-#endif
 
         fLoadGlyphFlags = loadFlags;
     }
@@ -1015,29 +1013,37 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
         return;
     }
 
-    if (fRec.fFlags & SkScalerContext::kEmbeddedBitmapText_Flag) {
+    if (FT_IS_SCALABLE(fFace)) {
+        err = FT_Set_Char_Size(fFace, SkFixedToFDot6(fScaleX), SkFixedToFDot6(fScaleY), 72, 72);
+        if (err != 0) {
+            SkDEBUGF(("FT_Set_CharSize(%08x, 0x%x, 0x%x) returned 0x%x\n",
+                                    fFace, fScaleX, fScaleY,      err));
+            fFace = NULL;
+            return;
+        }
+        FT_Set_Transform(fFace, &fMatrix22, NULL);
+    } else if (FT_HAS_FIXED_SIZES(fFace)) {
         fStrikeIndex = chooseBitmapStrike(fFace, fScaleY);
-    }
-
-    if (fStrikeIndex == -1) {
-        if (fFace->face_flags & FT_FACE_FLAG_SCALABLE) {
-            err = FT_Set_Char_Size(fFace,
-                                   SkFixedToFDot6(fScaleX), SkFixedToFDot6(fScaleY),
-                                   72, 72);
-            if (err != 0) {
-                SkDEBUGF(("FT_Set_CharSize(%08x, 0x%x, 0x%x) returned 0x%x\n", fFace, fScaleX,
-                          fScaleY, err));
-                fFace = NULL;
-                return;
-            }
-            FT_Set_Transform(fFace, &fMatrix22, NULL);
+        if (fStrikeIndex == -1) {
+            SkDEBUGF(("no glyphs for font \"%s\" size %f?\n",
+                            fFace->family_name,       SkFixedToScalar(fScaleY)));
         } else {
-            SkDEBUGF(("no glyphs for font \"%s\" size %f?\n", fFace->family_name,
-                      SkFixedToScalar(fScaleY)));
+            // FreeType does no provide linear metrics for bitmap fonts.
+            linearMetrics = false;
+
+            // FreeType documentation says:
+            // FT_LOAD_NO_BITMAP -- Ignore bitmap strikes when loading.
+            // Bitmap-only fonts ignore this flag.
+            //
+            // However, in FreeType 2.5.1 color bitmap only fonts do not ignore this flag.
+            // Force this flag off for bitmap only fonts.
+            fLoadGlyphFlags &= ~FT_LOAD_NO_BITMAP;
         }
     } else {
-        linearMetrics = false; // no linear metrics for bitmap fonts
+        SkDEBUGF(("unknown kind of font \"%s\" size %f?\n",
+                            fFace->family_name,       SkFixedToScalar(fScaleY)));
     }
+
     fDoLinearMetrics = linearMetrics;
 }
 
@@ -1052,7 +1058,6 @@ SkScalerContext_FreeType::~SkScalerContext_FreeType() {
         unref_ft_face(fFace);
     }
     if (--gFTCount == 0) {
-//        SkDEBUGF(("FT_Done_FreeType\n"));
         FT_Done_FreeType(gFTLibrary);
         SkDEBUGCODE(gFTLibrary = NULL;)
     }
@@ -1171,6 +1176,17 @@ void SkScalerContext_FreeType::getBBoxForCurrentGlyph(SkGlyph* glyph,
     }
 }
 
+bool SkScalerContext_FreeType::getCBoxForLetter(char letter, FT_BBox* bbox) {
+    const FT_UInt glyph_id = FT_Get_Char_Index(fFace, letter);
+    if (!glyph_id)
+        return false;
+    if (FT_Load_Glyph(fFace, glyph_id, fLoadGlyphFlags) != 0)
+        return false;
+    emboldenIfNeeded(fFace, fFace->glyph);
+    FT_Outline_Get_CBox(&fFace->glyph->outline, bbox);
+    return true;
+}
+
 void SkScalerContext_FreeType::updateGlyphIfLCD(SkGlyph* glyph) {
     if (isLCD(fRec)) {
         if (fLCDIsVert) {
@@ -1184,11 +1200,10 @@ void SkScalerContext_FreeType::updateGlyphIfLCD(SkGlyph* glyph) {
 }
 
 inline void scaleGlyphMetrics(SkGlyph& glyph, SkScalar scale) {
-    glyph.fWidth = SkToU16(SkScalarRoundToInt(SkScalarMul(SkIntToScalar(glyph.fWidth),  scale)));
-    glyph.fHeight = SkToU16(SkScalarRoundToInt(SkScalarMul(SkIntToScalar(glyph.fHeight), scale)));
-
-    glyph.fTop = SkToS16(SkScalarRoundToInt(SkScalarMul(SkIntToScalar(glyph.fTop), scale)));
-    glyph.fLeft = SkToS16(SkScalarRoundToInt(SkScalarMul(SkIntToScalar(glyph.fLeft), scale)));
+    glyph.fWidth *= scale;
+    glyph.fHeight *= scale;
+    glyph.fTop *= scale;
+    glyph.fLeft *= scale;
 
     SkFixed fixedScale = SkScalarToFixed(scale);
     glyph.fAdvanceX = SkFixedMul(glyph.fAdvanceX, fixedScale);
@@ -1217,6 +1232,7 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
         glyph->zeroMetrics();
         return;
     }
+    emboldenIfNeeded(fFace, fFace->glyph);
 
     switch ( fFace->glyph->format ) {
       case FT_GLYPH_FORMAT_OUTLINE:
@@ -1226,10 +1242,6 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
             glyph->fTop = 0;
             glyph->fLeft = 0;
         } else {
-            if (fRec.fFlags & kEmbolden_Flag && !(fFace->style_flags & FT_STYLE_FLAG_BOLD)) {
-                emboldenOutline(fFace, &fFace->glyph->outline);
-            }
-
             FT_BBox bbox;
             getBBoxForCurrentGlyph(glyph, &bbox, true);
 
@@ -1243,11 +1255,6 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
         break;
 
       case FT_GLYPH_FORMAT_BITMAP:
-        if ((fRec.fFlags & kEmbolden_Flag) && !(fFace->style_flags & FT_STYLE_FLAG_BOLD)) {
-            FT_GlyphSlot_Own_Bitmap(fFace->glyph);
-            FT_Bitmap_Embolden(gFTLibrary, &fFace->glyph->bitmap, kBitmapEmboldenStrength, 0);
-        }
-
         if (fRec.fFlags & SkScalerContext::kVertical_Flag) {
             FT_Vector vector;
             vector.x = fFace->glyph->metrics.vertBearingX - fFace->glyph->metrics.horiBearingX;
@@ -1257,11 +1264,9 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
             fFace->glyph->bitmap_top  += SkFDot6Floor(vector.y);
         }
 
-#ifdef FT_LOAD_COLOR
         if (fFace->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
             glyph->fMaskFormat = SkMask::kARGB32_Format;
         }
-#endif
 
         glyph->fWidth   = SkToU16(fFace->glyph->bitmap.width);
         glyph->fHeight  = SkToU16(fFace->glyph->bitmap.rows);
@@ -1298,19 +1303,10 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
     }
 
     if (fFace->glyph->format == FT_GLYPH_FORMAT_BITMAP && fScaleY && fFace->size->metrics.y_ppem) {
-#ifdef DEBUG_METRICS
-        SkDebugf("pre-scale glyph metrics:\n");
-        dumpSkGlyphMetrics(*glyph);
-#endif
         // NOTE: both dimensions are scaled by y_ppem. this is WAI.
         scaleGlyphMetrics(*glyph, SkScalarDiv(SkFixedToScalar(fScaleY),
                                               SkIntToScalar(fFace->size->metrics.y_ppem)));
     }
-#ifdef DEBUG_METRICS
-    SkDebugf("post-scale glyph metrics:\n");
-    dumpSkGlyphMetrics(*glyph);
-#endif
-
 
 #ifdef ENABLE_GLYPH_SPEW
     SkDEBUGF(("FT_Set_Char_Size(this:%p sx:%x sy:%x ", this, fScaleX, fScaleY));
@@ -1337,6 +1333,7 @@ void SkScalerContext_FreeType::generateImage(const SkGlyph& glyph) {
         return;
     }
 
+    emboldenIfNeeded(fFace, fFace->glyph);
     generateGlyphImage(fFace, glyph);
 }
 
@@ -1364,6 +1361,7 @@ void SkScalerContext_FreeType::generatePath(const SkGlyph& glyph,
         path->reset();
         return;
     }
+    emboldenIfNeeded(fFace, fFace->glyph);
 
     generateGlyphPath(fFace, path);
 
@@ -1377,104 +1375,6 @@ void SkScalerContext_FreeType::generatePath(const SkGlyph& glyph,
         path->offset(SkFDot6ToScalar(vector.x), -SkFDot6ToScalar(vector.y));
     }
 }
-
-#ifdef DEBUG_METRICS
-void generateFontMetricsOLD(FT_Face face, SkScalar scaleX, SkScalar scaleY,
-                            uint32_t loadGlyphFlags, uint16_t recFlags, SkMatrix matrix22Scalar,
-                            SkPaint::FontMetrics* mx, SkPaint::FontMetrics* my) {
-    if (NULL == mx && NULL == my) {
-        return;
-    }
-
-    if (false) {
-    ERROR:
-        if (mx) {
-            sk_bzero(mx, sizeof(SkPaint::FontMetrics));
-        }
-        if (my) {
-            sk_bzero(my, sizeof(SkPaint::FontMetrics));
-        }
-        return;
-    }
-
-    int upem = face->units_per_EM;
-    if (upem <= 0) {
-        goto ERROR;
-    }
-
-    SkPoint pts[6];
-    SkFixed ys[6];
-    SkScalar mxy = matrix22Scalar.getSkewX();
-    SkScalar myy = matrix22Scalar.getScaleY();
-    SkScalar xmin = SkIntToScalar(face->bbox.xMin) / upem;
-    SkScalar xmax = SkIntToScalar(face->bbox.xMax) / upem;
-
-    int leading = face->height - (face->ascender + -face->descender);
-    if (leading < 0) {
-        leading = 0;
-    }
-
-    TT_OS2* os2 = (TT_OS2*) FT_Get_Sfnt_Table(face, ft_sfnt_os2);
-
-    ys[0] = -face->bbox.yMax;
-    ys[1] = -face->ascender;
-    ys[2] = -face->descender;
-    ys[3] = -face->bbox.yMin;
-    ys[4] = leading;
-    ys[5] = os2 ? os2->xAvgCharWidth : 0;
-
-    SkScalar x_height;
-    if (os2 && os2->sxHeight) {
-        x_height = scaleX * os2->sxHeight / upem;
-    } else {
-        const FT_UInt x_glyph = FT_Get_Char_Index(face, 'x');
-        if (x_glyph) {
-            FT_BBox bbox;
-            FT_Load_Glyph(face, x_glyph, loadGlyphFlags);
-            if (recFlags & SkScalerContext::kEmbolden_Flag) {
-                SkDebugf("x_height is incorrect (skipped embolden step)\n");
-            }
-            FT_Outline_Get_CBox(&face->glyph->outline, &bbox);
-            x_height = bbox.yMax / 64.0f;
-         } else {
-            x_height = 0;
-         }
-    }
-
-    for (int i = 0; i < 6; i++) {
-        SkScalar y = scaleY * ys[i] / upem;
-        pts[i].set(y * mxy, y * myy);
-    }
-
-    if (mx) {
-        mx->fTop = pts[0].fX;
-        mx->fAscent = pts[1].fX;
-        mx->fDescent = pts[2].fX;
-        mx->fBottom = pts[3].fX;
-        mx->fLeading = pts[4].fX;
-        mx->fAvgCharWidth = pts[5].fX;
-        mx->fXMin = xmin;
-        mx->fXMax = xmax;
-        mx->fXHeight = x_height;
-        SkDebugf("generateFontMetricsOLD(\"%s\"): mx is:\n", face->family_name);
-        dumpSkFontMetrics(*mx);
-   }
-
-   if (my) {
-        my->fTop = pts[0].fY;
-        my->fAscent = pts[1].fY;
-        my->fDescent = pts[2].fY;
-        my->fBottom = pts[3].fY;
-        my->fLeading = pts[4].fY;
-        my->fAvgCharWidth = pts[5].fY;
-        my->fXMin = xmin;
-        my->fXMax = xmax;
-        my->fXHeight = x_height;
-        SkDebugf("generateFontMetricsOLD(\"%s\"): my is:\n", face->family_name);
-        dumpSkFontMetrics(*my);
-   }
-}
-#endif
 
 void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
                                                    SkPaint::FontMetrics* my) {
@@ -1501,12 +1401,6 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
     SkScalar mxy = fMatrix22Scalar.getSkewX() * scaleY;
     SkScalar myy = fMatrix22Scalar.getScaleY() * scaleY;
 
-#ifdef DEBUG_METRICS
-    SkDebugf("generateFontMetrics(\"%s\"):\n", face->family_name);
-    dumpFTFaceMetrics(face);
-    dumpFTSize(face->size);
-#endif
-
     // fetch units/EM from "head" table if needed (ie for bitmap fonts)
     SkScalar upem = SkIntToScalar(face->units_per_EM);
     if (!upem) {
@@ -1519,14 +1413,19 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
     // use the os/2 table as a source of reasonable defaults.
     SkScalar x_height = 0.0f;
     SkScalar avgCharWidth = 0.0f;
+    SkScalar cap_height = 0.0f;
     TT_OS2* os2 = (TT_OS2*) FT_Get_Sfnt_Table(face, ft_sfnt_os2);
     if (os2) {
         x_height = scaleX * SkIntToScalar(os2->sxHeight) / upem;
         avgCharWidth = SkIntToScalar(os2->xAvgCharWidth) / upem;
+        if (os2->version != 0xFFFF && os2->version >= 2) {
+            cap_height = scaleX * SkIntToScalar(os2->sCapHeight) / upem;
+        }
     }
 
     // pull from format-specific metrics as needed
     SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
+    SkScalar underlineThickness, underlinePosition;
     if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
         ascent = -SkIntToScalar(face->ascender) / upem;
         descent = -SkIntToScalar(face->descender) / upem;
@@ -1535,23 +1434,32 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
         xmax = SkIntToScalar(face->bbox.xMax) / upem;
         ymin = -SkIntToScalar(face->bbox.yMin) / upem;
         ymax = -SkIntToScalar(face->bbox.yMax) / upem;
-        // we may be able to synthesize x_height from outline
+        underlineThickness = SkIntToScalar(face->underline_thickness) / upem;
+        underlinePosition = -SkIntToScalar(face->underline_position +
+                                           face->underline_thickness / 2) / upem;
+
+        if(mx) {
+            mx->fFlags |= SkPaint::FontMetrics::kUnderlineThinknessIsValid_Flag;
+            mx->fFlags |= SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+        }
+        if(my){
+            my->fFlags |= SkPaint::FontMetrics::kUnderlineThinknessIsValid_Flag;
+            my->fFlags |= SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+        }
+        // we may be able to synthesize x_height and cap_height from outline
         if (!x_height) {
-            const FT_UInt x_glyph = FT_Get_Char_Index(fFace, 'x');
-            if (x_glyph) {
-                FT_BBox bbox;
-                FT_Load_Glyph(fFace, x_glyph, fLoadGlyphFlags);
-                if ((fRec.fFlags & kEmbolden_Flag) && !(fFace->style_flags & FT_STYLE_FLAG_BOLD)) {
-                    emboldenOutline(fFace, &fFace->glyph->outline);
-                }
-                FT_Outline_Get_CBox(&fFace->glyph->outline, &bbox);
+            FT_BBox bbox;
+            if (getCBoxForLetter('x', &bbox)) {
                 x_height = SkIntToScalar(bbox.yMax) / 64.0f;
             }
         }
+        if (!cap_height) {
+            FT_BBox bbox;
+            if (getCBoxForLetter('H', &bbox)) {
+                cap_height = SkIntToScalar(bbox.yMax) / 64.0f;
+            }
+        }
     } else if (fStrikeIndex != -1) { // bitmap strike metrics
-#ifdef DEBUG_METRICS
-        dumpBitmapStrikeMetrics(fFace, fStrikeIndex);
-#endif
         SkScalar xppem = SkIntToScalar(face->size->metrics.x_ppem);
         SkScalar yppem = SkIntToScalar(face->size->metrics.y_ppem);
         ascent = -SkIntToScalar(face->size->metrics.ascender) / (yppem * 64.0f);
@@ -1562,14 +1470,30 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
         xmax = SkIntToScalar(face->available_sizes[fStrikeIndex].width) / xppem;
         ymin = descent + leading;
         ymax = ascent - descent;
-        if (!x_height) {
-            x_height = -ascent;
+        underlineThickness = 0;
+        underlinePosition = 0;
+
+        if(mx) {
+            mx->fFlags &= ~SkPaint::FontMetrics::kUnderlineThinknessIsValid_Flag;
+            mx->fFlags &= ~SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
         }
-        if (!avgCharWidth) {
-            avgCharWidth = xmax - xmin;
+        if(my){
+            my->fFlags &= ~SkPaint::FontMetrics::kUnderlineThinknessIsValid_Flag;
+            my->fFlags &= ~SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
         }
     } else {
         goto ERROR;
+    }
+
+    // synthesize elements that were not provided by the os/2 table or format-specific metrics
+    if (!x_height) {
+        x_height = -ascent;
+    }
+    if (!avgCharWidth) {
+        avgCharWidth = xmax - xmin;
+    }
+    if (!cap_height) {
+      cap_height = -ascent;
     }
 
     // disallow negative linespacing
@@ -1577,10 +1501,6 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
         leading = 0.0f;
     }
 
-#ifdef DEBUG_METRICS
-    generateFontMetricsOLD(fFace, fScale.x(), fScale.y(), fLoadGlyphFlags, fRec.fFlags,
-                           fMatrix22Scalar, mx, my);
-#endif
     if (mx) {
         mx->fTop = ymax * mxy;
         mx->fAscent = ascent * mxy;
@@ -1591,10 +1511,9 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
         mx->fXMin = xmin;
         mx->fXMax = xmax;
         mx->fXHeight = x_height;
-#ifdef DEBUG_METRICS
-        SkDebugf("generateFontMetrics(\"%s\"): mx is:\n", face->family_name);
-        dumpSkFontMetrics(*mx);
-#endif
+        mx->fCapHeight = cap_height;
+        mx->fUnderlineThickness = underlineThickness * mxy;
+        mx->fUnderlinePosition = underlinePosition * mxy;
     }
     if (my) {
         my->fTop = ymax * myy;
@@ -1606,10 +1525,52 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* mx,
         my->fXMin = xmin;
         my->fXMax = xmax;
         my->fXHeight = x_height;
-#ifdef DEBUG_METRICS
-       SkDebugf("generateFontMetrics(\"%s\"): my is:\n", face->family_name);
-       dumpSkFontMetrics(*my);
+        my->fCapHeight = cap_height;
+        my->fUnderlineThickness = underlineThickness * myy;
+        my->fUnderlinePosition = underlinePosition * myy;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// hand-tuned value to reduce outline embolden strength
+#ifndef SK_OUTLINE_EMBOLDEN_DIVISOR
+    #ifdef SK_BUILD_FOR_ANDROID
+        #define SK_OUTLINE_EMBOLDEN_DIVISOR   34
+    #else
+        #define SK_OUTLINE_EMBOLDEN_DIVISOR   24
+    #endif
 #endif
+
+///////////////////////////////////////////////////////////////////////////////
+
+void SkScalerContext_FreeType::emboldenIfNeeded(FT_Face face, FT_GlyphSlot glyph)
+{
+    // check to see if the embolden bit is set
+    if (0 == (fRec.fFlags & SkScalerContext::kEmbolden_Flag)) {
+        return;
+    }
+
+#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK)
+    // Android doesn't want to embolden a font that is already bold.
+    if ((fFace->style_flags & FT_STYLE_FLAG_BOLD)) {
+        return;
+    }
+#endif
+
+    switch (glyph->format) {
+        case FT_GLYPH_FORMAT_OUTLINE:
+            FT_Pos strength;
+            strength = FT_MulFix(face->units_per_EM, face->size->metrics.y_scale)
+                       / SK_OUTLINE_EMBOLDEN_DIVISOR;
+            FT_Outline_Embolden(&glyph->outline, strength);
+            break;
+        case FT_GLYPH_FORMAT_BITMAP:
+            FT_GlyphSlot_Own_Bitmap(glyph);
+            FT_Bitmap_Embolden(glyph->library, &glyph->bitmap, kBitmapEmboldenStrength, 0);
+            break;
+        default:
+            SkDEBUGFAIL("unknown glyph format");
     }
 }
 

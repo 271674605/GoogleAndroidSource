@@ -8,7 +8,6 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/base/cc_export.h"
-#include "cc/base/scoped_ptr_hash_map.h"
 
 namespace cc {
 
@@ -38,9 +37,6 @@ class CC_EXPORT TreeSynchronizer {
 
  private:
   TreeSynchronizer();  // Not instantiable.
-
-  static void SetNumDependentsNeedPushProperties(Layer* layer, size_t num);
-  static void SetNumDependentsNeedPushProperties(LayerImpl* layer, size_t num);
 
   template <typename LayerType>
   static void PushPropertiesInternal(

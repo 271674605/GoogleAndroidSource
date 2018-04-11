@@ -43,6 +43,7 @@
       "HAVE_ALIAS",
       "HAVE_MINCORE",
       "HAVE_LIBUDEV",
+      "_GLAPI_NO_EXPORTS",
     ],
     'conditions': [
       ['OS=="android"', {
@@ -73,15 +74,6 @@
           '-fPIC',
         ],
       }],
-      ['OS=="win"', {
-        # Pick up emulation headers not supported by Visual Studio.
-        'include_dirs': [
-          'src/include/c99',
-        ],
-        'defines': [
-          '_GLAPI_NO_EXPORTS',
-        ],
-      }],
     ],
   },
   'targets': [
@@ -91,14 +83,6 @@
       'direct_dependent_settings': {
         'include_dirs': [
           'src/include',
-        ],
-        'xcode_settings': {
-          'WARNING_CFLAGS': [
-            '-Wno-unknown-pragmas',
-          ],
-        },
-        'cflags': [
-          '-Wno-unknown-pragmas',
         ],
       },
       'conditions': [
@@ -741,6 +725,7 @@
           'xcode_settings': {
             'WARNING_CFLAGS': [
               '-Wno-tautological-constant-out-of-range-compare',
+              '-Wno-absolute-value',  # Fires on st_atom_array.c, might be a bug
             ],
             'WARNING_CFLAGS!': [
               # Don't warn about string->bool used in asserts.
@@ -749,6 +734,7 @@
           },
           'cflags': [
             '-Wno-tautological-constant-out-of-range-compare',
+            '-Wno-absolute-value',
           ],
           'cflags!': [
             '-Wstring-conversion',
@@ -812,5 +798,34 @@
         'src/src/mesa/drivers/osmesa/osmesa.def',
       ],
     },
+  ],
+  'conditions': [
+    ['OS=="android"', {
+      'targets': [
+        {
+          # Copies libosmesa.so to the out/$BUILDTYPE/lib/ directory so that
+          # the write_ordered_libraries.py script won't assume it to be a
+          # system library. This will cause the library to be stripped allowing
+          # targets to embed it in the to-be-generated APK.
+          'target_name': 'osmesa_in_lib_dir',
+          'type': 'none',
+          'dependencies': [
+            'osmesa',
+          ],
+          'actions': [
+            {
+              'action_name': 'copy_libosmesa',
+              'inputs': ['<(PRODUCT_DIR)/libosmesa.so'],
+              'outputs': ['<(SHARED_LIB_DIR)/libosmesa.so'],
+              'action': [
+                'cp',
+                '<(PRODUCT_DIR)/libosmesa.so',
+                '<(SHARED_LIB_DIR)/libosmesa.so',
+              ],
+            },
+          ],
+        },
+      ],
+    }],
   ],
 }

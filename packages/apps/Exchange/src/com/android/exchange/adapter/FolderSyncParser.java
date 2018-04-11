@@ -40,8 +40,8 @@ import com.android.emailcommon.utility.AttachmentUtilities;
 import com.android.exchange.CommandStatusException;
 import com.android.exchange.CommandStatusException.CommandStatus;
 import com.android.exchange.Eas;
-import com.android.exchange.service.EasCalendarSyncHandler;
-import com.android.exchange.service.EasContactsSyncHandler;
+import com.android.exchange.eas.EasSyncContacts;
+import com.android.exchange.eas.EasSyncCalendar;
 import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -230,6 +230,7 @@ public class FolderSyncParser extends AbstractSyncParser {
                     if (CommandStatus.isDeniedAccess(status) ||
                             CommandStatus.isNeedsProvisioning(status) ||
                             (mAccount.mId == Account.NOT_SAVED)) {
+                        LogUtils.e(LogUtils.TAG, "FolderSync: Unknown status: " + status);
                         throw new CommandStatusException(status);
                     // Note that we need to catch both old-style (Eas.FOLDER_STATUS_INVALID_KEY)
                     // and EAS 14 style command status
@@ -576,6 +577,11 @@ public class FolderSyncParser extends AbstractSyncParser {
                 new ArrayList<ContentProviderOperation>(transactionSize);
         while (!mOperations.isEmpty()) {
             subOps.clear();
+            // If the original transaction is split into smaller transactions,
+            // need to ensure the final transaction doesn't overrun the array.
+            if (transactionSize > mOperations.size()) {
+                transactionSize = mOperations.size();
+            }
             subOps.addAll(mOperations.subList(0, transactionSize));
             // Try to apply the ops. If the transaction is too large, split it in half and try again
             // If some other error happens then throw an IOException up the stack.
@@ -758,9 +764,9 @@ public class FolderSyncParser extends AbstractSyncParser {
 
     @Override
     protected void wipe() {
-        EasCalendarSyncHandler.wipeAccountFromContentProvider(mContext,
+        EasSyncCalendar.wipeAccountFromContentProvider(mContext,
                 mAccount.mEmailAddress);
-        EasContactsSyncHandler.wipeAccountFromContentProvider(mContext,
+        EasSyncContacts.wipeAccountFromContentProvider(mContext,
                 mAccount.mEmailAddress);
 
         // Save away any mailbox sync information that is NOT default

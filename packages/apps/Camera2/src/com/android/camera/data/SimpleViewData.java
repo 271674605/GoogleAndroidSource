@@ -16,37 +16,47 @@
 
 package com.android.camera.data;
 
-import android.app.Activity;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.util.Log;
+import android.os.Bundle;
 import android.view.View;
 
-import com.android.camera.ui.FilmStripView;
-import com.android.camera.util.PhotoSphereHelper;
+import com.android.camera.debug.Log;
+import com.android.camera.filmstrip.ImageData;
+
+import java.util.UUID;
 
 /**
  * A LocalData that does nothing but only shows a view.
  */
 public class SimpleViewData implements LocalData {
-    private static final String TAG = "CAM_SimpleViewData";
+    private static final Log.Tag TAG = new Log.Tag("SimpleViewData");
+    private static final String SIMPLE_VIEW_URI_SCHEME = "simple_view_data";
 
     private final int mWidth;
     private final int mHeight;
     private final View mView;
     private final long mDateTaken;
     private final long mDateModified;
+    private final Bundle mMetaData;
+    private final Uri mUri;
+    private final LocalDataViewType mItemViewType;
 
     public SimpleViewData(
-            View v, int width, int height,
+            View v, LocalDataViewType viewType, int width, int height,
             int dateTaken, int dateModified) {
         mView = v;
+        mItemViewType = viewType;
         mWidth = width;
         mHeight = height;
         mDateTaken = dateTaken;
         mDateModified = dateModified;
+        mMetaData = new Bundle();
+        Uri.Builder builder = new Uri.Builder();
+        String uuid = UUID.randomUUID().toString();
+        builder.scheme(SIMPLE_VIEW_URI_SCHEME).appendPath(uuid);
+        mUri = builder.build();
     }
 
     @Override
@@ -75,13 +85,18 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public int getOrientation() {
+    public int getRotation() {
         return 0;
     }
 
     @Override
     public int getViewType() {
-        return FilmStripView.ImageData.VIEW_TYPE_REMOVABLE;
+        return ImageData.VIEW_TYPE_REMOVABLE;
+    }
+
+    @Override
+    public LocalDataViewType getItemViewType() {
+        return mItemViewType;
     }
 
     @Override
@@ -90,8 +105,8 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public Uri getContentUri() {
-        return Uri.EMPTY;
+    public Uri getUri() {
+        return mUri;
     }
 
     @Override
@@ -100,8 +115,8 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public LocalData refresh(ContentResolver resolver) {
-        return null;
+    public LocalData refresh(Context context) {
+        return this;
     }
 
     @Override
@@ -120,9 +135,14 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public View getView(Activity activity, int width, int height, Drawable placeHolder,
-            LocalDataAdapter adapter) {
+    public View getView(Context context, View recycled, int width, int height, int placeHolderResourceId,
+            LocalDataAdapter adapter, boolean isInProgressSession) {
         return mView;
+    }
+
+    @Override
+    public void loadFullImage(Context context, int w, int h, View view, LocalDataAdapter adapter) {
+        // do nothing.
     }
 
     @Override
@@ -131,19 +151,8 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public void recycle() {
-        // do nothing.
-    }
-
-    @Override
-    public void isPhotoSphere(Context context, PanoramaSupportCallback callback) {
-        // Not a photo sphere panorama.
-        callback.panoramaInfoAvailable(false, false);
-    }
-
-    @Override
-    public void viewPhotoSphere(PhotoSphereHelper.PanoramaViewHelper helper) {
-        // do nothing.
+    public void recycle(View view) {
+        // Do nothing.
     }
 
     @Override
@@ -167,21 +176,8 @@ public class SimpleViewData implements LocalData {
     }
 
     @Override
-    public boolean isPhoto() {
-        return false;
-    }
-
-    @Override
     public String getMimeType() {
         return null;
-    }
-
-    @Override
-    public boolean rotate90Degrees(Context context, LocalDataAdapter adapter,
-            int currentDataId, boolean clockwise) {
-        // We don't support rotation for SimpleViewData.
-        Log.w(TAG, "Unexpected call in rotate90Degrees()");
-        return false;
     }
 
     @Override
@@ -192,5 +188,20 @@ public class SimpleViewData implements LocalData {
     @Override
     public long getContentId() {
         return -1;
+    }
+
+    @Override
+    public Bundle getMetadata() {
+        return mMetaData;
+    }
+
+    @Override
+    public String getSignature() {
+        return "";
+    }
+
+    @Override
+    public boolean isMetadataUpdated() {
+        return true;
     }
 }

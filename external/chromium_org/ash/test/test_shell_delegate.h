@@ -7,9 +7,11 @@
 
 #include <string>
 
+#include "ash/media_delegate.h"
 #include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 
 namespace keyboard {
 class KeyboardControllerProxy;
@@ -31,69 +33,51 @@ class TestShellDelegate : public ShellDelegate {
 
   // Overridden from ShellDelegate:
   virtual bool IsFirstRunAfterBoot() const OVERRIDE;
+  virtual bool IsIncognitoAllowed() const OVERRIDE;
   virtual bool IsMultiProfilesEnabled() const OVERRIDE;
   virtual bool IsRunningInForcedAppMode() const OVERRIDE;
+  virtual bool IsMultiAccountEnabled() const OVERRIDE;
   virtual void PreInit() OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+  virtual void PreShutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
-  virtual void NewTab() OVERRIDE;
-  virtual void NewWindow(bool incognito) OVERRIDE;
-  virtual void ToggleFullscreen() OVERRIDE;
-  virtual void ToggleMaximized() OVERRIDE;
-  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
-  virtual void OpenCrosh() OVERRIDE;
-  virtual void RestoreTab() OVERRIDE;
-  virtual void ShowKeyboardOverlay() OVERRIDE;
   virtual keyboard::KeyboardControllerProxy*
       CreateKeyboardControllerProxy() OVERRIDE;
-  virtual void ShowTaskManager() OVERRIDE;
-  virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
-  virtual void ToggleSpokenFeedback(
-      AccessibilityNotificationVisibility notify) OVERRIDE;
-  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
-  virtual void ToggleHighContrast() OVERRIDE;
-  virtual bool IsHighContrastEnabled() const OVERRIDE;
-  virtual void SetMagnifierEnabled(bool enabled) OVERRIDE;
-  virtual void SetMagnifierType(MagnifierType type) OVERRIDE;
-  virtual bool IsMagnifierEnabled() const OVERRIDE;
-  virtual MagnifierType GetMagnifierType() const OVERRIDE;
-  virtual void SetLargeCursorEnabled(bool enabled) OVERRIDE;
-  virtual bool IsLargeCursorEnabled() const OVERRIDE;
-  virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE;
-  virtual void SilenceSpokenFeedback() const OVERRIDE;
+  virtual void VirtualKeyboardActivated(bool activated) OVERRIDE;
+  virtual void AddVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) OVERRIDE;
+  virtual void RemoveVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) OVERRIDE;
+  virtual content::BrowserContext* GetActiveBrowserContext() OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual LauncherDelegate* CreateLauncherDelegate(
-      ash::LauncherModel* model) OVERRIDE;
+  virtual ShelfDelegate* CreateShelfDelegate(ShelfModel* model) OVERRIDE;
   virtual SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
-  virtual CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
   virtual SessionStateDelegate* CreateSessionStateDelegate() OVERRIDE;
-  virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
-  virtual void OpenFeedbackPage() OVERRIDE;
-  virtual void RecordUserMetricsAction(UserMetricsAction action) OVERRIDE;
-  virtual void HandleMediaNextTrack() OVERRIDE;
-  virtual void HandleMediaPlayPause() OVERRIDE;
-  virtual void HandleMediaPrevTrack() OVERRIDE;
-  virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
-  virtual double GetSavedScreenMagnifierScale() OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root) OVERRIDE;
-  virtual RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
+  virtual AccessibilityDelegate* CreateAccessibilityDelegate() OVERRIDE;
+  virtual NewWindowDelegate* CreateNewWindowDelegate() OVERRIDE;
+  virtual MediaDelegate* CreateMediaDelegate() OVERRIDE;
+  virtual ui::MenuModel* CreateContextMenu(
+      aura::Window* root,
+      ash::ShelfItemDelegate* item_delegate,
+      ash::ShelfItem* item) OVERRIDE;
+  virtual GPUSupport* CreateGPUSupport() OVERRIDE;
   virtual base::string16 GetProductName() const OVERRIDE;
 
   int num_exit_requests() const { return num_exit_requests_; }
 
-  TestSessionStateDelegate* test_session_state_delegate();
+  TestSessionStateDelegate* test_session_state_delegate() {
+    return test_session_state_delegate_;
+  }
+
+  void SetMediaCaptureState(MediaCaptureState state);
 
  private:
-  bool spoken_feedback_enabled_;
-  bool high_contrast_enabled_;
-  bool screen_magnifier_enabled_;
-  MagnifierType screen_magnifier_type_;
-  bool large_cursor_enabled_;
   int num_exit_requests_;
   bool multi_profiles_enabled_;
 
-  scoped_ptr<content::BrowserContext> current_browser_context_;
+  scoped_ptr<content::BrowserContext> active_browser_context_;
+
+  ObserverList<ash::VirtualKeyboardStateObserver> keyboard_state_observer_list_;
 
   TestSessionStateDelegate* test_session_state_delegate_;  // Not owned.
 

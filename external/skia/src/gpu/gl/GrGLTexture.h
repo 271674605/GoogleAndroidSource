@@ -15,7 +15,7 @@
 /**
  * A ref counted tex id that deletes the texture in its destructor.
  */
-class GrGLTexID : public GrRefCnt {
+class GrGLTexID : public SkRefCnt {
 public:
     SK_DECLARE_INST_COUNT(GrGLTexID)
 
@@ -39,13 +39,13 @@ private:
     GrGLuint             fTexID;
     bool                 fIsWrapped;
 
-    typedef GrRefCnt INHERITED;
+    typedef SkRefCnt INHERITED;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
 
-class GrGLTexture : public GrTexture {
+class GrGLTexture : public GrTextureImpl {
 
 public:
     struct TexParams {
@@ -75,7 +75,7 @@ public:
 
     virtual GrBackendObject getTextureHandle() const SK_OVERRIDE;
 
-    virtual void invalidateCachedState() SK_OVERRIDE { fTexParams.invalidate(); }
+    virtual void textureParamsModified() SK_OVERRIDE { fTexParams.invalidate(); }
 
     // These functions are used to track the texture parameters associated with the texture.
     const TexParams& getCachedTexParams(GrGpu::ResetTimestamp* timestamp) const {
@@ -105,7 +105,7 @@ private:
               const Desc& textureDesc,
               const GrGLRenderTarget::Desc* rtDesc);
 
-    typedef GrTexture INHERITED;
+    typedef GrTextureImpl INHERITED;
 };
 
 #endif

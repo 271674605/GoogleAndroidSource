@@ -6,21 +6,20 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_X86_TARGET_MACHINE_H
-#define MCLD_X86_TARGET_MACHINE_H
+#ifndef TARGET_X86_X86TARGETMACHINE_H
+#define TARGET_X86_X86TARGETMACHINE_H
 #include "X86.h"
-#include <mcld/Target/TargetMachine.h>
+#include <mcld/CodeGen/TargetMachine.h>
 
 namespace mcld {
 
 class X86TargetMachine : public MCLDTargetMachine
 {
 public:
-  X86TargetMachine(llvm::TargetMachine &pTM,
-                   const mcld::Target &pTarget,
-                   const std::string &pTriple);
-
-  virtual ~X86TargetMachine();
+  X86TargetMachine(llvm::TargetMachine& pTM,
+                   const llvm::Target& pLLVMTarget,
+                   const mcld::Target& pMCLDTarget,
+                   const std::string& pTriple);
 };
 
 } // namespace of mcld

@@ -113,7 +113,7 @@ LLVM_VERSION_LIST=$(commas_to_spaces $LLVM_VERSION_LIST)
 # Create temp directory where everything will be copied first
 #
 PKGNAME=android-ndk-toolchain-$RELEASE
-TMPDIR=/tmp/ndk-$USER/$PKGNAME
+TMPDIR=$NDK_TMPDIR/$PKGNAME
 log "Creating temporary directory $TMPDIR"
 rm -rf $TMPDIR && mkdir $TMPDIR
 fail_panic "Could not create temporary directory: $TMPDIR"
@@ -205,6 +205,7 @@ toolchain_clone clang
 toolchain_clone llvm
 toolchain_clone compiler-rt
 toolchain_clone mclinker
+toolchain_clone yasm
 
 toolchain_checkout "" $BRANCH build .
 toolchain_checkout "" $BRANCH gmp .
@@ -214,12 +215,13 @@ toolchain_checkout "" $BRANCH cloog .
 toolchain_checkout "" $BRANCH isl .
 toolchain_checkout "" $BRANCH ppl .
 toolchain_checkout "" $BRANCH expat .
-toolchain_checkout "" $BRANCH binutils binutils-2.19 binutils-2.21 binutils-2.22 binutils-2.23
-toolchain_checkout "" $BRANCH gcc gcc-4.6 gcc-4.7 gcc-4.8
-toolchain_checkout "" $BRANCH gdb gdb-7.3.x gdb-7.6
+toolchain_checkout "" $BRANCH binutils binutils-2.21 binutils-2.23 binutils-2.24
+toolchain_checkout "" $BRANCH gcc gcc-4.6 gcc-4.8 gcc-4.9
+toolchain_checkout "" $BRANCH gdb gdb-7.3.x gdb-7.6 gdb-7.7
 toolchain_checkout "" $BRANCH python Python-2.7.5
 toolchain_checkout "" $BRANCH perl perl-5.16.2
 toolchain_checkout "" $BRANCH mclinker .
+toolchain_checkout "" $BRANCH yasm .
 
 for LLVM_VERSION in $LLVM_VERSION_LIST; do
     # Check-out and Adjust directory structure a bit
@@ -237,8 +239,6 @@ for LLVM_VERSION in $LLVM_VERSION_LIST; do
     if [ "$LLVM_VERSION" != "3.1" ]; then
         # compiler-rt only exists on and after 3.2
         toolchain_checkout "llvm-$LLVM_VERSION" $LLVM_BRANCH compiler-rt .
-        (cd "$TMPDIR/llvm-$LLVM_VERSION/llvm" && \
-            test -d ../compiler-rt && ln -s ../../compiler-rt projects)
     fi
     # In polly/utils/cloog_src, touch Makefile.in, aclocal.m4, and configure to
     # make sure they are not regenerated.

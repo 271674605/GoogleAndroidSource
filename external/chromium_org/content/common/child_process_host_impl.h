@@ -22,6 +22,14 @@ namespace base {
 class FilePath;
 }
 
+namespace gfx {
+struct GpuMemoryBufferHandle;
+}
+
+namespace IPC {
+class MessageFilter;
+}
+
 namespace content {
 class ChildProcessHostDelegate;
 
@@ -32,10 +40,6 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
                                             public IPC::Listener {
  public:
   virtual ~ChildProcessHostImpl();
-
-  // This value is guaranteed to never be returned by
-  // GenerateChildProcessUniqueId() below.
-  static int kInvalidChildProcessId;
 
   // Public and static for reuse by RenderMessageFilter.
   static void AllocateSharedMemory(
@@ -49,6 +53,8 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   //
   // This function is threadsafe since RenderProcessHost is on the UI thread,
   // but normally this will be used on the IO thread.
+  //
+  // This will never return ChildProcessHost::kInvalidUniqueID.
   static int GenerateChildProcessUniqueId();
 
   // ChildProcessHost implementation
@@ -56,7 +62,7 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   virtual void ForceShutdown() OVERRIDE;
   virtual std::string CreateChannel() OVERRIDE;
   virtual bool IsChannelOpening() OVERRIDE;
-  virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) OVERRIDE;
+  virtual void AddFilter(IPC::MessageFilter* filter) OVERRIDE;
 #if defined(OS_POSIX)
   virtual int TakeClientFileDescriptor() OVERRIDE;
 #endif
@@ -70,11 +76,17 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
+  virtual void OnBadMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Message handlers:
   void OnShutdownRequest();
   void OnAllocateSharedMemory(uint32 buffer_size,
                               base::SharedMemoryHandle* handle);
+  void OnAllocateGpuMemoryBuffer(uint32 width,
+                                 uint32 height,
+                                 uint32 internalformat,
+                                 uint32 usage,
+                                 gfx::GpuMemoryBufferHandle* handle);
 
   ChildProcessHostDelegate* delegate_;
   base::ProcessHandle peer_handle_;
@@ -85,7 +97,7 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   // Holds all the IPC message filters.  Since this object lives on the IO
   // thread, we don't have a IPC::ChannelProxy and so we manage filters
   // manually.
-  std::vector<scoped_refptr<IPC::ChannelProxy::MessageFilter> > filters_;
+  std::vector<scoped_refptr<IPC::MessageFilter> > filters_;
 
   DISALLOW_COPY_AND_ASSIGN(ChildProcessHostImpl);
 };

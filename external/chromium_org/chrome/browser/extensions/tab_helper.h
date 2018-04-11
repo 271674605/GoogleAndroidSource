@@ -6,23 +6,29 @@
 #define CHROME_BROWSER_EXTENSIONS_TAB_HELPER_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
-#include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/common/web_application_info.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "extensions/browser/extension_function_dispatcher.h"
+#include "extensions/common/stack_frame.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+
+class FaviconDownloader;
 
 namespace content {
 struct LoadCommittedDetails;
+class RenderFrameHost;
 }
 
 namespace gfx {
@@ -30,15 +36,15 @@ class Image;
 }
 
 namespace extensions {
+class BookmarkAppHelper;
 class Extension;
 class LocationBarController;
-class ScriptBadgeController;
-class ScriptBubbleController;
 class ScriptExecutor;
+class WebstoreInlineInstallerFactory;
 
 // Per-tab extension helper. Also handles non-extension apps.
 class TabHelper : public content::WebContentsObserver,
-                  public ExtensionFunctionDispatcher::Delegate,
+                  public extensions::ExtensionFunctionDispatcher::Delegate,
                   public base::SupportsWeakPtr<TabHelper>,
                   public content::NotificationObserver,
                   public content::WebContentsUserData<TabHelper> {
@@ -46,9 +52,10 @@ class TabHelper : public content::WebContentsObserver,
   // Different types of action when web app info is available.
   // OnDidGetApplicationInfo uses this to dispatch calls.
   enum WebAppAction {
-    NONE,             // No action at all.
-    CREATE_SHORTCUT,  // Bring up create application shortcut dialog.
-    UPDATE_SHORTCUT   // Update icon for app shortcut.
+    NONE,              // No action at all.
+    CREATE_SHORTCUT,   // Bring up create application shortcut dialog.
+    CREATE_HOSTED_APP, // Create and install a hosted app.
+    UPDATE_SHORTCUT    // Update icon for app shortcut.
   };
 
   // Observer base class for classes that need to be notified when content
@@ -92,7 +99,9 @@ class TabHelper : public content::WebContentsObserver,
   }
 
   void CreateApplicationShortcuts();
+  void CreateHostedAppFromWebContents();
   bool CanCreateApplicationShortcuts() const;
+  bool CanCreateBookmarkApp() const;
 
   void set_pending_web_app_action(WebAppAction action) {
     pending_web_app_action_ = action;
@@ -146,17 +155,22 @@ class TabHelper : public content::WebContentsObserver,
     return active_tab_permission_granter_.get();
   }
 
-  ScriptBubbleController* script_bubble_controller() {
-    return script_bubble_controller_.get();
-  }
-
   // Sets a non-extension app icon associated with WebContents and fires an
   // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
   void SetAppIcon(const SkBitmap& app_icon);
 
+  // Sets the factory used to create inline webstore item installers.
+  // Used for testing. Takes ownership of the factory instance.
+  void SetWebstoreInlineInstallerFactoryForTests(
+      WebstoreInlineInstallerFactory* factory);
+
  private:
   explicit TabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<TabHelper>;
+
+  // Displays UI for completion of creating a bookmark hosted app.
+  void FinishCreateBookmarkApp(const extensions::Extension* extension,
+                               const WebApplicationInfo& web_app_info);
 
   // content::WebContentsObserver overrides.
   virtual void RenderViewCreated(
@@ -165,11 +179,14 @@ class TabHelper : public content::WebContentsObserver,
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual bool OnMessageReceived(
+      const IPC::Message& message,
+      content::RenderFrameHost* render_frame_host) OVERRIDE;
   virtual void DidCloneToNewWebContents(
       content::WebContents* old_web_contents,
       content::WebContents* new_web_contents) OVERRIDE;
 
-  // ExtensionFunctionDispatcher::Delegate overrides.
+  // extensions::ExtensionFunctionDispatcher::Delegate overrides.
   virtual extensions::WindowController* GetExtensionWindowController()
       const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
@@ -179,7 +196,8 @@ class TabHelper : public content::WebContentsObserver,
   void OnInlineWebstoreInstall(int install_id,
                                int return_route_id,
                                const std::string& webstore_item_id,
-                               const GURL& requestor_url);
+                               const GURL& requestor_url,
+                               int listeners_mask);
   void OnGetAppInstallState(const GURL& requestor_url,
                             int return_route_id,
                             int callback_id);
@@ -189,6 +207,10 @@ class TabHelper : public content::WebContentsObserver,
       int32 page_id,
       const GURL& on_url);
   void OnWatchedPageChange(const std::vector<std::string>& css_selectors);
+  void OnDetailedConsoleMessageAdded(const base::string16& message,
+                                     const base::string16& source,
+                                     const StackTrace& stack_trace,
+                                     int32 severity_level);
 
   // App extensions related methods:
 
@@ -234,7 +256,7 @@ class TabHelper : public content::WebContentsObserver,
   SkBitmap extension_app_icon_;
 
   // Process any extension messages coming from the tab.
-  ExtensionFunctionDispatcher extension_function_dispatcher_;
+  extensions::ExtensionFunctionDispatcher extension_function_dispatcher_;
 
   // Cached web app info data.
   WebApplicationInfo web_app_info_;
@@ -251,12 +273,15 @@ class TabHelper : public content::WebContentsObserver,
 
   scoped_ptr<ActiveTabPermissionGranter> active_tab_permission_granter_;
 
-  scoped_ptr<ScriptBubbleController> script_bubble_controller_;
+  scoped_ptr<BookmarkAppHelper> bookmark_app_helper_;
 
   Profile* profile_;
 
   // Vend weak pointers that can be invalidated to stop in-progress loads.
   base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_;
+
+  // Creates WebstoreInlineInstaller instances for inline install triggers.
+  scoped_ptr<WebstoreInlineInstallerFactory> webstore_inline_installer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabHelper);
 };

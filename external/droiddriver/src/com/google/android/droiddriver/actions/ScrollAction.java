@@ -17,10 +17,7 @@
 package com.google.android.droiddriver.actions;
 
 /**
- * Base class for {@link Action} that scrolls.
+ * Marker interface for a scroll action.
  */
-public abstract class ScrollAction extends BaseAction {
-  protected ScrollAction(long timeoutMillis) {
-    super(timeoutMillis);
-  }
+public interface ScrollAction {
 }

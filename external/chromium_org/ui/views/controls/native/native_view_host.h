@@ -15,6 +15,10 @@ namespace views {
 class NativeViewHostAuraTest;
 class NativeViewHostWrapper;
 
+// If a NativeViewHost's native view is a Widget, this native window
+// property is set on the widget, pointing to the owning NativeViewHost.
+extern const char kWidgetNativeViewHostKey[];
+
 // A View type that hosts a gfx::NativeView. The bounds of the native view are
 // kept in sync with the bounds of this view as it is moved and sized.
 // Under the hood, a platform-specific NativeViewHostWrapper implementation does
@@ -23,9 +27,6 @@ class VIEWS_EXPORT NativeViewHost : public View {
  public:
   // The NativeViewHost's class name.
   static const char kViewClassName[];
-
-  // Should views render the focus when on native controls?
-  static const bool kRenderNativeControlFocus;
 
   NativeViewHost();
   virtual ~NativeViewHost();
@@ -76,12 +77,13 @@ class VIEWS_EXPORT NativeViewHost : public View {
   void NativeViewDestroyed();
 
   // Overridden from View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
 
  protected:
   virtual bool NeedsNotificationWhenVisibleBoundsChange() const OVERRIDE;

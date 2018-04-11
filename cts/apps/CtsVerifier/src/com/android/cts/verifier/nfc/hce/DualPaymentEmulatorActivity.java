@@ -1,7 +1,6 @@
 package com.android.cts.verifier.nfc.hce;
 
 import android.annotation.TargetApi;
-import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -16,6 +15,7 @@ public class DualPaymentEmulatorActivity extends BaseEmulatorActivity {
     final static int STATE_IDLE = 0;
     final static int STATE_SERVICE1_SETTING_UP = 1;
     final static int STATE_SERVICE2_SETTING_UP = 2;
+    final static int STATE_MAKING_SERVICE2_DEFAULT = 3;
 
     boolean mReceiverRegistered = false;
     int mState = STATE_IDLE;
@@ -43,17 +43,18 @@ public class DualPaymentEmulatorActivity extends BaseEmulatorActivity {
             return;
         }
         // Verify HCE service 2 is the default
-        if (!mCardEmulation.isDefaultServiceForCategory(
-                PaymentService2.COMPONENT, CardEmulation.CATEGORY_PAYMENT)) {
-            // Popup dialog-box, fail test
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Test failed.");
-            builder.setMessage("PaymentService2 is not the default service according " +
-                    "to CardEmulation.getDefaultServiceForCategory()");
-            builder.setPositiveButton("OK", null);
-            builder.show();
+        if (makePaymentDefault(PaymentService2.COMPONENT, R.string.nfc_hce_change_preinstalled_wallet)) {
+            mState = STATE_MAKING_SERVICE2_DEFAULT;
         } else {
+            // Already default
             NfcDialogs.createHceTapReaderDialog(this,null).show();
+        }
+    }
+
+    @Override
+    void onPaymentDefaultResult(ComponentName component, boolean success) {
+        if (success) {
+            NfcDialogs.createHceTapReaderDialog(this, null).show();
         }
     }
 
@@ -64,7 +65,6 @@ public class DualPaymentEmulatorActivity extends BaseEmulatorActivity {
             unregisterReceiver(mReceiver);
         }
     }
-
     public static Intent buildReaderIntent(Context context) {
         Intent readerIntent = new Intent(context, SimpleReaderActivity.class);
         readerIntent.putExtra(SimpleReaderActivity.EXTRA_APDUS,
@@ -82,6 +82,4 @@ public class DualPaymentEmulatorActivity extends BaseEmulatorActivity {
             getPassButton().setEnabled(true);
         }
     }
-
-
 }

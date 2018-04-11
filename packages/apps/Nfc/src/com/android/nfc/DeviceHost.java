@@ -16,6 +16,7 @@
 
 package com.android.nfc;
 
+import android.annotation.Nullable;
 import android.nfc.NdefMessage;
 import android.os.Bundle;
 
@@ -24,16 +25,6 @@ import java.io.IOException;
 public interface DeviceHost {
     public interface DeviceHostListener {
         public void onRemoteEndpointDiscovered(TagEndpoint tag);
-
-        /**
-         * Notifies transaction
-         */
-        public void onCardEmulationDeselected();
-
-        /**
-         * Notifies transaction
-         */
-        public void onCardEmulationAidSelected(byte[] aid);
 
         /**
          */
@@ -56,22 +47,6 @@ public interface DeviceHost {
         public void onRemoteFieldActivated();
 
         public void onRemoteFieldDeactivated();
-
-        /**
-         * Notifies that the SE has been activated in listen mode
-         */
-        public void onSeListenActivated();
-
-        /**
-         * Notifies that the SE has been deactivated
-         */
-        public void onSeListenDeactivated();
-
-        public void onSeApduReceived(byte[] apdu);
-
-        public void onSeEmvCardRemoval();
-
-        public void onSeMifareAccess(byte[] block);
     }
 
     public interface TagEndpoint {
@@ -81,7 +56,8 @@ public interface DeviceHost {
 
         boolean presenceCheck();
         boolean isPresent();
-        void startPresenceChecking(int presenceCheckDelay);
+        void startPresenceChecking(int presenceCheckDelay,
+                                   @Nullable TagDisconnectedCallback callback);
 
         int[] getTechList();
         void removeTechnology(int tech); // TODO remove this one
@@ -100,6 +76,10 @@ public interface DeviceHost {
         boolean makeReadOnly();
 
         int getConnectedTechnology();
+    }
+
+    public interface TagDisconnectedCallback {
+        void onTagDisconnected(long handle);
     }
 
     public interface NfceeEndpoint {
@@ -181,8 +161,8 @@ public interface DeviceHost {
     /**
      * Called at boot if NFC is disabled to give the device host an opportunity
      * to check the firmware version to see if it needs updating. Normally the firmware version
-     * is checked during {@link #initialize()}, but the firmware may need to be updated after
-     * an OTA update.
+     * is checked during {@link #initialize(boolean enableScreenOffSuspend)},
+     * but the firmware may need to be updated after an OTA update.
      *
      * <p>This is called from a thread
      * that may block for long periods of time during the update process.
@@ -195,25 +175,17 @@ public interface DeviceHost {
 
     public String getName();
 
-    public void enableDiscovery();
+    public void enableDiscovery(NfcDiscoveryParameters params, boolean restart);
 
     public void disableDiscovery();
-
-    public void enableRoutingToHost();
-
-    public void disableRoutingToHost();
-
-    public int[] doGetSecureElementList();
-
-    public void doSelectSecureElement();
-
-    public void doDeselectSecureElement();
 
     public boolean sendRawFrame(byte[] data);
 
     public boolean routeAid(byte[] aid, int route);
 
     public boolean unrouteAid(byte[] aid);
+
+    public boolean commitRouting();
 
     public LlcpConnectionlessSocket createLlcpConnectionlessSocket(int nSap, String sn)
             throws LlcpException;
@@ -246,17 +218,13 @@ public interface DeviceHost {
 
     boolean getExtendedLengthApdusSupported();
 
-    boolean enablePN544Quirks();
-
-    byte[][] getWipeApdus();
-
     int getDefaultLlcpMiu();
 
     int getDefaultLlcpRwSize();
 
     String dump();
 
-    boolean enableReaderMode(int technologies);
+    boolean enableScreenOffSuspend();
 
-    boolean disableReaderMode();
+    boolean disableScreenOffSuspend();
 }

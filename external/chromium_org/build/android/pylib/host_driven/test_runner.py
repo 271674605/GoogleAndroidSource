@@ -11,9 +11,8 @@ import traceback
 
 from pylib.base import base_test_result
 from pylib.base import base_test_runner
+from pylib.host_driven import test_case
 from pylib.instrumentation import test_result
-
-import test_case
 
 
 class HostDrivenExceptionTestResult(test_result.InstrumentationTestResult):
@@ -49,7 +48,7 @@ class HostDrivenTestRunner(base_test_runner.BaseTestRunner):
   """
 
   #override
-  def __init__(self, device, shard_index, tool, build_type, push_deps,
+  def __init__(self, device, shard_index, tool, push_deps,
                cleanup_test_files):
     """Creates a new HostDrivenTestRunner.
 
@@ -57,13 +56,12 @@ class HostDrivenTestRunner(base_test_runner.BaseTestRunner):
       device: Attached android device.
       shard_index: Shard index.
       tool: Name of the Valgrind tool.
-      build_type: 'Release' or 'Debug'.
       push_deps: If True, push all dependencies to the device.
       cleanup_test_files: Whether or not to cleanup test files on device.
     """
 
-    super(HostDrivenTestRunner, self).__init__(device, tool, build_type,
-                                               push_deps, cleanup_test_files)
+    super(HostDrivenTestRunner, self).__init__(device, tool, push_deps,
+                                               cleanup_test_files)
 
     # The shard index affords the ability to create unique port numbers (e.g.
     # DEFAULT_PORT + shard_index) if the test so wishes.
@@ -87,7 +85,7 @@ class HostDrivenTestRunner(base_test_runner.BaseTestRunner):
     exception_raised = False
 
     try:
-      test.SetUp(self.device, self.shard_index, self.build_type,
+      test.SetUp(self.device.old_interface.GetDevice(), self.shard_index,
                  self._push_deps, self._cleanup_test_files)
     except Exception:
       logging.exception(

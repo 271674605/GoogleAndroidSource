@@ -23,14 +23,16 @@ import android.content.Loader;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.DataSetObserver;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.support.v4.text.BidiFormatter;
+import android.support.v4.util.ArrayMap;
 import android.text.TextUtils;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
-import android.view.ScaleGestureDetector;
-import android.view.ScaleGestureDetector.OnScaleGestureListener;
 import android.view.View;
 import android.view.View.OnLayoutChangeListener;
 import android.view.ViewGroup;
@@ -43,30 +45,38 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Button;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.FormattedDateBuilder;
 import com.android.mail.R;
+import com.android.mail.analytics.Analytics;
+import com.android.mail.analytics.AnalyticsTimer;
 import com.android.mail.browse.ConversationContainer;
 import com.android.mail.browse.ConversationContainer.OverlayPosition;
+import com.android.mail.browse.ConversationFooterView.ConversationFooterCallbacks;
 import com.android.mail.browse.ConversationMessage;
 import com.android.mail.browse.ConversationOverlayItem;
 import com.android.mail.browse.ConversationViewAdapter;
-import com.android.mail.browse.ConversationViewAdapter.BorderItem;
+import com.android.mail.browse.ConversationViewAdapter.ConversationFooterItem;
 import com.android.mail.browse.ConversationViewAdapter.MessageFooterItem;
 import com.android.mail.browse.ConversationViewAdapter.MessageHeaderItem;
 import com.android.mail.browse.ConversationViewAdapter.SuperCollapsedBlockItem;
 import com.android.mail.browse.ConversationViewHeader;
 import com.android.mail.browse.ConversationWebView;
+import com.android.mail.browse.InlineAttachmentViewIntentBuilderCreator;
+import com.android.mail.browse.InlineAttachmentViewIntentBuilderCreatorHolder;
 import com.android.mail.browse.MailWebView.ContentSizeChangeListener;
 import com.android.mail.browse.MessageCursor;
+import com.android.mail.browse.MessageFooterView;
 import com.android.mail.browse.MessageHeaderView;
 import com.android.mail.browse.ScrollIndicatorsView;
 import com.android.mail.browse.SuperCollapsedBlock;
 import com.android.mail.browse.WebViewContextMenu;
 import com.android.mail.content.ObjectCursor;
+import com.android.mail.print.PrintUtils;
 import com.android.mail.providers.Account;
-import com.android.mail.providers.Address;
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Message;
+import com.android.mail.providers.Settings;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.ui.ConversationViewState.ExpansionState;
 import com.android.mail.utils.ConversationViewUtils;
@@ -88,12 +98,11 @@ import java.util.Set;
  */
 public class ConversationViewFragment extends AbstractConversationViewFragment implements
         SuperCollapsedBlock.OnClickListener, OnLayoutChangeListener,
-        MessageHeaderView.MessageHeaderViewCallbacks {
+        MessageHeaderView.MessageHeaderViewCallbacks, MessageFooterView.MessageFooterCallbacks,
+        WebViewContextMenu.Callbacks, ConversationFooterCallbacks, View.OnKeyListener {
 
     private static final String LOG_TAG = LogTag.getLogTag();
     public static final String LAYOUT_TAG = "ConvLayout";
-
-    private static final boolean ENABLE_CSS_ZOOM = false;
 
     /**
      * Difference in the height of the message header whose details have been expanded/collapsed
@@ -119,11 +128,23 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
      */
     private final int LOAD_WAIT_UNTIL_VISIBLE = 2;
 
+    // Keyboard navigation
+    private KeyboardNavigationController mNavigationController;
+    // Since we manually control navigation for most of the conversation view due to problems
+    // with two-pane layout but still rely on the system for SOME navigation, we need to keep track
+    // of the view that had focus when KeyEvent.ACTION_DOWN was fired. This is because we only
+    // manually change focus on KeyEvent.ACTION_UP (to prevent holding down the DOWN button and
+    // lagging the app), however, the view in focus might have changed between ACTION_UP and
+    // ACTION_DOWN since the system might have handled the ACTION_DOWN and moved focus.
+    private View mOriginalKeyedView;
+    private int mMaxScreenHeight;
+    private int mTopOfVisibleScreen;
+
     protected ConversationContainer mConversationContainer;
 
     protected ConversationWebView mWebView;
 
-    private ScrollIndicatorsView mScrollIndicators;
+    private ViewGroup mTopmostOverlay;
 
     private ConversationViewProgressController mProgressController;
 
@@ -207,6 +228,13 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
     private static final String BUNDLE_KEY_WEBVIEW_Y_PERCENT =
             ConversationViewFragment.class.getName() + "webview-y-percent";
 
+    private BidiFormatter mBidiFormatter;
+
+    /**
+     * Contains a mapping between inline image attachments and their local message id.
+     */
+    private Map<String, String> mUrlToMessageIdMap;
+
     /**
      * Constructor needs to be public to handle orientation changes and activity lifecycle events.
      */
@@ -262,14 +290,17 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
         final FormattedDateBuilder dateBuilder = new FormattedDateBuilder(context);
 
+        mNavigationController = mActivity.getKeyboardNavigationController();
+
         mAdapter = new ConversationViewAdapter(mActivity, this,
-                getLoaderManager(), this, getContactInfoSource(), this,
-                this, mAddressCache, dateBuilder);
+                getLoaderManager(), this, this, getContactInfoSource(), this, this,
+                getListController(), this, mAddressCache, dateBuilder, mBidiFormatter, this);
         mConversationContainer.setOverlayAdapter(mAdapter);
 
         // set up snap header (the adapter usually does this with the other ones)
-        final MessageHeaderView snapHeader = mConversationContainer.getSnapHeader();
-        initHeaderView(snapHeader);
+        mConversationContainer.getSnapHeader().initialize(
+                this, mAddressCache, this, getContactInfoSource(),
+                mActivity.getAccountController().getVeiledAddressMatcher());
 
         final Resources resources = getResources();
         mMaxAutoLoadMessages = resources.getInteger(R.integer.max_auto_load_messages);
@@ -277,7 +308,15 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         mSideMarginPx = resources.getDimensionPixelOffset(
                 R.dimen.conversation_message_content_margin_side);
 
-        mWebView.setOnCreateContextMenuListener(new WebViewContextMenu(getActivity()));
+        mUrlToMessageIdMap = new ArrayMap<String, String>();
+        final InlineAttachmentViewIntentBuilderCreator creator =
+                InlineAttachmentViewIntentBuilderCreatorHolder.
+                getInlineAttachmentViewIntentCreator();
+        final WebViewContextMenu contextMenu = new WebViewContextMenu(getActivity(),
+                creator.createInlineAttachmentViewIntentBuilder(mAccount,
+                mConversation != null ? mConversation.id : -1));
+        contextMenu.setCallbacks(this);
+        mWebView.setOnCreateContextMenuListener(contextMenu);
 
         // set this up here instead of onCreateView to ensure the latest Account is loaded
         setupOverviewMode();
@@ -300,18 +339,17 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         });
 
         if (mConversation != null && mConversation.conversationBaseUri != null &&
-                !Utils.isEmpty(mAccount.accoutCookieQueryUri)) {
+                !Utils.isEmpty(mAccount.accountCookieQueryUri)) {
             // Set the cookie for this base url
-            new SetCookieTask(getContext(), mConversation.conversationBaseUri,
-                    mAccount.accoutCookieQueryUri).execute();
+            new SetCookieTask(getContext(), mConversation.conversationBaseUri.toString(),
+                    mAccount.accountCookieQueryUri).execute();
         }
-    }
 
-    private void initHeaderView(MessageHeaderView headerView) {
-        headerView.initialize(this, mAddressCache);
-        headerView.setCallbacks(this);
-        headerView.setContactInfoSource(getContactInfoSource());
-        headerView.setVeiledMatcher(mActivity.getAccountController().getVeiledAddressMatcher());
+        // Find the height of the screen for manually scrolling the webview via keyboard.
+        final Rect screen = new Rect();
+        mActivity.getWindow().getDecorView().getWindowVisibleDisplayFrame(screen);
+        mMaxScreenHeight = screen.bottom;
+        mTopOfVisibleScreen = screen.top + mActivity.getSupportActionBar().getHeight();
     }
 
     @Override
@@ -323,6 +361,8 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         if (savedState != null) {
             mWebViewYPercent = savedState.getFloat(BUNDLE_KEY_WEBVIEW_Y_PERCENT);
         }
+
+        mBidiFormatter = BidiFormatter.getInstance();
     }
 
     protected ConversationWebViewClient createConversationWebViewClient() {
@@ -338,18 +378,19 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 .findViewById(R.id.conversation_container);
         mConversationContainer.setAccountController(this);
 
-        mNewMessageBar = (Button) mConversationContainer.findViewById(R.id.new_message_notification_bar);
-        mNewMessageBar.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                onNewMessageBarClick();
-            }
-        });
+        mTopmostOverlay =
+                (ViewGroup) mConversationContainer.findViewById(R.id.conversation_topmost_overlay);
+        mTopmostOverlay.setOnKeyListener(this);
+        inflateSnapHeader(mTopmostOverlay, inflater);
+        mConversationContainer.setupSnapHeader();
+
+        setupNewMessageBar();
 
         mProgressController = new ConversationViewProgressController(this, getHandler());
         mProgressController.instantiateProgressIndicators(rootView);
 
-        mWebView = (ConversationWebView) mConversationContainer.findViewById(R.id.webview);
+        mWebView = (ConversationWebView)
+                mConversationContainer.findViewById(R.id.conversation_webview);
 
         mWebView.addJavascriptInterface(mJsBridge, "mail");
         // On JB or newer, we use the 'webkitAnimationStart' DOM event to signal load complete
@@ -371,9 +412,15 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         final WebChromeClient wcc = new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
-                LogUtils.i(LOG_TAG, "JS: %s (%s:%d) f=%s", consoleMessage.message(),
-                        consoleMessage.sourceId(), consoleMessage.lineNumber(),
-                        ConversationViewFragment.this);
+                if (consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                    LogUtils.wtf(LOG_TAG, "JS: %s (%s:%d) f=%s", consoleMessage.message(),
+                            consoleMessage.sourceId(), consoleMessage.lineNumber(),
+                            ConversationViewFragment.this);
+                } else {
+                    LogUtils.i(LOG_TAG, "JS: %s (%s:%d) f=%s", consoleMessage.message(),
+                            consoleMessage.sourceId(), consoleMessage.lineNumber(),
+                            ConversationViewFragment.this);
+                }
                 return true;
             }
         };
@@ -381,8 +428,9 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
         final WebSettings settings = mWebView.getSettings();
 
-        mScrollIndicators = (ScrollIndicatorsView) rootView.findViewById(R.id.scroll_indicators);
-        mScrollIndicators.setSourceView(mWebView);
+        final ScrollIndicatorsView scrollIndicators =
+                (ScrollIndicatorsView) rootView.findViewById(R.id.scroll_indicators);
+        scrollIndicators.setSourceView(mWebView);
 
         settings.setJavaScriptEnabled(true);
 
@@ -392,6 +440,21 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         mWebViewLoadedData = false;
 
         return rootView;
+    }
+
+    protected void inflateSnapHeader(ViewGroup topmostOverlay, LayoutInflater inflater) {
+        inflater.inflate(R.layout.conversation_topmost_overlay_items, topmostOverlay, true);
+    }
+
+    protected void setupNewMessageBar() {
+        mNewMessageBar = (Button) mConversationContainer.findViewById(
+                R.id.new_message_notification_bar);
+        mNewMessageBar.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onNewMessageBarClick();
+            }
+        });
     }
 
     @Override
@@ -484,12 +547,34 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         if (!userVisible) {
             mProgressController.dismissLoadingStatus();
         } else if (mViewsCreated) {
+            String loadTag = null;
+            final boolean isInitialLoading;
+            if (mActivity != null) {
+                isInitialLoading = mActivity.getConversationUpdater()
+                    .isInitialConversationLoading();
+            } else {
+                isInitialLoading = true;
+            }
+
             if (getMessageCursor() != null) {
                 LogUtils.d(LOG_TAG, "Fragment is now user-visible, onConversationSeen: %s", this);
+                if (!isInitialLoading) {
+                    loadTag = "preloaded";
+                }
                 onConversationSeen();
             } else if (isLoadWaiting()) {
                 LogUtils.d(LOG_TAG, "Fragment is now user-visible, showing conversation: %s", this);
+                if (!isInitialLoading) {
+                    loadTag = "load_deferred";
+                }
                 handleDelayedConversationLoad();
+            }
+
+            if (loadTag != null) {
+                // pager swipes are visibility transitions to 'visible' except during initial
+                // pager load on A) enter conversation mode B) rotate C) 2-pane conv-mode list-tap
+              Analytics.getInstance().sendEvent("pager_swipe", loadTag,
+                      getCurrentFolderTypeDesc(), 0);
             }
         }
 
@@ -512,6 +597,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             timerMark("CVF.showConversation");
         } else {
             final boolean disableOffscreenLoading = DISABLE_OFFSCREEN_LOADING
+                    || Utils.isLowRamDevice(getContext())
                     || (mConversation != null && (mConversation.isRemote
                             || mConversation.getNumMessages() > mMaxAutoLoadMessages));
 
@@ -563,6 +649,10 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
     private void revealConversation() {
         timerMark("revealing conversation");
         mProgressController.dismissLoadingStatus(mOnProgressDismiss);
+        if (isUserVisible()) {
+            AnalyticsTimer.getInstance().logDuration(AnalyticsTimer.OPEN_CONV_VIEW_FROM_LIST,
+                    true /* isDestructive */, "open_conversation", "from_list", null);
+        }
     }
 
     private boolean isLoadWaiting() {
@@ -576,8 +666,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         if (DEBUG_DUMP_CONVERSATION_HTML) {
             java.io.FileWriter fw = null;
             try {
-                fw = new java.io.FileWriter("/sdcard/conv" + mConversation.id
-                        + ".html");
+                fw = new java.io.FileWriter(getSdCardFilePath());
                 fw.write(convHtml);
             } catch (java.io.IOException e) {
                 e.printStackTrace();
@@ -600,6 +689,10 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         mWebView.loadDataWithBaseURL(mBaseUri, convHtml, "text/html", "utf-8", null);
         mWebViewLoadedData = true;
         mWebViewLoadStartMs = SystemClock.uptimeMillis();
+    }
+
+    protected String getSdCardFilePath() {
+        return "/sdcard/conv" + mConversation.id + ".html";
     }
 
     /**
@@ -640,20 +733,21 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         final int convHeaderPos = mAdapter.addConversationHeader(mConversation);
         final int convHeaderPx = measureOverlayHeight(convHeaderPos);
 
-        mTemplates.startConversation(mWebView.screenPxToWebPx(mSideMarginPx),
-                mWebView.screenPxToWebPx(convHeaderPx));
+        mTemplates.startConversation(mWebView.getViewportWidth(),
+                mWebView.screenPxToWebPx(mSideMarginPx), mWebView.screenPxToWebPx(convHeaderPx));
 
         int collapsedStart = -1;
         ConversationMessage prevCollapsedMsg = null;
-        boolean prevSafeForImages = false;
 
-        // Store the previous expanded state so that the border between
-        // the previous and current message can be properly initialized.
-        int previousExpandedState = ExpansionState.NONE;
+        final boolean alwaysShowImages = shouldAlwaysShowImages();
+
+        boolean prevSafeForImages = alwaysShowImages;
+
+        boolean hasDraft = false;
         while (messageCursor.moveToPosition(++pos)) {
             final ConversationMessage msg = messageCursor.getMessage();
 
-            final boolean safeForImages =
+            final boolean safeForImages = alwaysShowImages ||
                     msg.alwaysShowImages || prevState.getShouldShowImages(msg);
             allowNetworkImages |= safeForImages;
 
@@ -669,8 +763,14 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 }
             } else {
                 // new messages that are not expanded default to being eligible for super-collapse
-                expandedState = (!msg.read || msg.starred || messageCursor.isLast()) ?
-                        ExpansionState.EXPANDED : ExpansionState.SUPER_COLLAPSED;
+                if (!msg.read || messageCursor.isLast()) {
+                    expandedState = ExpansionState.EXPANDED;
+                } else if (messageCursor.isFirst()) {
+                    expandedState = ExpansionState.COLLAPSED;
+                } else {
+                    expandedState = ExpansionState.SUPER_COLLAPSED;
+                    hasDraft |= msg.isDraft();
+                }
             }
             mViewState.setShouldShowImages(msg, prevState.getShouldShowImages(msg));
             mViewState.setExpansionState(msg, expandedState);
@@ -698,7 +798,6 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 // This line puts the from address in the address cache so that
                 // we get the sender image for it if it's in a super-collapsed block.
                 getAddress(msg.getFrom());
-                previousExpandedState = expandedState;
                 continue;
             }
 
@@ -706,66 +805,50 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             if (collapsedStart >= 0) {
                 if (pos - collapsedStart == 1) {
                     // Special-case for a single collapsed message: no need to super-collapse it.
-                    // Since it is super-collapsed, there is no previous message to be
-                    // collapsed and the border above it is the first border.
-                    renderMessage(prevCollapsedMsg, false /* previousCollapsed */,
-                            false /* expanded */, prevSafeForImages, true /* firstBorder */);
+                    renderMessage(prevCollapsedMsg, false /* expanded */, prevSafeForImages);
                 } else {
-                    renderSuperCollapsedBlock(collapsedStart, pos - 1);
+                    renderSuperCollapsedBlock(collapsedStart, pos - 1, hasDraft);
                 }
+                hasDraft = false; // reset hasDraft
                 prevCollapsedMsg = null;
                 collapsedStart = -1;
             }
 
-            renderMessage(msg, ExpansionState.isCollapsed(previousExpandedState),
-                    ExpansionState.isExpanded(expandedState), safeForImages,
-                    pos == 0 /* firstBorder */);
-
-            previousExpandedState = expandedState;
+            renderMessage(msg, ExpansionState.isExpanded(expandedState), safeForImages);
         }
+
+        final MessageHeaderItem lastHeaderItem = getLastMessageHeaderItem();
+        final int convFooterPos = mAdapter.addConversationFooter(lastHeaderItem);
+        final int convFooterPx = measureOverlayHeight(convFooterPos);
 
         mWebView.getSettings().setBlockNetworkImage(!allowNetworkImages);
 
         final boolean applyTransforms = shouldApplyTransforms();
 
-        renderBorder(true /* contiguous */, true /* expanded */,
-                false /* firstBorder */, true /* lastBorder */);
-
         // If the conversation has specified a base uri, use it here, otherwise use mBaseUri
-        return mTemplates.endConversation(mBaseUri, mConversation.getBaseUri(mBaseUri),
-                mWebView.getViewportWidth(), enableContentReadySignal, isOverviewMode(mAccount),
-                applyTransforms, applyTransforms);
+        return mTemplates.endConversation(convFooterPx, mBaseUri,
+                mConversation.getBaseUri(mBaseUri),
+                mWebView.getViewportWidth(), mWebView.getWidthInDp(mSideMarginPx),
+                enableContentReadySignal, isOverviewMode(mAccount), applyTransforms,
+                applyTransforms);
     }
 
-    private void renderSuperCollapsedBlock(int start, int end) {
-        renderBorder(true /* contiguous */, true /* expanded */,
-                true /* firstBorder */, false /* lastBorder */);
-        final int blockPos = mAdapter.addSuperCollapsedBlock(start, end);
+    private MessageHeaderItem getLastMessageHeaderItem() {
+        final int count = mAdapter.getCount();
+        if (count < 3) {
+            LogUtils.wtf(LOG_TAG, "not enough items in the adapter. count: %s", count);
+            return null;
+        }
+        return (MessageHeaderItem) mAdapter.getItem(count - 2);
+    }
+
+    private void renderSuperCollapsedBlock(int start, int end, boolean hasDraft) {
+        final int blockPos = mAdapter.addSuperCollapsedBlock(start, end, hasDraft);
         final int blockPx = measureOverlayHeight(blockPos);
         mTemplates.appendSuperCollapsedHtml(start, mWebView.screenPxToWebPx(blockPx));
     }
 
-    protected void renderBorder(
-            boolean contiguous, boolean expanded, boolean firstBorder, boolean lastBorder) {
-        final int blockPos = mAdapter.addBorder(contiguous, expanded, firstBorder, lastBorder);
-        final int blockPx = measureOverlayHeight(blockPos);
-        mTemplates.appendBorder(mWebView.screenPxToWebPx(blockPx));
-    }
-
-    private void renderMessage(ConversationMessage msg, boolean previousCollapsed,
-            boolean expanded, boolean safeForImages, boolean firstBorder) {
-        renderMessage(msg, previousCollapsed, expanded, safeForImages,
-                true /* renderBorder */, firstBorder);
-    }
-
-    private void renderMessage(ConversationMessage msg, boolean previousCollapsed,
-            boolean expanded, boolean safeForImages, boolean renderBorder, boolean firstBorder) {
-        if (renderBorder) {
-            // The border should be collapsed only if both the current
-            // and previous messages are collapsed.
-            renderBorder(true /* contiguous */, !previousCollapsed || expanded,
-                    firstBorder, false /* lastBorder */);
-        }
+    private void renderMessage(ConversationMessage msg, boolean expanded, boolean safeForImages) {
 
         final int headerPos = mAdapter.addMessageHeader(msg, expanded,
                 mViewState.getShouldShowImages(msg));
@@ -790,6 +873,9 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
         mTemplates.reset();
 
+        final boolean alwaysShowImages = (mAccount != null) &&
+                (mAccount.settings.showImages == Settings.ShowImages.ALWAYS);
+
         // In devices with non-integral density multiplier, screen pixels translate to non-integral
         // web pixels. Keep track of the error that occurs when we cast all heights to int
         float error = 0f;
@@ -798,30 +884,15 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             cursor.moveToPosition(i);
             final ConversationMessage msg = cursor.getMessage();
 
-            final int borderPx;
-            if (first) {
-                borderPx = 0;
-                first = false;
-            } else {
-                // When replacing the super-collapsed block,
-                // the border is always collapsed between messages.
-                final BorderItem border = mAdapter.newBorderItem(
-                        true /* contiguous */, false /* expanded */);
-                borderPx = measureOverlayHeight(border);
-                replacements.add(border);
-                mTemplates.appendBorder(mWebView.screenPxToWebPx(borderPx));
-            }
-
             final MessageHeaderItem header = ConversationViewAdapter.newMessageHeaderItem(
                     mAdapter, mAdapter.getDateBuilder(), msg, false /* expanded */,
-                    mViewState.getShouldShowImages(msg));
-            final MessageFooterItem footer = mAdapter.newMessageFooterItem(header);
+                    alwaysShowImages || mViewState.getShouldShowImages(msg));
+            final MessageFooterItem footer = mAdapter.newMessageFooterItem(mAdapter, header);
 
             final int headerPx = measureOverlayHeight(header);
             final int footerPx = measureOverlayHeight(footer);
             error += mWebView.screenPxToWebPxError(headerPx)
-                    + mWebView.screenPxToWebPxError(footerPx)
-                    + mWebView.screenPxToWebPxError(borderPx);
+                    + mWebView.screenPxToWebPxError(footerPx);
 
             // When the error becomes greater than 1 pixel, make the next header 1 pixel taller
             int correction = 0;
@@ -830,7 +901,8 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 error -= 1;
             }
 
-            mTemplates.appendMessageHtml(msg, false /* expanded */, msg.alwaysShowImages,
+            mTemplates.appendMessageHtml(msg, false /* expanded */,
+                    alwaysShowImages || msg.alwaysShowImages,
                     mWebView.screenPxToWebPx(headerPx) + correction,
                     mWebView.screenPxToWebPx(footerPx));
             replacements.add(header);
@@ -887,6 +959,17 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
     // END conversation header callbacks
 
+    // START conversation footer callbacks
+
+    @Override
+    public void onConversationFooterHeightChange(int newHeight) {
+        final int h = mWebView.screenPxToWebPx(newHeight);
+
+        mWebView.loadUrl(String.format("javascript:setConversationFooterSpacerHeight(%s);", h));
+    }
+
+    // END conversation footer callbacks
+
     // START message header callbacks
     @Override
     public void setMessageSpacerHeight(MessageHeaderItem item, int newSpacerHeightPx) {
@@ -901,19 +984,15 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
     }
 
     @Override
-    public void setMessageExpanded(MessageHeaderItem item, int newSpacerHeightPx,
-            int topBorderHeight, int bottomBorderHeight) {
+    public void setMessageExpanded(MessageHeaderItem item, int newSpacerHeightPx) {
         mConversationContainer.invalidateSpacerGeometry();
 
         // show/hide the HTML message body and update the spacer height
         final int h = mWebView.screenPxToWebPx(newSpacerHeightPx);
-        final int topHeight = mWebView.screenPxToWebPx(topBorderHeight);
-        final int bottomHeight = mWebView.screenPxToWebPx(bottomBorderHeight);
         LogUtils.i(LAYOUT_TAG, "setting HTML spacer expanded=%s h=%dwebPx (%dscreenPx)",
                 item.isExpanded(), h, newSpacerHeightPx);
-        mWebView.loadUrl(String.format("javascript:setMessageBodyVisible('%s', %s, %s, %s, %s);",
-                mTemplates.getMessageDomId(item.getMessage()), item.isExpanded(),
-                h, topHeight, bottomHeight));
+        mWebView.loadUrl(String.format("javascript:setMessageBodyVisible('%s', %s, %s);",
+                mTemplates.getMessageDomId(item.getMessage()), item.isExpanded(), h));
 
         mViewState.setExpansionState(item.getMessage(),
                 item.isExpanded() ? ExpansionState.EXPANDED : ExpansionState.COLLAPSED);
@@ -962,6 +1041,11 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         return (domId == null) ? null : mMessageTransforms.get(domId);
     }
 
+    @Override
+    public boolean isSecure() {
+        return false;
+    }
+
     // END message header callbacks
 
     @Override
@@ -979,6 +1063,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
         mTempBodiesHtml = renderCollapsedHeaders(cursor, item);
         mWebView.loadUrl("javascript:replaceSuperCollapsedBlock(" + item.getStart() + ")");
+        mConversationContainer.focusFirstMessageHeader();
     }
 
     private void showNewMessageNotification(NewMessagesInfo info) {
@@ -993,27 +1078,17 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                                                 // per onLoadFinished()
     }
 
-    private static OverlayPosition[] parsePositions(final String[] topArray,
-            final String[] bottomArray) {
+    private static OverlayPosition[] parsePositions(final int[] topArray, final int[] bottomArray) {
         final int len = topArray.length;
         final OverlayPosition[] positions = new OverlayPosition[len];
         for (int i = 0; i < len; i++) {
-            positions[i] = new OverlayPosition(
-                    Integer.parseInt(topArray[i]), Integer.parseInt(bottomArray[i]));
+            positions[i] = new OverlayPosition(topArray[i], bottomArray[i]);
         }
         return positions;
     }
 
     protected Address getAddress(String rawFrom) {
-        Address addr;
-        synchronized (mAddressCache) {
-            addr = mAddressCache.get(rawFrom);
-            if (addr == null) {
-                addr = Address.getEmailAddress(rawFrom);
-                mAddressCache.put(rawFrom, addr);
-            }
-        }
-        return addr;
+        return Utils.getAddress(mAddressCache, rawFrom);
     }
 
     private void ensureContentSizeChangeListener() {
@@ -1042,18 +1117,115 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         // gesture handling
         final boolean overviewMode = isOverviewMode(mAccount);
         final WebSettings settings = mWebView.getSettings();
+        final WebSettings.LayoutAlgorithm layout;
         settings.setUseWideViewPort(overviewMode);
-
-        final OnScaleGestureListener listener;
-
         settings.setSupportZoom(overviewMode);
         settings.setBuiltInZoomControls(overviewMode);
+        settings.setLoadWithOverviewMode(overviewMode);
         if (overviewMode) {
             settings.setDisplayZoomControls(false);
+            layout = WebSettings.LayoutAlgorithm.NORMAL;
+        } else {
+            layout = WebSettings.LayoutAlgorithm.NARROW_COLUMNS;
         }
-        listener = ENABLE_CSS_ZOOM && !overviewMode ? new CssScaleInterceptor() : null;
+        settings.setLayoutAlgorithm(layout);
+    }
 
-        mWebView.setOnScaleGestureListener(listener);
+    @Override
+    public ConversationMessage getMessageForClickedUrl(String url) {
+        final String domMessageId = mUrlToMessageIdMap.get(url);
+        if (domMessageId == null) {
+            return null;
+        }
+        final String messageId = mTemplates.getMessageIdForDomId(domMessageId);
+        return getMessageCursor().getMessageForId(Long.parseLong(messageId));
+    }
+
+    @Override
+    public boolean onKey(View view, int keyCode, KeyEvent keyEvent) {
+        if (keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+            mOriginalKeyedView = view;
+        }
+
+        if (mOriginalKeyedView != null) {
+            final int id = mOriginalKeyedView.getId();
+            final boolean isActionUp = keyEvent.getAction() == KeyEvent.ACTION_UP;
+            final boolean isLeft = keyCode == KeyEvent.KEYCODE_DPAD_LEFT;
+            final boolean isRight = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+            final boolean isUp = keyCode == KeyEvent.KEYCODE_DPAD_UP;
+            final boolean isDown = keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
+
+            // First we run the event by the controller
+            // We manually check if the view+direction combination should shift focus away from the
+            // conversation view to the thread list in two-pane landscape mode.
+            final boolean isTwoPaneLand = mNavigationController.isTwoPaneLandscape();
+            final boolean navigateAway = mConversationContainer.shouldNavigateAway(id, isLeft,
+                    isTwoPaneLand);
+            if (mNavigationController.onInterceptKeyFromCV(keyCode, keyEvent, navigateAway)) {
+                return true;
+            }
+
+            // If controller didn't handle the event, check directional interception.
+            if ((isLeft || isRight) && mConversationContainer.shouldInterceptLeftRightEvents(
+                    id, isLeft, isRight, isTwoPaneLand)) {
+                return true;
+            } else if (isUp || isDown) {
+                // We don't do anything on up/down for overlay
+                if (id == R.id.conversation_topmost_overlay) {
+                    return true;
+                }
+
+                // We manually handle up/down navigation through the overlay items because the
+                // system's default isn't optimal for two-pane landscape since it's not a real list.
+                final int position = mConversationContainer.getViewPosition(mOriginalKeyedView);
+                final View next = mConversationContainer.getNextOverlayView(position, isDown);
+                if (next != null) {
+                    if (isActionUp) {
+                        next.requestFocus();
+
+                        // Make sure that v is in view
+                        final int[] coords = new int[2];
+                        next.getLocationOnScreen(coords);
+                        final int bottom = coords[1] + next.getHeight();
+                        if (bottom > mMaxScreenHeight) {
+                            mWebView.scrollBy(0, bottom - mMaxScreenHeight);
+                        } else if (coords[1] < mTopOfVisibleScreen) {
+                            mWebView.scrollBy(0, coords[1] - mTopOfVisibleScreen);
+                        }
+                    }
+                    return true;
+                } else {
+                    // Special case two end points
+                    // Start is marked as index 1 because we are currently not allowing focus on
+                    // conversation view header.
+                    if ((position == mConversationContainer.getOverlayCount() - 1 && isDown) ||
+                            (position == 1 && isUp)) {
+                        mTopmostOverlay.requestFocus();
+                        // Scroll to the the top if we hit the first item
+                        if (isUp) {
+                            mWebView.scrollTo(0, 0);
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            // Finally we handle the special keys
+            if (keyCode == KeyEvent.KEYCODE_BACK && id != R.id.conversation_topmost_overlay) {
+                if (isActionUp) {
+                    mTopmostOverlay.requestFocus();
+                }
+                return true;
+            } else if (keyCode == KeyEvent.KEYCODE_ENTER &&
+                    id == R.id.conversation_topmost_overlay) {
+                if (isActionUp) {
+                    mConversationContainer.focusFirstMessageHeader();
+                    mWebView.scrollTo(0, 0);
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     public class ConversationWebViewClient extends AbstractConversationWebViewClient {
@@ -1107,17 +1279,14 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
      *
      */
     private class MailJsBridge {
-
-        @SuppressWarnings("unused")
         @JavascriptInterface
-        public void onWebContentGeometryChange(final String[] overlayTopStrs,
-                final String[] overlayBottomStrs) {
-            getHandler().post(new FragmentRunnable("onWebContentGeometryChange",
-                    ConversationViewFragment.this) {
-
-                @Override
-                public void go() {
-                    try {
+        public void onWebContentGeometryChange(final int[] overlayTopStrs,
+                final int[] overlayBottomStrs) {
+            try {
+                getHandler().post(new FragmentRunnable("onWebContentGeometryChange",
+                        ConversationViewFragment.this) {
+                    @Override
+                    public void go() {
                         if (!mViewsCreated) {
                             LogUtils.d(LOG_TAG, "ignoring webContentGeometryChange because views"
                                     + " are gone, %s", ConversationViewFragment.this);
@@ -1133,14 +1302,13 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                             }
                             mDiff = 0;
                         }
-                    } catch (Throwable t) {
-                        LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onWebContentGeometryChange");
                     }
-                }
-            });
+                });
+            } catch (Throwable t) {
+                LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onWebContentGeometryChange");
+            }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public String getTempMessageBodies() {
             try {
@@ -1157,7 +1325,6 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public String getMessageBody(String domId) {
             try {
@@ -1170,7 +1337,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 while (cursor.moveToPosition(++pos)) {
                     final ConversationMessage msg = cursor.getMessage();
                     if (TextUtils.equals(domId, mTemplates.getMessageDomId(msg))) {
-                        return msg.getBodyAsHtml();
+                        return HtmlConversationTemplates.wrapMessageBody(msg.getBodyAsHtml());
                     }
                 }
 
@@ -1182,7 +1349,6 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public String getMessageSender(String domId) {
             try {
@@ -1207,31 +1373,33 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public void onContentReady() {
-            getHandler().post(new FragmentRunnable("onContentReady",
-                    ConversationViewFragment.this) {
-                @Override
-                public void go() {
-                    try {
-                        if (mWebViewLoadStartMs != 0) {
-                            LogUtils.i(LOG_TAG, "IN CVF.onContentReady, f=%s vis=%s t=%sms",
-                                    ConversationViewFragment.this,
-                                    isUserVisible(),
-                                    (SystemClock.uptimeMillis() - mWebViewLoadStartMs));
+            try {
+                getHandler().post(new FragmentRunnable("onContentReady",
+                        ConversationViewFragment.this) {
+                    @Override
+                    public void go() {
+                        try {
+                            if (mWebViewLoadStartMs != 0) {
+                                LogUtils.i(LOG_TAG, "IN CVF.onContentReady, f=%s vis=%s t=%sms",
+                                        ConversationViewFragment.this,
+                                        isUserVisible(),
+                                        (SystemClock.uptimeMillis() - mWebViewLoadStartMs));
+                            }
+                            revealConversation();
+                        } catch (Throwable t) {
+                            LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onContentReady");
+                            // Still try to show the conversation.
+                            revealConversation();
                         }
-                        revealConversation();
-                    } catch (Throwable t) {
-                        LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onContentReady");
-                        // Still try to show the conversation.
-                        revealConversation();
                     }
-                }
-            });
+                });
+            } catch (Throwable t) {
+                LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onContentReady");
+            }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public float getScrollYPercent() {
             try {
@@ -1242,7 +1410,6 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             }
         }
 
-        @SuppressWarnings("unused")
         @JavascriptInterface
         public void onMessageTransform(String messageDomId, String transformText) {
             try {
@@ -1251,7 +1418,29 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 onConversationTransformed();
             } catch (Throwable t) {
                 LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onMessageTransform");
-                return;
+            }
+        }
+
+        @JavascriptInterface
+        public void onInlineAttachmentsParsed(final String[] urls, final String[] messageIds) {
+            try {
+                getHandler().post(new FragmentRunnable("onInlineAttachmentsParsed",
+                        ConversationViewFragment.this) {
+                    @Override
+                    public void go() {
+                        try {
+                            for (int i = 0, size = urls.length; i < size; i++) {
+                                mUrlToMessageIdMap.put(urls[i], messageIds[i]);
+                            }
+                        } catch (ArrayIndexOutOfBoundsException e) {
+                            LogUtils.e(LOG_TAG, e,
+                                    "Number of urls does not match number of message ids - %s:%s",
+                                    urls.length, messageIds.length);
+                        }
+                    }
+                });
+            } catch (Throwable t) {
+                LogUtils.e(LOG_TAG, t, "Error in MailJsBridge.onInlineAttachmentsParsed");
             }
         }
     }
@@ -1274,7 +1463,8 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             } else {
                 final Address addr = getAddress(senderAddress);
                 return res.getString(R.string.new_incoming_messages_one,
-                        TextUtils.isEmpty(addr.getName()) ? addr.getAddress() : addr.getName());
+                        mBidiFormatter.unicodeWrap(TextUtils.isEmpty(addr.getPersonal())
+                                ? addr.getAddress() : addr.getPersonal()));
             }
         }
     }
@@ -1370,7 +1560,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
                 // distinguish ours from theirs
                 // new messages from the account owner should not trigger a
                 // notification
-                if (mAccount.ownsFromAddress(from.getAddress())) {
+                if (from == null || mAccount.ownsFromAddress(from.getAddress())) {
                     LogUtils.i(LOG_TAG, "found message from self: %s", m.uri);
                     info.countFromSelf++;
                     continue;
@@ -1398,11 +1588,13 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             final ConversationMessage newMsg = newCursor.getMessage();
             final ConversationMessage oldMsg = oldCursor.getMessage();
 
-            if (!TextUtils.equals(newMsg.getFrom(), oldMsg.getFrom()) ||
-                    newMsg.isSending != oldMsg.isSending) {
+            // We are going to update the data in the adapter whenever any input fields change.
+            // This ensures that the Message object that ComposeActivity uses will be correctly
+            // aligned with the most up-to-date data.
+            if (!newMsg.isEqual(oldMsg)) {
                 mAdapter.updateItemsForMessage(newMsg, changedOverlayPositions);
-                LogUtils.i(LOG_TAG, "msg #%d (%d): detected from/sending change. isSending=%s",
-                        pos, newMsg.id, newMsg.isSending);
+                LogUtils.i(LOG_TAG, "msg #%d (%d): detected field(s) change. sendingState=%s",
+                        pos, newMsg.id, newMsg.sendingState);
             }
 
             // update changed message bodies in-place
@@ -1423,6 +1615,10 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
             changed = true;
         }
 
+        final ConversationFooterItem footerItem = mAdapter.getFooterItem();
+        if (footerItem != null) {
+            footerItem.invalidateMeasurement();
+        }
         if (!idsOfChangedBodies.isEmpty()) {
             mWebView.loadUrl(String.format("javascript:replaceMessageBodies([%s]);",
                     TextUtils.join(",", idsOfChangedBodies)));
@@ -1433,28 +1629,22 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
     }
 
     private void processNewOutgoingMessage(ConversationMessage msg) {
-        // if there are items in the adapter and the last item is a border,
-        // make the last border no longer be the last border
-        if (mAdapter.getCount() > 0) {
-            final ConversationOverlayItem item = mAdapter.getItem(mAdapter.getCount() - 1);
-            if (item.getType() == ConversationViewAdapter.VIEW_TYPE_BORDER) {
-                ((BorderItem) item).setIsLastBorder(false);
-            }
-        }
-
+        // Temporarily remove the ConversationFooterItem and its view.
+        // It will get re-added right after the new message is added.
+        final ConversationFooterItem footerItem = mAdapter.removeFooterItem();
+        mConversationContainer.removeViewAtAdapterIndex(footerItem.getPosition());
         mTemplates.reset();
         // this method will add some items to mAdapter, but we deliberately want to avoid notifying
         // adapter listeners (i.e. ConversationContainer) until onWebContentGeometryChange is next
         // called, to prevent N+1 headers rendering with N message bodies.
-
-        // We can just call previousCollapsed false here since the border
-        // above the message we're about to render should always show
-        // (which it also will since the message being render is expanded).
-        renderMessage(msg, false /* previousCollapsed */, true /* expanded */,
-                msg.alwaysShowImages, false /* renderBorder */, false /* firstBorder */);
-        renderBorder(true /* contiguous */, true /* expanded */,
-                false /* firstBorder */, true /* lastBorder */);
+        renderMessage(msg, true /* expanded */, msg.alwaysShowImages);
         mTempBodiesHtml = mTemplates.emit();
+
+        if (footerItem != null) {
+            footerItem.setLastMessageHeaderItem(getLastMessageHeaderItem());
+            footerItem.invalidateMeasurement();
+            mAdapter.addItem(footerItem);
+        }
 
         mViewState.setExpansionState(msg, ExpansionState.EXPANDED);
         // FIXME: should the provider set this as initial state?
@@ -1467,20 +1657,22 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         mWebView.loadUrl("javascript:appendMessageHtml();");
     }
 
-    private class SetCookieTask extends AsyncTask<Void, Void, Void> {
-        final String mUri;
-        final Uri mAccountCookieQueryUri;
-        final ContentResolver mResolver;
+    private static class SetCookieTask extends AsyncTask<Void, Void, Void> {
+        private final Context mContext;
+        private final String mUri;
+        private final Uri mAccountCookieQueryUri;
+        private final ContentResolver mResolver;
 
-        SetCookieTask(Context context, Uri baseUri, Uri accountCookieQueryUri) {
-            mUri = baseUri.toString();
+        /* package */ SetCookieTask(Context context, String baseUri, Uri accountCookieQueryUri) {
+            mContext = context;
+            mUri = baseUri;
             mAccountCookieQueryUri = accountCookieQueryUri;
             mResolver = context.getContentResolver();
         }
 
         @Override
         public Void doInBackground(Void... args) {
-            // First query for the coookie string from the UI provider
+            // First query for the cookie string from the UI provider
             final Cursor cookieCursor = mResolver.query(mAccountCookieQueryUri,
                     UIProvider.ACCOUNT_COOKIE_PROJECTION, null, null, null);
             if (cookieCursor == null) {
@@ -1494,7 +1686,7 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
 
                     if (cookie != null) {
                         final CookieSyncManager csm =
-                            CookieSyncManager.createInstance(getContext());
+                                CookieSyncManager.createInstance(mContext);
                         CookieManager.getInstance().setCookie(mUri, cookie);
                         csm.sync();
                     }
@@ -1516,7 +1708,6 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
         mConversation = conv;
         if (headerView != null) {
             headerView.onConversationUpdated(conv);
-            headerView.setSubject(conv.subject);
         }
     }
 
@@ -1533,41 +1724,21 @@ public class ConversationViewFragment extends AbstractConversationViewFragment i
     }
 
     @Override
-    public void setMessageDetailsExpanded(MessageHeaderItem i, boolean expanded,
-            int heightBefore) {
+    public void setMessageDetailsExpanded(MessageHeaderItem i, boolean expanded, int heightBefore) {
         mDiff = (expanded ? 1 : -1) * Math.abs(i.getHeight() - heightBefore);
     }
 
-    private class CssScaleInterceptor implements OnScaleGestureListener {
+    /**
+     * @return {@code true} because either the Print or Print All menu item is shown in GMail
+     */
+    @Override
+    protected boolean shouldShowPrintInOverflow() {
+        return true;
+    }
 
-        private float getFocusXWebPx(ScaleGestureDetector detector) {
-            return (detector.getFocusX() - mSideMarginPx) / mWebView.getInitialScale();
-        }
-
-        private float getFocusYWebPx(ScaleGestureDetector detector) {
-            return detector.getFocusY() / mWebView.getInitialScale();
-        }
-
-        @Override
-        public boolean onScale(ScaleGestureDetector detector) {
-            mWebView.loadUrl(String.format("javascript:onScale(%s, %s, %s);",
-                    detector.getScaleFactor(), getFocusXWebPx(detector),
-                    getFocusYWebPx(detector)));
-            return false;
-        }
-
-        @Override
-        public boolean onScaleBegin(ScaleGestureDetector detector) {
-            mWebView.loadUrl(String.format("javascript:onScaleBegin(%s, %s);",
-                    getFocusXWebPx(detector), getFocusYWebPx(detector)));
-            return true;
-        }
-
-        @Override
-        public void onScaleEnd(ScaleGestureDetector detector) {
-            mWebView.loadUrl(String.format("javascript:onScaleEnd(%s, %s);",
-                    getFocusXWebPx(detector), getFocusYWebPx(detector)));
-        }
-
+    @Override
+    protected void printConversation() {
+        PrintUtils.printConversation(mActivity.getActivityContext(), getMessageCursor(),
+                mAddressCache, mConversation.getBaseUri(mBaseUri), true /* useJavascript */);
     }
 }

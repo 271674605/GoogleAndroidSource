@@ -6,8 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ARM_LDBACKEND_H
-#define MCLD_ARM_LDBACKEND_H
+#ifndef TARGET_ARM_ARMLDBACKEND_H
+#define TARGET_ARM_ARMLDBACKEND_H
 
 #include "ARMELFDynamic.h"
 #include "ARMGOT.h"
@@ -18,9 +18,9 @@
 
 namespace mcld {
 
+class ARMELFAttributeData;
 class LinkerConfig;
 class GNUInfo;
-class SectionMap;
 
 //===----------------------------------------------------------------------===//
 /// ARMGNULDBackend - linker backend of ARM target of GNU ELF format
@@ -55,8 +55,8 @@ public:
   bool initRelocator();
 
   /// getRelocator - return relocator.
+  const Relocator* getRelocator() const;
   Relocator* getRelocator();
-
 
   /// doPreLayout - Backend can do any needed modification before layout
   void doPreLayout(IRBuilder& pBuilder);
@@ -103,6 +103,9 @@ public:
   OutputRelocSection& getRelPLT();
   const OutputRelocSection& getRelPLT() const;
 
+  ARMELFAttributeData& getAttributeData();
+  const ARMELFAttributeData& getAttributeData() const;
+
   LDSymbol* getGOTSymbol()             { return m_pGOTSymbol; }
   const LDSymbol* getGOTSymbol() const { return m_pGOTSymbol; }
 
@@ -113,17 +116,27 @@ public:
   bool finalizeTargetSymbols();
 
   /// mergeSection - merge target dependent sections
-  bool mergeSection(Module& pModule, LDSection& pSection);
+  bool mergeSection(Module& pModule, const Input& pInput, LDSection& pSection);
+
+  /// setUpReachedSectionsForGC - set the reference from section XXX to
+  /// .ARM.exidx.XXX to make sure GC correctly handle section exidx
+  void setUpReachedSectionsForGC(const Module& pModule,
+           GarbageCollection::SectionReachedListMap& pSectReachedListMap) const;
 
   /// readSection - read target dependent sections
   bool readSection(Input& pInput, SectionData& pSD);
 
+  /// mayHaveUnsafeFunctionPointerAccess - check if the section may have unsafe
+  /// function pointer access
+  bool mayHaveUnsafeFunctionPointerAccess(const LDSection& pSection) const;
+
 private:
   void defineGOTSymbol(IRBuilder& pBuilder);
 
-  /// maxBranchOffset
-  /// FIXME: if we can handle arm attributes, we may refine this!
-  uint64_t maxBranchOffset() { return THM_MAX_FWD_BRANCH_OFFSET; }
+  /// maxFwdBranchOffset
+  int64_t maxFwdBranchOffset();
+  /// maxBwdBranchOffset
+  int64_t maxBwdBranchOffset();
 
   /// mayRelax - Backends should override this function if they need relaxation
   bool mayRelax() { return true; }
@@ -158,6 +171,9 @@ private:
   OutputRelocSection* m_pRelDyn;
   /// m_RelPLT - dynamic relocation table of .rel.plt
   OutputRelocSection* m_pRelPLT;
+
+  /// m_pAttrData - attribute data in public ("aeabi") attribute subsection
+  ARMELFAttributeData* m_pAttrData;
 
   ARMELFDynamic* m_pDynamic;
   LDSymbol* m_pGOTSymbol;

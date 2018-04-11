@@ -172,15 +172,12 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
         mCallback = callback;
         mContext = context;
         mVcardManager = new BluetoothPbapVcardManager(mContext);
-
-        // set initial value when ObexServer created
-        mMissedCallSize = mVcardManager.getPhonebookSize(ContentType.MISSED_CALL_HISTORY);
-        if (D) Log.d(TAG, "Initialize mMissedCallSize=" + mMissedCallSize);
     }
 
     @Override
     public int onConnect(final HeaderSet request, HeaderSet reply) {
         if (V) logHeader(request);
+        notifyUpdateWakeLock();
         try {
             byte[] uuid = (byte[])request.getHeader(HeaderSet.TARGET);
             if (uuid == null) {
@@ -229,7 +226,7 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
     public void onDisconnect(final HeaderSet req, final HeaderSet resp) {
         if (D) Log.d(TAG, "onDisconnect(): enter");
         if (V) logHeader(req);
-
+        notifyUpdateWakeLock();
         resp.responseCode = ResponseCodes.OBEX_HTTP_OK;
         if (mCallback != null) {
             Message msg = Message.obtain(mCallback);
@@ -242,6 +239,7 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
     @Override
     public int onAbort(HeaderSet request, HeaderSet reply) {
         if (D) Log.d(TAG, "onAbort(): enter.");
+        notifyUpdateWakeLock();
         sIsAborted = true;
         return ResponseCodes.OBEX_HTTP_OK;
     }
@@ -249,6 +247,14 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
     @Override
     public int onPut(final Operation op) {
         if (D) Log.d(TAG, "onPut(): not support PUT request.");
+        notifyUpdateWakeLock();
+        return ResponseCodes.OBEX_HTTP_BAD_REQUEST;
+    }
+
+    @Override
+    public int onDelete(final HeaderSet request, final HeaderSet reply) {
+        if (D) Log.d(TAG, "onDelete(): not support PUT request.");
+        notifyUpdateWakeLock();
         return ResponseCodes.OBEX_HTTP_BAD_REQUEST;
     }
 
@@ -257,7 +263,7 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             final boolean create) {
         if (V) logHeader(request);
         if (D) Log.d(TAG, "before setPath, mCurrentPath ==  " + mCurrentPath);
-
+        notifyUpdateWakeLock();
         String current_path_tmp = mCurrentPath;
         String tmp_path = null;
         try {
@@ -308,6 +314,7 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
 
     @Override
     public int onGet(Operation op) {
+        notifyUpdateWakeLock();
         sIsAborted = false;
         HeaderSet request = null;
         HeaderSet reply = new HeaderSet();
@@ -374,25 +381,25 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             // we have weak name checking here to provide better
             // compatibility with other devices,although unique name such as
             // "pb.vcf" is required by SIG spec.
-            if (name.contains(PB.subSequence(0, PB.length()))) {
+            if (isNameMatchTarget(name, PB)) {
                 appParamValue.needTag = ContentType.PHONEBOOK;
                 if (D) Log.v(TAG, "download phonebook request");
-            } else if (name.contains(ICH.subSequence(0, ICH.length()))) {
+            } else if (isNameMatchTarget(name, ICH)) {
                 appParamValue.needTag = ContentType.INCOMING_CALL_HISTORY;
                 if (D) Log.v(TAG, "download incoming calls request");
-            } else if (name.contains(OCH.subSequence(0, OCH.length()))) {
+            } else if (isNameMatchTarget(name, OCH)) {
                 appParamValue.needTag = ContentType.OUTGOING_CALL_HISTORY;
                 if (D) Log.v(TAG, "download outgoing calls request");
-            } else if (name.contains(MCH.subSequence(0, MCH.length()))) {
+            } else if (isNameMatchTarget(name, MCH)) {
                 appParamValue.needTag = ContentType.MISSED_CALL_HISTORY;
                 mNeedNewMissedCallsNum = true;
                 if (D) Log.v(TAG, "download missed calls request");
-            } else if (name.contains(CCH.subSequence(0, CCH.length()))) {
+            } else if (isNameMatchTarget(name, CCH)) {
                 appParamValue.needTag = ContentType.COMBINED_CALL_HISTORY;
                 if (D) Log.v(TAG, "download combined calls request");
             } else {
                 Log.w(TAG, "Input name doesn't contain valid info!!!");
-                return ResponseCodes.OBEX_HTTP_NOT_ACCEPTABLE;
+                return ResponseCodes.OBEX_HTTP_NOT_FOUND;
             }
         }
 
@@ -415,6 +422,24 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             Log.w(TAG, "unknown type request!!!");
             return ResponseCodes.OBEX_HTTP_NOT_ACCEPTABLE;
         }
+    }
+
+    private boolean isNameMatchTarget(String name, String target) {
+        String contentTypeName = name;
+        if (contentTypeName.endsWith(".vcf")) {
+            contentTypeName = contentTypeName
+                    .substring(0, contentTypeName.length() - ".vcf".length());
+        }
+        // There is a test case: Client will send a wrong name "/telecom/pbpb".
+        // So we must use the String between '/' and '/' as a indivisible part
+        // for comparing.
+        String[] nameList = contentTypeName.split("/");
+        for (String subName : nameList) {
+            if (subName.equals(target)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** check whether path is legal */
@@ -451,6 +476,10 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
 
         public boolean vcard21;
 
+        public byte[] filter;
+
+        public boolean ignorefilter;
+
         public AppParamValue() {
             maxListCount = 0xFFFF;
             listStartOffset = 0;
@@ -459,6 +488,9 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             order = "";
             needTag = 0x00;
             vcard21 = true;
+            //Filter is not set by default
+            ignorefilter = true;
+            filter = new byte[] {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} ;
         }
 
         public void dump() {
@@ -473,10 +505,17 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             AppParamValue appParamValue) {
         int i = 0;
         boolean parseOk = true;
-        while (i < appParam.length) {
+        while ((i < appParam.length) && (parseOk == true)) {
             switch (appParam[i]) {
                 case ApplicationParameter.TRIPLET_TAGID.FILTER_TAGID:
                     i += 2; // length and tag field in triplet
+                    for (int index=0; index < ApplicationParameter.TRIPLET_LENGTH.FILTER_LENGTH;
+                         index++) {
+                        if (appParam[i+index] != 0){
+                            appParamValue.ignorefilter = false;
+                            appParamValue.filter[index] = appParam[i+index];
+                        }
+                    }
                     i += ApplicationParameter.TRIPLET_LENGTH.FILTER_LENGTH;
                     break;
                 case ApplicationParameter.TRIPLET_TAGID.ORDER_TAGID:
@@ -608,8 +647,10 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
                         itemsFound < requestSize; pos++) {
                     currentValue = nameList.get(pos);
                     if (D) Log.d(TAG, "currentValue=" + currentValue);
-                    if (currentValue.startsWith(compareValue)) {
+                    if (currentValue.equals(compareValue)) {
                         itemsFound++;
+                        if (currentValue.contains(","))
+                           currentValue = currentValue.substring(0, currentValue.lastIndexOf(','));
                         writeVCardEntry(pos, currentValue,result);
                     }
                 }
@@ -624,8 +665,10 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             for (int pos = listStartOffset; pos < listSize &&
                     itemsFound < requestSize; pos++) {
                 currentValue = nameList.get(pos);
-                if (D) Log.d(TAG, "currentValue=" + currentValue);
-                if (searchValue == null || currentValue.startsWith(compareValue)) {
+                if (currentValue.contains(","))
+                    currentValue = currentValue.substring(0, currentValue.lastIndexOf(','));
+
+                if (searchValue.isEmpty() || ((currentValue.toLowerCase()).equals(compareValue.toLowerCase()))) {
                     itemsFound++;
                     writeVCardEntry(pos, currentValue,result);
                 }
@@ -850,7 +893,7 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
                 return pushBytes(op, ownerVcard);
             } else {
                 return mVcardManager.composeAndSendPhonebookOneVcard(op, intIndex, vcard21, null,
-                        mOrderBy );
+                        mOrderBy, appParamValue.ignorefilter, appParamValue.filter);
             }
         } else {
             if (intIndex <= 0 || intIndex > size) {
@@ -861,7 +904,8 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
             // begin from 1.vcf
             if (intIndex >= 1) {
                 return mVcardManager.composeAndSendCallLogVcards(appParamValue.needTag, op,
-                        intIndex, intIndex, vcard21);
+                        intIndex, intIndex, vcard21, appParamValue.ignorefilter,
+                        appParamValue.filter);
             }
         }
         return ResponseCodes.OBEX_HTTP_OK;
@@ -922,15 +966,16 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
                     return pushBytes(op, ownerVcard);
                 } else {
                     return mVcardManager.composeAndSendPhonebookVcards(op, 1, endPoint, vcard21,
-                            ownerVcard);
+                            ownerVcard, appParamValue.ignorefilter, appParamValue.filter);
                 }
             } else {
                 return mVcardManager.composeAndSendPhonebookVcards(op, startPoint, endPoint,
-                        vcard21, null);
+                        vcard21, null, appParamValue.ignorefilter, appParamValue.filter);
             }
         } else {
             return mVcardManager.composeAndSendCallLogVcards(appParamValue.needTag, op,
-                    startPoint + 1, endPoint + 1, vcard21);
+                    startPoint + 1, endPoint + 1, vcard21, appParamValue.ignorefilter,
+                    appParamValue.filter);
         }
     }
 
@@ -1019,6 +1064,12 @@ public class BluetoothPbapObexServer extends ServerRequestHandler {
         result.append(".vcf\" name=\"");
         xmlEncode(name, result);
         result.append("\"/>");
+    }
+
+    private void notifyUpdateWakeLock() {
+        Message msg = Message.obtain(mCallback);
+        msg.what = BluetoothPbapService.MSG_ACQUIRE_WAKE_LOCK;
+        msg.sendToTarget();
     }
 
     public static final void logHeader(HeaderSet hs) {

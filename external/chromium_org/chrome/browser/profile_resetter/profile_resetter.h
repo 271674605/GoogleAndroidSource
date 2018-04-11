@@ -5,22 +5,31 @@
 #ifndef CHROME_BROWSER_PROFILE_RESETTER_PROFILE_RESETTER_H_
 #define CHROME_BROWSER_PROFILE_RESETTER_PROFILE_RESETTER_H_
 
+#include <utility>
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/strings/string16.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/profile_resetter/brandcoded_default_settings.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 
 class Profile;
-class TemplateURLService;
+
+namespace base {
+class CancellationFlag;
+}
 
 // This class allows resetting certain aspects of a profile to default values.
 // It is used in case the profile has been damaged due to malware or bad user
 // settings.
 class ProfileResetter : public base::NonThreadSafe,
-                        public content::NotificationObserver,
                         public BrowsingDataRemover::Observer {
  public:
   // Flags indicating what aspects of a profile shall be reset.
@@ -32,10 +41,12 @@ class ProfileResetter : public base::NonThreadSafe,
     EXTENSIONS = 1 << 4,
     STARTUP_PAGES = 1 << 5,
     PINNED_TABS = 1 << 6,
+    SHORTCUTS = 1 << 7,
     // Update ALL if you add new values and check whether the type of
     // ResettableFlags needs to be enlarged.
     ALL = DEFAULT_SEARCH_ENGINE | HOMEPAGE | CONTENT_SETTINGS |
-          COOKIES_AND_SITE_DATA | EXTENSIONS | STARTUP_PAGES | PINNED_TABS
+          COOKIES_AND_SITE_DATA | EXTENSIONS | STARTUP_PAGES | PINNED_TABS |
+          SHORTCUTS
   };
 
   // Bit vector for Resettable enum.
@@ -49,9 +60,11 @@ class ProfileResetter : public base::NonThreadSafe,
 
   // Resets |resettable_flags| and calls |callback| on the UI thread on
   // completion. |default_settings| allows the caller to specify some default
-  // settings. |default_settings| shouldn't be NULL.
+  // settings. |default_settings| shouldn't be NULL. |accepted_send_feedback|
+  // identifies whether the user accepted to send feedback or not.
   void Reset(ResettableFlags resettable_flags,
              scoped_ptr<BrandcodedDefaultSettings> master_settings,
+             bool accepted_send_feedback,
              const base::Closure& callback);
 
   bool IsActive() const;
@@ -68,14 +81,13 @@ class ProfileResetter : public base::NonThreadSafe,
   void ResetExtensions();
   void ResetStartupPages();
   void ResetPinnedTabs();
-
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void ResetShortcuts();
 
   // BrowsingDataRemover::Observer:
   virtual void OnBrowsingDataRemoverDone() OVERRIDE;
+
+  // Callback for when TemplateURLService has loaded.
+  void OnTemplateURLServiceLoaded();
 
   Profile* const profile_;
   scoped_ptr<BrandcodedDefaultSettings> master_settings_;
@@ -88,13 +100,26 @@ class ProfileResetter : public base::NonThreadSafe,
   // Called on UI thread when reset has been completed.
   base::Closure callback_;
 
-  content::NotificationRegistrar registrar_;
-
   // If non-null it means removal is in progress. BrowsingDataRemover takes care
   // of deleting itself when done.
   BrowsingDataRemover* cookies_remover_;
 
+  scoped_ptr<TemplateURLService::Subscription> template_url_service_sub_;
+
+  base::WeakPtrFactory<ProfileResetter> weak_ptr_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(ProfileResetter);
 };
+
+// Path to shortcut and command line arguments.
+typedef std::pair<base::FilePath, base::string16> ShortcutCommand;
+
+typedef base::RefCountedData<base::CancellationFlag> SharedCancellationFlag;
+
+// On Windows returns all the shortcuts which launch Chrome and corresponding
+// arguments. |cancel| can be passed to abort the operation earlier.
+// Call on FILE thread.
+std::vector<ShortcutCommand> GetChromeLaunchShortcuts(
+    const scoped_refptr<SharedCancellationFlag>& cancel);
 
 #endif  // CHROME_BROWSER_PROFILE_RESETTER_PROFILE_RESETTER_H_

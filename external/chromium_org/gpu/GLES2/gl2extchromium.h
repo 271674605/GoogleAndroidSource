@@ -55,13 +55,21 @@ typedef void (GL_APIENTRYP PFNGLTEXIMAGEIOSURFACE2DCHROMIUMPROC) (
 GL_APICALL void GL_APIENTRY glGenMailboxCHROMIUM(GLbyte* mailbox);
 GL_APICALL void GL_APIENTRY glProduceTextureCHROMIUM(
     GLenum target, const GLbyte* mailbox);
+GL_APICALL void GL_APIENTRY glProduceTextureDirectCHROMIUM(
+    GLuint texture, GLenum target, const GLbyte* mailbox);
 GL_APICALL void GL_APIENTRY glConsumeTextureCHROMIUM(
+    GLenum target, const GLbyte* mailbox);
+GL_APICALL GLuint GL_APIENTRY glCreateAndConsumeTextureCHROMIUM(
     GLenum target, const GLbyte* mailbox);
 #endif
 typedef void (GL_APIENTRYP PFNGLGENMAILBOXCHROMIUMPROC) (GLbyte* mailbox);
 typedef void (GL_APIENTRYP PFNGLPRODUCETEXTURECHROMIUMPROC) (
     GLenum target, const GLbyte* mailbox);
+typedef void (GL_APIENTRYP PFNGLPRODUCETEXTUREDIRECTCHROMIUMPROC) (
+    GLuint texture, GLenum target, const GLbyte* mailbox);
 typedef void (GL_APIENTRYP PFNGLCONSUMETEXTURECHROMIUMPROC) (
+    GLenum target, const GLbyte* mailbox);
+typedef GLuint (GL_APIENTRYP PFNGLCREATEANDCONSUMETEXTURECHROMIUMPROC) (
     GLenum target, const GLbyte* mailbox);
 #endif  /* GL_CHROMIUM_texture_mailbox */
 
@@ -94,7 +102,7 @@ typedef GLboolean (GL_APIENTRY PFNGLUNMAPBUFFERCHROMIUM) (GLuint target);
 #endif
 #endif  /* GL_CHROMIUM_pixel_transfer_buffer_object */
 
-/* GL_CHROMIUM_map_image */
+/* GL_CHROMIUM_image */
 #ifndef GL_CHROMIUM_map_image
 #define GL_CHROMIUM_map_image 1
 
@@ -102,21 +110,29 @@ typedef GLboolean (GL_APIENTRY PFNGLUNMAPBUFFERCHROMIUM) (GLuint target);
 #define GL_IMAGE_ROWBYTES_CHROMIUM 0x78F0
 #endif
 
-#ifndef GL_READ_WRITE
-#define GL_READ_WRITE 0x88BA
+#ifndef GL_IMAGE_MAP_CHROMIUM
+#define GL_IMAGE_MAP_CHROMIUM 0x78F1
+#endif
+
+#ifndef GL_IMAGE_SCANOUT_CHROMIUM
+#define GL_IMAGE_SCANOUT_CHROMIUM 0x78F2
 #endif
 
 #ifdef GL_GLEXT_PROTOTYPES
-GL_APICALL GLuint GL_APIENTRY glCreateImageCHROMIUM(
-    GLsizei width, GLsizei height, GLenum internalformat);
+GL_APICALL GLuint GL_APIENTRY glCreateImageCHROMIUM(GLsizei width,
+                                                    GLsizei height,
+                                                    GLenum internalformat,
+                                                    GLenum usage);
 GL_APICALL void GL_APIENTRY glDestroyImageCHROMIUM(GLuint image_id);
 GL_APICALL void GL_APIENTRY glGetImageParameterivCHROMIUM(
     GLuint image_id, GLenum pname, GLint* params);
-GL_APICALL void* GL_APIENTRY glMapImageCHROMIUM(GLuint image_id, GLenum access);
+GL_APICALL void* GL_APIENTRY glMapImageCHROMIUM(GLuint image_id);
 GL_APICALL void GL_APIENTRY glUnmapImageCHROMIUM(GLuint image_id);
 #endif
-typedef GLuint (GL_APIENTRYP PFNGLCREATEIMAGECHROMIUMPROC) (
-    GLsizei width, GLsizei height, GLenum internalformat);
+typedef GLuint(GL_APIENTRYP PFNGLCREATEIMAGECHROMIUMPROC)(
+    GLsizei width,
+    GLsizei height,
+    GLenum internalformat);
 typedef void (
     GL_APIENTRYP PFNGLDESTROYIMAGECHROMIUMPROC) (GLuint image_id);
 typedef void (
@@ -237,9 +253,16 @@ typedef void (GL_APIENTRYP PFNGLBINDUNIFORMLOCATIONCHROMIUMPROC) (
 #endif
 #endif  /* GL_CHROMIUM_command_buffer_query */
 
-/* GL_EXT_framebuffer_multisample */
-#ifndef GL_EXT_framebuffer_multisample
-#define GL_EXT_framebuffer_multisample 1
+/* GL_CHROMIUM_framebuffer_multisample */
+#ifndef GL_CHROMIUM_framebuffer_multisample
+#define GL_CHROMIUM_framebuffer_multisample 1
+
+#ifdef GL_GLEXT_PROTOTYPES
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisampleCHROMIUM (GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+GL_APICALL void GL_APIENTRY glBlitFramebufferCHROMIUM (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
+#endif
+typedef void (GL_APIENTRYP PFNGLRENDERBUFFERSTORAGEMULTISAMPLECHROMIUMPROC) (GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLBLITFRAMEBUFFERCHROMIUMPROC) (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 
 #ifndef GL_FRAMEBUFFER_BINDING_EXT
 #define GL_FRAMEBUFFER_BINDING_EXT GL_FRAMEBUFFER_BINDING
@@ -312,7 +335,7 @@ typedef void (GL_APIENTRYP PFNGLBINDUNIFORMLOCATIONCHROMIUMPROC) (
 #ifndef GL_FRAMEBUFFER_BINDING
 #define GL_FRAMEBUFFER_BINDING 0x8CA6
 #endif
-#endif  /* GL_EXT_framebuffer_multisample */
+#endif  /* GL_CHROMIUM_framebuffer_multisample */
 
 /* GL_CHROMIUM_texture_compression_dxt3 */
 #ifndef GL_CHROMIUM_texture_compression_dxt3
@@ -336,13 +359,17 @@ typedef void (GL_APIENTRYP PFNGLBINDUNIFORMLOCATIONCHROMIUMPROC) (
 #ifndef GL_CHROMIUM_async_pixel_transfers
 #define GL_CHROMIUM_async_pixel_transfers 1
 
-#ifndef GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM
-#define GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM 0x84F5
+#ifndef GL_ASYNC_PIXEL_UNPACK_COMPLETED_CHROMIUM
+#define GL_ASYNC_PIXEL_UNPACK_COMPLETED_CHROMIUM 0x84F5
 #endif
-#ifndef GL_ASYNC_READ_PIXELS_COMPLETED_CHROMIUM
-#define GL_ASYNC_READ_PIXELS_COMPLETED_CHROMIUM 0x84F6
+#ifndef GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM
+#define GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM 0x84F6
 #endif
 #endif  /* GL_CHROMIUM_async_pixel_transfers */
+
+#ifndef GL_BIND_GENERATES_RESOURCE_CHROMIUM
+#define GL_BIND_GENERATES_RESOURCE_CHROMIUM 0x9244
+#endif
 
 /* GL_CHROMIUM_copy_texture */
 #ifndef GL_CHROMIUM_copy_texture
@@ -600,11 +627,6 @@ typedef void (GL_APIENTRYP PFNGLGETPROGRAMINFOCHROMIUMPROC) (
    GLuint program, GLsizei bufsize, GLsizei* size, void* info);
 #endif  /* GL_CHROMIUM_get_multiple */
 
-/* GL_CHROMIUM_front_buffer_cached */
-#ifndef GL_CHROMIUM_front_buffer_cached
-#define GL_CHROMIUM_front_buffer_cached 1
-#endif  /* GL_CHROMIUM_front_buffer_cached */
-
 /* GL_CHROMIUM_sync_point */
 #ifndef GL_CHROMIUM_sync_point
 #define GL_CHROMIUM_sync_point 1
@@ -615,6 +637,85 @@ GL_APICALL void GL_APIENTRY glWaitSyncPointCHROMIUM(GLuint sync_point);
 typedef GLuint (GL_APIENTRYP PFNGLINSERTSYNCPOINTCHROMIUMPROC) ();
 typedef void (GL_APIENTRYP PFNGLWAITSYNCPOINTCHROMIUMPROC) (GLuint sync_point);
 #endif  /* GL_CHROMIUM_sync_point */
+
+#ifndef GL_CHROMIUM_color_buffer_float_rgba
+#define GL_CHROMIUM_color_buffer_float_rgba 1
+#ifndef GL_RGBA32F
+#define GL_RGBA32F 0x8814
+#endif
+#endif /* GL_CHROMIUM_color_buffer_float_rgba */
+
+#ifndef GL_CHROMIUM_color_buffer_float_rgb
+#define GL_CHROMIUM_color_buffer_float_rgb 1
+#ifndef GL_RGB32F
+#define GL_RGB32F 0x8815
+#endif
+#endif /* GL_CHROMIUM_color_buffer_float_rgb */
+
+/* GL_CHROMIUM_schedule_overlay_plane */
+#ifndef GL_CHROMIUM_schedule_overlay_plane
+#define GL_CHROMIUM_schedule_overlay_plane 1
+
+#ifndef GL_OVERLAY_TRANSFORM_NONE_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_NONE_CHROMIUM 0x9245
+#endif
+
+#ifndef GL_OVERLAY_TRANSFORM_FLIP_HORIZONTAL_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_FLIP_HORIZONTAL_CHROMIUM 0x9246
+#endif
+
+#ifndef GL_OVERLAY_TRANSFORM_FLIP_VERTICAL_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_FLIP_VERTICAL_CHROMIUM 0x9247
+#endif
+
+#ifndef GL_OVERLAY_TRANSFORM_ROTATE_90_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_ROTATE_90_CHROMIUM 0x9248
+#endif
+
+#ifndef GL_OVERLAY_TRANSFORM_ROTATE_180_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_ROTATE_180_CHROMIUM 0x9249
+#endif
+
+#ifndef GL_OVERLAY_TRANSFORM_ROTATE_270_CHROMIUM
+#define GL_OVERLAY_TRANSFORM_ROTATE_270_CHROMIUM 0x924A
+#endif
+
+#ifdef GL_GLEXT_PROTOTYPES
+GL_APICALL void GL_APIENTRY
+    glScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
+                                   GLenum plane_transform,
+                                   GLuint overlay_texture_id,
+                                   GLint bounds_x,
+                                   GLint bounds_y,
+                                   GLint bounds_width,
+                                   GLint bounds_height,
+                                   GLfloat uv_x,
+                                   GLfloat uv_y,
+                                   GLfloat uv_width,
+                                   GLfloat uv_height);
+#endif
+typedef void(GL_APIENTRYP PFNGLSCHEDULEOVERLAYPLANECHROMIUMPROC)(
+    GLint plane_z_order,
+    GLenum plane_transform,
+    GLuint overlay_texture_id,
+    GLint bounds_x,
+    GLint bounds_y,
+    GLint bounds_width,
+    GLint bounds_height,
+    GLfloat uv_x,
+    GLfloat uv_y,
+    GLfloat uv_width,
+    GLfloat uv_height);
+#endif /* GL_CHROMIUM_schedule_overlay_plane */
+
+/* GL_CHROMIUM_sync_query */
+#ifndef GL_CHROMIUM_sync_query
+#define GL_CHROMIUM_sync_query 1
+
+#ifndef GL_COMMANDS_COMPLETED_CHROMIUM
+#define GL_COMMANDS_COMPLETED_CHROMIUM 0x84F7
+#endif
+#endif  /* GL_CHROMIUM_sync_query */
 
 #ifdef __cplusplus
 }

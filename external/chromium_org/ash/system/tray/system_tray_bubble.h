@@ -14,11 +14,8 @@
 #include <vector>
 
 namespace ash {
-
 class SystemTray;
 class SystemTrayItem;
-
-namespace internal {
 
 class SystemTrayBubble {
  public:
@@ -43,6 +40,9 @@ class SystemTrayBubble {
                 user::LoginStatus login_status,
                 views::TrayBubbleView::InitParams* init_params);
 
+  // Focus the default item if no item is focused. Othewise, do nothing.
+  void FocusDefaultIfNeeded();
+
   BubbleType bubble_type() const { return bubble_type_; }
   views::TrayBubbleView* bubble_view() const { return bubble_view_; }
 
@@ -56,8 +56,8 @@ class SystemTrayBubble {
   bool IsVisible();
 
   // Returns true if any of the SystemTrayItems return true from
-  // ShouldShowLauncher().
-  bool ShouldShowLauncher() const;
+  // ShouldShowShelf().
+  bool ShouldShowShelf() const;
 
  private:
   void CreateItemViews(user::LoginStatus login_status);
@@ -73,7 +73,6 @@ class SystemTrayBubble {
   DISALLOW_COPY_AND_ASSIGN(SystemTrayBubble);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_TRAY_SYSTEM_TRAY_BUBBLE_H_

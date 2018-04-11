@@ -10,10 +10,13 @@
 #include <string>
 
 #include "net/url_request/url_request_file_job.h"
-#include "net/url_request/url_request_job_factory.h"
 
 namespace base {
 class FilePath;
+}
+
+namespace net {
+class URLRequestInterceptor;
 }
 
 namespace content {
@@ -37,7 +40,7 @@ class URLRequestMockHTTPJob : public net::URLRequestFileJob {
   // Respond to all HTTP requests of |hostname| with contents of the file
   // located at |file_path|.
   static void AddHostnameToFileHandler(const std::string& hostname,
-                                       const base::FilePath& file_path);
+                                       const base::FilePath& file);
 
   // Given the path to a file relative to the path passed to AddUrlHandler(),
   // construct a mock URL.
@@ -51,12 +54,19 @@ class URLRequestMockHTTPJob : public net::URLRequestFileJob {
   // URLRequestMockHTTPJob's responding like an HTTP server. |base_path| is the
   // file path leading to the root of the directory to use as the root of the
   // HTTP server.
-  static scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-  CreateProtocolHandler(const base::FilePath& base_path);
+  static scoped_ptr<net::URLRequestInterceptor>
+  CreateInterceptor(const base::FilePath& base_path);
 
- private:
+  // Returns a net::URLRequestJobFactory::ProtocolHandler that serves
+  // URLRequestMockHTTPJob's responding like an HTTP server. It responds to all
+  // requests with the contents of |file|.
+  static scoped_ptr<net::URLRequestInterceptor>
+  CreateInterceptorForSingleFile(const base::FilePath& file);
+
+ protected:
   virtual ~URLRequestMockHTTPJob();
 
+ private:
   void GetResponseInfoConst(net::HttpResponseInfo* info) const;
 };
 

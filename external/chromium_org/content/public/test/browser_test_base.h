@@ -7,12 +7,12 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/threading/thread.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-class CommandLine;
-
 namespace base {
+class CommandLine;
 class FilePath;
 }
 
@@ -20,7 +20,9 @@ namespace net {
 namespace test_server {
 class EmbeddedTestServer;
 }
-}
+
+class RuleBasedHostResolverProc;
+}  // namespace net
 
 namespace content {
 
@@ -50,7 +52,13 @@ class BrowserTestBase : public testing::Test {
   virtual void TearDownOnMainThread() {}
 
   // Override this to add command line flags specific to your test.
-  virtual void SetUpCommandLine(CommandLine* command_line) {}
+  virtual void SetUpCommandLine(base::CommandLine* command_line) {}
+
+  // Returns the host resolver being used for the tests. Subclasses might want
+  // to configure it inside tests.
+  net::RuleBasedHostResolverProc* host_resolver() {
+    return rule_based_resolver_.get();
+  }
 
  protected:
   // We need these special methods because SetUp is the bottom of the stack
@@ -72,6 +80,9 @@ class BrowserTestBase : public testing::Test {
   // This prepares for the test by creating a new browser, runs the test
   // (RunTestOnMainThread), quits the browsers and returns.
   virtual void RunTestOnMainThreadLoop() = 0;
+
+  // Sets expected browser exit code, in case it's different than 0 (success).
+  void set_expected_exit_code(int code) { expected_exit_code_ = code; }
 
   // Returns the testing server. Guaranteed to be non-NULL.
   // TODO(phajdan.jr): Remove test_server accessor (http://crbug.com/96594).
@@ -109,13 +120,15 @@ class BrowserTestBase : public testing::Test {
   // returns.
   void PostTaskToInProcessRendererAndWait(const base::Closure& task);
 
-  // Call this before SetUp() to use real GL contexts in Compositor for the
-  // test.
-  void UseRealGLContexts() { allow_test_contexts_ = false; }
+  // Call this before SetUp() to cause the test to generate pixel output.
+  void EnablePixelOutput();
 
-  // Call this before SetUp() to use real GL drivers instead of OSMesa for the
-  // test.
-  void UseRealGLBindings() { allow_osmesa_ = false; }
+  // Call this before SetUp() to not use GL, but use software compositing
+  // instead.
+  void UseSoftwareCompositing();
+
+  // Returns true if the test will be using GL acceleration via OSMesa.
+  bool UsingOSMesa() const;
 
  private:
   void ProxyRunTestOnMainThreadLoop();
@@ -126,13 +139,18 @@ class BrowserTestBase : public testing::Test {
   // Embedded test server, cheap to create, started on demand.
   scoped_ptr<net::test_server::EmbeddedTestServer> embedded_test_server_;
 
-  // When false, the ui::Compositor will be forced to use real GL contexts for
-  // the test, so that it produces real pixel output.
-  bool allow_test_contexts_;
+  // Host resolver used during tests.
+  scoped_refptr<net::RuleBasedHostResolverProc> rule_based_resolver_;
 
-  // When false, the GL backend will use a real GPU. When true, it uses OSMesa
-  // to run GL on the CPU in a way that works across all platforms.
-  bool allow_osmesa_;
+  // Expected exit code (default is 0).
+  int expected_exit_code_;
+
+  // When true, the compositor will produce pixel output that can be read back
+  // for pixel tests.
+  bool enable_pixel_output_;
+
+  // When true, do compositing with the software backend instead of using GL.
+  bool use_software_compositing_;
 
 #if defined(OS_POSIX)
   bool handle_sigterm_;

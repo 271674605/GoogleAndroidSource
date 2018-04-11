@@ -30,6 +30,7 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 
+import com.android.emailcommon.mail.Address;
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
 import com.android.mail.browse.ConversationAccountController;
@@ -41,9 +42,10 @@ import com.android.mail.content.ObjectCursor;
 import com.android.mail.content.ObjectCursorLoader;
 import com.android.mail.providers.Account;
 import com.android.mail.providers.AccountObserver;
-import com.android.mail.providers.Address;
 import com.android.mail.providers.Conversation;
+import com.android.mail.providers.Folder;
 import com.android.mail.providers.ListParams;
+import com.android.mail.providers.Settings;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.CursorStatus;
 import com.android.mail.utils.LogTag;
@@ -55,7 +57,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-
 public abstract class AbstractConversationViewFragment extends Fragment implements
         ConversationController, ConversationAccountController,
         ConversationViewHeaderCallbacks {
@@ -65,6 +66,7 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
     private static final String LOG_TAG = LogTag.getLogTag();
     protected static final int MESSAGE_LOADER = 0;
     protected static final int CONTACT_LOADER = 1;
+    public static final int ATTACHMENT_OPTION1_LOADER = 2;
     protected ControllableActivity mActivity;
     private final MessageLoaderCallbacks mMessageLoaderCallbacks = new MessageLoaderCallbacks();
     private ContactLoaderCallbacks mContactLoaderCallbacks;
@@ -107,6 +109,8 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
 
     private boolean mHasConversationBeenTransformed;
     private boolean mHasConversationTransformBeenReverted;
+
+    protected boolean mConversationSeen = false;
 
     private final AccountObserver mAccountObserver = new AccountObserver() {
         @Override
@@ -220,9 +224,13 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
      * (such as one that does not rely on account and/or conversation.
      */
     protected void setBaseUri() {
+        mBaseUri = buildBaseUri(getContext(), mAccount, mConversation);
+    }
+
+    public static String buildBaseUri(Context context, Account account, Conversation conversation) {
         // Since the uri specified in the conversation base uri may not be unique, we specify a
         // base uri that us guaranteed to be unique for this conversation.
-        mBaseUri = "x-thread://" + mAccount.getEmailAddress().hashCode() + "/" + mConversation.id;
+        return "x-thread://" + account.getAccountId().hashCode() + "/" + conversation.id;
     }
 
     @Override
@@ -284,7 +292,7 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
 
     public ContactLoaderCallbacks getContactInfoSource() {
         if (mContactLoaderCallbacks == null) {
-            mContactLoaderCallbacks = new ContactLoaderCallbacks(mActivity.getActivityContext());
+            mContactLoaderCallbacks = mActivity.getContactLoaderCallbacks();
         }
         return mContactLoaderCallbacks;
     }
@@ -313,7 +321,7 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
             LogUtils.e(LOG_TAG,
                     "ACVF ignoring onOptionsItemSelected b/c userVisibleHint is false. f=%s", this);
             if (LogUtils.isLoggable(LOG_TAG, LogUtils.DEBUG)) {
-                LogUtils.e(LOG_TAG, Utils.dumpFragment(this));  // the dump has '%' chars in it...
+                LogUtils.e(LOG_TAG, "%s", Utils.dumpFragment(this));
             }
             return false;
         }
@@ -326,6 +334,9 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
         } else if (itemId == R.id.show_original) {
             showUntransformedConversation();
             handled = true;
+        } else if (itemId == R.id.print_all) {
+            printConversation();
+            handled = true;
         }
         return handled;
     }
@@ -335,6 +346,19 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
         // Only show option if we support message transforms and message has been transformed.
         Utils.setMenuItemVisibility(menu, R.id.show_original, supportsMessageTransforms() &&
                 mHasConversationBeenTransformed && !mHasConversationTransformBeenReverted);
+
+        final MenuItem printMenuItem = menu.findItem(R.id.print_all);
+        if (printMenuItem != null) {
+            // compute the visibility of the print menu item
+            printMenuItem.setVisible(Utils.isRunningKitkatOrLater() && shouldShowPrintInOverflow());
+
+            // compute the text displayed on the print menu item
+            if (mConversation.getNumMessages() == 1) {
+                printMenuItem.setTitle(R.string.print);
+            } else {
+                printMenuItem.setTitle(R.string.print_all);
+            }
+        }
     }
 
     abstract boolean supportsMessageTransforms();
@@ -501,6 +525,31 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
         });
     }
 
+    /**
+     * @see Folder#getTypeDescription()
+     */
+    protected String getCurrentFolderTypeDesc() {
+        final Folder currFolder;
+        if (mActivity != null) {
+            currFolder = mActivity.getFolderController().getFolder();
+        } else {
+            currFolder = null;
+        }
+        final String folderStr;
+        if (currFolder != null) {
+            folderStr = currFolder.getTypeDescription();
+        } else {
+            folderStr = "unknown_folder";
+        }
+        return folderStr;
+    }
+
+    private void logConversationView() {
+      final String folderStr = getCurrentFolderTypeDesc();
+      Analytics.getInstance().sendEvent("view_conversation", folderStr,
+              mConversation.isRemote ? "unsynced" : "synced", mConversation.getNumMessages());
+    }
+
     protected void onConversationSeen() {
         LogUtils.d(LOG_TAG, "AbstractConversationViewFragment#onConversationSeen()");
 
@@ -509,6 +558,13 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
         if (activity == null) {
             LogUtils.w(LOG_TAG, "ignoring onConversationSeen for conv=%s", mConversation.id);
             return;
+        }
+
+        // this method is called 2x on rotation; debounce this a bit so as not to
+        // dramatically skew analytics data too much. Ideally, it should be called zero times
+        // on rotation...
+        if (!mConversationSeen) {
+            logConversationView();
         }
 
         mViewState.setInfoForConversation(mConversation);
@@ -542,6 +598,8 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
             }
         }
         activity.getListHandler().onConversationSeen();
+
+        mConversationSeen = true;
     }
 
     protected ConversationViewState getNewViewState() {
@@ -610,7 +668,7 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
         mHandler.post(new FragmentRunnable("invalidateOptionsMenu", this) {
             @Override
             public void go() {
-                mActivity.invalidateOptionsMenu();
+                mActivity.supportInvalidateOptionsMenu();
             }
         });
     }
@@ -633,5 +691,22 @@ public abstract class AbstractConversationViewFragment extends Fragment implemen
     public boolean shouldApplyTransforms() {
         return (mAccount.enableMessageTransforms > 0) &&
                 !mHasConversationTransformBeenReverted;
+    }
+
+    /**
+     * The Print item in the overflow menu of the Conversation view is shown based on the return
+     * from this method.
+     *
+     * @return {@code true} if the conversation can be printed; {@code false} otherwise.
+     */
+    protected abstract boolean shouldShowPrintInOverflow();
+
+    /**
+     * Prints all messages in the conversation.
+     */
+    protected abstract void printConversation();
+
+    public boolean shouldAlwaysShowImages() {
+        return (mAccount != null) && (mAccount.settings.showImages == Settings.ShowImages.ALWAYS);
     }
 }

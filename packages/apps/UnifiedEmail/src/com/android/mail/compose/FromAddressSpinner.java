@@ -70,7 +70,7 @@ public class FromAddressSpinner extends Spinner implements OnItemSelectedListene
     public ReplyFromAccount getMatchingReplyFromAccount(String accountString) {
         if (!TextUtils.isEmpty(accountString)) {
             for (ReplyFromAccount acct : mReplyFromAccounts) {
-                if (accountString.equals(acct.name)) {
+                if (accountString.equals(acct.address)) {
                     return acct;
                 }
             }
@@ -123,7 +123,8 @@ public class FromAddressSpinner extends Spinner implements OnItemSelectedListene
         if (mAccounts == null || mAccounts.size() == 0) {
             return;
         }
-        FromAddressSpinnerAdapter adapter = new FromAddressSpinnerAdapter(getContext());
+        FromAddressSpinnerAdapter adapter =
+                new FromAddressSpinnerAdapter(getContext());
 
         mReplyFromAccounts.clear();
         for (Account account : mAccounts) {
@@ -147,7 +148,7 @@ public class FromAddressSpinner extends Spinner implements OnItemSelectedListene
     @Override
     public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
         ReplyFromAccount selection = (ReplyFromAccount) getItemAtPosition(position);
-        if (!selection.name.equals(mAccount.name)) {
+        if (!selection.address.equals(mAccount.address)) {
             mAccount = selection;
             mAccountChangedListener.onAccountChanged();
         }

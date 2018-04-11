@@ -33,9 +33,6 @@
 #include <cutils/iosched_policy.h>
 #include <cutils/list.h>
 
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
-#include <sys/_system_properties.h>
-
 static list_declare(service_list);
 static list_declare(action_list);
 static list_declare(action_queue);
@@ -60,7 +57,7 @@ static void parse_line_action(struct parse_state *state, int nargs, char **args)
 #define KEYWORD(symbol, flags, nargs, func) \
     [ K_##symbol ] = { #symbol, func, nargs + 1, flags, },
 
-struct {
+static struct {
     const char *name;
     int (*func)(int nargs, char **args);
     unsigned char nargs;
@@ -76,7 +73,7 @@ struct {
 #define kw_func(kw) (keyword_info[kw].func)
 #define kw_nargs(kw) (keyword_info[kw].nargs)
 
-int lookup_keyword(const char *s)
+static int lookup_keyword(const char *s)
 {
     switch (*s++) {
     case 'c':
@@ -98,6 +95,7 @@ int lookup_keyword(const char *s)
         if (!strcmp(s, "omainname")) return K_domainname;
         break;
     case 'e':
+        if (!strcmp(s, "nable")) return K_enable;
         if (!strcmp(s, "xec")) return K_exec;
         if (!strcmp(s, "xport")) return K_export;
         break;
@@ -119,6 +117,7 @@ int lookup_keyword(const char *s)
     case 'l':
         if (!strcmp(s, "oglevel")) return K_loglevel;
         if (!strcmp(s, "oad_persist_props")) return K_load_persist_props;
+        if (!strcmp(s, "oad_all_props")) return K_load_all_props;
         break;
     case 'm':
         if (!strcmp(s, "kdir")) return K_mkdir;
@@ -135,6 +134,7 @@ int lookup_keyword(const char *s)
     case 'r':
         if (!strcmp(s, "estart")) return K_restart;
         if (!strcmp(s, "estorecon")) return K_restorecon;
+        if (!strcmp(s, "estorecon_recursive")) return K_restorecon_recursive;
         if (!strcmp(s, "mdir")) return K_rmdir;
         if (!strcmp(s, "m")) return K_rm;
         break;
@@ -169,7 +169,7 @@ int lookup_keyword(const char *s)
     return K_UNKNOWN;
 }
 
-void parse_line_no_op(struct parse_state *state, int nargs, char **args)
+static void parse_line_no_op(struct parse_state *state, int nargs, char **args)
 {
 }
 
@@ -292,7 +292,7 @@ err:
     return -1;
 }
 
-void parse_import(struct parse_state *state, int nargs, char **args)
+static void parse_import(struct parse_state *state, int nargs, char **args)
 {
     struct listnode *import_list = state->priv;
     struct import *import;
@@ -317,7 +317,7 @@ void parse_import(struct parse_state *state, int nargs, char **args)
     INFO("found import '%s', adding to import list", import->filename);
 }
 
-void parse_new_section(struct parse_state *state, int kw,
+static void parse_new_section(struct parse_state *state, int kw,
                        int nargs, char **args)
 {
     printf("[ %s %s ]\n", args[0],
@@ -552,12 +552,14 @@ void queue_all_property_triggers()
                 if (length > PROP_NAME_MAX) {
                     ERROR("property name too long in trigger %s", act->name);
                 } else {
+                    int ret;
                     memcpy(prop_name, name, length);
                     prop_name[length] = 0;
 
                     /* does the property exist, and match the trigger value? */
-                    property_get(prop_name, value);
-                    if (!strcmp(equals + 1, value) ||!strcmp(equals + 1, "*")) {
+                    ret = property_get(prop_name, value);
+                    if (ret > 0 && (!strcmp(equals + 1, value) ||
+                                    !strcmp(equals + 1, "*"))) {
                         action_add_queue_tail(act);
                     }
                 }
@@ -579,6 +581,7 @@ void queue_builtin_action(int (*func)(int nargs, char **args), char *name)
     cmd = calloc(1, sizeof(*cmd));
     cmd->func = func;
     cmd->args[0] = name;
+    cmd->nargs = 1;
     list_add_tail(&act->commands, &cmd->clist);
 
     list_add_tail(&action_list, &act->alist);
@@ -756,7 +759,7 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
         break;
     case K_setenv: { /* name value */
         struct svcenvinfo *ei;
-        if (nargs < 2) {
+        if (nargs < 3) {
             parse_error(state, "setenv option requires name and value arguments\n");
             break;
         }
@@ -771,7 +774,7 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
         svc->envvars = ei;
         break;
     }
-    case K_socket: {/* name type perm [ uid gid ] */
+    case K_socket: {/* name type perm [ uid gid context ] */
         struct socketinfo *si;
         if (nargs < 4) {
             parse_error(state, "socket option requires name, type, perm arguments\n");
@@ -794,6 +797,8 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
             si->uid = decode_uid(args[4]);
         if (nargs > 5)
             si->gid = decode_uid(args[5]);
+        if (nargs > 6)
+            si->socketcon = args[6];
         si->next = svc->sockets;
         svc->sockets = si;
         break;
@@ -863,6 +868,8 @@ static void parse_line_action(struct parse_state* state, int nargs, char **args)
     }
     cmd = malloc(sizeof(*cmd) + sizeof(char*) * nargs);
     cmd->func = kw_func(kw);
+    cmd->line = state->line;
+    cmd->filename = state->filename;
     cmd->nargs = nargs;
     memcpy(cmd->args, args, sizeof(char*) * nargs);
     list_add_tail(&act->commands, &cmd->clist);

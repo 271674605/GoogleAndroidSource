@@ -1,1 +1,1 @@
-include ':BasicNotifications'
+include 'Application'

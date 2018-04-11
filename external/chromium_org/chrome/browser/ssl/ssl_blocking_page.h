@@ -28,8 +28,24 @@ class WebContents;
 // This class is responsible for showing/hiding the interstitial page that is
 // shown when a certificate error happens.
 // It deletes itself when the interstitial page is closed.
-class SSLBlockingPage : public content::InterstitialPageDelegate {
+//
+// This class should only be used on the UI thread because its implementation
+// uses captive_portal::CaptivePortalService which can only be accessed on the
+// UI thread.
+class SSLBlockingPage : public content::InterstitialPageDelegate,
+                        public content::NotificationObserver {
  public:
+  // These represent the commands sent from the interstitial JavaScript. They
+  // are defined in chrome/browser/resources/ssl/ssl_errors_common.js.
+  // DO NOT reorder or change these without also changing the JavaScript!
+  enum SSLBlockingPageCommands {
+   CMD_DONT_PROCEED = 0,
+   CMD_PROCEED = 1,
+   CMD_MORE = 2,
+   CMD_RELOAD = 3,
+   CMD_HELP = 4
+  };
+
   SSLBlockingPage(
       content::WebContents* web_contents,
       int cert_error,
@@ -45,7 +61,7 @@ class SSLBlockingPage : public content::InterstitialPageDelegate {
   // ssl_error.html files.
   // Note: there can be up to 5 strings in |extra_info|.
   static void SetExtraInfo(base::DictionaryValue* strings,
-                           const std::vector<string16>& extra_info);
+                           const std::vector<base::string16>& extra_info);
 
  protected:
   // InterstitialPageDelegate implementation.
@@ -61,18 +77,28 @@ class SSLBlockingPage : public content::InterstitialPageDelegate {
   void NotifyDenyCertificate();
   void NotifyAllowCertificate();
 
+  // These fetch the appropriate HTML page, depending on the
+  // SSLInterstitialVersion Finch trial.
+  std::string GetHTMLContentsV1();
+  std::string GetHTMLContentsV2();
+
   // Used to query the HistoryService to see if the URL is in history. For UMA.
   void OnGotHistoryCount(HistoryService::Handle handle,
                          bool success,
                          int num_visits,
                          base::Time first_visit);
 
+  // content::NotificationObserver:
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE;
+
   base::Callback<void(bool)> callback_;
 
   content::WebContents* web_contents_;
   int cert_error_;
-  base::TimeTicks display_start_time_;
-  net::SSLInfo ssl_info_;
+  const net::SSLInfo ssl_info_;
   GURL request_url_;
   // Could the user successfully override the error?
   bool overridable_;
@@ -85,9 +111,19 @@ class SSLBlockingPage : public content::InterstitialPageDelegate {
   int num_visits_;
   // Used for getting num_visits_.
   CancelableRequestConsumer request_consumer_;
+  // Is captive portal detection enabled?
+  bool captive_portal_detection_enabled_;
+  // Did the probe complete before the interstitial was closed?
+  bool captive_portal_probe_completed_;
+  // Did the captive portal probe receive an error or get a non-HTTP response?
+  bool captive_portal_no_response_;
+  // Was a captive portal detected?
+  bool captive_portal_detected_;
 
   // For the FieldTrial: this contains the name of the condition.
   std::string trialCondition_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLBlockingPage);
 };

@@ -16,30 +16,32 @@
 
 package com.android.mail.ui;
 
-import android.app.ActionBar;
-import android.app.Activity;
 import android.app.Fragment;
 import android.app.FragmentTransaction;
 import android.appwidget.AppWidgetManager;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.DataSetObservable;
 import android.database.DataSetObserver;
 import android.os.Bundle;
+import android.support.v7.app.ActionBarActivity;
 import android.view.DragEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
 import android.widget.ListView;
 
+import com.android.bitmap.BitmapCache;
 import com.android.mail.R;
+import com.android.mail.bitmap.ContactResolver;
 import com.android.mail.providers.Account;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.FolderWatcher;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
-import com.android.mail.utils.Observable;
+import com.android.mail.utils.MailObservable;
 import com.android.mail.utils.Utils;
 import com.android.mail.utils.VeiledAddressMatcher;
 import com.android.mail.widget.WidgetProvider;
@@ -49,7 +51,7 @@ import java.util.ArrayList;
 /**
  * This activity displays the list of available folders for the current account.
  */
-public class FolderSelectionActivity extends Activity implements OnClickListener,
+public class FolderSelectionActivity extends ActionBarActivity implements OnClickListener,
         DialogInterface.OnClickListener, FolderChangeListener, ControllableActivity,
         FolderSelector {
     public static final String EXTRA_ACCOUNT_SHORTCUT = "account-shortcut";
@@ -67,7 +69,8 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
     private int mAppWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
     private int mMode = -1;
     /** Empty placeholder for communicating to the consumer of the drawer observer. */
-    private final DataSetObservable mDrawerObservers = new Observable("Drawer");
+    private final DataSetObservable mFolderOrAccountObservers =
+            new MailObservable("FolderOrAccount");
 
     private final AccountController mAccountController = new AccountController() {
         @Override
@@ -106,13 +109,6 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
         }
 
         @Override
-        public void changeAccount(Account account) {
-            // Never gets called, so do nothing here.
-            LogUtils.wtf(LOG_TAG,
-                    "FolderSelectionActivity.changeAccount() called when NOT expected.");
-        }
-
-        @Override
         public void switchToDefaultInboxOrChangeAccount(Account account) {
             // Never gets called, so do nothing here.
             LogUtils.wtf(LOG_TAG,"FolderSelectionActivity.switchToDefaultInboxOrChangeAccount() " +
@@ -120,13 +116,13 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
         }
 
         @Override
-        public void registerDrawerClosedObserver(final DataSetObserver observer) {
-            mDrawerObservers.registerObserver(observer);
+        public void registerFolderOrAccountChangedObserver(final DataSetObserver observer) {
+            mFolderOrAccountObservers.registerObserver(observer);
         }
 
         @Override
-        public void unregisterDrawerClosedObserver(final DataSetObserver observer) {
-            mDrawerObservers.unregisterObserver(observer);
+        public void unregisterFolderOrAccountChangedObserver(final DataSetObserver observer) {
+            mFolderOrAccountObservers.unregisterObserver(observer);
         }
 
         /**
@@ -135,7 +131,7 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
         @Override
         public void closeDrawer(final boolean hasNewFolderOrAccount,
                 Account account, Folder folder) {
-            mDrawerObservers.notifyChanged();
+            mFolderOrAccountObservers.notifyChanged();
         }
 
         @Override
@@ -169,10 +165,6 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
             LogUtils.wtf(LOG_TAG, "unexpected intent: %s", intent);
         }
         if (mConfigureShortcut || mConfigureWidget) {
-            ActionBar actionBar = getActionBar();
-            if (actionBar != null) {
-                actionBar.setIcon(R.mipmap.ic_launcher_shortcut_folder);
-            }
             mMode = CONFIGURE;
         } else {
             mMode = VIEW;
@@ -247,8 +239,8 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
      */
     protected void createWidget(int id, Account account, Folder selectedFolder) {
         WidgetProvider.updateWidget(this, id, account, selectedFolder.type,
-                selectedFolder.folderUri.fullUri, selectedFolder.conversationListUri,
-                selectedFolder.name);
+                selectedFolder.capabilities, selectedFolder.folderUri.fullUri,
+                selectedFolder.conversationListUri, selectedFolder.name);
         final Intent result = new Intent();
         result.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
         setResult(RESULT_OK, result);
@@ -315,12 +307,6 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
     }
 
     @Override
-    public String getHelpContext() {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
     public Context getActivityContext() {
         return this;
     }
@@ -345,9 +331,11 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
         return null;
     }
 
+    private Folder mNavigatedFolder;
     @Override
     public void onFolderSelected(Folder folder) {
-        if (folder.hasChildren) {
+        if (folder.hasChildren && !folder.equals(mNavigatedFolder)) {
+            mNavigatedFolder = folder;
             // Replace this fragment with a new FolderListFragment
             // showing this folder's children if we are not already looking
             // at the child view for this folder.
@@ -443,7 +431,13 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
     }
 
     @Override
-    public UpOrBackController getUpOrBackController() {
+    public DrawerController getDrawerController() {
+        // Unsupported
+        return null;
+    }
+
+    @Override
+    public KeyboardNavigationController getKeyboardNavigationController() {
         // Unsupported
         return null;
     }
@@ -464,5 +458,33 @@ public class FolderSelectionActivity extends Activity implements OnClickListener
     public FragmentLauncher getFragmentLauncher() {
         // Unsupported
         return null;
+    }
+
+    @Override
+    public ContactLoaderCallbacks getContactLoaderCallbacks() {
+        // Unsupported
+        return null;
+    }
+
+    @Override
+    public ContactResolver getContactResolver(ContentResolver resolver, BitmapCache bitmapCache) {
+        // Unsupported
+        return null;
+    }
+
+    @Override
+    public BitmapCache getSenderImageCache() {
+        // Unsupported
+        return null;
+    }
+
+    @Override
+    public void resetSenderImageCache() {
+        // Unsupported
+    }
+
+    @Override
+    public void showHelp(Account account, int viewMode) {
+        //Unsupported
     }
 }

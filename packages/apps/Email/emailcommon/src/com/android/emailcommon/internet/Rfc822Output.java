@@ -78,7 +78,7 @@ public class Rfc822Output {
      * the <body> tag (e.g. a '>' in a java script block).
      */
     /*package*/ static String getHtmlBody(String html) {
-        Matcher match = BODY_PATTERN.matcher(html);
+        final Matcher match = BODY_PATTERN.matcher(html);
         if (match.find()) {
             return match.group(BODY_PATTERN_GROUP);    // Found body; return
         } else {
@@ -93,12 +93,17 @@ public class Rfc822Output {
         if (body == null) {
             return new String[2];
         }
-        String[] messageBody = new String[] { body.mTextContent, body.mHtmlContent };
-        if (useSmartReply && body.mQuotedTextStartPos > 0) {
+        final String[] messageBody = new String[] { body.mTextContent, body.mHtmlContent };
+        final int pos = body.mQuotedTextStartPos;
+        if (useSmartReply && pos > 0) {
             if (messageBody[0] != null) {
-                messageBody[0] = messageBody[0].substring(0, body.mQuotedTextStartPos);
+                if (pos < messageBody[0].length()) {
+                    messageBody[0] = messageBody[0].substring(0, pos);
+                }
             } else if (messageBody[1] != null) {
-                messageBody[1] = messageBody[1].substring(0, body.mQuotedTextStartPos);
+                if (pos < messageBody[1].length()) {
+                    messageBody[1] = messageBody[1].substring(0, pos);
+                }
             }
         }
         return messageBody;
@@ -123,13 +128,13 @@ public class Rfc822Output {
             return;
         }
 
-        OutputStream stream = new BufferedOutputStream(out, 1024);
-        Writer writer = new OutputStreamWriter(stream);
+        final OutputStream stream = new BufferedOutputStream(out, 1024);
+        final Writer writer = new OutputStreamWriter(stream);
 
         // Write the fixed headers.  Ordering is arbitrary (the legacy code iterated through a
         // hashmap here).
 
-        String date = DATE_FORMAT.format(new Date(message.mTimeStamp));
+        final String date = DATE_FORMAT.format(new Date(message.mTimeStamp));
         writeHeader(writer, "Date", date);
 
         writeEncodedHeader(writer, "Subject", message.mSubject);
@@ -148,8 +153,8 @@ public class Rfc822Output {
         writeHeader(writer, "MIME-Version", "1.0");
 
         // Analyze message and determine if we have multiparts
-        Body body = Body.restoreBodyWithMessageId(context, message.mId);
-        String[] bodyText = buildBodyText(body, useSmartReply);
+        final Body body = Body.restoreBodyWithMessageId(context, message.mId);
+        final String[] bodyText = buildBodyText(body, useSmartReply);
 
         // If a list of attachments hasn't been passed in, build one from the message
         if (attachments == null) {
@@ -157,22 +162,21 @@ public class Rfc822Output {
                     Arrays.asList(Attachment.restoreAttachmentsWithMessageId(context, message.mId));
         }
 
-        boolean multipart = attachments.size() > 0;
-        String multipartBoundary = null;
-        String multipartType = "mixed";
+        final boolean multipart = attachments.size() > 0;
 
         // Simplified case for no multipart - just emit text and be done.
         if (!multipart) {
             writeTextWithHeaders(writer, stream, bodyText);
         } else {
             // continue with multipart headers, then into multipart body
-            multipartBoundary = getNextBoundary();
+            final String multipartBoundary = getNextBoundary();
+            String multipartType = "mixed";
 
             // Move to the first attachment; this must succeed because multipart is true
             if (attachments.size() == 1) {
                 // If we've got one attachment and it's an ics "attachment", we want to send
                 // this as multipart/alternative instead of multipart/mixed
-                int flags = attachments.get(0).mFlags;
+                final int flags = attachments.get(0).mFlags;
                 if ((flags & Attachment.FLAG_ICS_ALTERNATIVE_PART) != 0) {
                     multipartType = "alternative";
                 }
@@ -190,7 +194,7 @@ public class Rfc822Output {
             }
 
             // Write out the attachments until we run out
-            for (Attachment att: attachments) {
+            for (final Attachment att: attachments) {
                 writeBoundary(writer, multipartBoundary, false);
                 writeOneAttachment(context, writer, stream, att);
                 writer.write("\r\n");
@@ -325,7 +329,7 @@ public class Rfc822Output {
         if (value != null && value.length() > 0) {
             writer.append(name);
             writer.append(": ");
-            writer.append(MimeUtility.fold(Address.packedToHeader(value), name.length() + 2));
+            writer.append(MimeUtility.fold(Address.reformatToHeader(value), name.length() + 2));
             writer.append("\r\n");
         }
     }
@@ -362,19 +366,19 @@ public class Rfc822Output {
             throws IOException {
         boolean html = false;
         String text = bodyText[INDEX_BODY_TEXT];
-        if (text == null) {
+        if (TextUtils.isEmpty(text)) {
             text = bodyText[INDEX_BODY_HTML];
             html = true;
         }
-        if (text == null) {
+        if (TextUtils.isEmpty(text)) {
             writer.write("\r\n");       // a truly empty message
         } else {
             // first multipart element is the body
-            String mimeType = "text/" + (html ? "html" : "plain");
+            final String mimeType = "text/" + (html ? "html" : "plain");
             writeHeader(writer, "Content-Type", mimeType + "; charset=utf-8");
             writeHeader(writer, "Content-Transfer-Encoding", "base64");
             writer.write("\r\n");
-            byte[] textBytes = text.getBytes("UTF-8");
+            final byte[] textBytes = text.getBytes("UTF-8");
             writer.flush();
             out.write(Base64.encode(textBytes, Base64.CRLF));
         }
@@ -384,10 +388,10 @@ public class Rfc822Output {
      * Returns a unique boundary string.
      */
     /*package*/ static String getNextBoundary() {
-        StringBuilder boundary = new StringBuilder();
+        final StringBuilder boundary = new StringBuilder();
         boundary.append("--_com.android.email_").append(System.nanoTime());
         synchronized (Rfc822Output.class) {
-            boundary = boundary.append(sBoundaryDigit);
+            boundary.append(sBoundaryDigit);
             sBoundaryDigit = (byte)((sBoundaryDigit + 1) % 10);
         }
         return boundary.toString();

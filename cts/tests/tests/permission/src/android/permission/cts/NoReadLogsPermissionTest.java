@@ -16,7 +16,10 @@
 
 package android.permission.cts;
 
-import android.permission.cts.FileUtils.FileStatus;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import android.test.AndroidTestCase;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.util.Log;
@@ -52,14 +55,14 @@ public class NoReadLogsPermissionTest extends AndroidTestCase {
             int lineCt = 0;
             String line;
             while ((line = reader.readLine()) != null) {
-                if (!line.startsWith("--------- beginning of /dev/log")) {
+                if (!line.startsWith("--------- beginning of ")) {
                     lineCt++;
                 }
             }
 
             // no permission get an empty log buffer.
             // Logcat returns only one line:
-            // "--------- beginning of /dev/log/main"
+            // "--------- beginning of <log device>"
 
             assertEquals("Unexpected logcat entries. Are you running the "
                        + "the latest logger.c from the Android kernel?",
@@ -72,19 +75,30 @@ public class NoReadLogsPermissionTest extends AndroidTestCase {
         }
     }
 
-    public void testLogFilePermissions() {
-        File logDir = new File("/dev/log");
-        File[] logFiles = logDir.listFiles();
-        assertTrue("Where are the log files? Please check that they are not world readable.",
-                logFiles.length > 0);
+    public void testEventsLogSane() throws ErrnoException {
+        testLogIsSane("/dev/log/events");
+    }
 
-        FileStatus status = new FileStatus();
-        for (File log : logFiles) {
-            if (FileUtils.getFileStatus(log.getAbsolutePath(), status, false)) {
-                assertEquals("Log file " + log.getAbsolutePath() + " should have user root.",
-                        0, status.uid);
-                assertTrue("Log file " + log.getAbsolutePath() + " should have group log.",
-                        "log".equals(FileUtils.getGroupName(status.gid)));
+    public void testMainLogSane() throws ErrnoException {
+        testLogIsSane("/dev/log/main");
+    }
+
+    public void testRadioLogSane() throws ErrnoException {
+        testLogIsSane("/dev/log/radio");
+    }
+
+    public void testSystemLogSane() throws ErrnoException {
+        testLogIsSane("/dev/log/system");
+    }
+
+    private static void testLogIsSane(String log) throws ErrnoException {
+        try {
+            StructStat stat = Os.stat(log);
+            assertEquals("not owned by uid=0", 0, stat.st_uid);
+            assertEquals("not owned by gid=logs", "log", FileUtils.getGroupName(stat.st_gid));
+        } catch (ErrnoException e) {
+            if (e.errno != OsConstants.ENOENT && e.errno != OsConstants.EACCES) {
+                throw e;
             }
         }
     }

@@ -18,7 +18,6 @@ package com.android.cts.verifier.camera.formats;
 import com.android.cts.verifier.PassFailButtons;
 import com.android.cts.verifier.R;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -34,19 +33,22 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 import android.util.SparseArray;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.Surface;
 import android.view.TextureView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.Spinner;
+import android.widget.Toast;
 
 import java.io.IOException;
-import java.lang.InterruptedException;
 import java.lang.Math;
-import java.lang.Thread;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.TreeSet;
@@ -100,11 +102,22 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
     private TreeSet<String> mTestedCombinations = new TreeSet<String>();
     private TreeSet<String> mUntestedCombinations = new TreeSet<String>();
 
+    private int mAllCombinationsSize = 0;
+
+    // Menu to show the test progress
+    private static final int MENU_ID_PROGRESS = Menu.FIRST + 1;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.cf_main);
+
+        mAllCombinationsSize = calcAllCombinationsSize();
+
+        // disable "Pass" button until all combinations are tested
+        setPassButtonEnabled(false);
+
         setPassFailButtonClickListeners();
         setInfoResources(R.string.camera_format, R.string.cf_info, -1);
 
@@ -161,6 +174,36 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
     }
 
     @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        menu.add(Menu.NONE, MENU_ID_PROGRESS, Menu.NONE, "Current Progress");
+        return super.onCreateOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        boolean ret = true;
+        switch (item.getItemId()) {
+        case MENU_ID_PROGRESS:
+            showCombinationsDialog();
+            ret = true;
+            break;
+        default:
+            ret = super.onOptionsItemSelected(item);
+            break;
+        }
+        return ret;
+    }
+
+    private void showCombinationsDialog() {
+        AlertDialog.Builder builder =
+                new AlertDialog.Builder(CameraFormatsActivity.this);
+        builder.setMessage(getTestDetails())
+                .setTitle("Current Progress")
+                .setPositiveButton("OK", null);
+        builder.show();
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
 
@@ -172,6 +215,7 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
         super.onPause();
 
         shutdownCamera();
+        mPreviewTexture = null;
     }
 
     @Override
@@ -298,9 +342,10 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
             new ArrayAdapter<String>(
                 this, R.layout.cf_format_list_item, availableSizeNames));
 
-        // Get preview formats
+        // Get preview formats, removing duplicates
 
-        mPreviewFormats =  p.getSupportedPreviewFormats();
+        HashSet<Integer> formatSet = new HashSet<>(p.getSupportedPreviewFormats());
+        mPreviewFormats = new ArrayList<Integer>(formatSet);
 
         String[] availableFormatNames = new String[mPreviewFormats.size()];
         for (int i = 0; i < mPreviewFormats.size(); i++) {
@@ -401,9 +446,15 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
         float widthRatio = mNextPreviewSize.width / (float)mPreviewTexWidth;
         float heightRatio = mNextPreviewSize.height / (float)mPreviewTexHeight;
 
-        transform.setScale(1, heightRatio/widthRatio);
-        transform.postTranslate(0,
+        if (heightRatio < widthRatio) {
+            transform.setScale(1, heightRatio/widthRatio);
+            transform.postTranslate(0,
                 mPreviewTexHeight * (1 - heightRatio/widthRatio)/2);
+        } else {
+            transform.setScale(widthRatio/heightRatio, 1);
+            transform.postTranslate(mPreviewTexWidth * (1 - widthRatio/heightRatio)/2,
+            0);
+        }
 
         mPreviewView.setTransform(transform);
 
@@ -519,11 +570,47 @@ public class CameraFormatsActivity extends PassFailButtons.Activity
                             + "\n";
                     mUntestedCombinations.remove(combination);
                     mTestedCombinations.add(combination);
+
+                    displayToast(combination.replace("\n", ""));
+
+                    if (mTestedCombinations.size() == mAllCombinationsSize) {
+                        setPassButtonEnabled(true);
+                    }
                 }
             }
             mProcessInProgress = false;
         }
 
+    }
+
+    private void setPassButtonEnabled(boolean enabled) {
+        ImageButton pass_button = (ImageButton) findViewById(R.id.pass_button);
+        pass_button.setEnabled(enabled);
+    }
+
+    private int calcAllCombinationsSize() {
+        int allCombinationsSize = 0;
+        int numCameras = Camera.getNumberOfCameras();
+
+        for (int i = 0; i<numCameras; i++) {
+            // must release a Camera object before a new Camera object is created
+            shutdownCamera();
+
+            mCamera = Camera.open(i);
+            Camera.Parameters p = mCamera.getParameters();
+
+            HashSet<Integer> formatSet = new HashSet<>(p.getSupportedPreviewFormats());
+
+            allCombinationsSize +=
+                    p.getSupportedPreviewSizes().size() *   // resolutions
+                    formatSet.size();  // unique formats
+        }
+
+        return allCombinationsSize;
+    }
+
+    private void displayToast(String combination) {
+        Toast.makeText(this, "\"" + combination + "\"\n" + " has been tested.", Toast.LENGTH_LONG).show();
     }
 
     public void onPreviewFrame(byte[] data, Camera camera) {

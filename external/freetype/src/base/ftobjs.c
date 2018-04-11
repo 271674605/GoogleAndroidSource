@@ -4,7 +4,7 @@
 /*                                                                         */
 /*    The FreeType private base classes (body).                            */
 /*                                                                         */
-/*  Copyright 1996-2013 by                                                 */
+/*  Copyright 1996-2014 by                                                 */
 /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
 /*                                                                         */
 /*  This file is part of the FreeType project, and may only be used,       */
@@ -56,9 +56,7 @@
 #endif /* _MSC_VER */
 
   /* it's easiest to include `md5.c' directly */
-#define free  md5_free /* suppress a shadow warning */
 #include "md5.c"
-#undef free
 
 #if defined( _MSC_VER )
 #pragma warning( pop )
@@ -667,11 +665,18 @@
 
         /* the check for `num_locations' assures that we actually    */
         /* test for instructions in a TTF and not in a CFF-based OTF */
+        /*                                                           */
+        /* since `maxSizeOfInstructions' might be unreliable, we     */
+        /* check the size of the `fpgm' and `prep' tables, too --    */
+        /* the assumption is that there don't exist real TTFs where  */
+        /* both `fpgm' and `prep' tables are missing                 */
         if ( mode == FT_RENDER_MODE_LIGHT                       ||
              face->internal->ignore_unpatented_hinter           ||
              ( FT_IS_SFNT( face )                             &&
                ttface->num_locations                          &&
-               ttface->max_profile.maxSizeOfInstructions == 0 ) )
+               ttface->max_profile.maxSizeOfInstructions == 0 &&
+               ttface->font_program_size == 0                 &&
+               ttface->cvt_program_size == 0                  ) )
           autohint = TRUE;
       }
     }
@@ -1133,7 +1138,8 @@
   /*                                                                       */
   static FT_Error
   open_face( FT_Driver      driver,
-             FT_Stream      stream,
+             FT_Stream      *astream,
+             FT_Bool        external_stream,
              FT_Long        face_index,
              FT_Int         num_params,
              FT_Parameter*  params,
@@ -1141,9 +1147,10 @@
   {
     FT_Memory         memory;
     FT_Driver_Class   clazz;
-    FT_Face           face = 0;
-    FT_Error          error, error2;
+    FT_Face           face     = NULL;
     FT_Face_Internal  internal = NULL;
+
+    FT_Error          error, error2;
 
 
     clazz  = driver->clazz;
@@ -1153,14 +1160,18 @@
     if ( FT_ALLOC( face, clazz->face_object_size ) )
       goto Fail;
 
+    face->driver = driver;
+    face->memory = memory;
+    face->stream = *astream;
+
+    /* set the FT_FACE_FLAG_EXTERNAL_STREAM bit for FT_Done_Face */
+    if ( external_stream )
+      face->face_flags |= FT_FACE_FLAG_EXTERNAL_STREAM;
+
     if ( FT_NEW( internal ) )
       goto Fail;
 
     face->internal = internal;
-
-    face->driver   = driver;
-    face->memory   = memory;
-    face->stream   = stream;
 
 #ifdef FT_CONFIG_OPTION_INCREMENTAL
     {
@@ -1177,11 +1188,12 @@
 #endif
 
     if ( clazz->init_face )
-      error = clazz->init_face( stream,
+      error = clazz->init_face( *astream,
                                 face,
                                 (FT_Int)face_index,
                                 num_params,
                                 params );
+    *astream = face->stream; /* Stream may have been changed. */
     if ( error )
       goto Fail;
 
@@ -1789,9 +1801,10 @@
     if ( error )
       return error;
 
+    /* POST resources must be sorted to concatenate properly */
     error = FT_Raccess_Get_DataOffsets( library, stream,
                                         map_offset, rdara_pos,
-                                        TTAG_POST,
+                                        TTAG_POST, TRUE,
                                         &data_offsets, &count );
     if ( !error )
     {
@@ -1804,9 +1817,11 @@
       return error;
     }
 
+    /* sfnt resources should not be sorted to preserve the face order by
+       QuickDraw API */
     error = FT_Raccess_Get_DataOffsets( library, stream,
                                         map_offset, rdara_pos,
-                                        TTAG_sfnt,
+                                        TTAG_sfnt, FALSE,
                                         &data_offsets, &count );
     if ( !error )
     {
@@ -2024,8 +2039,8 @@
                 FT_Face             *aface )
   {
     FT_Error     error;
-    FT_Driver    driver;
-    FT_Memory    memory;
+    FT_Driver    driver = NULL;
+    FT_Memory    memory = NULL;
     FT_Stream    stream = NULL;
     FT_Face      face   = NULL;
     FT_ListNode  node   = NULL;
@@ -2069,7 +2084,7 @@
           params     = args->params;
         }
 
-        error = open_face( driver, stream, face_index,
+        error = open_face( driver, &stream, external_stream, face_index,
                            num_params, params, &face );
         if ( !error )
           goto Success;
@@ -2105,7 +2120,7 @@
             params     = args->params;
           }
 
-          error = open_face( driver, stream, face_index,
+          error = open_face( driver, &stream, external_stream, face_index,
                              num_params, params, &face );
           if ( !error )
             goto Success;
@@ -2173,10 +2188,6 @@
 
   Success:
     FT_TRACE4(( "FT_Open_Face: New face object, adding to list\n" ));
-
-    /* set the FT_FACE_FLAG_EXTERNAL_STREAM bit for FT_Done_Face */
-    if ( external_stream )
-      face->face_flags |= FT_FACE_FLAG_EXTERNAL_STREAM;
 
     /* add the face object to its driver's list */
     if ( FT_NEW( node ) )
@@ -2265,7 +2276,10 @@
     goto Exit;
 
   Fail:
-    FT_Done_Face( face );
+    if ( node )
+      FT_Done_Face( face );    /* face must be in the driver's list */
+    else if ( face )
+      destroy_face( memory, face, driver );
 
   Exit:
     FT_TRACE4(( "FT_Open_Face: Return %d\n", error ));
@@ -3346,6 +3360,7 @@
     FT_UInt   gindex = 0;
 
 
+    /* only do something if we have a charmap, and we have glyphs at all */
     if ( face && face->charmap && face->num_glyphs )
     {
       gindex = FT_Get_Char_Index( face, 0 );
@@ -3377,8 +3392,10 @@
       FT_CMap    cmap = FT_CMAP( face->charmap );
 
 
-      do {
+      do
+      {
         gindex = cmap->clazz->char_next( cmap, &code );
+
       } while ( gindex >= (FT_UInt)face->num_glyphs );
 
       result = ( gindex == 0 ) ? 0 : code;
@@ -3930,10 +3947,16 @@
   static void
   ft_remove_renderer( FT_Module  module )
   {
-    FT_Library   library = module->library;
-    FT_Memory    memory  = library->memory;
+    FT_Library   library;
+    FT_Memory    memory;
     FT_ListNode  node;
 
+
+    library = module->library;
+    if ( !library )
+      return;
+
+    memory = library->memory;
 
     node = FT_List_Find( &library->renderers, module );
     if ( node )
@@ -4308,7 +4331,8 @@
       FT_Renderer  renderer = FT_RENDERER( module );
 
 
-      if ( renderer->clazz->glyph_format == FT_GLYPH_FORMAT_OUTLINE &&
+      if ( renderer->clazz                                          &&
+           renderer->clazz->glyph_format == FT_GLYPH_FORMAT_OUTLINE &&
            renderer->raster                                         )
         renderer->clazz->raster_class->raster_done( renderer->raster );
     }
@@ -4449,7 +4473,7 @@
   }
 
 
-  FT_Error
+  static FT_Error
   ft_property_do( FT_Library        library,
                   const FT_String*  module_name,
                   const FT_String*  property_name,
@@ -4513,9 +4537,9 @@
     service = (FT_Service_Properties)interface;
 
     if ( set )
-      missing_func = !service->set_property;
+      missing_func = (FT_Bool)( !service->set_property );
     else
-      missing_func = !service->get_property;
+      missing_func = (FT_Bool)( !service->get_property );
 
     if ( missing_func )
     {
@@ -4857,6 +4881,8 @@
       *p_arg1      = subg->arg1;
       *p_arg2      = subg->arg2;
       *p_transform = subg->transform;
+
+      error = FT_Err_Ok;
     }
 
     return error;

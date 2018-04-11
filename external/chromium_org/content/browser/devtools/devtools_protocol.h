@@ -13,6 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
+#include "content/common/content_export.h"
 
 namespace content {
 
@@ -62,6 +63,9 @@ class DevToolsProtocol {
 
     // Creates error response.
     scoped_refptr<Response> NoSuchMethodErrorResponse();
+
+    // Creates error response.
+    scoped_refptr<Response> ServerErrorResponse(const std::string& message);
 
     // Creates async response promise.
     scoped_refptr<Response> AsyncResponsePromise();
@@ -119,7 +123,7 @@ class DevToolsProtocol {
     DISALLOW_COPY_AND_ASSIGN(Notification);
   };
 
-  class Handler {
+  class CONTENT_EXPORT Handler {
    public:
     typedef base::Callback<scoped_refptr<DevToolsProtocol::Response>(
         scoped_refptr<DevToolsProtocol::Command> command)> CommandHandler;
@@ -141,6 +145,8 @@ class DevToolsProtocol {
     void SendNotification(const std::string& method,
                           base::DictionaryValue* params);
 
+    void SendAsyncResponse(scoped_refptr<DevToolsProtocol::Response> response);
+
     // Sends message to client, the caller is presumed to properly
     // format the message.
     void SendRawMessage(const std::string& message);
@@ -154,18 +160,31 @@ class DevToolsProtocol {
     DISALLOW_COPY_AND_ASSIGN(Handler);
   };
 
-  static scoped_refptr<Command> ParseCommand(const std::string& json,
-                                             std::string* error_response);
+  CONTENT_EXPORT static base::DictionaryValue* ParseMessage(
+      const std::string& json,
+      std::string* error_response);
+
+  CONTENT_EXPORT static scoped_refptr<Command> ParseCommand(
+      const std::string& json,
+      std::string* error_response);
+
+  CONTENT_EXPORT static scoped_refptr<Command> ParseCommand(
+      base::DictionaryValue* command_dict,
+      std::string* error_response);
+
+  CONTENT_EXPORT static scoped_refptr<Command> CreateCommand(
+      int id,
+      const std::string& method,
+      base::DictionaryValue* params);
+
+  CONTENT_EXPORT static scoped_refptr<Response> ParseResponse(
+      base::DictionaryValue* response_dict);
 
   static scoped_refptr<Notification> ParseNotification(
       const std::string& json);
 
   static scoped_refptr<Notification> CreateNotification(
       const std::string& method, base::DictionaryValue* params);
-
- private:
-  static base::DictionaryValue* ParseMessage(const std::string& json,
-                                             std::string* error_response);
 
   DevToolsProtocol() {}
   ~DevToolsProtocol() {}

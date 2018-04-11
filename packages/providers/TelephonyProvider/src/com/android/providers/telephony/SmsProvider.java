@@ -20,8 +20,8 @@ import android.app.AppOpsManager;
 import android.content.ContentProvider;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.UriMatcher;
-
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.MatrixCursor;
@@ -30,6 +30,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
 import android.os.Binder;
+import android.os.UserHandle;
 import android.provider.Contacts;
 import android.provider.Telephony;
 import android.provider.Telephony.Mms;
@@ -49,7 +50,7 @@ public class SmsProvider extends ContentProvider {
     private static final Uri NOTIFICATION_URI = Uri.parse("content://sms");
     private static final Uri ICC_URI = Uri.parse("content://sms/icc");
     static final String TABLE_SMS = "sms";
-    private static final String TABLE_RAW = "raw";
+    static final String TABLE_RAW = "raw";
     private static final String TABLE_SR_PENDING = "sr_pending";
     private static final String TABLE_WORDS = "words";
 
@@ -256,23 +257,32 @@ public class SmsProvider extends ContentProvider {
      * Return a Cursor containing just one message from the ICC.
      */
     private Cursor getSingleMessageFromIcc(String messageIndexString) {
+        int messageIndex = -1;
         try {
-            int messageIndex = Integer.parseInt(messageIndexString);
-            SmsManager smsManager = SmsManager.getDefault();
-            ArrayList<SmsMessage> messages = smsManager.getAllMessagesFromIcc();
-
-            SmsMessage message = messages.get(messageIndex);
-            if (message == null) {
-                throw new IllegalArgumentException(
-                        "Message not retrieved. ID: " + messageIndexString);
-            }
-            MatrixCursor cursor = new MatrixCursor(ICC_COLUMNS, 1);
-            cursor.addRow(convertIccToSms(message, 0));
-            return withIccNotificationUri(cursor);
+            Integer.parseInt(messageIndexString);
         } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Bad SMS ICC ID: " + messageIndexString);
+            throw new IllegalArgumentException("Bad SMS ICC ID: " + messageIndexString);
         }
+        ArrayList<SmsMessage> messages;
+        final SmsManager smsManager = SmsManager.getDefault();
+        // Use phone id to avoid AppOps uid mismatch in telephony
+        long token = Binder.clearCallingIdentity();
+        try {
+            messages = smsManager.getAllMessagesFromIcc();
+        } finally {
+            Binder.restoreCallingIdentity(token);
+        }
+        if (messages == null) {
+            throw new IllegalArgumentException("ICC message not retrieved");
+        }
+        final SmsMessage message = messages.get(messageIndex);
+        if (message == null) {
+            throw new IllegalArgumentException(
+                    "Message not retrieved. ID: " + messageIndexString);
+        }
+        MatrixCursor cursor = new MatrixCursor(ICC_COLUMNS, 1);
+        cursor.addRow(convertIccToSms(message, 0));
+        return withIccNotificationUri(cursor);
     }
 
     /**
@@ -607,7 +617,8 @@ public class SmsProvider extends ContentProvider {
      */
     private int deleteMessageFromIcc(String messageIndexString) {
         SmsManager smsManager = SmsManager.getDefault();
-
+        // Use phone id to avoid AppOps uid mismatch in telephony
+        long token = Binder.clearCallingIdentity();
         try {
             return smsManager.deleteMessageFromIcc(
                     Integer.parseInt(messageIndexString))
@@ -617,8 +628,9 @@ public class SmsProvider extends ContentProvider {
                     "Bad SMS ICC ID: " + messageIndexString);
         } finally {
             ContentResolver cr = getContext().getContentResolver();
+            cr.notifyChange(ICC_URI, null, true, UserHandle.USER_ALL);
 
-            cr.notifyChange(ICC_URI, null);
+            Binder.restoreCallingIdentity(token);
         }
     }
 
@@ -697,9 +709,10 @@ public class SmsProvider extends ContentProvider {
 
     private void notifyChange(Uri uri) {
         ContentResolver cr = getContext().getContentResolver();
-        cr.notifyChange(uri, null);
-        cr.notifyChange(MmsSms.CONTENT_URI, null);
-        cr.notifyChange(Uri.parse("content://mms-sms/conversations/"), null);
+        cr.notifyChange(uri, null, true, UserHandle.USER_ALL);
+        cr.notifyChange(MmsSms.CONTENT_URI, null, true, UserHandle.USER_ALL);
+        cr.notifyChange(Uri.parse("content://mms-sms/conversations/"), null, true,
+                UserHandle.USER_ALL);
     }
 
     private SQLiteOpenHelper mOpenHelper;

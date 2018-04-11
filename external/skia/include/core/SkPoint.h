@@ -11,6 +11,28 @@
 #include "SkMath.h"
 #include "SkScalar.h"
 
+/** \struct SkIPoint16
+
+    SkIPoint holds two 16 bit integer coordinates
+*/
+struct SkIPoint16 {
+    int16_t fX, fY;
+
+    static SkIPoint16 Make(int x, int y) {
+        SkIPoint16 pt;
+        pt.set(x, y);
+        return pt;
+    }
+
+    int16_t x() const { return fX; }
+    int16_t y() const { return fY; }
+
+    void set(int x, int y) {
+        fX = SkToS16(x);
+        fY = SkToS16(y);
+    }
+};
+
 /** \struct SkIPoint
 
     SkIPoint holds two 32 bit integer coordinates
@@ -216,13 +238,10 @@ struct SK_API SkPoint {
      *  Return true if the computed length of the vector is >= the internal
      *  tolerance (used to avoid dividing by tiny values).
      */
-    static bool CanNormalize(SkScalar dx, SkScalar dy)
-#ifdef SK_SCALAR_IS_FLOAT
-    // Simple enough (and performance critical sometimes) so we inline it.
-    { return (dx*dx + dy*dy) > (SK_ScalarNearlyZero * SK_ScalarNearlyZero); }
-#else
-    ;
-#endif
+    static bool CanNormalize(SkScalar dx, SkScalar dy) {
+        // Simple enough (and performance critical sometimes) so we inline it.
+        return (dx*dx + dy*dy) > (SK_ScalarNearlyZero * SK_ScalarNearlyZero);
+    }
 
     bool canNormalize() const {
         return CanNormalize(fX, fY);
@@ -251,6 +270,14 @@ struct SK_API SkPoint {
      (i.e. nearly 0) then return false and do nothing, otherwise return true.
     */
     bool setLength(SkScalar x, SkScalar y, SkScalar length);
+
+    /** Same as setLength, but favoring speed over accuracy.
+    */
+    bool setLengthFast(SkScalar length);
+
+    /** Same as setLength, but favoring speed over accuracy.
+    */
+    bool setLengthFast(SkScalar x, SkScalar y, SkScalar length);
 
     /** Scale the point's coordinates by scale, writing the answer into dst.
         It is legal for dst == this.
@@ -316,7 +343,6 @@ struct SK_API SkPoint {
      *  Returns true if both X and Y are finite (not infinity or NaN)
      */
     bool isFinite() const {
-#ifdef SK_SCALAR_IS_FLOAT
         SkScalar accum = 0;
         accum *= fX;
         accum *= fY;
@@ -327,12 +353,6 @@ struct SK_API SkPoint {
         // value==value will be true iff value is not NaN
         // TODO: is it faster to say !accum or accum==accum?
         return accum == accum;
-#else
-        // use bit-or for speed, since we don't care about short-circuting the
-        // tests, and we expect the common case will be that we need to check all.
-        int isNaN = (SK_FixedNaN == fX) | (SK_FixedNaN == fX));
-        return !isNaN;
-#endif
     }
 
     /**
@@ -353,7 +373,7 @@ struct SK_API SkPoint {
     /** Return true if this point and the given point are far enough apart
         such that a vector between them would be non-degenerate.
 
-        WARNING: Unlike the deprecated version of equalsWithinTolerance(),
+        WARNING: Unlike the explicit tolerance version,
         this method does not use componentwise comparison.  Instead, it
         uses a comparison designed to match judgments elsewhere regarding
         degeneracy ("points A and B are so close that the vector between them
@@ -363,10 +383,7 @@ struct SK_API SkPoint {
         return !CanNormalize(fX - p.fX, fY - p.fY);
     }
 
-    /** DEPRECATED: Return true if this and the given point are componentwise
-        within tolerance "tol".
-
-        WARNING: There is no guarantee that the result will reflect judgments
+    /** WARNING: There is no guarantee that the result will reflect judgments
         elsewhere regarding degeneracy ("points A and B are so close that the
         vector between them is essentially zero").
     */
@@ -416,13 +433,13 @@ struct SK_API SkPoint {
     /** Returns the dot product of a and b, treating them as 2D vectors
     */
     static SkScalar DotProduct(const SkPoint& a, const SkPoint& b) {
-        return SkScalarMul(a.fX, b.fX) + SkScalarMul(a.fY, b.fY);
+        return a.fX * b.fX + a.fY * b.fY;
     }
 
     /** Returns the cross product of a and b, treating them as 2D vectors
     */
     static SkScalar CrossProduct(const SkPoint& a, const SkPoint& b) {
-        return SkScalarMul(a.fX, b.fY) - SkScalarMul(a.fY, b.fX);
+        return a.fX * b.fY - a.fY * b.fX;
     }
 
     SkScalar cross(const SkPoint& vec) const {
@@ -440,7 +457,7 @@ struct SK_API SkPoint {
     SkScalar distanceToSqd(const SkPoint& pt) const {
         SkScalar dx = fX - pt.fX;
         SkScalar dy = fY - pt.fY;
-        return SkScalarMul(dx, dx) + SkScalarMul(dy, dy);
+        return dx * dx + dy * dy;
     }
 
     /**

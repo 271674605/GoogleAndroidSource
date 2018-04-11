@@ -10,15 +10,17 @@
 // Get rid of a macro from Xlib.h that conflicts with Aura's RootWindow class.
 #undef RootWindow
 
+#include <list>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted_memory.h"
-#include "ui/base/ui_export.h"
-#include "ui/base/x/x11_atom_cache.h"
+#include "ui/base/ui_base_export.h"
+#include "ui/gfx/x/x11_atom_cache.h"
 
 namespace ui {
+class PlatformEventDispatcher;
 class SelectionData;
 
 // Requests and later receives data from the X11 server through the selection
@@ -28,11 +30,12 @@ class SelectionData;
 // drop. This class interprets messages from the statefull selection request
 // API. SelectionRequestor should only deal with the X11 details; it does not
 // implement per-component fast-paths.
-class UI_EXPORT SelectionRequestor {
+class UI_BASE_EXPORT SelectionRequestor {
  public:
   SelectionRequestor(Display* xdisplay,
                      ::Window xwindow,
-                     ::Atom selection_name);
+                     ::Atom selection_name,
+                     PlatformEventDispatcher* dispatcher);
   ~SelectionRequestor();
 
   // Does the work of requesting |target| from the selection we handle,
@@ -47,6 +50,12 @@ class UI_EXPORT SelectionRequestor {
       size_t* out_data_items,
       ::Atom* out_type);
 
+  // Requests |target| from the selection that we handle, passing |parameter|
+  // as a parameter to XConvertSelection().
+  void PerformBlockingConvertSelectionWithParameter(
+      ::Atom target,
+      const std::vector< ::Atom>& parameter);
+
   // Returns the first of |types| offered by the current selection holder, or
   // returns NULL if none of those types are available.
   SelectionData RequestAndWaitForTypes(const std::vector< ::Atom>& types);
@@ -56,29 +65,48 @@ class UI_EXPORT SelectionRequestor {
   void OnSelectionNotify(const XSelectionEvent& event);
 
  private:
+  // A request that has been issued and we are waiting for a response to.
+  struct PendingRequest {
+    explicit PendingRequest(Atom target);
+    ~PendingRequest();
+
+    // Data to the current XConvertSelection request. Used for error detection;
+    // we verify it on the return message.
+    ::Atom target;
+
+    // Called to terminate the nested message loop.
+    base::Closure quit_closure;
+
+    // The property in the returning SelectNotify message is used to signal
+    // success. If None, our request failed somehow. If equal to the property
+    // atom that we sent in the XConvertSelection call, we can read that
+    // property on |x_window_| for the requested data.
+    ::Atom returned_property;
+
+    // Set to true when return_property is populated.
+    bool returned;
+  };
+
+  // Blocks till SelectionNotify is received for the target specified in
+  // |request|.
+  void BlockTillSelectionNotifyForRequest(PendingRequest* request);
+
   // Our X11 state.
   Display* x_display_;
   ::Window x_window_;
 
-  // True if we're currently running a nested message loop, waiting for data to
-  // come back from the X server.
-  bool in_nested_loop_;
-
   // The X11 selection that this instance communicates on.
   ::Atom selection_name_;
 
-  // Data to the current XConvertSelection request. Used for error detection;
-  // we verify it on the return message.
-  ::Atom current_target_;
+  // Dispatcher which handles SelectionNotify and SelectionRequest for
+  // |selection_name_|. PerformBlockingConvertSelection() calls the
+  // dispatcher directly if PerformBlockingConvertSelection() is called after
+  // the PlatformEventSource is destroyed.
+  // Not owned.
+  PlatformEventDispatcher* dispatcher_;
 
-  // The property in the returning SelectNotify message is used to signal
-  // success. If None, our request failed somehow. If equal to the property
-  // atom that we sent in the XConvertSelection call, we can read that property
-  // on |x_window_| for the requested data.
-  ::Atom returned_property_;
-
-  // Called to terminate the nested message loop.
-  base::Closure quit_closure_;
+  // A list of requests for which we are waiting for responses.
+  std::list<PendingRequest*> pending_requests_;
 
   X11AtomCache atom_cache_;
 

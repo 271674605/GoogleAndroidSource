@@ -9,20 +9,20 @@
 
 #include "net/quic/quic_crypto_client_stream.h"
 #include "net/quic/quic_crypto_client_stream_factory.h"
-#include "net/quic/quic_session.h"
 #include "net/quic/test_tools/mock_crypto_client_stream.h"
 
 namespace net {
 
+class QuicServerId;
+
 class MockCryptoClientStreamFactory : public QuicCryptoClientStreamFactory  {
  public:
   MockCryptoClientStreamFactory();
-
   virtual ~MockCryptoClientStreamFactory() {}
 
   virtual QuicCryptoClientStream* CreateQuicCryptoClientStream(
-      const string& server_hostname,
-      QuicSession* session,
+      const QuicServerId& server_id,
+      QuicClientSession* session,
       QuicCryptoClientConfig* crypto_config) OVERRIDE;
 
   void set_handshake_mode(
@@ -30,8 +30,21 @@ class MockCryptoClientStreamFactory : public QuicCryptoClientStreamFactory  {
     handshake_mode_ = handshake_mode;
   }
 
+  void set_proof_verify_details(
+      const ProofVerifyDetails* proof_verify_details) {
+    proof_verify_details_ = proof_verify_details;
+  }
+
+  MockCryptoClientStream* last_stream() const {
+    return last_stream_;
+  }
+
  private:
   MockCryptoClientStream::HandshakeMode handshake_mode_;
+  MockCryptoClientStream* last_stream_;
+  const ProofVerifyDetails* proof_verify_details_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockCryptoClientStreamFactory);
 };
 
 }  // namespace net

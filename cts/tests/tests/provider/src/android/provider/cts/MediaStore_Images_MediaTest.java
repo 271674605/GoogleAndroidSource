@@ -16,17 +16,18 @@
 
 package android.provider.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.provider.R;
 
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.cts.util.FileCopyHelper;
+import android.cts.util.FileUtils;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Environment;
-import android.os.cts.FileUtils;
 import android.provider.MediaStore.Images.Media;
 import android.provider.MediaStore.Images.Thumbnails;
 import android.test.InstrumentationTestCase;
@@ -78,13 +79,6 @@ public class MediaStore_Images_MediaTest extends InstrumentationTestCase {
 
         mHelper = new FileCopyHelper(mContext);
         mRowsAdded = new ArrayList<Uri>();
-
-        String campath = Environment.getExternalStorageDirectory() + File.separator +
-                Environment.DIRECTORY_DCIM + File.separator + "Camera";
-        File camfile = new File(campath);
-        if (!camfile.exists()) {
-            assertTrue("failed to create " + campath, camfile.mkdir());
-        }
     }
 
     public void testInsertImageWithImagePath() throws Exception {

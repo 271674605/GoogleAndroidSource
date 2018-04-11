@@ -36,6 +36,7 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "clang/Frontend/DependencyOutputOptions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
+#include "clang/Frontend/FrontendOptions.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Frontend/Utils.h"
 
@@ -51,7 +52,7 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 
 // More force linking
-#include "llvm/Linker.h"
+#include "llvm/Linker/Linker.h"
 
 // Force linking all passes/vmcore stuffs to libslang.so
 #include "llvm/LinkAllIR.h"
@@ -71,6 +72,9 @@
 
 namespace {
 
+static const char *kRSTriple32 = "armv7-none-linux-gnueabi";
+static const char *kRSTriple64 = "aarch64-none-linux-gnueabi";
+
 struct ForceSlangLinking {
   ForceSlangLinking() {
     // We must reference the functions in such a way that compilers will not
@@ -81,7 +85,7 @@ struct ForceSlangLinking {
       return;
 
     // llvm-rs-link needs following functions existing in libslang.
-    llvm::ParseBitcodeFile(NULL, llvm::getGlobalContext(), NULL);
+    llvm::parseBitcodeFile(NULL, llvm::getGlobalContext());
     llvm::Linker::LinkModules(NULL, NULL, 0, NULL);
 
     // llvm-rs-cc need this.
@@ -93,15 +97,6 @@ struct ForceSlangLinking {
 }  // namespace
 
 namespace slang {
-
-#if defined(__arm__)
-#   define DEFAULT_TARGET_TRIPLE_STRING "armv7-none-linux-gnueabi"
-#elif defined(__x86_64__)
-#   define DEFAULT_TARGET_TRIPLE_STRING "x86_64-unknown-linux"
-#else
-// let's use x86 as default target
-#   define DEFAULT_TARGET_TRIPLE_STRING "i686-unknown-linux"
-#endif
 
 bool Slang::GlobalInitialized = false;
 
@@ -175,21 +170,20 @@ void Slang::LLVMErrorHandler(void *UserData, const std::string &Message,
   exit(1);
 }
 
-void Slang::createTarget(const std::string &Triple, const std::string &CPU,
-                         const std::vector<std::string> &Features) {
-  if (!Triple.empty())
-    mTargetOpts->Triple = Triple;
-  else
-    mTargetOpts->Triple = DEFAULT_TARGET_TRIPLE_STRING;
+void Slang::createTarget(uint32_t BitWidth) {
+  std::vector<std::string> features;
 
-  if (!CPU.empty())
-    mTargetOpts->CPU = CPU;
-
-  if (!Features.empty())
-    mTargetOpts->FeaturesAsWritten = Features;
+  if (BitWidth == 64) {
+    mTargetOpts->Triple = kRSTriple64;
+  } else {
+    mTargetOpts->Triple = kRSTriple32;
+    // Treat long as a 64-bit type for our 32-bit RS code.
+    features.push_back("+long64");
+    mTargetOpts->FeaturesAsWritten = features;
+  }
 
   mTarget.reset(clang::TargetInfo::CreateTargetInfo(*mDiagEngine,
-                                                    mTargetOpts.getPtr()));
+                                                    mTargetOpts));
 }
 
 void Slang::createFileManager() {
@@ -206,7 +200,7 @@ void Slang::createPreprocessor() {
   llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> HSOpts =
       new clang::HeaderSearchOptions();
   clang::HeaderSearch *HeaderInfo = new clang::HeaderSearch(HSOpts,
-                                                            *mFileMgr,
+                                                            *mSourceMgr,
                                                             *mDiagEngine,
                                                             LangOpts,
                                                             mTarget.get());
@@ -216,13 +210,16 @@ void Slang::createPreprocessor() {
   mPP.reset(new clang::Preprocessor(PPOpts,
                                     *mDiagEngine,
                                     LangOpts,
-                                    mTarget.get(),
                                     *mSourceMgr,
                                     *HeaderInfo,
                                     *this,
                                     NULL,
                                     /* OwnsHeaderSearch = */true));
   // Initialize the preprocessor
+  mPP->Initialize(getTargetInfo());
+  clang::FrontendOptions FEOpts;
+  clang::InitializePreprocessor(*mPP, *PPOpts, FEOpts);
+
   mPragmas.clear();
   mPP->AddPragmaHandler(new PragmaRecorder(&mPragmas));
 
@@ -247,11 +244,10 @@ void Slang::createPreprocessor() {
 void Slang::createASTContext() {
   mASTContext.reset(new clang::ASTContext(LangOpts,
                                           *mSourceMgr,
-                                          mTarget.get(),
                                           mPP->getIdentifierTable(),
                                           mPP->getSelectorTable(),
-                                          mPP->getBuiltinInfo(),
-                                          /* size_reserve = */0));
+                                          mPP->getBuiltinInfo()));
+  mASTContext->InitBuiltinTypes(getTargetInfo());
   initASTContext();
 }
 
@@ -262,14 +258,12 @@ Slang::createBackend(const clang::CodeGenOptions& CodeGenOpts,
                      &mPragmas, OS, OT);
 }
 
-Slang::Slang() : mInitialized(false), mDiagClient(NULL), mOT(OT_Default) {
-  mTargetOpts = new clang::TargetOptions();
+Slang::Slang() : mInitialized(false), mDiagClient(NULL),
+  mTargetOpts(new clang::TargetOptions()), mOT(OT_Default) {
   GlobalInitialization();
 }
 
-void Slang::init(const std::string &Triple, const std::string &CPU,
-                 const std::vector<std::string> &Features,
-                 clang::DiagnosticsEngine *DiagEngine,
+void Slang::init(uint32_t BitWidth, clang::DiagnosticsEngine *DiagEngine,
                  DiagnosticBuffer *DiagClient) {
   if (mInitialized)
     return;
@@ -280,7 +274,7 @@ void Slang::init(const std::string &Triple, const std::string &CPU,
   initDiagnostic();
   llvm::install_fatal_error_handler(LLVMErrorHandler, mDiagEngine);
 
-  createTarget(Triple, CPU, Features);
+  createTarget(BitWidth);
   createFileManager();
   createSourceManager();
 
@@ -307,7 +301,7 @@ bool Slang::setInputSource(llvm::StringRef InputFile,
   // Load the source
   llvm::MemoryBuffer *SB =
       llvm::MemoryBuffer::getMemBuffer(Text, Text + TextLength);
-  mSourceMgr->createMainFileIDForMemBuffer(SB);
+  mSourceMgr->setMainFileID(mSourceMgr->createFileID(SB));
 
   if (mSourceMgr->getMainFileID().isInvalid()) {
     mDiagEngine->Report(clang::diag::err_fe_error_reading) << InputFile;
@@ -322,8 +316,10 @@ bool Slang::setInputSource(llvm::StringRef InputFile) {
   mSourceMgr->clearIDTables();
 
   const clang::FileEntry *File = mFileMgr->getFile(InputFile);
-  if (File)
-    mSourceMgr->createMainFileID(File);
+  if (File) {
+    mSourceMgr->setMainFileID(mSourceMgr->createFileID(File,
+        clang::SourceLocation(), clang::SrcMgr::C_User));
+  }
 
   if (mSourceMgr->getMainFileID().isInvalid()) {
     mDiagEngine->Report(clang::diag::err_fe_error_reading) << InputFile;
@@ -341,7 +337,7 @@ bool Slang::setOutput(const char *OutputFile) {
     case OT_Dependency:
     case OT_Assembly:
     case OT_LLVMAssembly: {
-      OS = OpenOutputFile(OutputFile, llvm::sys::fs::F_None, &Error,
+      OS = OpenOutputFile(OutputFile, llvm::sys::fs::F_Text, &Error,
           mDiagEngine);
       break;
     }
@@ -350,7 +346,7 @@ bool Slang::setOutput(const char *OutputFile) {
     }
     case OT_Object:
     case OT_Bitcode: {
-      OS = OpenOutputFile(OutputFile, llvm::sys::fs::F_Binary,
+      OS = OpenOutputFile(OutputFile, llvm::sys::fs::F_None,
                           &Error, mDiagEngine);
       break;
     }
@@ -373,7 +369,7 @@ bool Slang::setDepOutput(const char *OutputFile) {
   std::string Error;
 
   mDOS.reset(
-      OpenOutputFile(OutputFile, llvm::sys::fs::F_None, &Error, mDiagEngine));
+      OpenOutputFile(OutputFile, llvm::sys::fs::F_Text, &Error, mDiagEngine));
   if (!Error.empty() || (mDOS.get() == NULL))
     return false;
 
@@ -404,7 +400,7 @@ int Slang::generateDepFile() {
 
   // Per-compilation needed initialization
   createPreprocessor();
-  AttachDependencyFileGen(*mPP.get(), DepOpts);
+  clang::DependencyFileGenerator::CreateAndAttachToPreprocessor(*mPP.get(), DepOpts);
 
   // Inform the diagnostic client we are processing a source file
   mDiagClient->BeginSourceFile(LangOpts, mPP.get());
@@ -474,14 +470,22 @@ void Slang::setOptimizationLevel(llvm::CodeGenOpt::Level OptimizationLevel) {
   CodeGenOpts.OptimizationLevel = OptimizationLevel;
 }
 
-void Slang::reset() {
-  llvm::errs() << mDiagClient->str();
+void Slang::reset(bool SuppressWarnings) {
+  // Always print diagnostics if we had an error occur, but don't print
+  // warnings if we suppressed them (i.e. we are doing the 64-bit compile after
+  // an existing 32-bit compile).
+  //
+  // TODO: This should really be removing duplicate identical warnings between
+  // the 32-bit and 64-bit compiles, but that is a more substantial feature.
+  // Bug: 17052573
+  if (!SuppressWarnings || mDiagEngine->hasErrorOccurred()) {
+    llvm::errs() << mDiagClient->str();
+  }
   mDiagEngine->Reset();
   mDiagClient->reset();
 }
 
 Slang::~Slang() {
-  llvm::llvm_shutdown();
 }
 
 }  // namespace slang

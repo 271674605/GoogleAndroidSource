@@ -127,7 +127,7 @@ sp<MediaSource> WAVExtractor::getTrack(size_t index) {
 }
 
 sp<MetaData> WAVExtractor::getTrackMetaData(
-        size_t index, uint32_t flags) {
+        size_t index, uint32_t /* flags */) {
     if (mInitCheck != OK || index > 0) {
         return NULL;
     }
@@ -358,7 +358,7 @@ WAVSource::~WAVSource() {
     }
 }
 
-status_t WAVSource::start(MetaData *params) {
+status_t WAVSource::start(MetaData * /* params */) {
     ALOGV("WAVSource::start");
 
     CHECK(!mStarted);
@@ -414,7 +414,7 @@ status_t WAVSource::read(
         } else {
             pos = (seekTimeUs * mSampleRate) / 1000000 * mNumChannels * (mBitsPerSample >> 3);
         }
-        if (pos > mSize) {
+        if (pos > (off64_t)mSize) {
             pos = mSize;
         }
         mCurrentPos = pos + mOffset;
@@ -438,6 +438,10 @@ status_t WAVSource::read(
     if (maxBytesToRead > maxBytesAvailable) {
         maxBytesToRead = maxBytesAvailable;
     }
+
+    // read only integral amounts of audio unit frames.
+    const size_t inputUnitFrameSize = mNumChannels * mBitsPerSample / 8;
+    maxBytesToRead -= maxBytesToRead % inputUnitFrameSize;
 
     if (mWaveFormat == WAVE_FORMAT_MSGSM) {
         // Microsoft packs 2 frames into 65 bytes, rather than using separate 33-byte frames,

@@ -9,6 +9,10 @@
   margin: 300px;
 }
 
+::-webkit-scrollbar {
+    display: none;
+}
+
 </style>
 
 <div name='0' class='large'></div>
@@ -51,6 +55,14 @@ function install_touch_handler() {
 
 function uninstall_touch_handler() {
   document.removeEventListener('touchstart', touch_start_handler);
+}
+
+function use_replace_state() {
+  window.history.replaceState({}, 'foo');
+}
+
+function use_push_state() {
+  window.history.pushState({}, 'foo2', 'newpath');
 }
 
 onload = function() {

@@ -72,27 +72,29 @@
                 <intent android:action="android.settings.TERMS" />
             </PreferenceScreen>
 
+            <Preference
+                    android:key="wallpaper_attributions"
+                    android:title="@string/wallpaper_attributions"
+                    android:summary="@string/wallpaper_attributions_values"
+                    />
+
         </PreferenceScreen>
-        
+
         <PreferenceScreen
                 android:key="safetylegal"
                 android:title="@string/settings_safetylegal_title">
             <intent android:action="android.settings.SAFETY" />
         </PreferenceScreen>
 
-        <!-- Contributors -->
-        <!-- 
-        <PreferenceScreen
-                android:key="contributors"
-                android:title="@string/contributors_title">
-            <intent android:action="android.settings.TEAM" />
-        </PreferenceScreen>
-        -->
-
         <PreferenceScreen
                 android:key="regulatory_info"
                 android:title="@string/regulatory_information">
             <intent android:action="android.settings.SHOW_REGULATORY_INFO" />
+        </PreferenceScreen>
+
+        <!-- Feedback on the device -->
+        <PreferenceScreen android:key="device_feedback"
+                android:title="@string/device_feedback">
         </PreferenceScreen>
 
         <!-- Device hardware model -->

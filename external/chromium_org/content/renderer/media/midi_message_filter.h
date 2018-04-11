@@ -10,9 +10,9 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_channel_proxy.h"
+#include "ipc/message_filter.h"
 #include "media/midi/midi_port_info.h"
-#include "third_party/WebKit/public/platform/WebMIDIAccessor.h"
+#include "media/midi/midi_result.h"
 #include "third_party/WebKit/public/platform/WebMIDIAccessorClient.h"
 
 namespace base {
@@ -22,22 +22,21 @@ class MessageLoopProxy;
 namespace content {
 
 // MessageFilter that handles MIDI messages.
-class CONTENT_EXPORT MIDIMessageFilter
-    : public IPC::ChannelProxy::MessageFilter {
+class CONTENT_EXPORT MidiMessageFilter : public IPC::MessageFilter {
  public:
-  explicit MIDIMessageFilter(
+  explicit MidiMessageFilter(
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop);
 
   // Each client registers for MIDI access here.
   // If permission is granted, then the client's
   // addInputPort() and addOutputPort() methods will be called,
   // giving the client access to receive and send data.
-  void StartSession(WebKit::WebMIDIAccessorClient* client);
-  void RemoveClient(WebKit::WebMIDIAccessorClient* client);
+  void StartSession(blink::WebMIDIAccessorClient* client);
+  void RemoveClient(blink::WebMIDIAccessorClient* client);
 
   // A client will only be able to call this method if it has a suitable
   // output port (from addOutputPort()).
-  void SendMIDIData(int port,
+  void SendMidiData(uint32 port,
                     const uint8* data,
                     size_t length,
                     double timestamp);
@@ -48,28 +47,28 @@ class CONTENT_EXPORT MIDIMessageFilter
   }
 
  protected:
-  virtual ~MIDIMessageFilter();
+  virtual ~MidiMessageFilter();
 
  private:
-  // Sends an IPC message using |channel_|.
+  // Sends an IPC message using |sender_|.
   void Send(IPC::Message* message);
 
-  // IPC::ChannelProxy::MessageFilter override. Called on |io_message_loop|.
+  // IPC::MessageFilter override. Called on |io_message_loop|.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
+  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE;
   virtual void OnFilterRemoved() OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
 
   // Called when the browser process has approved (or denied) access to
   // MIDI hardware.
   void OnSessionStarted(int client_id,
-                        bool success,
-                        media::MIDIPortInfoList inputs,
-                        media::MIDIPortInfoList outputs);
+                        media::MidiResult result,
+                        media::MidiPortInfoList inputs,
+                        media::MidiPortInfoList outputs);
 
   // Called when the browser process has sent MIDI data containing one or
   // more messages.
-  void OnDataReceived(int port,
+  void OnDataReceived(uint32 port,
                       const std::vector<uint8>& data,
                       double timestamp);
 
@@ -79,24 +78,24 @@ class CONTENT_EXPORT MIDIMessageFilter
   void OnAcknowledgeSentData(size_t bytes_sent);
 
   void HandleSessionStarted(int client_id,
-                            bool success,
-                            media::MIDIPortInfoList inputs,
-                            media::MIDIPortInfoList outputs);
+                            media::MidiResult result,
+                            media::MidiPortInfoList inputs,
+                            media::MidiPortInfoList outputs);
 
-  void HandleDataReceived(int port,
+  void HandleDataReceived(uint32 port,
                           const std::vector<uint8>& data,
                           double timestamp);
 
   void StartSessionOnIOThread(int client_id);
 
-  void SendMIDIDataOnIOThread(int port,
+  void SendMidiDataOnIOThread(uint32 port,
                               const std::vector<uint8>& data,
                               double timestamp);
 
-  WebKit::WebMIDIAccessorClient* GetClientFromId(int client_id);
+  blink::WebMIDIAccessorClient* GetClientFromId(int client_id);
 
-  // IPC channel for Send(); must only be accessed on |io_message_loop_|.
-  IPC::Channel* channel_;
+  // IPC sender for Send(); must only be accessed on |io_message_loop_|.
+  IPC::Sender* sender_;
 
   // Message loop on which IPC calls are driven.
   const scoped_refptr<base::MessageLoopProxy> io_message_loop_;
@@ -108,7 +107,7 @@ class CONTENT_EXPORT MIDIMessageFilter
   // We map client to "client id" used to track permission.
   // When access has been approved, we add the input and output ports to
   // the client, allowing it to actually receive and send MIDI data.
-  typedef std::map<WebKit::WebMIDIAccessorClient*, int> ClientsMap;
+  typedef std::map<blink::WebMIDIAccessorClient*, int> ClientsMap;
   ClientsMap clients_;
 
   // Dishes out client ids.
@@ -116,7 +115,7 @@ class CONTENT_EXPORT MIDIMessageFilter
 
   size_t unacknowledged_bytes_sent_;
 
-  DISALLOW_COPY_AND_ASSIGN(MIDIMessageFilter);
+  DISALLOW_COPY_AND_ASSIGN(MidiMessageFilter);
 };
 
 }  // namespace content

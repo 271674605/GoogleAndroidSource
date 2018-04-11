@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/test/base/web_ui_browsertest.h"
+#include "chrome/test/base/web_ui_browser_test.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
 // This is a helper class used by options_browsertest.js to feed the navigation
@@ -17,6 +17,10 @@ class OptionsBrowserTest : public WebUIBrowserTest,
  public:
   OptionsBrowserTest();
   virtual ~OptionsBrowserTest();
+
+ protected:
+  // Clears the preference at the given |path|.
+  void ClearPref(const char* path);
 
  private:
   // WebUIMessageHandler implementation.
@@ -29,6 +33,11 @@ class OptionsBrowserTest : public WebUIBrowserTest,
   // URLs in the "back" tab history, including the current entry, back to the
   // WebUI via a callback.
   void ReportHistory(const base::ListValue* list_value);
+
+  // A callback for the 'optionsTestSetPref' message. The first argument should
+  // be a pref path (e.g., "profile.managed_users"); the second, the new value
+  // to set for that pref.
+  void HandleSetPref(const base::ListValue* args);
 
   DISALLOW_COPY_AND_ASSIGN(OptionsBrowserTest);
 };

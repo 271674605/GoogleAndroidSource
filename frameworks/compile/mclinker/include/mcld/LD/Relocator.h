@@ -8,9 +8,6 @@
 //===----------------------------------------------------------------------===//
 #ifndef MCLD_RELOCATOR_H
 #define MCLD_RELOCATOR_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
 
 #include <mcld/Fragment/Relocation.h>
 
@@ -61,10 +58,21 @@ public:
   /// @param pReloc - a read in relocation entry
   /// @param pInputSym - the input LDSymbol of relocation target symbol
   /// @param pSection - the section of relocation applying target
+  /// @param pInput - the input file of relocation
   virtual void scanRelocation(Relocation& pReloc,
                               IRBuilder& pBuilder,
                               Module& pModule,
-                              LDSection& pSection) = 0;
+                              LDSection& pSection,
+                              Input& pInput) = 0;
+
+  /// issueUndefRefError - Provides a basic version for undefined reference dump.
+  /// It will handle the filename and function name automatically.
+  /// @param pReloc - a read in relocation entry
+  /// @param pSection - the section of relocation applying target
+  /// @ param pInput - the input file of relocation
+  virtual void issueUndefRef(Relocation& pReloc,
+                             LDSection& pSection,
+                             Input& pInput);
 
   /// initializeScan - do initialization before scan relocations in pInput
   /// @return - return true for initialization success
@@ -106,6 +114,13 @@ public:
 
   /// getSize - get the size of a relocation in bit
   virtual Size getSize(Type pType) const = 0;
+
+  /// mayHaveFunctionPointerAccess - check if the given reloc would possibly
+  /// access a function pointer.
+  /// Note: Each target relocator should override this function, or be
+  /// conservative and return true to avoid getting folded.
+  virtual bool mayHaveFunctionPointerAccess(const Relocation& pReloc) const
+  { return true; }
 
 protected:
   const LinkerConfig& config() const { return m_Config; }

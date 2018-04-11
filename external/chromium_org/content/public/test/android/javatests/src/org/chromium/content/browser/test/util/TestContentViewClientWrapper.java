@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,14 @@ import android.content.Context;
 import android.view.ActionMode;
 import android.view.KeyEvent;
 
+import org.chromium.content.browser.ContentVideoViewClient;
 import org.chromium.content.browser.ContentViewClient;
-import org.chromium.content.browser.SelectActionModeCallback;
 import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
-import org.chromium.content.browser.test.util.TestContentViewClient;
 
 /**
- * Simplistic {@link TestContentViewClient} for browser tests.
- * Wraps around existing client so that specific methods can be overridden if needed.
- * This class MUST override ALL METHODS OF the ContentViewClient and pass them
- * to the wrapped client.
+ * Simplistic {@link TestContentViewClient} for browser tests. Wraps around existing client so that
+ * specific methods can be overridden if needed. This class MUST override ALL METHODS OF the
+ * ContentViewClient and pass them to the wrapped client.
  */
 public class TestContentViewClientWrapper extends TestContentViewClient {
 
@@ -35,12 +33,6 @@ public class TestContentViewClientWrapper extends TestContentViewClient {
     }
 
     @Override
-    public void onRendererCrash(boolean processWasOomProtected) {
-        super.onRendererCrash(processWasOomProtected);
-        mWrappedClient.onRendererCrash(processWasOomProtected);
-    }
-
-    @Override
     public boolean shouldOverrideKeyEvent(KeyEvent event) {
         return mWrappedClient.shouldOverrideKeyEvent(event);
     }
@@ -52,13 +44,8 @@ public class TestContentViewClientWrapper extends TestContentViewClient {
     }
 
     @Override
-    public boolean shouldOverrideScroll(float deltaX, float deltaY, float currX, float currY) {
-        return mWrappedClient.shouldOverrideScroll(deltaX, deltaY, currX, currX);
-    }
-
-    @Override
-    public ActionMode.Callback getSelectActionModeCallback(
-            Context context, ActionHandler actionHandler, boolean incognito) {
+    public ActionMode.Callback getSelectActionModeCallback(Context context,
+            ActionHandler actionHandler, boolean incognito) {
         return mWrappedClient.getSelectActionModeCallback(context, actionHandler, incognito);
     }
 
@@ -79,4 +66,53 @@ public class TestContentViewClientWrapper extends TestContentViewClient {
         super.onStartContentIntent(context, contentUrl);
         mWrappedClient.onStartContentIntent(context, contentUrl);
     }
+
+    @Override
+    public boolean doesPerformWebSearch() {
+        return mWrappedClient.doesPerformWebSearch();
+    }
+
+    @Override
+    public ContentVideoViewClient getContentVideoViewClient() {
+        return mWrappedClient.getContentVideoViewClient();
+    }
+
+    @Override
+    public void onBackgroundColorChanged(int color) {
+        super.onBackgroundColorChanged(color);
+        mWrappedClient.onBackgroundColorChanged(color);
+    }
+
+    @Override
+    public void onOffsetsForFullscreenChanged(float topControlsOffsetYPix, float contentOffsetYPix,
+            float overdrawBottomHeightPix) {
+        super.onOffsetsForFullscreenChanged(topControlsOffsetYPix, contentOffsetYPix,
+                overdrawBottomHeightPix);
+        mWrappedClient.onOffsetsForFullscreenChanged(topControlsOffsetYPix, contentOffsetYPix,
+                overdrawBottomHeightPix);
+    }
+
+    @Override
+    public void onImeStateChangeRequested(boolean requestShow) {
+        super.onImeStateChangeRequested(requestShow);
+        mWrappedClient.onImeStateChangeRequested(requestShow);
+    }
+
+    @Override
+    public void performWebSearch(String searchQuery) {
+        super.performWebSearch(searchQuery);
+        mWrappedClient.performWebSearch(searchQuery);
+    }
+
+    @Override
+    public void onSelectionChanged(String selection) {
+        super.onSelectionChanged(selection);
+        mWrappedClient.onSelectionChanged(selection);
+    }
+
+    @Override
+    public boolean shouldBlockMediaRequest(String url) {
+        return mWrappedClient.shouldBlockMediaRequest(url);
+    }
+
 }

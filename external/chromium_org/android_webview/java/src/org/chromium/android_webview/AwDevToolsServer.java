@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@ import org.chromium.base.JNINamespace;
 @JNINamespace("android_webview")
 public class AwDevToolsServer {
 
-    private int mNativeDevToolsServer = 0;
+    private long mNativeDevToolsServer = 0;
 
     public AwDevToolsServer() {
         mNativeDevToolsServer = nativeInitRemoteDebugging();
@@ -27,7 +27,7 @@ public class AwDevToolsServer {
         nativeSetRemoteDebuggingEnabled(mNativeDevToolsServer, enabled);
     }
 
-    private native int nativeInitRemoteDebugging();
-    private native void nativeDestroyRemoteDebugging(int devToolsServer);
-    private native void nativeSetRemoteDebuggingEnabled(int devToolsServer, boolean enabled);
+    private native long nativeInitRemoteDebugging();
+    private native void nativeDestroyRemoteDebugging(long devToolsServer);
+    private native void nativeSetRemoteDebuggingEnabled(long devToolsServer, boolean enabled);
 }

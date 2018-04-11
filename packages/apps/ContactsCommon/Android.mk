@@ -17,16 +17,25 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE_TAGS := optional
 
-LOCAL_SRC_FILES := $(call all-java-files-under, src)
-LOCAL_RESOURCE_DIR := $(addprefix $(LOCAL_PATH)/, res)
+phone_common_dir := ../PhoneCommon
+src_dirs := src $(phone_common_dir)/src
+res_dirs := res $(phone_common_dir)/res
+
+LOCAL_SRC_FILES := $(call all-java-files-under, $(src_dirs))
+LOCAL_RESOURCE_DIR := $(addprefix $(LOCAL_PATH)/, $(res_dirs))
+
+LOCAL_AAPT_FLAGS := \
+    --auto-add-overlay \
+    --extra-packages com.android.phone.common
 
 LOCAL_STATIC_JAVA_LIBRARIES := \
-    com.android.phone.shared \
     com.android.vcard \
     guava \
     android-common \
     android-support-v13 \
     android-support-v4 \
+    libphonenumber \
+    libgeocoding
 
 LOCAL_PACKAGE_NAME := com.android.contacts.common
 
@@ -35,5 +44,14 @@ LOCAL_PROGUARD_FLAG_FILES := proguard.flags
 
 include $(BUILD_PACKAGE)
 
-# Use the folloing include to make our test apk.
+include $(CLEAR_VARS)
+
+# Open-source libphonenumber libraries as found in code.google.com/p/libphonenumber
+LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES := \
+   libphonenumber:libs/libphonenumber-6.2.jar \
+   libgeocoding:libs/geocoder-2.9.jar
+
+include $(BUILD_MULTI_PREBUILT)
+
+# Use the following include to make our test apk.
 include $(call all-makefiles-under,$(LOCAL_PATH))

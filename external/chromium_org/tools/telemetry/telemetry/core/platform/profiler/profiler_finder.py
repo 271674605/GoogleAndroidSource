@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,7 +12,8 @@ from telemetry.core.platform import profiler
 def _DiscoverProfilers():
   profiler_dir = os.path.dirname(__file__)
   return discover.DiscoverClasses(profiler_dir, util.GetTelemetryDir(),
-                                  profiler.Profiler).values()
+                                  profiler.Profiler,
+                                  index_by_class_name=True).values()
 
 
 def FindProfiler(name):
@@ -22,6 +23,6 @@ def FindProfiler(name):
   return None
 
 
-def GetAllAvailableProfilers(options):
+def GetAllAvailableProfilers():
   return sorted([p.name() for p in _DiscoverProfilers()
-                 if p.is_supported(options)])
+                 if p.is_supported(browser_type='any')])

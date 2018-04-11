@@ -109,6 +109,8 @@ LOCAL_SRC_FILES:=                     \
         itf/IAndroidEffect.cpp            \
         itf/IAndroidEffectCapabilities.c  \
         itf/IAndroidEffectSend.c          \
+        itf/IAcousticEchoCancellation.c   \
+        itf/IAutomaticGainControl.c       \
         itf/IBassBoost.c                  \
         itf/IBufferQueue.c                \
         itf/IDynamicInterfaceManagement.c \
@@ -118,6 +120,7 @@ LOCAL_SRC_FILES:=                     \
         itf/IEnvironmentalReverb.c        \
         itf/IEqualizer.c                  \
         itf/IMetadataExtraction.c         \
+        itf/INoiseSuppression.c           \
         itf/IMuteSolo.c                   \
         itf/IObject.c                     \
         itf/IOutputMix.c                  \
@@ -162,6 +165,7 @@ LOCAL_C_INCLUDES:=                                                  \
         $(call include-path-for, wilhelm)                           \
         frameworks/av/media/libstagefright                        \
         frameworks/av/media/libstagefright/include                \
+        frameworks/av/media/libstagefright/http                     \
         frameworks/native/include/media/openmax                     \
         $(call include-path-for, audio-effects)
 
@@ -181,9 +185,11 @@ LOCAL_SHARED_LIBRARIES :=         \
         libbinder                 \
         libstagefright            \
         libstagefright_foundation \
+        libstagefright_http_support \
         libcutils                 \
         libgui                    \
-        libdl
+        libdl                     \
+        libeffects
 
 
 

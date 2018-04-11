@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_STATIC_SYMBOL_RESOLVER_H
-#define MCLD_STATIC_SYMBOL_RESOLVER_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_STATICRESOLVER_H
+#define MCLD_LD_STATICRESOLVER_H
 #include <string>
 #include <mcld/LD/Resolver.h>
 #include <mcld/LD/ResolveInfo.h>
@@ -75,7 +72,7 @@ private:
     w_D  = ResolveInfo::weak_flag   | ResolveInfo::regular_flag | ResolveInfo::define_flag,
     d_D  = ResolveInfo::global_flag | ResolveInfo::dynamic_flag | ResolveInfo::define_flag,
     wd_D = ResolveInfo::weak_flag   | ResolveInfo::dynamic_flag | ResolveInfo::define_flag,
-    C    = ResolveInfo::global_flag | ResolveInfo::regular_flag | ResolveInfo::common_flag, 
+    C    = ResolveInfo::global_flag | ResolveInfo::regular_flag | ResolveInfo::common_flag,
     w_C  = ResolveInfo::weak_flag   | ResolveInfo::regular_flag | ResolveInfo::common_flag,
     d_C  = ResolveInfo::global_flag | ResolveInfo::dynamic_flag | ResolveInfo::common_flag,
     wd_C = ResolveInfo::weak_flag   | ResolveInfo::dynamic_flag | ResolveInfo::common_flag,
@@ -111,7 +108,7 @@ public:
   /// @param pNew the symbol which is used to replace pOld
   virtual bool resolve(ResolveInfo & __restrict__ pOld,
                        const ResolveInfo & __restrict__ pNew,
-                       bool &pOverride) const;
+                       bool &pOverride, LDSymbol::ValueType pValue) const;
 
 private:
   inline unsigned int getOrdinate(const ResolveInfo& pInfo) const {

@@ -26,7 +26,6 @@ import com.android.mail.providers.UIProvider.AccountColumns.SettingsColumns;
 import com.android.mail.providers.UIProvider.AutoAdvance;
 import com.android.mail.providers.UIProvider.ConversationListIcon;
 import com.android.mail.providers.UIProvider.DefaultReplyBehavior;
-import com.android.mail.providers.UIProvider.MessageTextSize;
 import com.android.mail.providers.UIProvider.SnapHeaderValue;
 import com.android.mail.providers.UIProvider.Swipe;
 import com.android.mail.utils.LogTag;
@@ -58,6 +57,11 @@ public class Settings implements Parcelable {
 
     private static final int DEFAULT = SWIPE_SETTING_ARCHIVE;
 
+    public interface ShowImages {
+        public static final int ALWAYS = 0;
+        public static final int ASK_FIRST = 1;
+    }
+
     public final String signature;
     /**
      * Auto advance setting for this account.
@@ -66,11 +70,9 @@ public class Settings implements Parcelable {
      */
     private final int mAutoAdvance;
     private Integer mTransientAutoAdvance = null;
-    public final int messageTextSize;
     public final int snapHeaders;
     public final int replyBehavior;
     public final int convListIcon;
-    public final boolean  convListAttachmentPreviews;
     public final boolean confirmDelete;
     public final boolean confirmArchive;
     public final boolean confirmSend;
@@ -88,10 +90,18 @@ public class Settings implements Parcelable {
     public final boolean forceReplyFromDefault;
     public final int maxAttachmentSize;
     public final int swipe;
-    /** True if arrows on the priority inbox are enabled. */
-    public final boolean priorityArrowsEnabled;
+    /** True if the yellow label indicating importance should be shown. */
+    public final boolean importanceMarkersEnabled;
+    /**
+     * true if personal level indicators should be shown:
+     * an arrow ( › ) by messages sent to my address (not a mailing list),
+     * and a double arrow ( » ) by messages sent only to me.
+     */
+    public final boolean showChevronsEnabled;
     public final Uri setupIntentUri;
     public final String veiledAddressPattern;
+    public final int showImages;
+    public final int welcomeTourShownVersion;
 
     /**
      * The {@link Uri} to use when moving a conversation to the inbox. May
@@ -108,11 +118,9 @@ public class Settings implements Parcelable {
     private Settings() {
         signature = "";
         mAutoAdvance = AutoAdvance.LIST;
-        messageTextSize = MessageTextSize.NORMAL;
         snapHeaders = SnapHeaderValue.ALWAYS;
         replyBehavior = DefaultReplyBehavior.REPLY;
         convListIcon = ConversationListIcon.SENDER_IMAGE;
-        convListAttachmentPreviews = true;
         confirmDelete = false;
         confirmArchive = false;
         confirmSend = false;
@@ -121,21 +129,22 @@ public class Settings implements Parcelable {
         forceReplyFromDefault = false;
         maxAttachmentSize = 0;
         swipe = DEFAULT;
-        priorityArrowsEnabled = false;
+        importanceMarkersEnabled = false;
+        showChevronsEnabled = false;
         setupIntentUri = Uri.EMPTY;
         conversationViewMode = UIProvider.ConversationViewMode.UNDEFINED;
         veiledAddressPattern = null;
         moveToInbox = Uri.EMPTY;
+        showImages = ShowImages.ASK_FIRST;
+        welcomeTourShownVersion = -1;
     }
 
     public Settings(Parcel inParcel) {
         signature = inParcel.readString();
         mAutoAdvance = inParcel.readInt();
-        messageTextSize = inParcel.readInt();
         snapHeaders = inParcel.readInt();
         replyBehavior = inParcel.readInt();
         convListIcon = inParcel.readInt();
-        convListAttachmentPreviews = inParcel.readInt() != 0;
         confirmDelete = inParcel.readInt() != 0;
         confirmArchive = inParcel.readInt() != 0;
         confirmSend = inParcel.readInt() != 0;
@@ -144,22 +153,22 @@ public class Settings implements Parcelable {
         forceReplyFromDefault = inParcel.readInt() != 0;
         maxAttachmentSize = inParcel.readInt();
         swipe = inParcel.readInt();
-        priorityArrowsEnabled = inParcel.readInt() != 0;
+        importanceMarkersEnabled = inParcel.readInt() != 0;
+        showChevronsEnabled = inParcel.readInt() != 0;
         setupIntentUri = Utils.getValidUri(inParcel.readString());
         conversationViewMode = inParcel.readInt();
         veiledAddressPattern = inParcel.readString();
         moveToInbox = Utils.getValidUri(inParcel.readString());
+        showImages = inParcel.readInt();
+        welcomeTourShownVersion = inParcel.readInt();
     }
 
     public Settings(Cursor cursor) {
         signature = cursor.getString(cursor.getColumnIndex(SettingsColumns.SIGNATURE));
         mAutoAdvance = cursor.getInt(cursor.getColumnIndex(SettingsColumns.AUTO_ADVANCE));
-        messageTextSize = cursor.getInt(cursor.getColumnIndex(SettingsColumns.MESSAGE_TEXT_SIZE));
         snapHeaders = cursor.getInt(cursor.getColumnIndex(SettingsColumns.SNAP_HEADERS));
         replyBehavior = cursor.getInt(cursor.getColumnIndex(SettingsColumns.REPLY_BEHAVIOR));
         convListIcon = cursor.getInt(cursor.getColumnIndex(SettingsColumns.CONV_LIST_ICON));
-        convListAttachmentPreviews = cursor
-                .getInt(cursor.getColumnIndex(SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS)) != 0;
         confirmDelete = cursor.getInt(cursor.getColumnIndex(SettingsColumns.CONFIRM_DELETE)) != 0;
         confirmArchive = cursor.getInt(cursor.getColumnIndex(SettingsColumns.CONFIRM_ARCHIVE)) != 0;
         confirmSend = cursor.getInt(cursor.getColumnIndex(SettingsColumns.CONFIRM_SEND)) != 0;
@@ -172,8 +181,10 @@ public class Settings implements Parcelable {
         maxAttachmentSize =
                 cursor.getInt(cursor.getColumnIndex(SettingsColumns.MAX_ATTACHMENT_SIZE));
         swipe = cursor.getInt(cursor.getColumnIndex(SettingsColumns.SWIPE));
-        priorityArrowsEnabled = cursor.getInt(
-                cursor.getColumnIndex(SettingsColumns.PRIORITY_ARROWS_ENABLED)) != 0;
+        importanceMarkersEnabled = cursor.getInt(
+                cursor.getColumnIndex(SettingsColumns.IMPORTANCE_MARKERS_ENABLED)) != 0;
+        showChevronsEnabled = cursor.getInt(
+                cursor.getColumnIndex(SettingsColumns.SHOW_CHEVRONS_ENABLED)) != 0;
         setupIntentUri = Utils.getValidUri(
                 cursor.getString(cursor.getColumnIndex(SettingsColumns.SETUP_INTENT_URI)));
         conversationViewMode =
@@ -182,21 +193,21 @@ public class Settings implements Parcelable {
                 cursor.getString(cursor.getColumnIndex(SettingsColumns.VEILED_ADDRESS_PATTERN));
         moveToInbox = Utils.getValidUri(
                 cursor.getString(cursor.getColumnIndex(SettingsColumns.MOVE_TO_INBOX)));
+        showImages = cursor.getInt(cursor.getColumnIndex(SettingsColumns.SHOW_IMAGES));
+        welcomeTourShownVersion = cursor.getInt(
+                cursor.getColumnIndex(SettingsColumns.WELCOME_TOUR_SHOWN_VERSION));
     }
 
     private Settings(JSONObject json) {
         signature = json.optString(SettingsColumns.SIGNATURE, sDefault.signature);
         mAutoAdvance = json.optInt(SettingsColumns.AUTO_ADVANCE, sDefault.getAutoAdvanceSetting());
-        messageTextSize = json.optInt(SettingsColumns.MESSAGE_TEXT_SIZE, sDefault.messageTextSize);
         snapHeaders = json.optInt(SettingsColumns.SNAP_HEADERS, sDefault.snapHeaders);
         replyBehavior = json.optInt(SettingsColumns.REPLY_BEHAVIOR, sDefault.replyBehavior);
         convListIcon = json.optInt(SettingsColumns.CONV_LIST_ICON, sDefault.convListIcon);
-        convListAttachmentPreviews = json.optBoolean(SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS,
-                sDefault.convListAttachmentPreviews);
         confirmDelete = json.optBoolean(SettingsColumns.CONFIRM_DELETE, sDefault.confirmDelete);
         confirmArchive = json.optBoolean(SettingsColumns.CONFIRM_ARCHIVE, sDefault.confirmArchive);
         confirmSend = json.optBoolean(SettingsColumns.CONFIRM_SEND, sDefault.confirmSend);
-        defaultInbox = Utils.getValidUri( json.optString(SettingsColumns.DEFAULT_INBOX));
+        defaultInbox = Utils.getValidUri(json.optString(SettingsColumns.DEFAULT_INBOX));
         defaultInboxName = json.optString(SettingsColumns.DEFAULT_INBOX_NAME,
                 sDefault.defaultInboxName);
         forceReplyFromDefault = json.optBoolean(SettingsColumns.FORCE_REPLY_FROM_DEFAULT,
@@ -204,13 +215,18 @@ public class Settings implements Parcelable {
         maxAttachmentSize =
                 json.optInt(SettingsColumns.MAX_ATTACHMENT_SIZE, sDefault.maxAttachmentSize);
         swipe = json.optInt(SettingsColumns.SWIPE, sDefault.swipe);
-        priorityArrowsEnabled = json.optBoolean(SettingsColumns.PRIORITY_ARROWS_ENABLED,
-                sDefault.priorityArrowsEnabled);
+        importanceMarkersEnabled = json.optBoolean(SettingsColumns.IMPORTANCE_MARKERS_ENABLED,
+                sDefault.importanceMarkersEnabled);
+        showChevronsEnabled = json.optBoolean(SettingsColumns.SHOW_CHEVRONS_ENABLED,
+                sDefault.showChevronsEnabled);
         setupIntentUri = Utils.getValidUri(json.optString(SettingsColumns.SETUP_INTENT_URI));
         conversationViewMode = json.optInt(SettingsColumns.CONVERSATION_VIEW_MODE,
                 UIProvider.ConversationViewMode.UNDEFINED);
         veiledAddressPattern = json.optString(SettingsColumns.VEILED_ADDRESS_PATTERN, null);
         moveToInbox = Utils.getValidUri(json.optString(SettingsColumns.MOVE_TO_INBOX));
+        showImages = json.optInt(SettingsColumns.SHOW_IMAGES, sDefault.showImages);
+        welcomeTourShownVersion = json.optInt(
+                SettingsColumns.WELCOME_TOUR_SHOWN_VERSION, sDefault.welcomeTourShownVersion);
     }
 
     /**
@@ -235,11 +251,9 @@ public class Settings implements Parcelable {
         try {
             json.put(SettingsColumns.SIGNATURE, getNonNull(signature, sDefault.signature));
             json.put(SettingsColumns.AUTO_ADVANCE, getAutoAdvanceSetting());
-            json.put(SettingsColumns.MESSAGE_TEXT_SIZE, messageTextSize);
             json.put(SettingsColumns.SNAP_HEADERS, snapHeaders);
             json.put(SettingsColumns.REPLY_BEHAVIOR, replyBehavior);
             json.put(SettingsColumns.CONV_LIST_ICON, convListIcon);
-            json.put(SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS, convListAttachmentPreviews);
             json.put(SettingsColumns.CONFIRM_DELETE, confirmDelete);
             json.put(SettingsColumns.CONFIRM_ARCHIVE, confirmArchive);
             json.put(SettingsColumns.CONFIRM_SEND, confirmSend);
@@ -250,12 +264,15 @@ public class Settings implements Parcelable {
             json.put(SettingsColumns.FORCE_REPLY_FROM_DEFAULT, forceReplyFromDefault);
             json.put(SettingsColumns.MAX_ATTACHMENT_SIZE,  maxAttachmentSize);
             json.put(SettingsColumns.SWIPE, swipe);
-            json.put(SettingsColumns.PRIORITY_ARROWS_ENABLED, priorityArrowsEnabled);
+            json.put(SettingsColumns.IMPORTANCE_MARKERS_ENABLED, importanceMarkersEnabled);
+            json.put(SettingsColumns.SHOW_CHEVRONS_ENABLED, showChevronsEnabled);
             json.put(SettingsColumns.SETUP_INTENT_URI, setupIntentUri);
             json.put(SettingsColumns.CONVERSATION_VIEW_MODE, conversationViewMode);
             json.put(SettingsColumns.VEILED_ADDRESS_PATTERN, veiledAddressPattern);
             json.put(SettingsColumns.MOVE_TO_INBOX,
                     getNonNull(moveToInbox, sDefault.moveToInbox));
+            json.put(SettingsColumns.SHOW_IMAGES, showImages);
+            json.put(SettingsColumns.WELCOME_TOUR_SHOWN_VERSION, welcomeTourShownVersion);
         } catch (JSONException e) {
             LogUtils.wtf(LOG_TAG, e, "Could not serialize settings");
         }
@@ -272,31 +289,27 @@ public class Settings implements Parcelable {
             map = new HashMap<String, Object>();
         }
 
-        map.put(UIProvider.AccountColumns.SettingsColumns.SIGNATURE, signature);
-        map.put(UIProvider.AccountColumns.SettingsColumns.AUTO_ADVANCE, getAutoAdvanceSetting());
-        map.put(UIProvider.AccountColumns.SettingsColumns.MESSAGE_TEXT_SIZE, messageTextSize);
-        map.put(UIProvider.AccountColumns.SettingsColumns.SNAP_HEADERS, snapHeaders);
-        map.put(UIProvider.AccountColumns.SettingsColumns.REPLY_BEHAVIOR, replyBehavior);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONV_LIST_ICON, convListIcon);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONV_LIST_ATTACHMENT_PREVIEWS,
-                convListAttachmentPreviews ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONFIRM_DELETE, confirmDelete ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONFIRM_ARCHIVE, confirmArchive ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONFIRM_SEND, confirmSend ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.DEFAULT_INBOX, defaultInbox);
-        map.put(UIProvider.AccountColumns.SettingsColumns.DEFAULT_INBOX_NAME, defaultInboxName);
-        map.put(UIProvider.AccountColumns.SettingsColumns.FORCE_REPLY_FROM_DEFAULT,
-                forceReplyFromDefault ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.MAX_ATTACHMENT_SIZE, maxAttachmentSize);
-        map.put(UIProvider.AccountColumns.SettingsColumns.SWIPE, swipe);
-        map.put(UIProvider.AccountColumns.SettingsColumns.PRIORITY_ARROWS_ENABLED,
-                priorityArrowsEnabled ? 1 : 0);
-        map.put(UIProvider.AccountColumns.SettingsColumns.SETUP_INTENT_URI, setupIntentUri);
-        map.put(UIProvider.AccountColumns.SettingsColumns.CONVERSATION_VIEW_MODE,
-                conversationViewMode);
-        map.put(UIProvider.AccountColumns.SettingsColumns.VEILED_ADDRESS_PATTERN,
-                veiledAddressPattern);
-        map.put(UIProvider.AccountColumns.SettingsColumns.MOVE_TO_INBOX, moveToInbox);
+        map.put(SettingsColumns.SIGNATURE, signature);
+        map.put(SettingsColumns.AUTO_ADVANCE, getAutoAdvanceSetting());
+        map.put(SettingsColumns.SNAP_HEADERS, snapHeaders);
+        map.put(SettingsColumns.REPLY_BEHAVIOR, replyBehavior);
+        map.put(SettingsColumns.CONV_LIST_ICON, convListIcon);
+        map.put(SettingsColumns.CONFIRM_DELETE, confirmDelete ? 1 : 0);
+        map.put(SettingsColumns.CONFIRM_ARCHIVE, confirmArchive ? 1 : 0);
+        map.put(SettingsColumns.CONFIRM_SEND, confirmSend ? 1 : 0);
+        map.put(SettingsColumns.DEFAULT_INBOX, defaultInbox);
+        map.put(SettingsColumns.DEFAULT_INBOX_NAME, defaultInboxName);
+        map.put(SettingsColumns.FORCE_REPLY_FROM_DEFAULT, forceReplyFromDefault ? 1 : 0);
+        map.put(SettingsColumns.MAX_ATTACHMENT_SIZE, maxAttachmentSize);
+        map.put(SettingsColumns.SWIPE, swipe);
+        map.put(SettingsColumns.IMPORTANCE_MARKERS_ENABLED, importanceMarkersEnabled ? 1 : 0);
+        map.put(SettingsColumns.SHOW_CHEVRONS_ENABLED, showChevronsEnabled ? 1 : 0);
+        map.put(SettingsColumns.SETUP_INTENT_URI, setupIntentUri);
+        map.put(SettingsColumns.CONVERSATION_VIEW_MODE, conversationViewMode);
+        map.put(SettingsColumns.VEILED_ADDRESS_PATTERN, veiledAddressPattern);
+        map.put(SettingsColumns.MOVE_TO_INBOX, moveToInbox);
+        map.put(SettingsColumns.SHOW_IMAGES, showImages);
+        map.put(SettingsColumns.WELCOME_TOUR_SHOWN_VERSION, welcomeTourShownVersion);
 
         return map;
     }
@@ -325,11 +338,9 @@ public class Settings implements Parcelable {
     public void writeToParcel(Parcel dest, int flags) {
         dest.writeString((String) getNonNull(signature, sDefault.signature));
         dest.writeInt(getAutoAdvanceSetting());
-        dest.writeInt(messageTextSize);
         dest.writeInt(snapHeaders);
         dest.writeInt(replyBehavior);
         dest.writeInt(convListIcon);
-        dest.writeInt(convListAttachmentPreviews ? 1 : 0);
         dest.writeInt(confirmDelete ? 1 : 0);
         dest.writeInt(confirmArchive? 1 : 0);
         dest.writeInt(confirmSend? 1 : 0);
@@ -338,11 +349,14 @@ public class Settings implements Parcelable {
         dest.writeInt(forceReplyFromDefault ? 1 : 0);
         dest.writeInt(maxAttachmentSize);
         dest.writeInt(swipe);
-        dest.writeInt(priorityArrowsEnabled ? 1 : 0);
+        dest.writeInt(importanceMarkersEnabled ? 1 : 0);
+        dest.writeInt(showChevronsEnabled ? 1 : 0);
         dest.writeString(getNonNull(setupIntentUri, sDefault.setupIntentUri).toString());
         dest.writeInt(conversationViewMode);
         dest.writeString(veiledAddressPattern);
         dest.writeString(getNonNull(moveToInbox, sDefault.moveToInbox).toString());
+        dest.writeInt(showImages);
+        dest.writeInt(welcomeTourShownVersion);
     }
 
     /**
@@ -434,11 +448,9 @@ public class Settings implements Parcelable {
         return (TextUtils.equals(signature, that.signature)
                 && mAutoAdvance == that.mAutoAdvance
                 && autoAdvanceEquals
-                && messageTextSize == that.messageTextSize
                 && snapHeaders == that.snapHeaders
                 && replyBehavior == that.replyBehavior
                 && convListIcon == that.convListIcon
-                && convListAttachmentPreviews == that.convListAttachmentPreviews
                 && confirmDelete == that.confirmDelete
                 && confirmArchive == that.confirmArchive
                 && confirmSend == that.confirmSend
@@ -447,11 +459,13 @@ public class Settings implements Parcelable {
                 && forceReplyFromDefault == that.forceReplyFromDefault
                 && maxAttachmentSize == that.maxAttachmentSize
                 && swipe == that.swipe
-                && priorityArrowsEnabled == that.priorityArrowsEnabled
+                && importanceMarkersEnabled == that.importanceMarkersEnabled
+                && showChevronsEnabled == that.showChevronsEnabled
                 && setupIntentUri == that.setupIntentUri
                 && conversationViewMode == that.conversationViewMode
                 && TextUtils.equals(veiledAddressPattern, that.veiledAddressPattern))
-                && Objects.equal(moveToInbox, that.moveToInbox);
+                && Objects.equal(moveToInbox, that.moveToInbox)
+                && welcomeTourShownVersion == that.welcomeTourShownVersion;
     }
 
     @Override
@@ -459,11 +473,11 @@ public class Settings implements Parcelable {
         if (mHashCode == 0) {
             mHashCode = super.hashCode()
                     ^ Objects.hashCode(signature, mAutoAdvance, mTransientAutoAdvance,
-                    messageTextSize, snapHeaders, replyBehavior, convListIcon,
-                    convListAttachmentPreviews, confirmDelete, confirmArchive, confirmSend,
-                    defaultInbox, forceReplyFromDefault, maxAttachmentSize, swipe,
-                    priorityArrowsEnabled, setupIntentUri, conversationViewMode,
-                    veiledAddressPattern, moveToInbox);
+                    snapHeaders, replyBehavior, convListIcon, confirmDelete, confirmArchive,
+                    confirmSend, defaultInbox, forceReplyFromDefault, maxAttachmentSize, swipe,
+                    importanceMarkersEnabled, showChevronsEnabled, setupIntentUri,
+                    conversationViewMode, veiledAddressPattern, moveToInbox,
+                    welcomeTourShownVersion);
         }
         return mHashCode;
     }

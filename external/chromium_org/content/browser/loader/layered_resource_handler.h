@@ -9,35 +9,39 @@
 #include "content/browser/loader/resource_handler.h"
 #include "content/common/content_export.h"
 
+namespace net {
+class URLRequest;
+}  // namespace net
+
 namespace content {
 
 // A ResourceHandler that simply delegates all calls to a next handler.  This
 // class is intended to be subclassed.
 class CONTENT_EXPORT LayeredResourceHandler : public ResourceHandler {
  public:
-  explicit LayeredResourceHandler(scoped_ptr<ResourceHandler> next_handler);
+  LayeredResourceHandler(net::URLRequest* request,
+                         scoped_ptr<ResourceHandler> next_handler);
   virtual ~LayeredResourceHandler();
 
   // ResourceHandler implementation:
   virtual void SetController(ResourceController* controller) OVERRIDE;
-  virtual bool OnUploadProgress(int request_id, uint64 position,
-                                uint64 size) OVERRIDE;
-  virtual bool OnRequestRedirected(int request_id, const GURL& url,
+  virtual bool OnUploadProgress(uint64 position, uint64 size) OVERRIDE;
+  virtual bool OnRequestRedirected(const GURL& url,
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
-  virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response,
+  virtual bool OnResponseStarted(ResourceResponse* response,
                                  bool* defer) OVERRIDE;
-  virtual bool OnWillStart(int request_id, const GURL& url,
-                           bool* defer) OVERRIDE;
-  virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
+  virtual bool OnWillStart(const GURL& url, bool* defer) OVERRIDE;
+  virtual bool OnBeforeNetworkStart(const GURL& url, bool* defer) OVERRIDE;
+  virtual bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+                          int* buf_size,
                           int min_size) OVERRIDE;
-  virtual bool OnReadCompleted(int request_id, int bytes_read,
+  virtual bool OnReadCompleted(int bytes_read,
                                bool* defer) OVERRIDE;
-  virtual bool OnResponseCompleted(int request_id,
-                                   const net::URLRequestStatus& status,
-                                   const std::string& security_info) OVERRIDE;
-  virtual void OnDataDownloaded(int request_id, int bytes_downloaded) OVERRIDE;
+  virtual void OnResponseCompleted(const net::URLRequestStatus& status,
+                                   const std::string& security_info,
+                                   bool* defer) OVERRIDE;
+  virtual void OnDataDownloaded(int bytes_downloaded) OVERRIDE;
 
   scoped_ptr<ResourceHandler> next_handler_;
 };

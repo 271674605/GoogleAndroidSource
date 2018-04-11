@@ -13,6 +13,8 @@
 
 #include "SkBlurImageFilter.h"
 #include "SkColorFilterImageFilter.h"
+#include "SkMergeImageFilter.h"
+#include "SkOffsetImageFilter.h"
 #include "SkTestImageFilters.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -58,8 +60,7 @@ static void draw_bitmap(SkCanvas* canvas, const SkRect& r, SkImageFilter* imf) {
     r.roundOut(&bounds);
 
     SkBitmap bm;
-    bm.setConfig(SkBitmap::kARGB_8888_Config, bounds.width(), bounds.height());
-    bm.allocPixels();
+    bm.allocN32Pixels(bounds.width(), bounds.height());
     bm.eraseColor(SK_ColorTRANSPARENT);
     SkCanvas c(bm);
     draw_path(&c, r, NULL);
@@ -78,8 +79,7 @@ static void draw_sprite(SkCanvas* canvas, const SkRect& r, SkImageFilter* imf) {
     r.roundOut(&bounds);
 
     SkBitmap bm;
-    bm.setConfig(SkBitmap::kARGB_8888_Config, bounds.width(), bounds.height());
-    bm.allocPixels();
+    bm.allocN32Pixels(bounds.width(), bounds.height());
     bm.eraseColor(SK_ColorRED);
     SkCanvas c(bm);
 
@@ -102,7 +102,6 @@ public:
     ImageFiltersCroppedGM () {}
 
 protected:
-
     virtual SkString onShortName() {
         return SkString("imagefilterscropped");
     }
@@ -121,7 +120,7 @@ protected:
         // from scaled replay tests because drawSprite ignores the
         // reciprocal scale that is applied at record time, which is
         // the intended behavior of drawSprite.
-        return kSkipScaledReplay_Flag;
+        return kSkipScaledReplay_Flag | kSkipTiled_Flag;
     }
 
     virtual void onDraw(SkCanvas* canvas) {
@@ -129,22 +128,27 @@ protected:
             draw_sprite, draw_bitmap, draw_path, draw_paint, draw_text
         };
 
-        SkColorFilter* cf = SkColorFilter::CreateModeFilter(SK_ColorRED,
-                                                     SkXfermode::kSrcIn_Mode);
-        SkIRect cropRect = SkIRect::MakeXYWH(10, 10, 44, 44);
-        SkIRect bogusRect = SkIRect::MakeXYWH(-100, -100, 10, 10);
+        SkAutoTUnref<SkColorFilter> cf(
+            SkColorFilter::CreateModeFilter(SK_ColorBLUE, SkXfermode::kSrcIn_Mode));
+        SkImageFilter::CropRect cropRect(SkRect::Make(SkIRect::MakeXYWH(10, 10, 44, 44)), SkImageFilter::CropRect::kHasAll_CropEdge);
+        SkImageFilter::CropRect bogusRect(SkRect::Make(SkIRect::MakeXYWH(-100, -100, 10, 10)), SkImageFilter::CropRect::kHasAll_CropEdge);
+
+        SkAutoTUnref<SkImageFilter> offset(SkOffsetImageFilter::Create(
+            SkIntToScalar(-10), SkIntToScalar(-10)));
+
+        SkAutoTUnref<SkImageFilter> cfOffset(SkColorFilterImageFilter::Create(cf.get(), offset.get()));
 
         SkImageFilter* filters[] = {
             NULL,
-            SkColorFilterImageFilter::Create(cf, NULL, &cropRect),
-            new SkBlurImageFilter(1.0f, 1.0f, NULL, &cropRect),
-            new SkBlurImageFilter(8.0f, 0.0f, NULL, &cropRect),
-            new SkBlurImageFilter(0.0f, 8.0f, NULL, &cropRect),
-            new SkBlurImageFilter(8.0f, 8.0f, NULL, &cropRect),
-            new SkBlurImageFilter(8.0f, 8.0f, NULL, &bogusRect),
-            SkColorFilterImageFilter::Create(cf, NULL, &bogusRect),
+            SkColorFilterImageFilter::Create(cf.get(), NULL, &cropRect),
+            SkBlurImageFilter::Create(1.0f, 1.0f, NULL, &cropRect),
+            SkBlurImageFilter::Create(8.0f, 0.0f, NULL, &cropRect),
+            SkBlurImageFilter::Create(0.0f, 8.0f, NULL, &cropRect),
+            SkBlurImageFilter::Create(8.0f, 8.0f, NULL, &cropRect),
+            SkMergeImageFilter::Create(NULL, cfOffset.get(), SkXfermode::kSrcOver_Mode, &cropRect),
+            SkBlurImageFilter::Create(8.0f, 8.0f, NULL, &bogusRect),
+            SkColorFilterImageFilter::Create(cf.get(), NULL, &bogusRect),
         };
-        cf->unref();
 
         SkRect r = SkRect::MakeWH(SkIntToScalar(64), SkIntToScalar(64));
         SkScalar MARGIN = SkIntToScalar(16);

@@ -18,28 +18,17 @@
 package com.android.mail.browse;
 
 import android.content.Context;
-import android.content.res.Resources;
-import android.os.Build;
-import android.text.Spannable;
-import android.text.SpannableStringBuilder;
-import android.text.TextUtils;
-import android.text.style.BackgroundColorSpan;
-import android.text.style.ForegroundColorSpan;
 import android.util.AttributeSet;
-import android.util.TypedValue;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import com.android.mail.R;
 import com.android.mail.browse.ConversationViewAdapter.ConversationHeaderItem;
-import com.android.mail.browse.FolderSpan.FolderSpanDimensions;
 import com.android.mail.providers.Conversation;
-import com.android.mail.providers.Folder;
-import com.android.mail.providers.Settings;
-import com.android.mail.ui.FolderDisplayer;
+import com.android.mail.providers.UIProvider;
+import com.android.mail.ui.ConversationUpdater;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.Utils;
@@ -67,16 +56,13 @@ public class ConversationViewHeader extends LinearLayout implements OnClickListe
     }
 
     private static final String LOG_TAG = LogTag.getLogTag();
-    private TextView mSubjectView;
-    private FolderSpanTextView mFoldersView;
+    private SubjectAndFolderView mSubjectAndFolderView;
+    private StarView mStarView;
     private ConversationViewHeaderCallbacks mCallbacks;
     private ConversationAccountController mAccountController;
-    private ConversationFolderDisplayer mFolderDisplayer;
+    private ConversationUpdater mConversationUpdater;
     private ConversationHeaderItem mHeaderItem;
-
-    private boolean mLargeText;
-    private final float mCondensedTextSize;
-    private final int mCondensedTopPadding;
+    private Conversation mConversation;
 
     /**
      * Instantiated from this layout: conversation_view_header.xml
@@ -88,87 +74,46 @@ public class ConversationViewHeader extends LinearLayout implements OnClickListe
 
     public ConversationViewHeader(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mLargeText = true;
-        final Resources resources = getResources();
-        mCondensedTextSize =
-                resources.getDimensionPixelSize(R.dimen.conversation_header_font_size_condensed);
-        mCondensedTopPadding = resources.getDimensionPixelSize(
-                R.dimen.conversation_header_vertical_padding_condensed);
     }
 
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        mSubjectView = (TextView) findViewById(R.id.subject);
-        mFoldersView = (FolderSpanTextView) findViewById(R.id.folders);
-
-        mFoldersView.setOnClickListener(this);
-        mFolderDisplayer = new ConversationFolderDisplayer(getContext(), mFoldersView);
-    }
-
-    @Override
-    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-
-        // If we currently have large text and we have greater than 2 lines,
-        // switch to smaller text size with smaller top padding and re-measure
-        if (mLargeText && mSubjectView.getLineCount() > 2) {
-            mSubjectView.setTextSize(TypedValue.COMPLEX_UNIT_PX, mCondensedTextSize);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                // start, top, end, bottom
-                mSubjectView.setPaddingRelative(mSubjectView.getPaddingStart(),
-                        mCondensedTopPadding, mSubjectView.getPaddingEnd(),
-                        mSubjectView.getPaddingBottom());
-            } else {
-                mSubjectView.setPadding(mSubjectView.getPaddingLeft(),
-                        mCondensedTopPadding, mSubjectView.getPaddingRight(),
-                        mSubjectView.getPaddingBottom());
-            }
-
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-        }
+        mSubjectAndFolderView =
+                (SubjectAndFolderView) findViewById(R.id.subject_and_folder_view);
+        mStarView = (StarView) findViewById(R.id.conversation_header_star);
+        mStarView.setOnClickListener(this);
     }
 
     public void setCallbacks(ConversationViewHeaderCallbacks callbacks,
-            ConversationAccountController accountController) {
+            ConversationAccountController accountController,
+            ConversationUpdater conversationUpdater) {
         mCallbacks = callbacks;
         mAccountController = accountController;
+        mConversationUpdater = conversationUpdater;
     }
 
     public void setSubject(final String subject) {
-        mSubjectView.setText(subject);
-        if (TextUtils.isEmpty(subject)) {
-            mSubjectView.setVisibility(GONE);
-        }
-    }
-
-    public void setFoldersVisible(boolean show) {
-        mFoldersView.setVisibility(show ? View.VISIBLE : View.GONE);
+        mSubjectAndFolderView.setSubject(subject);
     }
 
     public void setFolders(Conversation conv) {
-        setFoldersVisible(true);
-        SpannableStringBuilder sb = new SpannableStringBuilder();
-        final Settings settings = mAccountController.getAccount().settings;
-        if (settings.priorityArrowsEnabled && conv.isImportant()) {
-            sb.append('.');
-            sb.setSpan(new PriorityIndicatorSpan(getContext(),
-                    R.drawable.ic_email_caret_none_important_unread, mFoldersView.getPadding(), 0,
-                    mFoldersView.getPaddingAbove()),
-                    0, 1, Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
-        }
+        mSubjectAndFolderView.setFolders(mCallbacks, mAccountController.getAccount(), conv);
+    }
 
-        mFolderDisplayer.loadConversationFolders(conv, null /* ignoreFolder */,
-                -1 /* ignoreFolderType */);
-        mFolderDisplayer.appendFolderSpans(sb);
-
-        mFoldersView.setText(sb);
+    public void setStarred(boolean isStarred) {
+        mStarView.setStarred(isStarred);
+        mStarView.setVisibility(View.VISIBLE);
     }
 
     public void bind(ConversationHeaderItem headerItem) {
         mHeaderItem = headerItem;
+        mConversation = mHeaderItem.mConversation;
+        if (mSubjectAndFolderView != null) {
+            mSubjectAndFolderView.bind(headerItem);
+        }
+        mStarView.setVisibility(mConversation != null ? View.VISIBLE : View.INVISIBLE);
     }
 
     private int measureHeight() {
@@ -186,9 +131,12 @@ public class ConversationViewHeader extends LinearLayout implements OnClickListe
      */
     public void onConversationUpdated(Conversation conv) {
         // The only things we have to worry about when the conversation changes
-        // in the conversation header are the folders and priority indicators.
+        // in the conversation header are the folders, priority indicators, and starred state.
         // Updating these will resize the space for the header.
+        mConversation = conv;
+        setSubject(conv.subject);
         setFolders(conv);
+        setStarred(conv.starred);
         if (mHeaderItem != null) {
             final int h = measureHeight();
             if (mHeaderItem.setHeight(h)) {
@@ -199,50 +147,12 @@ public class ConversationViewHeader extends LinearLayout implements OnClickListe
 
     @Override
     public void onClick(View v) {
-        if (R.id.folders == v.getId()) {
-            if (mCallbacks != null) {
-                mCallbacks.onFoldersClicked();
-            }
-        }
-    }
-
-    private static class ConversationFolderDisplayer extends FolderDisplayer {
-
-        private FolderSpanDimensions mDims;
-
-        public ConversationFolderDisplayer(Context context, FolderSpanDimensions dims) {
-            super(context);
-            mDims = dims;
-        }
-
-        public void appendFolderSpans(SpannableStringBuilder sb) {
-            for (final Folder f : mFoldersSortedSet) {
-                final int bgColor = f.getBackgroundColor(mDefaultBgColor);
-                final int fgColor = f.getForegroundColor(mDefaultFgColor);
-                addSpan(sb, f.name, bgColor, fgColor);
-            }
-
-            if (mFoldersSortedSet.isEmpty()) {
-                final Resources r = mContext.getResources();
-                final String name = r.getString(R.string.add_label);
-                final int bgColor = r.getColor(R.color.conv_header_add_label_background);
-                final int fgColor = r.getColor(R.color.conv_header_add_label_text);
-                addSpan(sb, name, bgColor, fgColor);
-            }
-        }
-
-        private void addSpan(SpannableStringBuilder sb, String name, int bgColor,
-                             int fgColor) {
-            final int start = sb.length();
-            sb.append(name);
-            final int end = sb.length();
-
-            sb.setSpan(new BackgroundColorSpan(bgColor), start, end,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new ForegroundColorSpan(fgColor), start, end,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new FolderSpan(sb, mDims), start, end,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        final int id = v.getId();
+        if (mConversation != null && id == R.id.conversation_header_star) {
+            mConversation.starred = !mConversation.starred;
+            setStarred(mConversation.starred);
+            mConversationUpdater.updateConversation(Conversation.listOf(mConversation),
+                    UIProvider.ConversationColumns.STARRED, mConversation.starred);
         }
 
     }

@@ -48,6 +48,9 @@ IPC_MESSAGE_CONTROL3(PluginProcessMsg_ClearSiteData,
 IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ChannelCreated,
                      IPC::ChannelHandle /* channel_handle */)
 
+IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ChannelDestroyed,
+                     int /* renderer_id */)
+
 IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ClearSiteDataResult,
                      bool /* success */)
 
@@ -56,16 +59,6 @@ IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ClearSiteDataResult,
 IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginWindowDestroyed,
                      HWND /* window */,
                      HWND /* parent */)
-#endif
-
-#if defined(USE_X11)
-// On X11, the mapping between NativeViewId and X window ids
-// is known only to the browser.  This message lets the plugin process
-// ask about a NativeViewId that was provided by the renderer.
-// It will get 0 back if it's a bogus input.
-IPC_SYNC_MESSAGE_CONTROL1_1(PluginProcessHostMsg_MapNativeViewId,
-                           gfx::NativeViewId /* input: native view id */,
-                           gfx::PluginWindowHandle /* output: X window id */)
 #endif
 
 #if defined(OS_MACOSX)

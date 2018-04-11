@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <math.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -292,7 +293,7 @@ status_t InputPublisher::publishMotionEvent(
         float yPrecision,
         nsecs_t downTime,
         nsecs_t eventTime,
-        size_t pointerCount,
+        uint32_t pointerCount,
         const PointerProperties* pointerProperties,
         const PointerCoords* pointerCoords) {
 #if DEBUG_TRANSPORT_ACTIONS
@@ -300,7 +301,7 @@ status_t InputPublisher::publishMotionEvent(
             "action=0x%x, flags=0x%x, edgeFlags=0x%x, metaState=0x%x, buttonState=0x%x, "
             "xOffset=%f, yOffset=%f, "
             "xPrecision=%f, yPrecision=%f, downTime=%lld, eventTime=%lld, "
-            "pointerCount=%d",
+            "pointerCount=%" PRIu32,
             mChannel->getName().string(), seq,
             deviceId, source, action, flags, edgeFlags, metaState, buttonState,
             xOffset, yOffset, xPrecision, yPrecision, downTime, eventTime, pointerCount);
@@ -312,7 +313,7 @@ status_t InputPublisher::publishMotionEvent(
     }
 
     if (pointerCount > MAX_POINTERS || pointerCount < 1) {
-        ALOGE("channel '%s' publisher ~ Invalid number of pointers provided: %d.",
+        ALOGE("channel '%s' publisher ~ Invalid number of pointers provided: %" PRIu32 ".",
                 mChannel->getName().string(), pointerCount);
         return BAD_VALUE;
     }
@@ -334,7 +335,7 @@ status_t InputPublisher::publishMotionEvent(
     msg.body.motion.downTime = downTime;
     msg.body.motion.eventTime = eventTime;
     msg.body.motion.pointerCount = pointerCount;
-    for (size_t i = 0; i < pointerCount; i++) {
+    for (uint32_t i = 0; i < pointerCount; i++) {
         msg.body.motion.pointers[i].properties.copyFrom(pointerProperties[i]);
         msg.body.motion.pointers[i].coords.copyFrom(pointerCoords[i]);
     }
@@ -511,14 +512,17 @@ status_t InputConsumer::consumeBatch(InputEventFactoryInterface* factory,
     status_t result;
     for (size_t i = mBatches.size(); i-- > 0; ) {
         Batch& batch = mBatches.editItemAt(i);
-        if (frameTime < 0 || !mResampleTouch) {
+        if (frameTime < 0) {
             result = consumeSamples(factory, batch, batch.samples.size(),
                     outSeq, outEvent);
             mBatches.removeAt(i);
             return result;
         }
 
-        nsecs_t sampleTime = frameTime - RESAMPLE_LATENCY;
+        nsecs_t sampleTime = frameTime;
+        if (mResampleTouch) {
+            sampleTime -= RESAMPLE_LATENCY;
+        }
         ssize_t split = findSampleNoLaterThan(batch, sampleTime);
         if (split < 0) {
             continue;
@@ -532,7 +536,7 @@ status_t InputConsumer::consumeBatch(InputEventFactoryInterface* factory,
         } else {
             next = &batch.samples.itemAt(0);
         }
-        if (!result) {
+        if (!result && mResampleTouch) {
             resampleTouchState(sampleTime, static_cast<MotionEvent*>(*outEvent), next);
         }
         return result;
@@ -651,7 +655,7 @@ void InputConsumer::updateTouchState(InputMessage* msg) {
 }
 
 void InputConsumer::rewriteMessage(const TouchState& state, InputMessage* msg) {
-    for (size_t i = 0; i < msg->body.motion.pointerCount; i++) {
+    for (uint32_t i = 0; i < msg->body.motion.pointerCount; i++) {
         uint32_t id = msg->body.motion.pointers[i].properties.id;
         if (state.lastResample.idBits.hasBit(id)) {
             PointerCoords& msgCoords = msg->body.motion.pointers[i].coords;
@@ -891,10 +895,10 @@ void InputConsumer::initializeKeyEvent(KeyEvent* event, const InputMessage* msg)
 }
 
 void InputConsumer::initializeMotionEvent(MotionEvent* event, const InputMessage* msg) {
-    size_t pointerCount = msg->body.motion.pointerCount;
+    uint32_t pointerCount = msg->body.motion.pointerCount;
     PointerProperties pointerProperties[pointerCount];
     PointerCoords pointerCoords[pointerCount];
-    for (size_t i = 0; i < pointerCount; i++) {
+    for (uint32_t i = 0; i < pointerCount; i++) {
         pointerProperties[i].copyFrom(msg->body.motion.pointers[i].properties);
         pointerCoords[i].copyFrom(msg->body.motion.pointers[i].coords);
     }
@@ -919,9 +923,9 @@ void InputConsumer::initializeMotionEvent(MotionEvent* event, const InputMessage
 }
 
 void InputConsumer::addSample(MotionEvent* event, const InputMessage* msg) {
-    size_t pointerCount = msg->body.motion.pointerCount;
+    uint32_t pointerCount = msg->body.motion.pointerCount;
     PointerCoords pointerCoords[pointerCount];
-    for (size_t i = 0; i < pointerCount; i++) {
+    for (uint32_t i = 0; i < pointerCount; i++) {
         pointerCoords[i].copyFrom(msg->body.motion.pointers[i].coords);
     }
 
@@ -931,7 +935,7 @@ void InputConsumer::addSample(MotionEvent* event, const InputMessage* msg) {
 
 bool InputConsumer::canAddSample(const Batch& batch, const InputMessage *msg) {
     const InputMessage& head = batch.samples.itemAt(0);
-    size_t pointerCount = msg->body.motion.pointerCount;
+    uint32_t pointerCount = msg->body.motion.pointerCount;
     if (head.body.motion.pointerCount != pointerCount
             || head.body.motion.action != msg->body.motion.action) {
         return false;

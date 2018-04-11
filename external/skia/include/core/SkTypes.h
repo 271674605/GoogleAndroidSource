@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,19 +5,13 @@
  * found in the LICENSE file.
  */
 
-
 #ifndef SkTypes_DEFINED
 #define SkTypes_DEFINED
 
 #include "SkPreConfig.h"
 #include "SkUserConfig.h"
 #include "SkPostConfig.h"
-
-#ifndef SK_IGNORE_STDINT_DOT_H
-    #include <stdint.h>
-#endif
-
-#include <stdio.h>
+#include <stdint.h>
 
 /** \file SkTypes.h
 */
@@ -49,7 +42,7 @@ enum {
 };
 /** Return a block of memory (at least 4-byte aligned) of at least the
     specified size. If the requested memory cannot be returned, either
-    return null (if SK_MALLOC_TEMP bit is clear) or call sk_throw()
+    return null (if SK_MALLOC_TEMP bit is clear) or throw an exception
     (if SK_MALLOC_TEMP bit is set). To free the memory, call sk_free().
 */
 SK_API extern void* sk_malloc_flags(size_t size, unsigned flags);
@@ -63,6 +56,14 @@ SK_API extern void* sk_realloc_throw(void* buffer, size_t size);
 /** Free memory returned by sk_malloc(). It is safe to pass null.
 */
 SK_API extern void sk_free(void*);
+
+/** Much like calloc: returns a pointer to at least size zero bytes, or NULL on failure.
+ */
+SK_API extern void* sk_calloc(size_t size);
+
+/** Same as sk_calloc, but throws an exception instead of returning NULL on failure.
+ */
+SK_API extern void* sk_calloc_throw(size_t size);
 
 // bzero is safer than memset, but we can't rely on it, so... sk_bzero()
 static inline void sk_bzero(void* buffer, size_t size) {
@@ -92,7 +93,7 @@ inline void operator delete(void* p) {
 #endif
 
 #ifdef SK_DEBUG
-    #define SkASSERT(cond)              SK_DEBUGBREAK(cond)
+    #define SkASSERT(cond)              SK_ALWAYSBREAK(cond)
     #define SkDEBUGFAIL(message)        SkASSERT(false && message)
     #define SkDEBUGCODE(code)           code
     #define SkDECLAREPARAM(type, var)   , type var
@@ -112,22 +113,46 @@ inline void operator delete(void* p) {
     #define SkAssertResult(cond)        cond
 #endif
 
+#define SkFAIL(message)                 SK_ALWAYSBREAK(false && message)
+
+// We want to evaluate cond only once, and inside the SkASSERT somewhere so we see its string form.
+// So we use the comma operator to make an SkDebugf that always returns false: we'll evaluate cond,
+// and if it's true the assert passes; if it's false, we'll print the message and the assert fails.
+#define SkASSERTF(cond, fmt, ...)       SkASSERT((cond) || (SkDebugf(fmt"\n", __VA_ARGS__), false))
+
 #ifdef SK_DEVELOPER
     #define SkDEVCODE(code)             code
-    // the 'toString' helper functions convert Sk* objects to human-readable
-    // form in developer mode
-    #define SK_DEVELOPER_TO_STRING()    virtual void toString(SkString* str) const SK_OVERRIDE;
 #else
     #define SkDEVCODE(code)
-    #define SK_DEVELOPER_TO_STRING()
+#endif
+
+#ifdef SK_IGNORE_TO_STRING
+    #define SK_TO_STRING_NONVIRT()
+    #define SK_TO_STRING_VIRT()
+    #define SK_TO_STRING_PUREVIRT()
+    #define SK_TO_STRING_OVERRIDE()
+#else
+    // the 'toString' helper functions convert Sk* objects to human-readable
+    // form in developer mode
+    #define SK_TO_STRING_NONVIRT() void toString(SkString* str) const;
+    #define SK_TO_STRING_VIRT() virtual void toString(SkString* str) const;
+    #define SK_TO_STRING_PUREVIRT() virtual void toString(SkString* str) const = 0;
+    #define SK_TO_STRING_OVERRIDE() virtual void toString(SkString* str) const SK_OVERRIDE;
 #endif
 
 template <bool>
 struct SkCompileAssert {
 };
 
+// Uses static_cast<bool>(expr) instead of bool(expr) due to
+// https://connect.microsoft.com/VisualStudio/feedback/details/832915
+
+// The extra parentheses in SkCompileAssert<(...)> are a work around for
+// http://gcc.gnu.org/bugzilla/show_bug.cgi?id=57771
+// which was fixed in gcc 4.8.2.
 #define SK_COMPILE_ASSERT(expr, msg) \
-    typedef SkCompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] SK_UNUSED
+    typedef SkCompileAssert<(static_cast<bool>(expr))> \
+            msg[static_cast<bool>(expr) ? 1 : -1] SK_UNUSED
 
 /*
  *  Usage:  SK_MACRO_CONCAT(a, b)   to construct the symbol ab
@@ -145,6 +170,32 @@ struct SkCompileAssert {
  *                                      variables.
  */
 #define SK_MACRO_APPEND_LINE(name)  SK_MACRO_CONCAT(name, __LINE__)
+
+/**
+ * For some classes, it's almost always an error to instantiate one without a name, e.g.
+ *   {
+ *       SkAutoMutexAcquire(&mutex);
+ *       <some code>
+ *   }
+ * In this case, the writer meant to hold mutex while the rest of the code in the block runs,
+ * but instead the mutex is acquired and then immediately released.  The correct usage is
+ *   {
+ *       SkAutoMutexAcquire lock(&mutex);
+ *       <some code>
+ *   }
+ *
+ * To prevent callers from instantiating your class without a name, use SK_REQUIRE_LOCAL_VAR
+ * like this:
+ *   class classname {
+ *       <your class>
+ *   };
+ *   #define classname(...) SK_REQUIRE_LOCAL_VAR(classname)
+ *
+ * This won't work with templates, and you must inline the class' constructors and destructors.
+ * Take a look at SkAutoFree and SkAutoMalloc in this file for examples.
+ */
+#define SK_REQUIRE_LOCAL_VAR(classname) \
+    SK_COMPILE_ASSERT(false, missing_name_for_##classname)
 
 ///////////////////////////////////////////////////////////////////////
 
@@ -190,6 +241,9 @@ typedef uint8_t SkBool8;
     SK_API uint16_t    SkToU16(uintmax_t);
     SK_API int32_t     SkToS32(intmax_t);
     SK_API uint32_t    SkToU32(uintmax_t);
+    SK_API int         SkToInt(intmax_t);
+    SK_API unsigned    SkToUInt(uintmax_t);
+    SK_API size_t      SkToSizeT(uintmax_t);
 #else
     #define SkToS8(x)   ((int8_t)(x))
     #define SkToU8(x)   ((uint8_t)(x))
@@ -197,6 +251,9 @@ typedef uint8_t SkBool8;
     #define SkToU16(x)  ((uint16_t)(x))
     #define SkToS32(x)  ((int32_t)(x))
     #define SkToU32(x)  ((uint32_t)(x))
+    #define SkToInt(x)  ((int)(x))
+    #define SkToUInt(x) ((unsigned)(x))
+    #define SkToSizeT(x) ((size_t)(x))
 #endif
 
 /** Returns 0 or 1 based on the condition
@@ -264,6 +321,10 @@ typedef uint32_t SkMSec;
 /** Returns a <= b for milliseconds, correctly handling wrap-around from 0xFFFFFFFF to 0
 */
 #define SkMSec_LE(a, b)     ((int32_t)(a) - (int32_t)(b) <= 0)
+
+/** The generation IDs in Skia reserve 0 has an invalid marker.
+ */
+#define SK_InvalidGenID     0
 
 /****************************************************************************
     The rest of these only build with C++
@@ -429,13 +490,14 @@ private:
     SkAutoFree(const SkAutoFree&);
     SkAutoFree& operator=(const SkAutoFree&);
 };
+#define SkAutoFree(...) SK_REQUIRE_LOCAL_VAR(SkAutoFree)
 
 /**
  *  Manage an allocated block of heap memory. This object is the sole manager of
  *  the lifetime of the block, so the caller must not call sk_free() or delete
  *  on the block, unless detach() was called.
  */
-class SkAutoMalloc : public SkNoncopyable {
+class SkAutoMalloc : SkNoncopyable {
 public:
     explicit SkAutoMalloc(size_t size = 0) {
         fPtr = size ? sk_malloc_throw(size) : NULL;
@@ -515,6 +577,7 @@ private:
     void*   fPtr;
     size_t  fSize;  // can be larger than the requested size (see kReuse)
 };
+#define SkAutoMalloc(...) SK_REQUIRE_LOCAL_VAR(SkAutoMalloc)
 
 /**
  *  Manage an allocated block of memory. If the requested size is <= kSize, then
@@ -601,6 +664,7 @@ private:
     size_t      fSize;  // can be larger than the requested size (see kReuse)
     uint32_t    fStorage[(kSize + 3) >> 2];
 };
+// Can't guard the constructor because it's a template class.
 
 #endif /* C++ */
 

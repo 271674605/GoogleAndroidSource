@@ -13,9 +13,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
+#include "components/sync_driver/data_type_controller.h"
+#include "components/sync_driver/data_type_error_handler.h"
 
 class Profile;
 class ProfileSyncService;
@@ -48,6 +48,8 @@ class NonFrontendDataTypeController : public DataTypeController {
   class BackendComponentsContainer;
 
   NonFrontendDataTypeController(
+      scoped_refptr<base::MessageLoopProxy> ui_thread,
+      const base::Closure& error_callback,
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
@@ -112,6 +114,12 @@ class NonFrontendDataTypeController : public DataTypeController {
       const tracked_objects::Location& from_here,
       const base::Closure& task) = 0;
 
+  // Returns true if the current thread is the backend thread, i.e. the same
+  // thread used by |PostTaskOnBackendThread|. The default implementation just
+  // checks that the current thread is not the UI thread, but subclasses should
+  // override it appropriately.
+  virtual bool IsOnBackendThread();
+
   // Datatype specific creation of sync components.
   // Note: this is performed on the datatype's thread.
   virtual ProfileSyncComponentsFactory::SyncComponents
@@ -145,6 +153,13 @@ class NonFrontendDataTypeController : public DataTypeController {
   // Record causes of start failure. Called on UI thread.
   virtual void RecordStartFailure(StartResult result);
 
+  // Handles the reporting of unrecoverable error. It records stuff in
+  // UMA and reports to breakpad.
+  // Virtual for testing purpose.
+  virtual void RecordUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message);
+
   // Accessors and mutators used by derived classes.
   ProfileSyncComponentsFactory* profile_sync_factory() const;
   Profile* profile() const;
@@ -153,7 +168,7 @@ class NonFrontendDataTypeController : public DataTypeController {
   void set_state(State state);
 
   virtual AssociatorInterface* associator() const;
-  virtual ChangeProcessor* change_processor() const;
+  virtual ChangeProcessor* GetChangeProcessor() const OVERRIDE;
 
   State state_;
   StartCallback start_callback_;

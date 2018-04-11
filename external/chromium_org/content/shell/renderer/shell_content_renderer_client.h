@@ -7,58 +7,48 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/platform_file.h"
 #include "content/public/renderer/content_renderer_client.h"
 
-namespace WebKit {
+namespace blink {
 class WebFrame;
 class WebPlugin;
 struct WebPluginParams;
 }
 
-namespace WebTestRunner {
-class WebTestProxyBase;
-}
-
-class MockWebClipboardImpl;
-
 namespace content {
 
+class MockWebClipboardImpl;
 class ShellRenderProcessObserver;
+class WebTestProxyBase;
 
 class ShellContentRendererClient : public ContentRendererClient {
  public:
-  static ShellContentRendererClient* Get();
-
   ShellContentRendererClient();
   virtual ~ShellContentRendererClient();
 
   // ContentRendererClient implementation.
   virtual void RenderThreadStarted() OVERRIDE;
+  virtual void RenderFrameCreated(RenderFrame* render_frame) OVERRIDE;
   virtual void RenderViewCreated(RenderView* render_view) OVERRIDE;
   virtual bool OverrideCreatePlugin(
-      RenderView* render_view,
-      WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params,
-      WebKit::WebPlugin** plugin) OVERRIDE;
-  virtual WebKit::WebMediaStreamCenter* OverrideCreateWebMediaStreamCenter(
-      WebKit::WebMediaStreamCenterClient* client) OVERRIDE;
-  virtual WebKit::WebRTCPeerConnectionHandler*
+      RenderFrame* render_frame,
+      blink::WebLocalFrame* frame,
+      const blink::WebPluginParams& params,
+      blink::WebPlugin** plugin) OVERRIDE;
+  virtual blink::WebMediaStreamCenter* OverrideCreateWebMediaStreamCenter(
+      blink::WebMediaStreamCenterClient* client) OVERRIDE;
+  virtual blink::WebRTCPeerConnectionHandler*
   OverrideCreateWebRTCPeerConnectionHandler(
-      WebKit::WebRTCPeerConnectionHandlerClient* client) OVERRIDE;
-  virtual WebKit::WebMIDIAccessor* OverrideCreateMIDIAccessor(
-      WebKit::WebMIDIAccessorClient* client) OVERRIDE;
-  virtual WebKit::WebAudioDevice* OverrideCreateAudioDevice(
+      blink::WebRTCPeerConnectionHandlerClient* client) OVERRIDE;
+  virtual blink::WebMIDIAccessor* OverrideCreateMIDIAccessor(
+      blink::WebMIDIAccessorClient* client) OVERRIDE;
+  virtual blink::WebAudioDevice* OverrideCreateAudioDevice(
       double sample_rate) OVERRIDE;
-  virtual WebKit::WebClipboard* OverrideWebClipboard() OVERRIDE;
-  virtual WebKit::WebCrypto* OverrideWebCrypto() OVERRIDE;
-  virtual WebKit::WebThemeEngine* OverrideThemeEngine() OVERRIDE;
-  virtual bool AllowBrowserPlugin(
-      WebKit::WebPluginContainer* container) OVERRIDE;
+  virtual blink::WebClipboard* OverrideWebClipboard() OVERRIDE;
+  virtual blink::WebThemeEngine* OverrideThemeEngine() OVERRIDE;
 
  private:
-   void WebTestProxyCreated(RenderView* render_view,
-                            WebTestRunner::WebTestProxyBase* proxy);
+  void WebTestProxyCreated(RenderView* render_view, WebTestProxyBase* proxy);
 
   scoped_ptr<ShellRenderProcessObserver> shell_observer_;
   scoped_ptr<MockWebClipboardImpl> clipboard_;

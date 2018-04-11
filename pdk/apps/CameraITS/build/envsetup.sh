@@ -29,12 +29,15 @@ command -v python >/dev/null 2>&1 || \
 python -V 2>&1 | grep -q "Python 2.7" || \
     echo ">> Require python 2.7" >&2
 
-python -c 'import numpy, PIL, Image, matplotlib, pylab' >/dev/null 2>&1 || \
-    echo ">> Require scipy stack" >&2
+for M in numpy PIL Image matplotlib pylab
+do
+    python -c "import $M" >/dev/null 2>&1 || \
+        echo ">> Require Python $M module" >&2
+done
 
 export PYTHONPATH="$PWD/pymodules:$PYTHONPATH"
 
-for M in device objects image
+for M in device objects image caps dng target error
 do
     python "pymodules/its/$M.py" 2>&1 | grep -q "OK" || \
         echo ">> Unit test for $M failed" >&2

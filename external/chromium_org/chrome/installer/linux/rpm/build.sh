@@ -18,7 +18,7 @@ gen_spec() {
   # Trunk packages need to install to a custom path so they don't conflict with
   # release channel packages.
   local PACKAGE_FILENAME="${PACKAGE}"
-  if [ "$CHANNEL" = "trunk" ] || [ "$CHANNEL" = "asan" ]; then
+  if [ "$CHANNEL" != "stable" ]; then
     local INSTALLDIR="${INSTALLDIR}-${CHANNEL}"
     PACKAGE_FILENAME="${PACKAGE}-${CHANNEL}"
     local MENUNAME="${MENUNAME} (${CHANNEL})"
@@ -34,18 +34,24 @@ prep_staging_rpm() {
 
 # Put the package contents in the staging area.
 stage_install_rpm() {
-  # Trunk packages need to install to a custom path and with custom filenames
-  # (e.g. not /usr/bin/google-chrome) so they don't conflict with release
-  # channel packages.
-  if [ "$CHANNEL" = "trunk" ] || [ "$CHANNEL" = "asan" ]; then
-    local PACKAGE="${PACKAGE}-${CHANNEL}"
-    local INSTALLDIR="${INSTALLDIR}-${CHANNEL}"
+  # TODO(phajdan.jr): Deduplicate this and debian/build.sh .
+  # For now duplication is going to help us avoid merge conflicts
+  # as changes are frequently merged to older branches related to SxS effort.
+  if [ "$CHANNEL" != "stable" ]; then
     # This would ideally be compiled into the app, but that's a bit too
     # intrusive of a change for these limited use channels, so we'll just hack
     # it into the wrapper script. The user can still override since it seems to
     # work to specify --user-data-dir multiple times on the command line, with
     # the last occurrence winning.
-    local DEFAULT_FLAGS="--user-data-dir=\"\${HOME}/.config/${PACKAGE}\""
+    local SXS_USER_DATA_DIR="\${XDG_CONFIG_HOME:-\${HOME}/.config}/${PACKAGE}-${CHANNEL}"
+    local DEFAULT_FLAGS="--user-data-dir=\"${SXS_USER_DATA_DIR}\""
+
+    # Avoid file collisions between channels.
+    local PACKAGE="${PACKAGE}-${CHANNEL}"
+    local INSTALLDIR="${INSTALLDIR}-${CHANNEL}"
+
+    # Make it possible to distinguish between menu entries
+    # for different channels.
     local MENUNAME="${MENUNAME} (${CHANNEL})"
   fi
   prep_staging_rpm
@@ -92,8 +98,8 @@ do_package() {
   fi
 
   # Use find-requires script to make sure the dependencies are complete
-  # (especially libc and libstdc++ versions). Filter out udev to avoid
-  # libudev.so.0 vs. libudev.so.1 mismatches.
+  # (especially libc and libstdc++ versions).
+  # - Filter out udev to avoid libudev.so.0 vs. libudev.so.1 mismatches.
   DETECTED_DEPENDS="$(echo "${BUILDDIR}/chrome" | /usr/lib/rpm/find-requires |
       grep -v udev)"
 
@@ -105,7 +111,7 @@ do_package() {
     echo
     echo "ERROR: Shared library dependencies changed!"
     echo "If this is intentional, please update:"
-    echo "chrome/installer/linux/rpm/expected_deps_i686"
+    echo "chrome/installer/linux/rpm/expected_deps_i386"
     echo "chrome/installer/linux/rpm/expected_deps_x86_64"
     echo
     exit $BAD_DIFF
@@ -175,19 +181,23 @@ verify_channel() {
   case $CHANNEL in
     stable )
       CHANNEL=stable
-      REPLACES="unstable beta"
+      # TODO(phajdan.jr): Remove REPLACES completely.
+      REPLACES="dummy"
       ;;
     unstable|dev|alpha )
       CHANNEL=unstable
-      REPLACES="stable beta"
+      # TODO(phajdan.jr): Remove REPLACES completely.
+      REPLACES="dummy"
       ;;
     testing|beta )
       CHANNEL=beta
-      REPLACES="unstable stable"
+      # TODO(phajdan.jr): Remove REPLACES completely.
+      REPLACES="dummy"
       ;;
     trunk|asan )
       # This is a special package, mostly for development testing, so don't make
       # it replace any installed release packages.
+      # TODO(phajdan.jr): Remove REPLACES completely.
       REPLACES="dummy"
       # Setting this to empty will prevent it from updating any existing configs
       # from release packages.
@@ -276,6 +286,7 @@ eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
 
 REPOCONFIG="http://dl.google.com/linux/${PACKAGE#google-}/rpm/stable"
 verify_channel
+export USR_BIN_SYMLINK_NAME="${PACKAGE}-${CHANNEL}"
 
 # Make everything happen in the OUTPUTDIR.
 cd "${OUTPUTDIR}"

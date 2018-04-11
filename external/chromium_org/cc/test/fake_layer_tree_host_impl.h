@@ -14,21 +14,28 @@ namespace cc {
 
 class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
  public:
-  explicit FakeLayerTreeHostImpl(Proxy* proxy);
-  FakeLayerTreeHostImpl(const LayerTreeSettings& settings, Proxy* proxy);
+  FakeLayerTreeHostImpl(Proxy* proxy, SharedBitmapManager* manager);
+  FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
+                        Proxy* proxy,
+                        SharedBitmapManager* manager);
   virtual ~FakeLayerTreeHostImpl();
 
   void ForcePrepareToDraw() {
     LayerTreeHostImpl::FrameData frame_data;
-    PrepareToDraw(&frame_data, gfx::Rect());
+    PrepareToDraw(&frame_data);
     DidDrawAllLayers(frame_data);
   }
 
   virtual void CreatePendingTree() OVERRIDE;
 
+  virtual base::TimeTicks CurrentFrameTimeTicks() OVERRIDE;
+  void SetCurrentFrameTimeTicks(base::TimeTicks current_frame_time_ticks);
+
   using LayerTreeHostImpl::ActivatePendingTree;
+  using LayerTreeHostImpl::manage_tiles_needed;
 
  private:
+  base::TimeTicks current_frame_time_ticks_;
   FakeLayerTreeHostImplClient client_;
   FakeRenderingStatsInstrumentation stats_instrumentation_;
 };

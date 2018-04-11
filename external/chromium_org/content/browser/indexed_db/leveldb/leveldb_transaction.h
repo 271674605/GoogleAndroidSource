@@ -5,14 +5,14 @@
 #ifndef CONTENT_BROWSER_INDEXED_DB_LEVELDB_LEVELDB_TRANSACTION_H_
 #define CONTENT_BROWSER_INDEXED_DB_LEVELDB_LEVELDB_TRANSACTION_H_
 
+#include <map>
 #include <set>
 #include <string>
-#include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
-#include "content/browser/indexed_db/leveldb/avltree.h"
 #include "content/browser/indexed_db/leveldb/leveldb_comparator.h"
 #include "content/browser/indexed_db/leveldb/leveldb_database.h"
 #include "content/browser/indexed_db/leveldb/leveldb_iterator.h"
@@ -24,84 +24,71 @@ class LevelDBWriteBatch;
 class CONTENT_EXPORT LevelDBTransaction
     : public base::RefCounted<LevelDBTransaction> {
  public:
-  explicit LevelDBTransaction(LevelDBDatabase* db);
 
   void Put(const base::StringPiece& key, std::string* value);
   void Remove(const base::StringPiece& key);
-  bool Get(const base::StringPiece& key, std::string* value, bool* found);
-  bool Commit();
+  virtual leveldb::Status Get(const base::StringPiece& key,
+                              std::string* value,
+                              bool* found);
+  virtual leveldb::Status Commit();
   void Rollback();
 
   scoped_ptr<LevelDBIterator> CreateIterator();
 
- private:
+ protected:
   virtual ~LevelDBTransaction();
-  friend class base::RefCounted<LevelDBTransaction>;
+  explicit LevelDBTransaction(LevelDBDatabase* db);
+  friend class IndexedDBClassFactory;
 
-  struct AVLTreeNode {
-    AVLTreeNode();
-    ~AVLTreeNode();
+ private:
+  friend class base::RefCounted<LevelDBTransaction>;
+  FRIEND_TEST_ALL_PREFIXES(LevelDBDatabaseTest, Transaction);
+  FRIEND_TEST_ALL_PREFIXES(LevelDBDatabaseTest, TransactionCommitTest);
+  FRIEND_TEST_ALL_PREFIXES(LevelDBDatabaseTest, TransactionIterator);
+
+  struct Record {
+    Record();
+    ~Record();
     std::string key;
     std::string value;
     bool deleted;
-
-    AVLTreeNode* less;
-    AVLTreeNode* greater;
-    int balance_factor;
-    DISALLOW_COPY_AND_ASSIGN(AVLTreeNode);
   };
 
-  struct AVLTreeAbstractor {
-    typedef AVLTreeNode* handle;
-    typedef size_t size;
-    typedef base::StringPiece key;
-
-    handle GetLess(handle h) { return h->less; }
-    void SetLess(handle h, handle less) { h->less = less; }
-    handle GetGreater(handle h) { return h->greater; }
-    void SetGreater(handle h, handle greater) { h->greater = greater; }
-
-    int GetBalanceFactor(handle h) { return h->balance_factor; }
-    void SetBalanceFactor(handle h, int bf) { h->balance_factor = bf; }
-
-    int CompareKeyKey(const key& ka, const key& kb) {
-      return comparator_->Compare(ka, kb);
-    }
-    int CompareKeyNode(const key& k, handle h) {
-      return CompareKeyKey(k, h->key);
-    }
-    int CompareNodeNode(handle ha, handle hb) {
-      return CompareKeyKey(ha->key, hb->key);
+  class Comparator {
+   public:
+    explicit Comparator(const LevelDBComparator* comparator)
+        : comparator_(comparator) {}
+    bool operator()(const base::StringPiece& a,
+                    const base::StringPiece& b) const {
+      return comparator_->Compare(a, b) < 0;
     }
 
-    static handle Null() { return 0; }
-
+   private:
     const LevelDBComparator* comparator_;
   };
 
-  typedef AVLTree<AVLTreeAbstractor> TreeType;
+  typedef std::map<base::StringPiece, Record*, Comparator> DataType;
 
-  class TreeIterator : public LevelDBIterator {
+  class DataIterator : public LevelDBIterator {
    public:
-    static scoped_ptr<TreeIterator> Create(LevelDBTransaction* transaction);
-    virtual ~TreeIterator();
+    static scoped_ptr<DataIterator> Create(LevelDBTransaction* transaction);
+    virtual ~DataIterator();
 
     virtual bool IsValid() const OVERRIDE;
-    virtual void SeekToLast() OVERRIDE;
-    virtual void Seek(const base::StringPiece& slice) OVERRIDE;
-    virtual void Next() OVERRIDE;
-    virtual void Prev() OVERRIDE;
+    virtual leveldb::Status SeekToLast() OVERRIDE;
+    virtual leveldb::Status Seek(const base::StringPiece& slice) OVERRIDE;
+    virtual leveldb::Status Next() OVERRIDE;
+    virtual leveldb::Status Prev() OVERRIDE;
     virtual base::StringPiece Key() const OVERRIDE;
     virtual base::StringPiece Value() const OVERRIDE;
     bool IsDeleted() const;
-    void Reset();
 
    private:
-    explicit TreeIterator(LevelDBTransaction* transaction);
-    mutable TreeType::Iterator iterator_;  // Dereferencing this is non-const.
-    TreeType* tree_;
-    LevelDBTransaction* transaction_;
-    std::string key_;
+    explicit DataIterator(LevelDBTransaction* transaction);
+    DataType* data_;
+    DataType::iterator iterator_;
+
+    DISALLOW_COPY_AND_ASSIGN(DataIterator);
   };
 
   class TransactionIterator : public LevelDBIterator {
@@ -111,26 +98,26 @@ class CONTENT_EXPORT LevelDBTransaction
         scoped_refptr<LevelDBTransaction> transaction);
 
     virtual bool IsValid() const OVERRIDE;
-    virtual void SeekToLast() OVERRIDE;
-    virtual void Seek(const base::StringPiece& target) OVERRIDE;
-    virtual void Next() OVERRIDE;
-    virtual void Prev() OVERRIDE;
+    virtual leveldb::Status SeekToLast() OVERRIDE;
+    virtual leveldb::Status Seek(const base::StringPiece& target) OVERRIDE;
+    virtual leveldb::Status Next() OVERRIDE;
+    virtual leveldb::Status Prev() OVERRIDE;
     virtual base::StringPiece Key() const OVERRIDE;
     virtual base::StringPiece Value() const OVERRIDE;
-    void TreeChanged();
+    void DataChanged();
 
    private:
     explicit TransactionIterator(scoped_refptr<LevelDBTransaction> transaction);
     void HandleConflictsAndDeletes();
     void SetCurrentIteratorToSmallestKey();
     void SetCurrentIteratorToLargestKey();
-    void RefreshTreeIterator() const;
-    bool TreeIteratorIsLower() const;
-    bool TreeIteratorIsHigher() const;
+    void RefreshDataIterator() const;
+    bool DataIteratorIsLower() const;
+    bool DataIteratorIsHigher() const;
 
     scoped_refptr<LevelDBTransaction> transaction_;
     const LevelDBComparator* comparator_;
-    mutable scoped_ptr<TreeIterator> tree_iterator_;
+    mutable scoped_ptr<DataIterator> data_iterator_;
     scoped_ptr<LevelDBIterator> db_iterator_;
     LevelDBIterator* current_;
 
@@ -139,37 +126,50 @@ class CONTENT_EXPORT LevelDBTransaction
       REVERSE
     };
     Direction direction_;
-    mutable bool tree_changed_;
+    mutable bool data_changed_;
+
+    DISALLOW_COPY_AND_ASSIGN(TransactionIterator);
   };
 
   void Set(const base::StringPiece& key, std::string* value, bool deleted);
-  void ClearTree();
+  void Clear();
   void RegisterIterator(TransactionIterator* iterator);
   void UnregisterIterator(TransactionIterator* iterator);
-  void NotifyIteratorsOfTreeChange();
+  void NotifyIterators();
 
   LevelDBDatabase* db_;
   const LevelDBSnapshot snapshot_;
   const LevelDBComparator* comparator_;
-  TreeType tree_;
+  Comparator data_comparator_;
+  DataType data_;
   bool finished_;
   std::set<TransactionIterator*> iterators_;
+
+  DISALLOW_COPY_AND_ASSIGN(LevelDBTransaction);
 };
 
-class LevelDBWriteOnlyTransaction {
+// Reads go straight to the database, ignoring any writes cached in
+// write_batch_, and writes are write-through, without consolidation.
+class LevelDBDirectTransaction {
  public:
-  static scoped_ptr<LevelDBWriteOnlyTransaction> Create(LevelDBDatabase* db);
+  static scoped_ptr<LevelDBDirectTransaction> Create(LevelDBDatabase* db);
 
-  ~LevelDBWriteOnlyTransaction();
+  ~LevelDBDirectTransaction();
+  void Put(const base::StringPiece& key, const std::string* value);
+  leveldb::Status Get(const base::StringPiece& key,
+                      std::string* value,
+                      bool* found);
   void Remove(const base::StringPiece& key);
-  bool Commit();
+  leveldb::Status Commit();
 
  private:
-  explicit LevelDBWriteOnlyTransaction(LevelDBDatabase* db);
+  explicit LevelDBDirectTransaction(LevelDBDatabase* db);
 
   LevelDBDatabase* db_;
   scoped_ptr<LevelDBWriteBatch> write_batch_;
   bool finished_;
+
+  DISALLOW_COPY_AND_ASSIGN(LevelDBDirectTransaction);
 };
 
 }  // namespace content

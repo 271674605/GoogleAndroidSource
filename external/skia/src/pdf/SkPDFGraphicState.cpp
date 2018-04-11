@@ -14,8 +14,6 @@
 static const char* blend_mode_from_xfermode(SkXfermode::Mode mode) {
     switch (mode) {
         case SkXfermode::kSrcOver_Mode:    return "Normal";
-        // kModulate is not really like multipy but similar most of the time.
-        case SkXfermode::kModulate_Mode:
         case SkXfermode::kMultiply_Mode:   return "Multiply";
         case SkXfermode::kScreen_Mode:     return "Screen";
         case SkXfermode::kOverlay_Mode:    return "Overlay";
@@ -41,11 +39,12 @@ static const char* blend_mode_from_xfermode(SkXfermode::Mode mode) {
         case SkXfermode::kDstIn_Mode:
         case SkXfermode::kSrcOut_Mode:
         case SkXfermode::kDstOut_Mode:
+        case SkXfermode::kSrcATop_Mode:
+        case SkXfermode::kDstATop_Mode:
+        case SkXfermode::kModulate_Mode:
             return "Normal";
 
         // TODO(vandebo): Figure out if we can support more of these modes.
-        case SkXfermode::kSrcATop_Mode:
-        case SkXfermode::kDstATop_Mode:
         case SkXfermode::kXor_Mode:
         case SkXfermode::kPlus_Mode:
             return NULL;
@@ -83,24 +82,20 @@ size_t SkPDFGraphicState::getOutputSize(SkPDFCatalog* catalog, bool indirect) {
 }
 
 // static
-SkTDArray<SkPDFGraphicState::GSCanonicalEntry>&
-SkPDFGraphicState::CanonicalPaints() {
-    // This initialization is only thread safe with gcc.
+SkTDArray<SkPDFGraphicState::GSCanonicalEntry>& SkPDFGraphicState::CanonicalPaints() {
+    CanonicalPaintsMutex().assertHeld();
     static SkTDArray<SkPDFGraphicState::GSCanonicalEntry> gCanonicalPaints;
     return gCanonicalPaints;
 }
 
 // static
 SkBaseMutex& SkPDFGraphicState::CanonicalPaintsMutex() {
-    // This initialization is only thread safe with gcc or when
-    // POD-style mutex initialization is used.
     SK_DECLARE_STATIC_MUTEX(gCanonicalPaintsMutex);
     return gCanonicalPaintsMutex;
 }
 
 // static
-SkPDFGraphicState* SkPDFGraphicState::GetGraphicStateForPaint(
-        const SkPaint& paint) {
+SkPDFGraphicState* SkPDFGraphicState::GetGraphicStateForPaint(const SkPaint& paint) {
     SkAutoMutexAcquire lock(CanonicalPaintsMutex());
     int index = Find(paint);
     if (index >= 0) {
@@ -115,6 +110,7 @@ SkPDFGraphicState* SkPDFGraphicState::GetGraphicStateForPaint(
 // static
 SkPDFObject* SkPDFGraphicState::GetInvertFunction() {
     // This assumes that canonicalPaintsMutex is held.
+    CanonicalPaintsMutex().assertHeld();
     static SkPDFStream* invertFunction = NULL;
     if (!invertFunction) {
         // Acrobat crashes if we use a type 0 function, kpdf crashes if we use
@@ -186,6 +182,7 @@ SkPDFGraphicState* SkPDFGraphicState::GetNoSMaskGraphicState() {
 
 // static
 int SkPDFGraphicState::Find(const SkPaint& paint) {
+    CanonicalPaintsMutex().assertHeld();
     GSCanonicalEntry search(&paint);
     return CanonicalPaints().find(search);
 }

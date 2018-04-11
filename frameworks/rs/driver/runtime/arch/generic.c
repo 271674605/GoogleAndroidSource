@@ -79,7 +79,7 @@ extern T##4 __attribute__((overloadable)) clamp(T##4 amount, T low, T high) {   
     return r;                                                                       \
 }
 
-#if !defined(ARCH_X86_HAVE_SSE2) && !defined(ARCH_X86_HAVE_SSE3)
+#if !defined(__i386__) && !defined(__x86_64__)
 
 _CLAMP(float);
 
@@ -93,7 +93,7 @@ extern float2 __attribute__((overloadable)) clamp(float2 amount, float low, floa
 extern float3 __attribute__((overloadable)) clamp(float3 amount, float low, float high);
 extern float4 __attribute__((overloadable)) clamp(float4 amount, float low, float high);
 
-#endif // !defined(ARCH_X86_HAVE_SSE2) && !defined(ARCH_X86_HAVE_SSE3)
+#endif // !defined(__i386__) && !defined(__x86_64__)
 
 _CLAMP(double);
 _CLAMP(char);
@@ -308,34 +308,6 @@ extern int4 __attribute__((overloadable)) max(int4 v1, int4 v2) {
     return r;
 }
 
-extern int64_t __attribute__((overloadable)) max(int64_t v1, int64_t v2) {
-    return v1 > v2 ? v1 : v2;
-}
-
-extern long2 __attribute__((overloadable)) max(long2 v1, long2 v2) {
-    long2 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    return r;
-}
-
-extern long3 __attribute__((overloadable)) max(long3 v1, long3 v2) {
-    long3 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    r.z = v1.z > v2.z ? v1.z : v2.z;
-    return r;
-}
-
-extern long4 __attribute__((overloadable)) max(long4 v1, long4 v2) {
-    long4 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    r.z = v1.z > v2.z ? v1.z : v2.z;
-    r.w = v1.w > v2.w ? v1.w : v2.w;
-    return r;
-}
-
 extern uchar __attribute__((overloadable)) max(uchar v1, uchar v2) {
     return v1 > v2 ? v1 : v2;
 }
@@ -413,34 +385,6 @@ extern uint3 __attribute__((overloadable)) max(uint3 v1, uint3 v2) {
 
 extern uint4 __attribute__((overloadable)) max(uint4 v1, uint4 v2) {
     uint4 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    r.z = v1.z > v2.z ? v1.z : v2.z;
-    r.w = v1.w > v2.w ? v1.w : v2.w;
-    return r;
-}
-
-extern ulong __attribute__((overloadable)) max(ulong v1, ulong v2) {
-    return v1 > v2 ? v1 : v2;
-}
-
-extern ulong2 __attribute__((overloadable)) max(ulong2 v1, ulong2 v2) {
-    ulong2 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    return r;
-}
-
-extern ulong3 __attribute__((overloadable)) max(ulong3 v1, ulong3 v2) {
-    ulong3 r;
-    r.x = v1.x > v2.x ? v1.x : v2.x;
-    r.y = v1.y > v2.y ? v1.y : v2.y;
-    r.z = v1.z > v2.z ? v1.z : v2.z;
-    return r;
-}
-
-extern ulong4 __attribute__((overloadable)) max(ulong4 v1, ulong4 v2) {
-    ulong4 r;
     r.x = v1.x > v2.x ? v1.x : v2.x;
     r.y = v1.y > v2.y ? v1.y : v2.y;
     r.z = v1.z > v2.z ? v1.z : v2.z;
@@ -565,34 +509,6 @@ extern int4 __attribute__((overloadable)) min(int4 v1, int4 v2) {
     return r;
 }
 
-extern int64_t __attribute__((overloadable)) min(int64_t v1, int64_t v2) {
-    return v1 < v2 ? v1 : v2;
-}
-
-extern long2 __attribute__((overloadable)) min(long2 v1, long2 v2) {
-    long2 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    return r;
-}
-
-extern long3 __attribute__((overloadable)) min(long3 v1, long3 v2) {
-    long3 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    r.z = v1.z < v2.z ? v1.z : v2.z;
-    return r;
-}
-
-extern long4 __attribute__((overloadable)) min(long4 v1, long4 v2) {
-    long4 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    r.z = v1.z < v2.z ? v1.z : v2.z;
-    r.w = v1.w < v2.w ? v1.w : v2.w;
-    return r;
-}
-
 extern uchar __attribute__((overloadable)) min(uchar v1, uchar v2) {
     return v1 < v2 ? v1 : v2;
 }
@@ -677,34 +593,6 @@ extern uint4 __attribute__((overloadable)) min(uint4 v1, uint4 v2) {
     return r;
 }
 
-extern ulong __attribute__((overloadable)) min(ulong v1, ulong v2) {
-    return v1 < v2 ? v1 : v2;
-}
-
-extern ulong2 __attribute__((overloadable)) min(ulong2 v1, ulong2 v2) {
-    ulong2 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    return r;
-}
-
-extern ulong3 __attribute__((overloadable)) min(ulong3 v1, ulong3 v2) {
-    ulong3 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    r.z = v1.z < v2.z ? v1.z : v2.z;
-    return r;
-}
-
-extern ulong4 __attribute__((overloadable)) min(ulong4 v1, ulong4 v2) {
-    ulong4 r;
-    r.x = v1.x < v2.x ? v1.x : v2.x;
-    r.y = v1.y < v2.y ? v1.y : v2.y;
-    r.z = v1.z < v2.z ? v1.z : v2.z;
-    r.w = v1.w < v2.w ? v1.w : v2.w;
-    return r;
-}
-
 extern float __attribute__((overloadable)) min(float v1, float v2) {
     return fmin(v1, v2);
 }
@@ -773,67 +661,18 @@ extern float4 __attribute__((overloadable)) rsYuvToRGBA_float4(uchar y, uchar u,
  * half_RECIP
  */
 
-extern float __attribute__((overloadable)) half_recip(float v) {
-    // FIXME:  actual algorithm for generic approximate reciprocal
-    return 1.f / v;
-}
-
 extern float2 __attribute__((overloadable)) half_recip(float2 v) {
-    float2 r;
-    r.x = half_recip(r.x);
-    r.y = half_recip(r.y);
-    return r;
+    return ((float2) 1.f) / v;
 }
 
 extern float3 __attribute__((overloadable)) half_recip(float3 v) {
-    float3 r;
-    r.x = half_recip(r.x);
-    r.y = half_recip(r.y);
-    r.z = half_recip(r.z);
-    return r;
+    return ((float3) 1.f) / v;
 }
 
 extern float4 __attribute__((overloadable)) half_recip(float4 v) {
-    float4 r;
-    r.x = half_recip(r.x);
-    r.y = half_recip(r.y);
-    r.z = half_recip(r.z);
-    r.w = half_recip(r.w);
-    return r;
+    return ((float4) 1.f) / v;
 }
 
-
-/*
- * half_SQRT
- */
-
-extern float __attribute__((overloadable)) half_sqrt(float v) {
-    return sqrt(v);
-}
-
-extern float2 __attribute__((overloadable)) half_sqrt(float2 v) {
-    float2 r;
-    r.x = half_sqrt(v.x);
-    r.y = half_sqrt(v.y);
-    return r;
-}
-
-extern float3 __attribute__((overloadable)) half_sqrt(float3 v) {
-    float3 r;
-    r.x = half_sqrt(v.x);
-    r.y = half_sqrt(v.y);
-    r.z = half_sqrt(v.z);
-    return r;
-}
-
-extern float4 __attribute__((overloadable)) half_sqrt(float4 v) {
-    float4 r;
-    r.x = half_sqrt(v.x);
-    r.y = half_sqrt(v.y);
-    r.z = half_sqrt(v.z);
-    r.w = half_sqrt(v.w);
-    return r;
-}
 
 
 /*

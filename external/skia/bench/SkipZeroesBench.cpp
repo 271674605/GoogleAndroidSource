@@ -5,7 +5,8 @@
  * found in the LICENSE file.
  */
 
-#include "SkBenchmark.h"
+#include "Benchmark.h"
+#include "Resources.h"
 #include "SkBitmap.h"
 #include "SkData.h"
 #include "SkForceLinking.h"
@@ -18,7 +19,7 @@ __SK_FORCE_IMAGE_DECODER_LINKING;
 
 class SkCanvas;
 
-class SkipZeroesBench : public SkBenchmark {
+class SkipZeroesBench : public Benchmark {
 public:
     SkipZeroesBench(const char* filename, bool skipZeroes)
     : fName("SkipZeroes_")
@@ -27,25 +28,33 @@ public:
     , fStream()
     , fSkipZeroes(skipZeroes)
     , fValid(false) {
-        fName.append(SkOSPath::SkBasename(filename));
+        fName.append(filename);
         if (skipZeroes) {
             fName.append("_skip_zeroes");
         } else {
             fName.append("_write_zeroes");
         }
-        fIsRendering = false;
     }
 
-    ~SkipZeroesBench() {
-        SkDELETE(fDecoder);
+    virtual bool isSuitableFor(Backend backend) SK_OVERRIDE {
+        return backend == kNonRendering_Backend;
     }
+
 protected:
     virtual const char* onGetName() SK_OVERRIDE {
         return fName.c_str();
     }
 
     virtual void onPreDraw() SK_OVERRIDE {
-        SkFILEStream fileStream(fFilename.c_str());
+        SkString resourcePath = GetResourcePath();
+        if (resourcePath.isEmpty()) {
+            fValid = false;
+            return;
+        }
+
+        SkString fullPath = SkOSPath::SkPathJoin(resourcePath.c_str(),
+                                                 fFilename.c_str());
+        SkFILEStream fileStream(fullPath.c_str());
         fValid = fileStream.isValid() && fileStream.getLength() > 0;
         if (fValid) {
             const size_t size = fileStream.getLength();
@@ -55,8 +64,8 @@ protected:
             } else {
                 SkAutoTUnref<SkData> skdata(SkData::NewFromMalloc(data, size));
                 fStream.setData(skdata.get());
-                fDecoder = SkImageDecoder::Factory(&fStream);
-                if (fDecoder) {
+                fDecoder.reset(SkImageDecoder::Factory(&fStream));
+                if (fDecoder.get()) {
                     fDecoder->setSkipWritingZeroes(fSkipZeroes);
                 } else {
                     fValid = false;
@@ -65,28 +74,28 @@ protected:
         }
     }
 
-    virtual void onDraw(SkCanvas*) SK_OVERRIDE {
-#ifdef SK_DEBUG
+    virtual void onDraw(const int loops, SkCanvas*) SK_OVERRIDE {
         if (!fValid) {
-            SkDebugf("stream was invalid: %s\n", fName.c_str());
+#ifdef SK_DEBUG
+            SkDebugf("stream was invalid: %s\n", fFilename.c_str());
+#endif
             return;
         }
-#endif
         // Decode a bunch of times
         SkBitmap bm;
-        for (int i = 0; i < this->getLoops(); ++i) {
+        for (int i = 0; i < loops; ++i) {
             SkDEBUGCODE(bool success =) fDecoder->decode(&fStream, &bm,
                                                          SkImageDecoder::kDecodePixels_Mode);
 #ifdef SK_DEBUG
             if (!success) {
-                SkDebugf("failed to decode %s\n", fName.c_str());
+                SkDebugf("failed to decode %s\n", fFilename.c_str());
                 return;
             }
 #endif
             SkDEBUGCODE(success =) fStream.rewind();
 #ifdef SK_DEBUG
             if (!success) {
-                SkDebugf("failed to rewind %s\n", fName.c_str());
+                SkDebugf("failed to rewind %s\n", fFilename.c_str());
                 return;
             }
 #endif
@@ -94,15 +103,16 @@ protected:
     }
 
 private:
-    SkString        fName;
-    SkImageDecoder* fDecoder;
-    const SkString  fFilename;
-    SkMemoryStream  fStream;
-    bool            fSkipZeroes;
-    bool            fValid;
+    SkString                        fName;
+    SkAutoTDelete<SkImageDecoder>   fDecoder;
+    const SkString                  fFilename;
+    SkMemoryStream                  fStream;
+    bool                            fSkipZeroes;
+    bool                            fValid;
 
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
-//DEF_BENCH( return SkNEW_ARGS(SkipZeroesBench, ("/sdcard/skia/images/arrow.png", true)));
-//DEF_BENCH( return SkNEW_ARGS(SkipZeroesBench, ("/sdcard/skia/images/arrow.png", false)));
+// Enable the true version once the feature is checked in.
+DEF_BENCH( return SkNEW_ARGS(SkipZeroesBench, ("arrow.png", true)));
+DEF_BENCH( return SkNEW_ARGS(SkipZeroesBench, ("arrow.png", false)));

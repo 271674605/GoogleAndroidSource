@@ -513,20 +513,16 @@ FN_FUNC_FN_FN(nextafter)
 FN_FUNC_FN_FN(pow)
 
 extern float __attribute__((overloadable)) pown(float v, int p) {
-    return pow(v, (float)p);
+    /* The mantissa of a float has fewer bits than an int (24 effective vs. 31).
+     * For very large ints, we'll lose whether the exponent is even or odd, making
+     * the selection of a correct sign incorrect.  We correct this.  Use copysign
+     * to handle the negative zero case.
+     */
+    float sign = (p & 0x1) ? copysign(1.f, v) : 1.f;
+    float f = pow(v, (float)p);
+    return copysign(f, sign);
 }
-extern float2 __attribute__((overloadable)) pown(float2 v, int2 p) {
-    float2 f2 = convert_float2(p);
-    return pow(v, f2);
-}
-extern float3 __attribute__((overloadable)) pown(float3 v, int3 p) {
-    float3 f3 = convert_float3(p);
-    return pow(v, f3);
-}
-extern float4 __attribute__((overloadable)) pown(float4 v, int4 p) {
-    float4 f4 = convert_float4(p);
-    return pow(v, f4);
-}
+FN_FUNC_FN_IN(pown)
 
 extern float __attribute__((overloadable)) powr(float v, float p) {
     return pow(v, p);
@@ -552,7 +548,7 @@ FN_FUNC_FN(rint)
 
 extern float __attribute__((overloadable)) rootn(float v, int r) {
     if (r == 0) {
-        return nan(0);
+        return posinf(0);
     }
 
     if (iszero(v)) {
@@ -592,9 +588,13 @@ extern float __attribute__((overloadable)) rsqrt(float v) {
     return 1.f / sqrt(v);
 }
 
-#if !defined(ARCH_X86_HAVE_SSE2) && !defined(ARCH_X86_HAVE_SSE3)
+#if !defined(__i386__) && !defined(__x86_64__)
 FN_FUNC_FN(sqrt)
-#endif // !defined(ARCH_X86_HAVE_SSE2) && !defined(ARCH_X86_HAVE_SSE3)
+#else
+extern float2 __attribute__((overloadable)) sqrt(float2);
+extern float3 __attribute__((overloadable)) sqrt(float3);
+extern float4 __attribute__((overloadable)) sqrt(float4);
+#endif // !defined(__i386__) && !defined(__x86_64__)
 
 FN_FUNC_FN(rsqrt)
 
@@ -746,24 +746,27 @@ extern uint8_t __attribute__((overloadable)) abs(int8_t v) {
 
 /**
  * clz
+ * __builtin_clz only accepts a 32-bit unsigned int, so every input will be
+ * expanded to 32 bits. For our smaller data types, we need to subtract off
+ * these unused top bits (that will be always be composed of zeros).
  */
 extern uint32_t __attribute__((overloadable)) clz(uint32_t v) {
     return __builtin_clz(v);
 }
 extern uint16_t __attribute__((overloadable)) clz(uint16_t v) {
-    return (uint16_t)__builtin_clz(v);
+    return __builtin_clz(v) - 16;
 }
 extern uint8_t __attribute__((overloadable)) clz(uint8_t v) {
-    return (uint8_t)__builtin_clz(v);
+    return __builtin_clz(v) - 24;
 }
 extern int32_t __attribute__((overloadable)) clz(int32_t v) {
-    return (int32_t)__builtin_clz((uint32_t)v);
+    return __builtin_clz(v);
 }
 extern int16_t __attribute__((overloadable)) clz(int16_t v) {
-    return (int16_t)__builtin_clz(v);
+    return __builtin_clz(((uint32_t)v) & 0x0000ffff) - 16;
 }
 extern int8_t __attribute__((overloadable)) clz(int8_t v) {
-    return (int8_t)__builtin_clz(v);
+    return __builtin_clz(((uint32_t)v) & 0x000000ff) - 24;
 }
 
 
@@ -867,6 +870,27 @@ extern float4 __attribute__((overloadable)) step(float4 edge, float v) {
     r.w = (v < edge.w) ? 0.f : 1.f;
     return r;
 }
+extern float2 __attribute__((overloadable)) step(float edge, float2 v) {
+    float2 r;
+    r.x = (v.x < edge) ? 0.f : 1.f;
+    r.y = (v.y < edge) ? 0.f : 1.f;
+    return r;
+}
+extern float3 __attribute__((overloadable)) step(float edge, float3 v) {
+    float3 r;
+    r.x = (v.x < edge) ? 0.f : 1.f;
+    r.y = (v.y < edge) ? 0.f : 1.f;
+    r.z = (v.z < edge) ? 0.f : 1.f;
+    return r;
+}
+extern float4 __attribute__((overloadable)) step(float edge, float4 v) {
+    float4 r;
+    r.x = (v.x < edge) ? 0.f : 1.f;
+    r.y = (v.y < edge) ? 0.f : 1.f;
+    r.z = (v.z < edge) ? 0.f : 1.f;
+    r.w = (v.w < edge) ? 0.f : 1.f;
+    return r;
+}
 
 extern float __attribute__((overloadable)) smoothstep(float, float, float);
 extern float2 __attribute__((overloadable)) smoothstep(float2, float2, float2);
@@ -902,7 +926,7 @@ extern float4 __attribute__((overloadable)) cross(float4 lhs, float4 rhs) {
     return r;
 }
 
-#if !defined(ARCH_X86_HAVE_SSE3)
+#if !defined(__i386__) && !defined(__x86_64__)
 
 extern float __attribute__((overloadable)) dot(float lhs, float rhs) {
     return lhs * rhs;
@@ -937,7 +961,7 @@ extern float __attribute__((overloadable)) length(float2 v);
 extern float __attribute__((overloadable)) length(float3 v);
 extern float __attribute__((overloadable)) length(float4 v);
 
-#endif
+#endif // !defined(__i386__) && !defined(__x86_64__)
 
 extern float __attribute__((overloadable)) distance(float lhs, float rhs) {
     return length(lhs - rhs);
@@ -952,20 +976,35 @@ extern float __attribute__((overloadable)) distance(float4 lhs, float4 rhs) {
     return length(lhs - rhs);
 }
 
+/* For the normalization functions, vectors of length 0 should simply be
+ * returned (i.e. all the components of that vector are 0).
+ */
 extern float __attribute__((overloadable)) normalize(float v) {
-    return 1.f;
+    if (v == 0.0f) {
+        return 0.0f;
+    } else if (v < 0.0f) {
+        return -1.0f;
+    } else {
+        return 1.0f;
+    }
 }
 extern float2 __attribute__((overloadable)) normalize(float2 v) {
-    return v / length(v);
+    float l = length(v);
+    return l == 0.0f ? v : v / l;
 }
 extern float3 __attribute__((overloadable)) normalize(float3 v) {
-    return v / length(v);
+    float l = length(v);
+    return l == 0.0f ? v : v / l;
 }
 extern float4 __attribute__((overloadable)) normalize(float4 v) {
-    return v / length(v);
+    float l = length(v);
+    return l == 0.0f ? v : v / l;
 }
 
-extern float __attribute__((overloadable)) half_sqrt(float);
+extern float __attribute__((overloadable)) half_sqrt(float v) {
+    return sqrt(v);
+}
+FN_FUNC_FN(half_sqrt)
 
 extern float __attribute__((overloadable)) fast_length(float v) {
     return fabs(v);
@@ -995,20 +1034,35 @@ extern float __attribute__((overloadable)) fast_distance(float4 lhs, float4 rhs)
 
 extern float __attribute__((overloadable)) half_rsqrt(float);
 
+/* For the normalization functions, vectors of length 0 should simply be
+ * returned (i.e. all the components of that vector are 0).
+ */
 extern float __attribute__((overloadable)) fast_normalize(float v) {
-    return 1.f;
+    if (v == 0.0f) {
+        return 0.0f;
+    } else if (v < 0.0f) {
+        return -1.0f;
+    } else {
+        return 1.0f;
+    }
 }
+// If the length is 0, then rlength should be NaN.
 extern float2 __attribute__((overloadable)) fast_normalize(float2 v) {
-    return v * half_rsqrt(v.x*v.x + v.y*v.y);
+    float rlength = half_rsqrt(v.x*v.x + v.y*v.y);
+    return (rlength == rlength) ? v * rlength : v;
 }
 extern float3 __attribute__((overloadable)) fast_normalize(float3 v) {
-    return v * half_rsqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+    float rlength = half_rsqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+    return (rlength == rlength) ? v * rlength : v;
 }
 extern float4 __attribute__((overloadable)) fast_normalize(float4 v) {
-    return v * half_rsqrt(v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w);
+    float rlength = half_rsqrt(v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w);
+    return (rlength == rlength) ? v * rlength : v;
 }
 
-extern float __attribute__((overloadable)) half_recip(float);
+extern float __attribute__((overloadable)) half_recip(float v) {
+    return 1.f / v;
+}
 
 /*
 extern float __attribute__((overloadable)) approx_atan(float x) {
@@ -1138,18 +1192,15 @@ extern float __attribute__((overloadable)) native_log2(float v) {
 
     float ir;
     SET_FLOAT_WORD(ir, ibits);
-
     ir -= 1.5f;
     float ir2 = ir*ir;
-    float adj2 = 0.405465108f + // -0.00009f +
-                 (0.666666667f * ir) -
-                 (0.222222222f * ir2) +
-                 (0.098765432f * ir*ir2) -
-                 (0.049382716f * ir2*ir2) +
-                 (0.026337449f * ir*ir2*ir2) -
-                 (0.014631916f * ir2*ir2*ir2);
-    adj2 *= (1.f / 0.693147181f);
-
+    float adj2 = (0.405465108f / 0.693147181f) +
+                 ((0.666666667f / 0.693147181f) * ir) -
+                 ((0.222222222f / 0.693147181f) * ir2) +
+                 ((0.098765432f / 0.693147181f) * ir*ir2) -
+                 ((0.049382716f / 0.693147181f) * ir2*ir2) +
+                 ((0.026337449f / 0.693147181f) * ir*ir2*ir2) -
+                 ((0.014631916f / 0.693147181f) * ir2*ir2*ir2);
     return (float)(e - 127) + adj2;
 }
 extern float2 __attribute__((overloadable)) native_log2(float2 v) {
@@ -1194,24 +1245,266 @@ extern float4 __attribute__((overloadable)) native_log10(float4 v) {
 
 extern float __attribute__((overloadable)) native_powr(float v, float y) {
     float v2 = native_log2(v);
-    v2 = fmax(v2, -125.f);
-    return native_exp2(v2 * y);
+    v2 = fmax(v2 * y, -125.f);
+    return native_exp2(v2);
 }
 extern float2 __attribute__((overloadable)) native_powr(float2 v, float2 y) {
     float2 v2 = native_log2(v);
-    v2 = fmax(v2, -125.f);
-    return native_exp2(v2 * y);
+    v2 = fmax(v2 * y, -125.f);
+    return native_exp2(v2);
 }
 extern float3 __attribute__((overloadable)) native_powr(float3 v, float3 y) {
     float3 v2 = native_log2(v);
-    v2 = fmax(v2, -125.f);
-    return native_exp2(v2 * y);
+    v2 = fmax(v2 * y, -125.f);
+    return native_exp2(v2);
 }
 extern float4 __attribute__((overloadable)) native_powr(float4 v, float4 y) {
     float4 v2 = native_log2(v);
-    v2 = fmax(v2, -125.f);
-    return native_exp2(v2 * y);
+    v2 = fmax(v2 * y, -125.f);
+    return native_exp2(v2);
 }
+
+extern double __attribute__((overloadable)) min(double v1, double v2) {
+    return v1 < v2 ? v1 : v2;
+}
+
+extern double2 __attribute__((overloadable)) min(double2 v1, double2 v2) {
+    double2 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    return r;
+}
+
+extern double3 __attribute__((overloadable)) min(double3 v1, double3 v2) {
+    double3 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    return r;
+}
+
+extern double4 __attribute__((overloadable)) min(double4 v1, double4 v2) {
+    double4 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    r.w = v1.w < v2.w ? v1.w : v2.w;
+    return r;
+}
+
+extern long __attribute__((overloadable)) min(long v1, long v2) {
+    return v1 < v2 ? v1 : v2;
+}
+extern long2 __attribute__((overloadable)) min(long2 v1, long2 v2) {
+    long2 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    return r;
+}
+extern long3 __attribute__((overloadable)) min(long3 v1, long3 v2) {
+    long3 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    return r;
+}
+extern long4 __attribute__((overloadable)) min(long4 v1, long4 v2) {
+    long4 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    r.w = v1.w < v2.w ? v1.w : v2.w;
+    return r;
+}
+
+extern ulong __attribute__((overloadable)) min(ulong v1, ulong v2) {
+    return v1 < v2 ? v1 : v2;
+}
+extern ulong2 __attribute__((overloadable)) min(ulong2 v1, ulong2 v2) {
+    ulong2 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    return r;
+}
+extern ulong3 __attribute__((overloadable)) min(ulong3 v1, ulong3 v2) {
+    ulong3 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    return r;
+}
+extern ulong4 __attribute__((overloadable)) min(ulong4 v1, ulong4 v2) {
+    ulong4 r;
+    r.x = v1.x < v2.x ? v1.x : v2.x;
+    r.y = v1.y < v2.y ? v1.y : v2.y;
+    r.z = v1.z < v2.z ? v1.z : v2.z;
+    r.w = v1.w < v2.w ? v1.w : v2.w;
+    return r;
+}
+
+extern double __attribute__((overloadable)) max(double v1, double v2) {
+    return v1 > v2 ? v1 : v2;
+}
+
+extern double2 __attribute__((overloadable)) max(double2 v1, double2 v2) {
+    double2 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    return r;
+}
+
+extern double3 __attribute__((overloadable)) max(double3 v1, double3 v2) {
+    double3 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    return r;
+}
+
+extern double4 __attribute__((overloadable)) max(double4 v1, double4 v2) {
+    double4 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    r.w = v1.w > v2.w ? v1.w : v2.w;
+    return r;
+}
+
+extern long __attribute__((overloadable)) max(long v1, long v2) {
+    return v1 > v2 ? v1 : v2;
+}
+extern long2 __attribute__((overloadable)) max(long2 v1, long2 v2) {
+    long2 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    return r;
+}
+extern long3 __attribute__((overloadable)) max(long3 v1, long3 v2) {
+    long3 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    return r;
+}
+extern long4 __attribute__((overloadable)) max(long4 v1, long4 v2) {
+    long4 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    r.w = v1.w > v2.w ? v1.w : v2.w;
+    return r;
+}
+
+extern ulong __attribute__((overloadable)) max(ulong v1, ulong v2) {
+    return v1 > v2 ? v1 : v2;
+}
+extern ulong2 __attribute__((overloadable)) max(ulong2 v1, ulong2 v2) {
+    ulong2 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    return r;
+}
+extern ulong3 __attribute__((overloadable)) max(ulong3 v1, ulong3 v2) {
+    ulong3 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    return r;
+}
+extern ulong4 __attribute__((overloadable)) max(ulong4 v1, ulong4 v2) {
+    ulong4 r;
+    r.x = v1.x > v2.x ? v1.x : v2.x;
+    r.y = v1.y > v2.y ? v1.y : v2.y;
+    r.z = v1.z > v2.z ? v1.z : v2.z;
+    r.w = v1.w > v2.w ? v1.w : v2.w;
+    return r;
+}
+
+#define THUNK_NATIVE_F(fn) \
+    float __attribute__((overloadable)) native_##fn(float v) { return fn(v);} \
+    float2 __attribute__((overloadable)) native_##fn(float2 v) { return fn(v);} \
+    float3 __attribute__((overloadable)) native_##fn(float3 v) { return fn(v);} \
+    float4 __attribute__((overloadable)) native_##fn(float4 v) { return fn(v);}
+
+#define THUNK_NATIVE_F_F(fn) \
+    float __attribute__((overloadable)) native_##fn(float v1, float v2) { return fn(v1, v2);} \
+    float2 __attribute__((overloadable)) native_##fn(float2 v1, float2 v2) { return fn(v1, v2);} \
+    float3 __attribute__((overloadable)) native_##fn(float3 v1, float3 v2) { return fn(v1, v2);} \
+    float4 __attribute__((overloadable)) native_##fn(float4 v1, float4 v2) { return fn(v1, v2);}
+
+#define THUNK_NATIVE_F_FP(fn) \
+    float __attribute__((overloadable)) native_##fn(float v1, float *v2) { return fn(v1, v2);} \
+    float2 __attribute__((overloadable)) native_##fn(float2 v1, float2 *v2) { return fn(v1, v2);} \
+    float3 __attribute__((overloadable)) native_##fn(float3 v1, float3 *v2) { return fn(v1, v2);} \
+    float4 __attribute__((overloadable)) native_##fn(float4 v1, float4 *v2) { return fn(v1, v2);}
+
+#define THUNK_NATIVE_F_I(fn) \
+    float __attribute__((overloadable)) native_##fn(float v1, int v2) { return fn(v1, v2);} \
+    float2 __attribute__((overloadable)) native_##fn(float2 v1, int2 v2) { return fn(v1, v2);} \
+    float3 __attribute__((overloadable)) native_##fn(float3 v1, int3 v2) { return fn(v1, v2);} \
+    float4 __attribute__((overloadable)) native_##fn(float4 v1, int4 v2) { return fn(v1, v2);}
+
+THUNK_NATIVE_F(acos)
+THUNK_NATIVE_F(acosh)
+THUNK_NATIVE_F(acospi)
+THUNK_NATIVE_F(asin)
+THUNK_NATIVE_F(asinh)
+THUNK_NATIVE_F(asinpi)
+THUNK_NATIVE_F(atan)
+THUNK_NATIVE_F_F(atan2)
+THUNK_NATIVE_F(atanh)
+THUNK_NATIVE_F(atanpi)
+THUNK_NATIVE_F_F(atan2pi)
+THUNK_NATIVE_F(cbrt)
+THUNK_NATIVE_F(cos)
+THUNK_NATIVE_F(cosh)
+THUNK_NATIVE_F(cospi)
+THUNK_NATIVE_F(expm1)
+THUNK_NATIVE_F_F(hypot)
+THUNK_NATIVE_F(log1p)
+THUNK_NATIVE_F_I(rootn)
+THUNK_NATIVE_F(rsqrt)
+THUNK_NATIVE_F(sqrt)
+THUNK_NATIVE_F(sin)
+THUNK_NATIVE_F_FP(sincos)
+THUNK_NATIVE_F(sinh)
+THUNK_NATIVE_F(sinpi)
+THUNK_NATIVE_F(tan)
+THUNK_NATIVE_F(tanh)
+THUNK_NATIVE_F(tanpi)
+
+#undef THUNK_NATIVE_F
+#undef THUNK_NATIVE_F_F
+#undef THUNK_NATIVE_F_I
+#undef THUNK_NATIVE_F_FP
+
+float __attribute__((overloadable)) native_normalize(float v) { return fast_normalize(v);}
+float2 __attribute__((overloadable)) native_normalize(float2 v) { return fast_normalize(v);}
+float3 __attribute__((overloadable)) native_normalize(float3 v) { return fast_normalize(v);}
+float4 __attribute__((overloadable)) native_normalize(float4 v) { return fast_normalize(v);}
+
+float __attribute__((overloadable)) native_distance(float v1, float v2) { return fast_distance(v1, v2);}
+float __attribute__((overloadable)) native_distance(float2 v1, float2 v2) { return fast_distance(v1, v2);}
+float __attribute__((overloadable)) native_distance(float3 v1, float3 v2) { return fast_distance(v1, v2);}
+float __attribute__((overloadable)) native_distance(float4 v1, float4 v2) { return fast_distance(v1, v2);}
+
+float __attribute__((overloadable)) native_length(float v) { return fast_length(v);}
+float __attribute__((overloadable)) native_length(float2 v) { return fast_length(v);}
+float __attribute__((overloadable)) native_length(float3 v) { return fast_length(v);}
+float __attribute__((overloadable)) native_length(float4 v) { return fast_length(v);}
+
+float __attribute__((overloadable)) native_divide(float v1, float v2) { return v1 / v2;}
+float2 __attribute__((overloadable)) native_divide(float2 v1, float2 v2) { return v1 / v2;}
+float3 __attribute__((overloadable)) native_divide(float3 v1, float3 v2) { return v1 / v2;}
+float4 __attribute__((overloadable)) native_divide(float4 v1, float4 v2) { return v1 / v2;}
+
+float __attribute__((overloadable)) native_recip(float v) { return 1.f / v;}
+float2 __attribute__((overloadable)) native_recip(float2 v) { return ((float2)1.f) / v;}
+float3 __attribute__((overloadable)) native_recip(float3 v) { return ((float3)1.f) / v;}
+float4 __attribute__((overloadable)) native_recip(float4 v) { return ((float4)1.f) / v;}
+
+
+
 
 
 #undef FN_FUNC_FN

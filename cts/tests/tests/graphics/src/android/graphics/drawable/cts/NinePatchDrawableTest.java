@@ -16,13 +16,12 @@
 
 package android.graphics.drawable.cts;
 
-import com.android.cts.stub.R;
-
-import dalvik.annotation.KnownFailure;
+import com.android.cts.graphics.R;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
 import android.graphics.Bitmap;
@@ -36,8 +35,11 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.graphics.Bitmap.Config;
+import android.graphics.PorterDuff.Mode;
 import android.graphics.drawable.NinePatchDrawable;
+import android.graphics.drawable.ShapeDrawable;
 import android.graphics.drawable.Drawable.ConstantState;
+import android.graphics.drawable.shapes.RectShape;
 import android.test.InstrumentationTestCase;
 import android.util.AttributeSet;
 import android.util.Xml;
@@ -180,6 +182,16 @@ public class NinePatchDrawableTest extends InstrumentationTestCase {
         assertNull(mNinePatchDrawable.getPaint().getColorFilter());
     }
 
+    public void testSetTint() {
+        mNinePatchDrawable.setTint(Color.BLACK);
+        mNinePatchDrawable.setTintMode(Mode.SRC_OVER);
+        assertEquals("Nine-patch is tinted", Color.BLACK,
+                DrawableTestingUtils.getPixel(mNinePatchDrawable, 0, 0));
+
+        mNinePatchDrawable.setTintList(null);
+        mNinePatchDrawable.setTintMode(null);
+    }
+
     public void testSetDither() {
         mNinePatchDrawable.setDither(false);
         assertFalse(mNinePatchDrawable.getPaint().isDither());
@@ -239,9 +251,9 @@ public class NinePatchDrawableTest extends InstrumentationTestCase {
         assertEquals(9, mNinePatchDrawable.getMinimumHeight());
     }
 
-    @KnownFailure("Bug 2834281 - Bitmap#hasAlpha seems to return true for "
-        + "images without alpha.")
-    public void testGetOpacity() {
+    // Known failure: Bug 2834281 - Bitmap#hasAlpha seems to return true for
+    // images without alpha
+    public void suppress_testGetOpacity() {
         assertEquals(PixelFormat.OPAQUE, mNinePatchDrawable.getOpacity());
 
         mNinePatchDrawable = getNinePatchDrawable(R.drawable.ninepatch_1);

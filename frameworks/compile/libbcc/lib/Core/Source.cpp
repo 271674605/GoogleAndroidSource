@@ -20,10 +20,11 @@
 
 #include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/Linker.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/Linker/Linker.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/system_error.h>
+#include "llvm/Support/raw_ostream.h"
 
 #include "bcc/BCCContext.h"
 #include "bcc/Support/Log.h"
@@ -38,15 +39,13 @@ namespace {
 // return NULL and will NOT take the ownership of pInput.
 static inline llvm::Module *helper_load_bitcode(llvm::LLVMContext &pContext,
                                                 llvm::MemoryBuffer *pInput) {
-  std::string error;
-  llvm::Module *module = llvm::getLazyBitcodeModule(pInput, pContext, &error);
-
-  if (module == NULL) {
+  llvm::ErrorOr<llvm::Module *> moduleOrError = llvm::getLazyBitcodeModule(pInput, pContext);
+  if (std::error_code ec = moduleOrError.getError()) {
     ALOGE("Unable to parse the given bitcode file `%s'! (%s)",
-          pInput->getBufferIdentifier(), error.c_str());
+          pInput->getBufferIdentifier(), ec.message().c_str());
   }
 
-  return module;
+  return moduleOrError.get();
 }
 
 } // end anonymous namespace
@@ -87,16 +86,17 @@ Source *Source::CreateFromBuffer(BCCContext &pContext,
 }
 
 Source *Source::CreateFromFile(BCCContext &pContext, const std::string &pPath) {
-  llvm::OwningPtr<llvm::MemoryBuffer> input_data;
 
-  llvm::error_code ec = llvm::MemoryBuffer::getFile(pPath, input_data);
-  if (ec != llvm::error_code::success()) {
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> mb_or_error =
+      llvm::MemoryBuffer::getFile(pPath);
+  if (mb_or_error.getError()) {
     ALOGE("Failed to load bitcode from path %s! (%s)", pPath.c_str(),
-                                                       ec.message().c_str());
+          mb_or_error.getError().message().c_str());
     return NULL;
   }
+  std::unique_ptr<llvm::MemoryBuffer> input_data = std::move(mb_or_error.get());
 
-  llvm::MemoryBuffer *input_memory = input_data.take();
+  llvm::MemoryBuffer *input_memory = input_data.release();
   llvm::Module *module = helper_load_bitcode(pContext.mImpl->mLLVMContext,
                                              input_memory);
   if (module == NULL) {
@@ -114,6 +114,14 @@ Source *Source::CreateFromFile(BCCContext &pContext, const std::string &pPath) {
 
 Source *Source::CreateFromModule(BCCContext &pContext, llvm::Module &pModule,
                                  bool pNoDelete) {
+  std::string ErrorInfo;
+  llvm::raw_string_ostream ErrorStream(ErrorInfo);
+  if (llvm::verifyModule(pModule, &ErrorStream)) {
+    ALOGE("Bitcode of RenderScript module does not pass verification: `%s'!",
+          ErrorStream.str().c_str());
+    return NULL;
+  }
+
   Source *result = new (std::nothrow) Source(pContext, pModule, pNoDelete);
   if (result == NULL) {
     ALOGE("Out of memory during Source object allocation for `%s'!",

@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
-#include "chrome/browser/policy/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 
 namespace policy {
 
@@ -27,6 +27,16 @@ class StubEnterpriseInstallAttributes : public EnterpriseInstallAttributes {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StubEnterpriseInstallAttributes);
+};
+
+// Helper class to set enterprise install attributes in the scope of a test.
+class ScopedStubEnterpriseInstallAttributes {
+ public:
+  ScopedStubEnterpriseInstallAttributes(const std::string& domain,
+                                        const std::string& registration_user,
+                                        const std::string& device_id,
+                                        DeviceMode mode);
+  ~ScopedStubEnterpriseInstallAttributes();
 };
 
 }  // namespace policy

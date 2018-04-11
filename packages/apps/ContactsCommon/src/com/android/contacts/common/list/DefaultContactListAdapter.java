@@ -26,7 +26,7 @@ import android.preference.PreferenceManager;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Directory;
-import android.provider.ContactsContract.SearchSnippetColumns;
+import android.provider.ContactsContract.SearchSnippets;
 import android.text.TextUtils;
 import android.view.View;
 
@@ -40,13 +40,8 @@ import java.util.List;
  */
 public class DefaultContactListAdapter extends ContactListAdapter {
 
-    public static final char SNIPPET_START_MATCH = '\u0001';
-    public static final char SNIPPET_END_MATCH = '\u0001';
-    public static final String SNIPPET_ELLIPSIS = "\u2026";
-    public static final int SNIPPET_MAX_TOKENS = 5;
-
-    public static final String SNIPPET_ARGS = SNIPPET_START_MATCH + "," + SNIPPET_END_MATCH + ","
-            + SNIPPET_ELLIPSIS + "," + SNIPPET_MAX_TOKENS;
+    public static final char SNIPPET_START_MATCH = '[';
+    public static final char SNIPPET_END_MATCH = ']';
 
     public DefaultContactListAdapter(Context context) {
         super(context);
@@ -80,9 +75,7 @@ public class DefaultContactListAdapter extends ContactListAdapter {
                     builder.appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY,
                             String.valueOf(getDirectoryResultLimit(getDirectoryById(directoryId))));
                 }
-                builder.appendQueryParameter(SearchSnippetColumns.SNIPPET_ARGS_PARAM_KEY,
-                        SNIPPET_ARGS);
-                builder.appendQueryParameter(SearchSnippetColumns.DEFERRED_SNIPPETING_KEY,"1");
+                builder.appendQueryParameter(SearchSnippets.DEFERRED_SNIPPETING_KEY,"1");
                 loader.setUri(builder.build());
                 loader.setProjection(getProjection(true));
             }
@@ -93,7 +86,7 @@ public class DefaultContactListAdapter extends ContactListAdapter {
         }
 
         String sortOrder;
-        if (getSortOrder() == ContactsContract.Preferences.SORT_ORDER_PRIMARY) {
+        if (getSortOrder() == ContactsPreferences.SORT_ORDER_PRIMARY) {
             sortOrder = Contacts.SORT_KEY_PRIMARY;
         } else {
             sortOrder = Contacts.SORT_KEY_ALTERNATIVE;
@@ -183,6 +176,7 @@ public class DefaultContactListAdapter extends ContactListAdapter {
 
     @Override
     protected void bindView(View itemView, int partition, Cursor cursor, int position) {
+        super.bindView(itemView, partition, cursor, position);
         final ContactListItemView view = (ContactListItemView)itemView;
 
         view.setHighlightedPrefix(isSearchMode() ? getUpperCaseQueryString() : null);
@@ -196,14 +190,14 @@ public class DefaultContactListAdapter extends ContactListAdapter {
         if (isQuickContactEnabled()) {
             bindQuickContact(view, partition, cursor, ContactQuery.CONTACT_PHOTO_ID,
                     ContactQuery.CONTACT_PHOTO_URI, ContactQuery.CONTACT_ID,
-                    ContactQuery.CONTACT_LOOKUP_KEY);
+                    ContactQuery.CONTACT_LOOKUP_KEY, ContactQuery.CONTACT_DISPLAY_NAME);
         } else {
             if (getDisplayPhotos()) {
                 bindPhoto(view, partition, cursor);
             }
         }
 
-        bindName(view, cursor);
+        bindNameAndViewId(view, cursor);
         bindPresenceAndStatusMessage(view, cursor);
 
         if (isSearchMode()) {

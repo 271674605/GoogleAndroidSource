@@ -17,12 +17,9 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/ui/host_desktop.h"
 
-class AutomationProviderList;
 class BackgroundModeManager;
-class BookmarkPromptController;
 class ChromeNetLog;
 class CRLSetFetcher;
-class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GLStringManager;
@@ -30,14 +27,14 @@ class GpuModeManager;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
+class MediaFileSystemRegistry;
 class MetricsService;
+class MetricsServicesManager;
 class NotificationUIManager;
-class PnaclComponentInstaller;
 class PrefRegistrySimple;
 class PrefService;
 class Profile;
 class ProfileManager;
-class RenderWidgetSnapshotTaker;
 class SafeBrowsingService;
 class StatusTray;
 class WatchDogThread;
@@ -45,17 +42,21 @@ class WatchDogThread;
 class WebRtcLogUploader;
 #endif
 
-namespace chrome {
-class MediaFileSystemRegistry;
-class StorageMonitor;
-}
-
 namespace chrome_variations {
 class VariationsService;
 }
 
+namespace component_updater {
+class ComponentUpdateService;
+class PnaclComponentInstaller;
+}
+
 namespace extensions {
 class EventRouterForwarder;
+}
+
+namespace gcm {
+class GCMDriver;
 }
 
 namespace message_center {
@@ -64,6 +65,10 @@ class MessageCenter;
 
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace network_time {
+class NetworkTimeTracker;
 }
 
 namespace policy {
@@ -79,6 +84,10 @@ namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
 class PrintPreviewDialogController;
+}
+
+namespace rappor {
+class RapporService;
 }
 
 namespace safe_browsing {
@@ -101,8 +110,13 @@ class BrowserProcess {
   // continue shutdown.
   virtual void EndSession() = 0;
 
+  // Gets the manager for the various metrics-related services, constructing it
+  // if necessary.
+  virtual MetricsServicesManager* GetMetricsServicesManager() = 0;
+
   // Services: any of these getters may return NULL
   virtual MetricsService* metrics_service() = 0;
+  virtual rappor::RapporService* rappor_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
@@ -145,15 +159,10 @@ class BrowserProcess {
 
   virtual GpuModeManager* gpu_mode_manager() = 0;
 
-  virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() = 0;
-
-  virtual AutomationProviderList* GetAutomationProviderList() = 0;
-
   virtual void CreateDevToolsHttpProtocolHandler(
       chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
-      int port,
-      const std::string& frontend_url) = 0;
+      int port) = 0;
 
   virtual unsigned int AddRefModule() = 0;
   virtual unsigned int ReleaseModule() = 0;
@@ -208,23 +217,24 @@ class BrowserProcess {
 
   virtual prerender::PrerenderTracker* prerender_tracker() = 0;
 
-  virtual ComponentUpdateService* component_updater() = 0;
+  virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
 
-  virtual PnaclComponentInstaller* pnacl_component_installer() = 0;
+  virtual component_updater::PnaclComponentInstaller*
+      pnacl_component_installer() = 0;
 
-  virtual BookmarkPromptController* bookmark_prompt_controller() = 0;
-
-  virtual chrome::MediaFileSystemRegistry* media_file_system_registry() = 0;
-
-  virtual chrome::StorageMonitor* storage_monitor() = 0;
+  virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
 
   virtual bool created_local_state() const = 0;
 
 #if defined(ENABLE_WEBRTC)
   virtual WebRtcLogUploader* webrtc_log_uploader() = 0;
 #endif
+
+  virtual network_time::NetworkTimeTracker* network_time_tracker() = 0;
+
+  virtual gcm::GCMDriver* gcm_driver() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

@@ -14,19 +14,20 @@
 
 package android.accessibilityservice.cts;
 
-import android.app.Activity;
 import android.os.Bundle;
 import android.view.View;
 
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
 import com.android.cts.accessibilityservice.R;
 
 /**
  * Activity for testing the accessibility APIs for querying of
  * the screen content. These APIs allow exploring the screen and
  * requesting an action to be performed on a given view from an
- * AccessiiblityService.
+ * AccessibilityService.
  */
-public class AccessibilityWindowQueryActivity extends Activity {
+public class AccessibilityWindowQueryActivity extends AccessibilityTestActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -41,6 +42,22 @@ public class AccessibilityWindowQueryActivity extends Activity {
         findViewById(R.id.button5).setOnLongClickListener(new View.OnLongClickListener() {
             public boolean onLongClick(View v) {
                 return true;
+            }
+        });
+
+        findViewById(R.id.button5).setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override
+            public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.addAction(new AccessibilityAction(R.id.foo_custom_action, "Foo"));
+            }
+
+            @Override
+            public boolean performAccessibilityAction(View host, int action, Bundle args) {
+                if (action == R.id.foo_custom_action) {
+                    return true;
+                }
+                return super.performAccessibilityAction(host, action, args);
             }
         });
     }

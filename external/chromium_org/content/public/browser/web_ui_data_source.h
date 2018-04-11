@@ -25,12 +25,19 @@ class WebUIDataSource {
 
   CONTENT_EXPORT static WebUIDataSource* Create(const std::string& source_name);
 
+  // Adds the necessary resources for mojo bindings returning the
+  // WebUIDataSource that handles the resources. Callers do not own the return
+  // value.
+  CONTENT_EXPORT static WebUIDataSource* AddMojoDataSource(
+      BrowserContext* browser_context);
+
   // Adds a WebUI data source to |browser_context|.
   CONTENT_EXPORT static void Add(BrowserContext* browser_context,
                                  WebUIDataSource* source);
 
   // Adds a string keyed to its name to our dictionary.
-  virtual void AddString(const std::string& name, const string16& value) = 0;
+  virtual void AddString(const std::string& name,
+                         const base::string16& value) = 0;
 
   // Adds a string keyed to its name to our dictionary.
   virtual void AddString(const std::string& name, const std::string& value) = 0;
@@ -54,7 +61,7 @@ class WebUIDataSource {
   virtual void SetUseJsonJSFormatV2() = 0;
 
   // Adds a mapping between a path name and a resource to return.
-  virtual void AddResourcePath(const std::string &path, int resource_id) = 0;
+  virtual void AddResourcePath(const std::string& path, int resource_id) = 0;
 
   // Sets the resource to returned when no other paths match.
   virtual void SetDefaultResource(int resource_id) = 0;
@@ -78,6 +85,9 @@ class WebUIDataSource {
   // NOTE: it's not acceptable to call DisableContentSecurityPolicy for new
   // pages, see URLDataSource::ShouldAddContentSecurityPolicy and talk to
   // tsepez.
+
+  // Currently only used by embedders for WebUIs with multiple instances.
+  virtual void DisableReplaceExistingSource() = 0;
   virtual void DisableContentSecurityPolicy() = 0;
   virtual void OverrideContentSecurityPolicyObjectSrc(
       const std::string& data) = 0;

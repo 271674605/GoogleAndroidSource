@@ -45,33 +45,36 @@ LOCAL_SRC_FILES := \
     spectrum_ar_model_tables.c \
     transform.c
 
-ifeq ($(ARCH_ARM_HAVE_ARMV7A),true)
 # Using .S (instead of .s) extention is to include a C header file in assembly.
-LOCAL_SRC_FILES += \
+my_as_src := \
     lattice_armv7.S \
     pitch_filter_armv6.S
-else
-LOCAL_SRC_FILES += \
+my_c_src := \
     lattice_c.c \
     pitch_filter_c.c
-endif
+LOCAL_SRC_FILES_arm += $(my_as_src)
+LOCAL_SRC_FILES_x86 += $(my_c_src)
+LOCAL_SRC_FILES_mips += $(my_c_src)
+LOCAL_SRC_FILES_arm64 += $(my_c_src)
+LOCAL_SRC_FILES_x86_64 += $(my_c_src)
+LOCAL_SRC_FILES_mips64 += $(my_c_src)
 
 # Flags passed to both C and C++ files.
 LOCAL_CFLAGS := \
     $(MY_WEBRTC_COMMON_DEFS)
+
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+LOCAL_CFLAGS_x86 := $(MY_WEBRTC_COMMON_DEFS_x86)
+LOCAL_CFLAGS_mips := $(MY_WEBRTC_COMMON_DEFS_mips)
+LOCAL_CFLAGS_arm64 := $(MY_WEBRTC_COMMON_DEFS_arm64)
+LOCAL_CFLAGS_x86_64 := $(MY_WEBRTC_COMMON_DEFS_x86_64)
+LOCAL_CFLAGS_mips64 := $(MY_WEBRTC_COMMON_DEFS_mips64)
 
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/../interface \
     $(LOCAL_PATH)/../../../../../.. \
     $(LOCAL_PATH)/../../../../../../common_audio/signal_processing/include
 
-LOCAL_STATIC_LIBRARIES += libwebrtc_system_wrappers
-
-LOCAL_SHARED_LIBRARIES := \
-    libcutils \
-    libdl
-
-ifndef NDK_ROOT
 ifndef WEBRTC_STL
 LOCAL_SHARED_LIBRARIES += libstlport
 include external/stlport/libstlport.mk
@@ -79,9 +82,6 @@ else
 LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
 LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-endif
-else
-LOCAL_SHARED_LIBRARIES += libstlport
 endif
 
 include $(BUILD_STATIC_LIBRARY)
@@ -108,12 +108,14 @@ LOCAL_CFLAGS := \
     -mfloat-abi=softfp \
     -flax-vector-conversions
 
+LOCAL_MODULE_TARGET_ARCH := arm
+LOCAL_CFLAGS_arm := $(MY_WEBRTC_COMMON_DEFS_arm)
+
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/../interface \
     $(LOCAL_PATH)/../../../../../.. \
     $(LOCAL_PATH)/../../../../../../common_audio/signal_processing/include
 
-ifndef NDK_ROOT
 ifndef WEBRTC_STL
 LOCAL_SHARED_LIBRARIES += libstlport
 include external/stlport/libstlport.mk
@@ -121,62 +123,8 @@ else
 LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
 LOCAL_SDK_VERSION := 14
 LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-endif
-else
-LOCAL_SHARED_LIBRARIES += libstlport
 endif
 
 include $(BUILD_STATIC_LIBRARY)
 
 endif # ifeq ($(WEBRTC_BUILD_NEON_LIBS),true)
-
-###########################
-# isac test app
-
-include $(CLEAR_VARS)
-
-LOCAL_MODULE_TAGS := tests
-LOCAL_CPP_EXTENSION := .cc
-LOCAL_SRC_FILES:= ../test/kenny.c
-
-# Flags passed to both C and C++ files.
-LOCAL_CFLAGS := $(MY_WEBRTC_COMMON_DEFS)
-
-LOCAL_C_INCLUDES := \
-    $(LOCAL_PATH)/../interface \
-    $(LOCAL_PATH)/../../../../../..
-
-MY_LIB_SUFFIX :=
-ifdef WEBRTC_STL
-MY_LIB_SUFFIX := _$(WEBRTC_STL)
-endif
-
-LOCAL_STATIC_LIBRARIES := \
-    libwebrtc_isacfix$(MY_LIB_SUFFIX) \
-    libwebrtc_spl$(MY_LIB_SUFFIX) \
-    libwebrtc_system_wrappers$(MY_LIB_SUFFIX)
-
-ifeq ($(WEBRTC_BUILD_NEON_LIBS),true)
-LOCAL_STATIC_LIBRARIES += \
-    libwebrtc_isacfix_neon$(MY_LIB_SUFFIX)
-endif
-
-LOCAL_SHARED_LIBRARIES := \
-    libutils
-
-LOCAL_MODULE:= webrtc_isac_test
-
-ifdef NDK_ROOT
-include $(BUILD_EXECUTABLE)
-else
-ifndef WEBRTC_STL
-LOCAL_SHARED_LIBRARIES += libstlport
-include external/stlport/libstlport.mk
-else
-LOCAL_NDK_STL_VARIANT := $(WEBRTC_STL)
-LOCAL_SDK_VERSION := 14
-LOCAL_MODULE := $(LOCAL_MODULE)_$(WEBRTC_STL)
-LOCAL_SHARED_LIBRARIES :=
-endif
-include $(BUILD_NATIVE_TEST)
-endif

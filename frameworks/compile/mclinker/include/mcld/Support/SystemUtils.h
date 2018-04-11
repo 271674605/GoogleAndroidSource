@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_SYSTEM_UTILS_H
-#define MCLD_SYSTEM_UTILS_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_SYSTEMUTILS_H
+#define MCLD_SUPPORT_SYSTEMUTILS_H
 
 #include <llvm/Support/DataTypes.h>
 #include <mcld/Config/Config.h>

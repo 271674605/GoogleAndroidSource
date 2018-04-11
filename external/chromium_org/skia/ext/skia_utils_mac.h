@@ -78,11 +78,15 @@ SK_API NSColor* SkColorToSRGBNSColor(SkColor color);
 SK_API SkBitmap CGImageToSkBitmap(CGImageRef image);
 
 // Draws an NSImage with a given size into a SkBitmap.
-SK_API SkBitmap NSImageToSkBitmap(NSImage* image, NSSize size, bool is_opaque);
+SK_API SkBitmap NSImageToSkBitmapWithColorSpace(NSImage* image,
+                                                bool is_opaque,
+                                                CGColorSpaceRef color_space);
 
 // Draws an NSImageRep with a given size into a SkBitmap.
-SK_API SkBitmap NSImageRepToSkBitmap(
-    NSImageRep* image, NSSize size, bool is_opaque);
+SK_API SkBitmap NSImageRepToSkBitmapWithColorSpace(NSImageRep* image,
+                                                   NSSize size,
+                                                   bool is_opaque,
+                                                   CGColorSpaceRef colorspace);
 
 // Given an SkBitmap, return an autoreleased NSBitmapImageRep in the generic
 // color space.
@@ -113,6 +117,7 @@ class SK_API SkiaBitLocker {
   SkCanvas* canvas_;
   CGContextRef cgContext_;
   SkBitmap bitmap_;
+  SkIPoint bitmapOffset_;
   bool useDeviceBits_;
 };
 

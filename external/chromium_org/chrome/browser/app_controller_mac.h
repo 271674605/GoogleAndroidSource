@@ -14,15 +14,19 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "base/time/time.h"
 #include "ui/base/work_area_watcher_observer.h"
 
 class AppControllerProfileObserver;
+@class AppShimMenuController;
 class BookmarkMenuBridge;
 class CommandUpdater;
 class GURL;
 class HistoryMenuBridge;
 class Profile;
 @class ProfileMenuController;
+class QuitWithAppsController;
+
 namespace ui {
 class WorkAreaWatcherObserver;
 }
@@ -49,6 +53,9 @@ class WorkAreaWatcherObserver;
   scoped_ptr<BookmarkMenuBridge> bookmarkMenuBridge_;
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
 
+  // Controller that manages main menu items for packaged apps.
+  base::scoped_nsobject<AppShimMenuController> appShimMenuController_;
+
   // The profile menu, which appears right before the Help menu. It is only
   // available when multiple profiles is enabled.
   base::scoped_nsobject<ProfileMenuController> profileMenuController_;
@@ -70,17 +77,21 @@ class WorkAreaWatcherObserver;
   // to it.
   IBOutlet NSMenu* helpMenu_;
 
-  // Outlet for the tabpose menu item so we can hide it.
-  IBOutlet NSMenuItem* tabposeMenuItem_;
-
   // Indicates wheter an NSPopover is currently being shown.
   BOOL hasPopover_;
+
+  // If we are expecting a workspace change in response to a reopen
+  // event, the time we got the event. A null time otherwise.
+  base::TimeTicks reopenTime_;
 
   // Observers that listen to the work area changes.
   ObserverList<ui::WorkAreaWatcherObserver> workAreaChangeObservers_;
 
   scoped_ptr<PrefChangeRegistrar> profilePrefRegistrar_;
   PrefChangeRegistrar localPrefRegistrar_;
+
+  // Displays a notification when quitting while apps are running.
+  scoped_refptr<QuitWithAppsController> quitWithAppsController_;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;
@@ -112,20 +123,24 @@ class WorkAreaWatcherObserver;
 // Toggles the "Confirm to Quit" preference.
 - (IBAction)toggleConfirmToQuit:(id)sender;
 
+// Toggles the "Hide Notifications Icon" preference.
+- (IBAction)toggleDisplayMessageCenter:(id)sender;
+
 // Delegate method to return the dock menu.
 - (NSMenu*)applicationDockMenu:(NSApplication*)sender;
 
 // Get the URLs that Launch Services expects the browser to open at startup.
 - (const std::vector<GURL>&)startupUrls;
 
-// Clear the list of startup URLs.
-- (void)clearStartupUrls;
-
 - (BookmarkMenuBridge*)bookmarkMenuBridge;
 
 // Subscribes/unsubscribes from the work area change notification.
 - (void)addObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer;
 - (void)removeObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer;
+
+// Initializes the AppShimMenuController. This enables changing the menu bar for
+// apps.
+- (void)initAppShimMenuController;
 
 @end
 

@@ -109,10 +109,10 @@ void rsrMeasureText(Context *, const char *text,
 void rsrBindFont(Context *, Font *);
 void rsrFontColor(Context *, float r, float g, float b, float a);
 
+#endif
+
 void rsrAllocationIoSend(Context *, Allocation *);
 void rsrAllocationIoReceive(Context *, Allocation *);
-
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // Time routines
@@ -128,16 +128,22 @@ int64_t rsrUptimeNanos(Context *);
 // Message routines
 //////////////////////////////////////////////////////////////////////////////
 
-uint32_t rsrToClient(Context *, int cmdID, void *data, int len);
-uint32_t rsrToClientBlocking(Context *, int cmdID, void *data, int len);
+// Keep existing routines to not break current GPU drivers.
+uint32_t __attribute((used)) rsrToClient(Context *, int cmdID, void *data, int len);
+uint32_t __attribute((used)) rsrToClientBlocking(Context *, int cmdID, void *data, int len);
+
+uint32_t rsrToClient(Context *, int cmdID, const void *data, int len);
+uint32_t rsrToClientBlocking(Context *, int cmdID, const void *data, int len);
 
 //////////////////////////////////////////////////////////////////////////////
 //
 //////////////////////////////////////////////////////////////////////////////
 
-void rsrSetObject(const Context *, ObjectBase **dst, ObjectBase * src);
-void rsrClearObject(const Context *, ObjectBase **dst);
-bool rsrIsObject(const Context *, const ObjectBase *src);
+void rsrSetObject(const Context *, rs_object_base *dst, const ObjectBase *src);
+void rsrClearObject(const Context *, rs_object_base *dst);
+
+bool rsrIsObject(const Context *, rs_object_base src);
+bool rsrIsObject(const Context *, ObjectBase* src);
 
 void rsrAllocationIncRefs(const Context *, const Allocation *, void *ptr,
                           size_t elementCount, size_t startOffset);

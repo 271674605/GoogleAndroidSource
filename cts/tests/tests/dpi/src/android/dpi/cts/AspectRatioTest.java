@@ -20,6 +20,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.test.ActivityInstrumentationTestCase2;
 import android.util.DisplayMetrics;
 import android.view.Display;
@@ -40,46 +41,33 @@ public class AspectRatioTest extends ActivityInstrumentationTestCase2<Orientatio
     }
 
     /**
-     * Get all the aspect rations in different orientations. They could be
-     * different due to the system bar being different sizes. Test that
-     * one of the aspect ratios is within the range.
+     * Get the full screen size directly (including system bar) to calculate
+     * aspect ratio. With this, the screen orientation doesn't affect the aspect
+     * ratio value anymore. Test that the aspect ratio is within the range.
      */
     public void testAspectRatio() throws Exception {
-        List<Double> aspectRatios = getAllAspectRatios();
-        for (double aspectRatio : aspectRatios) {
-            if (aspectRatio >= 1.333 && aspectRatio <= 1.86) {
+        double aspectRatio = getRealAspectRatio(getActivity());
+        if (aspectRatio >= 1.333 && aspectRatio <= 1.86) {
+            return;
+        }
+        if (getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH)) {
+            // Watch allows for a different set of aspect ratios.
+            if (aspectRatio >= 1.0 && aspectRatio <= 1.86) {
                 return;
             }
         }
-        fail("Aspect ratios were not between 1.333 and 1.86: " + aspectRatios);
+        fail("Aspect ratio was not between 1.333 and 1.86: " + aspectRatio);
     }
 
-    private List<Double> getAllAspectRatios() throws Exception {
-        List<Double> aspectRatios = new ArrayList<Double>();
-        for (int i = 0; i < ORIENTATIONS.length; i++) {
-            Activity activity = startOrientationActivity(ORIENTATIONS[i]);
-            aspectRatios.add(getAspectRatio(activity));
-            tearDown();
-        }
-        return aspectRatios;
-    }
-
-    private double getAspectRatio(Context context) {
+    private double getRealAspectRatio(Context context) {
         WindowManager windowManager =
                 (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         Display display = windowManager.getDefaultDisplay();
         DisplayMetrics metrics = new DisplayMetrics();
-        display.getMetrics(metrics);
+        display.getRealMetrics(metrics);
 
         int max = Math.max(metrics.widthPixels, metrics.heightPixels);
         int min = Math.min(metrics.widthPixels, metrics.heightPixels);
         return (double) max / min;
-    }
-
-    private Activity startOrientationActivity(int orientation) {
-        Intent intent = new Intent();
-        intent.putExtra(OrientationActivity.EXTRA_ORIENTATION, orientation);
-        setActivityIntent(intent);
-        return getActivity();
     }
 }

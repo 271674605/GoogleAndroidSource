@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/platform_file.h"
 #include "chrome/common/media_galleries/itunes_library.h"
 
 namespace itunes {
@@ -16,9 +15,6 @@ class ITunesLibraryParser {
  public:
   ITunesLibraryParser();
   ~ITunesLibraryParser();
-
-  // Returns the contents of the given iTunes library XML |file|.
-  static std::string ReadITunesLibraryXmlFile(const base::PlatformFile file);
 
   // Returns true if at least one track was found. Malformed track entries
   // are silently ignored.

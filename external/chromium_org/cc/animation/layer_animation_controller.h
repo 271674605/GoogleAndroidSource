@@ -17,15 +17,20 @@
 #include "cc/base/scoped_ptr_vector.h"
 #include "ui/gfx/transform.h"
 
-namespace gfx { class Transform; }
+namespace gfx {
+class BoxF;
+class Transform;
+}
 
 namespace cc {
 
 class Animation;
 class AnimationDelegate;
 class AnimationRegistrar;
+class FilterOperations;
 class KeyframeValueList;
 class LayerAnimationValueObserver;
+class LayerAnimationValueProvider;
 
 class CC_EXPORT LayerAnimationController
     : public base::RefCounted<LayerAnimationController> {
@@ -34,27 +39,30 @@ class CC_EXPORT LayerAnimationController
 
   int id() const { return id_; }
 
-  // These methods are virtual for testing.
-  virtual void AddAnimation(scoped_ptr<Animation> animation);
-  virtual void PauseAnimation(int animation_id, double time_offset);
-  virtual void RemoveAnimation(int animation_id);
-  virtual void RemoveAnimation(int animation_id,
-                               Animation::TargetProperty target_property);
-  virtual void SuspendAnimations(double monotonic_time);
-  virtual void ResumeAnimations(double monotonic_time);
+  void AddAnimation(scoped_ptr<Animation> animation);
+  void PauseAnimation(int animation_id, base::TimeDelta time_offset);
+  void RemoveAnimation(int animation_id);
+  void RemoveAnimation(int animation_id,
+                       Animation::TargetProperty target_property);
+  void AbortAnimations(Animation::TargetProperty target_property);
 
   // Ensures that the list of active animations on the main thread and the impl
   // thread are kept in sync. This function does not take ownership of the impl
-  // thread controller.
+  // thread controller. This method is virtual for testing.
   virtual void PushAnimationUpdatesTo(
       LayerAnimationController* controller_impl);
 
-  void Animate(double monotonic_time);
-  void AccumulatePropertyUpdates(double monotonic_time,
+  void Animate(base::TimeTicks monotonic_time);
+  void AccumulatePropertyUpdates(base::TimeTicks monotonic_time,
                                  AnimationEventsVector* events);
 
   void UpdateState(bool start_ready_animations,
                    AnimationEventsVector* events);
+
+  // Make animations affect active observers if and only if they affect
+  // pending observers. Any animations that no longer affect any observers
+  // are deleted.
+  void ActivateAnimations();
 
   // Returns the active animation in the given group, animating the given
   // property, if such an animation exists.
@@ -70,24 +78,19 @@ class CC_EXPORT LayerAnimationController
   bool HasActiveAnimation() const;
 
   // Returns true if there are any animations at all to process.
-  bool has_any_animation() const { return !active_animations_.empty(); }
+  bool has_any_animation() const { return !animations_.empty(); }
 
   // Returns true if there is an animation currently animating the given
   // property, or if there is an animation scheduled to animate this property in
   // the future.
   bool IsAnimatingProperty(Animation::TargetProperty target_property) const;
 
-  // If a sync is forced, then the next time animation updates are pushed to the
-  // impl thread, all animations will be transferred.
-  void set_force_sync() { force_sync_ = true; }
-
   void SetAnimationRegistrar(AnimationRegistrar* registrar);
   AnimationRegistrar* animation_registrar() { return registrar_; }
 
-  void NotifyAnimationStarted(const AnimationEvent& event,
-                              double wall_clock_time);
-  void NotifyAnimationFinished(const AnimationEvent& event,
-                               double wall_clock_time);
+  void NotifyAnimationStarted(const AnimationEvent& event);
+  void NotifyAnimationFinished(const AnimationEvent& event);
+  void NotifyAnimationAborted(const AnimationEvent& event);
   void NotifyAnimationPropertyUpdate(const AnimationEvent& event);
 
   void AddValueObserver(LayerAnimationValueObserver* observer);
@@ -96,8 +99,41 @@ class CC_EXPORT LayerAnimationController
   void AddEventObserver(LayerAnimationEventObserver* observer);
   void RemoveEventObserver(LayerAnimationEventObserver* observer);
 
+  void set_value_provider(LayerAnimationValueProvider* provider) {
+    value_provider_ = provider;
+  }
+
+  void remove_value_provider(LayerAnimationValueProvider* provider) {
+    if (value_provider_ == provider)
+      value_provider_ = NULL;
+  }
+
   void set_layer_animation_delegate(AnimationDelegate* delegate) {
     layer_animation_delegate_ = delegate;
+  }
+
+  bool HasFilterAnimationThatInflatesBounds() const;
+  bool HasTransformAnimationThatInflatesBounds() const;
+  bool HasAnimationThatInflatesBounds() const {
+    return HasTransformAnimationThatInflatesBounds() ||
+           HasFilterAnimationThatInflatesBounds();
+  }
+
+  bool FilterAnimationBoundsForBox(const gfx::BoxF& box,
+                                   gfx::BoxF* bounds) const;
+  bool TransformAnimationBoundsForBox(const gfx::BoxF& box,
+                                      gfx::BoxF* bounds) const;
+
+  bool HasAnimationThatAffectsScale() const;
+
+  bool HasOnlyTranslationTransforms() const;
+
+  // Sets |max_scale| to the maximum scale along any dimension during active
+  // animations. Returns false if the maximum scale cannot be computed.
+  bool MaximumScale(float* max_scale) const;
+
+  bool needs_to_start_animations_for_testing() {
+    return needs_to_start_animations_;
   }
 
  protected:
@@ -115,21 +151,16 @@ class CC_EXPORT LayerAnimationController
       LayerAnimationController* controller_impl) const;
   void PushPropertiesToImplThread(
       LayerAnimationController* controller_impl) const;
-  void ReplaceImplThreadAnimations(
-      LayerAnimationController* controller_impl) const;
 
-  void StartAnimationsWaitingForNextTick(double monotonic_time);
-  void StartAnimationsWaitingForStartTime(double monotonic_time);
-  void StartAnimationsWaitingForTargetAvailability(double monotonic_time);
-  void ResolveConflicts(double monotonic_time);
-  void PromoteStartedAnimations(double monotonic_time,
+  void StartAnimations(base::TimeTicks monotonic_time);
+  void PromoteStartedAnimations(base::TimeTicks monotonic_time,
                                 AnimationEventsVector* events);
-  void MarkFinishedAnimations(double monotonic_time);
-  void MarkAnimationsForDeletion(double monotonic_time,
+  void MarkFinishedAnimations(base::TimeTicks monotonic_time);
+  void MarkAnimationsForDeletion(base::TimeTicks monotonic_time,
                                  AnimationEventsVector* events);
   void PurgeAnimationsMarkedForDeletion();
 
-  void TickAnimations(double monotonic_time);
+  void TickAnimations(base::TimeTicks monotonic_time);
 
   enum UpdateActivationType {
     NormalActivation,
@@ -137,28 +168,43 @@ class CC_EXPORT LayerAnimationController
   };
   void UpdateActivation(UpdateActivationType type);
 
-  void NotifyObserversOpacityAnimated(float opacity);
-  void NotifyObserversTransformAnimated(const gfx::Transform& transform);
+  void NotifyObserversOpacityAnimated(float opacity,
+                                      bool notify_active_observers,
+                                      bool notify_pending_observers);
+  void NotifyObserversTransformAnimated(const gfx::Transform& transform,
+                                        bool notify_active_observers,
+                                        bool notify_pending_observers);
+  void NotifyObserversFilterAnimated(const FilterOperations& filter,
+                                     bool notify_active_observers,
+                                     bool notify_pending_observers);
+  void NotifyObserversScrollOffsetAnimated(const gfx::Vector2dF& scroll_offset,
+                                           bool notify_active_observers,
+                                           bool notify_pending_observers);
+
+  void NotifyObserversAnimationWaitingForDeletion();
 
   bool HasValueObserver();
   bool HasActiveValueObserver();
 
-  // If this is true, we force a sync to the impl thread.
-  bool force_sync_;
-
   AnimationRegistrar* registrar_;
   int id_;
-  ScopedPtrVector<Animation> active_animations_;
+  ScopedPtrVector<Animation> animations_;
 
   // This is used to ensure that we don't spam the registrar.
   bool is_active_;
 
-  double last_tick_time_;
+  base::TimeTicks last_tick_time_;
 
   ObserverList<LayerAnimationValueObserver> value_observers_;
   ObserverList<LayerAnimationEventObserver> event_observers_;
 
+  LayerAnimationValueProvider* value_provider_;
+
   AnimationDelegate* layer_animation_delegate_;
+
+  // Only try to start animations when new animations are added or when the
+  // previous attempt at starting animations failed to start all animations.
+  bool needs_to_start_animations_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerAnimationController);
 };

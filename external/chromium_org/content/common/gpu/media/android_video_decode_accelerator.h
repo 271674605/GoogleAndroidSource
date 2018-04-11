@@ -5,7 +5,6 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_ANDROID_VIDEO_DECODE_ACCELERATOR_H_
 #define CONTENT_COMMON_GPU_MEDIA_ANDROID_VIDEO_DECODE_ACCELERATOR_H_
 
-#include <dlfcn.h>
 #include <list>
 #include <map>
 #include <queue>
@@ -14,6 +13,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/threading/thread_checker.h"
+#include "base/timer/timer.h"
 #include "content/common/content_export.h"
 #include "gpu/command_buffer/service/gles2_cmd_copy_texture_chromium.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
@@ -21,24 +21,24 @@
 #include "media/video/video_decode_accelerator.h"
 
 namespace gfx {
-class SurfaceTextureBridge;
+class SurfaceTexture;
 }
 
 namespace content {
 // A VideoDecodeAccelerator implementation for Android.
 // This class decodes the input encoded stream by using Android's MediaCodec
 // class. http://developer.android.com/reference/android/media/MediaCodec.html
-class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
-    public media::VideoDecodeAccelerator {
+class CONTENT_EXPORT AndroidVideoDecodeAccelerator
+    : public media::VideoDecodeAccelerator {
  public:
   // Does not take ownership of |client| which must outlive |*this|.
   AndroidVideoDecodeAccelerator(
-      media::VideoDecodeAccelerator::Client* client,
       const base::WeakPtr<gpu::gles2::GLES2Decoder> decoder,
       const base::Callback<bool(void)>& make_context_current);
 
   // media::VideoDecodeAccelerator implementation.
-  virtual bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
+  virtual bool Initialize(media::VideoCodecProfile profile,
+                          Client* client) OVERRIDE;
   virtual void Decode(const media::BitstreamBuffer& bitstream_buffer) OVERRIDE;
   virtual void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) OVERRIDE;
@@ -46,6 +46,7 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
   virtual void Flush() OVERRIDE;
   virtual void Reset() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+  virtual bool CanDecodeOnIOThread() OVERRIDE;
 
  private:
   enum State {
@@ -75,9 +76,6 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
   // Dequeues output from |media_codec_| and feeds the decoded frame to the
   // client.
   void DequeueOutput();
-
-  // Notifies the client that initialize was completed.
-  void NotifyInitializeDone();
 
   // Requests picture buffers from the client.
   void RequestPictureBuffers();
@@ -123,11 +121,16 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
   // decoded frames to the client.
   std::queue<int32> free_picture_ids_;
 
+  // Picture buffer ids which have been dismissed and not yet re-assigned.  Used
+  // to ignore ReusePictureBuffer calls that were in flight when the
+  // DismissPictureBuffer call was made.
+  std::set<int32> dismissed_picture_ids_;
+
   // The low-level decoder which Android SDK provides.
   scoped_ptr<media::VideoCodecBridge> media_codec_;
 
   // A container of texture. Used to set a texture to |media_codec_|.
-  scoped_refptr<gfx::SurfaceTextureBridge> surface_texture_;
+  scoped_refptr<gfx::SurfaceTexture> surface_texture_;
 
   // The texture id which is set to |surface_texture_|.
   uint32 surface_texture_id_;
@@ -135,23 +138,15 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
   // Set to true after requesting picture buffers to the client.
   bool picturebuffers_requested_;
 
-  // Set to true when DoIOTask is in the message loop.
-  bool io_task_is_posted_;
-
-  // Set to true when decoder outputs EOS (end of stream).
-  bool decoder_met_eos_;
-
   // The resolution of the stream.
   gfx::Size size_;
 
-  // Encoded bitstream buffers to be passed to media codec, queued until a input
-  // buffer is available.
-  typedef std::queue<media::BitstreamBuffer> BitstreamBufferList;
-  BitstreamBufferList pending_bitstream_buffers_;
-
-  // Indicates the number of bytes already passed to the decoder in the first
-  // buffer in |pending_bitstream_buffers_|.
-  size_t num_bytes_used_in_the_pending_buffer_;
+  // Encoded bitstream buffers to be passed to media codec, queued until an
+  // input buffer is available, along with the time when they were first
+  // enqueued.
+  typedef std::queue<std::pair<media::BitstreamBuffer, base::Time> >
+      PendingBitstreamBuffers;
+  PendingBitstreamBuffers pending_bitstream_buffers_;
 
   // Keeps track of bitstream ids notified to the client with
   // NotifyEndOfBitstreamBuffer() before getting output from the bitstream.
@@ -162,6 +157,12 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator :
 
   // Used for copy the texture from |surface_texture_| to picture buffers.
   scoped_ptr<gpu::CopyTextureCHROMIUMResourceManager> copier_;
+
+  // Repeating timer responsible for draining pending IO to the codec.
+  base::RepeatingTimer<AndroidVideoDecodeAccelerator> io_timer_;
+
+  // WeakPtrFactory for posting tasks back to |this|.
+  base::WeakPtrFactory<AndroidVideoDecodeAccelerator> weak_this_factory_;
 
   friend class AndroidVideoDecodeAcceleratorTest;
 };

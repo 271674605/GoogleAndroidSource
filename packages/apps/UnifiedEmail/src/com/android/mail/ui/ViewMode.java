@@ -91,7 +91,8 @@ public class ViewMode {
         "Search results list",
         "Search results conversation",
         "Waiting for sync",
-        "Ad"
+        "Ad",
+        "Warm welcome"
     };
 
     public ViewMode() {
@@ -200,6 +201,10 @@ public class ViewMode {
 
     public static boolean isConversationMode(final int mode) {
         return mode == CONVERSATION || mode == SEARCH_RESULTS_CONVERSATION;
+    }
+
+    public boolean isSearchMode() {
+        return isSearchMode(mMode);
     }
 
     public static boolean isSearchMode(final int mode) {

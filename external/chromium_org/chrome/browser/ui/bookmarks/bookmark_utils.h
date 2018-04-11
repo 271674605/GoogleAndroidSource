@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -21,6 +22,11 @@ namespace content {
 class BrowserContext;
 class PageNavigator;
 class WebContents;
+}
+
+namespace extensions {
+class CommandService;
+class Extension;
 }
 
 namespace chrome {
@@ -77,7 +83,7 @@ GURL GetURLToBookmark(content::WebContents* web_contents);
 // Fills in the URL and title for a bookmark of |web_contents|.
 void GetURLAndTitleToBookmark(content::WebContents* web_contents,
                               GURL* url,
-                              string16* title);
+                              base::string16* title);
 
 // Toggles whether the bookmark bar is shown only on the new tab page or on
 // all tabs. This is a preference modifier, not a visual modifier.
@@ -85,17 +91,28 @@ void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context);
 
 // Returns a formatted version of |url| appropriate to display to a user with
 // the given |prefs|, which may be NULL.  When re-parsing this URL, clients
-// should call URLFixerUpper::FixupURL().
-string16 FormatBookmarkURLForDisplay(const GURL& url,
-                                     const PrefService* prefs);
+// should call url_fixer::FixupURL().
+base::string16 FormatBookmarkURLForDisplay(const GURL& url,
+                                           const PrefService* prefs);
 
 // Returns whether the Apps shortcut is enabled. If true, then the visibility
 // of the Apps shortcut should be controllable via an item in the bookmark
 // context menu.
-bool IsAppsShortcutEnabled(const Profile* profile);
+bool IsAppsShortcutEnabled(Profile* profile,
+                           chrome::HostDesktopType host_desktop_type);
 
 // Returns true if the Apps shortcut should be displayed in the bookmark bar.
-bool ShouldShowAppsShortcutInBookmarkBar(Profile* profile);
+bool ShouldShowAppsShortcutInBookmarkBar(
+    Profile* profile,
+    chrome::HostDesktopType host_desktop_type);
+
+// Whether the menu item and shortcut to bookmark a page should be removed from
+// the user interface.
+bool ShouldRemoveBookmarkThisPageUI(Profile* profile);
+
+// Whether the menu item and shortcut to bookmark open pages should be removed
+// from the user interface.
+bool ShouldRemoveBookmarkOpenPagesUI(Profile* profile);
 
 }  // namespace chrome
 

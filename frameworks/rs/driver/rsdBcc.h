@@ -43,6 +43,16 @@ void rsdScriptInvokeForEach(const android::renderscript::Context *rsc,
                             size_t usrLen,
                             const RsScriptCall *sc);
 
+void rsdScriptInvokeForEachMulti(const android::renderscript::Context *rsc,
+                                 android::renderscript::Script *s,
+                                 uint32_t slot,
+                                 const android::renderscript::Allocation ** ains,
+                                 size_t inLen,
+                                 android::renderscript::Allocation * aout,
+                                 const void * usr,
+                                 size_t usrLen,
+                                 const RsScriptCall *sc);
+
 int rsdScriptInvokeRoot(const android::renderscript::Context *dc,
                         android::renderscript::Script *script);
 void rsdScriptInvokeInit(const android::renderscript::Context *dc,
@@ -61,7 +71,7 @@ void rsdScriptSetGlobalVarWithElemDims(const android::renderscript::Context *,
                                        uint32_t slot, void *data,
                                        size_t dataLength,
                                        const android::renderscript::Element *,
-                                       const size_t *dims,
+                                       const uint32_t *dims,
                                        size_t dimLength);
 void rsdScriptSetGlobalBind(const android::renderscript::Context *,
                             const android::renderscript::Script *,
@@ -87,6 +97,11 @@ android::renderscript::Allocation * rsdScriptGetAllocationForPointer(
                         const android::renderscript::Context *dc,
                         const android::renderscript::Script *script,
                         const void *);
+
+void rsdScriptUpdateCachedObject(const android::renderscript::Context *rsc,
+                                 const android::renderscript::Script *script,
+                                 android::renderscript::rs_script *obj);
+
 
 
 #endif

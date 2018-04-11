@@ -5,8 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_H_
 
+#include "base/environment.h"
 #include "base/process/kill.h"
-#include "base/process/launch.h"
 #include "base/process/process_handle.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/string16.h"
@@ -15,9 +15,8 @@
 #include "content/public/common/process_type.h"
 #include "ipc/ipc_sender.h"
 
-class CommandLine;
-
 namespace base {
+class CommandLine;
 class FilePath;
 }
 
@@ -44,13 +43,8 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   // Derived classes call this to launch the child process asynchronously.
   // Takes ownership of |cmd_line| and |delegate|.
   virtual void Launch(
-#if defined(OS_WIN)
       SandboxedProcessLauncherDelegate* delegate,
-#elif defined(OS_POSIX)
-      bool use_zygote,
-      const base::EnvironmentVector& environ,
-#endif
-      CommandLine* cmd_line) = 0;
+      base::CommandLine* cmd_line) = 0;
 
   virtual const ChildProcessData& GetData() const = 0;
 
@@ -61,10 +55,14 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   // status returned when the process exited (for posix, as returned
   // from waitpid(), for Windows, as returned from
   // GetExitCodeProcess()).  |exit_code| may be NULL.
-  virtual base::TerminationStatus GetTerminationStatus(int* exit_code) = 0;
+  // |known_dead| indicates that the child is already dead. On Linux, this
+  // information is necessary to retrieve accurate information. See
+  // ChildProcessLauncher::GetChildTerminationStatus() for more details.
+  virtual base::TerminationStatus GetTerminationStatus(
+      bool known_dead, int* exit_code) = 0;
 
   // Sets the user-visible name of the process.
-  virtual void SetName(const string16& name) = 0;
+  virtual void SetName(const base::string16& name) = 0;
 
   // Set the handle of the process. BrowserChildProcessHost will do this when
   // the Launch method is used to start the process. However if the owner

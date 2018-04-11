@@ -8,9 +8,8 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/common/extensions/manifest.h"
+#include "extensions/common/manifest.h"
 
-class AsyncExtensionFunction;
 class Browser;
 class UIThreadExtensionFunction;
 
@@ -71,10 +70,6 @@ scoped_refptr<extensions::Extension> CreateExtension(
 // Creates an extension instance with a specified extension value that can be
 // attached to an ExtensionFunction before running.
 scoped_refptr<extensions::Extension> CreateExtension(
-    base::DictionaryValue* test_extension_value);
-
-scoped_refptr<extensions::Extension> CreateExtension(
-    extensions::Manifest::Location location,
     base::DictionaryValue* test_extension_value);
 
 // Returns true if |val| contains privacy information, e.g. url,

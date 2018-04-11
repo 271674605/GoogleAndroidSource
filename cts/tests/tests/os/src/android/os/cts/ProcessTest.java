@@ -16,7 +16,6 @@
 
 package android.os.cts;
 
-import android.app.cts.ISecondary;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -68,9 +67,13 @@ public class ProcessTest extends AndroidTestCase {
             }
         };
         mIntent = new Intent(REMOTE_SERVICE);
+        mIntent.setPackage(getContext().getPackageName());
         getContext().startService(mIntent);
-        getContext().bindService(new Intent(ISecondary.class.getName()),
-                mSecondaryConnection, Context.BIND_AUTO_CREATE);
+
+        Intent secondaryIntent = new Intent(ISecondary.class.getName());
+        secondaryIntent.setPackage(getContext().getPackageName());
+        getContext().bindService(secondaryIntent, mSecondaryConnection,
+                Context.BIND_AUTO_CREATE);
         synchronized (mSync) {
             if (!mHasConnected) {
                 try {

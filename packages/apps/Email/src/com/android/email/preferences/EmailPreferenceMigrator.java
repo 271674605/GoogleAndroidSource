@@ -57,7 +57,7 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
         } else {
             try {
                 while (accountCursor.moveToNext()) {
-                    accounts.add(new Account(accountCursor));
+                    accounts.add(Account.builder().buildFrom(accountCursor));
                 }
             } finally {
                 accountCursor.close();
@@ -67,6 +67,7 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
         migrate(context, oldVersion, newVersion, accounts);
     }
 
+    @SuppressWarnings("deprecation")
     protected static void migrate(final Context context, final int oldVersion, final int newVersion,
             final List<Account> accounts) {
         final Preferences preferences = Preferences.getPreferences(context);
@@ -74,19 +75,15 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
         if (oldVersion < 1) {
             // Move global settings
 
-            @SuppressWarnings("deprecation")
             final boolean hasSwipeDelete = preferences.hasSwipeDelete();
             if (hasSwipeDelete) {
-                @SuppressWarnings("deprecation")
                 final boolean swipeDelete = preferences.getSwipeDelete();
                 mailPrefs.setConversationListSwipeEnabled(swipeDelete);
             }
 
             // Move reply-all setting
-            @SuppressWarnings("deprecation")
             final boolean isReplyAllSet = preferences.hasReplyAll();
             if (isReplyAllSet) {
-                @SuppressWarnings("deprecation")
                 final boolean replyAll = preferences.getReplyAll();
                 mailPrefs.setDefaultReplyAll(replyAll);
             }
@@ -97,7 +94,8 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
                 final Cursor ecAccountCursor = context.getContentResolver().query(
                         com.android.emailcommon.provider.Account.CONTENT_URI,
                         com.android.emailcommon.provider.Account.CONTENT_PROJECTION,
-                        AccountColumns.EMAIL_ADDRESS + " = ?", new String[] { account.name },
+                        AccountColumns.EMAIL_ADDRESS + " = ?",
+                        new String[] { account.getEmailAddress() },
                         null);
                 final com.android.emailcommon.provider.Account ecAccount =
                         new com.android.emailcommon.provider.Account();
@@ -105,7 +103,7 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
 
                 if (ecAccountCursor == null) {
                     LogUtils.e(LOG_TAG, "Null old account cursor for mailbox %s",
-                            LogUtils.sanitizeName(LOG_TAG, account.name));
+                            LogUtils.sanitizeName(LOG_TAG, account.getEmailAddress()));
                     continue;
                 }
 
@@ -114,7 +112,7 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
                         ecAccount.restore(ecAccountCursor);
                     } else {
                         LogUtils.e(LOG_TAG, "Couldn't load old account for mailbox %s",
-                                LogUtils.sanitizeName(LOG_TAG, account.name));
+                                LogUtils.sanitizeName(LOG_TAG, account.getEmailAddress()));
                         continue;
                     }
                 } finally {
@@ -138,6 +136,11 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
                 try {
                     if (folderCursor.moveToFirst()) {
                         folder = new Folder(folderCursor);
+                    } else {
+                        LogUtils.e(LOG_TAG, "Empty folder cursor for mailbox %s",
+                                LogUtils.sanitizeName(LOG_TAG,
+                                        account.settings.defaultInbox.toString()));
+                        continue;
                     }
                 } finally {
                     folderCursor.close();
@@ -147,16 +150,13 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
                         new FolderPreferences(context, account.getEmailAddress(), folder,
                                 true /* inbox */);
 
-                @SuppressWarnings("deprecation")
                 final boolean notify = (ecAccount.getFlags()
                         & com.android.emailcommon.provider.Account.FLAGS_NOTIFY_NEW_MAIL) != 0;
                 folderPreferences.setNotificationsEnabled(notify);
 
-                @SuppressWarnings("deprecation")
                 final String ringtoneUri = ecAccount.getRingtone();
                 folderPreferences.setNotificationRingtoneUri(ringtoneUri);
 
-                @SuppressWarnings("deprecation")
                 final boolean vibrate = (ecAccount.getFlags()
                         & com.android.emailcommon.provider.Account.FLAGS_VIBRATE) != 0;
                 folderPreferences.setNotificationVibrateEnabled(vibrate);
@@ -166,17 +166,34 @@ public class EmailPreferenceMigrator extends BasePreferenceMigrator {
         }
 
         if (oldVersion < 2) {
-            @SuppressWarnings("deprecation")
             final Set<String> whitelistedAddresses = preferences.getWhitelistedSenderAddresses();
             mailPrefs.setSenderWhitelist(whitelistedAddresses);
         }
 
         if (oldVersion < 3) {
-            @SuppressWarnings("deprecation")
             // The default for the conversation list icon is the sender image.
             final boolean showSenderImages = !TextUtils.equals(
                     Preferences.CONV_LIST_ICON_NONE, preferences.getConversationListIcon());
             mailPrefs.setShowSenderImages(showSenderImages);
+        }
+
+        if (oldVersion < 4) {
+            final boolean confirmDelete = preferences.getConfirmDelete();
+            mailPrefs.setConfirmDelete(confirmDelete);
+
+            final boolean confirmSend = preferences.getConfirmSend();
+            mailPrefs.setConfirmSend(confirmSend);
+
+            final int autoAdvance = preferences.getAutoAdvanceDirection();
+            switch(autoAdvance) {
+                case Preferences.AUTO_ADVANCE_OLDER:
+                    mailPrefs.setAutoAdvanceMode(UIProvider.AutoAdvance.OLDER);
+                case Preferences.AUTO_ADVANCE_NEWER:
+                    mailPrefs.setAutoAdvanceMode(UIProvider.AutoAdvance.NEWER);
+                case Preferences.AUTO_ADVANCE_MESSAGE_LIST:
+                default:
+                    mailPrefs.setAutoAdvanceMode(UIProvider.AutoAdvance.LIST);
+            }
         }
     }
 }

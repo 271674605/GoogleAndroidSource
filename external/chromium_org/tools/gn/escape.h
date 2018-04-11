@@ -9,40 +9,59 @@
 
 #include "base/strings/string_piece.h"
 
-// TODO(brettw) we may need to make this a bitfield. If we want to write a
-// shell command in a ninja file, we need the shell characters to be escaped,
-// and THEN the ninja characters. Or maybe we require the caller to do two
-// passes.
 enum EscapingMode {
-  ESCAPE_NONE,   // No escaping.
-  ESCAPE_NINJA,  // Ninja string escaping.
-  ESCAPE_SHELL,  // Shell string escaping.
+  // No escaping.
+  ESCAPE_NONE,
+
+  // Ninja string escaping.
+  ESCAPE_NINJA,
+
+  // For writing commands to ninja files.
+  ESCAPE_NINJA_COMMAND,
+};
+
+enum EscapingPlatform {
+  // Do escaping for the current platform.
+  ESCAPE_PLATFORM_CURRENT,
+
+  // Force escaping for the given platform.
+  ESCAPE_PLATFORM_POSIX,
+  ESCAPE_PLATFORM_WIN,
 };
 
 struct EscapeOptions {
   EscapeOptions()
       : mode(ESCAPE_NONE),
-        convert_slashes(false),
+        platform(ESCAPE_PLATFORM_CURRENT),
         inhibit_quoting(false) {
   }
 
   EscapingMode mode;
 
-  // When set, converts forward-slashes to system-specific path separators.
-  bool convert_slashes;
+  // Controls how "fork" escaping is done. You will generally want to keep the
+  // default "current" platform.
+  EscapingPlatform platform;
 
   // When the escaping mode is ESCAPE_SHELL, the escaper will normally put
   // quotes around things with spaces. If this value is set to true, we'll
   // disable the quoting feature and just add the spaces.
   //
   // This mode is for when quoting is done at some higher-level. Defaults to
-  // false.
+  // false. Note that Windows has strange behavior where the meaning of the
+  // backslashes changes according to if it is followed by a quote. The
+  // escaping rules assume that a double-quote will be appended to the result.
   bool inhibit_quoting;
 };
 
 // Escapes the given input, returnining the result.
+//
+// If needed_quoting is non-null, whether the string was or should have been
+// (if inhibit_quoting was set) quoted will be written to it. This value should
+// be initialized to false by the caller and will be written to only if it's
+// true (the common use-case is for chaining calls).
 std::string EscapeString(const base::StringPiece& str,
-                         const EscapeOptions& options);
+                         const EscapeOptions& options,
+                         bool* needed_quoting);
 
 // Same as EscapeString but writes the results to the given stream, saving a
 // copy.

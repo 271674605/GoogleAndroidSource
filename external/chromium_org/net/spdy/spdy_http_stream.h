@@ -51,7 +51,6 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
                           const CompletionCallback& callback) OVERRIDE;
   virtual UploadProgress GetUploadProgress() const OVERRIDE;
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
-  virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual int ReadResponseBody(IOBuffer* buf,
                                int buf_len,
                                const CompletionCallback& callback) OVERRIDE;
@@ -66,6 +65,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
 
   virtual void SetConnectionReused() OVERRIDE;
   virtual bool IsConnectionReusable() const OVERRIDE;
+  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
   virtual bool GetLoadTimingInfo(
       LoadTimingInfo* load_timing_info) const OVERRIDE;
   virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
@@ -73,6 +73,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
       SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual bool IsSpdyHttpStream() const OVERRIDE;
   virtual void Drain(HttpNetworkSession* session) OVERRIDE;
+  virtual void SetPriority(RequestPriority priority) OVERRIDE;
 
   // SpdyStream::Delegate implementation.
   virtual void OnRequestHeadersSent() OVERRIDE;
@@ -107,8 +108,6 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   bool DoBufferedReadCallback();
   bool ShouldWaitForMoreBufferedData() const;
 
-  base::WeakPtrFactory<SpdyHttpStream> weak_factory_;
-
   const base::WeakPtr<SpdySession> spdy_session_;
   bool is_reused_;
   SpdyStreamRequest stream_request_;
@@ -121,6 +120,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   SpdyStreamId closed_stream_id_;
   bool closed_stream_has_load_timing_info_;
   LoadTimingInfo closed_stream_load_timing_info_;
+  int64 closed_stream_received_bytes_;
 
   // The request to send.
   const HttpRequestInfo* request_info_;
@@ -157,6 +157,8 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
 
   // Is this spdy stream direct to the origin server (or to a proxy).
   bool direct_;
+
+  base::WeakPtrFactory<SpdyHttpStream> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdyHttpStream);
 };

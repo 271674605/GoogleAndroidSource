@@ -24,6 +24,7 @@ import android.content.Entity;
 import android.content.Entity.NamedContentValues;
 import android.content.EntityIterator;
 import android.content.res.Resources;
+import android.database.Cursor;
 import android.net.Uri;
 import android.provider.CalendarContract.Attendees;
 import android.provider.CalendarContract.Calendars;
@@ -45,7 +46,6 @@ import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.service.AccountServiceProxy;
 import com.android.emailcommon.utility.Utility;
 import com.android.exchange.Eas;
-import com.android.exchange.ExchangeService;
 import com.android.exchange.R;
 import com.android.exchange.adapter.Serializer;
 import com.android.exchange.adapter.Tags;
@@ -54,6 +54,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.text.DateFormat;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -383,7 +384,7 @@ public class CalendarUtilities {
         String tziString = sTziStringCache.get(tz);
         if (tziString != null) {
             if (Eas.USER_LOG) {
-                ExchangeService.log(TAG, "TZI string for " + tz.getDisplayName() +
+                LogUtils.d(TAG, "TZI string for " + tz.getDisplayName() +
                         " found in cache.");
             }
             return tziString;
@@ -759,14 +760,14 @@ public class CalendarUtilities {
         TimeZone timeZone = sTimeZoneCache.get(timeZoneString);
         if (timeZone != null) {
             if (Eas.USER_LOG) {
-                ExchangeService.log(TAG, " Using cached TimeZone " + timeZone.getID());
+                LogUtils.d(TAG, " Using cached TimeZone " + timeZone.getID());
             }
         } else {
             timeZone = tziStringToTimeZoneImpl(timeZoneString, precision);
             if (timeZone == null) {
                 // If we don't find a match, we just return the current TimeZone.  In theory, this
                 // shouldn't be happening...
-                ExchangeService.alwaysLog("TimeZone not found using default: " + timeZoneString);
+                LogUtils.d(TAG, "TimeZone not found using default: " + timeZoneString);
                 timeZone = TimeZone.getDefault();
             }
             sTimeZoneCache.put(timeZoneString, timeZone);
@@ -823,7 +824,7 @@ public class CalendarUtilities {
                 if (!defaultTimeZone.useDaylightTime() &&
                         hasTimeZoneId(zoneIds, defaultTimeZone.getID())) {
                     if (Eas.USER_LOG) {
-                        ExchangeService.log(TAG, "TimeZone without DST found to be default: " +
+                        LogUtils.d(TAG, "TimeZone without DST found to be default: " +
                                 defaultTimeZone.getID());
                     }
                     return defaultTimeZone;
@@ -835,7 +836,7 @@ public class CalendarUtilities {
                     timeZone = TimeZone.getTimeZone(zoneId);
                     if (!timeZone.useDaylightTime()) {
                         if (Eas.USER_LOG) {
-                            ExchangeService.log(TAG, "TimeZone without DST found by offset: " +
+                            LogUtils.d(TAG, "TimeZone without DST found by offset: " +
                                     timeZone.getID());
                         }
                         return timeZone;
@@ -906,7 +907,7 @@ public class CalendarUtilities {
                     }
                 }
                 if (Eas.USER_LOG) {
-                    ExchangeService.log(TAG,
+                    LogUtils.d(TAG,
                             "No TimeZone with correct DST settings; using " +
                             (name ? "name" : (lenient ? "lenient" : "first")) + ": " +
                                     timeZone.getID());
@@ -1146,7 +1147,7 @@ public class CalendarUtilities {
      * Reformat an RRULE style UNTIL to an EAS style until
      */
     @VisibleForTesting
-    static String recurrenceUntilToEasUntil(String until) {
+    static String recurrenceUntilToEasUntil(String until) throws ParseException {
         // Get a calendar in our local time zone
         GregorianCalendar localCalendar = new GregorianCalendar(TimeZone.getDefault());
         // Set the time per GMT time in the 'until'
@@ -1176,7 +1177,11 @@ public class CalendarUtilities {
         }
         String until = tokenFromRrule(rrule, "UNTIL=");
         if (until != null) {
-            s.data(Tags.CALENDAR_RECURRENCE_UNTIL, recurrenceUntilToEasUntil(until));
+            try {
+                s.data(Tags.CALENDAR_RECURRENCE_UNTIL, recurrenceUntilToEasUntil(until));
+            } catch (ParseException e) {
+                LogUtils.w(TAG, "Parse error for CALENDAR_RECURRENCE_UNTIL tag.", e);
+            }
         }
     }
 
@@ -1226,7 +1231,7 @@ public class CalendarUtilities {
             Serializer s)
             throws IOException {
         if (Eas.USER_LOG) {
-            ExchangeService.log(TAG, "RRULE: " + rrule);
+            LogUtils.d(TAG, "RRULE: " + rrule);
         }
         final String freq = tokenFromRrule(rrule, "FREQ=");
         // If there's no FREQ=X, then we don't write a recurrence
@@ -1343,7 +1348,15 @@ public class CalendarUtilities {
      */
     static public String rruleFromRecurrence(int type, int occurrences, int interval, int dow,
             int dom, int wom, int moy, String until) {
-        StringBuilder rrule = new StringBuilder("FREQ=" + sTypeToFreq[type]);
+        if (type < 0 || type >= sTypeToFreq.length) {
+            return null;
+        }
+        final String typeStr = sTypeToFreq[type];
+        // Type array is sparse (eg, no type 4), so catch invalid (empty) types
+        if (TextUtils.isEmpty(typeStr)) {
+            return null;
+        }
+        StringBuilder rrule = new StringBuilder("FREQ=" + typeStr);
         // INTERVAL and COUNT
         if (occurrences > 0) {
             rrule.append(";COUNT=" + occurrences);
@@ -1520,7 +1533,7 @@ public class CalendarUtilities {
         int attendeeStatus;
         switch (responseType) {
             case RESPONSE_TYPE_NOT_RESPONDED:
-                attendeeStatus = Attendees.ATTENDEE_STATUS_NONE;
+                attendeeStatus = Attendees.ATTENDEE_STATUS_INVITED;
                 break;
             case RESPONSE_TYPE_ACCEPTED:
                 attendeeStatus = Attendees.ATTENDEE_STATUS_ACCEPTED;
@@ -1626,18 +1639,24 @@ public class CalendarUtilities {
         boolean recurringEvent = !entityValues.containsKey(Events.ORIGINAL_SYNC_ID) &&
             entityValues.containsKey(Events.RRULE);
 
-        String dateTimeString;
-        int res;
-        long startTime = entityValues.getAsLong(Events.DTSTART);
-        if (allDayEvent) {
-            Date date = new Date(getLocalAllDayCalendarTime(startTime, TimeZone.getDefault()));
-            dateTimeString = DateFormat.getDateInstance().format(date);
-            res = recurringEvent ? R.string.meeting_allday_recurring : R.string.meeting_allday;
-        } else {
-            dateTimeString = DateFormat.getDateTimeInstance().format(new Date(startTime));
-            res = recurringEvent ? R.string.meeting_recurring : R.string.meeting_when;
+        if (entityValues.containsKey(Events.DTSTART)) {
+            final String dateTimeString;
+            final int res;
+            final long startTime = entityValues.getAsLong(Events.DTSTART);
+            if (allDayEvent) {
+                final Date date = new Date(getLocalAllDayCalendarTime(startTime,
+                                TimeZone.getDefault()));
+                dateTimeString = DateFormat.getDateInstance().format(date);
+                res = recurringEvent ? R.string.meeting_allday_recurring
+                    : R.string.meeting_allday;
+            } else {
+                dateTimeString = DateFormat.getDateTimeInstance().format(
+                        new Date(startTime));
+                res = recurringEvent ? R.string.meeting_recurring
+                    : R.string.meeting_when;
+            }
+            sb.append(resources.getString(res, dateTimeString));
         }
-        sb.append(resources.getString(res, dateTimeString));
 
         String location = null;
         if (entityValues.containsKey(Events.EVENT_LOCATION)) {
@@ -1705,8 +1724,8 @@ public class CalendarUtilities {
      * Create a Message for an (Event) Entity
      * @param entity the Entity for the Event (as might be retrieved by CalendarProvider)
      * @param messageFlag the Message.FLAG_XXX constant indicating the type of email to be sent
-     * @param the unique id of this Event, or null if it can be retrieved from the Event
-     * @param the user's account
+     * @param uid the unique id of this Event, or null if it can be retrieved from the Event
+     * @param account the user's account
      * @return a Message with many fields pre-filled (more later)
      */
     static public Message createMessageForEntity(Context context, Entity entity,
@@ -1719,7 +1738,7 @@ public class CalendarUtilities {
             int messageFlag, String uid, Account account, String specifiedAttendee) {
         ContentValues entityValues = entity.getEntityValues();
         ArrayList<NamedContentValues> subValues = entity.getSubValues();
-        boolean isException = entityValues.containsKey(Events.ORIGINAL_SYNC_ID);
+        boolean isException = entityValues.containsKey(Events.ORIGINAL_INSTANCE_TIME);
         boolean isReply = false;
 
         EmailContent.Message msg = new EmailContent.Message();
@@ -1797,6 +1816,7 @@ public class CalendarUtilities {
             // If this is an Exception, we send the recurrence-id, which is just the original
             // instance time
             if (isException) {
+                // isException indicates this key is present
                 long originalTime = entityValues.getAsLong(Events.ORIGINAL_INSTANCE_TIME);
                 ics.writeTag("RECURRENCE-ID" + vCalendarDateSuffix,
                         millisToEasDateTime(originalTime, vCalendarTimeZone, !allDayEvent));
@@ -1876,6 +1896,7 @@ public class CalendarUtilities {
             StringBuilder sb = new StringBuilder();
             if (isException && !isReply) {
                 // Add the line, depending on whether this is a cancellation or update
+                // isException indicates this key is present
                 Date date = new Date(entityValues.getAsLong(Events.ORIGINAL_INSTANCE_TIME));
                 String dateString = DateFormat.getDateInstance().format(date);
                 if (titleId == R.string.meeting_canceled) {
@@ -1916,23 +1937,21 @@ public class CalendarUtilities {
                 Uri ncvUri = ncv.uri;
                 ContentValues ncvValues = ncv.values;
                 if (ncvUri.equals(Attendees.CONTENT_URI)) {
-                    Integer relationship =
+                    final Integer relationship =
                         ncvValues.getAsInteger(Attendees.ATTENDEE_RELATIONSHIP);
+                    final String attendeeEmail =
+                        ncvValues.getAsString(Attendees.ATTENDEE_EMAIL);
                     // If there's no relationship, we can't create this for EAS
                     // Similarly, we need an attendee email for each invitee
-                    if (relationship != null &&
-                            ncvValues.containsKey(Attendees.ATTENDEE_EMAIL)) {
+                    if (relationship != null && !TextUtils.isEmpty(attendeeEmail)) {
                         // Organizer isn't among attendees in EAS
                         if (relationship == Attendees.RELATIONSHIP_ORGANIZER) {
                             organizerName = ncvValues.getAsString(Attendees.ATTENDEE_NAME);
-                            organizerEmail = ncvValues.getAsString(Attendees.ATTENDEE_EMAIL);
+                            organizerEmail = attendeeEmail;
                             continue;
                         }
-                        String attendeeEmail = ncvValues.getAsString(Attendees.ATTENDEE_EMAIL);
                         String attendeeName = ncvValues.getAsString(Attendees.ATTENDEE_NAME);
 
-                        // This shouldn't be possible, but allow for it
-                        if (attendeeEmail == null) continue;
                         // If we only want to send to the specifiedAttendee, eliminate others here
                         if ((specifiedAttendee != null) &&
                                 !attendeeEmail.equalsIgnoreCase(specifiedAttendee)) {
@@ -1974,7 +1993,7 @@ public class CalendarUtilities {
             for (Address address: toList) {
                 toArray[i++] = address;
             }
-            msg.mTo = Address.pack(toArray);
+            msg.mTo = Address.toHeader(toArray);
 
             ics.writeTag("CLASS", "PUBLIC");
             ics.writeTag("STATUS", (messageFlag == Message.FLAG_OUTGOING_MEETING_CANCEL) ?
@@ -2030,10 +2049,13 @@ public class CalendarUtilities {
 
     static public EmailContent.Message createMessageForEventId(Context context, long eventId,
             int messageFlag, String uid, Account account, String specifiedAttendee) {
-        ContentResolver cr = context.getContentResolver();
-        EntityIterator eventIterator = EventsEntity.newEntityIterator(cr.query(
-                ContentUris.withAppendedId(Events.CONTENT_URI, eventId), null, null, null, null),
-                cr);
+        final ContentResolver cr = context.getContentResolver();
+        final Cursor cursor = cr.query(ContentUris.withAppendedId(
+                        Events.CONTENT_URI, eventId), null, null, null, null);
+        if (cursor == null) {
+            return null;
+        }
+        final EntityIterator eventIterator = EventsEntity.newEntityIterator(cursor, cr);
         try {
             while (eventIterator.hasNext()) {
                 Entity entity = eventIterator.next();

@@ -48,11 +48,8 @@ import android.text.style.TypefaceSpan;
 import android.text.style.URLSpan;
 import android.text.style.UnderlineSpan;
 
-import com.android.internal.util.XmlUtils;
-
 import java.io.IOException;
 import java.io.StringReader;
-import java.util.HashMap;
 
 /**
  * This class processes HTML strings into displayable styled text.
@@ -214,7 +211,7 @@ public class Html {
 
     private static String getOpenParaTagWithDirection(Spanned text, int start, int end) {
         final int len = end - start;
-        final byte[] levels = new byte[ArrayUtils.idealByteArraySize(len)];
+        final byte[] levels = ArrayUtils.newUnpaddedByteArray(len);
         final char[] buffer = TextUtils.obtain(len);
         TextUtils.getChars(text, start, end, buffer, 0);
 
@@ -391,6 +388,15 @@ public class Html {
                 out.append("&gt;");
             } else if (c == '&') {
                 out.append("&amp;");
+            } else if (c >= 0xD800 && c <= 0xDFFF) {
+                if (c < 0xDC00 && i + 1 < end) {
+                    char d = text.charAt(i + 1);
+                    if (d >= 0xDC00 && d <= 0xDFFF) {
+                        i++;
+                        int codepoint = 0x010000 | (int) c - 0xD800 << 10 | (int) d - 0xDC00;
+                        out.append("&#").append(codepoint).append(";");
+                    }
+                }
             } else if (c > 0x7E || c < ' ') {
                 out.append("&#").append((int) c).append(";");
             } else if (c == ' ') {

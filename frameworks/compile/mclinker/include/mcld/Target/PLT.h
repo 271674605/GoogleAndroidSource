@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_PROCEDURE_LINKAGE_TABLE_H
-#define MCLD_PROCEDURE_LINKAGE_TABLE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_TARGET_PLT_H
+#define MCLD_TARGET_PLT_H
 
 #include <mcld/LD/LDSection.h>
 #include <mcld/LD/SectionData.h>
@@ -22,7 +19,7 @@ class LDSection;
 class ResolveInfo;
 
 /** \class PLTEntryDefaultBase
- *  \brief PLTEntryDefaultBase provides the default interface for PLE Entry
+ *  \brief PLTEntryDefaultBase provides the default interface for PLT Entry
  */
 class PLTEntryBase : public TargetFragment
 {
@@ -33,7 +30,7 @@ public:
 
   virtual ~PLTEntryBase()
   {
-    delete m_pValue;
+    free(m_pValue);
   }
 
   void setValue(unsigned char* pValue)
@@ -81,23 +78,19 @@ public:
 
   virtual ~PLT();
 
-  /// reserveEntry - reseve the number of pNum of empty entries
-  /// The empty entris are reserved for layout to adjust the fragment offset.
-  virtual void reserveEntry(size_t pNum = 1) = 0;
-
   // finalizeSectionSize - set LDSection size
   virtual void finalizeSectionSize() = 0;
 
   uint64_t addr() const { return m_Section.addr(); }
 
-  const_iterator begin() const { return m_SectionData->begin(); }
-  iterator       begin()       { return m_SectionData->begin(); }
-  const_iterator end  () const { return m_SectionData->end();   }
-  iterator       end  ()       { return m_SectionData->end();   }
+  const_iterator begin() const { return m_pSectionData->begin(); }
+  iterator       begin()       { return m_pSectionData->begin(); }
+  const_iterator end  () const { return m_pSectionData->end();   }
+  iterator       end  ()       { return m_pSectionData->end();   }
 
 protected:
   LDSection& m_Section;
-  SectionData* m_SectionData;
+  SectionData* m_pSectionData;
 };
 
 } // namespace of mcld

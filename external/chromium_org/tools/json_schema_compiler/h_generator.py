@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 from code import Code
-from model import PropertyType, Type
+from model import PropertyType
 import cpp_util
 import schema_util
 
@@ -16,6 +16,7 @@ class HGenerator(object):
     return _Generator(namespace,
                       self._type_generator,
                       self._cpp_namespace).Generate()
+
 
 class _Generator(object):
   """A .h generator for a namespace.
@@ -137,14 +138,18 @@ class _Generator(object):
     return dependency_order
 
   def _GenerateEnumDeclaration(self, enum_name, type_):
-    """Generate the declaration of a C++ enum.
+    """Generate a code object with the  declaration of a C++ enum.
     """
     c = Code()
     c.Sblock('enum %s {' % enum_name)
     c.Append(self._type_helper.GetEnumNoneValue(type_) + ',')
     for value in type_.enum_values:
-      c.Append(self._type_helper.GetEnumValue(type_, value) + ',')
-    return c.Eblock('};')
+      current_enum_string = self._type_helper.GetEnumValue(type_, value)
+      c.Append(current_enum_string + ',')
+    c.Append('%s = %s,' % (
+        self._type_helper.GetEnumLastValue(type_), current_enum_string))
+    c.Eblock('};')
+    return c
 
   def _GenerateFields(self, props):
     """Generates the field declarations when declaring a type.
@@ -204,19 +209,15 @@ class _Generator(object):
     elif type_.property_type == PropertyType.ENUM:
       if type_.description:
         c.Comment(type_.description)
-      c.Sblock('enum %(classname)s {')
-      c.Append('%s,' % self._type_helper.GetEnumNoneValue(type_))
-      for value in type_.enum_values:
-        c.Append('%s,' % self._type_helper.GetEnumValue(type_, value))
+      c.Cblock(self._GenerateEnumDeclaration(classname, type_));
       # Top level enums are in a namespace scope so the methods shouldn't be
       # static. On the other hand, those declared inline (e.g. in an object) do.
       maybe_static = '' if is_toplevel else 'static '
-      (c.Eblock('};')
-        .Append()
+      (c.Append()
         .Append('%sstd::string ToString(%s as_enum);' %
-                    (maybe_static, classname))
+                (maybe_static, classname))
         .Append('%s%s Parse%s(const std::string& as_string);' %
-                    (maybe_static, classname, classname))
+                (maybe_static, classname, classname))
       )
     elif type_.property_type in (PropertyType.CHOICES,
                                  PropertyType.OBJECT):
@@ -303,9 +304,8 @@ class _Generator(object):
     c = Code()
     # TODO(kalman): Use function.unix_name not Classname here.
     function_namespace = cpp_util.Classname(function.name)
-    """Windows has a #define for SendMessage, so to avoid any issues, we need
-    to not use the name.
-    """
+    # Windows has a #define for SendMessage, so to avoid any issues, we need
+    # to not use the name.
     if function_namespace == 'SendMessage':
       function_namespace = 'PassMessage'
     (c.Append('namespace %s {' % function_namespace)
@@ -392,6 +392,11 @@ class _Generator(object):
   def _GenerateParams(self, params):
     """Builds the parameter list for a function, given an array of parameters.
     """
+    # |error| is populated with warnings and/or errors found during parsing.
+    # |error| being set does not necessarily imply failure and may be
+    # recoverable.
+    # For example, optional properties may have failed to parse, but the
+    # parser was able to continue.
     if self._generate_error_messages:
-      params += ('std::string* error = NULL',)
+      params += ('base::string16* error',)
     return ', '.join(str(p) for p in params)

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "content/public/browser/notification_observer.h"
@@ -34,19 +35,11 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   typedef ContentSettingBubbleModelDelegate Delegate;
 
   struct PopupItem {
-    PopupItem(const gfx::Image& image,
-              const std::string& title,
-              content::WebContents* web_contents)
-        : image(image),
-          title(title),
-          web_contents(web_contents),
-          popup_id(-1) {}
     PopupItem(const gfx::Image& image, const std::string& title, int32 popup_id)
-        : image(image), title(title), web_contents(NULL), popup_id(popup_id) {}
+        : image(image), title(title), popup_id(popup_id) {}
 
     gfx::Image image;
     std::string title;
-    content::WebContents* web_contents;
     int32 popup_id;
   };
   typedef std::vector<PopupItem> PopupItems;
@@ -71,9 +64,13 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   };
 
   struct MediaMenu {
+    MediaMenu();
+    ~MediaMenu();
+
     std::string label;
     content::MediaStreamDevice default_device;
     content::MediaStreamDevice selected_device;
+    bool disabled;
   };
   typedef std::map<content::MediaStreamType, MediaMenu> MediaMenuMap;
 
@@ -86,11 +83,11 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
     RadioGroup radio_group;
     bool radio_group_enabled;
     std::vector<DomainList> domain_lists;
-    std::set<std::string> resource_identifiers;
     std::string custom_link;
     bool custom_link_enabled;
     std::string manage_link;
     MediaMenuMap media_menus;
+    std::string learn_more_link;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(BubbleContent);
@@ -117,6 +114,7 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   virtual void OnPopupClicked(int index) {}
   virtual void OnCustomLinkClicked() {}
   virtual void OnManageLinkClicked() {}
+  virtual void OnLearnMoreLinkClicked() {}
   virtual void OnMediaMenuClicked(content::MediaStreamType type,
                                   const std::string& selected_device_id) {}
 
@@ -155,13 +153,21 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   void set_manage_link(const std::string& link) {
     bubble_content_.manage_link = link;
   }
+  void set_learn_more_link(const std::string& link) {
+    bubble_content_.learn_more_link = link;
+  }
   void add_media_menu(content::MediaStreamType type, const MediaMenu& menu) {
     bubble_content_.media_menus[type] = menu;
   }
   void set_selected_device(const content::MediaStreamDevice& device) {
     bubble_content_.media_menus[device.type].selected_device = device;
   }
-  void AddBlockedResource(const std::string& resource_identifier);
+  bool setting_is_managed() {
+    return setting_is_managed_;
+  }
+  void set_setting_is_managed(bool managed) {
+    setting_is_managed_ = managed;
+  }
 
  private:
   content::WebContents* web_contents_;
@@ -170,6 +176,9 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   BubbleContent bubble_content_;
   // A registrar for listening for WEB_CONTENTS_DESTROYED notifications.
   content::NotificationRegistrar registrar_;
+  // A flag that indicates if the content setting managed i.e. can't be
+  // controlled by the user.
+  bool setting_is_managed_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingBubbleModel);
 };
@@ -184,11 +193,13 @@ class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
   Delegate* delegate() const { return delegate_; }
 
  private:
-  void SetBlockedResources();
   void SetTitle();
   void SetManageLink();
-  virtual void OnManageLinkClicked() OVERRIDE;
+  void SetLearnMoreLink();
 
+  // content::ContentSettingBubbleModel:
+  virtual void OnManageLinkClicked() OVERRIDE;
+  virtual void OnLearnMoreLinkClicked() OVERRIDE;
   Delegate* delegate_;
 };
 

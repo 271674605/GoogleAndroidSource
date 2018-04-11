@@ -10,12 +10,14 @@
 #define GrSurface_DEFINED
 
 #include "GrTypes.h"
-#include "GrResource.h"
+#include "GrGpuObject.h"
+#include "SkRect.h"
 
 class GrTexture;
 class GrRenderTarget;
+struct SkImageInfo;
 
-class GrSurface : public GrResource {
+class GrSurface : public GrGpuObject {
 public:
     SK_DECLARE_INST_COUNT(GrSurface);
 
@@ -33,8 +35,14 @@ public:
      */
     int height() const { return fDesc.fHeight; }
 
+    /**
+     * Helper that gets the width and height of the surface as a bounding rectangle.
+     */
+    void getBoundsRect(SkRect* rect) const { rect->setWH(SkIntToScalar(this->width()),
+                                                         SkIntToScalar(this->height())); }
+
     GrSurfaceOrigin origin() const {
-        GrAssert(kTopLeft_GrSurfaceOrigin == fDesc.fOrigin || kBottomLeft_GrSurfaceOrigin == fDesc.fOrigin);
+        SkASSERT(kTopLeft_GrSurfaceOrigin == fDesc.fOrigin || kBottomLeft_GrSurfaceOrigin == fDesc.fOrigin);
         return fDesc.fOrigin;
     }
 
@@ -50,6 +58,8 @@ public:
      * Return the descriptor describing the surface
      */
     const GrTextureDesc& desc() const { return fDesc; }
+
+    SkImageInfo info() const;
 
     /**
      * @return the texture associated with the surface, may be NULL.
@@ -74,7 +84,7 @@ public:
             return thisRT == other->asRenderTarget();
         } else {
             const GrTexture* thisTex = this->asTexture();
-            GrAssert(NULL != thisTex); // We must be one or the other
+            SkASSERT(NULL != thisTex); // We must be one or the other
             return thisTex == other->asTexture();
         }
     }
@@ -119,6 +129,12 @@ public:
                              size_t rowBytes = 0,
                              uint32_t pixelOpsFlags = 0) = 0;
 
+    /**
+     * Write the contents of the surface to a PNG. Returns true if successful.
+     * @param filename      Full path to desired file
+     */
+    bool savePixels(const char* filename);
+
 protected:
     GrSurface(GrGpu* gpu, bool isWrapped, const GrTextureDesc& desc)
     : INHERITED(gpu, isWrapped)
@@ -128,7 +144,7 @@ protected:
     GrTextureDesc fDesc;
 
 private:
-    typedef GrResource INHERITED;
+    typedef GrGpuObject INHERITED;
 };
 
 #endif // GrSurface_DEFINED

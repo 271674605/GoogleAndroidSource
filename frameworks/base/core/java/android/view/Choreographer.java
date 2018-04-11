@@ -23,6 +23,9 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.util.Log;
+import android.util.TimeUtils;
+
+import java.io.PrintWriter;
 
 /**
  * Coordinates the timing of animations, input and drawing.
@@ -108,8 +111,6 @@ public final class Choreographer {
     // Skipped frames imply jank.
     private static final int SKIPPED_FRAME_WARNING_LIMIT = SystemProperties.getInt(
             "debug.choreographer.skipwarning", 30);
-
-    private static final long NANOS_PER_MS = 1000000;
 
     private static final int MSG_DO_FRAME = 0;
     private static final int MSG_DO_SCHEDULE_VSYNC = 1;
@@ -254,6 +255,23 @@ public final class Choreographer {
     public static long subtractFrameDelay(long delayMillis) {
         final long frameDelay = sFrameDelay;
         return delayMillis <= frameDelay ? 0 : delayMillis - frameDelay;
+    }
+
+    /**
+     * @return The refresh rate as the nanoseconds between frames
+     * @hide
+     */
+    public long getFrameIntervalNanos() {
+        return mFrameIntervalNanos;
+    }
+
+    void dump(String prefix, PrintWriter writer) {
+        String innerPrefix = prefix + "  ";
+        writer.print(prefix); writer.println("Choreographer:");
+        writer.print(innerPrefix); writer.print("mFrameScheduled=");
+                writer.println(mFrameScheduled);
+        writer.print(innerPrefix); writer.print("mLastFrameTime=");
+                writer.println(TimeUtils.formatUptime(mLastFrameTimeNanos / 1000000));
     }
 
     /**
@@ -413,7 +431,7 @@ public final class Choreographer {
     /**
      * Gets the time when the current frame started.
      * <p>
-     * This method provides the time in nanoseconds when the frame started being rendered.
+     * This method provides the time in milliseconds when the frame started being rendered.
      * The frame time provides a stable time base for synchronizing animations
      * and drawing.  It should be used instead of {@link SystemClock#uptimeMillis()}
      * or {@link System#nanoTime()} for animations and drawing in the UI.  Using the frame
@@ -436,7 +454,7 @@ public final class Choreographer {
      * @hide
      */
     public long getFrameTime() {
-        return getFrameTimeNanos() / NANOS_PER_MS;
+        return getFrameTimeNanos() / TimeUtils.NANOS_PER_MS;
     }
 
     /**
@@ -477,7 +495,7 @@ public final class Choreographer {
                 }
             } else {
                 final long nextFrameTime = Math.max(
-                        mLastFrameTimeNanos / NANOS_PER_MS + sFrameDelay, now);
+                        mLastFrameTimeNanos / TimeUtils.NANOS_PER_MS + sFrameDelay, now);
                 if (DEBUG) {
                     Log.d(TAG, "Scheduling next frame in " + (nextFrameTime - now) + " ms.");
                 }
@@ -726,7 +744,7 @@ public final class Choreographer {
             mFrame = frame;
             Message msg = Message.obtain(mHandler, this);
             msg.setAsynchronous(true);
-            mHandler.sendMessageAtTime(msg, timestampNanos / NANOS_PER_MS);
+            mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);
         }
 
         @Override

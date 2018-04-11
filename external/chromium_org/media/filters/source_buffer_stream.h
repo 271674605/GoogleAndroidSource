@@ -22,6 +22,7 @@
 #include "media/base/media_log.h"
 #include "media/base/ranges.h"
 #include "media/base/stream_parser_buffer.h"
+#include "media/base/text_track_config.h"
 #include "media/base/video_decoder_config.h"
 
 namespace media {
@@ -31,7 +32,7 @@ class SourceBufferRange;
 // See file-level comment for complete description.
 class MEDIA_EXPORT SourceBufferStream {
  public:
-  typedef std::deque<scoped_refptr<StreamParserBuffer> > BufferQueue;
+  typedef StreamParser::BufferQueue BufferQueue;
 
   // Status returned by GetNextBuffer().
   // kSuccess: Indicates that the next buffer was returned.
@@ -45,10 +46,21 @@ class MEDIA_EXPORT SourceBufferStream {
     kEndOfStream
   };
 
+  enum Type {
+    kAudio,
+    kVideo,
+    kText
+  };
+
   SourceBufferStream(const AudioDecoderConfig& audio_config,
-                     const LogCB& log_cb);
+                     const LogCB& log_cb,
+                     bool splice_frames_enabled);
   SourceBufferStream(const VideoDecoderConfig& video_config,
-                     const LogCB& log_cb);
+                     const LogCB& log_cb,
+                     bool splice_frames_enabled);
+  SourceBufferStream(const TextTrackConfig& text_config,
+                     const LogCB& log_cb,
+                     bool splice_frames_enabled);
 
   ~SourceBufferStream();
 
@@ -99,6 +111,11 @@ class MEDIA_EXPORT SourceBufferStream {
   // Returns a list of the buffered time ranges.
   Ranges<base::TimeDelta> GetBufferedTime() const;
 
+  // Returns the duration of the buffered ranges, which is equivalent
+  // to the end timestamp of the last buffered range. If no data is buffered
+  // then base::TimeDelta() is returned.
+  base::TimeDelta GetBufferedDuration() const;
+
   // Notifies this object that end of stream has been signalled.
   void MarkEndOfStream();
 
@@ -107,6 +124,7 @@ class MEDIA_EXPORT SourceBufferStream {
 
   const AudioDecoderConfig& GetCurrentAudioDecoderConfig();
   const VideoDecoderConfig& GetCurrentVideoDecoderConfig();
+  const TextTrackConfig& GetCurrentTextTrackConfig();
 
   // Notifies this object that the audio config has changed and buffers in
   // future Append() calls should be associated with this new config.
@@ -126,6 +144,8 @@ class MEDIA_EXPORT SourceBufferStream {
   }
 
  private:
+  friend class SourceBufferStreamTest;
+
   typedef std::list<SourceBufferRange*> RangeList;
 
   // Frees up space if the SourceBufferStream is taking up too much memory.
@@ -137,29 +157,28 @@ class MEDIA_EXPORT SourceBufferStream {
   // is true. Returns the number of bytes freed.
   int FreeBuffers(int total_bytes_to_free, bool reverse_direction);
 
-  // Appends |new_buffers| into |range_for_new_buffers_itr|, handling start and
-  // end overlaps if necessary.
-  // |deleted_buffers| is an output parameter containing candidates for
-  // |track_buffer_|.
-  // Returns true if the buffers were successfully inserted into the existing
-  // range.
-  // Returns false if the buffers being inserted triggered an error.
-  bool InsertIntoExistingRange(
-      const RangeList::iterator& range_for_new_buffers_itr,
-      const BufferQueue& new_buffers,
-      BufferQueue* deleted_buffers);
+  // Attempts to delete approximately |total_bytes_to_free| amount of data from
+  // |ranges_|, starting after the last appended buffer before the current
+  // playback position.
+  int FreeBuffersAfterLastAppended(int total_bytes_to_free);
 
-  // Resolve overlapping ranges such that no ranges overlap anymore.
-  // |range_with_new_buffers_itr| points to the range that has newly appended
-  // buffers.
+  // Gets the removal range to secure |byte_to_free| from
+  // [|start_timestamp|, |end_timestamp|).
+  // Returns the size of buffers to secure if future
+  // Remove(|start_timestamp|, |removal_end_timestamp|, duration) is called.
+  // Will not update |removal_end_timestamp| if the returned size is 0.
+  int GetRemovalRange(base::TimeDelta start_timestamp,
+      base::TimeDelta end_timestamp, int byte_to_free,
+      base::TimeDelta* removal_end_timestamp);
+
+  // Prepares |range_for_next_append_| so |new_buffers| can be appended.
+  // This involves removing buffers between the end of the previous append
+  // and any buffers covered by the time range in |new_buffers|.
   // |deleted_buffers| is an output parameter containing candidates for
-  // |track_buffer_|.
-  void ResolveCompleteOverlaps(
-      const RangeList::iterator& range_with_new_buffers_itr,
-      BufferQueue* deleted_buffers);
-  void ResolveEndOverlap(
-      const RangeList::iterator& range_with_new_buffers_itr,
-      BufferQueue* deleted_buffers);
+  // |track_buffer_| if this method ends up removing the current playback
+  // position from the range.
+  void PrepareRangesForNextAppend(const BufferQueue& new_buffers,
+                                  BufferQueue* deleted_buffers);
 
   // Removes buffers, from the |track_buffer_|, that come after |timestamp|.
   void PruneTrackBuffer(const base::TimeDelta timestamp);
@@ -168,17 +187,6 @@ class MEDIA_EXPORT SourceBufferStream {
   // next to it, and merges them if so.
   void MergeWithAdjacentRangeIfNecessary(
       const RangeList::iterator& range_with_new_buffers_itr);
-
-  // Deletes the buffers between |start_timestamp|, |end_timestamp| from
-  // the range that |range_itr| points to. Deletes between [start,end] if
-  // |is_range_exclusive| is true, or (start,end) if |is_range_exclusive| is
-  // false. Buffers are deleted in GOPs, so this method may delete buffers past
-  // |end_timestamp| if the keyframe a buffer depends on was deleted.
-  void DeleteBetween(const RangeList::iterator& range_itr,
-                     base::TimeDelta start_timestamp,
-                     base::TimeDelta end_timestamp,
-                     bool is_range_exclusive,
-                     BufferQueue* deleted_buffers);
 
   // Returns true if |second_timestamp| is the timestamp of the next buffer in
   // sequence after |first_timestamp|, false otherwise.
@@ -223,15 +231,14 @@ class MEDIA_EXPORT SourceBufferStream {
   // in |ranges_|, false otherwise or if |ranges_| is empty.
   bool ShouldSeekToStartOfBuffered(base::TimeDelta seek_timestamp) const;
 
-  // Returns true if the |prev_is_keyframe| & |current_is_keyframe| combination
-  // on buffers with the same timestamp should be allowed. Returns false if the
-  // combination should signal an error.
-  bool AllowSameTimestamp(bool prev_is_keyframe,
-                          bool current_is_keyframe) const;
-
   // Returns true if the timestamps of |buffers| are monotonically increasing
   // since the previous append to the media segment, false otherwise.
   bool IsMonotonicallyIncreasing(const BufferQueue& buffers) const;
+
+  // Returns true if |next_timestamp| and |next_is_keyframe| are valid for
+  // the first buffer after the previous append.
+  bool IsNextTimestampValid(base::TimeDelta next_timestamp,
+                            bool next_is_keyframe) const;
 
   // Returns true if |selected_range_| is the only range in |ranges_| that
   // HasNextBufferPosition().
@@ -267,13 +274,58 @@ class MEDIA_EXPORT SourceBufferStream {
   // have a keyframe after |timestamp| then kNoTimestamp() is returned.
   base::TimeDelta FindKeyframeAfterTimestamp(const base::TimeDelta timestamp);
 
-  // Returns "VIDEO" for a video SourceBufferStream and "AUDIO" for an audio
-  // one.
+  // Returns "VIDEO" for a video SourceBufferStream, "AUDIO" for an audio
+  // stream, and "TEXT" for a text stream.
   std::string GetStreamTypeName() const;
 
   // Returns true if we don't have any ranges or the last range is selected
   // or there is a pending seek beyond any existing ranges.
   bool IsEndSelected() const;
+
+  // Deletes the range pointed to by |*itr| and removes it from |ranges_|.
+  // If |*itr| points to |selected_range_|, then |selected_range_| is set to
+  // NULL. After the range is removed, |*itr| is to the range after the one that
+  // was removed or to |ranges_.end()| if the last range was removed.
+  void DeleteAndRemoveRange(RangeList::iterator* itr);
+
+  // Helper function used by Remove() and PrepareRangesForNextAppend() to
+  // remove buffers and ranges between |start| and |end|.
+  // |is_exclusive| - If set to true, buffers with timestamps that
+  // match |start| are not removed. If set to false, buffers with
+  // timestamps that match |start| will be removed.
+  // |*deleted_buffers| - Filled with buffers for the current playback position
+  // if the removal range included the current playback position. These buffers
+  // can be used as candidates for placing in the |track_buffer_|.
+  void RemoveInternal(
+      base::TimeDelta start, base::TimeDelta end, bool is_exclusive,
+      BufferQueue* deleted_buffers);
+
+  Type GetType() const;
+
+  // See GetNextBuffer() for additional details.  This method handles splice
+  // frame processing.
+  Status HandleNextBufferWithSplice(
+      scoped_refptr<StreamParserBuffer>* out_buffer);
+
+  // See GetNextBuffer() for additional details.  This method handles preroll
+  // frame processing.
+  Status HandleNextBufferWithPreroll(
+      scoped_refptr<StreamParserBuffer>* out_buffer);
+
+  // See GetNextBuffer() for additional details.  The internal method hands out
+  // single buffers from the |track_buffer_| and |selected_range_| without
+  // additional processing for splice frame or preroll buffers.
+  Status GetNextBufferInternal(scoped_refptr<StreamParserBuffer>* out_buffer);
+
+  // Called by PrepareRangesForNextAppend() before pruning overlapped buffers to
+  // generate a splice frame with a small portion of the overlapped buffers.  If
+  // a splice frame is generated, the first buffer in |new_buffers| will have
+  // its timestamps, duration, and fade out preroll updated.
+  void GenerateSpliceFrame(const BufferQueue& new_buffers);
+
+  // If |out_buffer| has splice buffers or preroll, sets |pending_buffer_|
+  // appropriately and returns true.  Otherwise returns false.
+  bool SetPendingBuffer(scoped_refptr<StreamParserBuffer>* out_buffer);
 
   // Callback used to report error strings that can help the web developer
   // figure out what is wrong with the content.
@@ -297,6 +349,9 @@ class MEDIA_EXPORT SourceBufferStream {
   // and |append_config_index_| represent indexes into one of these vectors.
   std::vector<AudioDecoderConfig> audio_configs_;
   std::vector<VideoDecoderConfig> video_configs_;
+
+  // Holds the text config for this stream.
+  TextTrackConfig text_track_config_;
 
   // True if more data needs to be appended before the Seek() can complete,
   // false if no Seek() has been requested or the Seek() is completed.
@@ -347,6 +402,21 @@ class MEDIA_EXPORT SourceBufferStream {
   // config. GetNextBuffer() must not be called again until
   // GetCurrentXXXDecoderConfig() has been called.
   bool config_change_pending_;
+
+  // Used by HandleNextBufferWithSplice() or HandleNextBufferWithPreroll() when
+  // a splice frame buffer or buffer with preroll is returned from
+  // GetNextBufferInternal().
+  scoped_refptr<StreamParserBuffer> pending_buffer_;
+
+  // Indicates which of the splice buffers in |splice_buffer_| should be
+  // handled out next.
+  size_t splice_buffers_index_;
+
+  // Indicates that all buffers before |pending_buffer_| have been handed out.
+  bool pending_buffers_complete_;
+
+  // Indicates that splice frame generation is enabled.
+  const bool splice_frames_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(SourceBufferStream);
 };

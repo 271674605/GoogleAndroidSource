@@ -12,7 +12,9 @@
 #include "base/compiler_specific.h"
 #include "content/browser/gamepad/gamepad_data_fetcher.h"
 
-#if defined(OS_WIN)
+#if defined(OS_ANDROID)
+#include "content/browser/gamepad/gamepad_platform_data_fetcher_android.h"
+#elif defined(OS_WIN)
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_win.h"
 #elif defined(OS_MACOSX)
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_mac.h"
@@ -22,7 +24,11 @@
 
 namespace content {
 
-#if defined(OS_WIN)
+#if defined(OS_ANDROID)
+
+typedef GamepadPlatformDataFetcherAndroid GamepadPlatformDataFetcher;
+
+#elif defined(OS_WIN)
 
 typedef GamepadPlatformDataFetcherWin GamepadPlatformDataFetcher;
 
@@ -30,7 +36,7 @@ typedef GamepadPlatformDataFetcherWin GamepadPlatformDataFetcher;
 
 typedef GamepadPlatformDataFetcherMac GamepadPlatformDataFetcher;
 
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) && defined(USE_UDEV)
 
 typedef GamepadPlatformDataFetcherLinux GamepadPlatformDataFetcher;
 
@@ -40,7 +46,7 @@ class GamepadDataFetcherEmpty : public GamepadDataFetcher {
  public:
   GamepadDataFetcherEmpty();
 
-  virtual void GetGamepadData(WebKit::WebGamepads* pads,
+  virtual void GetGamepadData(blink::WebGamepads* pads,
                               bool devices_changed_hint) OVERRIDE;
 
  private:

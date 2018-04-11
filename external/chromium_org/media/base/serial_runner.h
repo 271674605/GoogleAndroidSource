@@ -11,10 +11,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace media {
@@ -22,17 +23,18 @@ namespace media {
 // Runs a series of bound functions accepting Closures or PipelineStatusCB.
 // SerialRunner doesn't use regular Closure/PipelineStatusCBs as it late binds
 // the completion callback as the series progresses.
-class SerialRunner {
+class MEDIA_EXPORT SerialRunner {
  public:
   typedef base::Callback<void(const base::Closure&)> BoundClosure;
   typedef base::Callback<void(const PipelineStatusCB&)> BoundPipelineStatusCB;
 
   // Serial queue of bound functions to run.
-  class Queue {
+  class MEDIA_EXPORT Queue {
    public:
     Queue();
     ~Queue();
 
+    void Push(const base::Closure& closure);
     void Push(const BoundClosure& bound_fn);
     void Push(const BoundPipelineStatusCB& bound_fn);
 
@@ -50,6 +52,13 @@ class SerialRunner {
   // All bound functions are executed on the thread that Run() is called on,
   // including |done_cb|.
   //
+  // To eliminate an unnecessary posted task, the first function is executed
+  // immediately on the caller's stack. It is *strongly advised* to ensure
+  // the calling code does no more work after the call to Run().
+  //
+  // In all cases, |done_cb| is guaranteed to execute on a separate calling
+  // stack.
+  //
   // Deleting the object will prevent execution of any unstarted bound
   // functions, including |done_cb|.
   static scoped_ptr<SerialRunner> Run(
@@ -63,10 +72,12 @@ class SerialRunner {
 
   void RunNextInSeries(PipelineStatus last_status);
 
-  base::WeakPtrFactory<SerialRunner> weak_this_;
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   Queue bound_fns_;
   PipelineStatusCB done_cb_;
+
+  // NOTE: Weak pointers must be invalidated before all other member variables.
+  base::WeakPtrFactory<SerialRunner> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SerialRunner);
 };

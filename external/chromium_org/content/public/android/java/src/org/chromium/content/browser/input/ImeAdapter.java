@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,20 @@ package org.chromium.content.browser.input;
 
 import android.os.Handler;
 import android.os.ResultReceiver;
+import android.os.SystemClock;
+import android.text.Editable;
+import android.text.SpannableString;
+import android.text.style.BackgroundColorSpan;
+import android.text.style.CharacterStyle;
+import android.text.style.UnderlineSpan;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import java.lang.CharSequence;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
@@ -39,28 +47,42 @@ import org.chromium.base.JNINamespace;
  */
 @JNINamespace("content")
 public class ImeAdapter {
+
+    /**
+     * Interface for the delegate that needs to be notified of IME changes.
+     */
     public interface ImeAdapterDelegate {
         /**
          * @param isFinish whether the event is occurring because input is finished.
          */
         void onImeEvent(boolean isFinish);
-        void onSetFieldValue();
+
+        /**
+         * Called when a request to hide the keyboard is sent to InputMethodManager.
+         */
         void onDismissInput();
+
+        /**
+         * @return View that the keyboard should be attached to.
+         */
         View getAttachedView();
+
+        /**
+         * @return Object that should be called for all keyboard show and hide requests.
+         */
         ResultReceiver getNewShowKeyboardReceiver();
     }
 
     private class DelayedDismissInput implements Runnable {
-        private final int mNativeImeAdapter;
+        private final long mNativeImeAdapter;
 
-        DelayedDismissInput(int nativeImeAdapter) {
+        DelayedDismissInput(long nativeImeAdapter) {
             mNativeImeAdapter = nativeImeAdapter;
         }
 
         @Override
         public void run() {
-            attach(mNativeImeAdapter, sTextInputTypeNone, AdapterInputConnection.INVALID_SELECTION,
-                    AdapterInputConnection.INVALID_SELECTION);
+            attach(mNativeImeAdapter, sTextInputTypeNone);
             dismissInput(true);
         }
     }
@@ -88,7 +110,6 @@ public class ImeAdapter {
     static int sTextInputTypeEmail;
     static int sTextInputTypeTel;
     static int sTextInputTypeNumber;
-    static int sTextInputTypeWeek;
     static int sTextInputTypeContentEditable;
     static int sModifierShift;
     static int sModifierAlt;
@@ -96,15 +117,13 @@ public class ImeAdapter {
     static int sModifierCapsLockOn;
     static int sModifierNumLockOn;
 
-    private int mNativeImeAdapterAndroid;
+    private long mNativeImeAdapterAndroid;
     private InputMethodManagerWrapper mInputMethodManagerWrapper;
     private AdapterInputConnection mInputConnection;
     private final ImeAdapterDelegate mViewEmbedder;
     private final Handler mHandler;
     private DelayedDismissInput mDismissInput = null;
     private int mTextInputType;
-    private int mInitialSelectionStart;
-    private int mInitialSelectionEnd;
 
     @VisibleForTesting
     boolean mIsShowWithoutHideOutstanding = false;
@@ -120,13 +139,21 @@ public class ImeAdapter {
         mHandler = new Handler();
     }
 
+    /**
+     * Default factory for AdapterInputConnection classes.
+     */
     public static class AdapterInputConnectionFactory {
         public AdapterInputConnection get(View view, ImeAdapter imeAdapter,
-                EditorInfo outAttrs) {
-            return new AdapterInputConnection(view, imeAdapter, outAttrs);
+                Editable editable, EditorInfo outAttrs) {
+            return new AdapterInputConnection(view, imeAdapter, editable, outAttrs);
         }
     }
 
+    /**
+     * Overrides the InputMethodManagerWrapper that ImeAdapter uses to make calls to
+     * InputMethodManager.
+     * @param immw InputMethodManagerWrapper that should be used to call InputMethodManager.
+     */
     @VisibleForTesting
     public void setInputMethodManagerWrapper(InputMethodManagerWrapper immw) {
         mInputMethodManagerWrapper = immw;
@@ -158,21 +185,8 @@ public class ImeAdapter {
     }
 
     /**
-     * Should be only used by AdapterInputConnection.
-     * @return The starting index of the initial text selection.
+     * @return Constant representing that a focused node is not an input field.
      */
-    int getInitialSelectionStart() {
-        return mInitialSelectionStart;
-    }
-
-    /**
-     * Should be only used by AdapterInputConnection.
-     * @return The ending index of the initial text selection.
-     */
-    int getInitialSelectionEnd() {
-        return mInitialSelectionEnd;
-    }
-
     public static int getTextInputTypeNone() {
         return sTextInputTypeNone;
     }
@@ -180,34 +194,31 @@ public class ImeAdapter {
     private static int getModifiers(int metaState) {
         int modifiers = 0;
         if ((metaState & KeyEvent.META_SHIFT_ON) != 0) {
-          modifiers |= sModifierShift;
+            modifiers |= sModifierShift;
         }
         if ((metaState & KeyEvent.META_ALT_ON) != 0) {
-          modifiers |= sModifierAlt;
+            modifiers |= sModifierAlt;
         }
         if ((metaState & KeyEvent.META_CTRL_ON) != 0) {
-          modifiers |= sModifierCtrl;
+            modifiers |= sModifierCtrl;
         }
         if ((metaState & KeyEvent.META_CAPS_LOCK_ON) != 0) {
-          modifiers |= sModifierCapsLockOn;
+            modifiers |= sModifierCapsLockOn;
         }
         if ((metaState & KeyEvent.META_NUM_LOCK_ON) != 0) {
-          modifiers |= sModifierNumLockOn;
+            modifiers |= sModifierNumLockOn;
         }
         return modifiers;
     }
 
-    public boolean isActive() {
-        return mInputConnection != null && mInputConnection.isActive();
-    }
-
-    private boolean isFor(int nativeImeAdapter, int textInputType) {
-        return mNativeImeAdapterAndroid == nativeImeAdapter &&
-               mTextInputType == textInputType;
-    }
-
-    public void attachAndShowIfNeeded(int nativeImeAdapter, int textInputType,
-            int selectionStart, int selectionEnd, boolean showIfNeeded) {
+    /**
+     * Shows or hides the keyboard based on passed parameters.
+     * @param nativeImeAdapter Pointer to the ImeAdapterAndroid object that is sending the update.
+     * @param textInputType Text input type for the currently focused field in renderer.
+     * @param showIfNeeded Whether the keyboard should be shown if it is currently hidden.
+     */
+    public void updateKeyboardVisibility(long nativeImeAdapter, int textInputType,
+            boolean showIfNeeded) {
         mHandler.removeCallbacks(mDismissInput);
 
         // If current input type is none and showIfNeeded is false, IME should not be shown
@@ -216,7 +227,7 @@ public class ImeAdapter {
             return;
         }
 
-        if (!isFor(nativeImeAdapter, textInputType)) {
+        if (mNativeImeAdapterAndroid != nativeImeAdapter || mTextInputType != textInputType) {
             // Set a delayed task to perform unfocus. This avoids hiding the keyboard when tabbing
             // through text inputs or when JS rapidly changes focus to another text element.
             if (textInputType == sTextInputTypeNone) {
@@ -225,8 +236,7 @@ public class ImeAdapter {
                 return;
             }
 
-            int previousType = mTextInputType;
-            attach(nativeImeAdapter, textInputType, selectionStart, selectionEnd);
+            attach(nativeImeAdapter, textInputType);
 
             mInputMethodManagerWrapper.restartInput(mViewEmbedder.getAttachedView());
             if (showIfNeeded) {
@@ -237,17 +247,17 @@ public class ImeAdapter {
         }
     }
 
-    public void attach(int nativeImeAdapter, int textInputType, int selectionStart,
-            int selectionEnd) {
+    public void attach(long nativeImeAdapter, int textInputType) {
         if (mNativeImeAdapterAndroid != 0) {
             nativeResetImeAdapter(mNativeImeAdapterAndroid);
         }
         mNativeImeAdapterAndroid = nativeImeAdapter;
         mTextInputType = textInputType;
-        mInitialSelectionStart = selectionStart;
-        mInitialSelectionEnd = selectionEnd;
         if (nativeImeAdapter != 0) {
             nativeAttachImeAdapter(mNativeImeAdapterAndroid);
+        }
+        if (mTextInputType == sTextInputTypeNone) {
+            dismissInput(false);
         }
     }
 
@@ -256,22 +266,8 @@ public class ImeAdapter {
      * keyboard events to WebKit.
      * @param nativeImeAdapter The pointer to the native ImeAdapter object.
      */
-    public void attach(int nativeImeAdapter) {
-        if (mNativeImeAdapterAndroid != 0) {
-            nativeResetImeAdapter(mNativeImeAdapterAndroid);
-        }
-        mNativeImeAdapterAndroid = nativeImeAdapter;
-        if (nativeImeAdapter != 0) {
-            nativeAttachImeAdapter(mNativeImeAdapterAndroid);
-        }
-    }
-
-    /**
-     * Used to check whether the native counterpart of the ImeAdapter has been attached yet.
-     * @return Whether native ImeAdapter has been attached and its pointer is currently nonzero.
-     */
-    public boolean isNativeImeAdapterAttached() {
-        return mNativeImeAdapterAndroid != 0;
+    public void attach(long nativeImeAdapter) {
+        attach(nativeImeAdapter, sTextInputTypeNone);
     }
 
     private void showKeyboard() {
@@ -281,29 +277,32 @@ public class ImeAdapter {
     }
 
     private void dismissInput(boolean unzoomIfNeeded) {
-        hideKeyboard(unzoomIfNeeded);
-        mViewEmbedder.onDismissInput();
-    }
-
-    private void hideKeyboard(boolean unzoomIfNeeded) {
         mIsShowWithoutHideOutstanding  = false;
         View view = mViewEmbedder.getAttachedView();
         if (mInputMethodManagerWrapper.isActive(view)) {
             mInputMethodManagerWrapper.hideSoftInputFromWindow(view.getWindowToken(), 0,
                     unzoomIfNeeded ? mViewEmbedder.getNewShowKeyboardReceiver() : null);
         }
+        mViewEmbedder.onDismissInput();
     }
 
     private boolean hasInputType() {
         return mTextInputType != sTextInputTypeNone;
     }
 
-    static boolean isTextInputType(int type) {
+    private static boolean isTextInputType(int type) {
         return type != sTextInputTypeNone && !InputDialogContainer.isDialogInputType(type);
     }
 
     public boolean hasTextInputType() {
         return isTextInputType(mTextInputType);
+    }
+
+    /**
+     * @return true if the selected text is of password.
+     */
+    public boolean isSelectionPassword() {
+        return mTextInputType == sTextInputTypePassword;
     }
 
     public boolean dispatchKeyEvent(KeyEvent event) {
@@ -319,12 +318,12 @@ public class ImeAdapter {
     }
 
     void sendKeyEventWithKeyCode(int keyCode, int flags) {
-        long eventTime = System.currentTimeMillis();
+        long eventTime = SystemClock.uptimeMillis();
         translateAndSendNativeEvents(new KeyEvent(eventTime, eventTime,
                 KeyEvent.ACTION_DOWN, keyCode, 0, 0,
                 KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
                 flags));
-        translateAndSendNativeEvents(new KeyEvent(System.currentTimeMillis(), eventTime,
+        translateAndSendNativeEvents(new KeyEvent(SystemClock.uptimeMillis(), eventTime,
                 KeyEvent.ACTION_UP, keyCode, 0, 0,
                 KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
                 flags));
@@ -332,16 +331,16 @@ public class ImeAdapter {
 
     // Calls from Java to C++
 
-    @VisibleForTesting
-    boolean checkCompositionQueueAndCallNative(String text, int newCursorPosition,
+    boolean checkCompositionQueueAndCallNative(CharSequence text, int newCursorPosition,
             boolean isCommit) {
         if (mNativeImeAdapterAndroid == 0) return false;
+        String textStr = text.toString();
 
         // Committing an empty string finishes the current composition.
-        boolean isFinish = text.isEmpty();
+        boolean isFinish = textStr.isEmpty();
         mViewEmbedder.onImeEvent(isFinish);
-        int keyCode = shouldSendKeyEventWithKeyCode(text);
-        long timeStampMs = System.currentTimeMillis();
+        int keyCode = shouldSendKeyEventWithKeyCode(textStr);
+        long timeStampMs = SystemClock.uptimeMillis();
 
         if (keyCode != COMPOSITION_KEY_CODE) {
             sendKeyEventWithKeyCode(keyCode,
@@ -350,9 +349,9 @@ public class ImeAdapter {
             nativeSendSyntheticKeyEvent(mNativeImeAdapterAndroid, sEventTypeRawKeyDown,
                     timeStampMs, keyCode, 0);
             if (isCommit) {
-                nativeCommitText(mNativeImeAdapterAndroid, text);
+                nativeCommitText(mNativeImeAdapterAndroid, textStr);
             } else {
-                nativeSetComposingText(mNativeImeAdapterAndroid, text, newCursorPosition);
+                nativeSetComposingText(mNativeImeAdapterAndroid, text, textStr, newCursorPosition);
             }
             nativeSendSyntheticKeyEvent(mNativeImeAdapterAndroid, sEventTypeKeyUp,
                     timeStampMs, keyCode, 0);
@@ -387,11 +386,10 @@ public class ImeAdapter {
         mViewEmbedder.onImeEvent(false);
         return nativeSendKeyEvent(mNativeImeAdapterAndroid, event, event.getAction(),
                 getModifiers(event.getMetaState()), event.getEventTime(), event.getKeyCode(),
-                                event.isSystem(), event.getUnicodeChar());
+                             /*isSystemKey=*/false, event.getUnicodeChar());
     }
 
-    boolean sendSyntheticKeyEvent(
-            int eventType, long timestampMs, int keyCode, int unicodeChar) {
+    boolean sendSyntheticKeyEvent(int eventType, long timestampMs, int keyCode, int unicodeChar) {
         if (mNativeImeAdapterAndroid == 0) return false;
 
         nativeSendSyntheticKeyEvent(
@@ -399,29 +397,30 @@ public class ImeAdapter {
         return true;
     }
 
-    boolean deleteSurroundingText(int leftLength, int rightLength) {
+    /**
+     * Send a request to the native counterpart to delete a given range of characters.
+     * @param beforeLength Number of characters to extend the selection by before the existing
+     *                     selection.
+     * @param afterLength Number of characters to extend the selection by after the existing
+     *                    selection.
+     * @return Whether the native counterpart of ImeAdapter received the call.
+     */
+    boolean deleteSurroundingText(int beforeLength, int afterLength) {
         if (mNativeImeAdapterAndroid == 0) return false;
-        nativeDeleteSurroundingText(mNativeImeAdapterAndroid, leftLength, rightLength);
+        nativeDeleteSurroundingText(mNativeImeAdapterAndroid, beforeLength, afterLength);
         return true;
     }
 
-    @VisibleForTesting
-    protected boolean setEditableSelectionOffsets(int start, int end) {
+    /**
+     * Send a request to the native counterpart to set the selection to given range.
+     * @param start Selection start index.
+     * @param end Selection end index.
+     * @return Whether the native counterpart of ImeAdapter received the call.
+     */
+    boolean setEditableSelectionOffsets(int start, int end) {
         if (mNativeImeAdapterAndroid == 0) return false;
         nativeSetEditableSelectionOffsets(mNativeImeAdapterAndroid, start, end);
         return true;
-    }
-
-    void batchStateChanged(boolean isBegin) {
-        if (mNativeImeAdapterAndroid == 0) return;
-        nativeImeBatchStateChanged(mNativeImeAdapterAndroid, isBegin);
-    }
-
-    void commitText() {
-        cancelComposition();
-        if (mNativeImeAdapterAndroid != 0) {
-            nativeCommitText(mNativeImeAdapterAndroid, "");
-        }
     }
 
     /**
@@ -506,9 +505,7 @@ public class ImeAdapter {
     private static void initializeTextInputTypes(int textInputTypeNone, int textInputTypeText,
             int textInputTypeTextArea, int textInputTypePassword, int textInputTypeSearch,
             int textInputTypeUrl, int textInputTypeEmail, int textInputTypeTel,
-            int textInputTypeNumber, int textInputTypeDate, int textInputTypeDateTime,
-            int textInputTypeDateTimeLocal, int textInputTypeMonth, int textInputTypeTime,
-            int textInputTypeWeek, int textInputTypeContentEditable) {
+            int textInputTypeNumber, int textInputTypeContentEditable) {
         sTextInputTypeNone = textInputTypeNone;
         sTextInputTypeText = textInputTypeText;
         sTextInputTypeTextArea = textInputTypeTextArea;
@@ -518,53 +515,78 @@ public class ImeAdapter {
         sTextInputTypeEmail = textInputTypeEmail;
         sTextInputTypeTel = textInputTypeTel;
         sTextInputTypeNumber = textInputTypeNumber;
-        sTextInputTypeWeek = textInputTypeWeek;
         sTextInputTypeContentEditable = textInputTypeContentEditable;
     }
 
     @CalledByNative
-    private void cancelComposition() {
-        if (mInputConnection != null) {
-            mInputConnection.restartInput();
+    private void focusedNodeChanged(boolean isEditable) {
+        if (mInputConnection != null && isEditable) mInputConnection.restartInput();
+    }
+
+    @CalledByNative
+    private void populateUnderlinesFromSpans(CharSequence text, long underlines) {
+        if (!(text instanceof SpannableString)) return;
+
+        SpannableString spannableString = ((SpannableString) text);
+        CharacterStyle spans[] =
+                spannableString.getSpans(0, text.length(), CharacterStyle.class);
+        for (CharacterStyle span : spans) {
+            if (span instanceof BackgroundColorSpan) {
+                nativeAppendBackgroundColorSpan(underlines, spannableString.getSpanStart(span),
+                        spannableString.getSpanEnd(span),
+                        ((BackgroundColorSpan) span).getBackgroundColor());
+            } else if (span instanceof UnderlineSpan) {
+                nativeAppendUnderlineSpan(underlines, spannableString.getSpanStart(span),
+                        spannableString.getSpanEnd(span));
+            }
         }
     }
 
     @CalledByNative
+    private void cancelComposition() {
+        if (mInputConnection != null) mInputConnection.restartInput();
+    }
+
+    @CalledByNative
     void detach() {
+        if (mDismissInput != null) mHandler.removeCallbacks(mDismissInput);
         mNativeImeAdapterAndroid = 0;
         mTextInputType = 0;
     }
 
-    private native boolean nativeSendSyntheticKeyEvent(int nativeImeAdapterAndroid,
+    private native boolean nativeSendSyntheticKeyEvent(long nativeImeAdapterAndroid,
             int eventType, long timestampMs, int keyCode, int unicodeChar);
 
-    private native boolean nativeSendKeyEvent(int nativeImeAdapterAndroid, KeyEvent event,
+    private native boolean nativeSendKeyEvent(long nativeImeAdapterAndroid, KeyEvent event,
             int action, int modifiers, long timestampMs, int keyCode, boolean isSystemKey,
             int unicodeChar);
 
-    private native void nativeSetComposingText(int nativeImeAdapterAndroid, String text,
-            int newCursorPosition);
+    private static native void nativeAppendUnderlineSpan(long underlinePtr, int start, int end);
 
-    private native void nativeCommitText(int nativeImeAdapterAndroid, String text);
+    private static native void nativeAppendBackgroundColorSpan(long underlinePtr, int start,
+            int end, int backgroundColor);
 
-    private native void nativeFinishComposingText(int nativeImeAdapterAndroid);
+    private native void nativeSetComposingText(long nativeImeAdapterAndroid, CharSequence text,
+            String textStr, int newCursorPosition);
 
-    private native void nativeAttachImeAdapter(int nativeImeAdapterAndroid);
+    private native void nativeCommitText(long nativeImeAdapterAndroid, String textStr);
 
-    private native void nativeSetEditableSelectionOffsets(int nativeImeAdapterAndroid,
+    private native void nativeFinishComposingText(long nativeImeAdapterAndroid);
+
+    private native void nativeAttachImeAdapter(long nativeImeAdapterAndroid);
+
+    private native void nativeSetEditableSelectionOffsets(long nativeImeAdapterAndroid,
             int start, int end);
 
-    private native void nativeSetComposingRegion(int nativeImeAdapterAndroid, int start, int end);
+    private native void nativeSetComposingRegion(long nativeImeAdapterAndroid, int start, int end);
 
-    private native void nativeDeleteSurroundingText(int nativeImeAdapterAndroid,
+    private native void nativeDeleteSurroundingText(long nativeImeAdapterAndroid,
             int before, int after);
 
-    private native void nativeImeBatchStateChanged(int nativeImeAdapterAndroid, boolean isBegin);
-
-    private native void nativeUnselect(int nativeImeAdapterAndroid);
-    private native void nativeSelectAll(int nativeImeAdapterAndroid);
-    private native void nativeCut(int nativeImeAdapterAndroid);
-    private native void nativeCopy(int nativeImeAdapterAndroid);
-    private native void nativePaste(int nativeImeAdapterAndroid);
-    private native void nativeResetImeAdapter(int nativeImeAdapterAndroid);
+    private native void nativeUnselect(long nativeImeAdapterAndroid);
+    private native void nativeSelectAll(long nativeImeAdapterAndroid);
+    private native void nativeCut(long nativeImeAdapterAndroid);
+    private native void nativeCopy(long nativeImeAdapterAndroid);
+    private native void nativePaste(long nativeImeAdapterAndroid);
+    private native void nativeResetImeAdapter(long nativeImeAdapterAndroid);
 }

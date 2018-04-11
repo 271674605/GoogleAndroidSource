@@ -15,7 +15,6 @@
 #include "SkString.h"
 #include "SkTDArray.h"
 #include "SkTemplates.h"
-#include "SkTScopedPtr.h"
 
 /** \class SkAdvancedTypefaceMetrics
 
@@ -36,15 +35,21 @@ public:
         kCFF_Font,
         kTrueType_Font,
         kOther_Font,
-        kNotEmbeddable_Font
     };
     // The type of the underlying font program.  This field determines which
-    // of the following fields are valid.  If it is kOther_Font or
-    // kNotEmbeddable_Font, the per glyph information will never be populated.
+    // of the following fields are valid.  If it is kOther_Font the per glyph
+    // information will never be populated.
     FontType fType;
 
-    // fMultiMaster may be true for Type1_Font or CFF_Font.
-    bool fMultiMaster;
+    enum FontFlags {
+        kEmpty_FontFlag          = 0x0,  //!<No flags set
+        kMultiMaster_FontFlag    = 0x1,  //!<May be true for Type1 or CFF fonts.
+        kNotEmbeddable_FontFlag  = 0x2,  //!<May not be embedded.
+        kNotSubsettable_FontFlag = 0x4,  //!<May not be subset.
+    };
+    // Global font flags.
+    FontFlags fFlags;
+
     uint16_t fLastGlyphID; // The last valid glyph ID in the font.
     uint16_t fEmSize;  // The size of the em box (defines font units).
 
@@ -90,7 +95,7 @@ public:
         uint16_t fStartId;
         uint16_t fEndId;
         SkTDArray<Data> fAdvance;
-        SkTScopedPtr<AdvanceMetric<Data> > fNext;
+        SkAutoTDelete<AdvanceMetric<Data> > fNext;
     };
 
     struct VerticalMetric {
@@ -102,12 +107,12 @@ public:
     typedef AdvanceMetric<VerticalMetric> VerticalAdvanceRange;
 
     // This is indexed by glyph id.
-    SkTScopedPtr<WidthRange> fGlyphWidths;
+    SkAutoTDelete<WidthRange> fGlyphWidths;
     // Only used for Vertical CID fonts.
-    SkTScopedPtr<VerticalAdvanceRange> fVerticalMetrics;
+    SkAutoTDelete<VerticalAdvanceRange> fVerticalMetrics;
 
     // The names of each glyph, only populated for postscript fonts.
-    SkTScopedPtr<SkAutoTArray<SkString> > fGlyphNames;
+    SkAutoTDelete<SkAutoTArray<SkString> > fGlyphNames;
 
     // The mapping from glyph to Unicode, only populated if
     // kToUnicode_PerGlyphInfo is passed to GetAdvancedTypefaceMetrics.
@@ -125,7 +130,7 @@ void resetRange(SkAdvancedTypefaceMetrics::AdvanceMetric<Data>* range,
 
 template <typename Data>
 SkAdvancedTypefaceMetrics::AdvanceMetric<Data>* appendRange(
-        SkTScopedPtr<SkAdvancedTypefaceMetrics::AdvanceMetric<Data> >* nextSlot,
+        SkAutoTDelete<SkAdvancedTypefaceMetrics::AdvanceMetric<Data> >* nextSlot,
         int startId);
 
 template <typename Data>

@@ -93,10 +93,7 @@ template <class A>  class EncodeTable {
     int32 encode_flags_;
   };
 
-  typedef hash_map<const Tuple*,
-                   Label,
-                   TupleKey,
-                   TupleEqual> EncodeHash;
+  typedef std::unordered_map<const Tuple*, Label, TupleKey, TupleEqual> EncodeHash;
 
   explicit EncodeTable(uint32 encode_flags)
       : flags_(encode_flags),
@@ -140,9 +137,11 @@ template <class A>  class EncodeTable {
       tuple->weight.Write(strm);
     }
     strm.flush();
-    if (!strm)
+    if (!strm) {
       LOG(ERROR) << "EncodeTable::Write: write failed: " << source;
-    return strm;
+      return false;
+    }
+    return true;
   }
 
   bool Read(istream &strm, const string &source) {
@@ -169,12 +168,14 @@ template <class A>  class EncodeTable {
       encode_tuples_.push_back(tuple);
       encode_hash_[encode_tuples_.back()] = encode_tuples_.size();
     }
-    if (!strm)
+    if (!strm) {
       LOG(ERROR) << "EncodeTable::Read: read failed: " << source;
-    return strm;
+      return false;
+    }
+    return true;
   }
 
-  const uint32 flags() const { return flags_; }
+  uint32 flags() const { return flags_; }
  private:
   uint32 flags_;
   vector<Tuple*> encode_tuples_;
@@ -271,8 +272,8 @@ template <class A> class EncodeMapper {
                    MAP_REQUIRE_SUPERFINAL : MAP_NO_SUPERFINAL;
   }
 
-  const uint32 flags() const { return flags_; }
-  const EncodeType type() const { return type_; }
+  uint32 flags() const { return flags_; }
+  EncodeType type() const { return type_; }
 
   bool Write(ostream &strm, const string& source) {
     return table_->Write(strm, source);

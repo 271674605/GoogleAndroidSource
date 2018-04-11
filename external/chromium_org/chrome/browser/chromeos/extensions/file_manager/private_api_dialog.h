@@ -9,61 +9,60 @@
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_DIALOG_H_
 
 #include <vector>
+
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
 
 namespace ui {
 struct SelectedFileInfo;
 }
 
-namespace file_manager {
+namespace extensions {
 
 // Cancel file selection Dialog.  Closes the dialog window.
-class CancelFileDialogFunction : public LoggedAsyncExtensionFunction {
+class FileBrowserPrivateCancelDialogFunction
+    : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.cancelDialog",
                              FILEBROWSERPRIVATE_CANCELDIALOG)
 
-  CancelFileDialogFunction();
-
  protected:
-  virtual ~CancelFileDialogFunction();
+  virtual ~FileBrowserPrivateCancelDialogFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
-class SelectFileFunction : public LoggedAsyncExtensionFunction {
+class FileBrowserPrivateSelectFileFunction
+    : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.selectFile",
                              FILEBROWSERPRIVATE_SELECTFILE)
 
-  SelectFileFunction();
-
  protected:
-  virtual ~SelectFileFunction();
+  virtual ~FileBrowserPrivateSelectFileFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // A callback method to handle the result of GetSelectedFileInfo.
   void GetSelectedFileInfoResponse(
+      int index,
       const std::vector<ui::SelectedFileInfo>& files);
 };
 
 // Select multiple files.  Closes the dialog window.
-class SelectFilesFunction : public LoggedAsyncExtensionFunction {
+class FileBrowserPrivateSelectFilesFunction
+    : public LoggedAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.selectFiles",
                              FILEBROWSERPRIVATE_SELECTFILES)
 
-  SelectFilesFunction();
-
  protected:
-  virtual ~SelectFilesFunction();
+  virtual ~FileBrowserPrivateSelectFilesFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // A callback method to handle the result of GetSelectedFileInfo.
@@ -71,6 +70,6 @@ class SelectFilesFunction : public LoggedAsyncExtensionFunction {
       const std::vector<ui::SelectedFileInfo>& files);
 };
 
-}  // namespace file_manager
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_DIALOG_H_

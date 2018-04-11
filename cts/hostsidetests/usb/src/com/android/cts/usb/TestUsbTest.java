@@ -16,46 +16,43 @@
 package com.android.cts.usb;
 
 import com.android.cts.tradefed.build.CtsBuildHelper;
-import com.android.ddmlib.IDevice;
-import com.android.ddmlib.Log;
+import com.android.cts.util.AbiUtils;
 import com.android.ddmlib.testrunner.RemoteAndroidTestRunner;
-import com.android.ddmlib.testrunner.TestIdentifier;
+import com.android.ddmlib.testrunner.TestRunResult;
 import com.android.tradefed.build.IBuildInfo;
 import com.android.tradefed.device.DeviceNotAvailableException;
-import com.android.tradefed.device.IFileEntry;
 import com.android.tradefed.device.ITestDevice;
-import com.android.tradefed.log.LogUtil.CLog;
 import com.android.tradefed.result.CollectingTestListener;
-import com.android.tradefed.result.InputStreamSource;
-import com.android.tradefed.result.TestRunResult;
 import com.android.tradefed.testtype.DeviceTestCase;
+import com.android.tradefed.testtype.IAbi;
+import com.android.tradefed.testtype.IAbiReceiver;
 import com.android.tradefed.testtype.IBuildReceiver;
 import com.android.tradefed.util.CommandResult;
 import com.android.tradefed.util.CommandStatus;
-import com.android.tradefed.util.FileUtil;
 import com.android.tradefed.util.RunUtil;
-import com.android.tradefed.util.StreamUtil;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Functional tests for usb connection
  */
-public class TestUsbTest extends DeviceTestCase implements IBuildReceiver {
+public class TestUsbTest extends DeviceTestCase implements IAbiReceiver, IBuildReceiver {
 
     private static final String LOG_TAG = "TestUsbTest";
-    private static final String CTS_RUNNER = "android.test.InstrumentationCtsTestRunner";
+    private static final String CTS_RUNNER = "android.support.test.runner.AndroidJUnitRunner";
     private static final String PACKAGE_NAME = "com.android.cts.usb.serialtest";
     private static final String APK_NAME="CtsUsbSerialTestApp.apk";
     private ITestDevice mDevice;
+    private IAbi mAbi;
+    private String mAbiBitness;
     private CtsBuildHelper mBuild;
+
+    @Override
+    public void setAbi(IAbi abi) {
+        mAbi = abi;
+    }
 
     @Override
     public void setBuild(IBuildInfo buildInfo) {
@@ -68,7 +65,8 @@ public class TestUsbTest extends DeviceTestCase implements IBuildReceiver {
         mDevice = getDevice();
         mDevice.uninstallPackage(PACKAGE_NAME);
         File app = mBuild.getTestApp(APK_NAME);
-        mDevice.installPackage(app, false);
+        String[] options = {AbiUtils.createAbiFlag(mAbi.getName())};
+        mDevice.installPackage(app, false, options);
     }
 
     @Override

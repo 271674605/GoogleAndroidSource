@@ -149,7 +149,8 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
     /**
      * Tests editing of a video file with GL.
      */
-    private void videoEditTest() {
+    private void videoEditTest()
+            throws IOException {
         VideoChunks sourceChunks = new VideoChunks();
 
         if (!generateVideoFile(sourceChunks)) {
@@ -182,23 +183,24 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
      *
      * @return true on success, false on "soft" failure
      */
-    private boolean generateVideoFile(VideoChunks output) {
+    private boolean generateVideoFile(VideoChunks output)
+            throws IOException {
         if (VERBOSE) Log.d(TAG, "generateVideoFile " + mWidth + "x" + mHeight);
         MediaCodec encoder = null;
         InputSurface inputSurface = null;
 
         try {
-            MediaCodecInfo codecInfo = selectCodec(MIME_TYPE);
-            if (codecInfo == null) {
+            // We avoid the device-specific limitations on width and height by using values that
+            // are multiples of 16, which all tested devices seem to be able to handle.
+            MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
+
+            String codecName = selectCodec(format);
+            if (codecName == null) {
                 // Don't fail CTS if they don't have an AVC codec (not here, anyway).
                 Log.e(TAG, "Unable to find an appropriate codec for " + MIME_TYPE);
                 return false;
             }
-            if (VERBOSE) Log.d(TAG, "found codec: " + codecInfo.getName());
-
-            // We avoid the device-specific limitations on width and height by using values that
-            // are multiples of 16, which all tested devices seem to be able to handle.
-            MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
+            if (VERBOSE) Log.d(TAG, "found codec: " + codecName);
 
             // Set some properties.  Failing to specify some of these can cause the MediaCodec
             // configure() call to throw an unhelpful exception.
@@ -212,7 +214,7 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
 
             // Create a MediaCodec for the desired codec, then configure it as an encoder with
             // our desired properties.
-            encoder = MediaCodec.createByCodecName(codecInfo.getName());
+            encoder = MediaCodec.createByCodecName(codecName);
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             inputSurface = new InputSurface(encoder.createInputSurface());
             inputSurface.makeCurrent();
@@ -238,23 +240,9 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
      * Returns the first codec capable of encoding the specified MIME type, or null if no
      * match was found.
      */
-    private static MediaCodecInfo selectCodec(String mimeType) {
-        int numCodecs = MediaCodecList.getCodecCount();
-        for (int i = 0; i < numCodecs; i++) {
-            MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(i);
-
-            if (!codecInfo.isEncoder()) {
-                continue;
-            }
-
-            String[] types = codecInfo.getSupportedTypes();
-            for (int j = 0; j < types.length; j++) {
-                if (types[j].equalsIgnoreCase(mimeType)) {
-                    return codecInfo;
-                }
-            }
-        }
-        return null;
+    private static String selectCodec(MediaFormat format) {
+        MediaCodecList mcl = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+        return mcl.findEncoderForFormat(format);
     }
 
     /**
@@ -315,7 +303,7 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
                     encoderOutputBuffers = encoder.getOutputBuffers();
                     if (VERBOSE) Log.d(TAG, "encoder output buffers changed");
                 } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    // not expected for an encoder
+                    // expected on API 18+
                     MediaFormat newFormat = encoder.getOutputFormat();
                     if (VERBOSE) Log.d(TAG, "encoder output format changed: " + newFormat);
                 } else if (encoderStatus < 0) {
@@ -393,7 +381,8 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
      * for output and a Surface for input, we can avoid issues with obscure formats and can
      * use a fragment shader to do transformations.
      */
-    private VideoChunks editVideoFile(VideoChunks inputData) {
+    private VideoChunks editVideoFile(VideoChunks inputData)
+            throws IOException {
         if (VERBOSE) Log.d(TAG, "editVideoFile " + mWidth + "x" + mHeight);
         VideoChunks outputData = new VideoChunks();
         MediaCodec decoder = null;
@@ -613,7 +602,8 @@ public class DecodeEditEncodeTest extends AndroidTestCase {
      * Checks the video file to see if the contents match our expectations.  We decode the
      * video to a Surface and check the pixels with GL.
      */
-    private void checkVideoFile(VideoChunks inputData) {
+    private void checkVideoFile(VideoChunks inputData)
+            throws IOException {
         OutputSurface surface = null;
         MediaCodec decoder = null;
 

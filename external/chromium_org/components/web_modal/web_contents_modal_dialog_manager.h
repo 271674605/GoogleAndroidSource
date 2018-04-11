@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@
 #include <deque>
 
 #include "base/memory/scoped_ptr.h"
-#include "components/web_modal/native_web_contents_modal_dialog_manager.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "components/web_modal/single_web_contents_dialog_manager.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/gfx/native_widget_types.h"
@@ -21,39 +19,40 @@ class WebContentsModalDialogManagerDelegate;
 
 // Per-WebContents class to manage WebContents-modal dialogs.
 class WebContentsModalDialogManager
-    : public NativeWebContentsModalDialogManagerDelegate,
+    : public SingleWebContentsDialogManagerDelegate,
       public content::WebContentsObserver,
-      public content::WebContentsUserData<WebContentsModalDialogManager>,
-      public content::NotificationObserver {
+      public content::WebContentsUserData<WebContentsModalDialogManager> {
  public:
   virtual ~WebContentsModalDialogManager();
 
   WebContentsModalDialogManagerDelegate* delegate() const { return delegate_; }
-  void set_delegate(WebContentsModalDialogManagerDelegate* d) { delegate_ = d; }
+  void SetDelegate(WebContentsModalDialogManagerDelegate* d);
 
-  static NativeWebContentsModalDialogManager* CreateNativeManager(
-      NativeWebContentsModalDialogManagerDelegate* native_delegate);
+  static SingleWebContentsDialogManager* CreateNativeWebModalManager(
+      NativeWebContentsModalDialog dialog,
+      SingleWebContentsDialogManagerDelegate* native_delegate);
 
   // Shows the dialog as a web contents modal dialog. The dialog will notify via
   // WillClose() when it is being destroyed.
-  void ShowDialog(NativeWebContentsModalDialog dialog);
+  void ShowModalDialog(NativeWebContentsModalDialog dialog);
 
-  // Returns true if a dialog is currently being shown.
-  bool IsShowingDialog() const;
+  // Allow clients to supply their own native dialog manager. Suitable for
+  // bubble clients.
+  void ShowDialogWithManager(
+      NativeWebContentsModalDialog dialog,
+      scoped_ptr<SingleWebContentsDialogManager> manager);
 
-  // Focus the topmost modal dialog.  IsShowingDialog() must be true when
-  // calling this function.
+  // Returns true if any dialogs are active and not closed.
+  bool IsDialogActive() const;
+
+  // Focus the topmost modal dialog.  IsDialogActive() must be true when calling
+  // this function.
   void FocusTopmostDialog();
 
-  // Overriden from NativeWebContentsModalDialogManagerDelegate:
+  // Overriden from SingleWebContentsDialogManagerDelegate:
   virtual content::WebContents* GetWebContents() const OVERRIDE;
   // Called when a WebContentsModalDialogs we own is about to be closed.
   virtual void WillClose(NativeWebContentsModalDialog dialog) OVERRIDE;
-
-  // content::NotificationObserver overrides
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // For testing.
   class TestApi {
@@ -62,9 +61,9 @@ class WebContentsModalDialogManager
         : manager_(manager) {}
 
     void CloseAllDialogs() { manager_->CloseAllDialogs(); }
-    void ResetNativeManager(NativeWebContentsModalDialogManager* delegate) {
-      manager_->native_manager_.reset(delegate);
-    }
+    void DidAttachInterstitialPage() { manager_->DidAttachInterstitialPage(); }
+    void WebContentsWasShown() { manager_->WasShown(); }
+    void WebContentsWasHidden() { manager_->WasHidden(); }
 
    private:
     WebContentsModalDialogManager* manager_;
@@ -76,7 +75,20 @@ class WebContentsModalDialogManager
   explicit WebContentsModalDialogManager(content::WebContents* web_contents);
   friend class content::WebContentsUserData<WebContentsModalDialogManager>;
 
-  typedef std::deque<NativeWebContentsModalDialog> WebContentsModalDialogList;
+  struct DialogState {
+    DialogState(NativeWebContentsModalDialog dialog,
+                scoped_ptr<SingleWebContentsDialogManager> manager);
+    ~DialogState();
+
+    NativeWebContentsModalDialog dialog;
+    scoped_ptr<SingleWebContentsDialogManager> manager;
+  };
+
+  typedef std::deque<DialogState*> WebContentsModalDialogList;
+
+  // Utility function to get the dialog state for a dialog.
+  WebContentsModalDialogList::iterator FindDialogState(
+      NativeWebContentsModalDialog dialog);
 
   // Blocks/unblocks interaction with renderer process.
   void BlockWebContentsInteraction(bool blocked);
@@ -91,22 +103,19 @@ class WebContentsModalDialogManager
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
   virtual void DidGetIgnoredUIEvent() OVERRIDE;
-  virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
+  virtual void WasShown() OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
+  virtual void DidAttachInterstitialPage() OVERRIDE;
 
   // Delegate for notifying our owner about stuff. Not owned by us.
   WebContentsModalDialogManagerDelegate* delegate_;
-
-  // Delegate for native UI-specific functions on the dialog.
-  scoped_ptr<NativeWebContentsModalDialogManager> native_manager_;
 
   // All active dialogs.
   WebContentsModalDialogList child_dialogs_;
 
   // True while closing the dialogs on WebContents close.
   bool closing_all_dialogs_;
-
-  // A scoped container for notification registries.
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsModalDialogManager);
 };

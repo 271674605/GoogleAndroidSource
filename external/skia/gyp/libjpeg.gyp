@@ -101,17 +101,12 @@
                   '../third_party/externals/libjpeg',
                 ],
               },
-              'conditions': [
-                [ 'skia_os != "win"', {
-                  'product_name': 'jpeg',
-                  'cflags': [
-                   '-Wno-main', # supresses warnings about naming things "main"
-                  ],
-                }],
+              'cflags': [
+                '-w', # supresses warnings
               ],
             },
           ],
-        }, {
+        }, {  ## use_system_libjpeg != 0
           'targets': [
             {
               'target_name': 'libjpeg',
@@ -133,9 +128,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

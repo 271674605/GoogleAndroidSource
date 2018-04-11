@@ -21,6 +21,7 @@ import tempfile
 import time
 import unittest
 import subprocess
+import math
 
 def int_to_rational(i):
     """Function to convert Python integers to Camera2 rationals.
@@ -29,7 +30,7 @@ def int_to_rational(i):
         i: Python integer or list of integers.
 
     Returns:
-        Python dictionary or list of dictionary representing the given int(s)
+        Python dictionary or list of dictionaries representing the given int(s)
         as rationals with denominator=1.
     """
     if isinstance(i, list):
@@ -37,43 +38,56 @@ def int_to_rational(i):
     else:
         return {"numerator":i, "denominator":1}
 
-def capture_request(obj):
-    """Function to wrap an object inside a captureRequest object.
+def float_to_rational(f, denom=128):
+    """Function to convert Python floats to Camera2 rationals.
 
     Args:
-        obj: The Python dictionary object to wrap.
+        f: Python float or list of floats.
+        denom: (Optonal) the denominator to use in the output rationals.
 
     Returns:
-        The dictionary: {"captureRequest": obj}
+        Python dictionary or list of dictionaries representing the given
+        float(s) as rationals.
     """
-    return {"captureRequest": obj}
+    if isinstance(f, list):
+        return [{"numerator":math.floor(val*denom+0.5), "denominator":denom}
+                for val in f]
+    else:
+        return {"numerator":math.floor(f*denom+0.5), "denominator":denom}
 
-def capture_request_list(obj_list):
-    """Function to wrap an object list inside a captureRequestList object.
+def rational_to_float(r):
+    """Function to convert Camera2 rational objects to Python floats.
 
     Args:
-        obj_list: The list of Python dictionary objects to wrap.
+        r: Rational or list of rationals, as Python dictionaries.
 
     Returns:
-        The dictionary: {"captureRequestList": obj_list}
+        Float or list of floats.
     """
-    return {"captureRequestList": obj_list}
+    if isinstance(r, list):
+        return [float(val["numerator"]) / float(val["denominator"])
+                for val in r]
+    else:
+        return float(r["numerator"]) / float(r["denominator"])
 
-def manual_capture_request(sensitivity, exp_time_ms):
+def manual_capture_request(sensitivity, exp_time, linear_tonemap=False):
     """Return a capture request with everything set to manual.
 
     Uses identity/unit color correction, and the default tonemap curve.
+    Optionally, the tonemap can be specified as being linear.
 
     Args:
         sensitivity: The sensitivity value to populate the request with.
-        exp_time_ms: The exposure time, in milliseconds, to populate the
-            request with.
+        exp_time: The exposure time, in nanoseconds, to populate the request
+            with.
+        linear_tonemap: [Optional] whether a linear tonemap should be used
+            in this request.
 
     Returns:
         The default manual capture request, ready to be passed to the
         its.device.do_capture function.
     """
-    return capture_request( {
+    req = {
         "android.control.mode": 0,
         "android.control.aeMode": 0,
         "android.control.awbMode": 0,
@@ -81,31 +95,73 @@ def manual_capture_request(sensitivity, exp_time_ms):
         "android.control.effectMode": 0,
         "android.sensor.frameDuration": 0,
         "android.sensor.sensitivity": sensitivity,
-        "android.sensor.exposureTime": exp_time_ms*1000*1000,
+        "android.sensor.exposureTime": exp_time,
         "android.colorCorrection.mode": 0,
         "android.colorCorrection.transform":
                 int_to_rational([1,0,0, 0,1,0, 0,0,1]),
         "android.colorCorrection.gains": [1,1,1,1],
         "android.tonemap.mode": 1,
-        })
+        }
+    if linear_tonemap:
+        req["android.tonemap.mode"] = 0
+        req["android.tonemap.curveRed"] = [0.0,0.0, 1.0,1.0]
+        req["android.tonemap.curveGreen"] = [0.0,0.0, 1.0,1.0]
+        req["android.tonemap.curveBlue"] = [0.0,0.0, 1.0,1.0]
+    return req
 
 def auto_capture_request():
     """Return a capture request with everything set to auto.
     """
-    return capture_request( {
+    return {
         "android.control.mode": 1,
         "android.control.aeMode": 1,
         "android.control.awbMode": 1,
         "android.control.afMode": 1,
         "android.colorCorrection.mode": 1,
         "android.tonemap.mode": 1,
-        })
+        }
+
+def get_available_output_sizes(fmt, props):
+    """Return a sorted list of available output sizes for a given format.
+
+    Args:
+        fmt: the output format, as a string in ["jpg", "yuv", "raw"].
+        props: the object returned from its.device.get_camera_properties().
+
+    Returns:
+        A sorted list of (w,h) tuples (sorted large-to-small).
+    """
+    fmt_codes = {"raw":0x20, "raw10":0x25, "yuv":0x23, "jpg":0x100, "jpeg":0x100}
+    configs = props['android.scaler.streamConfigurationMap']\
+                   ['availableStreamConfigurations']
+    fmt_configs = [cfg for cfg in configs if cfg['format'] == fmt_codes[fmt]]
+    out_configs = [cfg for cfg in fmt_configs if cfg['input'] == False]
+    out_sizes = [(cfg['width'],cfg['height']) for cfg in out_configs]
+    out_sizes.sort(reverse=True)
+    return out_sizes
+
+def get_fastest_manual_capture_settings(props):
+    """Return a capture request and format spec for the fastest capture.
+
+    Args:
+        props: the object returned from its.device.get_camera_properties().
+
+    Returns:
+        Two values, the first is a capture request, and the second is an output
+        format specification, for the fastest possible (legal) capture that
+        can be performed on this device (with the smallest output size).
+    """
+    fmt = "yuv"
+    size = get_available_output_sizes(fmt, props)[-1]
+    out_spec = {"format":fmt, "width":size[0], "height":size[1]}
+    s = min(props['android.sensor.info.sensitivityRange'])
+    e = min(props['android.sensor.info.exposureTimeRange'])
+    req = manual_capture_request(s,e)
+    return req, out_spec
 
 class __UnitTest(unittest.TestCase):
     """Run a suite of unit tests on this module.
     """
-
-    # TODO: Add more unit tests.
 
     def test_int_to_rational(self):
         """Unit test for int_to_rational.
@@ -115,6 +171,19 @@ class __UnitTest(unittest.TestCase):
         self.assertEqual(int_to_rational([1,2]),
                          [{"numerator":1,"denominator":1},
                           {"numerator":2,"denominator":1}])
+
+    def test_float_to_rational(self):
+        """Unit test for float_to_rational.
+        """
+        self.assertEqual(float_to_rational(0.5001, 64),
+                        {"numerator":32, "denominator":64})
+
+    def test_rational_to_float(self):
+        """Unit test for rational_to_float.
+        """
+        self.assertTrue(
+                abs(rational_to_float({"numerator":32,"denominator":64})-0.5)
+                < 0.0001)
 
 if __name__ == '__main__':
     unittest.main()

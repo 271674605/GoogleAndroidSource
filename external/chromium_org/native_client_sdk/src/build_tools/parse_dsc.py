@@ -9,13 +9,25 @@ import optparse
 import os
 import sys
 
-VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
+VALID_TOOLCHAINS = [
+  'bionic',
+  'newlib',
+  'glibc',
+  'pnacl',
+  'win',
+  'linux',
+  'mac',
+]
 
 # 'KEY' : ( <TYPE>, [Accepted Values], <Required?>)
 DSC_FORMAT = {
     'DISABLE': (bool, [True, False], False),
     'SEL_LDR': (bool, [True, False], False),
+    # Disable this project from being included in the NaCl packaged app.
     'DISABLE_PACKAGE': (bool, [True, False], False),
+    # Don't generate the additional files to allow this project to run as a
+    # packaged app (i.e. manifest.json, background.js, etc.).
+    'NO_PACKAGE_FILES': (bool, [True, False], False),
     'TOOLS' : (list, VALID_TOOLCHAINS, True),
     'CONFIGS' : (list, ['Debug', 'Release'], False),
     'PREREQ' : (list, '', False),
@@ -36,7 +48,7 @@ DSC_FORMAT = {
         'INCLUDES': (list, '', False),
         'LIBS' : (dict, VALID_TOOLCHAINS, False),
         'DEPS' : (list, '', False)
-    }, True),
+    }, False),
     'HEADERS': (list, {
         'FILES': (list, '', True),
         'DEST': (str, '', True),
@@ -44,7 +56,7 @@ DSC_FORMAT = {
     'SEARCH': (list, '', False),
     'POST': (str, '', False),
     'PRE': (str, '', False),
-    'DEST': (str, ['examples/getting_started', 'examples/api',
+    'DEST': (str, ['getting_started', 'examples/api',
                    'examples/demo', 'examples/tutorial',
                    'src', 'tests'], True),
     'NAME': (str, '', False),
@@ -53,7 +65,9 @@ DSC_FORMAT = {
     'GROUP': (str, '', False),
     'EXPERIMENTAL': (bool, [True, False], False),
     'PERMISSIONS': (list, '', False),
-    'SOCKET_PERMISSIONS': (list, '', False)
+    'SOCKET_PERMISSIONS': (list, '', False),
+    'MULTI_PLATFORM': (bool, [True, False], False),
+    'MIN_CHROME_VERSION': (str, '', False),
 }
 
 
@@ -144,7 +158,10 @@ def ValidateFormat(src, dsc_format):
 
 def LoadProject(filename):
   with open(filename, 'r') as descfile:
-    desc = eval(descfile.read(), {}, {})
+    try:
+      desc = eval(descfile.read(), {}, {})
+    except Exception as e:
+      raise ValidationError(e)
   if desc.get('DISABLE', False):
     return None
   ValidateFormat(desc, DSC_FORMAT)

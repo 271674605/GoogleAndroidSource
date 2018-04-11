@@ -26,7 +26,7 @@ namespace llvm {
 
 class R600SchedStrategy : public MachineSchedStrategy {
 
-  const ScheduleDAGMI *DAG;
+  const ScheduleDAGMILive *DAG;
   const R600InstrInfo *TII;
   const R600RegisterInfo *TRI;
   MachineRegisterInfo *MRI;
@@ -53,8 +53,6 @@ class R600SchedStrategy : public MachineSchedStrategy {
 
   std::vector<SUnit *> Available[IDLast], Pending[IDLast];
   std::vector<SUnit *> AvailableAlus[AluLast];
-  std::vector<SUnit *> UnscheduledARDefs;
-  std::vector<SUnit *> UnscheduledARUses;
   std::vector<SUnit *> PhysicalRegCopy;
 
   InstKind CurInstKind;
@@ -70,29 +68,29 @@ class R600SchedStrategy : public MachineSchedStrategy {
 
 public:
   R600SchedStrategy() :
-    DAG(0), TII(0), TRI(0), MRI(0) {
+    DAG(nullptr), TII(nullptr), TRI(nullptr), MRI(nullptr) {
   }
 
-  virtual ~R600SchedStrategy() {
-  }
+  virtual ~R600SchedStrategy() {}
 
-  virtual void initialize(ScheduleDAGMI *dag);
-  virtual SUnit *pickNode(bool &IsTopNode);
-  virtual void schedNode(SUnit *SU, bool IsTopNode);
-  virtual void releaseTopNode(SUnit *SU);
-  virtual void releaseBottomNode(SUnit *SU);
+  void initialize(ScheduleDAGMI *dag) override;
+  SUnit *pickNode(bool &IsTopNode) override;
+  void schedNode(SUnit *SU, bool IsTopNode) override;
+  void releaseTopNode(SUnit *SU) override;
+  void releaseBottomNode(SUnit *SU) override;
 
 private:
   std::vector<MachineInstr *> InstructionsGroupCandidate;
+  bool VLIW5;
 
   int getInstKind(SUnit *SU);
   bool regBelongsToClass(unsigned Reg, const TargetRegisterClass *RC) const;
   AluKind getAluKind(SUnit *SU) const;
   void LoadAlu();
   unsigned AvailablesAluCount() const;
-  SUnit *AttemptFillSlot (unsigned Slot);
+  SUnit *AttemptFillSlot (unsigned Slot, bool AnyAlu);
   void PrepareNextSlot();
-  SUnit *PopInst(std::vector<SUnit*> &Q);
+  SUnit *PopInst(std::vector<SUnit*> &Q, bool AnyALU);
 
   void AssignSlot(MachineInstr *MI, unsigned Slot);
   SUnit* pickAlu();

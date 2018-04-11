@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2012 Google Inc.
  *
@@ -6,10 +5,10 @@
  * found in the LICENSE file.
  */
 
-#include "Test.h"
-#include "SkRandom.h"
 #include "SkRTree.h"
+#include "SkRandom.h"
 #include "SkTSort.h"
+#include "Test.h"
 
 static const size_t MIN_CHILDREN = 6;
 static const size_t MAX_CHILDREN = 11;
@@ -23,7 +22,7 @@ struct DataRect {
     void* data;
 };
 
-static SkIRect random_rect(SkMWCRandom& rand) {
+static SkIRect random_rect(SkRandom& rand) {
     SkIRect rect = {0,0,0,0};
     while (rect.isEmpty()) {
         rect.fLeft   = rand.nextS() % 1000;
@@ -35,7 +34,7 @@ static SkIRect random_rect(SkMWCRandom& rand) {
     return rect;
 }
 
-static void random_data_rects(SkMWCRandom& rand, DataRect out[], int n) {
+static void random_data_rects(SkRandom& rand, DataRect out[], int n) {
     for (int i = 0; i < n; ++i) {
         out[i].rect = random_rect(rand);
         out[i].data = reinterpret_cast<void*>(i);
@@ -68,7 +67,7 @@ static bool verify_query(SkIRect query, DataRect rects[],
     return found == expected;
 }
 
-static void runQueries(skiatest::Reporter* reporter, SkMWCRandom& rand, DataRect rects[],
+static void run_queries(skiatest::Reporter* reporter, SkRandom& rand, DataRect rects[],
                        SkRTree& tree) {
     for (size_t i = 0; i < NUM_QUERIES; ++i) {
         SkTDArray<void*> hits;
@@ -78,11 +77,9 @@ static void runQueries(skiatest::Reporter* reporter, SkMWCRandom& rand, DataRect
     }
 }
 
-static void TestRTree(skiatest::Reporter* reporter) {
+static void rtree_test_main(SkRTree* rtree, skiatest::Reporter* reporter) {
     DataRect rects[NUM_RECTS];
-    SkMWCRandom rand;
-    SkRTree* rtree = SkRTree::Create(MIN_CHILDREN, MAX_CHILDREN);
-    SkAutoUnref au(rtree);
+    SkRandom rand;
     REPORTER_ASSERT(reporter, NULL != rtree);
 
     int expectedDepthMin = -1;
@@ -110,7 +107,7 @@ static void TestRTree(skiatest::Reporter* reporter) {
             rtree->insert(rects[i].data, rects[i].rect, true);
         }
         rtree->flushDeferredInserts();
-        runQueries(reporter, rand, rects, *rtree);
+        run_queries(reporter, rand, rects, *rtree);
         REPORTER_ASSERT(reporter, NUM_RECTS == rtree->getCount());
         REPORTER_ASSERT(reporter, expectedDepthMin <= rtree->getDepth() &&
                                   expectedDepthMax >= rtree->getDepth());
@@ -121,7 +118,7 @@ static void TestRTree(skiatest::Reporter* reporter) {
         for (int i = 0; i < NUM_RECTS; ++i) {
             rtree->insert(rects[i].data, rects[i].rect);
         }
-        runQueries(reporter, rand, rects, *rtree);
+        run_queries(reporter, rand, rects, *rtree);
         REPORTER_ASSERT(reporter, NUM_RECTS == rtree->getCount());
         REPORTER_ASSERT(reporter, expectedDepthMin <= rtree->getDepth() &&
                                   expectedDepthMax >= rtree->getDepth());
@@ -132,7 +129,7 @@ static void TestRTree(skiatest::Reporter* reporter) {
         for (int i = NUM_RECTS - 1; i >= 0; --i) {
             rtree->insert(rects[i].data, rects[i].rect);
         }
-        runQueries(reporter, rand, rects, *rtree);
+        run_queries(reporter, rand, rects, *rtree);
         REPORTER_ASSERT(reporter, NUM_RECTS == rtree->getCount());
         REPORTER_ASSERT(reporter, expectedDepthMin <= rtree->getDepth() &&
                                   expectedDepthMax >= rtree->getDepth());
@@ -141,5 +138,13 @@ static void TestRTree(skiatest::Reporter* reporter) {
     }
 }
 
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("RTree", RTreeTestClass, TestRTree)
+DEF_TEST(RTree, reporter) {
+    SkRTree* rtree = SkRTree::Create(MIN_CHILDREN, MAX_CHILDREN);
+    SkAutoUnref au(rtree);
+    rtree_test_main(rtree, reporter);
+
+    // Rtree that orders input rectangles on deferred insert.
+    SkRTree* unsortedRtree = SkRTree::Create(MIN_CHILDREN, MAX_CHILDREN, 1, false);
+    SkAutoUnref auo(unsortedRtree);
+    rtree_test_main(unsortedRtree, reporter);
+}

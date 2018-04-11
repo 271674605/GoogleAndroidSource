@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "cc/base/cc_export.h"
+#include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 
@@ -16,19 +17,26 @@ class Value;
 
 namespace cc {
 
+// SharedQuadState holds a set of properties that are common across multiple
+// DrawQuads. It's purely an optimization - the properties behave in exactly the
+// same way as if they were replicated on each DrawQuad. A given SharedQuadState
+// can only be shared by DrawQuads that are adjacent in their RenderPass'
+// QuadList.
 class CC_EXPORT SharedQuadState {
  public:
-  static scoped_ptr<SharedQuadState> Create();
+  SharedQuadState();
   ~SharedQuadState();
 
-  scoped_ptr<SharedQuadState> Copy() const;
+  void CopyFrom(const SharedQuadState* other);
 
   void SetAll(const gfx::Transform& content_to_target_transform,
-              gfx::Size content_bounds,
-              gfx::Rect visible_content_rect,
-              gfx::Rect clip_rect,
+              const gfx::Size& content_bounds,
+              const gfx::Rect& visible_content_rect,
+              const gfx::Rect& clip_rect,
               bool is_clipped,
-              float opacity);
+              float opacity,
+              SkXfermode::Mode blend_mode,
+              int sorting_context_id);
   scoped_ptr<base::Value> AsValue() const;
 
   // Transforms from quad's original content space to its target content space.
@@ -41,9 +49,8 @@ class CC_EXPORT SharedQuadState {
   gfx::Rect clip_rect;
   bool is_clipped;
   float opacity;
-
- private:
-  SharedQuadState();
+  SkXfermode::Mode blend_mode;
+  int sorting_context_id;
 };
 
 }  // namespace cc

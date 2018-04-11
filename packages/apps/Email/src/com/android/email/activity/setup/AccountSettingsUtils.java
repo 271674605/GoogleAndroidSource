@@ -20,21 +20,28 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.res.XmlResourceParser;
+import android.net.Uri;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.widget.EditText;
 
 import com.android.email.R;
+import com.android.email.SecurityPolicy;
 import com.android.email.provider.AccountBackupRestore;
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.VendorPolicyLoader;
+import com.android.emailcommon.VendorPolicyLoader.OAuthProvider;
 import com.android.emailcommon.VendorPolicyLoader.Provider;
 import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.EmailContent.AccountColumns;
 import com.android.emailcommon.provider.QuickResponse;
+import com.android.emailcommon.service.PolicyServiceProxy;
 import com.android.emailcommon.utility.Utility;
 import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class AccountSettingsUtils {
 
@@ -54,6 +61,22 @@ public class AccountSettingsUtils {
     public static void commitSettings(Context context, Account account) {
         if (!account.isSaved()) {
             account.save(context);
+
+            if (account.mPolicy != null) {
+                // TODO: we need better handling for unsupported policies
+                // For now, just clear the unsupported policies, as the server will (hopefully)
+                // just reject our sync attempts if it's not happy with half-measures
+                if (account.mPolicy.mProtocolPoliciesUnsupported != null) {
+                    LogUtils.d(LogUtils.TAG, "Clearing unsupported policies "
+                            + account.mPolicy.mProtocolPoliciesUnsupported);
+                    account.mPolicy.mProtocolPoliciesUnsupported = null;
+                }
+                PolicyServiceProxy.setAccountPolicy2(context,
+                        account.getId(),
+                        account.mPolicy,
+                        account.mSecuritySyncKey == null ? "" : account.mSecuritySyncKey,
+                        false /* notify */);
+            }
 
             // Set up default quick responses here...
             String[] defaultQuickResponses =
@@ -94,7 +117,126 @@ public class AccountSettingsUtils {
         return cv;
     }
 
-    /**
+   /**
+    * Create the request to get the authorization code.
+    *
+    * @param context
+    * @param provider The OAuth provider to register with
+    * @param emailAddress Email address to send as a hint to the oauth service.
+    * @return
+    */
+   public static Uri createOAuthRegistrationRequest(final Context context,
+           final OAuthProvider provider, final String emailAddress) {
+       final Uri.Builder b = Uri.parse(provider.authEndpoint).buildUpon();
+       b.appendQueryParameter("response_type", provider.responseType);
+       b.appendQueryParameter("client_id", provider.clientId);
+       b.appendQueryParameter("redirect_uri", provider.redirectUri);
+       b.appendQueryParameter("scope", provider.scope);
+       b.appendQueryParameter("state", provider.state);
+       b.appendQueryParameter("login_hint", emailAddress);
+       return b.build();
+   }
+
+   /**
+    * Search for a single resource containing known oauth provider definitions.
+    *
+    * @param context
+    * @param id String Id of the oauth provider.
+    * @return The OAuthProvider if found, null if not.
+    */
+   public static OAuthProvider findOAuthProvider(final Context context, final String id) {
+       return findOAuthProvider(context, id, R.xml.oauth);
+   }
+
+   public static List<OAuthProvider> getAllOAuthProviders(final Context context) {
+       try {
+           List<OAuthProvider> providers = new ArrayList<OAuthProvider>();
+           final XmlResourceParser xml = context.getResources().getXml(R.xml.oauth);
+           int xmlEventType;
+           OAuthProvider provider = null;
+           while ((xmlEventType = xml.next()) != XmlResourceParser.END_DOCUMENT) {
+               if (xmlEventType == XmlResourceParser.START_TAG
+                       && "provider".equals(xml.getName())) {
+                   try {
+                       provider = new OAuthProvider();
+                       provider.id = getXmlAttribute(context, xml, "id");
+                       provider.label = getXmlAttribute(context, xml, "label");
+                       provider.authEndpoint = getXmlAttribute(context, xml, "auth_endpoint");
+                       provider.tokenEndpoint = getXmlAttribute(context, xml, "token_endpoint");
+                       provider.refreshEndpoint = getXmlAttribute(context, xml,
+                               "refresh_endpoint");
+                       provider.responseType = getXmlAttribute(context, xml, "response_type");
+                       provider.redirectUri = getXmlAttribute(context, xml, "redirect_uri");
+                       provider.scope = getXmlAttribute(context, xml, "scope");
+                       provider.state = getXmlAttribute(context, xml, "state");
+                       provider.clientId = getXmlAttribute(context, xml, "client_id");
+                       provider.clientSecret = getXmlAttribute(context, xml, "client_secret");
+                       providers.add(provider);
+                   } catch (IllegalArgumentException e) {
+                       LogUtils.w(Logging.LOG_TAG, "providers line: " + xml.getLineNumber() +
+                               "; Domain contains multiple globals");
+                   }
+               }
+           }
+           return providers;
+       } catch (Exception e) {
+           LogUtils.e(Logging.LOG_TAG, "Error while trying to load provider settings.", e);
+       }
+       return null;
+   }
+
+   /**
+    * Search for a single resource containing known oauth provider definitions.
+    *
+    * @param context
+    * @param id String Id of the oauth provider.
+    * @param resourceId ResourceId of the xml file to search.
+    * @return The OAuthProvider if found, null if not.
+    */
+   public static OAuthProvider findOAuthProvider(final Context context, final String id,
+           final int resourceId) {
+       // TODO: Consider adding a way to cache this file during new account setup, so that we
+       // don't need to keep loading the file over and over.
+       // TODO: need a mechanism to get a list of all supported OAuth providers so that we can
+       // offer the user a choice of who to authenticate with.
+       try {
+           final XmlResourceParser xml = context.getResources().getXml(resourceId);
+           int xmlEventType;
+           OAuthProvider provider = null;
+           while ((xmlEventType = xml.next()) != XmlResourceParser.END_DOCUMENT) {
+               if (xmlEventType == XmlResourceParser.START_TAG
+                       && "provider".equals(xml.getName())) {
+                   String providerId = getXmlAttribute(context, xml, "id");
+                   try {
+                       if (TextUtils.equals(id, providerId)) {
+                           provider = new OAuthProvider();
+                           provider.id = id;
+                           provider.label = getXmlAttribute(context, xml, "label");
+                           provider.authEndpoint = getXmlAttribute(context, xml, "auth_endpoint");
+                           provider.tokenEndpoint = getXmlAttribute(context, xml, "token_endpoint");
+                           provider.refreshEndpoint = getXmlAttribute(context, xml,
+                                   "refresh_endpoint");
+                           provider.responseType = getXmlAttribute(context, xml, "response_type");
+                           provider.redirectUri = getXmlAttribute(context, xml, "redirect_uri");
+                           provider.scope = getXmlAttribute(context, xml, "scope");
+                           provider.state = getXmlAttribute(context, xml, "state");
+                           provider.clientId = getXmlAttribute(context, xml, "client_id");
+                           provider.clientSecret = getXmlAttribute(context, xml, "client_secret");
+                           return provider;
+                       }
+                   } catch (IllegalArgumentException e) {
+                       LogUtils.w(Logging.LOG_TAG, "providers line: " + xml.getLineNumber() +
+                               "; Domain contains multiple globals");
+                   }
+               }
+           }
+       } catch (Exception e) {
+           LogUtils.e(Logging.LOG_TAG, "Error while trying to load provider settings.", e);
+       }
+       return null;
+   }
+
+   /**
      * Search the list of known Email providers looking for one that matches the user's email
      * domain.  We check for vendor supplied values first, then we look in providers_product.xml,
      * and finally by the entries in platform providers.xml.  This provides a nominal override
@@ -140,6 +282,11 @@ public class AccountSettingsUtils {
                             provider.label = getXmlAttribute(context, xml, "label");
                             provider.domain = domain.toLowerCase();
                             provider.note = getXmlAttribute(context, xml, "note");
+                            // TODO: Maybe this should actually do a lookup of the OAuth provider
+                            // here, and keep a pointer to it rather than a textual key.
+                            // To do this probably requires caching oauth.xml, otherwise the lookup
+                            // is expensive and likely to happen repeatedly.
+                            provider.oauth = getXmlAttribute(context, xml, "oauth");
                         }
                     } catch (IllegalArgumentException e) {
                         LogUtils.w(Logging.LOG_TAG, "providers line: " + xml.getLineNumber() +
@@ -157,6 +304,20 @@ public class AccountSettingsUtils {
                         && provider != null) {
                     provider.outgoingUriTemplate = getXmlAttribute(context, xml, "uri");
                     provider.outgoingUsernameTemplate = getXmlAttribute(context, xml, "username");
+                }
+                else if (xmlEventType == XmlResourceParser.START_TAG
+                        && "incoming-fallback".equals(xml.getName())
+                        && provider != null) {
+                    provider.altIncomingUriTemplate = getXmlAttribute(context, xml, "uri");
+                    provider.altIncomingUsernameTemplate =
+                            getXmlAttribute(context, xml, "username");
+                }
+                else if (xmlEventType == XmlResourceParser.START_TAG
+                        && "outgoing-fallback".equals(xml.getName())
+                        && provider != null) {
+                    provider.altOutgoingUriTemplate = getXmlAttribute(context, xml, "uri");
+                    provider.altOutgoingUsernameTemplate =
+                            getXmlAttribute(context, xml, "username");
                 }
                 else if (xmlEventType == XmlResourceParser.END_TAG
                         && "provider".equals(xml.getName())
@@ -178,7 +339,7 @@ public class AccountSettingsUtils {
      * part (i.e. substring demarcated by a period, '.')
      */
     @VisibleForTesting
-    static boolean matchProvider(String testDomain, String providerDomain) {
+    public static boolean matchProvider(String testDomain, String providerDomain) {
         String[] testParts = testDomain.split(DOMAIN_SEPARATOR);
         String[] providerParts = providerDomain.split(DOMAIN_SEPARATOR);
         if (testParts.length != providerParts.length) {

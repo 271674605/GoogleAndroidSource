@@ -109,7 +109,7 @@ public class LevelsV4 extends TestBase {
     public boolean onBar4Setup(SeekBar b, TextView t) {
         b.setMax(128);
         b.setProgress(128);
-        t.setText("Out White");
+        t.setText("In White");
         return true;
     }
     public boolean onBar5Setup(SeekBar b, TextView t) {
@@ -141,8 +141,8 @@ public class LevelsV4 extends TestBase {
     }
 
     public void createTest(android.content.res.Resources res) {
-        mScriptR = new ScriptC_levels_relaxed(mRS, res, R.raw.levels_relaxed);
-        mScriptF = new ScriptC_levels_full(mRS, res, R.raw.levels_full);
+        mScriptR = new ScriptC_levels_relaxed(mRS);
+        mScriptF = new ScriptC_levels_full(mRS);
         setSaturation();
         setLevels();
     }

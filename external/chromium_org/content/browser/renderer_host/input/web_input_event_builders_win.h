@@ -13,20 +13,29 @@ namespace content {
 
 class WebKeyboardEventBuilder {
  public:
-  static WebKit::WebKeyboardEvent Build(HWND hwnd, UINT message,
-                                        WPARAM wparam, LPARAM lparam);
+  static blink::WebKeyboardEvent Build(HWND hwnd,
+                                       UINT message,
+                                       WPARAM wparam,
+                                       LPARAM lparam,
+                                       DWORD time_ms);
 };
 
 class WebMouseEventBuilder {
  public:
-  static WebKit::WebMouseEvent Build(HWND hwnd, UINT message,
-                                     WPARAM wparam, LPARAM lparam);
+  static blink::WebMouseEvent Build(HWND hwnd,
+                                    UINT message,
+                                    WPARAM wparam,
+                                    LPARAM lparam,
+                                    DWORD time_ms);
 };
 
 class WebMouseWheelEventBuilder {
  public:
-  static WebKit::WebMouseWheelEvent Build(HWND hwnd, UINT message,
-                                          WPARAM wparam, LPARAM lparam);
+  static blink::WebMouseWheelEvent Build(HWND hwnd,
+                                         UINT message,
+                                         WPARAM wparam,
+                                         LPARAM lparam,
+                                         DWORD time_ms);
 };
 
 } // namespace content

@@ -20,7 +20,6 @@
 namespace gpu {
 namespace gles2 {
 
-class FeatureInfo;
 class ProgramCache;
 class ProgramManager;
 class Shader;
@@ -33,6 +32,25 @@ class ShaderTranslator;
 class GPU_EXPORT Program : public base::RefCounted<Program> {
  public:
   static const int kMaxAttachedShaders = 2;
+
+  enum VaryingsPackingOption {
+    kCountOnlyStaticallyUsed,
+    kCountAll
+  };
+
+  enum UniformApiType {
+    kUniform1i = 1 << 0,
+    kUniform2i = 1 << 1,
+    kUniform3i = 1 << 2,
+    kUniform4i = 1 << 3,
+    kUniform1f = 1 << 4,
+    kUniform2f = 1 << 5,
+    kUniform3f = 1 << 6,
+    kUniform4f = 1 << 7,
+    kUniformMatrix2f = 1 << 8,
+    kUniformMatrix3f = 1 << 9,
+    kUniformMatrix4f = 1 << 10,
+  };
 
   struct UniformInfo {
     UniformInfo();
@@ -52,6 +70,7 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
 
     GLsizei size;
     GLenum type;
+    uint32 accepts_api_type;
     GLint fake_location_base;
     bool is_array;
     std::string name;
@@ -157,7 +176,7 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
   bool Link(ShaderManager* manager,
             ShaderTranslator* vertex_translator,
             ShaderTranslator* fragment_shader,
-            FeatureInfo* feature_info,
+            VaryingsPackingOption varyings_packing_option,
             const ShaderCacheCallback& shader_callback);
 
   // Performs glValidateProgram and related activities.
@@ -185,6 +204,23 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
   // glBindAttribLocation() calls.
   // We only consider the declared attributes in the program.
   bool DetectAttribLocationBindingConflicts() const;
+
+  // Detects if there are uniforms of the same name but different type
+  // or precision in vertex/fragment shaders.
+  // Return true and set the first found conflicting hashed name to
+  // conflicting_name if such cases are detected.
+  bool DetectUniformsMismatch(std::string* conflicting_name) const;
+
+  // Return true if a varying is statically used in fragment shader, but it
+  // is not declared in vertex shader.
+  bool DetectVaryingsMismatch(std::string* conflicting_name) const;
+
+  // Return true if an uniform and an attribute share the same name.
+  bool DetectGlobalNameConflicts(std::string* conflicting_name) const;
+
+  // Return false if varyings can't be packed into the max available
+  // varying registers.
+  bool CheckVaryingsPacking(VaryingsPackingOption option) const;
 
   // Visible for testing
   const LocationMap& bind_attrib_location_map() const {
@@ -320,7 +356,13 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
 // need to be shared by multiple GLES2Decoders.
 class GPU_EXPORT ProgramManager {
  public:
-  explicit ProgramManager(ProgramCache* program_cache);
+  enum TranslatedShaderSourceType {
+    kANGLE,
+    kGL,  // GL or GLES
+  };
+
+  explicit ProgramManager(ProgramCache* program_cache,
+                          uint32 max_varying_vectors);
   ~ProgramManager();
 
   // Must call before destruction.
@@ -358,15 +400,23 @@ class GPU_EXPORT ProgramManager {
 
   static int32 MakeFakeLocation(int32 index, int32 element);
 
-  void DoCompileShader(Shader* shader,
-                       ShaderTranslator* translator,
-                       FeatureInfo* feature_info);
+  void DoCompileShader(
+      Shader* shader,
+      ShaderTranslator* translator,
+      TranslatedShaderSourceType translated_shader_source_type);
+
+  uint32 max_varying_vectors() const {
+    return max_varying_vectors_;
+  }
 
  private:
   friend class Program;
 
   void StartTracking(Program* program);
   void StopTracking(Program* program);
+
+  void RemoveProgramInfoIfUnused(
+      ShaderManager* shader_manager, Program* program);
 
   // Info for each "successfully linked" program by service side program Id.
   // TODO(gman): Choose a faster container.
@@ -379,15 +429,12 @@ class GPU_EXPORT ProgramManager {
 
   bool have_context_;
 
-  bool disable_workarounds_;
-
   // Used to clear uniforms.
   std::vector<uint8> zero_;
 
   ProgramCache* program_cache_;
 
-  void RemoveProgramInfoIfUnused(
-      ShaderManager* shader_manager, Program* program);
+  uint32 max_varying_vectors_;
 
   DISALLOW_COPY_AND_ASSIGN(ProgramManager);
 };

@@ -21,9 +21,19 @@
 
 #include "Volume.h"
 
-#define MAX_PARTS 4
+class PathInfo {
+public:
+	PathInfo(const char *pattern);
+	~PathInfo();
+	bool match(const char *path);
+private:
+	bool warned;
+	char *pattern;
+	enum PatternType { prefix, wildcard };
+	PatternType patternType;
+};
 
-typedef android::List<char *> PathCollection;
+typedef android::List<PathInfo *> PathCollection;
 
 class DirectVolume : public Volume {
 public:
@@ -40,9 +50,8 @@ protected:
     int            mOrigDiskMinor;
     int            mOrigPartMinors[MAX_PARTITIONS];
     int            mDiskNumParts;
-    unsigned int   mPendingPartMap;
+    int            mPendingPartCount;
     int            mIsDecrypted;
-    int            mFlags;
 
 public:
     DirectVolume(VolumeManager *vm, const fstab_rec* rec, int flags);
@@ -65,7 +74,6 @@ protected:
     int updateDeviceInfo(char *new_path, int new_major, int new_minor);
     virtual void revertDeviceInfo(void);
     int isDecrypted() { return mIsDecrypted; }
-    int getFlags() { return mFlags; }
 
 private:
     void handleDiskAdded(const char *devpath, NetlinkEvent *evt);

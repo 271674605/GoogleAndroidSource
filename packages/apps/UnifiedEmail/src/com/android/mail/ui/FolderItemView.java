@@ -17,7 +17,9 @@ package com.android.mail.ui;
 
 import android.content.Context;
 import android.graphics.Color;
-import android.support.v4.text.BidiFormatter;
+import android.graphics.drawable.ShapeDrawable;
+import android.graphics.drawable.shapes.RoundRectShape;
+import android.graphics.drawable.shapes.Shape;
 import android.util.AttributeSet;
 import android.view.DragEvent;
 import android.view.View;
@@ -38,6 +40,8 @@ public class FolderItemView extends RelativeLayout {
     private final String LOG_TAG = LogTag.getLogTag();
 
     private static final int[] STATE_DRAG_MODE = {R.attr.state_drag_mode};
+
+    private static float[] sUnseenCornerRadii;
 
     private Folder mFolder;
     private TextView mFolderTextView;
@@ -67,16 +71,34 @@ public class FolderItemView extends RelativeLayout {
 
     public FolderItemView(Context context) {
         super(context);
+
+        loadResources(context);
     }
 
     public FolderItemView(Context context, AttributeSet attrs) {
         super(context, attrs);
+
+        loadResources(context);
     }
 
     public FolderItemView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
 
+        loadResources(context);
         mIsDragMode = false;
+    }
+
+    private void loadResources(Context context) {
+        if (sUnseenCornerRadii == null) {
+            final float cornerRadius =
+                    context.getResources().getDimension(R.dimen.folder_rounded_corner_radius);
+            sUnseenCornerRadii = new float[] {
+                    cornerRadius, cornerRadius, // top left
+                    cornerRadius, cornerRadius, // top right
+                    cornerRadius, cornerRadius, // bottom right
+                    cornerRadius, cornerRadius  // bottom left
+            };
+        }
     }
 
     @Override
@@ -110,12 +132,11 @@ public class FolderItemView extends RelativeLayout {
                 && a.unreadCount == b.unreadCount));
     }
 
-    public void bind(final Folder folder, final DropHandler dropHandler,
-            final BidiFormatter bidiFormatter) {
+    public void bind(final Folder folder, final DropHandler dropHandler) {
         mFolder = folder;
         mDropHandler = dropHandler;
 
-        mFolderTextView.setText(bidiFormatter.unicodeWrap(folder.name));
+        mFolderTextView.setText(folder.name);
 
         mFolderParentIcon.setVisibility(mFolder.hasChildren ? View.VISIBLE : View.GONE);
         if (mFolder.isInbox() && mFolder.unseenCount > 0) {
@@ -128,20 +149,11 @@ public class FolderItemView extends RelativeLayout {
     }
 
     /**
-     * Sets the icon, if any. If the image view's visibility is set to gone, the text view will
-     * be moved over to account for the change.
+     * Sets the icon, if any.
      */
     public void setIcon(final Folder folder) {
         final ImageView folderIconView = (ImageView) findViewById(R.id.folder_icon);
         Folder.setIcon(folder, folderIconView);
-        if (folderIconView.getVisibility() == View.GONE) {
-            mFolderTextView.setPadding(getContext()
-                    .getResources().getDimensionPixelSize(R.dimen.folder_list_item_left_offset),
-                    0, 0, 0 /* No top, right, bottom padding needed */);
-        } else {
-            // View recycling case
-            mFolderTextView.setPadding(0, 0, 0, 0);
-        }
     }
 
     /**
@@ -160,8 +172,11 @@ public class FolderItemView extends RelativeLayout {
     private void setUnseenCount(final int color, final int count) {
         mUnseenCountTextView.setVisibility(count > 0 ? View.VISIBLE : View.GONE);
         if (count > 0) {
-            mUnseenCountTextView.setBackgroundColor(color);
-            mUnseenCountTextView.setText(Utils.getUnreadCountString(getContext(), count));
+            final Shape shape = new RoundRectShape(sUnseenCornerRadii, null, null);
+            final ShapeDrawable drawable = new ShapeDrawable(shape);
+            drawable.getPaint().setColor(color);
+            mUnseenCountTextView.setBackgroundDrawable(drawable);
+            mUnseenCountTextView.setText(Utils.getUnseenCountString(getContext(), count));
         }
     }
 

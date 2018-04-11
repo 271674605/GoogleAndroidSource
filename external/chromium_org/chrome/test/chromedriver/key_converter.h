@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 struct KeyEvent;
 class Status;
@@ -26,7 +26,7 @@ KeyEvent CreateCharEvent(const std::string& unmodified_text,
 // an error message. If |release_modifiers| is true, all modifiers would be
 // depressed. |modifiers| acts both an input and an output, however, only when
 // the conversion process is successful will |modifiers| be changed.
-Status ConvertKeysToKeyEvents(const string16& keys,
+Status ConvertKeysToKeyEvents(const base::string16& keys,
                               bool release_modifiers,
                               int* modifiers,
                               std::list<KeyEvent>* key_events);

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_MODULE_MODULE_H_
 #define CHROME_BROWSER_EXTENSIONS_API_MODULE_MODULE_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 namespace extensions {
 class ExtensionPrefs;
@@ -16,7 +16,7 @@ std::string GetUpdateURLData(const ExtensionPrefs* prefs,
                              const std::string& extension_id);
 }  // namespace extension
 
-class ExtensionSetUpdateUrlDataFunction : public SyncExtensionFunction {
+class ExtensionSetUpdateUrlDataFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("extension.setUpdateUrlData",
                              EXTENSION_SETUPDATEURLDATA)
@@ -25,10 +25,11 @@ class ExtensionSetUpdateUrlDataFunction : public SyncExtensionFunction {
   virtual ~ExtensionSetUpdateUrlDataFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class ExtensionIsAllowedIncognitoAccessFunction : public SyncExtensionFunction {
+class ExtensionIsAllowedIncognitoAccessFunction
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("extension.isAllowedIncognitoAccess",
                              EXTENSION_ISALLOWEDINCOGNITOACCESS)
@@ -37,11 +38,11 @@ class ExtensionIsAllowedIncognitoAccessFunction : public SyncExtensionFunction {
   virtual ~ExtensionIsAllowedIncognitoAccessFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ExtensionIsAllowedFileSchemeAccessFunction
-    : public SyncExtensionFunction {
+    : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("extension.isAllowedFileSchemeAccess",
                              EXTENSION_ISALLOWEDFILESCHEMEACCESS)
@@ -50,7 +51,7 @@ class ExtensionIsAllowedFileSchemeAccessFunction
   virtual ~ExtensionIsAllowedFileSchemeAccessFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

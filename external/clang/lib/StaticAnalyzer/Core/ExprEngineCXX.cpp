@@ -102,13 +102,85 @@ static SVal makeZeroElementRegion(ProgramStateRef State, SVal LValue,
   return LValue;
 }
 
+
+static const MemRegion *getRegionForConstructedObject(
+    const CXXConstructExpr *CE, ExplodedNode *Pred, ExprEngine &Eng,
+    unsigned int CurrStmtIdx) {
+  const LocationContext *LCtx = Pred->getLocationContext();
+  ProgramStateRef State = Pred->getState();
+  const NodeBuilderContext &CurrBldrCtx = Eng.getBuilderContext();
+
+  // See if we're constructing an existing region by looking at the next
+  // element in the CFG.
+  const CFGBlock *B = CurrBldrCtx.getBlock();
+  unsigned int NextStmtIdx = CurrStmtIdx + 1;
+  if (NextStmtIdx < B->size()) {
+    CFGElement Next = (*B)[NextStmtIdx];
+
+    // Is this a destructor? If so, we might be in the middle of an assignment
+    // to a local or member: look ahead one more element to see what we find.
+    while (Next.getAs<CFGImplicitDtor>() && NextStmtIdx + 1 < B->size()) {
+      ++NextStmtIdx;
+      Next = (*B)[NextStmtIdx];
+    }
+
+    // Is this a constructor for a local variable?
+    if (Optional<CFGStmt> StmtElem = Next.getAs<CFGStmt>()) {
+      if (const DeclStmt *DS = dyn_cast<DeclStmt>(StmtElem->getStmt())) {
+        if (const VarDecl *Var = dyn_cast<VarDecl>(DS->getSingleDecl())) {
+          if (Var->getInit() && Var->getInit()->IgnoreImplicit() == CE) {
+            SVal LValue = State->getLValue(Var, LCtx);
+            QualType Ty = Var->getType();
+            LValue = makeZeroElementRegion(State, LValue, Ty);
+            return LValue.getAsRegion();
+          }
+        }
+      }
+    }
+
+    // Is this a constructor for a member?
+    if (Optional<CFGInitializer> InitElem = Next.getAs<CFGInitializer>()) {
+      const CXXCtorInitializer *Init = InitElem->getInitializer();
+      assert(Init->isAnyMemberInitializer());
+
+      const CXXMethodDecl *CurCtor = cast<CXXMethodDecl>(LCtx->getDecl());
+      Loc ThisPtr = Eng.getSValBuilder().getCXXThis(CurCtor,
+          LCtx->getCurrentStackFrame());
+      SVal ThisVal = State->getSVal(ThisPtr);
+
+      const ValueDecl *Field;
+      SVal FieldVal;
+      if (Init->isIndirectMemberInitializer()) {
+        Field = Init->getIndirectMember();
+        FieldVal = State->getLValue(Init->getIndirectMember(), ThisVal);
+      } else {
+        Field = Init->getMember();
+        FieldVal = State->getLValue(Init->getMember(), ThisVal);
+      }
+
+      QualType Ty = Field->getType();
+      FieldVal = makeZeroElementRegion(State, FieldVal, Ty);
+      return FieldVal.getAsRegion();
+    }
+
+    // FIXME: This will eventually need to handle new-expressions as well.
+    // Don't forget to update the pre-constructor initialization code in
+    // ExprEngine::VisitCXXConstructExpr.
+  }
+
+  // If we couldn't find an existing region to construct into, assume we're
+  // constructing a temporary.
+  MemRegionManager &MRMgr = Eng.getSValBuilder().getRegionManager();
+  return MRMgr.getCXXTempObjectRegion(CE, LCtx);
+}
+
 void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
                                        ExplodedNode *Pred,
                                        ExplodedNodeSet &destNodes) {
   const LocationContext *LCtx = Pred->getLocationContext();
   ProgramStateRef State = Pred->getState();
 
-  const MemRegion *Target = 0;
+  const MemRegion *Target = nullptr;
 
   // FIXME: Handle arrays, which run the same constructor for every element.
   // For now, we just run the first constructor (which should still invalidate
@@ -116,62 +188,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
 
   switch (CE->getConstructionKind()) {
   case CXXConstructExpr::CK_Complete: {
-    // See if we're constructing an existing region by looking at the next
-    // element in the CFG.
-    const CFGBlock *B = currBldrCtx->getBlock();
-    if (currStmtIdx + 1 < B->size()) {
-      CFGElement Next = (*B)[currStmtIdx+1];
-
-      // Is this a constructor for a local variable?
-      if (Optional<CFGStmt> StmtElem = Next.getAs<CFGStmt>()) {
-        if (const DeclStmt *DS = dyn_cast<DeclStmt>(StmtElem->getStmt())) {
-          if (const VarDecl *Var = dyn_cast<VarDecl>(DS->getSingleDecl())) {
-            if (Var->getInit()->IgnoreImplicit() == CE) {
-              SVal LValue = State->getLValue(Var, LCtx);
-              QualType Ty = Var->getType();
-              LValue = makeZeroElementRegion(State, LValue, Ty);
-              Target = LValue.getAsRegion();
-            }
-          }
-        }
-      }
-      
-      // Is this a constructor for a member?
-      if (Optional<CFGInitializer> InitElem = Next.getAs<CFGInitializer>()) {
-        const CXXCtorInitializer *Init = InitElem->getInitializer();
-        assert(Init->isAnyMemberInitializer());
-
-        const CXXMethodDecl *CurCtor = cast<CXXMethodDecl>(LCtx->getDecl());
-        Loc ThisPtr = getSValBuilder().getCXXThis(CurCtor,
-                                                  LCtx->getCurrentStackFrame());
-        SVal ThisVal = State->getSVal(ThisPtr);
-
-        const ValueDecl *Field;
-        SVal FieldVal;
-        if (Init->isIndirectMemberInitializer()) {
-          Field = Init->getIndirectMember();
-          FieldVal = State->getLValue(Init->getIndirectMember(), ThisVal);
-        } else {
-          Field = Init->getMember();
-          FieldVal = State->getLValue(Init->getMember(), ThisVal);
-        }
-
-        QualType Ty = Field->getType();
-        FieldVal = makeZeroElementRegion(State, FieldVal, Ty);
-        Target = FieldVal.getAsRegion();
-      }
-
-      // FIXME: This will eventually need to handle new-expressions as well.
-      // Don't forget to update the pre-constructor initialization code below.
-    }
-
-    // If we couldn't find an existing region to construct into, assume we're
-    // constructing a temporary.
-    if (!Target) {
-      MemRegionManager &MRMgr = getSValBuilder().getRegionManager();
-      Target = MRMgr.getCXXTempObjectRegion(CE, LCtx);
-    }
-
+    Target = getRegionForConstructedObject(CE, Pred, *this, currStmtIdx);
     break;
   }
   case CXXConstructExpr::CK_VirtualBase:
@@ -245,7 +262,8 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
         // since it's then possible to be initializing one part of a multi-
         // dimensional array.
         State = State->bindDefault(loc::MemRegionVal(Target), ZeroVal);
-        Bldr.generateNode(CE, *I, State, /*tag=*/0, ProgramPoint::PreStmtKind);
+        Bldr.generateNode(CE, *I, State, /*tag=*/nullptr,
+                          ProgramPoint::PreStmtKind);
       }
     }
   }
@@ -290,7 +308,9 @@ void ExprEngine::VisitCXXDestructor(QualType ObjectType,
   // FIXME: We need to run the same destructor on every element of the array.
   // This workaround will just run the first destructor (which will still
   // invalidate the entire array).
-  SVal DestVal = loc::MemRegionVal(Dest);
+  SVal DestVal = UnknownVal();
+  if (Dest)
+    DestVal = loc::MemRegionVal(Dest);
   DestVal = makeZeroElementRegion(State, DestVal, ObjectType);
   Dest = DestVal.getAsRegion();
 
@@ -320,6 +340,32 @@ void ExprEngine::VisitCXXDestructor(QualType ObjectType,
   getCheckerManager().runCheckersForPostCall(Dst, DstInvalidated,
                                              *Call, *this);
 }
+
+void ExprEngine::VisitCXXNewAllocatorCall(const CXXNewExpr *CNE,
+                                          ExplodedNode *Pred,
+                                          ExplodedNodeSet &Dst) {
+  ProgramStateRef State = Pred->getState();
+  const LocationContext *LCtx = Pred->getLocationContext();
+  PrettyStackTraceLoc CrashInfo(getContext().getSourceManager(),
+                                CNE->getStartLoc(),
+                                "Error evaluating New Allocator Call");
+  CallEventManager &CEMgr = getStateManager().getCallEventManager();
+  CallEventRef<CXXAllocatorCall> Call =
+    CEMgr.getCXXAllocatorCall(CNE, State, LCtx);
+
+  ExplodedNodeSet DstPreCall;
+  getCheckerManager().runCheckersForPreCall(DstPreCall, Pred,
+                                            *Call, *this);
+
+  ExplodedNodeSet DstInvalidated;
+  StmtNodeBuilder Bldr(DstPreCall, DstInvalidated, *currBldrCtx);
+  for (ExplodedNodeSet::iterator I = DstPreCall.begin(), E = DstPreCall.end();
+       I != E; ++I)
+    defaultEvalCall(Bldr, *I, *Call);
+  getCheckerManager().runCheckersForPostCall(Dst, DstInvalidated,
+                                             *Call, *this);
+}
+
 
 void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
                                    ExplodedNodeSet &Dst) {
@@ -352,7 +398,7 @@ void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
   if (IsStandardGlobalOpNewFunction)
     symVal = svalBuilder.getConjuredHeapSymbolVal(CNE, LCtx, blockCount);
   else
-    symVal = svalBuilder.conjureSymbolVal(0, CNE, LCtx, CNE->getType(), 
+    symVal = svalBuilder.conjureSymbolVal(nullptr, CNE, LCtx, CNE->getType(),
                                           blockCount);
 
   ProgramStateRef State = Pred->getState();
@@ -367,11 +413,14 @@ void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
   if (!State)
     return;
 
-  // If we're compiling with exceptions enabled, and this allocation function
-  // is not declared as non-throwing, failures /must/ be signalled by
-  // exceptions, and thus the return value will never be NULL.
+  // If this allocation function is not declared as non-throwing, failures
+  // /must/ be signalled by exceptions, and thus the return value will never be
+  // NULL. -fno-exceptions does not influence this semantics.
+  // FIXME: GCC has a -fcheck-new option, which forces it to consider the case
+  // where new can return NULL. If we end up supporting that option, we can
+  // consider adding a check for it here.
   // C++11 [basic.stc.dynamic.allocation]p3.
-  if (FD && getContext().getLangOpts().CXXExceptions) {
+  if (FD) {
     QualType Ty = FD->getType();
     if (const FunctionProtoType *ProtoType = Ty->getAs<FunctionProtoType>())
       if (!ProtoType->isNothrow(getContext()))

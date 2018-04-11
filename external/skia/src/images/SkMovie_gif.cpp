@@ -364,13 +364,11 @@ bool SkGIFMovie::onGetBitmap(SkBitmap* bm)
         startIndex = 0;
 
         // create bitmap
-        bm->setConfig(SkBitmap::kARGB_8888_Config, width, height, 0);
-        if (!bm->allocPixels(NULL)) {
+        if (!bm->allocPixels(SkImageInfo::MakeN32Premul(width, height))) {
             return false;
         }
         // create bitmap for backup
-        fBackup.setConfig(SkBitmap::kARGB_8888_Config, width, height, 0);
-        if (!fBackup.allocPixels(NULL)) {
+        if (!fBackup.allocPixels(SkImageInfo::MakeN32Premul(width, height))) {
             return false;
         }
     } else if (startIndex > fCurrIndex) {
@@ -432,7 +430,7 @@ bool SkGIFMovie::onGetBitmap(SkBitmap* bm)
 
 #include "SkTRegistry.h"
 
-SkMovie* Factory(SkStream* stream) {
+SkMovie* Factory(SkStreamRewindable* stream) {
     char buf[GIF_STAMP_LEN];
     if (stream->read(buf, GIF_STAMP_LEN) == GIF_STAMP_LEN) {
         if (memcmp(GIF_STAMP,   buf, GIF_STAMP_LEN) == 0 ||
@@ -446,4 +444,4 @@ SkMovie* Factory(SkStream* stream) {
     return NULL;
 }
 
-static SkTRegistry<SkMovie*, SkStream*> gReg(Factory);
+static SkTRegistry<SkMovie*(*)(SkStreamRewindable*)> gReg(Factory);

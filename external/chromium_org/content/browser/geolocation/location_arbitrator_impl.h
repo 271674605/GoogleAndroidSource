@@ -11,8 +11,8 @@
 #include "base/time/time.h"
 #include "content/browser/geolocation/location_arbitrator.h"
 #include "content/common/content_export.h"
-#include "content/port/browser/location_provider.h"
 #include "content/public/browser/access_token_store.h"
+#include "content/public/browser/location_provider.h"
 #include "content/public/common/geoposition.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -27,8 +27,7 @@ class LocationProvider;
 // This class is responsible for handling updates from multiple underlying
 // providers and resolving them to a single 'best' location fix at any given
 // moment.
-class CONTENT_EXPORT GeolocationArbitratorImpl
-    : public GeolocationArbitrator {
+class CONTENT_EXPORT LocationArbitratorImpl : public LocationArbitrator {
  public:
   // Number of milliseconds newer a location provider has to be that it's worth
   // switching to this location provider on the basis of it being fresher
@@ -37,12 +36,12 @@ class CONTENT_EXPORT GeolocationArbitratorImpl
 
   typedef base::Callback<void(const Geoposition&)> LocationUpdateCallback;
 
-  explicit GeolocationArbitratorImpl(const LocationUpdateCallback& callback);
-  virtual ~GeolocationArbitratorImpl();
+  explicit LocationArbitratorImpl(const LocationUpdateCallback& callback);
+  virtual ~LocationArbitratorImpl();
 
   static GURL DefaultNetworkProviderURL();
 
-  // GeolocationArbitrator
+  // LocationArbitrator
   virtual void StartProviders(bool use_high_accuracy) OVERRIDE;
   virtual void StopProviders() OVERRIDE;
   virtual void OnPermissionGranted() OVERRIDE;
@@ -58,7 +57,7 @@ class CONTENT_EXPORT GeolocationArbitratorImpl
       AccessTokenStore* access_token_store,
       net::URLRequestContextGetter* context,
       const GURL& url,
-      const string16& access_token);
+      const base::string16& access_token);
   virtual LocationProvider* NewSystemLocationProvider();
   virtual base::Time GetTimeNow() const;
 
@@ -96,7 +95,7 @@ class CONTENT_EXPORT GeolocationArbitratorImpl
   // Tracks whether providers should be running.
   bool is_running_;
 
-  DISALLOW_COPY_AND_ASSIGN(GeolocationArbitratorImpl);
+  DISALLOW_COPY_AND_ASSIGN(LocationArbitratorImpl);
 };
 
 // Factory functions for the various types of location provider to abstract

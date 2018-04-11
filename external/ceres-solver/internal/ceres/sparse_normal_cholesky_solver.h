@@ -34,12 +34,17 @@
 #ifndef CERES_INTERNAL_SPARSE_NORMAL_CHOLESKY_SOLVER_H_
 #define CERES_INTERNAL_SPARSE_NORMAL_CHOLESKY_SOLVER_H_
 
-#if !defined(CERES_NO_SUITESPARSE) || !defined(CERES_NO_CXSPARSE)
+// This include must come before any #ifndef check on Ceres compile options.
+#include "ceres/internal/port.h"
 
-#include "ceres/cxsparse.h"
 #include "ceres/internal/macros.h"
 #include "ceres/linear_solver.h"
 #include "ceres/suitesparse.h"
+#include "ceres/cxsparse.h"
+
+#ifdef CERES_USE_EIGEN_SPARSE
+#include "Eigen/SparseCholesky"
+#endif
 
 namespace ceres {
 namespace internal {
@@ -62,16 +67,22 @@ class SparseNormalCholeskySolver : public CompressedRowSparseMatrixSolver {
 
   LinearSolver::Summary SolveImplUsingSuiteSparse(
       CompressedRowSparseMatrix* A,
-      const double* b,
       const LinearSolver::PerSolveOptions& options,
-      double* x);
+      double* rhs_and_solution);
 
   // Crashes if CSparse is not installed.
   LinearSolver::Summary SolveImplUsingCXSparse(
       CompressedRowSparseMatrix* A,
-      const double* b,
       const LinearSolver::PerSolveOptions& options,
-      double* x);
+      double* rhs_and_solution);
+
+  // Crashes if CERES_USE_LGPGL_CODE is not defined.
+  LinearSolver::Summary SolveImplUsingEigen(
+      CompressedRowSparseMatrix* A,
+      const LinearSolver::PerSolveOptions& options,
+      double* rhs_and_solution);
+
+  void FreeFactorization();
 
   SuiteSparse ss_;
   // Cached factorization
@@ -81,6 +92,14 @@ class SparseNormalCholeskySolver : public CompressedRowSparseMatrixSolver {
   // Cached factorization
   cs_dis* cxsparse_factor_;
 
+#ifdef CERES_USE_EIGEN_SPARSE
+  typedef Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>,
+                                Eigen::Upper> SimplicialLDLT;
+  scoped_ptr<SimplicialLDLT> simplicial_ldlt_;
+#endif
+
+  scoped_ptr<CompressedRowSparseMatrix> outer_product_;
+  vector<int> pattern_;
   const LinearSolver::Options options_;
   CERES_DISALLOW_COPY_AND_ASSIGN(SparseNormalCholeskySolver);
 };
@@ -88,5 +107,4 @@ class SparseNormalCholeskySolver : public CompressedRowSparseMatrixSolver {
 }  // namespace internal
 }  // namespace ceres
 
-#endif  // !defined(CERES_NO_SUITESPARSE) || !defined(CERES_NO_CXSPARSE)
 #endif  // CERES_INTERNAL_SPARSE_NORMAL_CHOLESKY_SOLVER_H_

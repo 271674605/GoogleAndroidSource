@@ -15,9 +15,7 @@
 #include "chrome/browser/password_manager/password_store_x.h"
 #include "chrome/browser/profiles/profile.h"
 
-class PrefService;
-
-namespace content {
+namespace autofill {
 struct PasswordForm;
 }
 
@@ -34,12 +32,22 @@ class GnomeKeyringLoader {
 
 // Call a given parameter with the name of each function we use from GNOME
 // Keyring. Make sure to adjust the unit test if you change these.
-#define GNOME_KEYRING_FOR_EACH_FUNC(F)          \
-  F(is_available)                               \
-  F(store_password)                             \
-  F(delete_password)                            \
-  F(find_itemsv)                                \
+// The list of functions is divided into those we plan to mock in the unittest,
+// and those which we use without mocking in the test.
+#define GNOME_KEYRING_FOR_EACH_MOCKED_FUNC(F)      \
+  F(is_available)                                  \
+  F(store_password)                                \
+  F(delete_password)                               \
+  F(find_items)                                    \
   F(result_to_message)
+#define GNOME_KEYRING_FOR_EACH_NON_MOCKED_FUNC(F)  \
+  F(attribute_list_free)                           \
+  F(attribute_list_new)                            \
+  F(attribute_list_append_string)                  \
+  F(attribute_list_append_uint32)
+#define GNOME_KEYRING_FOR_EACH_FUNC(F)             \
+  GNOME_KEYRING_FOR_EACH_NON_MOCKED_FUNC(F)        \
+  GNOME_KEYRING_FOR_EACH_MOCKED_FUNC(F)
 
 // Declare the actual function pointers that we'll use in client code.
 #define GNOME_KEYRING_DECLARE_POINTER(name) \
@@ -66,29 +74,40 @@ class GnomeKeyringLoader {
 class NativeBackendGnome : public PasswordStoreX::NativeBackend,
                            public GnomeKeyringLoader {
  public:
-  NativeBackendGnome(LocalProfileId id, PrefService* prefs);
+  explicit NativeBackendGnome(LocalProfileId id);
 
   virtual ~NativeBackendGnome();
 
   virtual bool Init() OVERRIDE;
 
   // Implements NativeBackend interface.
-  virtual bool AddLogin(const content::PasswordForm& form) OVERRIDE;
-  virtual bool UpdateLogin(const content::PasswordForm& form) OVERRIDE;
-  virtual bool RemoveLogin(const content::PasswordForm& form) OVERRIDE;
+  virtual password_manager::PasswordStoreChangeList AddLogin(
+      const autofill::PasswordForm& form) OVERRIDE;
+  virtual bool UpdateLogin(
+      const autofill::PasswordForm& form,
+      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
+  virtual bool RemoveLogin(const autofill::PasswordForm& form) OVERRIDE;
   virtual bool RemoveLoginsCreatedBetween(
-      const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual bool GetLogins(const content::PasswordForm& form,
+      base::Time delete_begin,
+      base::Time delete_end,
+      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
+  virtual bool RemoveLoginsSyncedBetween(
+      base::Time delete_begin,
+      base::Time delete_end,
+      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
+  virtual bool GetLogins(const autofill::PasswordForm& form,
                          PasswordFormList* forms) OVERRIDE;
-  virtual bool GetLoginsCreatedBetween(const base::Time& get_begin,
-                                       const base::Time& get_end,
-                                       PasswordFormList* forms) OVERRIDE;
   virtual bool GetAutofillableLogins(PasswordFormList* forms) OVERRIDE;
   virtual bool GetBlacklistLogins(PasswordFormList* forms) OVERRIDE;
 
  private:
+  enum TimestampToCompare {
+    CREATION_TIMESTAMP,
+    SYNC_TIMESTAMP,
+  };
+
   // Adds a login form without checking for one to replace first.
-  bool RawAddLogin(const content::PasswordForm& form);
+  bool RawAddLogin(const autofill::PasswordForm& form);
 
   // Reads PasswordForms from the keyring with the given autofillability state.
   bool GetLoginsList(PasswordFormList* forms, bool autofillable);
@@ -96,23 +115,28 @@ class NativeBackendGnome : public PasswordStoreX::NativeBackend,
   // Helper for GetLoginsCreatedBetween().
   bool GetAllLogins(PasswordFormList* forms);
 
+  // Retrieves password created/synced in the time interval. Returns |true| if
+  // the operation succeeded.
+  bool GetLoginsBetween(base::Time get_begin,
+                        base::Time get_end,
+                        TimestampToCompare date_to_compare,
+                        PasswordFormList* forms);
+
+  // Removes password created/synced in the time interval. Returns |true| if the
+  // operation succeeded. |changes| will contain the changes applied.
+  bool RemoveLoginsBetween(base::Time get_begin,
+                           base::Time get_end,
+                           TimestampToCompare date_to_compare,
+                           password_manager::PasswordStoreChangeList* changes);
+
   // Generates a profile-specific app string based on profile_id_.
   std::string GetProfileSpecificAppString() const;
-
-  // Migrates non-profile-specific logins to be profile-specific.
-  void MigrateToProfileSpecificLogins();
 
   // The local profile id, used to generate the app string.
   const LocalProfileId profile_id_;
 
-  // The pref service to use for persistent migration settings.
-  PrefService* prefs_;
-
   // The app string, possibly based on the local profile id.
   std::string app_string_;
-
-  // True once MigrateToProfileSpecificLogins() has been attempted.
-  bool migrate_tried_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeBackendGnome);
 };

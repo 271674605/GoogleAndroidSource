@@ -16,7 +16,6 @@
 
 package android.renderscript.cts;
 
-import com.android.cts.stub.R;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.Float4;
@@ -32,7 +31,7 @@ public class RsUnpackColor8888Test extends RSBaseCompute {
     }
 
     public void testRsUnpackColor8888RGB() {
-        script = new ScriptC_rs_unpack_color_8888(mRS, mRes, R.raw.rs_unpack_color_8888);
+        script = new ScriptC_rs_unpack_color_8888(mRS);
         Allocation mAllocationIn = Allocation.createSized(mRS, Element.U8_4(mRS), INPUTSIZE);
         Allocation mAllocationOut = Allocation.createSized(mRS, Element.F32_4(mRS), INPUTSIZE);
         byte[] inArray = new byte[INPUTSIZE * 4];
@@ -44,7 +43,7 @@ public class RsUnpackColor8888Test extends RSBaseCompute {
 
         mAllocationIn.copy1DRangeFrom(0, INPUTSIZE, inArray);
         try {
-            RSUtils.forEach(this, 0, mAllocationIn, mAllocationOut);
+            forEach(0, mAllocationIn, mAllocationOut);
         } catch (RSRuntimeException e) {
         }
         mAllocationOut.copyTo(outArray);

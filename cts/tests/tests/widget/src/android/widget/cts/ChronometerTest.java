@@ -25,10 +25,10 @@ import android.widget.Chronometer.OnChronometerTickListener;
 /**
  * Test {@link Chronometer}.
  */
-public class ChronometerTest extends ActivityInstrumentationTestCase2<ChronometerStubActivity> {
-    private ChronometerStubActivity mActivity;
+public class ChronometerTest extends ActivityInstrumentationTestCase2<ChronometerCtsActivity> {
+    private ChronometerCtsActivity mActivity;
     public ChronometerTest() {
-        super("com.android.cts.stub", ChronometerStubActivity.class);
+        super("com.android.cts.widget", ChronometerCtsActivity.class);
     }
 
     @Override
@@ -37,6 +37,7 @@ public class ChronometerTest extends ActivityInstrumentationTestCase2<Chronomete
         mActivity = getActivity();
     }
 
+    @UiThreadTest
     public void testConstructor() {
         new Chronometer(mActivity);
 

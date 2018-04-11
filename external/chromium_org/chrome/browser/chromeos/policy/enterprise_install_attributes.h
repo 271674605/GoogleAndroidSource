@@ -13,13 +13,9 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
-
-namespace chromeos {
-class CryptohomeLibrary;
-}
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 
 namespace policy {
 
@@ -54,14 +50,14 @@ class EnterpriseInstallAttributes {
   static const char kAttrEnterpriseUser[];
   static const char kAttrConsumerKioskEnabled[];
 
-  EnterpriseInstallAttributes(
-      chromeos::CryptohomeLibrary* cryptohome,
+  explicit EnterpriseInstallAttributes(
       chromeos::CryptohomeClient* cryptohome_client);
   ~EnterpriseInstallAttributes();
 
-  // Reads data from the cache file. The cache file is used to work around slow
-  // cryptohome startup, which takes a while to register its DBus interface.
-  // See http://crosbug.com/37367 for background on this.
+  // Reads data from the cache file which is created early during the boot
+  // process.  The cache file is used to work around slow cryptohome startup,
+  // which takes a while to register its DBus interface.  See
+  // http://crosbug.com/37367 for background on this.
   void ReadCacheFile(const base::FilePath& cache_file);
 
   // Makes sure the local caches for enterprise-related install attributes are
@@ -83,7 +79,7 @@ class EnterpriseInstallAttributes {
   bool IsEnterpriseDevice();
 
   // Checks whether this is a consumer kiosk enabled device.
-  bool IsConsumerKioskDevice();
+  bool IsConsumerKioskDeviceWithAutoLaunch();
 
   // Gets the domain this device belongs to or an empty string if the device is
   // not an enterprise device.
@@ -134,7 +130,6 @@ class EnterpriseInstallAttributes {
   void OnReadImmutableAttributes(const std::string& user,
                                  const LockResultCallback& callback);
 
-  chromeos::CryptohomeLibrary* cryptohome_;
   chromeos::CryptohomeClient* cryptohome_client_;
 
   base::WeakPtrFactory<EnterpriseInstallAttributes> weak_ptr_factory_;

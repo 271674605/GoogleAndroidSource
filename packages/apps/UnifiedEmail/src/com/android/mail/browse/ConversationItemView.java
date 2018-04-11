@@ -18,26 +18,30 @@
 package com.android.mail.browse;
 
 import android.animation.Animator;
-import android.animation.Animator.AnimatorListener;
-import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipData.Item;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.InsetDrawable;
+import android.support.v4.text.TextUtilsCompat;
+import android.support.v4.view.ViewCompat;
 import android.text.Layout.Alignment;
 import android.text.Spannable;
 import android.text.SpannableString;
@@ -47,11 +51,10 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextUtils.TruncateAt;
 import android.text.format.DateUtils;
+import android.text.style.BackgroundColorSpan;
 import android.text.style.CharacterStyle;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.TextAppearanceSpan;
-import android.text.util.Rfc822Token;
-import android.text.util.Rfc822Tokenizer;
 import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.DragEvent;
@@ -60,36 +63,23 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
-import android.view.animation.LinearInterpolator;
-import android.widget.AbsListView;
-import android.widget.AbsListView.OnScrollListener;
 import android.widget.TextView;
 
 import com.android.mail.R;
-import com.android.mail.R.drawable;
-import com.android.mail.R.integer;
 import com.android.mail.analytics.Analytics;
-import com.android.mail.bitmap.AttachmentDrawable;
-import com.android.mail.bitmap.AttachmentGridDrawable;
-import com.android.mail.browse.ConversationItemViewModel.SenderFragment;
+import com.android.mail.bitmap.CheckableContactFlipDrawable;
+import com.android.mail.bitmap.ContactDrawable;
 import com.android.mail.perf.Timer;
-import com.android.mail.photomanager.ContactPhotoManager;
-import com.android.mail.photomanager.ContactPhotoManager.ContactIdentifier;
-import com.android.mail.photomanager.PhotoManager.PhotoIdentifier;
-import com.android.mail.providers.Address;
-import com.android.mail.providers.Attachment;
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.UIProvider;
-import com.android.mail.providers.UIProvider.AttachmentRendition;
 import com.android.mail.providers.UIProvider.ConversationColumns;
 import com.android.mail.providers.UIProvider.ConversationListIcon;
 import com.android.mail.providers.UIProvider.FolderType;
 import com.android.mail.ui.AnimatedAdapter;
-import com.android.mail.ui.AnimatedAdapter.ConversationListListener;
 import com.android.mail.ui.ControllableActivity;
 import com.android.mail.ui.ConversationSelectionSet;
-import com.android.mail.ui.DividedImageCanvas;
+import com.android.mail.ui.ConversationSetObserver;
 import com.android.mail.ui.DividedImageCanvas.InvalidateCallback;
 import com.android.mail.ui.FolderDisplayer;
 import com.android.mail.ui.SwipeableItemView;
@@ -100,14 +90,16 @@ import com.android.mail.utils.HardwareLayerEnabler;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
 import com.android.mail.utils.Utils;
+import com.android.mail.utils.ViewUtils;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class ConversationItemView extends View
-        implements SwipeableItemView, ToggleableItem, InvalidateCallback, OnScrollListener {
+        implements SwipeableItemView, ToggleableItem, InvalidateCallback, ConversationSetObserver,
+        BadgeSpan.BadgeSpanDimensions {
 
     // Timer.
     private static int sLayoutCount = 0;
@@ -121,43 +113,52 @@ public class ConversationItemView extends View
     private static final String PERF_TAG_CALCULATE_COORDINATES = "CCHV.coordinates";
     private static final String LOG_TAG = LogTag.getLogTag();
 
+    private static final Typeface SANS_SERIF_LIGHT = Typeface.create("sans-serif-light",
+            Typeface.NORMAL);
+
     // Static bitmaps.
     private static Bitmap STAR_OFF;
     private static Bitmap STAR_ON;
-    private static Bitmap CHECK;
     private static Bitmap ATTACHMENT;
     private static Bitmap ONLY_TO_ME;
     private static Bitmap TO_ME_AND_OTHERS;
     private static Bitmap IMPORTANT_ONLY_TO_ME;
     private static Bitmap IMPORTANT_TO_ME_AND_OTHERS;
-    private static Bitmap IMPORTANT_TO_OTHERS;
+    private static Bitmap IMPORTANT;
     private static Bitmap STATE_REPLIED;
     private static Bitmap STATE_FORWARDED;
     private static Bitmap STATE_REPLIED_AND_FORWARDED;
     private static Bitmap STATE_CALENDAR_INVITE;
-    private static Bitmap VISIBLE_CONVERSATION_CARET;
+    private static Drawable VISIBLE_CONVERSATION_HIGHLIGHT;
     private static Drawable RIGHT_EDGE_TABLET;
-    private static Drawable PLACEHOLDER;
-    private static Drawable PROGRESS_BAR;
 
     private static String sSendersSplitToken;
     private static String sElidedPaddingToken;
 
     // Static colors.
-    private static int sSendersTextColorRead;
-    private static int sSendersTextColorUnread;
-    private static int sDateTextColor;
+    private static int sSendersTextColor;
+    private static int sDateTextColorRead;
+    private static int sDateTextColorUnread;
     private static int sStarTouchSlop;
     private static int sSenderImageTouchSlop;
     private static int sShrinkAnimationDuration;
     private static int sSlideAnimationDuration;
-    private static int sOverflowCountMax;
     private static int sCabAnimationDuration;
+    private static int sBadgePaddingExtraWidth;
+    private static int sBadgeRoundedCornerRadius;
+    private static int sFolderRoundedCornerRadius;
+    private static int sDividerColor;
 
     // Static paints.
     private static final TextPaint sPaint = new TextPaint();
     private static final TextPaint sFoldersPaint = new TextPaint();
     private static final Paint sCheckBackgroundPaint = new Paint();
+    private static final Paint sDividerPaint = new Paint();
+
+    private static int sDividerInset;
+    private static int sDividerHeight;
+
+    private static BroadcastReceiver sConfigurationChangedReceiver;
 
     // Backgrounds for different states.
     private final SparseArray<Drawable> mBackgrounds = new SparseArray<Drawable>();
@@ -169,13 +170,13 @@ public class ConversationItemView extends View
 
     private int mInfoIconX;
     private int mDateX;
+    private int mDateWidth;
     private int mPaperclipX;
+    private int mSendersX;
     private int mSendersWidth;
 
     /** Whether we are on a tablet device or not */
     private final boolean mTabletDevice;
-    /** Whether we are on an expansive tablet */
-    private final boolean mIsExpansiveTablet;
     /** When in conversation mode, true if the list is hidden */
     private final boolean mListCollapsible;
 
@@ -199,36 +200,23 @@ public class ConversationItemView extends View
     private float mAnimatedHeightFraction = 1.0f;
     private final String mAccount;
     private ControllableActivity mActivity;
-    private ConversationListListener mConversationListListener;
-    private final TextView mSubjectTextView;
     private final TextView mSendersTextView;
+    private final TextView mSubjectTextView;
+    private final TextView mSnippetTextView;
     private int mGadgetMode;
-    private boolean mAttachmentPreviewsEnabled;
-    private boolean mParallaxSpeedAlternative;
-    private boolean mParallaxDirectionAlternative;
-    private final DividedImageCanvas mContactImagesHolder;
-    private static ContactPhotoManager sContactPhotoManager;
 
-    private static int sFoldersLeftPadding;
+    private static int sFoldersStartPadding;
+    private static int sFoldersInnerPadding;
+    private static int sFoldersMaxCount;
+    private static int sFoldersOverflowGradientPadding;
     private static TextAppearanceSpan sSubjectTextUnreadSpan;
     private static TextAppearanceSpan sSubjectTextReadSpan;
-    private static ForegroundColorSpan sSnippetTextUnreadSpan;
-    private static ForegroundColorSpan sSnippetTextReadSpan;
+    private static TextAppearanceSpan sBadgeTextSpan;
+    private static BackgroundColorSpan sBadgeBackgroundSpan;
     private static int sScrollSlop;
     private static CharacterStyle sActivatedTextSpan;
 
-    private final AttachmentGridDrawable mAttachmentsView;
-
-    private final Matrix mPhotoFlipMatrix = new Matrix();
-    private final Matrix mCheckMatrix = new Matrix();
-
-    private final CabAnimator mPhotoFlipAnimator;
-
-    /**
-     * The conversation id, if this conversation was selected the last time we were in a selection
-     * mode. This is reset after any animations complete upon exiting the selection mode.
-     */
-    private long mLastSelectedId = -1;
+    private final CheckableContactFlipDrawable mSendersImageView;
 
     /** The resource id of the color to use to override the background. */
     private int mBackgroundOverrideResId = -1;
@@ -255,19 +243,6 @@ public class ConversationItemView extends View
         sFoldersPaint.setAntiAlias(true);
 
         sCheckBackgroundPaint.setColor(Color.GRAY);
-    }
-
-    public static void setScrollStateChanged(final int scrollState) {
-        if (sContactPhotoManager == null) {
-            return;
-        }
-        final boolean flinging = scrollState == OnScrollListener.SCROLL_STATE_FLING;
-
-        if (flinging) {
-            sContactPhotoManager.pause();
-        } else {
-            sContactPhotoManager.resume();
-        }
     }
 
     /**
@@ -298,107 +273,162 @@ public class ConversationItemView extends View
             return mFoldersCount > 0;
         }
 
-        private int measureFolders(int availableSpace, int cellSize) {
-            int totalWidth = 0;
-            boolean firstTime = true;
-            for (Folder f : mFoldersSortedSet) {
-                final String folderString = f.name;
-                int width = (int) sFoldersPaint.measureText(folderString) + cellSize;
-                if (firstTime) {
-                    firstTime = false;
-                } else {
-                    width += sFoldersLeftPadding;
-                }
-                totalWidth += width;
-                if (totalWidth > availableSpace) {
-                    break;
-                }
+        /**
+         * Helper function to calculate exactly how much space the displayed folders should take.
+         * @return an array of integers that signifies the length in dp.
+         */
+        private MeasurementWrapper measureFolderDimen(ConversationItemViewCoordinates coordinates) {
+            // This signifies the absolute max for each folder cell, no exceptions.
+            final int maxCellWidth = coordinates.folderCellWidth;
+
+            final int numDisplayedFolders = Math.min(sFoldersMaxCount, mFoldersSortedSet.size());
+            if (numDisplayedFolders == 0) {
+                return new MeasurementWrapper(new int[0], new boolean[0]);
             }
 
-            return totalWidth;
+            // This variable is calculated based on the number of folders we are displaying
+            final int maxAllowedCellSize = Math.min(maxCellWidth, (coordinates.folderLayoutWidth -
+                    (numDisplayedFolders - 1) * sFoldersStartPadding) / numDisplayedFolders);
+            final int[] measurements = new int[numDisplayedFolders];
+            final boolean[] overflow = new boolean[numDisplayedFolders];
+            final MeasurementWrapper result = new MeasurementWrapper(measurements, overflow);
+
+            int count = 0;
+            int missingWidth = 0;
+            int extraWidth = 0;
+            for (Folder f : mFoldersSortedSet) {
+                if (count > numDisplayedFolders - 1) {
+                    break;
+                }
+
+                final String folderString = f.name;
+                final int neededWidth = (int) sFoldersPaint.measureText(folderString) +
+                        2 * sFoldersInnerPadding;
+
+                if (neededWidth > maxAllowedCellSize) {
+                    // What we can take from others is the minimum of the width we need to borrow
+                    // and the width we are allowed to borrow.
+                    final int borrowedWidth = Math.min(neededWidth - maxAllowedCellSize,
+                            maxCellWidth - maxAllowedCellSize);
+                    final int extraWidthLeftover = extraWidth - borrowedWidth;
+                    if (extraWidthLeftover >= 0) {
+                        measurements[count] = Math.min(neededWidth, maxCellWidth);
+                        extraWidth = extraWidthLeftover;
+                    } else {
+                        measurements[count] = maxAllowedCellSize + extraWidth;
+                        extraWidth = 0;
+                    }
+                    missingWidth = -extraWidthLeftover;
+                    overflow[count] = neededWidth > measurements[count];
+                } else {
+                    extraWidth = maxAllowedCellSize - neededWidth;
+                    measurements[count] = neededWidth;
+                    if (missingWidth > 0) {
+                        if (extraWidth >= missingWidth) {
+                            measurements[count - 1] += missingWidth;
+                            extraWidth -= missingWidth;
+                            overflow[count - 1] = false;
+                        } else {
+                            measurements[count - 1] += extraWidth;
+                            extraWidth = 0;
+                        }
+                    }
+                    missingWidth = 0;
+                }
+
+                count++;
+            }
+
+            return result;
         }
 
-        public void drawFolders(Canvas canvas, ConversationItemViewCoordinates coordinates) {
+        /**
+         * @return how much total space the folders list requires.
+         */
+        private int measureFolders(ConversationItemViewCoordinates coordinates) {
+            int[] sizes = measureFolderDimen(coordinates).measurements;
+            return sumWidth(sizes);
+        }
+
+        private int sumWidth(int[] arr) {
+            int sum = 0;
+            for (int i = 0; i < arr.length; i++) {
+                sum += arr[i];
+            }
+            return sum + (arr.length - 1) * sFoldersStartPadding;
+        }
+
+        public void drawFolders(
+                Canvas canvas, ConversationItemViewCoordinates coordinates, boolean isRtl) {
             if (mFoldersCount == 0) {
                 return;
             }
-            final int xMinStart = coordinates.foldersX;
-            final int xEnd = coordinates.foldersXEnd;
+
+            final MeasurementWrapper wrapper = measureFolderDimen(coordinates);
+            final int[] measurements = wrapper.measurements;
+            final boolean[] overflow = wrapper.overflow;
+
+            final int right = coordinates.foldersRight;
             final int y = coordinates.foldersY;
             final int height = coordinates.foldersHeight;
-            int textBottomPadding = coordinates.foldersTextBottomPadding;
+            final int textBottomPadding = coordinates.foldersTextBottomPadding;
 
             sFoldersPaint.setTextSize(coordinates.foldersFontSize);
             sFoldersPaint.setTypeface(coordinates.foldersTypeface);
 
             // Initialize space and cell size based on the current mode.
-            int availableSpace = xEnd - xMinStart;
-            int maxFoldersCount = availableSpace / coordinates.getFolderMinimumWidth();
-            int foldersCount = Math.min(mFoldersCount, maxFoldersCount);
-            int averageWidth = availableSpace / foldersCount;
-            int cellSize = coordinates.getFolderCellWidth();
+            final int foldersCount = measurements.length;
+            final int width = sumWidth(measurements);
+            int xLeft = (isRtl) ?  right - coordinates.folderLayoutWidth : right - width;
 
-            // TODO(ath): sFoldersPaint.measureText() is done 3x in this method. stop that.
-            // Extra credit: maybe cache results across items as long as font size doesn't change.
-
-            final int totalWidth = measureFolders(availableSpace, cellSize);
-            int xStart = xEnd - Math.min(availableSpace, totalWidth);
-            final boolean overflow = totalWidth > availableSpace;
-
-            // Second pass to draw folders.
-            int i = 0;
+            int index = 0;
             for (Folder f : mFoldersSortedSet) {
-                if (availableSpace <= 0) {
+                if (index > foldersCount - 1) {
                     break;
                 }
+
                 final String folderString = f.name;
                 final int fgColor = f.getForegroundColor(mDefaultFgColor);
                 final int bgColor = f.getBackgroundColor(mDefaultBgColor);
-                boolean labelTooLong = false;
-                final int textW = (int) sFoldersPaint.measureText(folderString);
-                int width = textW + cellSize + sFoldersLeftPadding;
-
-                if (overflow && width > averageWidth) {
-                    if (i < foldersCount - 1) {
-                        width = averageWidth;
-                    } else {
-                        // allow the last label to take all remaining space
-                        // (and don't let it make room for padding)
-                        width = availableSpace + sFoldersLeftPadding;
-                    }
-                    labelTooLong = true;
-                }
-
-                // TODO (mindyp): how to we get this?
-                final boolean isMuted = false;
-                // labelValues.folderId ==
-                // sGmail.getFolderMap(mAccount).getFolderIdIgnored();
 
                 // Draw the box.
                 sFoldersPaint.setColor(bgColor);
                 sFoldersPaint.setStyle(Paint.Style.FILL);
-                canvas.drawRect(xStart, y, xStart + width - sFoldersLeftPadding,
-                        y + height, sFoldersPaint);
+                final RectF rect =
+                        new RectF(xLeft, y, xLeft + measurements[index], y + height);
+                canvas.drawRoundRect(rect, sFolderRoundedCornerRadius, sFolderRoundedCornerRadius,
+                        sFoldersPaint);
 
                 // Draw the text.
-                final int padding = cellSize / 2;
                 sFoldersPaint.setColor(fgColor);
                 sFoldersPaint.setStyle(Paint.Style.FILL);
-                if (labelTooLong) {
-                    final int rightBorder = xStart + width - sFoldersLeftPadding - padding;
-                    final Shader shader = new LinearGradient(rightBorder - padding, y, rightBorder,
-                            y, fgColor, Utils.getTransparentColor(fgColor), Shader.TileMode.CLAMP);
+                if (overflow[index]) {
+                    final int rightBorder = xLeft + measurements[index];
+                    final int x0 = (isRtl) ? xLeft + sFoldersOverflowGradientPadding :
+                            rightBorder - sFoldersOverflowGradientPadding;
+                    final int x1 = (isRtl) ?  xLeft + sFoldersInnerPadding :
+                            rightBorder - sFoldersInnerPadding;
+                    final Shader shader = new LinearGradient(x0, y, x1, y, fgColor,
+                            Utils.getTransparentColor(fgColor), Shader.TileMode.CLAMP);
                     sFoldersPaint.setShader(shader);
                 }
-                canvas.drawText(folderString, xStart + padding, y + height - textBottomPadding,
-                        sFoldersPaint);
-                if (labelTooLong) {
+                canvas.drawText(folderString, xLeft + sFoldersInnerPadding,
+                        y + height - textBottomPadding, sFoldersPaint);
+                if (overflow[index]) {
                     sFoldersPaint.setShader(null);
                 }
 
-                availableSpace -= width;
-                xStart += width;
-                i++;
+                xLeft += measurements[index++] + sFoldersStartPadding;
+            }
+        }
+
+        private static class MeasurementWrapper {
+            final int[] measurements;
+            final boolean[] overflow;
+
+            public MeasurementWrapper(int[] m, boolean[] o) {
+                measurements = m;
+                overflow = o;
             }
         }
     }
@@ -411,24 +441,63 @@ public class ConversationItemView extends View
         mContext = context.getApplicationContext();
         final Resources res = mContext.getResources();
         mTabletDevice = Utils.useTabletUI(res);
-        mIsExpansiveTablet =
-                mTabletDevice ? res.getBoolean(R.bool.use_expansive_tablet_ui) : false;
         mListCollapsible = res.getBoolean(R.bool.list_collapsible);
         mAccount = account;
 
+        getItemViewResources(mContext);
+
+        final int layoutDir = TextUtilsCompat.getLayoutDirectionFromLocale(Locale.getDefault());
+
+        mSendersTextView = new TextView(mContext);
+        mSendersTextView.setIncludeFontPadding(false);
+
+        mSubjectTextView = new TextView(mContext);
+        mSubjectTextView.setEllipsize(TextUtils.TruncateAt.END);
+        mSubjectTextView.setSingleLine(); // allow partial words to be elided
+        mSubjectTextView.setIncludeFontPadding(false);
+        ViewCompat.setLayoutDirection(mSubjectTextView, layoutDir);
+        ViewUtils.setTextAlignment(mSubjectTextView, View.TEXT_ALIGNMENT_VIEW_START);
+
+        mSnippetTextView = new TextView(mContext);
+        mSnippetTextView.setEllipsize(TextUtils.TruncateAt.END);
+        mSnippetTextView.setSingleLine(); // allow partial words to be elided
+        mSnippetTextView.setIncludeFontPadding(false);
+        mSnippetTextView.setTypeface(SANS_SERIF_LIGHT);
+        mSnippetTextView.setTextColor(getResources().getColor(R.color.snippet_text_color));
+        ViewCompat.setLayoutDirection(mSnippetTextView, layoutDir);
+        ViewUtils.setTextAlignment(mSnippetTextView, View.TEXT_ALIGNMENT_VIEW_START);
+
+        mSendersImageView = new CheckableContactFlipDrawable(res, sCabAnimationDuration);
+        mSendersImageView.setCallback(this);
+
+        Utils.traceEndSection();
+    }
+
+    private static synchronized void getItemViewResources(Context context) {
+        if (sConfigurationChangedReceiver == null) {
+            sConfigurationChangedReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    STAR_OFF = null;
+                    getItemViewResources(context);
+                }
+            };
+            context.registerReceiver(sConfigurationChangedReceiver, new IntentFilter(
+                    Intent.ACTION_CONFIGURATION_CHANGED));
+        }
         if (STAR_OFF == null) {
+            final Resources res = context.getResources();
             // Initialize static bitmaps.
-            STAR_OFF = BitmapFactory.decodeResource(res, R.drawable.ic_btn_star_off);
-            STAR_ON = BitmapFactory.decodeResource(res, R.drawable.ic_btn_star_on);
-            CHECK = BitmapFactory.decodeResource(res, R.drawable.ic_avatar_check);
-            ATTACHMENT = BitmapFactory.decodeResource(res, R.drawable.ic_attachment_holo_light);
+            STAR_OFF = BitmapFactory.decodeResource(res, R.drawable.ic_star_outline_20dp);
+            STAR_ON = BitmapFactory.decodeResource(res, R.drawable.ic_star_20dp);
+            ATTACHMENT = BitmapFactory.decodeResource(res, R.drawable.ic_attach_file_20dp);
             ONLY_TO_ME = BitmapFactory.decodeResource(res, R.drawable.ic_email_caret_double);
             TO_ME_AND_OTHERS = BitmapFactory.decodeResource(res, R.drawable.ic_email_caret_single);
             IMPORTANT_ONLY_TO_ME = BitmapFactory.decodeResource(res,
                     R.drawable.ic_email_caret_double_important_unread);
             IMPORTANT_TO_ME_AND_OTHERS = BitmapFactory.decodeResource(res,
                     R.drawable.ic_email_caret_single_important_unread);
-            IMPORTANT_TO_OTHERS = BitmapFactory.decodeResource(res,
+            IMPORTANT = BitmapFactory.decodeResource(res,
                     R.drawable.ic_email_caret_none_important_unread);
             STATE_REPLIED =
                     BitmapFactory.decodeResource(res, R.drawable.ic_badge_reply_holo_light);
@@ -438,25 +507,24 @@ public class ConversationItemView extends View
                     BitmapFactory.decodeResource(res, R.drawable.ic_badge_reply_forward_holo_light);
             STATE_CALENDAR_INVITE =
                     BitmapFactory.decodeResource(res, R.drawable.ic_badge_invite_holo_light);
-            VISIBLE_CONVERSATION_CARET = BitmapFactory.decodeResource(res, R.drawable.caret_grey);
+            VISIBLE_CONVERSATION_HIGHLIGHT = res.getDrawable(
+                    R.drawable.visible_conversation_highlight);
             RIGHT_EDGE_TABLET = res.getDrawable(R.drawable.list_edge_tablet);
-            PLACEHOLDER = res.getDrawable(drawable.ic_attachment_load);
-            PROGRESS_BAR = res.getDrawable(drawable.progress_holo);
 
             // Initialize colors.
             sActivatedTextSpan = CharacterStyle.wrap(new ForegroundColorSpan(
-                    res.getColor(R.color.senders_text_color_read)));
-            sSendersTextColorRead = res.getColor(R.color.senders_text_color_read);
-            sSendersTextColorUnread = res.getColor(R.color.senders_text_color_unread);
-            sSubjectTextUnreadSpan = new TextAppearanceSpan(mContext,
+                    res.getColor(R.color.senders_text_color)));
+            sSendersTextColor = res.getColor(R.color.senders_text_color);
+            sSubjectTextUnreadSpan = new TextAppearanceSpan(context,
                     R.style.SubjectAppearanceUnreadStyle);
-            sSubjectTextReadSpan = new TextAppearanceSpan(mContext,
-                    R.style.SubjectAppearanceReadStyle);
-            sSnippetTextUnreadSpan =
-                    new ForegroundColorSpan(res.getColor(R.color.snippet_text_color_unread));
-            sSnippetTextReadSpan =
-                    new ForegroundColorSpan(res.getColor(R.color.snippet_text_color_read));
-            sDateTextColor = res.getColor(R.color.date_text_color);
+            sSubjectTextReadSpan = new TextAppearanceSpan(
+                    context, R.style.SubjectAppearanceReadStyle);
+
+            sBadgeTextSpan = new TextAppearanceSpan(context, R.style.BadgeTextStyle);
+            sBadgeBackgroundSpan = new BackgroundColorSpan(
+                    res.getColor(R.color.badge_background_color));
+            sDateTextColorRead = res.getColor(R.color.date_text_color_read);
+            sDateTextColorUnread = res.getColor(R.color.date_text_color_unread);
             sStarTouchSlop = res.getDimensionPixelSize(R.dimen.star_touch_slop);
             sSenderImageTouchSlop = res.getDimensionPixelSize(R.dimen.sender_image_touch_slop);
             sShrinkAnimationDuration = res.getInteger(R.integer.shrink_animation_duration);
@@ -465,144 +533,95 @@ public class ConversationItemView extends View
             sSendersSplitToken = res.getString(R.string.senders_split_token);
             sElidedPaddingToken = res.getString(R.string.elided_padding_token);
             sScrollSlop = res.getInteger(R.integer.swipeScrollSlop);
-            sFoldersLeftPadding = res.getDimensionPixelOffset(R.dimen.folders_left_padding);
-            sContactPhotoManager = ContactPhotoManager.createContactPhotoManager(context);
-            sOverflowCountMax = res.getInteger(integer.ap_overflow_max_count);
-            sCabAnimationDuration =
-                    res.getInteger(R.integer.conv_item_view_cab_anim_duration);
+            sFoldersStartPadding = res.getDimensionPixelOffset(R.dimen.folders_start_padding);
+            sFoldersInnerPadding = res.getDimensionPixelOffset(R.dimen.folder_cell_content_padding);
+            sFoldersMaxCount = res.getInteger(R.integer.conversation_list_max_folder_count);
+            sFoldersOverflowGradientPadding =
+                    res.getDimensionPixelOffset(R.dimen.folders_gradient_padding);
+            sCabAnimationDuration = res.getInteger(R.integer.conv_item_view_cab_anim_duration);
+            sBadgePaddingExtraWidth = res.getDimensionPixelSize(R.dimen.badge_padding_extra_width);
+            sBadgeRoundedCornerRadius =
+                    res.getDimensionPixelSize(R.dimen.badge_rounded_corner_radius);
+            sFolderRoundedCornerRadius =
+                    res.getDimensionPixelOffset(R.dimen.folder_rounded_corner_radius);
+            sDividerColor = res.getColor(R.color.conversation_list_divider_color);
+            sDividerInset = res.getDimensionPixelSize(R.dimen.conv_list_divider_inset);
+            sDividerHeight = res.getDimensionPixelSize(R.dimen.divider_height);
         }
-
-        mPhotoFlipAnimator = new CabAnimator("photoFlipFraction", 0, 2,
-                sCabAnimationDuration) {
-            @Override
-            public void invalidateArea() {
-                final int left = mCoordinates.contactImagesX;
-                final int right = left + mContactImagesHolder.getWidth();
-                final int top = mCoordinates.contactImagesY;
-                final int bottom = top + mContactImagesHolder.getHeight();
-                invalidate(left, top, right, bottom);
-            }
-        };
-
-        mSendersTextView = new TextView(mContext);
-        mSendersTextView.setIncludeFontPadding(false);
-
-        mSubjectTextView = new TextView(mContext);
-        mSubjectTextView.setEllipsize(TextUtils.TruncateAt.END);
-        mSubjectTextView.setIncludeFontPadding(false);
-
-        mContactImagesHolder = new DividedImageCanvas(context, new InvalidateCallback() {
-            @Override
-            public void invalidate() {
-                if (mCoordinates == null) {
-                    return;
-                }
-                ConversationItemView.this.invalidate(mCoordinates.contactImagesX,
-                        mCoordinates.contactImagesY,
-                        mCoordinates.contactImagesX + mCoordinates.contactImagesWidth,
-                        mCoordinates.contactImagesY + mCoordinates.contactImagesHeight);
-            }
-        });
-
-        mAttachmentsView = new AttachmentGridDrawable(res, PLACEHOLDER, PROGRESS_BAR);
-        mAttachmentsView.setCallback(this);
-
-        Utils.traceEndSection();
     }
 
     public void bind(final Conversation conversation, final ControllableActivity activity,
-            final ConversationListListener conversationListListener,
             final ConversationSelectionSet set, final Folder folder,
-            final int checkboxOrSenderImage, final boolean showAttachmentPreviews,
-            final boolean parallaxSpeedAlternative, final boolean parallaxDirectionAlternative,
-            final boolean swipeEnabled, final boolean priorityArrowEnabled,
-            final AnimatedAdapter adapter) {
+            final int checkboxOrSenderImage,
+            final boolean swipeEnabled, final boolean importanceMarkersEnabled,
+            final boolean showChevronsEnabled, final AnimatedAdapter adapter) {
         Utils.traceBeginSection("CIVC.bind");
         bind(ConversationItemViewModel.forConversation(mAccount, conversation), activity,
-                conversationListListener, null /* conversationItemAreaClickListener */, set, folder,
-                checkboxOrSenderImage, showAttachmentPreviews, parallaxSpeedAlternative,
-                parallaxDirectionAlternative, swipeEnabled, priorityArrowEnabled, adapter,
-                -1 /* backgroundOverrideResId */,
-                null /* photoBitmap */);
+                null /* conversationItemAreaClickListener */,
+                set, folder, checkboxOrSenderImage, swipeEnabled, importanceMarkersEnabled,
+                showChevronsEnabled, adapter, -1 /* backgroundOverrideResId */,
+                null /* photoBitmap */, false /* useFullMargins */);
         Utils.traceEndSection();
     }
 
     public void bindAd(final ConversationItemViewModel conversationItemViewModel,
             final ControllableActivity activity,
-            final ConversationListListener conversationListListener,
             final ConversationItemAreaClickListener conversationItemAreaClickListener,
             final Folder folder, final int checkboxOrSenderImage, final AnimatedAdapter adapter,
             final int backgroundOverrideResId, final Bitmap photoBitmap) {
         Utils.traceBeginSection("CIVC.bindAd");
-        bind(conversationItemViewModel, activity, conversationListListener,
-                conversationItemAreaClickListener, null /* set */, folder, checkboxOrSenderImage,
-                false /* attachment previews */, false /* parallax */, false /* parallax */,
-                true /* swipeEnabled */, false /* priorityArrowEnabled */, adapter,
-                backgroundOverrideResId, photoBitmap);
+        bind(conversationItemViewModel, activity, conversationItemAreaClickListener, null /* set */,
+                folder, checkboxOrSenderImage, true /* swipeEnabled */,
+                false /* importanceMarkersEnabled */, false /* showChevronsEnabled */,
+                adapter, backgroundOverrideResId, photoBitmap, true /* useFullMargins */);
         Utils.traceEndSection();
     }
 
     private void bind(final ConversationItemViewModel header, final ControllableActivity activity,
-            final ConversationListListener conversationListListener,
             final ConversationItemAreaClickListener conversationItemAreaClickListener,
             final ConversationSelectionSet set, final Folder folder,
-            final int checkboxOrSenderImage, final boolean showAttachmentPreviews,
-            final boolean parallaxSpeedAlternative, final boolean parallaxDirectionAlternative,
-            boolean swipeEnabled, final boolean priorityArrowEnabled, final AnimatedAdapter adapter,
-            final int backgroundOverrideResId, final Bitmap photoBitmap) {
+            final int checkboxOrSenderImage,
+            boolean swipeEnabled, final boolean importanceMarkersEnabled,
+            final boolean showChevronsEnabled, final AnimatedAdapter adapter,
+            final int backgroundOverrideResId, final Bitmap photoBitmap,
+            final boolean useFullMargins) {
         mBackgroundOverrideResId = backgroundOverrideResId;
         mPhotoBitmap = photoBitmap;
         mConversationItemAreaClickListener = conversationItemAreaClickListener;
 
         if (mHeader != null) {
+            Utils.traceBeginSection("unbind");
+            final boolean newlyBound = header.conversation.id != mHeader.conversation.id;
             // If this was previously bound to a different conversation, remove any contact photo
             // manager requests.
-            if (header.conversation.id != mHeader.conversation.id ||
-                    (mHeader.displayableSenderNames != null && !mHeader.displayableSenderNames
-                    .equals(header.displayableSenderNames))) {
-                ArrayList<String> divisionIds = mContactImagesHolder.getDivisionIds();
-                if (divisionIds != null) {
-                    mContactImagesHolder.reset();
-                    for (int pos = 0; pos < divisionIds.size(); pos++) {
-                        sContactPhotoManager.removePhoto(ContactPhotoManager.generateHash(
-                                mContactImagesHolder, pos, divisionIds.get(pos)));
-                    }
-                }
+            if (newlyBound || (mHeader.displayableNames != null && !mHeader
+                    .displayableNames.equals(header.displayableNames))) {
+                mSendersImageView.getContactDrawable().unbind();
             }
 
-            // If this was previously bound to a different conversation,
-            // remove any attachment preview manager requests.
-            if (header.conversation.id != mHeader.conversation.id
-                    || header.conversation.attachmentPreviewsCount
-                            != mHeader.conversation.attachmentPreviewsCount
-                    || !header.conversation.getAttachmentPreviewUris()
-                            .equals(mHeader.conversation.getAttachmentPreviewUris())) {
-
-                // unbind the attachments view (releasing bitmap references)
-                // (this also cancels all async tasks)
-                for (int i = 0, len = mAttachmentsView.getCount(); i < len; i++) {
-                    mAttachmentsView.getOrCreateDrawable(i).unbind();
-                }
-                // reset the grid, as the newly bound item may have a different attachment count
-                mAttachmentsView.setCount(0);
-            }
-
-            if (header.conversation.id != mHeader.conversation.id) {
+            if (newlyBound) {
                 // Stop the photo flip animation
-                mPhotoFlipAnimator.stopAnimation();
+                final boolean showSenders = !isSelected();
+                mSendersImageView.reset(showSenders);
             }
+            Utils.traceEndSection();
         }
         mCoordinates = null;
         mHeader = header;
         mActivity = activity;
-        mConversationListListener = conversationListListener;
         mSelectedConversationSet = set;
+        if (mSelectedConversationSet != null) {
+            mSelectedConversationSet.addObserver(this);
+        }
         mDisplayedFolder = folder;
         mStarEnabled = folder != null && !folder.isTrash();
         mSwipeEnabled = swipeEnabled;
         mAdapter = adapter;
-        mAttachmentsView.setBitmapCache(mAdapter.getBitmapCache());
-        mAttachmentsView.setDecodeAggregator(mAdapter.getDecodeAggregator());
+
+        Utils.traceBeginSection("drawables");
+        mSendersImageView.getContactDrawable().setBitmapCache(mAdapter.getSendersImagesCache());
+        mSendersImageView.getContactDrawable().setContactResolver(mAdapter.getContactResolver());
+        Utils.traceEndSection();
 
         if (checkboxOrSenderImage == ConversationListIcon.SENDER_IMAGE) {
             mGadgetMode = ConversationItemViewCoordinates.GADGET_CONTACT_PHOTO;
@@ -610,16 +629,14 @@ public class ConversationItemView extends View
             mGadgetMode = ConversationItemViewCoordinates.GADGET_NONE;
         }
 
-        mAttachmentPreviewsEnabled = showAttachmentPreviews;
-        mParallaxSpeedAlternative = parallaxSpeedAlternative;
-        mParallaxDirectionAlternative = parallaxDirectionAlternative;
-
+        Utils.traceBeginSection("folder displayer");
         // Initialize folder displayer.
         if (mHeader.folderDisplayer == null) {
             mHeader.folderDisplayer = new ConversationItemFolderDisplayer(mContext);
         } else {
             mHeader.folderDisplayer.reset();
         }
+        Utils.traceEndSection();
 
         final int ignoreFolderType;
         if (mDisplayedFolder.isInbox()) {
@@ -628,19 +645,24 @@ public class ConversationItemView extends View
             ignoreFolderType = -1;
         }
 
+        Utils.traceBeginSection("load folders");
         mHeader.folderDisplayer.loadConversationFolders(mHeader.conversation,
                 mDisplayedFolder.folderUri, ignoreFolderType);
+        Utils.traceEndSection();
 
-        if (mHeader.dateOverrideText == null) {
+        if (mHeader.showDateText) {
+            Utils.traceBeginSection("relative time");
             mHeader.dateText = DateUtils.getRelativeTimeSpanString(mContext,
                     mHeader.conversation.dateMs);
+            Utils.traceEndSection();
         } else {
-            mHeader.dateText = mHeader.dateOverrideText;
+            mHeader.dateText = "";
         }
 
+        Utils.traceBeginSection("config setup");
         mConfig = new ConversationItemViewCoordinates.Config()
             .withGadget(mGadgetMode)
-            .withAttachmentPreviews(getAttachmentPreviewsMode());
+            .setUseFullMargins(useFullMargins);
         if (header.folderDisplayer.hasVisibleFolders()) {
             mConfig.showFolders();
         }
@@ -650,41 +672,51 @@ public class ConversationItemView extends View
         if (mHeader.conversation.color != 0) {
             mConfig.showColorBlock();
         }
-        // Personal level.
-        mHeader.personalLevelBitmap = null;
-        if (true) { // TODO: hook this up to a setting
-            final int personalLevel = mHeader.conversation.personalLevel;
-            final boolean isImportant =
-                    mHeader.conversation.priority == UIProvider.ConversationPriority.IMPORTANT;
-            final boolean useImportantMarkers = isImportant && priorityArrowEnabled;
 
-            if (personalLevel == UIProvider.ConversationPersonalLevel.ONLY_TO_ME) {
-                mHeader.personalLevelBitmap = useImportantMarkers ? IMPORTANT_ONLY_TO_ME
-                        : ONLY_TO_ME;
-            } else if (personalLevel == UIProvider.ConversationPersonalLevel.TO_ME_AND_OTHERS) {
-                mHeader.personalLevelBitmap = useImportantMarkers ? IMPORTANT_TO_ME_AND_OTHERS
-                        : TO_ME_AND_OTHERS;
-            } else if (useImportantMarkers) {
-                mHeader.personalLevelBitmap = IMPORTANT_TO_OTHERS;
-            }
+        // Importance markers and chevrons (personal level indicators).
+        mHeader.personalLevelBitmap = null;
+        final int personalLevel = mHeader.conversation.personalLevel;
+        final boolean isImportant =
+                mHeader.conversation.priority == UIProvider.ConversationPriority.IMPORTANT;
+        final boolean useImportantMarkers = isImportant && importanceMarkersEnabled;
+        if (showChevronsEnabled &&
+                personalLevel == UIProvider.ConversationPersonalLevel.ONLY_TO_ME) {
+            mHeader.personalLevelBitmap = useImportantMarkers ? IMPORTANT_ONLY_TO_ME
+                    : ONLY_TO_ME;
+        } else if (showChevronsEnabled &&
+                personalLevel == UIProvider.ConversationPersonalLevel.TO_ME_AND_OTHERS) {
+            mHeader.personalLevelBitmap = useImportantMarkers ? IMPORTANT_TO_ME_AND_OTHERS
+                    : TO_ME_AND_OTHERS;
+        } else if (useImportantMarkers) {
+            mHeader.personalLevelBitmap = IMPORTANT;
         }
         if (mHeader.personalLevelBitmap != null) {
             mConfig.showPersonalIndicator();
         }
+        Utils.traceEndSection();
 
-        mAttachmentsView.setOverflowText(null);
-
+        Utils.traceBeginSection("content description");
         setContentDescription();
+        Utils.traceEndSection();
         requestLayout();
     }
 
     @Override
-    public void invalidateDrawable(Drawable who) {
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+
+        if (mSelectedConversationSet != null) {
+            mSelectedConversationSet.removeObserver(this);
+        }
+    }
+
+    @Override
+    public void invalidateDrawable(final Drawable who) {
         boolean handled = false;
         if (mCoordinates != null) {
-            if (mAttachmentsView.equals(who)) {
+            if (mSendersImageView.equals(who)) {
                 final Rect r = new Rect(who.getBounds());
-                r.offset(mCoordinates.attachmentPreviewsX, mCoordinates.attachmentPreviewsY);
+                r.offset(mCoordinates.contactImagesX, mCoordinates.contactImagesY);
                 ConversationItemView.this.invalidate(r.left, r.top, r.right, r.bottom);
                 handled = true;
             }
@@ -725,7 +757,8 @@ public class ConversationItemView extends View
         }
         mHeader.viewWidth = mViewWidth;
 
-        mConfig.updateWidth(wSize).setViewMode(currentMode);
+        mConfig.updateWidth(wSize).setViewMode(currentMode)
+                .setLayoutDirection(ViewCompat.getLayoutDirection(this));
 
         Resources res = getResources();
         mHeader.standardScaledDimen = res.getDimensionPixelOffset(R.dimen.standard_scaled_dimen);
@@ -760,12 +793,16 @@ public class ConversationItemView extends View
         Utils.traceEndSection();
 
         // Subject.
+        Utils.traceBeginSection("subject");
         createSubject(mHeader.unread);
+
+        createSnippet();
 
         if (!mHeader.isLayoutValid()) {
             setContentDescription();
         }
         mHeader.validate();
+        Utils.traceEndSection();
 
         pauseTimer(PERF_TAG_LAYOUT);
         if (sTimer != null && ++sLayoutCount >= PERF_LAYOUT_ITERATIONS) {
@@ -779,7 +816,8 @@ public class ConversationItemView extends View
     private void setContentDescription() {
         if (mActivity.isAccessibilityEnabled()) {
             mHeader.resetContentDescription();
-            setContentDescription(mHeader.getContentDescription(mContext));
+            setContentDescription(
+                    mHeader.getContentDescription(mContext, mDisplayedFolder.shouldShowRecipients()));
         }
     }
 
@@ -789,6 +827,10 @@ public class ConversationItemView extends View
         Drawable drawable = mBackgrounds.get(resourceId);
         if (drawable == null) {
             drawable = getResources().getDrawable(resourceId);
+            final int insetPadding = mHeader.insetPadding;
+            if (insetPadding > 0) {
+                drawable = new InsetDrawable(drawable, insetPadding);
+            }
             mBackgrounds.put(resourceId, drawable);
         }
         if (getBackground() != drawable) {
@@ -806,11 +848,9 @@ public class ConversationItemView extends View
         setSelected(mSelected);
         mHeader.gadgetMode = mGadgetMode;
 
-        final boolean isUnread = mHeader.unread;
-        updateBackground(isUnread);
+        updateBackground();
 
         mHeader.sendersDisplayText = new SpannableStringBuilder();
-        mHeader.styledSendersString = null;
 
         mHeader.hasDraftMessage = mHeader.conversation.numDrafts() > 0;
 
@@ -818,51 +858,31 @@ public class ConversationItemView extends View
         if (mHeader.preserveSendersText) {
             // This is a special view that doesn't need special sender formatting
             mHeader.sendersDisplayText = new SpannableStringBuilder(mHeader.sendersText);
-            loadSenderImages();
+            loadImages();
         } else if (mHeader.conversation.conversationInfo != null) {
-            // This is Gmail
             Context context = getContext();
             mHeader.messageInfoString = SendersView
                     .createMessageInfo(context, mHeader.conversation, true);
             int maxChars = ConversationItemViewCoordinates.getSendersLength(context,
                     mCoordinates.getMode(), mHeader.conversation.hasAttachments);
-            mHeader.displayableSenderEmails = new ArrayList<String>();
-            mHeader.displayableSenderNames = new ArrayList<String>();
-            mHeader.styledSenders = new ArrayList<SpannableString>();
-            SendersView.format(context, mHeader.conversation.conversationInfo,
-                    mHeader.messageInfoString.toString(), maxChars, mHeader.styledSenders,
-                    mHeader.displayableSenderNames, mHeader.displayableSenderEmails, mAccount,
-                    true);
+            mHeader.displayableEmails = new ArrayList<String>();
+            mHeader.displayableNames = new ArrayList<String>();
+            mHeader.styledNames = new ArrayList<SpannableString>();
 
-            if (mHeader.displayableSenderEmails.isEmpty() && mHeader.hasDraftMessage) {
-                mHeader.displayableSenderEmails.add(mAccount);
-                mHeader.displayableSenderNames.add(mAccount);
+            SendersView.format(context, mHeader.conversation.conversationInfo,
+                    mHeader.messageInfoString.toString(), maxChars, mHeader.styledNames,
+                    mHeader.displayableNames, mHeader.displayableEmails, mAccount,
+                    mDisplayedFolder.shouldShowRecipients(), true);
+
+            if (mHeader.displayableEmails.isEmpty() && mHeader.hasDraftMessage) {
+                mHeader.displayableEmails.add(mAccount);
+                mHeader.displayableNames.add(mAccount);
             }
 
             // If we have displayable senders, load their thumbnails
-            loadSenderImages();
+            loadImages();
         } else {
-            // This is Email
-            SendersView.formatSenders(mHeader, getContext(), true);
-            if (!TextUtils.isEmpty(mHeader.conversation.senders)) {
-                mHeader.displayableSenderEmails = new ArrayList<String>();
-                mHeader.displayableSenderNames = new ArrayList<String>();
-
-                final Rfc822Token[] tokens = Rfc822Tokenizer.tokenize(mHeader.conversation.senders);
-                for (int i = 0; i < tokens.length;i++) {
-                    final Rfc822Token token = tokens[i];
-                    final String senderName = Address.decodeAddressName(token.getName());
-                    final String senderAddress = token.getAddress();
-                    mHeader.displayableSenderEmails.add(senderAddress);
-                    mHeader.displayableSenderNames.add(
-                            !TextUtils.isEmpty(senderName) ? senderName : senderAddress);
-                }
-                loadSenderImages();
-            }
-        }
-
-        if (isAttachmentPreviewsEnabled()) {
-            loadAttachmentPreviews();
+            LogUtils.wtf(LOG_TAG, "Null conversationInfo");
         }
 
         if (mHeader.isLayoutValid()) {
@@ -886,140 +906,30 @@ public class ConversationItemView extends View
         pauseTimer(PERF_TAG_CALCULATE_TEXTS_BITMAPS);
     }
 
-    private boolean isAttachmentPreviewsEnabled() {
-        return mAttachmentPreviewsEnabled && !mHeader.conversation.getAttachmentPreviewUris()
-                .isEmpty();
-    }
-
-    private int getOverflowCount() {
-        return mHeader.conversation.attachmentPreviewsCount - mHeader.conversation
-                .getAttachmentPreviewUris().size();
-    }
-
-    private int getAttachmentPreviewsMode() {
-        if (isAttachmentPreviewsEnabled()) {
-            return mHeader.conversation.read
-                    ? ConversationItemViewCoordinates.ATTACHMENT_PREVIEW_READ
-                    : ConversationItemViewCoordinates.ATTACHMENT_PREVIEW_UNREAD;
-        } else {
-            return ConversationItemViewCoordinates.ATTACHMENT_PREVIEW_NONE;
-        }
-    }
-
-    private float getParallaxSpeedMultiplier() {
-        return mParallaxSpeedAlternative
-                ? SwipeableListView.ATTACHMENT_PARALLAX_MULTIPLIER_ALTERNATIVE
-                : SwipeableListView.ATTACHMENT_PARALLAX_MULTIPLIER_NORMAL;
-    }
-
     // FIXME(ath): maybe move this to bind(). the only dependency on layout is on tile W/H, which
     // is immutable.
-    private void loadSenderImages() {
-        if (mGadgetMode == ConversationItemViewCoordinates.GADGET_CONTACT_PHOTO
-                && mHeader.displayableSenderEmails != null
-                && mHeader.displayableSenderEmails.size() > 0) {
-            if (mCoordinates.contactImagesWidth <= 0 || mCoordinates.contactImagesHeight <= 0) {
-                LogUtils.w(LOG_TAG,
-                        "Contact image width(%d) or height(%d) is 0 for mode: (%d).",
-                        mCoordinates.contactImagesWidth, mCoordinates.contactImagesHeight,
-                        mCoordinates.getMode());
-                return;
-            }
-
-            int size = mHeader.displayableSenderEmails.size();
-            final List<Object> keys = Lists.newArrayListWithCapacity(size);
-            for (int i = 0; i < DividedImageCanvas.MAX_DIVISIONS && i < size; i++) {
-                keys.add(mHeader.displayableSenderEmails.get(i));
-            }
-
-            mContactImagesHolder.setDimensions(mCoordinates.contactImagesWidth,
-                    mCoordinates.contactImagesHeight);
-            mContactImagesHolder.setDivisionIds(keys);
-            String emailAddress;
-            for (int i = 0; i < DividedImageCanvas.MAX_DIVISIONS && i < size; i++) {
-                emailAddress = mHeader.displayableSenderEmails.get(i);
-                PhotoIdentifier photoIdentifier = new ContactIdentifier(
-                        mHeader.displayableSenderNames.get(i), emailAddress, i);
-                sContactPhotoManager.loadThumbnail(photoIdentifier, mContactImagesHolder);
-            }
-        }
-    }
-
-    private void loadAttachmentPreviews() {
-        if (mCoordinates.attachmentPreviewsWidth <= 0
-                || mCoordinates.attachmentPreviewsHeight <= 0) {
-            LogUtils.w(LOG_TAG,
-                    "Attachment preview width(%d) or height(%d) is 0 for mode: (%d,%d).",
-                    mCoordinates.attachmentPreviewsWidth, mCoordinates.attachmentPreviewsHeight,
-                    mCoordinates.getMode(), getAttachmentPreviewsMode());
+    private void loadImages() {
+        if (mGadgetMode != ConversationItemViewCoordinates.GADGET_CONTACT_PHOTO
+                || mHeader.displayableEmails == null
+                || mHeader.displayableEmails.isEmpty()) {
             return;
         }
-        Utils.traceBeginSection("attachment previews");
-
-        Utils.traceBeginSection("Setup load attachment previews");
-
-        LogUtils.d(LOG_TAG,
-                "loadAttachmentPreviews: Loading attachment previews for conversation %s",
-                mHeader.conversation);
-
-        // Get list of attachments and states from conversation
-        final ArrayList<String> attachmentUris = mHeader.conversation.getAttachmentPreviewUris();
-        final int previewStates = mHeader.conversation.attachmentPreviewStates;
-        final int displayCount = Math.min(
-                attachmentUris.size(), AttachmentGridDrawable.MAX_VISIBLE_ATTACHMENT_COUNT);
-        Utils.traceEndSection();
-
-        mAttachmentsView.setCoordinates(mCoordinates);
-        mAttachmentsView.setCount(displayCount);
-
-        final int decodeHeight;
-        // if parallax is enabled, increase the desired vertical size of attachment bitmaps
-        // so we have extra pixels to scroll within
-        if (SwipeableListView.ENABLE_ATTACHMENT_PARALLAX) {
-            decodeHeight = Math.round(mCoordinates.attachmentPreviewsDecodeHeight
-                    * getParallaxSpeedMultiplier());
-        } else {
-            decodeHeight = mCoordinates.attachmentPreviewsDecodeHeight;
+        if (mCoordinates.contactImagesWidth <= 0 || mCoordinates.contactImagesHeight <= 0) {
+            LogUtils.w(LOG_TAG,
+                    "Contact image width(%d) or height(%d) is 0 for mode: (%d).",
+                    mCoordinates.contactImagesWidth, mCoordinates.contactImagesHeight,
+                    mCoordinates.getMode());
+            return;
         }
 
-        // set the bounds before binding inner drawables so they can decode right away
-        // (they need the their bounds set to know whether to decode to 1x1 or 2x1 dimens)
-        mAttachmentsView.setBounds(0, 0, mCoordinates.attachmentPreviewsWidth,
-                mCoordinates.attachmentPreviewsHeight);
+        mSendersImageView
+                .setBounds(0, 0, mCoordinates.contactImagesWidth, mCoordinates.contactImagesHeight);
 
-        for (int i = 0; i < displayCount; i++) {
-            Utils.traceBeginSection("setup single attachment preview");
-            final String uri = attachmentUris.get(i);
-
-            // Find the rendition to load based on availability.
-            LogUtils.v(LOG_TAG, "loadAttachmentPreviews: state [BEST, SIMPLE] is [%s, %s] for %s ",
-                    Attachment.getPreviewState(previewStates, i, AttachmentRendition.BEST),
-                    Attachment.getPreviewState(previewStates, i, AttachmentRendition.SIMPLE),
-                    uri);
-            int bestAvailableRendition = -1;
-            // BEST first, else use less preferred renditions
-            for (final int rendition : AttachmentRendition.PREFERRED_RENDITIONS) {
-                if (Attachment.getPreviewState(previewStates, i, rendition)) {
-                    bestAvailableRendition = rendition;
-                    break;
-                }
-            }
-
-            LogUtils.d(LOG_TAG,
-                    "creating/setting drawable region in CIV=%s canvas=%s rend=%s uri=%s",
-                    this, mAttachmentsView, bestAvailableRendition, uri);
-            final AttachmentDrawable drawable = mAttachmentsView.getOrCreateDrawable(i);
-            drawable.setDecodeDimensions(mCoordinates.attachmentPreviewsWidth, decodeHeight);
-            drawable.setParallaxSpeedMultiplier(getParallaxSpeedMultiplier());
-            if (bestAvailableRendition != -1) {
-                drawable.bind(getContext(), uri, bestAvailableRendition);
-            } else {
-                drawable.showStaticPlaceholder();
-            }
-
-            Utils.traceEndSection();
-        }
-
+        Utils.traceBeginSection("load sender image");
+        final ContactDrawable drawable = mSendersImageView.getContactDrawable();
+        drawable.setDecodeDimensions(mCoordinates.contactImagesWidth,
+                mCoordinates.contactImagesHeight);
+        drawable.bind(mHeader.displayableNames.get(0), mHeader.displayableEmails.get(0));
         Utils.traceEndSection();
     }
 
@@ -1032,13 +942,13 @@ public class ConversationItemView extends View
         v.layout(0, 0, w, h);
     }
 
-    private void layoutSenders() {
-        if (mHeader.styledSendersString != null) {
+    private void layoutParticipantText(SpannableStringBuilder participantText) {
+        if (participantText != null) {
             if (isActivated() && showActivatedText()) {
-                mHeader.styledSendersString.setSpan(sActivatedTextSpan, 0,
+                participantText.setSpan(sActivatedTextSpan, 0,
                         mHeader.styledMessageInfoStringOffset, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else {
-                mHeader.styledSendersString.removeSpan(sActivatedTextSpan);
+                participantText.removeSpan(sActivatedTextSpan);
             }
 
             final int w = mSendersWidth;
@@ -1048,59 +958,89 @@ public class ConversationItemView extends View
             mSendersTextView.setTextSize(TypedValue.COMPLEX_UNIT_PX, mCoordinates.sendersFontSize);
             layoutViewExactly(mSendersTextView, w, h);
 
-            mSendersTextView.setText(mHeader.styledSendersString);
+            mSendersTextView.setText(participantText);
         }
     }
 
     private void createSubject(final boolean isUnread) {
-        final String subject = filterTag(mHeader.conversation.subject);
-        final String snippet = mHeader.conversation.getSnippet();
-        final Spannable displayedStringBuilder = new SpannableString(
-                Conversation.getSubjectAndSnippetForDisplay(mContext, subject, snippet));
+        final String badgeText = mHeader.badgeText == null ? "" : mHeader.badgeText;
+        String subject = filterTag(getContext(), mHeader.conversation.subject);
+        subject = Conversation.getSubjectForDisplay(mContext, badgeText, subject);
+        final Spannable displayedStringBuilder = new SpannableString(subject);
 
         // since spans affect text metrics, add spans to the string before measure/layout or fancy
         // ellipsizing
-        final int subjectTextLength = (subject != null) ? subject.length() : 0;
+
+        final int badgeTextLength = formatBadgeText(displayedStringBuilder, badgeText);
+
         if (!TextUtils.isEmpty(subject)) {
             displayedStringBuilder.setSpan(TextAppearanceSpan.wrap(
-                    isUnread ? sSubjectTextUnreadSpan : sSubjectTextReadSpan), 0, subjectTextLength,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-        if (!TextUtils.isEmpty(snippet)) {
-            final int startOffset = subjectTextLength;
-            // Start after the end of the subject text; since the subject may be
-            // "" or null, this could start at the 0th character in the subjectText string
-            displayedStringBuilder.setSpan(ForegroundColorSpan.wrap(
-                    isUnread ? sSnippetTextUnreadSpan : sSnippetTextReadSpan), startOffset,
-                    displayedStringBuilder.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    isUnread ? sSubjectTextUnreadSpan : sSubjectTextReadSpan),
+                    badgeTextLength, subject.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         if (isActivated() && showActivatedText()) {
-            displayedStringBuilder.setSpan(sActivatedTextSpan, 0, displayedStringBuilder.length(),
-                    Spannable.SPAN_INCLUSIVE_INCLUSIVE);
+            displayedStringBuilder.setSpan(sActivatedTextSpan, badgeTextLength,
+                    displayedStringBuilder.length(), Spannable.SPAN_INCLUSIVE_INCLUSIVE);
         }
 
         final int subjectWidth = mCoordinates.subjectWidth;
         final int subjectHeight = mCoordinates.subjectHeight;
         mSubjectTextView.setLayoutParams(new ViewGroup.LayoutParams(subjectWidth, subjectHeight));
-        mSubjectTextView.setMaxLines(mCoordinates.subjectLineCount);
         mSubjectTextView.setTextSize(TypedValue.COMPLEX_UNIT_PX, mCoordinates.subjectFontSize);
         layoutViewExactly(mSubjectTextView, subjectWidth, subjectHeight);
 
         mSubjectTextView.setText(displayedStringBuilder);
     }
 
+    private void createSnippet() {
+        final String snippet = mHeader.conversation.getSnippet();
+        final Spannable displayedStringBuilder = new SpannableString(snippet);
+
+        // measure the width of the folders which overlap the snippet view
+        final int folderWidth = mHeader.folderDisplayer.measureFolders(mCoordinates);
+
+        // size the snippet view by subtracting the folder width from the maximum snippet width
+        final int snippetWidth = mCoordinates.maxSnippetWidth - folderWidth;
+        final int snippetHeight = mCoordinates.snippetHeight;
+        mSnippetTextView.setLayoutParams(new ViewGroup.LayoutParams(snippetWidth, snippetHeight));
+        mSnippetTextView.setTextSize(TypedValue.COMPLEX_UNIT_PX, mCoordinates.snippetFontSize);
+        layoutViewExactly(mSnippetTextView, snippetWidth, snippetHeight);
+
+        mSnippetTextView.setText(displayedStringBuilder);
+    }
+
+    private int formatBadgeText(Spannable displayedStringBuilder, String badgeText) {
+        final int badgeTextLength = (badgeText != null) ? badgeText.length() : 0;
+        if (!TextUtils.isEmpty(badgeText)) {
+            displayedStringBuilder.setSpan(TextAppearanceSpan.wrap(sBadgeTextSpan),
+                    0, badgeTextLength, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            displayedStringBuilder.setSpan(TextAppearanceSpan.wrap(sBadgeBackgroundSpan),
+                    0, badgeTextLength, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            displayedStringBuilder.setSpan(new BadgeSpan(displayedStringBuilder, this),
+                    0, badgeTextLength, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+
+        return badgeTextLength;
+    }
+
+    // START BadgeSpan.BadgeSpanDimensions override
+
+    @Override
+    public int getHorizontalPadding() {
+        return sBadgePaddingExtraWidth;
+    }
+
+    @Override
+    public float getRoundedCornerRadius() {
+        return sBadgeRoundedCornerRadius;
+    }
+
+    // END BadgeSpan.BadgeSpanDimensions override
+
     private boolean showActivatedText() {
         // For activated elements in tablet in conversation mode, we show an activated color, since
         // the background is dark blue for activated versus gray for non-activated.
         return mTabletDevice && !mListCollapsible;
-    }
-
-    private boolean canFitFragment(int width, int line, int fixedWidth) {
-        if (line == mCoordinates.sendersLineCount) {
-            return width + fixedWidth <= mSendersWidth;
-        } else {
-            return width <= mSendersWidth;
-        }
     }
 
     private void calculateCoordinates() {
@@ -1109,68 +1049,71 @@ public class ConversationItemView extends View
         sPaint.setTextSize(mCoordinates.dateFontSize);
         sPaint.setTypeface(Typeface.DEFAULT);
 
+        final boolean isRtl = ViewUtils.isViewRtl(this);
+
+        mDateWidth = (int) sPaint.measureText(
+                mHeader.dateText != null ? mHeader.dateText.toString() : "");
         if (mHeader.infoIcon != null) {
-            mInfoIconX = mCoordinates.infoIconXEnd - mHeader.infoIcon.getWidth();
+            mInfoIconX = (isRtl) ? mCoordinates.infoIconX :
+                    mCoordinates.infoIconXRight - mHeader.infoIcon.getWidth();
 
             // If we have an info icon, we start drawing the date text:
             // At the end of the date TextView minus the width of the date text
-            mDateX = mCoordinates.dateXEnd - (int) sPaint.measureText(
-                    mHeader.dateText != null ? mHeader.dateText.toString() : "");
+            // In RTL mode, we just use dateX
+            mDateX = (isRtl) ? mCoordinates.dateX : mCoordinates.dateXRight - mDateWidth;
         } else {
             // If there is no info icon, we start drawing the date text:
             // At the end of the info icon ImageView minus the width of the date text
             // We use the info icon ImageView for positioning, since we want the date text to be
             // at the right, since there is no info icon
-            mDateX = mCoordinates.infoIconXEnd - (int) sPaint.measureText(
-                    mHeader.dateText != null ? mHeader.dateText.toString() : "");
+            // In RTL, we just use infoIconX
+            mDateX = (isRtl) ? mCoordinates.infoIconX : mCoordinates.infoIconXRight - mDateWidth;
         }
 
-        mPaperclipX = mDateX - ATTACHMENT.getWidth() - mCoordinates.datePaddingLeft;
+        // The paperclip is drawn starting at the start of the date text minus
+        // the width of the paperclip and the date padding.
+        // In RTL mode, it is at the end of the date (mDateX + mDateWidth) plus the
+        // start date padding.
+        mPaperclipX = (isRtl) ? mDateX + mDateWidth + mCoordinates.datePaddingStart :
+                mDateX - ATTACHMENT.getWidth() - mCoordinates.datePaddingStart;
 
-        if (mCoordinates.isWide()) {
-            // In wide mode, the end of the senders should align with
-            // the start of the subject and is based on a max width.
-            mSendersWidth = mCoordinates.sendersWidth;
+        // In normal mode, the senders x and width is based
+        // on where the date/attachment icon start.
+        final int dateAttachmentStart;
+        // Have this end near the paperclip or date, not the folders.
+        if (mHeader.paperclip != null) {
+            // If there is a paperclip, the date/attachment start is at the start
+            // of the paperclip minus the paperclip padding.
+            // In RTL, it is at the end of the paperclip plus the paperclip padding.
+            dateAttachmentStart = (isRtl) ?
+                    mPaperclipX + ATTACHMENT.getWidth() + mCoordinates.paperclipPaddingStart
+                    : mPaperclipX - mCoordinates.paperclipPaddingStart;
         } else {
-            // In normal mode, the width is based on where the date/attachment icon start.
-            final int dateAttachmentStart;
-            // Have this end near the paperclip or date, not the folders.
-            if (mHeader.paperclip != null) {
-                dateAttachmentStart = mPaperclipX - mCoordinates.paperclipPaddingLeft;
-            } else {
-                dateAttachmentStart = mDateX - mCoordinates.datePaddingLeft;
-            }
-            mSendersWidth = dateAttachmentStart - mCoordinates.sendersX;
+            // If no paperclip, just use the start of the date minus the date padding start.
+            // In RTL mode, this is just the paperclipX.
+            dateAttachmentStart = (isRtl) ?
+                    mPaperclipX : mDateX - mCoordinates.datePaddingStart;
         }
+        // Senders width is the dateAttachmentStart - sendersX.
+        // In RTL, it is sendersWidth + sendersX - dateAttachmentStart.
+        mSendersWidth = (isRtl) ?
+                mCoordinates.sendersWidth + mCoordinates.sendersX - dateAttachmentStart
+                : dateAttachmentStart - mCoordinates.sendersX;
+        mSendersX = (isRtl) ? dateAttachmentStart : mCoordinates.sendersX;
 
         // Second pass to layout each fragment.
         sPaint.setTextSize(mCoordinates.sendersFontSize);
         sPaint.setTypeface(Typeface.DEFAULT);
 
-        if (mHeader.styledSenders != null) {
-            ellipsizeStyledSenders();
-            layoutSenders();
+        if (mHeader.styledNames != null) {
+            final SpannableStringBuilder participantText = elideParticipants(mHeader.styledNames);
+            layoutParticipantText(participantText);
         } else {
             // First pass to calculate width of each fragment.
-            int totalWidth = 0;
-            int fixedWidth = 0;
-            for (SenderFragment senderFragment : mHeader.senderFragments) {
-                CharacterStyle style = senderFragment.style;
-                int start = senderFragment.start;
-                int end = senderFragment.end;
-                style.updateDrawState(sPaint);
-                senderFragment.width = (int) sPaint.measureText(mHeader.sendersText, start, end);
-                boolean isFixed = senderFragment.isFixed;
-                if (isFixed) {
-                    fixedWidth += senderFragment.width;
-                }
-                totalWidth += senderFragment.width;
-            }
-
             if (mSendersWidth < 0) {
                 mSendersWidth = 0;
             }
-            totalWidth = ellipsize(fixedWidth);
+
             mHeader.sendersDisplayLayout = new StaticLayout(mHeader.sendersDisplayText, sPaint,
                     mSendersWidth, Alignment.ALIGN_NORMAL, 1, 0, true);
         }
@@ -1182,16 +1125,33 @@ public class ConversationItemView extends View
         pauseTimer(PERF_TAG_CALCULATE_COORDINATES);
     }
 
-    // The rules for displaying ellipsized senders are as follows:
+    // The rules for displaying elided participants are as follows:
     // 1) If there is message info (either a COUNT or DRAFT info to display), it MUST be shown
     // 2) If senders do not fit, ellipsize the last one that does fit, and stop
     // appending new senders
-    private int ellipsizeStyledSenders() {
-        SpannableStringBuilder builder = new SpannableStringBuilder();
+    SpannableStringBuilder elideParticipants(List<SpannableString> parts) {
+        final SpannableStringBuilder builder = new SpannableStringBuilder();
         float totalWidth = 0;
         boolean ellipsize = false;
         float width;
-        SpannableStringBuilder messageInfoString =  mHeader.messageInfoString;
+        boolean skipToHeader = false;
+
+        // start with "To: " if we're showing recipients
+        if (mDisplayedFolder.shouldShowRecipients() && !parts.isEmpty()) {
+            final SpannableString toHeader = SendersView.getFormattedToHeader();
+            CharacterStyle[] spans = toHeader.getSpans(0, toHeader.length(),
+                    CharacterStyle.class);
+            // There is only 1 character style span; make sure we apply all the
+            // styles to the paint object before measuring.
+            if (spans.length > 0) {
+                spans[0].updateDrawState(sPaint);
+            }
+            totalWidth += sPaint.measureText(toHeader.toString());
+            builder.append(toHeader);
+            skipToHeader = true;
+        }
+
+        final SpannableStringBuilder messageInfoString = mHeader.messageInfoString;
         if (messageInfoString.length() > 0) {
             CharacterStyle[] spans = messageInfoString.getSpans(0, messageInfoString.length(),
                     CharacterStyle.class);
@@ -1206,7 +1166,7 @@ public class ConversationItemView extends View
         }
        SpannableString prevSender = null;
        SpannableString ellipsizedText;
-        for (SpannableString sender : mHeader.styledSenders) {
+        for (SpannableString sender : parts) {
             // There may be null sender strings if there were dupes we had to remove.
             if (sender == null) {
                 continue;
@@ -1225,13 +1185,14 @@ public class ConversationItemView extends View
             if (SendersView.sElidedString.equals(sender.toString())) {
                 prevSender = sender;
                 sender = copyStyles(spans, sElidedPaddingToken + sender + sElidedPaddingToken);
-            } else if (builder.length() > 0
+            } else if (!skipToHeader && builder.length() > 0
                     && (prevSender == null || !SendersView.sElidedString.equals(prevSender
                             .toString()))) {
                 prevSender = sender;
                 sender = copyStyles(spans, sSendersSplitToken + sender);
             } else {
                 prevSender = sender;
+                skipToHeader = false;
             }
             if (spans.length > 0) {
                 spans[0].updateDrawState(sPaint);
@@ -1261,8 +1222,7 @@ public class ConversationItemView extends View
         }
         mHeader.styledMessageInfoStringOffset = builder.length();
         builder.append(messageInfoString);
-        mHeader.styledSendersString = builder;
-        return (int)totalWidth;
+        return builder;
     }
 
     private static SpannableString copyStyles(CharacterStyle[] spans, CharSequence newText) {
@@ -1273,87 +1233,14 @@ public class ConversationItemView extends View
         return s;
     }
 
-    private int ellipsize(int fixedWidth) {
-        int totalWidth = 0;
-        int currentLine = 1;
-        boolean ellipsize = false;
-        for (SenderFragment senderFragment : mHeader.senderFragments) {
-            CharacterStyle style = senderFragment.style;
-            int start = senderFragment.start;
-            int end = senderFragment.end;
-            int width = senderFragment.width;
-            boolean isFixed = senderFragment.isFixed;
-            style.updateDrawState(sPaint);
-
-            // No more width available, we'll only show fixed fragments.
-            if (ellipsize && !isFixed) {
-                senderFragment.shouldDisplay = false;
-                continue;
-            }
-
-            // New line and ellipsize text if needed.
-            senderFragment.ellipsizedText = null;
-            if (isFixed) {
-                fixedWidth -= width;
-            }
-            if (!canFitFragment(totalWidth + width, currentLine, fixedWidth)) {
-                // The text is too long, new line won't help. We have to
-                // ellipsize text.
-                if (totalWidth == 0) {
-                    ellipsize = true;
-                } else {
-                    // New line.
-                    if (currentLine < mCoordinates.sendersLineCount) {
-                        currentLine++;
-                        totalWidth = 0;
-                        // The text is still too long, we have to ellipsize
-                        // text.
-                        if (totalWidth + width > mSendersWidth) {
-                            ellipsize = true;
-                        }
-                    } else {
-                        ellipsize = true;
-                    }
-                }
-
-                if (ellipsize) {
-                    width = mSendersWidth - totalWidth;
-                    // No more new line, we have to reserve width for fixed
-                    // fragments.
-                    if (currentLine == mCoordinates.sendersLineCount) {
-                        width -= fixedWidth;
-                    }
-                    senderFragment.ellipsizedText = TextUtils.ellipsize(
-                            mHeader.sendersText.substring(start, end), sPaint, width,
-                            TruncateAt.END).toString();
-                    width = (int) sPaint.measureText(senderFragment.ellipsizedText);
-                }
-            }
-            senderFragment.shouldDisplay = true;
-            totalWidth += width;
-
-            final CharSequence fragmentDisplayText;
-            if (senderFragment.ellipsizedText != null) {
-                fragmentDisplayText = senderFragment.ellipsizedText;
-            } else {
-                fragmentDisplayText = mHeader.sendersText.substring(start, end);
-            }
-            final int spanStart = mHeader.sendersDisplayText.length();
-            mHeader.sendersDisplayText.append(fragmentDisplayText);
-            mHeader.sendersDisplayText.setSpan(senderFragment.style, spanStart,
-                    mHeader.sendersDisplayText.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-        return totalWidth;
-    }
-
     /**
      * If the subject contains the tag of a mailing-list (text surrounded with
      * []), return the subject with that tag ellipsized, e.g.
      * "[android-gmail-team] Hello" -> "[andr...] Hello"
      */
-    private String filterTag(String subject) {
+    public static String filterTag(Context context, String subject) {
         String result = subject;
-        String formatString = getContext().getResources().getString(R.string.filtered_tag);
+        String formatString = context.getResources().getString(R.string.filtered_tag);
         if (!TextUtils.isEmpty(subject) && subject.charAt(0) == '[') {
             int end = subject.indexOf(']');
             if (end > 0) {
@@ -1366,31 +1253,15 @@ public class ConversationItemView extends View
     }
 
     @Override
-    public final void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount,
-            int totalItemCount) {
-        if (SwipeableListView.ENABLE_ATTACHMENT_PARALLAX) {
-            if (mHeader == null || mCoordinates == null || !isAttachmentPreviewsEnabled()) {
-                return;
-            }
-
-            invalidate(mCoordinates.attachmentPreviewsX, mCoordinates.attachmentPreviewsY,
-                    mCoordinates.attachmentPreviewsX + mCoordinates.attachmentPreviewsWidth,
-                    mCoordinates.attachmentPreviewsY + mCoordinates.attachmentPreviewsHeight);
-        }
-    }
-
-    @Override
-    public void onScrollStateChanged(AbsListView view, int scrollState) {
-    }
-
-    @Override
     protected void onDraw(Canvas canvas) {
         Utils.traceBeginSection("CIVC.draw");
 
         // Contact photo
         if (mGadgetMode == ConversationItemViewCoordinates.GADGET_CONTACT_PHOTO) {
             canvas.save();
-            drawContactImageArea(canvas);
+            Utils.traceBeginSection("draw senders image");
+            drawSendersImage(canvas);
+            Utils.traceEndSection();
             canvas.restore();
         }
 
@@ -1401,8 +1272,8 @@ public class ConversationItemView extends View
         if (mHeader.sendersDisplayLayout != null) {
             sPaint.setTextSize(mCoordinates.sendersFontSize);
             sPaint.setTypeface(SendersView.getTypeface(isUnread));
-            sPaint.setColor(isUnread ? sSendersTextColorUnread : sSendersTextColorRead);
-            canvas.translate(mCoordinates.sendersX, mCoordinates.sendersY
+            sPaint.setColor(sSendersTextColor);
+            canvas.translate(mSendersX, mCoordinates.sendersY
                     + mHeader.sendersDisplayLayout.getTopPadding());
             mHeader.sendersDisplayLayout.draw(canvas);
         } else {
@@ -1417,9 +1288,13 @@ public class ConversationItemView extends View
         drawSubject(canvas);
         canvas.restore();
 
+        canvas.save();
+        drawSnippet(canvas);
+        canvas.restore();
+
         // Folders.
         if (mConfig.areFoldersVisible()) {
-            mHeader.folderDisplayer.drawFolders(canvas, mCoordinates);
+            mHeader.folderDisplayer.drawFolders(canvas, mCoordinates, ViewUtils.isViewRtl(this));
         }
 
         // If this folder has a color (combined view/Email), show it here
@@ -1460,10 +1335,9 @@ public class ConversationItemView extends View
 
         // Date.
         sPaint.setTextSize(mCoordinates.dateFontSize);
-        sPaint.setTypeface(Typeface.DEFAULT);
-        sPaint.setColor(sDateTextColor);
-        drawText(canvas, mHeader.dateText, mDateX, mCoordinates.dateYBaseline,
-                sPaint);
+        sPaint.setTypeface(isUnread ? Typeface.SANS_SERIF : SANS_SERIF_LIGHT);
+        sPaint.setColor(isUnread ? sDateTextColorUnread : sDateTextColorRead);
+        drawText(canvas, mHeader.dateText, mDateX, mCoordinates.dateYBaseline, sPaint);
 
         // Paper clip icon.
         if (mHeader.paperclip != null) {
@@ -1475,156 +1349,43 @@ public class ConversationItemView extends View
             canvas.drawBitmap(getStarBitmap(), mCoordinates.starX, mCoordinates.starY, sPaint);
         }
 
-        // Attachment previews
-        if (isAttachmentPreviewsEnabled()) {
-            canvas.save();
-            drawAttachmentPreviews(canvas);
-            canvas.restore();
-        }
-
         // right-side edge effect when in tablet conversation mode and the list is not collapsed
         if (Utils.getDisplayListRightEdgeEffect(mTabletDevice, mListCollapsible,
                 mConfig.getViewMode())) {
-            RIGHT_EDGE_TABLET.setBounds(getWidth() - RIGHT_EDGE_TABLET.getIntrinsicWidth(), 0,
-                    getWidth(), getHeight());
+            final boolean isRtl = ViewUtils.isViewRtl(this);
+            RIGHT_EDGE_TABLET.setBounds(
+                    (isRtl) ? 0 : getWidth() - RIGHT_EDGE_TABLET.getIntrinsicWidth(), 0,
+                    (isRtl) ? RIGHT_EDGE_TABLET.getIntrinsicWidth() : getWidth(), getHeight());
             RIGHT_EDGE_TABLET.draw(canvas);
 
             if (isActivated()) {
-                // draw caret on the right, centered vertically
-                final int x = getWidth() - VISIBLE_CONVERSATION_CARET.getWidth();
-                final int y = (getHeight() - VISIBLE_CONVERSATION_CARET.getHeight()) / 2;
-                canvas.drawBitmap(VISIBLE_CONVERSATION_CARET, x, y, null);
+                final int w = VISIBLE_CONVERSATION_HIGHLIGHT.getIntrinsicWidth();
+                VISIBLE_CONVERSATION_HIGHLIGHT.setBounds(
+                        (isRtl) ? getWidth() - w : 0, 0,
+                        (isRtl) ? getWidth() : w, getHeight());
+                VISIBLE_CONVERSATION_HIGHLIGHT.draw(canvas);
             }
         }
+
+        // draw the inset divider
+        sDividerPaint.setColor(sDividerColor);
+        final int dividerBottomY = getHeight();
+        final int dividerTopY = dividerBottomY - sDividerHeight;
+        canvas.drawRect(sDividerInset, dividerTopY, getWidth(), dividerBottomY, sDividerPaint);
         Utils.traceEndSection();
     }
 
-    /**
-     * Draws the contact images or check, in the correct animated state.
-     */
-    private void drawContactImageArea(final Canvas canvas) {
-        if (isSelected()) {
-            mLastSelectedId = mHeader.conversation.id;
-
-            // Since this is selected, we draw the checkbox if the animation is not running, or if
-            // it's running, and is past the half-way point
-            if (mPhotoFlipAnimator.getValue() > 1 || !mPhotoFlipAnimator.isStarted()) {
-                // Flash in the check
-                drawCheckbox(canvas);
-            } else {
-                // Flip out the contact photo
-                drawContactImages(canvas);
-            }
-        } else {
-            if ((mConversationListListener.isExitingSelectionMode()
-                    && mLastSelectedId == mHeader.conversation.id)
-                    || mPhotoFlipAnimator.isStarted()) {
-                // Animate back to the photo
-                if (!mPhotoFlipAnimator.isStarted()) {
-                    mPhotoFlipAnimator.startAnimation(true /* reverse */);
-                }
-
-                if (mPhotoFlipAnimator.getValue() > 1) {
-                    // Flash out the check
-                    drawCheckbox(canvas);
-                } else {
-                    // Flip in the contact photo
-                    drawContactImages(canvas);
-                }
-            } else {
-                mLastSelectedId = -1; // We don't care anymore
-                mPhotoFlipAnimator.stopAnimation(); // It's not running, but we want to reset state
-
-                // Contact photos
-                drawContactImages(canvas);
-            }
+    private void drawSendersImage(final Canvas canvas) {
+        if (!mSendersImageView.isFlipping()) {
+            final boolean showSenders = !isSelected();
+            mSendersImageView.reset(showSenders);
         }
-    }
-
-    private void drawContactImages(final Canvas canvas) {
-        // mPhotoFlipFraction goes from 0 to 1
-        final float value = mPhotoFlipAnimator.getValue();
-
-        final float scale = 1f - value;
-        final float xOffset = mContactImagesHolder.getWidth() * value / 2;
-
-        mPhotoFlipMatrix.reset();
-        mPhotoFlipMatrix.postScale(scale, 1);
-
-        final float x = mCoordinates.contactImagesX + xOffset;
-        final float y = mCoordinates.contactImagesY;
-
-        canvas.translate(x, y);
-
+        canvas.translate(mCoordinates.contactImagesX, mCoordinates.contactImagesY);
         if (mPhotoBitmap == null) {
-            mContactImagesHolder.draw(canvas, mPhotoFlipMatrix);
+            mSendersImageView.draw(canvas);
         } else {
             canvas.drawBitmap(mPhotoBitmap, null, mPhotoRect, sPaint);
         }
-    }
-
-    private void drawCheckbox(final Canvas canvas) {
-        // mPhotoFlipFraction goes from 1 to 2
-
-        // Draw the background
-        canvas.save();
-        canvas.translate(mCoordinates.contactImagesX, mCoordinates.contactImagesY);
-        canvas.drawRect(0, 0, mCoordinates.contactImagesWidth, mCoordinates.contactImagesHeight,
-                sCheckBackgroundPaint);
-        canvas.restore();
-
-        final int x = mCoordinates.contactImagesX
-                + (mCoordinates.contactImagesWidth - CHECK.getWidth()) / 2;
-        final int y = mCoordinates.contactImagesY
-                + (mCoordinates.contactImagesHeight - CHECK.getHeight()) / 2;
-
-        final float value = mPhotoFlipAnimator.getValue();
-        final float scale;
-
-        if (!mPhotoFlipAnimator.isStarted()) {
-            // We're not animating
-            scale = 1;
-        } else if (value < 1.9) {
-            // 1.0 to 1.9 will scale 0 to 1
-            scale = (value - 1f) / 0.9f;
-        } else if (value < 1.95) {
-            // 1.9 to 1.95 will scale 1 to 19/18
-            scale = (value - 1f) / 0.9f;
-        } else {
-            // 1.95 to 2.0 will scale 19/18 to 1
-            scale = (0.95f - (value - 1.95f)) / 0.9f;
-        }
-
-        final float xOffset = CHECK.getWidth() * (1f - scale) / 2f;
-        final float yOffset = CHECK.getHeight() * (1f - scale) / 2f;
-
-        mCheckMatrix.reset();
-        mCheckMatrix.postScale(scale, scale);
-
-        canvas.translate(x + xOffset, y + yOffset);
-
-        canvas.drawBitmap(CHECK, mCheckMatrix, sPaint);
-    }
-
-    private void drawAttachmentPreviews(Canvas canvas) {
-        canvas.translate(mCoordinates.attachmentPreviewsX, mCoordinates.attachmentPreviewsY);
-        final float fraction;
-        if (SwipeableListView.ENABLE_ATTACHMENT_PARALLAX) {
-            final View listView = getListView();
-            final View listItemView = unwrap();
-            if (mParallaxDirectionAlternative) {
-                fraction = 1 - (float) listItemView.getBottom()
-                        / (listView.getHeight() + listItemView.getHeight());
-            } else {
-                fraction = (float) listItemView.getBottom()
-                        / (listView.getHeight() + listItemView.getHeight());
-            }
-        } else {
-            // Vertically center the preview crop, which has already been decoded at 1/3.
-            fraction = 0.5f;
-        }
-        mAttachmentsView.setParallaxFraction(fraction);
-        mAttachmentsView.draw(canvas);
     }
 
     private void drawSubject(Canvas canvas) {
@@ -1632,8 +1393,18 @@ public class ConversationItemView extends View
         mSubjectTextView.draw(canvas);
     }
 
+    private void drawSnippet(Canvas canvas) {
+        // if folders exist, their width will be the max width - actual width
+        final int folderWidth = mCoordinates.maxSnippetWidth - mSnippetTextView.getWidth();
+
+        // in RTL layouts we move the snippet to the right so it doesn't overlap the folders
+        final int x = mCoordinates.snippetX + (ViewUtils.isViewRtl(this) ? folderWidth : 0);
+        canvas.translate(x, mCoordinates.snippetY);
+        mSnippetTextView.draw(canvas);
+    }
+
     private void drawSenders(Canvas canvas) {
-        canvas.translate(mCoordinates.sendersX, mCoordinates.sendersY);
+        canvas.translate(mSendersX, mCoordinates.sendersY);
         mSendersTextView.draw(canvas);
     }
 
@@ -1651,16 +1422,13 @@ public class ConversationItemView extends View
      * 2. Tablet / Phone
      * 3. Checkbox checked / Unchecked (controls CAB color for item)
      * 4. Activated / Not activated (controls the blue highlight on tablet)
-     * @param isUnread
      */
-    private void updateBackground(boolean isUnread) {
+    private void updateBackground() {
         final int background;
         if (mBackgroundOverrideResId > 0) {
             background = mBackgroundOverrideResId;
-        } else if (isUnread) {
-            background = R.drawable.conversation_unread_selector;
         } else {
-            background = R.drawable.conversation_read_selector;
+            background = R.drawable.conversation_item_background_selector;
         }
         setBackgroundResource(background);
     }
@@ -1672,7 +1440,7 @@ public class ConversationItemView extends View
     @Override
     public boolean toggleSelectedStateOrBeginDrag() {
         ViewMode mode = mActivity.getViewMode();
-        if (mIsExpansiveTablet && mode.isListMode()) {
+        if (mTabletDevice && mode.isListMode()) {
             return beginDragMode();
         } else {
             return toggleSelectedState("long_press");
@@ -1684,13 +1452,13 @@ public class ConversationItemView extends View
         return toggleSelectedState(null);
     }
 
-    private boolean toggleSelectedState(String sourceOpt) {
+    private boolean toggleSelectedState(final String sourceOpt) {
         if (mHeader != null && mHeader.conversation != null && mSelectedConversationSet != null) {
             mSelected = !mSelected;
             setSelected(mSelected);
-            Conversation conv = mHeader.conversation;
+            final Conversation conv = mHeader.conversation;
             // Set the list position of this item in the conversation
-            SwipeableListView listView = getListView();
+            final SwipeableListView listView = getListView();
 
             try {
                 conv.position = mSelected && listView != null ? listView.getPositionForView(this)
@@ -1709,9 +1477,8 @@ public class ConversationItemView extends View
                 listView.commitDestructiveActions(true);
             }
 
-            final boolean reverse = !mSelected;
-            mPhotoFlipAnimator.startAnimation(reverse);
-            mPhotoFlipAnimator.invalidateArea();
+            final boolean front = !mSelected;
+            mSendersImageView.flipTo(front);
 
             // We update the background after the checked state has changed
             // now that we have a selected background asset. Setting the background
@@ -1724,6 +1491,17 @@ public class ConversationItemView extends View
 
         return false;
     }
+
+    @Override
+    public void onSetEmpty() {
+        mSendersImageView.flipTo(true);
+    }
+
+    @Override
+    public void onSetPopulated(final ConversationSelectionSet set) { }
+
+    @Override
+    public void onSetChanged(final ConversationSelectionSet set) { }
 
     /**
      * Toggle the star on this view and update the conversation.
@@ -1743,9 +1521,11 @@ public class ConversationItemView extends View
     }
 
     private boolean isTouchInContactPhoto(float x, float y) {
-        // Everything before the right edge of contact photo
+        // Everything before the end edge of contact photo
 
-        final int threshold = mCoordinates.contactImagesX + mCoordinates.contactImagesWidth
+        final boolean isRtl = ViewUtils.isViewRtl(this);
+        final int threshold = (isRtl) ? mCoordinates.contactImagesX - sSenderImageTouchSlop :
+                mCoordinates.contactImagesX + mCoordinates.contactImagesWidth
                 + sSenderImageTouchSlop;
 
         // Allow touching a little right of the contact photo when we're already in selection mode
@@ -1758,8 +1538,7 @@ public class ConversationItemView extends View
         }
 
         return mHeader.gadgetMode == ConversationItemViewCoordinates.GADGET_CONTACT_PHOTO
-                && x < (threshold + extra)
-                && (!isAttachmentPreviewsEnabled() || y < mCoordinates.attachmentPreviewsY);
+                && ((isRtl) ? x > (threshold - extra) : x < (threshold + extra));
     }
 
     private boolean isTouchInInfoIcon(final float x, final float y) {
@@ -1768,35 +1547,27 @@ public class ConversationItemView extends View
             return false;
         }
 
-        // Regardless of device, we always want to be right of the date's left touch slop
-        if (x < mDateX - sStarTouchSlop) {
+        final boolean isRtl = ViewUtils.isViewRtl(this);
+        // Regardless of device, we always want to be end of the date's start touch slop
+        if (((isRtl) ? x > mDateX + mDateWidth + sStarTouchSlop : x < mDateX - sStarTouchSlop)) {
             return false;
         }
 
         if (mStarEnabled) {
-            if (mIsExpansiveTablet) {
-                // Just check that we're left of the star's touch area
-                if (x >= mCoordinates.starX - sStarTouchSlop) {
-                    return false;
-                }
-            } else {
-                // We're on a phone or non-expansive tablet
+            // We allow touches all the way to the right edge, so no x check is necessary
 
-                // We allow touches all the way to the right edge, so no x check is necessary
-
-                // We need to be above the star's touch area, which ends at the top of the subject
-                // text
-                return y < mCoordinates.subjectY;
-            }
+            // We need to be above the star's touch area, which ends at the top of the subject
+            // text
+            return y < mCoordinates.subjectY;
         }
 
         // With no star below the info icon, we allow touches anywhere from the top edge to the
-        // bottom edge, or to the top of the attachment previews, whichever is higher
-        return !isAttachmentPreviewsEnabled() || y < mCoordinates.attachmentPreviewsY;
+        // bottom edge
+        return true;
     }
 
     private boolean isTouchInStar(float x, float y) {
-        if (mHeader.infoIcon != null && !mIsExpansiveTablet) {
+        if (mHeader.infoIcon != null) {
             // We have an info icon, and it's above the star
             // We allow touches everywhere below the top of the subject text
             if (y < mCoordinates.subjectY) {
@@ -1805,21 +1576,24 @@ public class ConversationItemView extends View
         }
 
         // Everything after the star and include a touch slop.
-        return mStarEnabled
-                && x > mCoordinates.starX - sStarTouchSlop
-                && (!isAttachmentPreviewsEnabled() || y < mCoordinates.attachmentPreviewsY);
+        return mStarEnabled && isTouchInStarTargetX(ViewUtils.isViewRtl(this), x);
+    }
+
+    private boolean isTouchInStarTargetX(boolean isRtl, float x) {
+        return (isRtl) ? x < mCoordinates.starX + mCoordinates.starWidth + sStarTouchSlop
+                : x >= mCoordinates.starX - sStarTouchSlop;
     }
 
     @Override
     public boolean canChildBeDismissed() {
-        return true;
+        return mSwipeEnabled;
     }
 
     @Override
     public void dismiss() {
         SwipeableListView listView = getListView();
         if (listView != null) {
-            getListView().dismissChild(this);
+            listView.dismissChild(this);
         }
     }
 
@@ -2170,124 +1944,6 @@ public class ConversationItemView extends View
     @Override
     public float getMinAllowScrollDistance() {
         return sScrollSlop;
-    }
-
-    private abstract class CabAnimator {
-        private ObjectAnimator mAnimator = null;
-
-        private final String mPropertyName;
-
-        private float mValue;
-
-        private final float mStartValue;
-        private final float mEndValue;
-
-        private final long mDuration;
-
-        private boolean mReversing = false;
-
-        public CabAnimator(final String propertyName, final float startValue, final float endValue,
-                final long duration) {
-            mPropertyName = propertyName;
-
-            mStartValue = startValue;
-            mEndValue = endValue;
-
-            mDuration = duration;
-        }
-
-        private ObjectAnimator createAnimator() {
-            final ObjectAnimator animator = ObjectAnimator.ofFloat(ConversationItemView.this,
-                    mPropertyName, mStartValue, mEndValue);
-            animator.setDuration(mDuration);
-            animator.setInterpolator(new LinearInterpolator());
-            animator.addListener(new AnimatorListenerAdapter() {
-                @Override
-                public void onAnimationEnd(final Animator animation) {
-                    invalidateArea();
-                }
-            });
-            animator.addListener(mAnimatorListener);
-            return animator;
-        }
-
-        private final AnimatorListener mAnimatorListener = new AnimatorListener() {
-            @Override
-            public void onAnimationStart(final Animator animation) {
-                // Do nothing
-            }
-
-            @Override
-            public void onAnimationEnd(final Animator animation) {
-                if (mReversing) {
-                    mReversing = false;
-                    // We no longer want to track whether we were last selected,
-                    // since we no longer are selected
-                    mLastSelectedId = -1;
-                }
-            }
-
-            @Override
-            public void onAnimationCancel(final Animator animation) {
-                // Do nothing
-            }
-
-            @Override
-            public void onAnimationRepeat(final Animator animation) {
-                // Do nothing
-            }
-        };
-
-        public abstract void invalidateArea();
-
-        public void setValue(final float fraction) {
-            if (mValue == fraction) {
-                return;
-            }
-            mValue = fraction;
-            invalidateArea();
-        }
-
-        public float getValue() {
-            return mValue;
-        }
-
-        /**
-         * @param reverse <code>true</code> to animate in reverse
-         */
-        public void startAnimation(final boolean reverse) {
-            if (mAnimator != null) {
-                mAnimator.cancel();
-            }
-
-            mAnimator = createAnimator();
-            mReversing = reverse;
-
-            if (reverse) {
-                mAnimator.reverse();
-            } else {
-                mAnimator.start();
-            }
-        }
-
-        public void stopAnimation() {
-            if (mAnimator != null) {
-                mAnimator.cancel();
-                mAnimator = null;
-            }
-
-            mReversing = false;
-
-            setValue(0);
-        }
-
-        public boolean isStarted() {
-            return mAnimator != null && mAnimator.isStarted();
-        }
-    }
-
-    public void setPhotoFlipFraction(final float fraction) {
-        mPhotoFlipAnimator.setValue(fraction);
     }
 
     public String getAccount() {

@@ -6,8 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef HEXAGON_LDBACKEND_H
-#define HEXAGON_LDBACKEND_H
+#ifndef TARGET_HEXAGON_HEXAGONLDBACKEND_H
+#define TARGET_HEXAGON_HEXAGONLDBACKEND_H
 
 #include "HexagonELFDynamic.h"
 #include "HexagonGOT.h"
@@ -83,6 +83,7 @@ public:
   bool initRelocator();
 
   /// getRelocator - return relocator.
+  const Relocator* getRelocator() const;
   Relocator* getRelocator();
 
   ResolveInfo::Desc getSymDesc(uint16_t shndx) const
@@ -126,7 +127,7 @@ public:
   bool finalizeTargetSymbols();
 
   /// mergeSection - merge target dependent sections
-  bool mergeSection(Module& pModule, LDSection& pSection);
+  bool mergeSection(Module& pModule, const Input& pInput, LDSection& pSection);
 
   /// readSection - read target dependent sections
   bool readSection(Input& pInput, SectionData& pSD);
@@ -162,14 +163,15 @@ private:
   /// target-dependent segments
   void doCreateProgramHdrs(Module& pModule);
 
-  uint64_t maxBranchOffset() { return ~(~0 << 6); }
+  /// maxFwdBranchOffset
+  int64_t maxFwdBranchOffset() { return ~(~0 << 6); }
 
   virtual void setGOTSectionSize(IRBuilder& pBuilder);
 
   virtual uint64_t emitGOTSectionData(MemoryRegion& pRegion) const;
 
   virtual uint64_t emitGOTPLTSectionData(MemoryRegion& pRegion,
-					 const ELFFileFormat* FileFormat) const;
+                                         const ELFFileFormat* FileFormat) const;
 
   virtual void setRelaDynSize();
   virtual void setRelaPLTSize();

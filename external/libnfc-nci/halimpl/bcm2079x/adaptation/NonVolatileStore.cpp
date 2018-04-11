@@ -20,10 +20,9 @@
 #include "gki.h"
 extern "C"
 {
-    #include "nfc_hal_nv_co.h"
+    #include "nfc_hal_target.h"
+    #include "nfc_hal_nv_ci.h"
 }
-#include "nfc_hal_nv_ci.h"
-#include "nfc_hal_int.h"
 #include "config.h"
 #include "CrcChecksum.h"
 #include <sys/types.h>
@@ -221,6 +220,8 @@ void delete_hal_non_volatile_store (bool forceDelete)
     remove (filename);
     snprintf (filename, sizeof(filename), "%s%u", fn.c_str(), HC_F2_NV_BLOCK);
     remove (filename);
+    snprintf (filename, sizeof(filename), "%s%u", fn.c_str(), HC_F5_NV_BLOCK);
+    remove (filename);
 }
 
 
@@ -260,7 +261,11 @@ void verify_hal_non_volatile_store ()
             {
                 snprintf (filename, sizeof(filename), "%s%u", fn.c_str(), HC_F2_NV_BLOCK);
                 if (crcChecksumVerifyIntegrity (filename))
-                    isValid = true;
+                {
+                    snprintf (filename, sizeof(filename), "%s%u", fn.c_str(), HC_F5_NV_BLOCK);
+                    if (crcChecksumVerifyIntegrity (filename))
+                        isValid = true;
+                }
             }
         }
     }

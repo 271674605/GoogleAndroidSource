@@ -60,6 +60,13 @@ Status ExecuteSwitchToFrame(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
 
+// Change focus to the parent frame.
+Status ExecuteSwitchToParentFrame(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
 // Get the current page title.
 Status ExecuteGetTitle(
     Session* session,
@@ -148,6 +155,27 @@ Status ExecuteMouseButtonUp(
 
 // Double-clicks at the current mouse coordinates (set by last moveto).
 Status ExecuteMouseDoubleClick(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Touch press at a given coordinate.
+Status ExecuteTouchDown(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Touch release at a given coordinate.
+Status ExecuteTouchUp(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Touch move at a given coordinate.
+Status ExecuteTouchMove(
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,
@@ -257,6 +285,12 @@ Status ExecuteDeleteAllCookies(
     scoped_ptr<base::Value>* value);
 
 Status ExecuteSetLocation(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteTakeHeapSnapshot(
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,

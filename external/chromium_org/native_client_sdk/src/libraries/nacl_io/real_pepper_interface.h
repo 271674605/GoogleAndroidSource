@@ -17,7 +17,7 @@ namespace nacl_io {
 #include "nacl_io/pepper/define_empty_macros.h"
 #undef BEGIN_INTERFACE
 #define BEGIN_INTERFACE(BaseClass, PPInterface, InterfaceString) \
-    class Real##BaseClass;
+  class Real##BaseClass;
 #include "nacl_io/pepper/all_interfaces.h"
 
 class RealPepperInterface : public PepperInterface {
@@ -26,31 +26,24 @@ class RealPepperInterface : public PepperInterface {
                       PPB_GetInterface get_browser_interface);
 
   virtual PP_Instance GetInstance();
-  virtual void AddRefResource(PP_Resource);
-  virtual void ReleaseResource(PP_Resource);
-  virtual bool IsMainThread();
 
 // Interface getters.
 #include "nacl_io/pepper/undef_macros.h"
 #include "nacl_io/pepper/define_empty_macros.h"
 #undef BEGIN_INTERFACE
 #define BEGIN_INTERFACE(BaseClass, PPInterface, InterfaceString) \
-    virtual BaseClass* Get##BaseClass();
+  virtual BaseClass* Get##BaseClass();
 #include "nacl_io/pepper/all_interfaces.h"
-
-  int32_t InitializeMessageLoop();
 
  private:
   PP_Instance instance_;
-  const PPB_Core* core_interface_;
-  const PPB_MessageLoop* message_loop_interface_;
 
 // Interface pointers.
 #include "nacl_io/pepper/undef_macros.h"
 #include "nacl_io/pepper/define_empty_macros.h"
 #undef BEGIN_INTERFACE
 #define BEGIN_INTERFACE(BaseClass, PPInterface, InterfaceString) \
-    Real##BaseClass* BaseClass##interface_;
+  Real##BaseClass* BaseClass##interface_;
 #include "nacl_io/pepper/all_interfaces.h"
 };
 

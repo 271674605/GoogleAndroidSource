@@ -6,9 +6,11 @@
 #define CHROME_UTILITY_IMPORTER_FIREFOX_IMPORTER_UNITTEST_UTILS_H_
 
 #include "base/basictypes.h"
+#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process/process_handle.h"
 #include "chrome/utility/importer/nss_decryptor.h"
+#include "components/autofill/core/common/password_form.h"
 
 class FFDecryptorServerChannelListener;
 
@@ -43,7 +45,9 @@ class FFUnitTestDecryptorProxy {
   // This match the parallel functions in NSSDecryptor.
   bool DecryptorInit(const base::FilePath& dll_path,
                      const base::FilePath& db_path);
-  string16 Decrypt(const std::string& crypt);
+  base::string16 Decrypt(const std::string& crypt);
+  std::vector<autofill::PasswordForm> ParseSignons(
+      const base::FilePath& signons_path);
 
  private:
 #if defined(OS_MACOSX)
@@ -81,9 +85,19 @@ bool FFUnitTestDecryptorProxy::DecryptorInit(const base::FilePath& dll_path,
   return decryptor_.Init(dll_path, db_path);
 }
 
-string16 FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
+base::string16 FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
   return decryptor_.Decrypt(crypt);
 }
+
+std::vector<autofill::PasswordForm> FFUnitTestDecryptorProxy::ParseSignons(
+    const base::FilePath& signons_path) {
+  std::vector<autofill::PasswordForm> signons;
+  if (decryptor_.ReadAndParseSignons(signons_path, &signons))
+    return signons;
+
+  return std::vector<autofill::PasswordForm>();
+}
+
 #endif  // !OS_MACOSX
 
 #endif  // CHROME_UTILITY_IMPORTER_FIREFOX_IMPORTER_UNITTEST_UTILS_H_

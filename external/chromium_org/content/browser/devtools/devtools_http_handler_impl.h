@@ -15,7 +15,6 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
-#include "content/public/browser/worker_service.h"
 #include "net/http/http_status_code.h"
 #include "net/server/http_server.h"
 
@@ -47,15 +46,14 @@ class DevToolsHttpHandlerImpl
   // Takes ownership over |socket_factory|.
   DevToolsHttpHandlerImpl(const net::StreamListenSocketFactory* socket_factory,
                           const std::string& frontend_url,
-                          DevToolsHttpHandlerDelegate* delegate);
+                          DevToolsHttpHandlerDelegate* delegate,
+                          const base::FilePath& active_port_output_directory);
   virtual ~DevToolsHttpHandlerImpl();
   void Start();
 
   // DevToolsHttpHandler implementation.
   virtual void Stop() OVERRIDE;
-  virtual void SetDevToolsAgentHostBinding(
-      DevToolsAgentHostBinding* binding) OVERRIDE;
-  virtual GURL GetFrontendURL(DevToolsAgentHost* agent_host) OVERRIDE;
+  virtual GURL GetFrontendURL() OVERRIDE;
 
   // net::HttpServer::Delegate implementation.
   virtual void OnHttpRequest(int connection_id,
@@ -80,14 +78,20 @@ class DevToolsHttpHandlerImpl
   void ResetHandlerThread();
   void ResetHandlerThreadAndRelease();
 
-  void CollectWorkerInfo(base::ListValue* target_list, std::string host);
-  void SendTargetList(int connection_id, base::ListValue* target_list);
+  void OnTargetListReceived(
+      int connection_id,
+      const std::string& host,
+      const DevToolsHttpHandlerDelegate::TargetList& targets);
+
+  DevToolsTarget* GetTarget(const std::string& id);
 
   void Init();
   void Teardown();
 
   void StartHandlerThread();
   void StopHandlerThread();
+
+  void WriteActivePortToUserProfile();
 
   void SendJson(int connection_id,
                 net::HttpStatusCode status_code,
@@ -103,32 +107,26 @@ class DevToolsHttpHandlerImpl
                        const net::HttpServerRequestInfo& request);
 
   // Returns the front end url without the host at the beginning.
-  std::string GetFrontendURLInternal(const std::string rvh_id,
+  std::string GetFrontendURLInternal(const std::string target_id,
                                      const std::string& host);
 
-  base::DictionaryValue* SerializePageInfo(RenderViewHost* rvh,
-                                           const std::string& host);
-
-  base::DictionaryValue* SerializeWorkerInfo(
-      const WorkerService::WorkerInfo& worker,
-      const std::string& host);
-
-  void SerializeDebuggerURLs(base::DictionaryValue* dictionary,
-                             const std::string& id,
-                             const std::string& host);
+  base::DictionaryValue* SerializeTarget(const DevToolsTarget& target,
+                                         const std::string& host);
 
   // The thread used by the devtools handler to run server socket.
   scoped_ptr<base::Thread> thread_;
 
-  std::string overridden_frontend_url_;
+  std::string frontend_url_;
   scoped_ptr<const net::StreamListenSocketFactory> socket_factory_;
   scoped_refptr<net::HttpServer> server_;
   typedef std::map<int, DevToolsClientHost*> ConnectionToClientHostMap;
   ConnectionToClientHostMap connection_to_client_host_ui_;
   scoped_ptr<DevToolsHttpHandlerDelegate> delegate_;
-  DevToolsAgentHostBinding* binding_;
-  scoped_ptr<DevToolsAgentHostBinding> default_binding_;
-  scoped_refptr<DevToolsBrowserTarget> browser_target_;
+  base::FilePath active_port_output_directory_;
+  typedef std::map<std::string, DevToolsTarget*> TargetMap;
+  TargetMap target_map_;
+  typedef std::map<int, scoped_refptr<DevToolsBrowserTarget> > BrowserTargets;
+  BrowserTargets browser_targets_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsHttpHandlerImpl);
 };
 

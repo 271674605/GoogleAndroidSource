@@ -18,6 +18,8 @@
 package com.android.mail.ui;
 
 import android.app.Dialog;
+import android.app.LoaderManager;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -26,15 +28,22 @@ import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.os.Bundle;
+import android.support.v7.app.ActionBar;
+import android.support.v7.widget.Toolbar;
 import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.accessibility.AccessibilityManager;
 
+import com.android.bitmap.BitmapCache;
+import com.android.bitmap.UnrefedBitmapCache;
+import com.android.mail.R;
+import com.android.mail.analytics.AnalyticsTimer;
+import com.android.mail.bitmap.ContactResolver;
 import com.android.mail.compose.ComposeActivity;
+import com.android.mail.providers.Account;
 import com.android.mail.providers.Folder;
 import com.android.mail.utils.StorageLowState;
 import com.android.mail.utils.Utils;
@@ -48,6 +57,13 @@ import java.net.URLEncoder;
  * conversation list or a conversation view).
  */
 public class MailActivity extends AbstractMailActivity implements ControllableActivity {
+
+    /** 339KB cache fits 10 bitmaps at 33856 bytes each. */
+    private static final int SENDERS_IMAGES_CACHE_TARGET_SIZE_BYTES = 1024 * 339;
+    private static final float SENDERS_IMAGES_PREVIEWS_CACHE_NON_POOLED_FRACTION = 0f;
+    /** Each string has upper estimate of 50 bytes, so this cache would be 5KB. */
+    private static final int SENDERS_IMAGES_PREVIEWS_CACHE_NULL_CAPACITY = 100;
+
     /**
      * The activity controller to which we delegate most Activity lifecycle events.
      */
@@ -67,6 +83,8 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
      * and have the NFC message changed accordingly.
      */
     protected static String sAccountName = null;
+
+    private BitmapCache mSendersImageCache;
 
     /**
      * Create an NFC message (in the NDEF: Nfc Data Exchange Format) to instruct the recepient to
@@ -138,10 +156,36 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
     @Override
     public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
+        // Log the start time if this is launched from the launcher with no saved states
+        Intent i = getIntent();
+        if (i != null && i.getCategories() != null &&
+                i.getCategories().contains(Intent.CATEGORY_LAUNCHER)) {
+            AnalyticsTimer.getInstance().trackStart(AnalyticsTimer.COLD_START_LAUNCHER);
+        }
 
+        resetSenderImageCache();
         mViewMode = new ViewMode();
         final boolean tabletUi = Utils.useTabletUI(this.getResources());
         mController = ControllerFactory.forActivity(this, mViewMode, tabletUi);
+
+        setContentView(mController.getContentViewResource());
+
+        final Toolbar toolbar = (Toolbar) findViewById(R.id.mail_toolbar);
+        // Toolbar is currently only used on phone layout, so this is expected to be null
+        // on tablets
+        if (toolbar != null) {
+            setSupportActionBar(toolbar);
+            toolbar.setNavigationOnClickListener(mController.getNavigationViewClickListener());
+        }
+
+        final ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            // Hide the app icon.
+            actionBar.setIcon(android.R.color.transparent);
+            actionBar.setDisplayUseLogoEnabled(false);
+        }
+
+        // Must be done after setting up action bar
         mController.onCreate(savedState);
 
         mAccessibilityManager =
@@ -260,7 +304,7 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
     }
 
     @Override
-    public void onStop() {
+    protected void onStop() {
         super.onStop();
         mController.onStop();
     }
@@ -353,17 +397,6 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
         return mPendingToastOp;
     }
 
-    /**
-     * Sole purpose of this method is to stop clicks where we don't want them in
-     * the action bar. This can be hooked as a listener to view with
-     * android:onClick.
-     *
-     * @param v
-     */
-    public void doNothingClickHandler(View v) {
-        // Do nothing.
-    }
-
     @Override
     public void onAnimationEnd(AnimatedAdapter animatedAdapter) {
         mController.onAnimationEnd(animatedAdapter);
@@ -380,7 +413,12 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
     }
 
     @Override
-    public UpOrBackController getUpOrBackController() {
+    public DrawerController getDrawerController() {
+        return mController.getDrawerController();
+    }
+
+    @Override
+    public KeyboardNavigationController getKeyboardNavigationController() {
         return mController;
     }
 
@@ -422,5 +460,66 @@ public class MailActivity extends AbstractMailActivity implements ControllableAc
     @Override
     public FragmentLauncher getFragmentLauncher() {
         return mController;
+    }
+
+    @Override
+    public ContactLoaderCallbacks getContactLoaderCallbacks() {
+        return new ContactLoaderCallbacks(getActivityContext());
+    }
+
+    @Override
+    public ContactResolver getContactResolver(ContentResolver resolver, BitmapCache bitmapCache) {
+        return new ContactResolver(resolver, bitmapCache);
+    }
+
+    @Override
+    public BitmapCache getSenderImageCache() {
+        return mSendersImageCache;
+    }
+
+    @Override
+    public void resetSenderImageCache() {
+        mSendersImageCache = createNewSenderImageCache();
+    }
+
+    private BitmapCache createNewSenderImageCache() {
+        return new UnrefedBitmapCache(Utils.isLowRamDevice(this) ?
+                0 : SENDERS_IMAGES_CACHE_TARGET_SIZE_BYTES,
+                SENDERS_IMAGES_PREVIEWS_CACHE_NON_POOLED_FRACTION,
+                SENDERS_IMAGES_PREVIEWS_CACHE_NULL_CAPACITY);
+    }
+
+    @Override
+    public void showHelp(Account account, int viewMode) {
+        int helpContext = ViewMode.isConversationMode(viewMode)
+                ? R.string.conversation_view_help_context
+                : R.string.conversation_list_help_context;
+        Utils.showHelp(this, account, getString(helpContext));
+    }
+
+    /**
+     * Returns the loader callback that can create a
+     * {@link AbstractActivityController#LOADER_WELCOME_TOUR_ACCOUNTS} followed by a
+     * {@link AbstractActivityController#LOADER_WELCOME_TOUR} which determines whether the welcome
+     * tour should be displayed.
+     *
+     * The base implementation returns {@code null} and subclasses should return an actual
+     * implementation if they want to be invoked at appropriate time.
+     */
+    public LoaderManager.LoaderCallbacks<?> getWelcomeCallbacks() {
+        return null;
+    }
+
+    /**
+     * Returns whether the latest version of the welcome tour was shown on this device.
+     * <p>
+     * The base implementation returns {@code true} and applications that implement a welcome tour
+     * should override this method in order to optimize
+     * {@link AbstractActivityController#perhapsStartWelcomeTour()}.
+     *
+     * @return Whether the latest version of the welcome tour was shown.
+     */
+    public boolean wasLatestWelcomeTourShownOnDeviceForAllAccounts() {
+        return true;
     }
 }

@@ -353,17 +353,12 @@ static unsigned getEncodedLinkage(const GlobalValue *GV) {
   case GlobalValue::AppendingLinkage:                return 2;
   case GlobalValue::InternalLinkage:                 return 3;
   case GlobalValue::LinkOnceAnyLinkage:              return 4;
-  case GlobalValue::DLLImportLinkage:                return 5;
-  case GlobalValue::DLLExportLinkage:                return 6;
   case GlobalValue::ExternalWeakLinkage:             return 7;
   case GlobalValue::CommonLinkage:                   return 8;
   case GlobalValue::PrivateLinkage:                  return 9;
   case GlobalValue::WeakODRLinkage:                  return 10;
   case GlobalValue::LinkOnceODRLinkage:              return 11;
   case GlobalValue::AvailableExternallyLinkage:      return 12;
-  case GlobalValue::LinkerPrivateLinkage:            return 13;
-  case GlobalValue::LinkerPrivateWeakLinkage:        return 14;
-  case GlobalValue::LinkOnceODRAutoHideLinkage:      return 15;
   }
   llvm_unreachable("Invalid linkage");
 }
@@ -397,8 +392,8 @@ static void WriteModuleInfo(const Module *M,
   if (!M->getTargetTriple().empty())
     WriteStringRecord(bitc::MODULE_CODE_TRIPLE, M->getTargetTriple(),
                       0/*TODO*/, Stream);
-  if (!M->getDataLayout().empty())
-    WriteStringRecord(bitc::MODULE_CODE_DATALAYOUT, M->getDataLayout(),
+  if (!M->getDataLayoutStr().empty())
+    WriteStringRecord(bitc::MODULE_CODE_DATALAYOUT, M->getDataLayoutStr(),
                       0/*TODO*/, Stream);
   if (!M->getModuleInlineAsm().empty())
     WriteStringRecord(bitc::MODULE_CODE_ASM, M->getModuleInlineAsm(),
@@ -1165,63 +1160,16 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
     break;
   case Instruction::Switch:
     {
-      // Redefine Vals, since here we need to use 64 bit values
-      // explicitly to store large APInt numbers.
-      SmallVector<uint64_t, 128> Vals64;
-
       Code = bitc::FUNC_CODE_INST_SWITCH;
       const SwitchInst &SI = cast<SwitchInst>(I);
-
-      uint32_t SwitchRecordHeader = SI.hash() | (SWITCH_INST_MAGIC << 16);
-      Vals64.push_back(SwitchRecordHeader);
-
-      Vals64.push_back(VE.getTypeID(SI.getCondition()->getType()));
-      Vals64.push_back(VE.getValueID(SI.getCondition()));
-      Vals64.push_back(VE.getValueID(SI.getDefaultDest()));
-      Vals64.push_back(SI.getNumCases());
+      Vals.push_back(VE.getTypeID(SI.getCondition()->getType()));
+      Vals.push_back(VE.getValueID(SI.getCondition()));
+      Vals.push_back(VE.getValueID(SI.getDefaultDest()));
       for (SwitchInst::ConstCaseIt i = SI.case_begin(), e = SI.case_end();
            i != e; ++i) {
-        const IntegersSubset& CaseRanges = i.getCaseValueEx();
-        unsigned Code, Abbrev; // will unused.
-
-        if (CaseRanges.isSingleNumber()) {
-          Vals64.push_back(1/*NumItems = 1*/);
-          Vals64.push_back(true/*IsSingleNumber = true*/);
-          EmitAPInt(Vals64, Code, Abbrev, CaseRanges.getSingleNumber(0), true);
-        } else {
-
-          Vals64.push_back(CaseRanges.getNumItems());
-
-          if (CaseRanges.isSingleNumbersOnly()) {
-            for (unsigned ri = 0, rn = CaseRanges.getNumItems();
-                 ri != rn; ++ri) {
-
-              Vals64.push_back(true/*IsSingleNumber = true*/);
-
-              EmitAPInt(Vals64, Code, Abbrev,
-                        CaseRanges.getSingleNumber(ri), true);
-            }
-          } else
-            for (unsigned ri = 0, rn = CaseRanges.getNumItems();
-                 ri != rn; ++ri) {
-              IntegersSubset::Range r = CaseRanges.getItem(ri);
-              bool IsSingleNumber = CaseRanges.isSingleNumber(ri);
-
-              Vals64.push_back(IsSingleNumber);
-
-              EmitAPInt(Vals64, Code, Abbrev, r.getLow(), true);
-              if (!IsSingleNumber)
-                EmitAPInt(Vals64, Code, Abbrev, r.getHigh(), true);
-            }
-        }
-        Vals64.push_back(VE.getValueID(i.getCaseSuccessor()));
+        Vals.push_back(VE.getValueID(i.getCaseValue()));
+        Vals.push_back(VE.getValueID(i.getCaseSuccessor()));
       }
-
-      Stream.EmitRecord(Code, Vals64, AbbrevToUse);
-
-      // Also do expected action - clear external Vals collection:
-      Vals.clear();
-      return;
     }
     break;
   case Instruction::IndirectBr:
@@ -1338,7 +1286,7 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
     Vals.push_back(VE.getValueID(I.getOperand(2)));       // newval.
     Vals.push_back(cast<AtomicCmpXchgInst>(I).isVolatile());
     Vals.push_back(GetEncodedOrdering(
-                     cast<AtomicCmpXchgInst>(I).getOrdering()));
+        cast<AtomicCmpXchgInst>(I).getSuccessOrdering()));
     Vals.push_back(GetEncodedSynchScope(
                      cast<AtomicCmpXchgInst>(I).getSynchScope()));
     break;
@@ -1705,8 +1653,8 @@ static void WriteUseList(const Value *V, const llvm_3_2::ValueEnumerator &VE,
   UseList.reserve(UseListSize);
   for (Value::const_use_iterator I = V->use_begin(), E = V->use_end();
        I != E; ++I) {
-    const User *U = *I;
-    UseList.push_back(U);
+    const Use &use = *I;
+    UseList.push_back(use.getUser());
   }
 
   // Sort the copy based on the order read by the BitcodeReader.

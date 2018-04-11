@@ -9,24 +9,24 @@
       'dependencies': [
         'core.gyp:*',
         'libjpeg.gyp:*',
+        'etc1.gyp:libetc1',
+        'ktx.gyp:libSkKTX',
         'libwebp.gyp:libwebp',
         'utils.gyp:utils',
       ],
-      'export_dependent_settings': [
-        'libjpeg.gyp:*',
-      ],
       'include_dirs': [
         '../include/images',
-        '../include/lazy',
+        '../src/lazy',
         # for access to SkErrorInternals.h
         '../src/core/',
         # for access to SkImagePriv.h
         '../src/image/',
+        # So src/ports/SkImageDecoder_CG can access SkStreamHelpers.h
+        '../src/images/',
       ],
       'sources': [
+        '../include/images/SkDecodingImageGenerator.h',
         '../include/images/SkForceLinking.h',
-        '../include/images/SkImageRef.h',
-        '../include/images/SkImageRef_GlobalPool.h',
         '../src/images/SkJpegUtility.h',
         '../include/images/SkMovie.h',
         '../include/images/SkPageFlipper.h',
@@ -34,30 +34,36 @@
         '../src/images/bmpdecoderhelper.cpp',
         '../src/images/bmpdecoderhelper.h',
 
+        '../src/images/SkDecodingImageGenerator.cpp',
         '../src/images/SkForceLinking.cpp',
         '../src/images/SkImageDecoder.cpp',
         '../src/images/SkImageDecoder_FactoryDefault.cpp',
         '../src/images/SkImageDecoder_FactoryRegistrar.cpp',
+
         # If decoders are added/removed to/from (all/individual)
         # platform(s), be sure to update SkForceLinking.cpp
         # so the right decoders will be forced to link.
+
+        # IMPORTANT: The build order of the SkImageDecoder_*.cpp files
+        # defines the order image decoders are tested when decoding a
+        # stream. The last decoder is the first one tested, so the .cpp
+        # files should be in listed in order from the least likely to be
+        # used, to the most likely (jpeg and png should be the last two
+        # for instance.) As a result, they are deliberately not in
+        # alphabetical order.
+        '../src/images/SkImageDecoder_wbmp.cpp',
+        '../src/images/SkImageDecoder_pkm.cpp',
+        '../src/images/SkImageDecoder_ktx.cpp',
         '../src/images/SkImageDecoder_libbmp.cpp',
         '../src/images/SkImageDecoder_libgif.cpp',
         '../src/images/SkImageDecoder_libico.cpp',
+        '../src/images/SkImageDecoder_libwebp.cpp',
         '../src/images/SkImageDecoder_libjpeg.cpp',
         '../src/images/SkImageDecoder_libpng.cpp',
-        '../src/images/SkImageDecoder_libwebp.cpp',
-        '../src/images/SkImageDecoder_wbmp.cpp',
+
         '../src/images/SkImageEncoder.cpp',
         '../src/images/SkImageEncoder_Factory.cpp',
         '../src/images/SkImageEncoder_argb.cpp',
-        '../src/images/SkImageRef.cpp',
-        '../src/images/SkImageRefPool.cpp',
-        '../src/images/SkImageRefPool.h',
-        '../src/images/SkImageRef_ashmem.h',
-        '../src/images/SkImageRef_ashmem.cpp',
-        '../src/images/SkImageRef_GlobalPool.cpp',
-        '../src/images/SkImages.cpp',
         '../src/images/SkJpegUtility.cpp',
         '../src/images/SkMovie.cpp',
         '../src/images/SkMovie_gif.cpp',
@@ -80,7 +86,7 @@
           ],
           'link_settings': {
             'libraries': [
-              'windowscodecs.lib',
+              '-lwindowscodecs.lib',
             ],
           },
         },{ #else if skia_os != win
@@ -101,16 +107,14 @@
           ],
         }],
         [ 'skia_os in ["linux", "freebsd", "openbsd", "solaris"]', {
-          # Any targets that depend on this target should link in libpng, libgif, and
-          # our code that calls it.
-          # See http://code.google.com/p/gyp/wiki/InputFormatReference#Dependent_Settings
-          'link_settings': {
-            'libraries': [
-              '-lgif',
-              '-lpng',
-              '-lz',
-            ],
-          },
+          'export_dependent_settings': [
+            'libpng.gyp:libpng',
+            'giflib.gyp:giflib'
+          ],
+          'dependencies': [
+            'libpng.gyp:libpng',
+            'giflib.gyp:giflib'
+          ],
           # end libpng/libgif stuff
         }],
         # FIXME: NaCl should be just like linux, etc, above, but it currently is separated out
@@ -121,12 +125,6 @@
             '../src/images/SkImageDecoder_libgif.cpp',
             '../src/images/SkMovie_gif.cpp',
           ],
-          'link_settings': {
-            'libraries': [
-              '-lpng',
-              '-lz',
-            ],
-          },
         }],
         [ 'skia_os == "android"', {
           'include_dirs': [
@@ -136,24 +134,27 @@
              'android_deps.gyp:gif',
              'android_deps.gyp:png',
           ],
-          'export_dependent_settings': [
-            'android_deps.gyp:png'
-          ],
-        },{ #else if skia_os != android
-          'sources!': [
-            '../src/images/SkImageRef_ashmem.h',
-            '../src/images/SkImageRef_ashmem.cpp',
+          'conditions': [
+            [ 'skia_android_framework == 0', {
+              'export_dependent_settings': [
+                'android_deps.gyp:png',
+                'libjpeg.gyp:*'
+              ],
+            }, {
+              # The android framework disables these decoders as they are of little use to
+              # Java applications that can't take advantage of the compressed formats.
+              'sources!': [
+                '../src/images/SkImageDecoder_pkm.cpp',
+                '../src/images/SkImageDecoder_ktx.cpp',
+              ],
+            }],
           ],
         }],
         [ 'skia_os == "chromeos"', {
           'dependencies': [
              'chromeos_deps.gyp:gif',
+             'libpng.gyp:libpng',
           ],
-          'link_settings': {
-            'libraries': [
-              '-lpng',
-            ],
-          },
         }],
         [ 'skia_os == "ios"', {
            'include_dirs': [
@@ -164,15 +165,8 @@
       'direct_dependent_settings': {
         'include_dirs': [
           '../include/images',
-          '../include/lazy',
         ],
       },
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

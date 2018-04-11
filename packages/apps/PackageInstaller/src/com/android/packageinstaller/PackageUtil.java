@@ -22,13 +22,14 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageParser;
+import android.content.pm.PackageParser.PackageParserException;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
-import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.os.UserHandle;
 
 import java.io.File;
 import java.util.List;
@@ -49,36 +50,27 @@ public class PackageUtil {
      * Utility method to get application information for a given {@link File}
      */
     public static ApplicationInfo getApplicationInfo(File sourcePath) {
-        final String archiveFilePath = sourcePath.getAbsolutePath();
-        PackageParser packageParser = new PackageParser(archiveFilePath);
-        File sourceFile = new File(archiveFilePath);
-        DisplayMetrics metrics = new DisplayMetrics();
-        metrics.setToDefaults();
-        PackageParser.Package pkg = packageParser.parsePackage(
-                sourceFile, archiveFilePath, metrics, 0);
-        if (pkg == null) {
+        final PackageParser parser = new PackageParser();
+        try {
+            PackageParser.Package pkg = parser.parseMonolithicPackage(sourcePath, 0);
+            return pkg.applicationInfo;
+        } catch (PackageParserException e) {
             return null;
         }
-        return pkg.applicationInfo;
     }
 
     /**
      * Utility method to get package information for a given {@link File}
      */
     public static PackageParser.Package getPackageInfo(File sourceFile) {
-        final String archiveFilePath = sourceFile.getAbsolutePath();
-        PackageParser packageParser = new PackageParser(archiveFilePath);
-        DisplayMetrics metrics = new DisplayMetrics();
-        metrics.setToDefaults();
-        PackageParser.Package pkg =  packageParser.parsePackage(sourceFile,
-                archiveFilePath, metrics, 0);
-        if (pkg == null) {
+        final PackageParser parser = new PackageParser();
+        try {
+            PackageParser.Package pkg = parser.parseMonolithicPackage(sourceFile, 0);
+            parser.collectManifestDigest(pkg);
+            return pkg;
+        } catch (PackageParserException e) {
             return null;
         }
-        if (!packageParser.collectManifestDigest(pkg)) {
-            return null;
-        }
-        return pkg;
     }
 
     public static View initSnippet(View snippetView, CharSequence label, Drawable icon) {
@@ -99,11 +91,31 @@ public class PackageUtil {
      */
     public static View initSnippetForInstalledApp(Activity pContext,
             ApplicationInfo appInfo, View snippetView) {
+        return initSnippetForInstalledApp(pContext, appInfo, snippetView, null);
+    }
+
+    /**
+     * Utility method to display a snippet of an installed application.
+     * The content view should have been set on context before invoking this method.
+     * appSnippet view should include R.id.app_icon and R.id.app_name
+     * defined on it.
+     *
+     * @param pContext context of package that can load the resources
+     * @param componentInfo ComponentInfo object whose resources are to be loaded
+     * @param snippetView the snippet view
+     * @param UserHandle user that the app si installed for.
+     */
+    public static View initSnippetForInstalledApp(Activity pContext,
+            ApplicationInfo appInfo, View snippetView, UserHandle user) {
         final PackageManager pm = pContext.getPackageManager();
+        Drawable icon = appInfo.loadIcon(pm);
+        if (user != null) {
+            icon = pContext.getPackageManager().getUserBadgedIcon(icon, user);
+        }
         return initSnippet(
                 snippetView,
                 appInfo.loadLabel(pm),
-                appInfo.loadIcon(pm));
+                icon);
     }
 
     /**

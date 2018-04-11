@@ -21,14 +21,21 @@ LOCAL_MODULE_TAGS := optional
 # and when built explicitly put it in the data partition
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
-LOCAL_STATIC_JAVA_LIBRARIES := ctsutil ctstestserver ctstestrunner
+# include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
+
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil ctstestserver ctstestrunner
+
+LOCAL_JNI_SHARED_LIBRARIES := libctsmediacodec_jni
 
 LOCAL_SRC_FILES := $(call all-java-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsMediaTestCases
 
-# uncomment when dalvik.annotation.Test* are removed or part of SDK
+# uncomment when b/13249737 is fixed
 #LOCAL_SDK_VERSION := current
+LOCAL_JAVA_LIBRARIES += android.test.runner
 
 include $(BUILD_CTS_PACKAGE)
+
+include $(call all-makefiles-under,$(LOCAL_PATH))

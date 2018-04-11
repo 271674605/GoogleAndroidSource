@@ -30,6 +30,7 @@
 
 struct PP_DecryptedBlockInfo;
 struct PP_DecryptedFrameInfo;
+struct PPP_MessageHandler_0_1;
 
 namespace ppapi {
 
@@ -78,11 +79,15 @@ class PPB_Instance_API {
                              PP_Var value) = 0;
 
   // Find.
+  virtual void SetPluginToHandleFindRequests(PP_Instance instance) = 0;
   virtual void NumberOfFindResultsChanged(PP_Instance instance,
                                           int32_t total,
                                           PP_Bool final_result) = 0;
   virtual void SelectedFindResultChanged(PP_Instance instance,
                                          int32_t index) = 0;
+  virtual void SetTickmarks(PP_Instance instance,
+                            const PP_Rect* tickmarks,
+                            uint32_t count) = 0;
 
   // Fullscreen.
   virtual PP_Bool IsFullscreen(PP_Instance instance) = 0;
@@ -105,8 +110,16 @@ class PPB_Instance_API {
   virtual void ClearInputEventRequest(PP_Instance instance,
                                       uint32_t event_classes) = 0;
 
+  // InputEventPrivate.
+  virtual void StartTrackingLatency(PP_Instance instance) = 0;
+
   // Messaging.
   virtual void PostMessage(PP_Instance instance, PP_Var message) = 0;
+  virtual int32_t RegisterMessageHandler(PP_Instance instance,
+                                         void* user_data,
+                                         const PPP_MessageHandler_0_1* handler,
+                                         PP_Resource message_loop) = 0;
+  virtual void UnregisterMessageHandler(PP_Instance instance) = 0;
 
   // Mouse cursor.
   virtual PP_Bool SetCursor(PP_Instance instance,
@@ -142,23 +155,28 @@ class PPB_Instance_API {
                                 PP_URLComponents_Dev* components) = 0;
 #if !defined(OS_NACL)
   // Content Decryptor.
-  virtual void NeedKey(PP_Instance instance,
-                       PP_Var key_system,
-                       PP_Var session_id,
-                       PP_Var init_data) = 0;
-  virtual void KeyAdded(PP_Instance instance,
-                        PP_Var key_system,
-                        PP_Var session_id) = 0;
-  virtual void KeyMessage(PP_Instance instance,
-                          PP_Var key_system,
-                          PP_Var session_id,
-                          PP_Var message,
-                          PP_Var default_url) = 0;
-  virtual void KeyError(PP_Instance instance,
-                        PP_Var key_system,
-                        PP_Var session_id,
-                        int32_t media_error,
-                        int32_t system_error) = 0;
+  virtual void PromiseResolved(PP_Instance instance, uint32 promise_id) = 0;
+  virtual void PromiseResolvedWithSession(PP_Instance instance,
+                                          uint32 promise_id,
+                                          PP_Var web_session_id_var) = 0;
+  virtual void PromiseRejected(PP_Instance instance,
+                               uint32 promise_id,
+                               PP_CdmExceptionCode exception_code,
+                               uint32 system_code,
+                               PP_Var error_description_var) = 0;
+  virtual void SessionMessage(PP_Instance instance,
+                              PP_Var web_session_id_var,
+                              PP_Var message_var,
+                              PP_Var destination_url_var) = 0;
+  virtual void SessionReady(PP_Instance instance,
+                            PP_Var web_session_id_var) = 0;
+  virtual void SessionClosed(PP_Instance instance,
+                             PP_Var web_session_id_var) = 0;
+  virtual void SessionError(PP_Instance instance,
+                            PP_Var web_session_id_var,
+                            PP_CdmExceptionCode exception_code,
+                            uint32 system_code,
+                            PP_Var error_description_var) = 0;
   virtual void DeliverBlock(PP_Instance instance,
                             PP_Resource decrypted_block,
                             const PP_DecryptedBlockInfo* block_info) = 0;
@@ -177,7 +195,7 @@ class PPB_Instance_API {
                             const PP_DecryptedFrameInfo* frame_info) = 0;
   virtual void DeliverSamples(PP_Instance instance,
                               PP_Resource audio_frames,
-                              const PP_DecryptedBlockInfo* block_info) = 0;
+                              const PP_DecryptedSampleInfo* sample_info) = 0;
 
   // URLUtil.
   virtual PP_Var ResolveRelativeToDocument(
@@ -188,6 +206,8 @@ class PPB_Instance_API {
   virtual PP_Bool DocumentCanAccessDocument(PP_Instance instance,
                                             PP_Instance target) = 0;
   virtual PP_Var GetPluginInstanceURL(PP_Instance instance,
+                                      PP_URLComponents_Dev* components) = 0;
+  virtual PP_Var GetPluginReferrerURL(PP_Instance instance,
                                       PP_URLComponents_Dev* components) = 0;
 #endif  // !defined(OS_NACL)
 

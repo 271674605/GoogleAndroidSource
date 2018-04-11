@@ -136,7 +136,7 @@
     <string name="mediapickerlabel" msgid="4549836003229914299">"เพลง"</string>
     <string name="playback_failed" msgid="3811851150820251398">"โปรแกรมเล่นไม่สนับสนุนไฟล์เสียงประเภทนี้"</string>
     <string name="cancel" msgid="886559484711947520">"ยกเลิก"</string>
-    <string name="remove_from_playlist" msgid="2548577514849026354">"นำออกจากเพลย์ลิสต์"</string>
+    <string name="remove_from_playlist" msgid="2548577514849026354">"ลบจากเพลย์ลิสต์"</string>
     <string name="streamloadingtext" msgid="8842426517396356215">"กำลังเชื่อมต่อกับ <xliff:g id="HOST">%s</xliff:g>..."</string>
     <string name="mediasearch" msgid="959222971261132292">"ค้นหาเกี่ยวกับ <xliff:g id="TERM">%s</xliff:g> โดยใช้:"</string>
     <string name="working_artists" msgid="8678357432732156580">"ศิลปิน..."</string>

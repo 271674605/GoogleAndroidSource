@@ -24,11 +24,13 @@
 #include <algorithm>
 #include "gtest/gtest.h"
 #include "system/camera_metadata.h"
+#include "camera_metadata_hidden.h"
 
 #include "camera_metadata_tests_fake_vendor.h"
 
 #define EXPECT_NULL(x)     EXPECT_EQ((void*)0, x)
 #define EXPECT_NOT_NULL(x) EXPECT_NE((void*)0, x)
+#define ARRAY_SIZE(a)      (sizeof(a) / sizeof((a)[0]))
 
 #define OK    0
 #define ERROR 1
@@ -72,12 +74,34 @@ TEST(camera_metadata, allocate_nodata) {
     FINISH_USING_CAMERA_METADATA(m);
 }
 
+TEST(camera_metadata, clone_nodata) {
+    camera_metadata_t *src = NULL;
+    camera_metadata_t *copy = NULL;
+
+    src = allocate_camera_metadata(10, 0);
+
+    ASSERT_NE((void*)NULL, (void*)src);
+    copy = clone_camera_metadata(src);
+    ASSERT_NE((void*)NULL, (void*)copy);
+    EXPECT_EQ((size_t)0, get_camera_metadata_entry_count(copy));
+    EXPECT_EQ((size_t)0, get_camera_metadata_entry_capacity(copy));
+    EXPECT_EQ((size_t)0, get_camera_metadata_data_count(copy));
+    EXPECT_EQ((size_t)0, get_camera_metadata_data_capacity(copy));
+
+    FINISH_USING_CAMERA_METADATA(src);
+    FINISH_USING_CAMERA_METADATA(copy);
+}
+
 TEST(camera_metadata, allocate_nothing) {
     camera_metadata_t *m = NULL;
 
     m = allocate_camera_metadata(0, 0);
 
-    EXPECT_NULL(m);
+    ASSERT_NE((void*)NULL, (void*)m);
+    EXPECT_EQ((size_t)0, get_camera_metadata_entry_count(m));
+    EXPECT_EQ((size_t)0, get_camera_metadata_entry_capacity(m));
+    EXPECT_EQ((size_t)0, get_camera_metadata_data_count(m));
+    EXPECT_EQ((size_t)0, get_camera_metadata_data_capacity(m));
 }
 
 TEST(camera_metadata, place_normal) {
@@ -186,7 +210,7 @@ TEST(camera_metadata, get_size) {
 TEST(camera_metadata, add_get_normal) {
     camera_metadata_t *m = NULL;
     const size_t entry_capacity = 5;
-    const size_t data_capacity = 80;
+    const size_t data_capacity = 128;
 
     m = allocate_camera_metadata(entry_capacity, data_capacity);
 
@@ -237,61 +261,96 @@ TEST(camera_metadata, add_get_normal) {
 
     // Array of FLOAT
 
-    float colorTransform[9] = {
-        0.9f, 0.0f, 0.0f,
-        0.2f, 0.5f, 0.0f,
-        0.0f, 0.1f, 0.7f
+    float colorCorrectionGains[] = {1.69f,  1.00f,  1.00f,  2.41f};
+    result = add_camera_metadata_entry(m,
+            ANDROID_COLOR_CORRECTION_GAINS,
+            colorCorrectionGains, ARRAY_SIZE(colorCorrectionGains));
+    EXPECT_EQ(OK, result);
+    data_used += calculate_camera_metadata_entry_data_size(
+           get_camera_metadata_tag_type(ANDROID_COLOR_CORRECTION_GAINS),
+           ARRAY_SIZE(colorCorrectionGains));
+    entries_used++;
+
+    EXPECT_EQ(OK, validate_camera_metadata_structure(m, NULL));
+
+
+    // Array of RATIONAL
+
+    camera_metadata_rational_t colorTransform[] = {
+        {9, 10}, {0, 1}, {0, 1},
+        {1, 5}, {1, 2}, {0, 1},
+        {0, 1}, {1, 10}, {7, 10}
     };
     result = add_camera_metadata_entry(m,
             ANDROID_COLOR_CORRECTION_TRANSFORM,
-            colorTransform, 9);
+            colorTransform, ARRAY_SIZE(colorTransform));
     EXPECT_EQ(OK, result);
     data_used += calculate_camera_metadata_entry_data_size(
-           get_camera_metadata_tag_type(ANDROID_COLOR_CORRECTION_TRANSFORM), 9);
+           get_camera_metadata_tag_type(ANDROID_COLOR_CORRECTION_TRANSFORM),
+           ARRAY_SIZE(colorTransform));
     entries_used++;
 
     EXPECT_EQ(OK, validate_camera_metadata_structure(m, NULL));
 
     // Check added entries
 
+    size_t index = 0;
     camera_metadata_entry entry;
+
     result = get_camera_metadata_entry(m,
-            0, &entry);
+            index, &entry);
     EXPECT_EQ(OK, result);
-    EXPECT_EQ(0, (int)entry.index);
+    EXPECT_EQ(index, (int)entry.index);
     EXPECT_EQ(ANDROID_SENSOR_EXPOSURE_TIME, entry.tag);
     EXPECT_EQ(TYPE_INT64, entry.type);
     EXPECT_EQ((size_t)1, entry.count);
     EXPECT_EQ(exposure_time, *entry.data.i64);
+    index++;
 
     result = get_camera_metadata_entry(m,
-            1, &entry);
+            index, &entry);
     EXPECT_EQ(OK, result);
-    EXPECT_EQ((size_t)1, entry.index);
+    EXPECT_EQ(index, entry.index);
     EXPECT_EQ(ANDROID_SENSOR_SENSITIVITY, entry.tag);
     EXPECT_EQ(TYPE_INT32, entry.type);
     EXPECT_EQ((size_t)1, entry.count);
     EXPECT_EQ(sensitivity, *entry.data.i32);
+    index++;
 
     result = get_camera_metadata_entry(m,
-            2, &entry);
+            index, &entry);
     EXPECT_EQ(OK, result);
-    EXPECT_EQ((size_t)2, entry.index);
+    EXPECT_EQ(index, entry.index);
     EXPECT_EQ(ANDROID_LENS_FOCUS_DISTANCE, entry.tag);
     EXPECT_EQ(TYPE_FLOAT, entry.type);
     EXPECT_EQ((size_t)1, entry.count);
     EXPECT_EQ(focusDistance, *entry.data.f);
+    index++;
 
     result = get_camera_metadata_entry(m,
-            3, &entry);
+            index, &entry);
     EXPECT_EQ(OK, result);
-    EXPECT_EQ((size_t)3, entry.index);
-    EXPECT_EQ(ANDROID_COLOR_CORRECTION_TRANSFORM, entry.tag);
+    EXPECT_EQ(index, entry.index);
+    EXPECT_EQ(ANDROID_COLOR_CORRECTION_GAINS, entry.tag);
     EXPECT_EQ(TYPE_FLOAT, entry.type);
-    EXPECT_EQ((size_t)9, entry.count);
+    EXPECT_EQ(ARRAY_SIZE(colorCorrectionGains), entry.count);
     for (unsigned int i=0; i < entry.count; i++) {
-        EXPECT_EQ(colorTransform[i], entry.data.f[i] );
+        EXPECT_EQ(colorCorrectionGains[i], entry.data.f[i]);
     }
+    index++;
+
+    result = get_camera_metadata_entry(m,
+            index, &entry);
+    EXPECT_EQ(OK, result);
+    EXPECT_EQ(index, entry.index);
+    EXPECT_EQ(ANDROID_COLOR_CORRECTION_TRANSFORM, entry.tag);
+    EXPECT_EQ(TYPE_RATIONAL, entry.type);
+    EXPECT_EQ(ARRAY_SIZE(colorTransform), entry.count);
+    for (unsigned int i=0; i < entry.count; i++) {
+        EXPECT_EQ(colorTransform[i].numerator, entry.data.r[i].numerator);
+        EXPECT_EQ(colorTransform[i].denominator, entry.data.r[i].denominator);
+    }
+    index++;
 
     EXPECT_EQ(calculate_camera_metadata_size(entry_capacity, data_capacity),
             get_camera_metadata_size(m) );
@@ -754,7 +813,7 @@ TEST(camera_metadata, vendor_tags) {
     EXPECT_NULL(get_camera_metadata_tag_name(FAKEVENDOR_SENSOR_SUPERMODE));
     EXPECT_EQ(-1, get_camera_metadata_tag_type(FAKEVENDOR_SENSOR_SUPERMODE));
 
-    set_camera_metadata_vendor_tag_ops(&fakevendor_query_ops);
+    set_camera_metadata_vendor_ops(&fakevendor_ops);
 
     result = add_camera_metadata_entry(m,
             FAKEVENDOR_SENSOR_SUPERMODE,
@@ -786,7 +845,7 @@ TEST(camera_metadata, vendor_tags) {
     EXPECT_NULL(get_camera_metadata_tag_name(FAKEVENDOR_SCALER_END));
     EXPECT_EQ(-1, get_camera_metadata_tag_type(FAKEVENDOR_SCALER_END));
 
-    set_camera_metadata_vendor_tag_ops(NULL);
+    set_camera_metadata_vendor_ops(NULL);
     // TODO: fix vendor ops. Then the below 3 validations should fail.
     EXPECT_EQ(OK, validate_camera_metadata_structure(m, NULL));
 
@@ -914,14 +973,14 @@ TEST(camera_metadata, sort_metadata) {
 
     // Add several unique entries in non-sorted order
 
-    float colorTransform[9] = {
-        0.9f, 0.0f, 0.0f,
-        0.2f, 0.5f, 0.0f,
-        0.0f, 0.1f, 0.7f
+    camera_metadata_rational_t colorTransform[] = {
+        {9, 10}, {0, 1}, {0, 1},
+        {1, 5}, {1, 2}, {0, 1},
+        {0, 1}, {1, 10}, {7, 10}
     };
     result = add_camera_metadata_entry(m,
             ANDROID_COLOR_CORRECTION_TRANSFORM,
-            colorTransform, 9);
+            colorTransform, ARRAY_SIZE(colorTransform));
     EXPECT_EQ(OK, result);
 
     float focus_distance = 0.5f;
@@ -1624,55 +1683,6 @@ TEST(camera_metadata, update_metadata) {
         EXPECT_EQ(exposureTime, *e2.data.i64);
     }
 
-}
-
-TEST(camera_metadata, user_pointer) {
-    camera_metadata_t *m = NULL;
-    const size_t entry_capacity = 50;
-    const size_t data_capacity = 450;
-
-    int result;
-
-    m = allocate_camera_metadata(entry_capacity, data_capacity);
-
-    size_t num_entries = 5;
-    size_t data_per_entry =
-            calculate_camera_metadata_entry_data_size(TYPE_INT64, 1);
-    size_t num_data = num_entries * data_per_entry;
-
-    add_test_metadata(m, num_entries);
-    EXPECT_EQ(num_entries, get_camera_metadata_entry_count(m));
-    EXPECT_EQ(num_data, get_camera_metadata_data_count(m));
-
-    void* ptr;
-    result = get_camera_metadata_user_pointer(m, &ptr);
-    EXPECT_EQ(OK, result);
-    EXPECT_NULL(ptr);
-
-    int testValue = 10;
-    result = set_camera_metadata_user_pointer(m, &testValue);
-    EXPECT_EQ(OK, result);
-
-    result = get_camera_metadata_user_pointer(m, &ptr);
-    EXPECT_EQ(OK, result);
-    EXPECT_EQ(&testValue, (int*)ptr);
-    EXPECT_EQ(testValue, *(int*)ptr);
-
-    size_t buf_size = get_camera_metadata_compact_size(m);
-    EXPECT_LT((size_t)0, buf_size);
-
-    uint8_t *buf = (uint8_t*)malloc(buf_size);
-    EXPECT_NOT_NULL(buf);
-
-    camera_metadata_t *m2 = copy_camera_metadata(buf, buf_size, m);
-    EXPECT_NOT_NULL(m2);
-
-    result = get_camera_metadata_user_pointer(m2, &ptr);
-    EXPECT_NULL(ptr);
-
-    EXPECT_EQ(OK, validate_camera_metadata_structure(m2, &buf_size));
-    free(buf);
-    FINISH_USING_CAMERA_METADATA(m);
 }
 
 TEST(camera_metadata, memcpy) {

@@ -18,20 +18,38 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE_TAGS := tests
 
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
+
+LOCAL_STATIC_JAVA_LIBRARIES := ctstestserver ctstestrunner ctsdeviceutil guava
+
 LOCAL_JAVA_LIBRARIES := android.test.runner
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner
+LOCAL_JNI_SHARED_LIBRARIES := libctssecurity_jni libcts_jni
 
-LOCAL_JNI_SHARED_LIBRARIES := libctssecurity_jni
-
-LOCAL_SRC_FILES := $(call all-java-files-under, src)
+LOCAL_SRC_FILES := $(call all-java-files-under, src)\
+                   src/android/security/cts/activity/ISecureRandomService.aidl
 
 LOCAL_PACKAGE_NAME := CtsSecurityTestCases
 
-LOCAL_INSTRUMENTATION_FOR := CtsTestStubs
-
 LOCAL_SDK_VERSION := current
 
+intermediates.COMMON := $(call intermediates-dir-for,APPS,$(LOCAL_PACKAGE_NAME),,COMMON)
+
+sepolicy_asset_dir := $(intermediates.COMMON)/assets
+
+LOCAL_ASSET_DIR := $(sepolicy_asset_dir)
+
 include $(BUILD_CTS_PACKAGE)
+
+selinux_policy.xml := $(sepolicy_asset_dir)/selinux_policy.xml
+selinux_policy_parser := cts/tools/selinux/src/gen_SELinux_CTS.py
+general_sepolicy_policy.conf := $(call intermediates-dir-for,ETC,general_sepolicy.conf)/general_sepolicy.conf
+$(selinux_policy.xml): PRIVATE_POLICY_PARSER := $(selinux_policy_parser)
+$(selinux_policy.xml): $(general_sepolicy_policy.conf) $(selinux_policy_parser)
+	mkdir -p $(dir $@)
+	$(PRIVATE_POLICY_PARSER) $< $@ neverallow_only=t
+
+$(R_file_stamp): $(selinux_policy.xml)
 
 include $(call all-makefiles-under,$(LOCAL_PATH))

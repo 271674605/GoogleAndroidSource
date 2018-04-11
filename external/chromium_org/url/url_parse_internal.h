@@ -9,7 +9,7 @@
 
 #include "url/url_parse.h"
 
-namespace url_parse {
+namespace url {
 
 // We treat slashes and backslashes the same for IE compatability.
 inline bool IsURLSlash(base::char16 ch) {
@@ -28,15 +28,19 @@ inline bool ShouldTrimFromURL(base::char16 ch) {
 // in the input string (so the string starts at character |*begin| in the spec,
 // and goes until |*len|).
 template<typename CHAR>
-inline void TrimURL(const CHAR* spec, int* begin, int* len) {
+inline void TrimURL(const CHAR* spec, int* begin, int* len,
+                    bool trim_path_end = true) {
   // Strip leading whitespace and control characters.
   while (*begin < *len && ShouldTrimFromURL(spec[*begin]))
     (*begin)++;
 
-  // Strip trailing whitespace and control characters. We need the >i test for
-  // when the input string is all blanks; we don't want to back past the input.
-  while (*len > *begin && ShouldTrimFromURL(spec[*len - 1]))
-    (*len)--;
+  if (trim_path_end) {
+    // Strip trailing whitespace and control characters. We need the >i test
+    // for when the input string is all blanks; we don't want to back past the
+    // input.
+    while (*len > *begin && ShouldTrimFromURL(spec[*len - 1]))
+      (*len)--;
+  }
 }
 
 // Counts the number of consecutive slashes starting at the given offset
@@ -82,6 +86,6 @@ void ParseAfterScheme(const base::char16* spec,
                       int after_scheme,
                       Parsed* parsed);
 
-}  // namespace url_parse
+}  // namespace url
 
 #endif  // URL_URL_PARSE_INTERNAL_H_

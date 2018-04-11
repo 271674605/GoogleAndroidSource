@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SYSTEM_MEMORY_SYSTEM_MEMORY_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SYSTEM_MEMORY_SYSTEM_MEMORY_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
 #include "chrome/common/extensions/api/system_memory.h"
+#include "extensions/browser/extension_function.h"
 
 namespace extensions {
 
@@ -17,7 +17,7 @@ class SystemMemoryGetInfoFunction : public AsyncExtensionFunction {
 
  private:
   virtual ~SystemMemoryGetInfoFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
   void OnGetMemoryInfoCompleted(bool success);
 };
 

@@ -14,6 +14,7 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/translate/chrome_translate_client.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
@@ -23,9 +24,10 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
+#include "components/translate/core/common/translate_errors.h"
 #include "ui/gfx/rect.h"
 
-@class AvatarButtonController;
+@class AvatarBaseController;
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
@@ -33,18 +35,25 @@ class BrowserWindowCocoa;
 @class DownloadShelfController;
 class ExtensionKeybindingRegistryCocoa;
 @class FindBarCocoaController;
+@class FullscreenModeController;
 @class FullscreenWindow;
 @class InfoBarContainerController;
 class LocationBarViewMac;
 @class OverlayableContentsController;
+class PermissionBubbleCocoa;
 @class PresentationModeController;
 class StatusBubbleMac;
 @class TabStripController;
 @class TabStripView;
 @class ToolbarController;
+@class TranslateBubbleController;
 
 namespace content {
 class WebContents;
+}
+
+namespace extensions {
+class Command;
 }
 
 @interface BrowserWindowController :
@@ -71,6 +80,7 @@ class WebContents;
   base::scoped_nsobject<OverlayableContentsController>
       overlayableContentsController_;
   base::scoped_nsobject<PresentationModeController> presentationModeController_;
+  base::scoped_nsobject<FullscreenModeController> fullscreenModeController_;
   base::scoped_nsobject<FullscreenExitBubbleController>
       fullscreenExitBubbleController_;
 
@@ -84,6 +94,8 @@ class WebContents;
   BOOL initializing_;  // YES while we are currently in initWithBrowser:
   BOOL ownsBrowser_;  // Only ever NO when testing
 
+  TranslateBubbleController* translateBubbleController_;  // Weak.
+
   // The total amount by which we've grown the window up or down (to display a
   // bookmark bar and/or download shelf), respectively; reset to 0 when moved
   // away from the bottom/top or resized (or zoomed).
@@ -96,36 +108,35 @@ class WebContents;
   // NO on growth.
   BOOL isShrinkingFromZoomed_;
 
-  // The raw accumulated zoom value and the actual zoom increments made for an
-  // an in-progress pinch gesture.
-  CGFloat totalMagnifyGestureAmount_;
-  NSInteger currentZoomStepDelta_;
-
   // The view controller that manages the incognito badge or the multi-profile
-  // avatar icon. The view is always in the view hierarchy, but will be hidden
-  // unless it's appropriate to show it.
-  base::scoped_nsobject<AvatarButtonController> avatarButtonController_;
+  // avatar button. Depending on whether the --new-profile-management flag is
+  // used, the multi-profile button can either be the avatar's icon badge or a
+  // button with the profile's name. If the flag is used, the button is always
+  // shown, otherwise the view will always be in the view hierarchy but will
+  // be hidden unless it's appropriate to show it (i.e. if there's more than
+  // one profile).
+  base::scoped_nsobject<AvatarBaseController> avatarButtonController_;
 
   // Lazily created view which draws the background for the floating set of bars
   // in presentation mode (for window types having a floating bar; it remains
   // nil for those which don't).
   base::scoped_nsobject<NSView> floatingBarBackingView_;
 
-  // The borderless window used in fullscreen mode.  Lion reuses the original
-  // window in fullscreen mode, so this is always nil on Lion.
+  // The borderless window used in fullscreen mode when Cocoa's System
+  // Fullscreen API is not being used (or not available, before OS 10.7).
   base::scoped_nsobject<NSWindow> fullscreenWindow_;
 
-  // Tracks whether presentation mode was entered from fullscreen mode or
-  // directly from normal windowed mode.  Used to determine what to do when
-  // exiting presentation mode.
-  BOOL enteredPresentationModeFromFullscreen_;
+  // The Cocoa implementation of the PermissionBubbleView.
+  scoped_ptr<PermissionBubbleCocoa> permissionBubbleCocoa_;
 
-  // True between -windowWillEnterFullScreen and -windowDidEnterFullScreen.
-  // Only used on Lion and higher.
+  // True between |-windowWillEnterFullScreen:| and |-windowDidEnterFullScreen:|
+  // to indicate that the window is in the process of transitioning into
+  // fullscreen mode.
   BOOL enteringFullscreen_;
 
   // True between |-setPresentationMode:url:bubbleType:| and
-  // -windowDidEnterFullScreen. Only used on Lion and higher.
+  // |-windowDidEnterFullScreen:| to indicate that the window is in the process
+  // of transitioning into fullscreen presentation mode.
   BOOL enteringPresentationMode_;
 
   // The size of the original (non-fullscreen) window.  This is saved just
@@ -220,17 +231,18 @@ class WebContents;
 - (Profile*)profile;
 
 // Access the avatar button controller.
-- (AvatarButtonController*)avatarButtonController;
+- (AvatarBaseController*)avatarButtonController;
 
-// Updates the toolbar (and transitively the location bar) with the states of
-// the specified |tab|.  If |shouldRestore| is true, we're switching
-// (back?) to this tab and should restore any previous location bar state
-// (such as user editing) as well.
-- (void)updateToolbarWithContents:(content::WebContents*)tab
-               shouldRestoreState:(BOOL)shouldRestore;
+// Forces the toolbar (and transitively the location bar) to update its current
+// state.  If |tab| is non-NULL, we're switching (back?) to this tab and should
+// restore any previous location bar state (such as user editing) as well.
+- (void)updateToolbarWithContents:(content::WebContents*)tab;
 
 // Sets whether or not the current page in the frontmost tab is bookmarked.
 - (void)setStarredState:(BOOL)isStarred;
+
+// Sets whether or not the current page is translated.
+- (void)setCurrentPageIsTranslated:(BOOL)on;
 
 // Happens when the zoom level is changed in the active tab, the active tab is
 // changed, or a new browser window or tab is created. |canShowBubble| denotes
@@ -263,6 +275,9 @@ class WebContents;
 // Whether or not to show the avatar, which is either the incognito guy or the
 // user's profile avatar.
 - (BOOL)shouldShowAvatar;
+
+// Whether or not to show the new avatar button used by --new-profile-maagement.
+- (BOOL)shouldUseNewAvatarButton;
 
 - (BOOL)isBookmarkBarVisible;
 
@@ -302,6 +317,11 @@ class WebContents;
 - (void)showBookmarkBubbleForURL:(const GURL&)url
                alreadyBookmarked:(BOOL)alreadyBookmarked;
 
+// Show the translate bubble.
+- (void)showTranslateBubbleForWebContents:(content::WebContents*)contents
+                                     step:(translate::TranslateStep)step
+                                errorType:(TranslateErrors::Type)errorType;
+
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(content::WebContents*)contents;
 
@@ -311,9 +331,13 @@ class WebContents;
 // Gets the window style.
 - (ThemedWindowStyle)themedWindowStyle;
 
-// Returns the pattern phase for |alignment|. If the window does not have a tab
-// strip, the phase for THEME_PATTERN_ALIGN_WITH_FRAME is always returned.
-- (NSPoint)themePatternPhaseForAlignment:(ThemePatternAlignment)alignment;
+// Returns the position in the coordinates of the root view
+// ([[self contentView] superview]) that the top left of a theme image with
+// |alignment| should be painted at. If the window does not have a tab strip,
+// the offset for THEME_IMAGE_ALIGN_WITH_FRAME is always returned. The result of
+// this method can be used in conjunction with
+// [NSGraphicsContext cr_setPatternPhase:] to set the offset of pattern colors.
+- (NSPoint)themeImagePositionForAlignment:(ThemeImageAlignment)alignment;
 
 // Return the point to which a bubble window's arrow should point, in window
 // coordinates.
@@ -337,6 +361,16 @@ class WebContents;
 // allowOverlappingViews state. Currently used for history overlay and
 // confirm bubble.
 - (void)onOverlappedViewHidden;
+
+// Executes the command registered by the extension that has the given id.
+- (void)executeExtensionCommand:(const std::string&)extension_id
+                        command:(const extensions::Command&)command;
+
+// Activates the page action for the extension that has the given id.
+- (void)activatePageAction:(const std::string&)extension_id;
+
+// Activates the browser action for the extension that has the given id.
+- (void)activateBrowserAction:(const std::string&)extension_id;
 
 @end  // @interface BrowserWindowController
 
@@ -395,8 +429,17 @@ class WebContents;
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
                            bubbleType:(FullscreenExitBubbleType)bubbleType;
 
-// Returns fullscreen state.  This method is safe to call on all OS versions.
+// Returns fullscreen state: YES when the window is in fullscreen or is
+// animating into fullscreen.
 - (BOOL)isFullscreen;
+
+// Returns YES if the browser window is currently in fullscreen via the built-in
+// immersive mechanism.
+- (BOOL)isInImmersiveFullscreen;
+
+// Returns YES if the browser window is currently in fullscreen via the Cocoa
+// System Fullscreen API.
+- (BOOL)isInSystemFullscreen;
 
 // Enters (or exits) presentation mode.  Also enters fullscreen mode if this
 // window is not already fullscreen.  This method is safe to call on all OS
@@ -446,9 +489,6 @@ class WebContents;
 // Returns YES if any of the views in the floating bar currently has focus.
 - (BOOL)floatingBarHasFocus;
 
-// Opens the tabpose window.
-- (void)openTabpose;
-
 @end  // @interface BrowserWindowController(Fullscreen)
 
 
@@ -491,6 +531,9 @@ class WebContents;
 // Gets the rect, in window base coordinates, that the omnibox popup should be
 // positioned relative to.
 - (NSRect)omniboxPopupAnchorRect;
+
+// Force a layout of info bars.
+- (void)layoutInfoBars;
 
 @end  // @interface BrowserWindowController (TestingAPI)
 

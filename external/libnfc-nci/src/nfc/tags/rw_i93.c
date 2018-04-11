@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2011-2013 Broadcom Corporation
+ *  Copyright (C) 2011-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -3122,7 +3122,7 @@ static void rw_i93_data_cback (UINT8 conn_id, tNFC_CONN_EVT event, tNFC_CONN *p_
         p_i93->sent_cmd = 0;
         if (rw_cb.p_cback)
         {
-            rw_data.raw_frame.status = NFC_STATUS_OK;
+            rw_data.raw_frame.status = p_data->data.status;
             rw_data.raw_frame.p_data = p_resp;
             (*(rw_cb.p_cback)) (RW_I93_RAW_FRAME_EVT, &rw_data);
             p_resp = NULL;

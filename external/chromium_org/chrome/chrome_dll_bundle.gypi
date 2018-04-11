@@ -61,7 +61,6 @@
     'app/theme/menu_overflow_down.pdf',
     'app/theme/menu_overflow_up.pdf',
     'browser/mac/install.sh',
-    '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
     '<(SHARED_INTERMEDIATE_DIR)/repack/chrome_100_percent.pak',
     '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
     '<!@pymod_do_main(repack_locales -o -p <(OS) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
@@ -77,6 +76,7 @@
     # Bring in pdfsqueeze and run it on all pdfs
     '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
     '../crypto/crypto.gyp:crypto',
+    '../pdf/pdf.gyp:pdf',
     # On Mac, Flash gets put into the framework, so we need this
     # dependency here. flash_player.gyp will copy the Flash bundle
     # into PRODUCT_DIR.
@@ -109,7 +109,6 @@
       }],
     ],
     'libpeer_target_type%': 'static_library',
-    'repack_path': '../tools/grit/grit/format/repack.py',
   },
   'postbuilds': [
     {
@@ -140,21 +139,18 @@
   ],
   'copies': [
     {
-      # Copy FFmpeg binaries for audio/video support.
       'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
       'files': [
+        '<(PRODUCT_DIR)/exif.so',
         '<(PRODUCT_DIR)/ffmpegsumo.so',
       ],
     },
     {
       'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins',
-      'files': [],
+      'files': [
+        '<(PRODUCT_DIR)/PDF.plugin',
+      ],
       'conditions': [
-        ['internal_pdf', {
-          'files': [
-            '<(PRODUCT_DIR)/PDF.plugin',
-          ],
-        }],
         ['disable_nacl!=1', {
           'files': [
             '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.plugin',
@@ -242,7 +238,7 @@
     ['mac_breakpad_compiled_in==1', {
       'dependencies': [
         '../breakpad/breakpad.gyp:breakpad',
-        'app/policy/cloud_policy_codegen.gyp:policy',
+        '../components/components.gyp:policy',
       ],
       'copies': [
         {
@@ -280,17 +276,12 @@
         },
       ],
     }],  # mac_keystone
-    ['internal_pdf', {
-      'dependencies': [
-        '../pdf/pdf.gyp:pdf',
-      ],
-    }],
     ['debug_devtools==1', {
       'postbuilds': [{
         'postbuild_name': 'Copy inspector files',
         'action': [
-          'cp',
-          '-r',
+          'ln',
+          '-fs',
           '${BUILT_PRODUCTS_DIR}/resources/inspector',
           '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources',
         ],
@@ -308,6 +299,11 @@
           '<(PRODUCT_DIR)/libpeerconnection.so',
         ],
       }],
+    }],
+    ['icu_use_data_file_flag==1', {
+      'mac_bundle_resources': [
+        '<(PRODUCT_DIR)/icudtl.dat',
+      ],
     }],
   ],  # conditions
 }

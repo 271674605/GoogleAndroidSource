@@ -19,6 +19,13 @@ class PrefRegistrySyncable;
 // Utility functions for sign in promos.
 namespace signin {
 
+const char kSignInPromoQueryKeyAutoClose[] = "auto_close";
+const char kSignInPromoQueryKeyContinue[] = "continue";
+const char kSignInPromoQueryKeySource[] = "source";
+const char kSignInPromoQueryKeyConstrained[] = "constrained";
+const char kSignInPromoQueryKeyShowAccountManagement[] =
+    "showAccountManagement";
+
 enum Source {
   SOURCE_START_PAGE = 0, // This must be first.
   SOURCE_NTP_LINK,
@@ -29,6 +36,10 @@ enum Source {
   SOURCE_APP_LAUNCHER,
   SOURCE_APPS_PAGE_LINK,
   SOURCE_BOOKMARK_BUBBLE,
+  SOURCE_AVATAR_BUBBLE_SIGN_IN,
+  SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT,
+  SOURCE_DEVICES_PAGE,
+  SOURCE_REAUTH,
   SOURCE_UNKNOWN, // This must be last.
 };
 
@@ -53,7 +64,20 @@ GURL GetLandingURL(const char* option, int value);
 // |source| identifies from where the sign in promo is being called, and is
 // used to record sync promo UMA stats in the context of the source.
 // |auto_close| whether to close the sign in promo automatically when done.
+// |is_constrained} whether to load the URL in a constrained window, false
+// by default.
 GURL GetPromoURL(Source source, bool auto_close);
+GURL GetPromoURL(Source source, bool auto_close, bool is_constrained);
+
+// As above, but also appends the |continue_url| as a parameter to the URL.
+// A |continue_url| may be set only when not using the web-based sign-in flow.
+GURL GetPromoURLWithContinueURL(Source source,
+                                bool auto_close,
+                                bool is_constrained,
+                                GURL continue_url);
+
+// Returns a sign in promo URL specifically for reauthenticating |account_id|.
+GURL GetReauthURL(Profile* profile, const std::string& account_id);
 
 // Gets the next page URL from the query portion of the sign in promo URL.
 GURL GetNextPageURLForPromoURL(const GURL& url);
@@ -64,6 +88,10 @@ Source GetSourceForPromoURL(const GURL& url);
 
 // Returns true if the auto_close parameter in the given URL is set to true.
 bool IsAutoCloseEnabledInURL(const GURL& url);
+
+// Returns true if the showAccountManagement parameter in the given url is set
+// to true.
+bool ShouldShowAccountManagement(const GURL& url);
 
 // Returns true if the given URL is the standard continue URL used with the
 // sync promo when the web-based flow is enabled.  The query parameters

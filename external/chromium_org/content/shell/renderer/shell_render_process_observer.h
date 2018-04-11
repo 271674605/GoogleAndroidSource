@@ -12,19 +12,16 @@
 #include "content/public/renderer/render_process_observer.h"
 #include "ipc/ipc_platform_file.h"
 
-namespace WebKit {
+namespace blink {
 class WebFrame;
-}
-
-namespace WebTestRunner {
-class WebTestDelegate;
-class WebTestInterfaces;
 }
 
 namespace content {
 
 class RenderView;
 class WebKitTestRunner;
+class WebTestDelegate;
+class WebTestInterfaces;
 
 class ShellRenderProcessObserver : public RenderProcessObserver {
  public:
@@ -33,17 +30,18 @@ class ShellRenderProcessObserver : public RenderProcessObserver {
   ShellRenderProcessObserver();
   virtual ~ShellRenderProcessObserver();
 
-  void SetTestDelegate(WebTestRunner::WebTestDelegate* delegate);
+  void SetTestDelegate(WebTestDelegate* delegate);
   void SetMainWindow(RenderView* view);
 
   // RenderProcessObserver implementation.
   virtual void WebKitInitialized() OVERRIDE;
+  virtual void OnRenderProcessShutdown() OVERRIDE;
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  WebTestRunner::WebTestDelegate* test_delegate() const {
+  WebTestDelegate* test_delegate() const {
     return test_delegate_;
   }
-  WebTestRunner::WebTestInterfaces* test_interfaces() const {
+  WebTestInterfaces* test_interfaces() const {
     return test_interfaces_.get();
   }
   WebKitTestRunner* main_test_runner() const { return main_test_runner_; }
@@ -55,8 +53,8 @@ class ShellRenderProcessObserver : public RenderProcessObserver {
   void OnSetWebKitSourceDir(const base::FilePath& webkit_source_dir);
 
   WebKitTestRunner* main_test_runner_;
-  WebTestRunner::WebTestDelegate* test_delegate_;
-  scoped_ptr<WebTestRunner::WebTestInterfaces> test_interfaces_;
+  WebTestDelegate* test_delegate_;
+  scoped_ptr<WebTestInterfaces> test_interfaces_;
 
   base::FilePath webkit_source_dir_;
 

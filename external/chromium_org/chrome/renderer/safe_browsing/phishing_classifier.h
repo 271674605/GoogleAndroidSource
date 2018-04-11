@@ -18,6 +18,8 @@
 #ifndef CHROME_RENDERER_SAFE_BROWSING_PHISHING_CLASSIFIER_H_
 #define CHROME_RENDERER_SAFE_BROWSING_PHISHING_CLASSIFIER_H_
 
+#include <set>
+
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
@@ -83,7 +85,7 @@ class PhishingClassifier {
   //
   // It is an error to call BeginClassification if the classifier is not yet
   // ready.
-  virtual void BeginClassification(const string16* page_text,
+  virtual void BeginClassification(const base::string16* page_text,
                                    const DoneCallback& callback);
 
   // Called by the RenderView (on the render thread) when a page is unloading
@@ -135,7 +137,8 @@ class PhishingClassifier {
 
   // State for any in-progress extraction.
   scoped_ptr<FeatureMap> features_;
-  const string16* page_text_;  // owned by the caller
+  scoped_ptr<std::set<uint32> > shingle_hashes_;
+  const base::string16* page_text_;  // owned by the caller
   DoneCallback done_callback_;
 
   // Used in scheduling BeginFeatureExtraction tasks.

@@ -8,13 +8,13 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_TAB_CAPTURE_TAB_CAPTURE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_TAB_CAPTURE_TAB_CAPTURE_API_H_
 
-#include "chrome/browser/extensions/api/api_function.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/tab_capture.h"
 
 namespace extensions {
 
-class TabCaptureCaptureFunction : public SyncExtensionFunction {
+class TabCaptureCaptureFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("tabCapture.capture", TABCAPTURE_CAPTURE)
 
@@ -22,10 +22,10 @@ class TabCaptureCaptureFunction : public SyncExtensionFunction {
   virtual ~TabCaptureCaptureFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
-class TabCaptureGetCapturedTabsFunction : public SyncExtensionFunction {
+class TabCaptureGetCapturedTabsFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("tabCapture.getCapturedTabs",
                              TABCAPTURE_GETCAPTUREDTABS)
@@ -34,7 +34,7 @@ class TabCaptureGetCapturedTabsFunction : public SyncExtensionFunction {
   virtual ~TabCaptureGetCapturedTabsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

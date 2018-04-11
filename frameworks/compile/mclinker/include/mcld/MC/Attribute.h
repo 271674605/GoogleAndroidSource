@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ATTRIBUTE_H
-#define MCLD_ATTRIBUTE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_MC_ATTRIBUTE_H
+#define MCLD_MC_ATTRIBUTE_H
 
 namespace mcld {
 
@@ -159,7 +156,7 @@ public:
 
   bool isStaticSystem() const
   { return m_Static; }
-  
+
   bool isLegal(const Attribute& pAttr) const;
 };
 
@@ -224,8 +221,8 @@ private:
 inline bool operator== (const Attribute& pLHS, const Attribute& pRHS)
 {
   return ((pLHS.isWholeArchive() == pRHS.isWholeArchive()) &&
-    (pLHS.isAsNeeded() == pRHS.isAsNeeded()) && 
-    (pLHS.isAddNeeded() == pRHS.isAddNeeded()) && 
+    (pLHS.isAsNeeded() == pRHS.isAsNeeded()) &&
+    (pLHS.isAddNeeded() == pRHS.isAddNeeded()) &&
     (pLHS.isStatic() == pRHS.isStatic()));
 }
 

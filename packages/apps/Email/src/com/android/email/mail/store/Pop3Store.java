@@ -78,10 +78,8 @@ public class Pop3Store extends Store {
         HostAuth recvAuth = account.getOrCreateHostAuthRecv(context);
         mTransport = new MailTransport(context, "POP3", recvAuth);
         String[] userInfoParts = recvAuth.getLogin();
-        if (userInfoParts != null) {
-            mUsername = userInfoParts[0];
-            mPassword = userInfoParts[1];
-        }
+        mUsername = userInfoParts[0];
+        mPassword = userInfoParts[1];
     }
 
     /**
@@ -555,7 +553,7 @@ public class Pop3Store extends Store {
          *
          * @param message
          * @param lines
-         * @param optional callback that reports progress of the fetch
+         * @param callback optional callback that reports progress of the fetch
          */
         public void fetchBody(Pop3Message message, int lines,
                 EOLConvertingInputStream.Callback callback) throws IOException, MessagingException {
@@ -628,7 +626,7 @@ public class Pop3Store extends Store {
         }
 
         @Override
-        public void appendMessages(Message[] messages) {
+        public void appendMessage(Context context, Message message, boolean noTimeout) {
         }
 
         @Override

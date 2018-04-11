@@ -38,48 +38,50 @@ public class Preferences {
     public static final String PREFERENCES_FILE = "AndroidMail.Main";
 
     // Preferences field names
+    @Deprecated
     private static final String ACCOUNT_UUIDS = "accountUuids";
     private static final String ENABLE_DEBUG_LOGGING = "enableDebugLogging";
     private static final String ENABLE_EXCHANGE_LOGGING = "enableExchangeLogging";
     private static final String ENABLE_EXCHANGE_FILE_LOGGING = "enableExchangeFileLogging";
-    private static final String INHIBIT_GRAPHICS_ACCELERATION = "inhibitGraphicsAcceleration";
-    private static final String FORCE_ONE_MINUTE_REFRESH = "forceOneMinuteRefresh";
     private static final String ENABLE_STRICT_MODE = "enableStrictMode";
     private static final String DEVICE_UID = "deviceUID";
     private static final String ONE_TIME_INITIALIZATION_PROGRESS = "oneTimeInitializationProgress";
-    private static final String AUTO_ADVANCE_DIRECTION = "autoAdvance";
-    private static final String TEXT_ZOOM = "textZoom";
-    private static final String BACKGROUND_ATTACHMENTS = "backgroundAttachments";
-    private static final String TRUSTED_SENDERS = "trustedSenders";
     private static final String LAST_ACCOUNT_USED = "lastAccountUsed";
-    private static final String REQUIRE_MANUAL_SYNC_DIALOG_SHOWN = "requireManualSyncDialogShown";
+    // The following are only used for migration
+    @Deprecated
+    private static final String AUTO_ADVANCE_DIRECTION = "autoAdvance";
+    @Deprecated
+    private static final String TRUSTED_SENDERS = "trustedSenders";
+    @Deprecated
     private static final String CONFIRM_DELETE = "confirm_delete";
+    @Deprecated
     private static final String CONFIRM_SEND = "confirm_send";
     @Deprecated
     private static final String SWIPE_DELETE = "swipe_delete";
+    @Deprecated
     private static final String CONV_LIST_ICON = "conversation_list_icons";
     @Deprecated
     private static final String REPLY_ALL = "reply_all";
 
+    @Deprecated
     public static final int AUTO_ADVANCE_NEWER = 0;
+    @Deprecated
     public static final int AUTO_ADVANCE_OLDER = 1;
+    @Deprecated
     public static final int AUTO_ADVANCE_MESSAGE_LIST = 2;
     // "move to older" was the behavior on older versions.
+    @Deprecated
     private static final int AUTO_ADVANCE_DEFAULT = AUTO_ADVANCE_OLDER;
+    @Deprecated
     private static final boolean CONFIRM_DELETE_DEFAULT = false;
+    @Deprecated
     private static final boolean CONFIRM_SEND_DEFAULT = false;
 
-    // The following constants are used as offsets into R.array.general_preference_text_zoom_size.
-    public static final int TEXT_ZOOM_TINY = 0;
-    public static final int TEXT_ZOOM_SMALL = 1;
-    public static final int TEXT_ZOOM_NORMAL = 2;
-    public static final int TEXT_ZOOM_LARGE = 3;
-    public static final int TEXT_ZOOM_HUGE = 4;
-    // "normal" will be the default
-    public static final int TEXT_ZOOM_DEFAULT = TEXT_ZOOM_NORMAL;
-
+    @Deprecated
     public static final String CONV_LIST_ICON_SENDER_IMAGE = "senderimage";
+    @Deprecated
     public static final String CONV_LIST_ICON_NONE = "none";
+    @Deprecated
     public static final String CONV_LIST_ICON_DEFAULT = CONV_LIST_ICON_SENDER_IMAGE;
 
     private static Preferences sPreferences;
@@ -139,22 +141,6 @@ public class Preferences {
         return mSharedPreferences.getBoolean(ENABLE_EXCHANGE_FILE_LOGGING, false);
     }
 
-    public void setInhibitGraphicsAcceleration(boolean value) {
-        mSharedPreferences.edit().putBoolean(INHIBIT_GRAPHICS_ACCELERATION, value).apply();
-    }
-
-    public boolean getInhibitGraphicsAcceleration() {
-        return mSharedPreferences.getBoolean(INHIBIT_GRAPHICS_ACCELERATION, false);
-    }
-
-    public void setForceOneMinuteRefresh(boolean value) {
-        mSharedPreferences.edit().putBoolean(FORCE_ONE_MINUTE_REFRESH, value).apply();
-    }
-
-    public boolean getForceOneMinuteRefresh() {
-        return mSharedPreferences.getBoolean(FORCE_ONE_MINUTE_REFRESH, false);
-    }
-
     public void setEnableStrictMode(boolean value) {
         mSharedPreferences.edit().putBoolean(ENABLE_STRICT_MODE, value).apply();
     }
@@ -185,12 +171,10 @@ public class Preferences {
         mSharedPreferences.edit().putInt(ONE_TIME_INITIALIZATION_PROGRESS, progress).apply();
     }
 
+    /** @deprecated Only used for migration */
+    @Deprecated
     public int getAutoAdvanceDirection() {
         return mSharedPreferences.getInt(AUTO_ADVANCE_DIRECTION, AUTO_ADVANCE_DEFAULT);
-    }
-
-    public void setAutoAdvanceDirection(int direction) {
-        mSharedPreferences.edit().putInt(AUTO_ADVANCE_DIRECTION, direction).apply();
     }
 
     /** @deprecated Only used for migration */
@@ -199,20 +183,16 @@ public class Preferences {
         return mSharedPreferences.getString(CONV_LIST_ICON, CONV_LIST_ICON_SENDER_IMAGE);
     }
 
+    /** @deprecated Only used for migration */
+    @Deprecated
     public boolean getConfirmDelete() {
         return mSharedPreferences.getBoolean(CONFIRM_DELETE, CONFIRM_DELETE_DEFAULT);
     }
 
-    public void setConfirmDelete(boolean set) {
-        mSharedPreferences.edit().putBoolean(CONFIRM_DELETE, set).apply();
-    }
-
+    /** @deprecated Only used for migration */
+    @Deprecated
     public boolean getConfirmSend() {
         return mSharedPreferences.getBoolean(CONFIRM_SEND, CONFIRM_SEND_DEFAULT);
-    }
-
-    public void setConfirmSend(boolean set) {
-        mSharedPreferences.edit().putBoolean(CONFIRM_SEND, set).apply();
     }
 
     /** @deprecated Only used for migration */
@@ -239,24 +219,9 @@ public class Preferences {
         return mSharedPreferences.getBoolean(REPLY_ALL, false);
     }
 
-    public int getTextZoom() {
-        return mSharedPreferences.getInt(TEXT_ZOOM, TEXT_ZOOM_DEFAULT);
-    }
-
-    public void setTextZoom(int zoom) {
-        mSharedPreferences.edit().putInt(TEXT_ZOOM, zoom).apply();
-    }
-
-    public boolean getBackgroundAttachments() {
-        return mSharedPreferences.getBoolean(BACKGROUND_ATTACHMENTS, false);
-    }
-
-    public void setBackgroundAttachments(boolean allowed) {
-        mSharedPreferences.edit().putBoolean(BACKGROUND_ATTACHMENTS, allowed).apply();
-    }
-
     /**
-     * @deprecated This has been moved to {@link com.android.mail.preferences.MailPrefs}, and is only here for migration.
+     * @deprecated This has been moved to {@link com.android.mail.preferences.MailPrefs}, and is
+     * only here for migration.
      */
     @Deprecated
     public Set<String> getWhitelistedSenderAddresses() {
@@ -276,10 +241,6 @@ public class Preferences {
             }
         }
         return result;
-    }
-
-    String packEmailSet(HashSet<String> set) {
-        return new JSONArray(set).toString();
     }
 
     /**
@@ -305,33 +266,6 @@ public class Preferences {
                 .apply();
     }
 
-    /**
-     * Gets whether the require manual sync dialog has been shown for the specified account.
-     * It should only be shown once per account.
-     */
-    public boolean getHasShownRequireManualSync(Account account) {
-        return getBoolean(account.getEmailAddress(), REQUIRE_MANUAL_SYNC_DIALOG_SHOWN, false);
-    }
-
-    /**
-     * Sets whether the require manual sync dialog has been shown for the specified account.
-     * It should only be shown once per account.
-     */
-    public void setHasShownRequireManualSync(Account account, boolean value) {
-        setBoolean(account.getEmailAddress(), REQUIRE_MANUAL_SYNC_DIALOG_SHOWN, value);
-    }
-
-
-    /**
-     * Get whether to show the manual sync dialog. This dialog is shown when the user is roaming,
-     * connected to a mobile network, the administrator has set the RequireManualSyncWhenRoaming
-     * flag to true, and the dialog has not been shown before for the supplied account.
-     */
-    public boolean shouldShowRequireManualSync(Context context, Account account) {
-        return Account.isAutomaticSyncDisabledByRoaming(context, account.mId)
-                && !getHasShownRequireManualSync(account);
-    }
-
     public void clear() {
         mSharedPreferences.edit().clear().apply();
     }
@@ -342,26 +276,5 @@ public class Preferences {
                 LogUtils.v(Logging.LOG_TAG, key + " = " + mSharedPreferences.getAll().get(key));
             }
         }
-    }
-
-    /**
-     * Utility method for setting a boolean value on a per-account preference.
-     */
-    private void setBoolean(String account, String key, Boolean value) {
-        mSharedPreferences.edit().putBoolean(makeKey(account, key), value).apply();
-    }
-
-    /**
-     * Utility method for getting a boolean value from a per-account preference.
-     */
-    private boolean getBoolean(String account, String key, boolean def) {
-        return mSharedPreferences.getBoolean(makeKey(account, key), def);
-    }
-
-    /**
-     * Utility method for creating a per account preference key.
-     */
-    private static String makeKey(String account, String key) {
-        return account != null ? account + "-" + key : key;
     }
 }

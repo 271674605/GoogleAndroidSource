@@ -12,22 +12,14 @@
 
 #include "SkInstCnt.h"
 #include "SkMatrix.h"
+#include "SkPathRef.h"
 #include "SkTDArray.h"
 #include "SkRefCnt.h"
-
-#ifdef SK_BUILD_FOR_ANDROID
-#define GEN_ID_INC              fGenerationID++
-#define GEN_ID_PTR_INC(ptr)     (ptr)->fGenerationID++
-#else
-#define GEN_ID_INC
-#define GEN_ID_PTR_INC(ptr)
-#endif
 
 class SkReader32;
 class SkWriter32;
 class SkAutoPathBoundsUpdate;
 class SkString;
-class SkPathRef;
 class SkRRect;
 
 /** \class SkPath
@@ -40,10 +32,10 @@ public:
     SK_DECLARE_INST_COUNT_ROOT(SkPath);
 
     SkPath();
-    SkPath(const SkPath&);  // Copies fGenerationID on Android.
+    SkPath(const SkPath&);
     ~SkPath();
 
-    SkPath& operator=(const SkPath&);  // Increments fGenerationID on Android.
+    SkPath& operator=(const SkPath&);
     friend  SK_API bool operator==(const SkPath&, const SkPath&);
     friend bool operator!=(const SkPath& a, const SkPath& b) {
         return !(a == b);
@@ -80,7 +72,6 @@ public:
     */
     void setFillType(FillType ft) {
         fFillType = SkToU8(ft);
-        GEN_ID_INC;
     }
 
     /** Returns true if the filltype is one of the Inverse variants */
@@ -92,8 +83,7 @@ public:
      */
     void toggleInverseFillType() {
         fFillType ^= 2;
-        GEN_ID_INC;
-     }
+    }
 
     enum Convexity {
         kUnknown_Convexity,
@@ -133,7 +123,6 @@ public:
     void setConvexity(Convexity);
 
     /**
-     *  DEPRECATED: use getConvexity()
      *  Returns true if the path is flagged as being convex. This is not a
      *  confirmed by any analysis, it is just the value set earlier.
      */
@@ -142,12 +131,12 @@ public:
     }
 
     /**
-     *  DEPRECATED: use setConvexity()
      *  Set the isConvex flag to true or false. Convex paths may draw faster if
      *  this flag is set, though setting this to true on a path that is in fact
      *  not convex can give undefined results when drawn. Paths default to
      *  isConvex == false
      */
+    SK_ATTR_DEPRECATED("use setConvexity")
     void setIsConvex(bool isConvex) {
         this->setConvexity(isConvex ? kConvex_Convexity : kConcave_Convexity);
     }
@@ -162,16 +151,18 @@ public:
      *              optimization for performance and so some paths that are in
      *              fact ovals can report false.
      */
-    bool isOval(SkRect* rect) const;
+    bool isOval(SkRect* rect) const { return fPathRef->isOval(rect); }
 
     /** Clear any lines and curves from the path, making it empty. This frees up
         internal storage associated with those segments.
+        On Android, does not change fSourcePath.
     */
     void reset();
 
     /** Similar to reset(), in that all lines and curves are removed from the
         path. However, any internal storage for those lines/curves is retained,
         making reuse of the path potentially faster.
+        On Android, does not change fSourcePath.
     */
     void rewind();
 
@@ -179,17 +170,18 @@ public:
 
         @return true if the path is empty (contains no lines or curves)
     */
-    bool isEmpty() const;
+    bool isEmpty() const {
+        SkDEBUGCODE(this->validate();)
+        return 0 == fPathRef->countVerbs();
+    }
 
     /**
      *  Returns true if all of the points in this path are finite, meaning there
      *  are no infinities and no NaNs.
      */
     bool isFinite() const {
-        if (fBoundsIsDirty) {
-            this->computeBounds();
-        }
-        return SkToBool(fIsFinite);
+        SkDEBUGCODE(this->validate();)
+        return fPathRef->isFinite();
     }
 
     /** Test a line for zero length
@@ -279,10 +271,7 @@ public:
         do not extend as far as their control points.
     */
     const SkRect& getBounds() const {
-        if (fBoundsIsDirty) {
-            this->computeBounds();
-        }
-        return fBounds;
+        return fPathRef->getBounds();
     }
 
     /** Calling this will, if the internal cache of the bounds is out of date,
@@ -457,8 +446,8 @@ public:
         @param dy3   The amount to add to the y-coordinate of the last point on
                      this contour, to specify the end point of a cubic curve
     */
-    void    rCubicTo(SkScalar x1, SkScalar y1, SkScalar x2, SkScalar y2,
-                     SkScalar x3, SkScalar y3);
+    void rCubicTo(SkScalar x1, SkScalar y1, SkScalar x2, SkScalar y2,
+                  SkScalar x3, SkScalar y3);
 
     /** Append the specified arc to the path as a new contour. If the start of
         the path is different from the path's current last point, then an
@@ -472,8 +461,8 @@ public:
                           treated mod 360.
         @param forceMoveTo If true, always begin a new contour with the arc
     */
-    void    arcTo(const SkRect& oval, SkScalar startAngle, SkScalar sweepAngle,
-                  bool forceMoveTo);
+    void arcTo(const SkRect& oval, SkScalar startAngle, SkScalar sweepAngle,
+               bool forceMoveTo);
 
     /** Append a line and arc to the current path. This is the same as the
         PostScript call "arct".
@@ -566,6 +555,25 @@ public:
         return computedDir == dir;
     }
 
+    enum PathAsRect {
+        /** The path can not draw the same as its bounds. */
+        kNone_PathAsRect,
+        /** The path draws the same as its bounds when filled. */
+        kFill_PathAsRect,
+        /** The path draws the same as its bounds when stroked or filled. */
+        kStroke_PathAsRect,
+    };
+
+    /** Returns kFill_PathAsRect or kStroke_PathAsRect if drawing the path (either filled or
+        stroked) will be equivalent to filling/stroking the path's bounding rect. If
+        either is true, and direction is not null, sets the direction of the contour. If the
+        path is not drawn equivalent to a rect, returns kNone_PathAsRect and ignores direction.
+
+        @param direction If not null, set to the contour's direction when it is drawn as a rect
+        @return the path's PathAsRect type
+     */
+    PathAsRect asRect(Direction* direction = NULL) const;
+
     /** Returns true if the path specifies a rectangle. If so, and if isClosed is
         not null, set isClosed to true if the path is closed. Also, if returning true
         and direction is not null, return the rect direction. If the path does not
@@ -596,7 +604,7 @@ public:
      *  @param dir  The direction to wind the rectangle's contour. Cannot be
      *              kUnknown_Direction.
      */
-    void    addRect(const SkRect& rect, Direction dir = kCW_Direction);
+    void addRect(const SkRect& rect, Direction dir = kCW_Direction);
 
     /**
      *  Add a closed rectangle contour to the path
@@ -655,8 +663,8 @@ public:
      *  @param dir  The direction to wind the rectangle's contour. Cannot be
      *              kUnknown_Direction.
      */
-    void    addRoundRect(const SkRect& rect, SkScalar rx, SkScalar ry,
-                         Direction dir = kCW_Direction);
+    void addRoundRect(const SkRect& rect, SkScalar rx, SkScalar ry,
+                      Direction dir = kCW_Direction);
 
     /**
      *  Add a closed round-rectangle contour to the path. Each corner receives
@@ -694,25 +702,41 @@ public:
      */
     void addPoly(const SkPoint pts[], int count, bool close);
 
+    enum AddPathMode {
+        /** Source path contours are added as new contours.
+        */
+        kAppend_AddPathMode,
+        /** Path is added by extending the last contour of the destination path
+            with the first contour of the source path. If the last contour of
+            the destination path is closed, then it will not be extended.
+            Instead, the start of source path will be extended by a straight
+            line to the end point of the destination path.
+        */
+        kExtend_AddPathMode
+    };
+
     /** Add a copy of src to the path, offset by (dx,dy)
         @param src  The path to add as a new contour
         @param dx   The amount to translate the path in X as it is added
         @param dx   The amount to translate the path in Y as it is added
     */
-    void addPath(const SkPath& src, SkScalar dx, SkScalar dy);
+    void addPath(const SkPath& src, SkScalar dx, SkScalar dy,
+                 AddPathMode mode = kAppend_AddPathMode);
 
     /** Add a copy of src to the path
     */
-    void addPath(const SkPath& src) {
+    void addPath(const SkPath& src, AddPathMode mode = kAppend_AddPathMode) {
         SkMatrix m;
         m.reset();
-        this->addPath(src, m);
+        this->addPath(src, m, mode);
     }
 
     /** Add a copy of src to the path, transformed by matrix
         @param src  The path to add as a new contour
+        @param matrix  Transform applied to src
+        @param mode  Determines how path is added
     */
-    void addPath(const SkPath& src, const SkMatrix& matrix);
+    void addPath(const SkPath& src, const SkMatrix& matrix, AddPathMode mode = kAppend_AddPathMode);
 
     /**
      *  Same as addPath(), but reverses the src input
@@ -789,7 +813,7 @@ public:
      *  set if the path contains 1 or more segments of that type.
      *  Returns 0 for an empty path (no segments).
      */
-    uint32_t getSegmentMasks() const { return fSegmentMask; }
+    uint32_t getSegmentMasks() const { return fPathRef->getSegmentMasks(); }
 
     enum Verb {
         kMove_Verb,     //!< iter.next returns 1 point
@@ -910,47 +934,55 @@ public:
     void dump() const;
 
     /**
-     *  Write the region to the buffer, and return the number of bytes written.
+     *  Write the path to the buffer, and return the number of bytes written.
      *  If buffer is NULL, it still returns the number of bytes.
      */
-    uint32_t writeToMemory(void* buffer) const;
+    size_t writeToMemory(void* buffer) const;
     /**
-     *  Initialized the region from the buffer, returning the number
-     *  of bytes actually read.
+     * Initializes the path from the buffer
+     *
+     * @param buffer Memory to read from
+     * @param length Amount of memory available in the buffer
+     * @return number of bytes read (must be a multiple of 4) or
+     *         0 if there was not enough memory available
      */
-    uint32_t readFromMemory(const void* buffer);
+    size_t readFromMemory(const void* buffer, size_t length);
+
+    /** Returns a non-zero, globally unique value corresponding to the set of verbs
+        and points in the path (but not the fill type [except on Android skbug.com/1762]).
+        Each time the path is modified, a different generation ID will be returned.
+    */
+    uint32_t getGenerationID() const;
 
 #ifdef SK_BUILD_FOR_ANDROID
-    uint32_t getGenerationID() const;
+    static const int kPathRefGenIDBitCnt = 30; // leave room for the fill type (skbug.com/1762)
     const SkPath* getSourcePath() const;
     void setSourcePath(const SkPath* path);
+#else
+    static const int kPathRefGenIDBitCnt = 32;
 #endif
 
     SkDEBUGCODE(void validate() const;)
 
 private:
     enum SerializationOffsets {
+        // 1 free bit at 29
+        kUnused1_SerializationShift = 28,    // 1 free bit
         kDirection_SerializationShift = 26, // requires 2 bits
-        kIsFinite_SerializationShift = 25,  // requires 1 bit
-        kIsOval_SerializationShift = 24,    // requires 1 bit
-        kConvexity_SerializationShift = 16, // requires 2 bits
-        kFillType_SerializationShift = 8,   // requires 2 bits
-        kSegmentMask_SerializationShift = 0 // requires 4 bits
+        kUnused2_SerializationShift = 25,    // 1 free bit
+        // 1 free bit at 24
+        kConvexity_SerializationShift = 16, // requires 8 bits
+        kFillType_SerializationShift = 8,   // requires 8 bits
+        // 8 free bits at 0
     };
 
     SkAutoTUnref<SkPathRef> fPathRef;
 
-    mutable SkRect      fBounds;
     int                 fLastMoveToIndex;
     uint8_t             fFillType;
-    uint8_t             fSegmentMask;
-    mutable uint8_t     fBoundsIsDirty;
     mutable uint8_t     fConvexity;
     mutable uint8_t     fDirection;
-    mutable SkBool8     fIsFinite;    // only meaningful if bounds are valid
-    mutable SkBool8     fIsOval;
 #ifdef SK_BUILD_FOR_ANDROID
-    uint32_t            fGenerationID;
     const SkPath*       fSourcePath;
 #endif
 
@@ -966,17 +998,9 @@ private:
      */
     void copyFields(const SkPath& that);
 
-    // called, if dirty, by getBounds()
-    void computeBounds() const;
-
     friend class Iter;
 
     friend class SkPathStroker;
-    /*  Append the first contour of path, ignoring path's initial point. If no
-        moveTo() call has been made for this contour, the first point is
-        automatically set to (0,0).
-    */
-    void pathTo(const SkPath& path);
 
     /*  Append, in reverse order, the first contour of path, ignoring path's
         last point. If no moveTo() call has been made for this contour, the
@@ -999,10 +1023,27 @@ private:
     bool isRectContour(bool allowPartial, int* currVerb, const SkPoint** pts,
                        bool* isClosed, Direction* direction) const;
 
+    /** Returns if the path can return a bound at no cost (true) or will have to
+        perform some computation (false).
+     */
+    bool hasComputedBounds() const {
+        SkDEBUGCODE(this->validate();)
+        return fPathRef->hasComputedBounds();
+    }
+
+
+    // 'rect' needs to be sorted
+    void setBounds(const SkRect& rect) {
+        SkPathRef::Editor ed(&fPathRef);
+
+        ed.setBounds(rect);
+    }
+
     friend class SkAutoPathBoundsUpdate;
     friend class SkAutoDisableOvalCheck;
     friend class SkAutoDisableDirectionCheck;
-    friend class SkBench_AddPathTest; // perf test pathTo/reversePathTo
+    friend class SkBench_AddPathTest; // perf test reversePathTo
+    friend class PathTest_Private; // unit test reversePathTo
 };
 
 #endif

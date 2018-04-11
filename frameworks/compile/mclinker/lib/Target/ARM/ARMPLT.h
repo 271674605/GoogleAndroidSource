@@ -6,11 +6,12 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_ARM_PLT_H
-#define MCLD_ARM_PLT_H
+#ifndef TARGET_ARM_ARMPLT_H
+#define TARGET_ARM_ARMPLT_H
 
 #include <mcld/Target/GOT.h>
 #include <mcld/Target/PLT.h>
+#include <mcld/Support/MemoryRegion.h>
 
 namespace {
 
@@ -19,13 +20,13 @@ const uint32_t arm_plt0[] = {
   0xe59fe004, // ldr   lr, [pc, #4]
   0xe08fe00e, // add   lr, pc, lr
   0xe5bef008, // ldr   pc, [lr, #8]!
-  0x00000000, // &GOT[0] - .
+  0x00000000  // &GOT[0] - .
 };
 
 const uint32_t arm_plt1[] = {
   0xe28fc600, // add   ip, pc, #0xNN00000
   0xe28cca00, // add   ip, ip, #0xNN000
-  0xe5bcf000, // ldr   pc, [ip, #0xNNN]!
+  0xe5bcf000  // ldr   pc, [ip, #0xNNN]!
 };
 
 } // anonymous namespace
@@ -33,7 +34,6 @@ const uint32_t arm_plt1[] = {
 namespace mcld {
 
 class ARMGOT;
-class MemoryRegion;
 
 class ARMPLT0 : public PLT::Entry<sizeof(arm_plt0)>
 {
@@ -62,9 +62,7 @@ public:
   // hasPLT1 - return if this plt section has any plt1 entry
   bool hasPLT1() const;
 
-  void reserveEntry(size_t pNum = 1) ;
-
-  ARMPLT1* consume();
+  ARMPLT1* create();
 
   ARMPLT0* getPLT0() const;
 
@@ -76,9 +74,6 @@ public:
 
 private:
   ARMGOT& m_GOT;
-
-  // Used by getEntry() for mapping a ResolveInfo instance to a PLT1 Entry.
-  iterator m_PLTEntryIterator;
 };
 
 } // namespace of mcld

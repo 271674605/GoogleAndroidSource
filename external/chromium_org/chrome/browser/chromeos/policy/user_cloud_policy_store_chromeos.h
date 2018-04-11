@@ -11,11 +11,16 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/policy/cloud/cloud_policy_validator.h"
-#include "chrome/browser/policy/cloud/user_cloud_policy_store_base.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
+#include "components/policy/core/common/cloud/cloud_policy_validator.h"
+#include "components/policy/core/common/cloud/user_cloud_policy_store_base.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace chromeos {
 class CryptohomeClient;
@@ -38,6 +43,7 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
   UserCloudPolicyStoreChromeOS(
       chromeos::CryptohomeClient* cryptohome_client,
       chromeos::SessionManagerClient* session_manager_client,
+      scoped_refptr<base::SequencedTaskRunner> background_task_runner,
       const std::string& username,
       const base::FilePath& user_policy_key_dir,
       const base::FilePath& legacy_token_cache_file,
@@ -99,10 +105,10 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
 
   // Reads the contents of |path| into |key|.
   static void LoadPolicyKey(const base::FilePath& path,
-                            std::vector<uint8>* key);
+                            std::string* key);
 
   // Callback for the key reloading.
-  void OnPolicyKeyReloaded(std::vector<uint8>* key,
+  void OnPolicyKeyReloaded(std::string* key,
                            const base::Closure& callback);
 
   // Invokes |callback| after creating |policy_key_|, if it hasn't been created
@@ -113,6 +119,9 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
   void OnGetSanitizedUsername(const base::Closure& callback,
                               chromeos::DBusMethodCallStatus call_status,
                               const std::string& sanitized_username);
+
+  scoped_ptr<UserCloudPolicyValidator> CreateValidatorForLoad(
+      scoped_ptr<enterprise_management::PolicyFetchResponse> policy);
 
   chromeos::CryptohomeClient* cryptohome_client_;
   chromeos::SessionManagerClient* session_manager_client_;
@@ -129,7 +138,7 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
 
   bool policy_key_loaded_;
   base::FilePath policy_key_path_;
-  std::vector<uint8> policy_key_;
+  std::string policy_key_;
 
   DISALLOW_COPY_AND_ASSIGN(UserCloudPolicyStoreChromeOS);
 };

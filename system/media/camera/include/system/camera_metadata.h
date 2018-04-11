@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <cutils/compiler.h>
+#include <system/camera_vendor_tags.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -152,6 +153,9 @@ typedef struct camera_metadata camera_metadata_t;
 /**
  * Functions for manipulating camera metadata
  * =============================================================================
+ *
+ * NOTE: Unless otherwise specified, functions that return type "int"
+ * return 0 on success, and non-0 value on error.
  */
 
 /**
@@ -163,6 +167,14 @@ typedef struct camera_metadata camera_metadata_t;
 ANDROID_API
 camera_metadata_t *allocate_camera_metadata(size_t entry_capacity,
         size_t data_capacity);
+
+/**
+ * Get the required alignment of a packet of camera metadata, which is the
+ * maximal alignment of the embedded camera_metadata, camera_metadata_buffer_entry,
+ * and camera_metadata_data.
+ */
+ANDROID_API
+size_t get_camera_metadata_alignment();
 
 /**
  * Allocate a new camera_metadata structure of size src_size. Copy the data,
@@ -223,6 +235,9 @@ size_t get_camera_metadata_compact_size(const camera_metadata_t *metadata);
 
 /**
  * Get the current number of entries in the metadata packet.
+ *
+ * metadata packet must be valid, which can be checked before the call with
+ * validate_camera_metadata_structure().
  */
 ANDROID_API
 size_t get_camera_metadata_entry_count(const camera_metadata_t *metadata);
@@ -318,6 +333,8 @@ size_t calculate_camera_metadata_entry_data_size(uint8_t type,
  * set_vendor_tag_query_ops() has been called first. Entries are always added to
  * the end of the structure (highest index), so after addition, a
  * previously-sorted array will be marked as unsorted.
+ *
+ * Returns 0 on success. A non-0 value is returned on error.
  */
 ANDROID_API
 int add_camera_metadata_entry(camera_metadata_t *dst,
@@ -329,21 +346,35 @@ int add_camera_metadata_entry(camera_metadata_t *dst,
  * Sort the metadata buffer for fast searching. If already marked as sorted,
  * does nothing. Adding or appending entries to the buffer will place the buffer
  * back into an unsorted state.
+ *
+ * Returns 0 on success. A non-0 value is returned on error.
  */
 ANDROID_API
 int sort_camera_metadata(camera_metadata_t *dst);
 
 /**
  * Get metadata entry at position index in the metadata buffer.
+ * Index must be less than entry count, which is returned by
+ * get_camera_metadata_entry_count().
  *
  * src and index are inputs; the passed-in entry is updated with the details of
  * the entry. The data pointer points to the real data in the buffer, and can be
  * updated as long as the data count does not change.
+ *
+ * Returns 0 on success. A non-0 value is returned on error.
  */
 ANDROID_API
 int get_camera_metadata_entry(camera_metadata_t *src,
         size_t index,
         camera_metadata_entry_t *entry);
+
+/**
+ * Get metadata entry at position index, but disallow editing the data.
+ */
+ANDROID_API
+int get_camera_metadata_ro_entry(const camera_metadata_t *src,
+        size_t index,
+        camera_metadata_ro_entry_t *entry);
 
 /**
  * Find an entry with given tag value. If not found, returns -ENOENT. Otherwise,
@@ -393,21 +424,6 @@ int update_camera_metadata_entry(camera_metadata_t *dst,
         camera_metadata_entry_t *updated_entry);
 
 /**
- * Set user pointer in buffer. This can be used for linking the metadata buffer
- * with other associated data. This user pointer is not copied with
- * copy_camera_metadata, and is unaffected by append or any other methods.
- */
-ANDROID_API
-int set_camera_metadata_user_pointer(camera_metadata_t *dst, void* user);
-
-/**
- * Retrieve user pointer in buffer. Returns NULL in user if
- * set_camera_metadata_user_pointer has not been called with this buffer.
- */
-ANDROID_API
-int get_camera_metadata_user_pointer(camera_metadata_t *dst, void** user);
-
-/**
  * Retrieve human-readable name of section the tag is in. Returns NULL if
  * no such tag is defined. Returns NULL for tags in the vendor section, unless
  * set_vendor_tag_query_ops() has been used.
@@ -436,6 +452,9 @@ int get_camera_metadata_tag_type(uint32_t tag);
  * entries with vendor-specified tags and to use the
  * get_camera_metadata_section_name, _tag_name, and _tag_type methods with
  * vendor tags. Returns 0 on success.
+ *
+ * **DEPRECATED** - Please use vendor_tag_ops defined in camera_vendor_tags.h
+ *        instead.
  */
 typedef struct vendor_tag_query_ops vendor_tag_query_ops_t;
 struct vendor_tag_query_ops {
@@ -482,6 +501,11 @@ struct vendor_tag_query_ops {
         uint32_t *tag_array);
 };
 
+/**
+ * **DEPRECATED** - This should only be used by the camera framework. Camera
+ *      metadata will transition to using vendor_tag_ops defined in
+ *      camera_vendor_tags.h instead.
+ */
 ANDROID_API
 int set_camera_metadata_vendor_tag_ops(const vendor_tag_query_ops_t *query_ops);
 

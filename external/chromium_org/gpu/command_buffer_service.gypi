@@ -15,13 +15,14 @@
     '../base/base.gyp:base',
     '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
     '../crypto/crypto.gyp:crypto',
-    '../ui/gl/gl.gyp:gl',
-    '../ui/ui.gyp:ui',
-    '../third_party/angle_dx11/src/build_angle.gyp:translator_glsl',
     '../third_party/khronos/khronos.gyp:khronos_headers',
     '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-    '../third_party/smhasher/smhasher.gyp:cityhash',
     '../third_party/re2/re2.gyp:re2',
+    '../third_party/smhasher/smhasher.gyp:cityhash',
+    '../ui/gfx/gfx.gyp:gfx',
+    '../ui/gfx/gfx.gyp:gfx_geometry',
+    '../ui/gl/gl.gyp:gl',
+    '<(angle_path)/src/build_angle.gyp:translator',
   ],
   'sources': [
     'command_buffer/service/async_pixel_transfer_delegate.cc',
@@ -75,13 +76,18 @@
     'command_buffer/service/gl_state_restorer_impl.cc',
     'command_buffer/service/gl_state_restorer_impl.h',
     'command_buffer/service/gl_utils.h',
-    'command_buffer/service/gpu_scheduler.h',
+    'command_buffer/service/gpu_control_service.cc',
+    'command_buffer/service/gpu_control_service.h',
+    'command_buffer/service/gpu_memory_buffer_manager.h',
     'command_buffer/service/gpu_scheduler.cc',
+    'command_buffer/service/gpu_scheduler.h',
     'command_buffer/service/gpu_scheduler_mock.h',
-    'command_buffer/service/gpu_switches.h',
+    'command_buffer/service/gpu_state_tracer.cc',
+    'command_buffer/service/gpu_state_tracer.h',
     'command_buffer/service/gpu_switches.cc',
-    'command_buffer/service/gpu_tracer.h',
+    'command_buffer/service/gpu_switches.h',
     'command_buffer/service/gpu_tracer.cc',
+    'command_buffer/service/gpu_tracer.h',
     'command_buffer/service/id_manager.h',
     'command_buffer/service/id_manager.cc',
     'command_buffer/service/image_manager.cc',
@@ -92,6 +98,8 @@
     'command_buffer/service/logger.h',
     'command_buffer/service/mailbox_manager.cc',
     'command_buffer/service/mailbox_manager.h',
+    'command_buffer/service/mailbox_synchronizer.cc',
+    'command_buffer/service/mailbox_synchronizer.h',
     'command_buffer/service/memory_program_cache.h',
     'command_buffer/service/memory_program_cache.cc',
     'command_buffer/service/mocks.h',
@@ -103,18 +111,16 @@
     'command_buffer/service/renderbuffer_manager.cc',
     'command_buffer/service/program_cache.h',
     'command_buffer/service/program_cache.cc',
-    'command_buffer/service/safe_shared_memory_pool.h',
-    'command_buffer/service/safe_shared_memory_pool.cc',
     'command_buffer/service/shader_manager.h',
     'command_buffer/service/shader_manager.cc',
     'command_buffer/service/shader_translator.h',
     'command_buffer/service/shader_translator.cc',
     'command_buffer/service/shader_translator_cache.h',
     'command_buffer/service/shader_translator_cache.cc',
-    'command_buffer/service/stream_texture.h',
-    'command_buffer/service/stream_texture_manager.h',
     'command_buffer/service/stream_texture_manager_in_process_android.h',
     'command_buffer/service/stream_texture_manager_in_process_android.cc',
+    'command_buffer/service/texture_definition.h',
+    'command_buffer/service/texture_definition.cc',
     'command_buffer/service/texture_manager.h',
     'command_buffer/service/texture_manager.cc',
     'command_buffer/service/transfer_buffer_manager.cc',
@@ -125,11 +131,6 @@
     'command_buffer/service/vertex_attrib_manager.cc',
   ],
   'conditions': [
-    ['toolkit_uses_gtk == 1', {
-      'dependencies': [
-        '../build/linux/system.gyp:gtk',
-      ],
-    }],
     ['ui_compositor_image_transport==1', {
       'include_dirs': [
         '../third_party/khronos',
@@ -140,6 +141,13 @@
         'command_buffer/service/async_pixel_transfer_manager_egl.cc',
         'command_buffer/service/async_pixel_transfer_manager_egl.h',
       ],
+    }],
+    ['OS=="android"', {
+      'configurations': {
+        'Release': {
+          'cflags': ['-O2']
+        }
+      }
     }]
   ],
 }

@@ -17,6 +17,9 @@
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
+ifeq ($(USE_32_BIT_KEYSTORE), true)
+LOCAL_MULTILIB := 32
+endif
 LOCAL_CFLAGS := -Wall -Wextra -Werror
 LOCAL_SRC_FILES := keystore.cpp keyblob_utils.cpp
 LOCAL_C_INCLUDES := external/openssl/include
@@ -28,13 +31,17 @@ LOCAL_SHARED_LIBRARIES := \
 	libkeystore_binder \
 	liblog \
 	libsoftkeymaster \
-	libutils
+	libutils \
+	libselinux
 LOCAL_MODULE := keystore
 LOCAL_MODULE_TAGS := optional
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
+ifeq ($(USE_32_BIT_KEYSTORE), true)
+LOCAL_MULTILIB := 32
+endif
 LOCAL_CFLAGS := -Wall -Wextra -Werror
 LOCAL_SRC_FILES := keystore_cli.cpp
 LOCAL_C_INCLUDES := external/openssl/include
@@ -46,6 +53,9 @@ include $(BUILD_EXECUTABLE)
 
 # Library for keystore clients
 include $(CLEAR_VARS)
+ifeq ($(USE_32_BIT_KEYSTORE), true)
+LOCAL_MULTILIB := 32
+endif
 LOCAL_CFLAGS := -Wall -Wextra -Werror
 LOCAL_SRC_FILES := IKeystoreService.cpp keystore_get.cpp keyblob_utils.cpp
 LOCAL_SHARED_LIBRARIES := libbinder libutils liblog

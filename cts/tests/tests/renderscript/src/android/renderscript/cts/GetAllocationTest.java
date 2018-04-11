@@ -19,7 +19,6 @@ package android.renderscript.cts;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.RSRuntimeException;
-import com.android.cts.stub.R;
 import java.util.Random;
 
 public class GetAllocationTest extends RSBaseCompute {
@@ -31,7 +30,7 @@ public class GetAllocationTest extends RSBaseCompute {
             tempArray[i] = random.nextInt();
         }
         ScriptC_get_allocation ms =
-                new ScriptC_get_allocation(mRS, mRes, R.raw.get_allocation);
+                new ScriptC_get_allocation(mRS);
 
         Allocation mTemp = Allocation.createSized(mRS, Element.I32(mRS), INPUTSIZE);
         mTemp.copyFrom(tempArray);

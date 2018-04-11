@@ -28,7 +28,6 @@ using llvm::RefCountedBase;
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Lex/ModuleLoader.h"
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringRef.h"
 
 #include "llvm/Target/TargetMachine.h"
@@ -82,7 +81,7 @@ class Slang : public clang::ModuleLoader {
   bool mInitialized;
 
   // Diagnostics Mediator (An interface for both Producer and Consumer)
-  llvm::OwningPtr<clang::Diagnostic> mDiag;
+  std::unique_ptr<clang::Diagnostic> mDiag;
 
   // Diagnostics Engine (Producer and Diagnostics Reporter)
   clang::DiagnosticsEngine *mDiagEngine;
@@ -92,40 +91,40 @@ class Slang : public clang::ModuleLoader {
   DiagnosticBuffer *mDiagClient;
 
   // The target being compiled for
-  llvm::IntrusiveRefCntPtr<clang::TargetOptions> mTargetOpts;
-  llvm::OwningPtr<clang::TargetInfo> mTarget;
-  void createTarget(std::string const &Triple, std::string const &CPU,
-                    std::vector<std::string> const &Features);
+  std::shared_ptr<clang::TargetOptions> mTargetOpts;
+  std::unique_ptr<clang::TargetInfo> mTarget;
+  void createTarget(uint32_t BitWidth);
 
 
   // File manager (for prepocessor doing the job such as header file search)
-  llvm::OwningPtr<clang::FileManager> mFileMgr;
-  llvm::OwningPtr<clang::FileSystemOptions> mFileSysOpt;
+  std::unique_ptr<clang::FileManager> mFileMgr;
+  std::unique_ptr<clang::FileSystemOptions> mFileSysOpt;
   void createFileManager();
 
 
   // Source manager (responsible for the source code handling)
-  llvm::OwningPtr<clang::SourceManager> mSourceMgr;
+  std::unique_ptr<clang::SourceManager> mSourceMgr;
   void createSourceManager();
 
 
   // Preprocessor (source code preprocessor)
-  llvm::OwningPtr<clang::Preprocessor> mPP;
+  std::unique_ptr<clang::Preprocessor> mPP;
   void createPreprocessor();
 
 
   // AST context (the context to hold long-lived AST nodes)
-  llvm::OwningPtr<clang::ASTContext> mASTContext;
+  std::unique_ptr<clang::ASTContext> mASTContext;
   void createASTContext();
 
 
   // AST consumer, responsible for code generation
-  llvm::OwningPtr<clang::ASTConsumer> mBackend;
+  std::unique_ptr<clang::ASTConsumer> mBackend;
 
 
   // File names
   std::string mInputFileName;
   std::string mOutputFileName;
+  std::string mOutput32FileName;
 
   std::string mDepOutputFileName;
   std::string mDepTargetBCFileName;
@@ -135,10 +134,10 @@ class Slang : public clang::ModuleLoader {
   OutputType mOT;
 
   // Output stream
-  llvm::OwningPtr<llvm::tool_output_file> mOS;
+  std::unique_ptr<llvm::tool_output_file> mOS;
 
   // Dependency output stream
-  llvm::OwningPtr<llvm::tool_output_file> mDOS;
+  std::unique_ptr<llvm::tool_output_file> mDOS;
 
   std::vector<std::string> mIncludePaths;
 
@@ -153,7 +152,7 @@ class Slang : public clang::ModuleLoader {
   clang::ASTContext &getASTContext() { return *mASTContext; }
 
   inline clang::TargetOptions const &getTargetOptions() const
-    { return *mTargetOpts.getPtr(); }
+    { return *mTargetOpts.get(); }
 
   virtual void initDiagnostic() {}
   virtual void initPreprocessor() {}
@@ -171,9 +170,7 @@ class Slang : public clang::ModuleLoader {
 
   Slang();
 
-  void init(const std::string &Triple, const std::string &CPU,
-            const std::vector<std::string> &Features,
-            clang::DiagnosticsEngine *DiagEngine,
+  void init(uint32_t BitWidth, clang::DiagnosticsEngine *DiagEngine,
             DiagnosticBuffer *DiagClient);
 
   virtual clang::ModuleLoadResult loadModule(
@@ -197,8 +194,18 @@ class Slang : public clang::ModuleLoader {
 
   bool setOutput(const char *OutputFile);
 
+  // For use with 64-bit compilation/reflection. This only sets the filename of
+  // the 32-bit bitcode file, and doesn't actually verify it already exists.
+  void setOutput32(const char *OutputFile) {
+    mOutput32FileName = OutputFile;
+  }
+
   std::string const &getOutputFileName() const {
     return mOutputFileName;
+  }
+
+  std::string const &getOutput32FileName() const {
+    return mOutput32FileName;
   }
 
   bool setDepOutput(const char *OutputFile);
@@ -228,7 +235,7 @@ class Slang : public clang::ModuleLoader {
 
   // Reset the slang compiler state such that it can be reused to compile
   // another file
-  virtual void reset();
+  virtual void reset(bool SuppressWarnings = false);
 
   virtual ~Slang();
 };

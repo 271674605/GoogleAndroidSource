@@ -16,12 +16,12 @@
 
 package com.android.camera.data;
 
-import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.view.View;
 
-import com.android.camera.ui.FilmStripView;
+import com.android.camera.filmstrip.ImageData;
 
 /**
  * A {@link LocalDataAdapter} which puts a {@link LocalData} fixed at the last
@@ -36,13 +36,15 @@ public class FixedLastDataAdapter extends AbstractLocalDataAdapterWrapper {
     /**
      * Constructor.
      *
-     * @param wrappedAdapter  The {@link LocalDataAdapter} to be wrapped.
-     * @param lastData       The {@link LocalData} to be placed at the last position.
+     * @param context A valid Android context.
+     * @param wrappedAdapter The {@link LocalDataAdapter} to be wrapped.
+     * @param lastData The {@link LocalData} to be placed at the last position.
      */
     public FixedLastDataAdapter(
+            Context context,
             LocalDataAdapter wrappedAdapter,
             LocalData lastData) {
-        super(wrappedAdapter);
+        super(context, wrappedAdapter);
         if (lastData == null) {
             throw new AssertionError("data is null");
         }
@@ -69,9 +71,9 @@ public class FixedLastDataAdapter extends AbstractLocalDataAdapterWrapper {
     }
 
     @Override
-    public void removeData(Context context, int dataID) {
+    public void removeData(int dataID) {
         if (dataID < mAdapter.getTotalNumber()) {
-            mAdapter.removeData(context, dataID);
+            mAdapter.removeData(dataID);
         }
     }
 
@@ -110,21 +112,39 @@ public class FixedLastDataAdapter extends AbstractLocalDataAdapterWrapper {
     }
 
     @Override
-    public View getView(Activity activity, int dataID) {
+    public View getView(Context context, View recycled, int dataID) {
         int totalNumber = mAdapter.getTotalNumber();
 
         if (dataID < totalNumber) {
-            return mAdapter.getView(activity, dataID);
+            return mAdapter.getView(context, recycled, dataID);
         } else if (dataID == totalNumber) {
-            return mLastData.getView(activity,
-                    mSuggestedWidth, mSuggestedHeight, null, null);
+            return mLastData.getView(context, recycled,
+                    mSuggestedWidth, mSuggestedHeight, 0, null, false);
         }
 
         return null;
     }
 
     @Override
-    public FilmStripView.ImageData getImageData(int dataID) {
+    public int getItemViewType(int dataId) {
+        int totalNumber = mAdapter.getTotalNumber();
+
+        if (dataId < totalNumber) {
+            return mAdapter.getItemViewType(dataId);
+        } else if (dataId == totalNumber) {
+            return mLastData.getItemViewType().ordinal();
+        }
+
+        return -1;
+   }
+
+    @Override
+    public void resizeView(Context context, int dataID, View view, int w, int h) {
+        // Do nothing.
+    }
+
+    @Override
+    public ImageData getImageData(int dataID) {
         int totalNumber = mAdapter.getTotalNumber();
 
         if (dataID < totalNumber) {
@@ -146,5 +166,23 @@ public class FixedLastDataAdapter extends AbstractLocalDataAdapterWrapper {
         }
         return false;
     }
-}
 
+    @Override
+    public AsyncTask updateMetadata(int dataId) {
+        if (dataId < mAdapter.getTotalNumber()) {
+            return mAdapter.updateMetadata(dataId);
+        } else {
+            MetadataLoader.loadMetadata(mContext, mLastData);
+        }
+        return null;
+    }
+
+    @Override
+    public boolean isMetadataUpdated(int dataId) {
+        if (dataId < mAdapter.getTotalNumber()) {
+            return mAdapter.isMetadataUpdated(dataId);
+        } else {
+            return MetadataLoader.isMetadataCached(mLastData);
+        }
+    }
+}

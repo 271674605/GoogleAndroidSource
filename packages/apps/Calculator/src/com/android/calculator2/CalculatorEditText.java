@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2014 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,211 +16,27 @@
 
 package com.android.calculator2;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.res.Resources;
-import android.text.Editable;
-import android.text.InputType;
-import android.text.TextUtils;
+import android.content.res.TypedArray;
+import android.graphics.Paint;
+import android.graphics.Paint.FontMetricsInt;
+import android.graphics.Rect;
+import android.os.Parcelable;
+import android.text.method.ScrollingMovementMethod;
+import android.text.TextPaint;
 import android.util.AttributeSet;
-import android.util.Log;
+import android.util.TypedValue;
 import android.view.ActionMode;
-import android.view.ContextMenu;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
-import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
-import android.widget.Toast;
-
-import com.google.common.collect.ImmutableMap;
+import android.widget.TextView;
 
 public class CalculatorEditText extends EditText {
 
-    private static final String LOG_TAG = "Calculator2";
-    private static final int CUT = 0;
-    private static final int COPY = 1;
-    private static final int PASTE = 2;
-    private String[] mMenuItemsStrings;
-    private ImmutableMap<String, String> sReplacementTable;
-    private String[] sOperators;
-
-    public CalculatorEditText(Context context, AttributeSet attrs) {
-        super(context, attrs);
-        setCustomSelectionActionModeCallback(new NoTextSelectionMode());
-        setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-    }
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-       if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-            // Hack to prevent keyboard and insertion handle from showing.
-           cancelLongPress();
-        }
-        return super.onTouchEvent(event);
-    }
-
-    @Override
-    public boolean performLongClick() {
-        showContextMenu();
-        return true;
-    }
-
-    @Override
-    public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
-        super.onInitializeAccessibilityEvent(event);
-        String mathText = mathParse(getText().toString());
-        // Parse the string into something more "mathematical" sounding.
-        if (!TextUtils.isEmpty(mathText)) {
-            event.getText().clear();
-            event.getText().add(mathText);
-            setContentDescription(mathText);
-        }
-    }
-
-    @Override
-    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
-        super.onInitializeAccessibilityNodeInfo(info);
-        info.setText(mathParse(getText().toString()));
-    }
-
-    @Override
-    public void onPopulateAccessibilityEvent(AccessibilityEvent event) {
-        // Do nothing.
-    }
-
-    private String mathParse(String plainText) {
-        String parsedText = plainText;
-        if (!TextUtils.isEmpty(parsedText)) {
-            // Initialize replacement table.
-            initializeReplacementTable();
-            for (String operator : sOperators) {
-                if (sReplacementTable.containsKey(operator)) {
-                    parsedText = parsedText.replace(operator, sReplacementTable.get(operator));
-                }
-            }
-        }
-        return parsedText;
-    }
-
-    private synchronized void initializeReplacementTable() {
-        if (sReplacementTable == null) {
-            ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-            Resources res = getContext().getResources();
-            sOperators = res.getStringArray(R.array.operators);
-            String[] descs = res.getStringArray(R.array.operatorDescs);
-            int pos = 0;
-            for (String key : sOperators) {
-                builder.put(key, descs[pos]);
-                pos++;
-            }
-            sReplacementTable = builder.build();
-        }
-    }
-
-    private class MenuHandler implements MenuItem.OnMenuItemClickListener {
-        public boolean onMenuItemClick(MenuItem item) {
-            return onTextContextMenuItem(item.getTitle());
-        }
-    }
-
-    public boolean onTextContextMenuItem(CharSequence title) {
-        boolean handled = false;
-        if (TextUtils.equals(title, mMenuItemsStrings[CUT])) {
-            cutContent();
-            handled = true;
-        } else if (TextUtils.equals(title,  mMenuItemsStrings[COPY])) {
-            copyContent();
-            handled = true;
-        } else if (TextUtils.equals(title,  mMenuItemsStrings[PASTE])) {
-            pasteContent();
-            handled = true;
-        }
-        return handled;
-    }
-
-    @Override
-    public void onCreateContextMenu(ContextMenu menu) {
-        MenuHandler handler = new MenuHandler();
-        if (mMenuItemsStrings == null) {
-            Resources resources = getResources();
-            mMenuItemsStrings = new String[3];
-            mMenuItemsStrings[CUT] = resources.getString(android.R.string.cut);
-            mMenuItemsStrings[COPY] = resources.getString(android.R.string.copy);
-            mMenuItemsStrings[PASTE] = resources.getString(android.R.string.paste);
-        }
-        for (int i = 0; i < mMenuItemsStrings.length; i++) {
-            menu.add(Menu.NONE, i, i, mMenuItemsStrings[i]).setOnMenuItemClickListener(handler);
-        }
-        if (getText().length() == 0) {
-            menu.getItem(CUT).setVisible(false);
-            menu.getItem(COPY).setVisible(false);
-        }
-        ClipData primaryClip = getPrimaryClip();
-        if (primaryClip == null || primaryClip.getItemCount() == 0
-                || !canPaste(primaryClip.getItemAt(0).coerceToText(getContext()))) {
-            menu.getItem(PASTE).setVisible(false);
-        }
-    }
-
-    private void setPrimaryClip(ClipData clip) {
-        ClipboardManager clipboard = (ClipboardManager) getContext().
-                getSystemService(Context.CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(clip);
-    }
-
-    private void copyContent() {
-        final Editable text = getText();
-        int textLength = text.length();
-        setSelection(0, textLength);
-        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(
-                Context.CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText(null, text));
-        Toast.makeText(getContext(), R.string.text_copied_toast, Toast.LENGTH_SHORT).show();
-        setSelection(textLength);
-    }
-
-    private void cutContent() {
-        final Editable text = getText();
-        int textLength = text.length();
-        setSelection(0, textLength);
-        setPrimaryClip(ClipData.newPlainText(null, text));
-        ((Editable) getText()).delete(0, textLength);
-        setSelection(0);
-    }
-
-    private ClipData getPrimaryClip() {
-        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(
-                Context.CLIPBOARD_SERVICE);
-        return clipboard.getPrimaryClip();
-    }
-
-    private void pasteContent() {
-        ClipData clip = getPrimaryClip();
-        if (clip != null) {
-            for (int i = 0; i < clip.getItemCount(); i++) {
-                CharSequence paste = clip.getItemAt(i).coerceToText(getContext());
-                if (canPaste(paste)) {
-                    ((Editable) getText()).insert(getSelectionEnd(), paste);
-                }
-            }
-        }
-    }
-
-    private boolean canPaste(CharSequence paste) {
-        boolean canPaste = true;
-        try {
-            Float.parseFloat(paste.toString());
-        } catch (NumberFormatException e) {
-            Log.e(LOG_TAG, "Error turning string to integer. Ignoring paste.", e);
-            canPaste = false;
-        }
-        return canPaste;
-    }
-
-    class NoTextSelectionMode implements ActionMode.Callback {
+    private final static ActionMode.Callback NO_SELECTION_ACTION_MODE_CALLBACK =
+            new ActionMode.Callback() {
         @Override
         public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
             return false;
@@ -228,17 +44,158 @@ public class CalculatorEditText extends EditText {
 
         @Override
         public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-            copyContent();
             // Prevents the selection action mode on double tap.
             return false;
         }
 
         @Override
-        public void onDestroyActionMode(ActionMode mode) {}
+        public void onDestroyActionMode(ActionMode mode) {
+        }
 
         @Override
         public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
             return false;
         }
+    };
+
+    private final float mMaximumTextSize;
+    private final float mMinimumTextSize;
+    private final float mStepTextSize;
+
+    // Temporary objects for use in layout methods.
+    private final Paint mTempPaint = new TextPaint();
+    private final Rect mTempRect = new Rect();
+
+    private int mWidthConstraint = -1;
+    private OnTextSizeChangeListener mOnTextSizeChangeListener;
+
+    public CalculatorEditText(Context context) {
+        this(context, null);
+    }
+
+    public CalculatorEditText(Context context, AttributeSet attrs) {
+        this(context, attrs, 0);
+    }
+
+    public CalculatorEditText(Context context, AttributeSet attrs, int defStyle) {
+        super(context, attrs, defStyle);
+
+        final TypedArray a = context.obtainStyledAttributes(
+                attrs, R.styleable.CalculatorEditText, defStyle, 0);
+        mMaximumTextSize = a.getDimension(
+                R.styleable.CalculatorEditText_maxTextSize, getTextSize());
+        mMinimumTextSize = a.getDimension(
+                R.styleable.CalculatorEditText_minTextSize, getTextSize());
+        mStepTextSize = a.getDimension(R.styleable.CalculatorEditText_stepTextSize,
+                (mMaximumTextSize - mMinimumTextSize) / 3);
+
+        a.recycle();
+
+        setCustomSelectionActionModeCallback(NO_SELECTION_ACTION_MODE_CALLBACK);
+        if (isFocusable()) {
+            setMovementMethod(ScrollingMovementMethod.getInstance());
+        }
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, mMaximumTextSize);
+        setMinHeight(getLineHeight() + getCompoundPaddingBottom() + getCompoundPaddingTop());
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+            // Hack to prevent keyboard and insertion handle from showing.
+            cancelLongPress();
+        }
+        return super.onTouchEvent(event);
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+
+        mWidthConstraint =
+                MeasureSpec.getSize(widthMeasureSpec) - getPaddingLeft() - getPaddingRight();
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, getVariableTextSize(getText().toString()));
+    }
+
+    @Override
+    public Parcelable onSaveInstanceState() {
+        super.onSaveInstanceState();
+
+        // EditText will freeze any text with a selection regardless of getFreezesText() ->
+        // return null to prevent any state from being preserved at the instance level.
+        return null;
+    }
+
+    @Override
+    protected void onTextChanged(CharSequence text, int start, int lengthBefore, int lengthAfter) {
+        super.onTextChanged(text, start, lengthBefore, lengthAfter);
+
+        final int textLength = text.length();
+        if (getSelectionStart() != textLength || getSelectionEnd() != textLength) {
+            // Pin the selection to the end of the current text.
+            setSelection(textLength);
+        }
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, getVariableTextSize(text.toString()));
+    }
+
+    @Override
+    public void setTextSize(int unit, float size) {
+        final float oldTextSize = getTextSize();
+        super.setTextSize(unit, size);
+
+        if (mOnTextSizeChangeListener != null && getTextSize() != oldTextSize) {
+            mOnTextSizeChangeListener.onTextSizeChanged(this, oldTextSize);
+        }
+    }
+
+    public void setOnTextSizeChangeListener(OnTextSizeChangeListener listener) {
+        mOnTextSizeChangeListener = listener;
+    }
+
+    public float getVariableTextSize(String text) {
+        if (mWidthConstraint < 0 || mMaximumTextSize <= mMinimumTextSize) {
+            // Not measured, bail early.
+            return getTextSize();
+        }
+
+        // Capture current paint state.
+        mTempPaint.set(getPaint());
+
+        // Step through increasing text sizes until the text would no longer fit.
+        float lastFitTextSize = mMinimumTextSize;
+        while (lastFitTextSize < mMaximumTextSize) {
+            final float nextSize = Math.min(lastFitTextSize + mStepTextSize, mMaximumTextSize);
+            mTempPaint.setTextSize(nextSize);
+            if (mTempPaint.measureText(text) > mWidthConstraint) {
+                break;
+            } else {
+                lastFitTextSize = nextSize;
+            }
+        }
+
+        return lastFitTextSize;
+    }
+
+    @Override
+    public int getCompoundPaddingTop() {
+        // Measure the top padding from the capital letter height of the text instead of the top,
+        // but don't remove more than the available top padding otherwise clipping may occur.
+        getPaint().getTextBounds("H", 0, 1, mTempRect);
+
+        final FontMetricsInt fontMetrics = getPaint().getFontMetricsInt();
+        final int paddingOffset = -(fontMetrics.ascent + mTempRect.height());
+        return super.getCompoundPaddingTop() - Math.min(getPaddingTop(), paddingOffset);
+    }
+
+    @Override
+    public int getCompoundPaddingBottom() {
+        // Measure the bottom padding from the baseline of the text instead of the bottom, but don't
+        // remove more than the available bottom padding otherwise clipping may occur.
+        final FontMetricsInt fontMetrics = getPaint().getFontMetricsInt();
+        return super.getCompoundPaddingBottom() - Math.min(getPaddingBottom(), fontMetrics.descent);
+    }
+
+    public interface OnTextSizeChangeListener {
+        void onTextSizeChanged(TextView textView, float oldSize);
     }
 }

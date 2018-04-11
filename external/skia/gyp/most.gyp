@@ -4,6 +4,9 @@
 # - debugger: this requires QT to build
 #
 {
+  'variables': {
+    'skia_skip_gui%': 0,
+  },
   'targets': [
     {
       'target_name': 'most',
@@ -19,18 +22,26 @@
         'tools.gyp:tools',
         'pathops_unittest.gyp:*',
 #       'pdfviewer.gyp:pdfviewer',
+        'dm.gyp:dm',
       ],
       'conditions': [
         ['skia_os == "android"', {
           'dependencies': [ 'android_system.gyp:SampleApp_APK' ],
         }],
+        ['skia_os == "ios"', {
+          'dependencies!': [ 'SampleApp.gyp:SampleApp' ],
+        }],
+        ['skia_os == "mac" or skia_os == "linux"', {
+          'dependencies': [ 'nanomsg.gyp:*' ],
+        }],
+        [ 'skia_skip_gui',
+          {
+            'dependencies!': [
+              'SampleApp.gyp:SampleApp',
+            ]
+          }
+        ]
       ],
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

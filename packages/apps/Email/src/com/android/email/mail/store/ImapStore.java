@@ -39,6 +39,7 @@ import com.android.emailcommon.mail.Folder;
 import com.android.emailcommon.mail.Message;
 import com.android.emailcommon.mail.MessagingException;
 import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.provider.Credential;
 import com.android.emailcommon.provider.HostAuth;
 import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.service.EmailServiceProxy;
@@ -86,6 +87,8 @@ public class ImapStore extends Store {
     @VisibleForTesting String mPathPrefix;
     @VisibleForTesting String mPathSeparator;
 
+    private boolean mUseOAuth;
+
     private final ConcurrentLinkedQueue<ImapConnection> mConnectionPool =
             new ConcurrentLinkedQueue<ImapConnection>();
 
@@ -111,14 +114,23 @@ public class ImapStore extends Store {
         mTransport = new MailTransport(context, "IMAP", recvAuth);
 
         String[] userInfo = recvAuth.getLogin();
-        if (userInfo != null) {
-            mUsername = userInfo[0];
-            mPassword = userInfo[1];
-        } else {
-            mUsername = null;
-            mPassword = null;
-        }
+        mUsername = userInfo[0];
+        mPassword = userInfo[1];
+        final Credential cred = recvAuth.getCredential(context);
+        mUseOAuth = (cred != null);
         mPathPrefix = recvAuth.mDomain;
+    }
+
+    boolean getUseOAuth() {
+        return mUseOAuth;
+    }
+
+    String getUsername() {
+        return mUsername;
+    }
+
+    String getPassword() {
+        return mPassword;
     }
 
     @VisibleForTesting
@@ -241,7 +253,7 @@ public class ImapStore extends Store {
         networkOperator = p.matcher(networkOperator).replaceAll("");
 
         // "name" "com.android.email"
-        StringBuffer sb = new StringBuffer("\"name\" \"");
+        StringBuilder sb = new StringBuilder("\"name\" \"");
         sb.append(packageName);
         sb.append("\"");
 
@@ -306,8 +318,9 @@ public class ImapStore extends Store {
             final Mailbox mailbox = folder.mMailbox;
             int delimiterIdx = mailbox.mServerId.lastIndexOf(mailbox.mDelimiter);
             long parentKey = Mailbox.NO_MAILBOX;
+            String parentPath = null;
             if (delimiterIdx != -1) {
-                String parentPath = path.substring(0, delimiterIdx);
+                parentPath = path.substring(0, delimiterIdx);
                 final ImapFolder parentFolder = mailboxes.get(parentPath);
                 final Mailbox parentMailbox = (parentFolder == null) ? null : parentFolder.mMailbox;
                 if (parentMailbox != null) {
@@ -317,6 +330,7 @@ public class ImapStore extends Store {
                 }
             }
             mailbox.mParentKey = parentKey;
+            mailbox.mParentServerId = parentPath;
         }
     }
 
@@ -333,17 +347,21 @@ public class ImapStore extends Store {
      */
     private ImapFolder addMailbox(Context context, long accountId, String mailboxPath,
             char delimiter, boolean selectable, Mailbox mailbox) {
-        ImapFolder folder = (ImapFolder) getFolder(mailboxPath);
+        // TODO: pass in the mailbox type, or do a proper lookup here
+        final int mailboxType;
         if (mailbox == null) {
+            mailboxType = LegacyConversions.inferMailboxTypeFromName(context, mailboxPath);
             mailbox = Mailbox.getMailboxForPath(context, accountId, mailboxPath);
+        } else {
+            mailboxType = mailbox.mType;
         }
+        final ImapFolder folder = (ImapFolder) getFolder(mailboxPath);
         if (mailbox.isSaved()) {
             // existing mailbox
             // mailbox retrieved from database; save hash _before_ updating fields
             folder.mHash = mailbox.getHashes();
         }
-        updateMailbox(mailbox, accountId, mailboxPath, delimiter, selectable,
-                LegacyConversions.inferMailboxTypeFromName(context, mailboxPath));
+        updateMailbox(mailbox, accountId, mailboxPath, delimiter, selectable, mailboxType);
         if (folder.mHash == null) {
             // new mailbox
             // save hash after updating. allows tracking changes if the mailbox is saved
@@ -372,7 +390,7 @@ public class ImapStore extends Store {
         // using it.
         ImapConnection connection = getConnection();
         try {
-            HashMap<String, ImapFolder> mailboxes = new HashMap<String, ImapFolder>();
+            final HashMap<String, ImapFolder> mailboxes = new HashMap<String, ImapFolder>();
             // Establish a connection to the IMAP server; if necessary
             // This ensures a valid prefix if the prefix is automatically set by the server
             connection.executeSimpleCommand(ImapConstants.NOOP);
@@ -415,10 +433,10 @@ public class ImapStore extends Store {
 
             createHierarchy(mailboxes);
             saveMailboxList(mContext, mailboxes);
-            return mailboxes.values().toArray(new Folder[] {});
+            return mailboxes.values().toArray(new Folder[mailboxes.size()]);
         } catch (IOException ioe) {
             connection.close();
-            throw new MessagingException("Unable to get folder list.", ioe);
+            throw new MessagingException("Unable to get folder list", ioe);
         } catch (AuthenticationFailedException afe) {
             // We do NOT want this connection pooled, or we will continue to send NOOP and SELECT
             // commands to the server
@@ -427,6 +445,8 @@ public class ImapStore extends Store {
             throw afe;
         } finally {
             if (connection != null) {
+                // We keep our connection out of the pool as long as we are using it, then
+                // put it back into the pool so it can be reused.
                 poolConnection(connection);
             }
         }
@@ -436,7 +456,10 @@ public class ImapStore extends Store {
     public Bundle checkSettings() throws MessagingException {
         int result = MessagingException.NO_ERROR;
         Bundle bundle = new Bundle();
-        ImapConnection connection = new ImapConnection(this, mUsername, mPassword);
+        // TODO: why doesn't this use getConnection()? I guess this is only done during setup,
+        // so there's need to look for a pooled connection?
+        // But then why doesn't it use poolConnection() after it's done?
+        ImapConnection connection = new ImapConnection(this);
         try {
             connection.open();
             connection.close();
@@ -495,10 +518,13 @@ public class ImapStore extends Store {
      * Gets a connection if one is available from the pool, or creates a new one if not.
      */
     ImapConnection getConnection() {
-        ImapConnection connection = null;
+        // TODO Why would we ever have (or need to have) more than one active connection?
+        // TODO We set new username/password each time, but we don't actually close the transport
+        // when we do this. So if that information has changed, this connection will fail.
+        ImapConnection connection;
         while ((connection = mConnectionPool.poll()) != null) {
             try {
-                connection.setStore(this, mUsername, mPassword);
+                connection.setStore(this);
                 connection.executeSimpleCommand(ImapConstants.NOOP);
                 break;
             } catch (MessagingException e) {
@@ -507,10 +533,10 @@ public class ImapStore extends Store {
                 // Fall through
             }
             connection.close();
-            connection = null;
         }
+
         if (connection == null) {
-            connection = new ImapConnection(this, mUsername, mPassword);
+            connection = new ImapConnection(this);
         }
         return connection;
     }
@@ -604,24 +630,28 @@ public class ImapStore extends Store {
     static class ImapException extends MessagingException {
         private static final long serialVersionUID = 1L;
 
-        String mAlertText;
+        private final String mAlertText;
+        private final String mResponseCode;
 
-        public ImapException(String message, String alertText, Throwable throwable) {
-            super(message, throwable);
-            mAlertText = alertText;
-        }
-
-        public ImapException(String message, String alertText) {
+        public ImapException(String message, String alertText, String responseCode) {
             super(message);
             mAlertText = alertText;
+            mResponseCode = responseCode;
         }
 
         public String getAlertText() {
             return mAlertText;
         }
 
-        public void setAlertText(String alertText) {
-            mAlertText = alertText;
+        public String getResponseCode() {
+            return mResponseCode;
+        }
+    }
+
+    public void closeConnections() {
+        ImapConnection connection;
+        while ((connection = mConnectionPool.poll()) != null) {
+            connection.close();
         }
     }
 }

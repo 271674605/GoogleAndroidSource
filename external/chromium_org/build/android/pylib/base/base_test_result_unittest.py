@@ -6,9 +6,9 @@
 
 import unittest
 
-from base_test_result import BaseTestResult
-from base_test_result import TestRunResults
-from base_test_result import ResultType
+from pylib.base.base_test_result import BaseTestResult
+from pylib.base.base_test_result import TestRunResults
+from pylib.base.base_test_result import ResultType
 
 
 class TestTestRunResults(unittest.TestCase):
@@ -61,14 +61,16 @@ class TestTestRunResults(unittest.TestCase):
                    'CRASH: 1       TIMEOUT: 0     UNKNOWN: 1     ')
     self.assertEqual(self.tr.GetShortForm(), short_print)
 
-  def testGetLongForm(self):
-    long_print = ('ALL (5 tests)\n'
-                  'PASS (2 tests)\n'
-                  'FAIL (1 tests): [f1]\n'
-                  'CRASH (1 tests): [c1]\n'
-                  'TIMEOUT (0 tests): []\n'
-                  'UNKNOWN (1 tests): [u1]')
-    self.assertEqual(self.tr.GetLongForm(), long_print)
+  def testGetGtestForm(self):
+    gtest_print = ('[==========] 5 tests ran.\n'
+                   '[  PASSED  ] 2 tests.\n'
+                   '[  FAILED  ] 3 tests, listed below:\n'
+                   '[  FAILED  ] f1\n'
+                   '[  FAILED  ] c1 (CRASHED)\n'
+                   '[  FAILED  ] u1 (UNKNOWN)\n'
+                   '\n'
+                   '3 FAILED TESTS')
+    self.assertEqual(gtest_print, self.tr.GetGtestForm())
 
   def testRunPassed(self):
     self.assertFalse(self.tr.DidRunPass())

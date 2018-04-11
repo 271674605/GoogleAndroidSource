@@ -16,13 +16,10 @@
 
 package com.android.systemui;
 
-import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
-import android.os.Handler;
 import android.util.Slog;
-import android.view.animation.DecelerateInterpolator;
 
 public class DessertCase extends Activity {
     DessertCaseView mView;
@@ -36,7 +33,8 @@ public class DessertCase extends Activity {
         if (pm.getComponentEnabledSetting(cn) != PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
             Slog.v("DessertCase", "ACHIEVEMENT UNLOCKED");
             pm.setComponentEnabledSetting(cn,
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, 0);
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
         }
 
         mView = new DessertCaseView(this);

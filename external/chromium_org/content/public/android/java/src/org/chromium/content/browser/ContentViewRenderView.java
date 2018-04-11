@@ -1,54 +1,78 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser;
 
 import android.content.Context;
-import android.os.Build;
+import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.view.Surface;
-import android.view.SurfaceView;
 import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.widget.FrameLayout;
 
+import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.ui.base.WindowAndroid;
 
 /***
  * This view is used by a ContentView to render its content.
- * Call {@link #setCurrentContentView(ContentView)} with the contentView that should be displayed.
- * Note that only one ContentView can be shown at a time.
+ * Call {@link #setCurrentContentViewCore(ContentViewCore)} with the contentViewCore that should be
+ * managing the view.
+ * Note that only one ContentViewCore can be shown at a time.
  */
 @JNINamespace("content")
 public class ContentViewRenderView extends FrameLayout {
-
     // The native side of this object.
-    private int mNativeContentViewRenderView = 0;
-    private final SurfaceHolder.Callback mSurfaceCallback;
+    private long mNativeContentViewRenderView;
+    private SurfaceHolder.Callback mSurfaceCallback;
 
-    private SurfaceView mSurfaceView;
-    private VSyncAdapter mVSyncAdapter;
+    private final SurfaceView mSurfaceView;
+    protected ContentViewCore mContentViewCore;
 
-    private ContentView mCurrentContentView;
+    private ContentReadbackHandler mContentReadbackHandler;
 
     /**
-     * Constructs a new ContentViewRenderView that should be can to a view hierarchy.
-     * Native code should add/remove the layers to be rendered through the ContentViewLayerRenderer.
+     * Constructs a new ContentViewRenderView.
+     * This should be called and the {@link ContentViewRenderView} should be added to the view
+     * hierarchy before the first draw to avoid a black flash that is seen every time a
+     * {@link SurfaceView} is added.
      * @param context The context used to create this.
      */
     public ContentViewRenderView(Context context) {
         super(context);
 
-        mNativeContentViewRenderView = nativeInit();
-        assert mNativeContentViewRenderView != 0;
-
         mSurfaceView = createSurfaceView(getContext());
+        mSurfaceView.setZOrderMediaOverlay(true);
+
+        setSurfaceViewBackgroundColor(Color.WHITE);
+        addView(mSurfaceView,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+        mSurfaceView.setVisibility(GONE);
+    }
+
+    /**
+     * Initialization that requires native libraries should be done here.
+     * Native code should add/remove the layers to be rendered through the ContentViewLayerRenderer.
+     * @param rootWindow The {@link WindowAndroid} this render view should be linked to.
+     */
+    public void onNativeLibraryLoaded(WindowAndroid rootWindow) {
+        assert !mSurfaceView.getHolder().getSurface().isValid() :
+                "Surface created before native library loaded.";
+        assert rootWindow != null;
+        mNativeContentViewRenderView = nativeInit(rootWindow.getNativePointer());
+        assert mNativeContentViewRenderView != 0;
         mSurfaceCallback = new SurfaceHolder.Callback() {
             @Override
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
                 assert mNativeContentViewRenderView != 0;
-                nativeSurfaceSetSize(mNativeContentViewRenderView, width, height);
-                if (mCurrentContentView != null) {
-                    mCurrentContentView.getContentViewCore().onPhysicalBackingSizeChanged(
+                nativeSurfaceChanged(mNativeContentViewRenderView,
+                        format, width, height, holder.getSurface());
+                if (mContentViewCore != null) {
+                    mContentViewCore.onPhysicalBackingSizeChanged(
                             width, height);
                 }
             }
@@ -56,7 +80,8 @@ public class ContentViewRenderView extends FrameLayout {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
                 assert mNativeContentViewRenderView != 0;
-                nativeSurfaceCreated(mNativeContentViewRenderView, holder.getSurface());
+                nativeSurfaceCreated(mNativeContentViewRenderView);
+
                 onReadyToRender();
             }
 
@@ -67,60 +92,33 @@ public class ContentViewRenderView extends FrameLayout {
             }
         };
         mSurfaceView.getHolder().addCallback(mSurfaceCallback);
+        mSurfaceView.setVisibility(VISIBLE);
 
-        mVSyncAdapter = new VSyncAdapter(getContext());
-        addView(mSurfaceView,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT));
+        mContentReadbackHandler = new ContentReadbackHandler() {
+            @Override
+            protected boolean readyForReadback() {
+                return mNativeContentViewRenderView != 0 && mContentViewCore != null;
+            }
+        };
+        mContentReadbackHandler.initNativeContentReadbackHandler();
     }
 
-    private static class VSyncAdapter implements VSyncManager.Provider, VSyncMonitor.Listener {
-        private final VSyncMonitor mVSyncMonitor;
-        private boolean mVSyncNotificationEnabled;
-        private VSyncManager.Listener mVSyncListener;
+    /**
+     * @return The content readback handler.
+     */
+    public ContentReadbackHandler getContentReadbackHandler() {
+        return mContentReadbackHandler;
+    }
 
-        // The VSyncMonitor gives the timebase for the actual vsync, but we don't want render until
-        // we have had a chance for input events to propagate to the compositor thread. This takes
-        // 3 ms typically, so we adjust the vsync timestamps forward by a bit to give input events a
-        // chance to arrive.
-        private static final long INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS = 3200;
-
-        VSyncAdapter(Context context) {
-            mVSyncMonitor = new VSyncMonitor(context, this);
-        }
-
-        @Override
-        public void onVSync(VSyncMonitor monitor, long vsyncTimeMicros) {
-            if (mVSyncListener == null) return;
-            if (mVSyncNotificationEnabled) {
-                mVSyncListener.onVSync(vsyncTimeMicros);
-                mVSyncMonitor.requestUpdate();
-            } else {
-                // Compensate for input event lag. Input events are delivered immediately on
-                // pre-JB releases, so this adjustment is only done for later versions.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                    vsyncTimeMicros += INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS;
-                }
-                mVSyncListener.updateVSync(vsyncTimeMicros,
-                        mVSyncMonitor.getVSyncPeriodInMicroseconds());
-            }
-        }
-
-        @Override
-        public void registerVSyncListener(VSyncManager.Listener listener) {
-            if (!mVSyncNotificationEnabled) mVSyncMonitor.requestUpdate();
-            mVSyncNotificationEnabled = true;
-        }
-
-        @Override
-        public void unregisterVSyncListener(VSyncManager.Listener listener) {
-            mVSyncNotificationEnabled = false;
-        }
-
-        void setVSyncListener(VSyncManager.Listener listener) {
-            mVSyncListener = listener;
-            if (mVSyncListener != null) mVSyncMonitor.requestUpdate();
+    /**
+     * Sets the background color of the surface view.  This method is necessary because the
+     * background color of ContentViewRenderView itself is covered by the background of
+     * SurfaceView.
+     * @param color The color of the background.
+     */
+    public void setSurfaceViewBackgroundColor(int color) {
+        if (mSurfaceView != null) {
+            mSurfaceView.setBackgroundColor(color);
         }
     }
 
@@ -129,23 +127,24 @@ public class ContentViewRenderView extends FrameLayout {
      * native resource can be freed.
      */
     public void destroy() {
+        mContentReadbackHandler.destroy();
+        mContentReadbackHandler = null;
         mSurfaceView.getHolder().removeCallback(mSurfaceCallback);
         nativeDestroy(mNativeContentViewRenderView);
         mNativeContentViewRenderView = 0;
     }
 
-    /**
-     * Makes the passed ContentView the one displayed by this ContentViewRenderView.
-     */
-    public void setCurrentContentView(ContentView contentView) {
+    public void setCurrentContentViewCore(ContentViewCore contentViewCore) {
         assert mNativeContentViewRenderView != 0;
-        ContentViewCore contentViewCore = contentView.getContentViewCore();
-        nativeSetCurrentContentView(mNativeContentViewRenderView,
-                contentViewCore.getNativeContentViewCore());
+        mContentViewCore = contentViewCore;
 
-        mCurrentContentView = contentView;
-        contentViewCore.onPhysicalBackingSizeChanged(getWidth(), getHeight());
-        mVSyncAdapter.setVSyncListener(contentViewCore.getVSyncListener(mVSyncAdapter));
+        if (mContentViewCore != null) {
+            mContentViewCore.onPhysicalBackingSizeChanged(getWidth(), getHeight());
+            nativeSetCurrentContentViewCore(mNativeContentViewRenderView,
+                                            mContentViewCore.getNativeContentViewCore());
+        } else {
+            nativeSetCurrentContentViewCore(mNativeContentViewRenderView, 0);
+        }
     }
 
     /**
@@ -172,12 +171,49 @@ public class ContentViewRenderView extends FrameLayout {
         return mSurfaceView.getHolder().getSurface() != null;
     }
 
-    private static native int nativeInit();
-    private native void nativeDestroy(int nativeContentViewRenderView);
-    private native void nativeSetCurrentContentView(int nativeContentViewRenderView,
-            int nativeContentView);
-    private native void nativeSurfaceCreated(int nativeContentViewRenderView, Surface surface);
-    private native void nativeSurfaceDestroyed(int nativeContentViewRenderView);
-    private native void nativeSurfaceSetSize(int nativeContentViewRenderView,
-            int width, int height);
+    /**
+     * Enter or leave overlay video mode.
+     * @param enabled Whether overlay mode is enabled.
+     */
+    public void setOverlayVideoMode(boolean enabled) {
+        int format = enabled ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE;
+        mSurfaceView.getHolder().setFormat(format);
+        nativeSetOverlayVideoMode(mNativeContentViewRenderView, enabled);
+    }
+
+    /**
+     * Set the native layer tree helper for this {@link ContentViewRenderView}.
+     * @param layerTreeBuildHelperNativePtr Native pointer to the layer tree build helper.
+     */
+    public void setLayerTreeBuildHelper(long layerTreeBuildHelperNativePtr) {
+        nativeSetLayerTreeBuildHelper(mNativeContentViewRenderView, layerTreeBuildHelperNativePtr);
+    }
+
+    @CalledByNative
+    protected void onCompositorLayout() {
+    }
+
+    @CalledByNative
+    private void onSwapBuffersCompleted() {
+        if (mSurfaceView.getBackground() != null) {
+            post(new Runnable() {
+                @Override public void run() {
+                    mSurfaceView.setBackgroundResource(0);
+                }
+            });
+        }
+    }
+
+    private native long nativeInit(long rootWindowNativePointer);
+    private native void nativeDestroy(long nativeContentViewRenderView);
+    private native void nativeSetCurrentContentViewCore(long nativeContentViewRenderView,
+            long nativeContentViewCore);
+    private native void nativeSetLayerTreeBuildHelper(long nativeContentViewRenderView,
+            long buildHelperNativePtr);
+    private native void nativeSurfaceCreated(long nativeContentViewRenderView);
+    private native void nativeSurfaceDestroyed(long nativeContentViewRenderView);
+    private native void nativeSurfaceChanged(long nativeContentViewRenderView,
+            int format, int width, int height, Surface surface);
+    private native void nativeSetOverlayVideoMode(long nativeContentViewRenderView,
+            boolean enabled);
 }

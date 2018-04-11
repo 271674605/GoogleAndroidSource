@@ -28,15 +28,24 @@ public interface VideoController extends OnShutterButtonListener {
 
     public boolean isVideoCaptureIntent();
     public boolean isInReviewMode();
-    public int onZoomChanged(int index);
+    public void onZoomChanged(float ratio);
 
     public void onSingleTapUp(View view, int x, int y);
 
     public void stopPreview();
 
     public void updateCameraOrientation();
+    public void updatePreviewAspectRatio(float aspectRatio);
 
     // Callbacks for camera preview UI events.
     public void onPreviewUIReady();
     public void onPreviewUIDestroyed();
+
+    /********************** Capture animation **********************/
+
+    /**
+     * Starts the pre-capture animation.
+     */
+    public void startPreCaptureAnimation();
+
 }

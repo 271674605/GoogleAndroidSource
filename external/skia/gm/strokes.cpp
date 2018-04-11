@@ -18,7 +18,7 @@
 static const SkScalar SW = SkIntToScalar(W);
 static const SkScalar SH = SkIntToScalar(H);
 
-static void rnd_rect(SkRect* r, SkPaint* paint, SkRandom& rand) {
+static void rnd_rect(SkRect* r, SkPaint* paint, SkLCGRandom& rand) {
     SkScalar x = rand.nextUScalar1() * W;
     SkScalar y = rand.nextUScalar1() * H;
     SkScalar w = rand.nextUScalar1() * (W >> 2);
@@ -39,6 +39,10 @@ public:
     StrokesGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("strokes_round");
     }
@@ -61,7 +65,7 @@ protected:
                                               , SW - SkIntToScalar(2), SH - SkIntToScalar(2)
                                               ));
 
-            SkRandom rand;
+            SkLCGRandom rand;
             for (int i = 0; i < N; i++) {
                 SkRect r;
                 rnd_rect(&r, &paint, rand);
@@ -81,7 +85,7 @@ class Strokes2GM : public skiagm::GM {
     SkPath fPath;
 public:
     Strokes2GM() {
-        SkRandom rand;
+        SkLCGRandom rand;
         fPath.moveTo(0, 0);
         for (int i = 0; i < 13; i++) {
             SkScalar x = rand.nextUScalar1() * (W >> 1);
@@ -91,6 +95,10 @@ public:
     }
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("strokes_poly");
     }
@@ -121,7 +129,7 @@ protected:
                                               SW - SkIntToScalar(2),
                                               SH - SkIntToScalar(2)));
 
-            SkRandom rand;
+            SkLCGRandom rand;
             for (int i = 0; i < N/2; i++) {
                 SkRect r;
                 rnd_rect(&r, &paint, rand);
@@ -188,6 +196,10 @@ public:
     Strokes3GM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("strokes3");
     }

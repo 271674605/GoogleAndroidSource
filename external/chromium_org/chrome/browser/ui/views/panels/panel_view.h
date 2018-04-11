@@ -7,8 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/panels/native_panel.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/views/focus/widget_focus_manager.h"
+#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -16,6 +15,7 @@
 #include "ui/base/win/hwnd_subclass.h"
 #endif
 
+class AutoKeepAlive;
 class Panel;
 class PanelBoundsAnimation;
 class PanelFrameView;
@@ -28,11 +28,10 @@ class WebView;
 class PanelView : public NativePanel,
                   public views::WidgetObserver,
                   public views::WidgetDelegateView,
-                  public views::WidgetFocusChangeListener,
 #if defined(OS_WIN)
                   public ui::HWNDMessageFilter,
 #endif
-                  public ui::AnimationDelegate {
+                  public gfx::AnimationDelegate {
  public:
   // The size of inside area used for mouse resizing.
   static const int kResizeInsideBoundsSize = 5;
@@ -65,7 +64,6 @@ class PanelView : public NativePanel,
   virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
   virtual bool IsPanelAlwaysOnTop() const OVERRIDE;
   virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
-  virtual void EnableResizeByMouse(bool enable) OVERRIDE;
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
   virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) OVERRIDE;
   virtual void PanelExpansionStateChanging(
@@ -85,8 +83,8 @@ class PanelView : public NativePanel,
   virtual NativePanelTesting* CreateNativePanelTesting() OVERRIDE;
 
   // Overridden from views::View:
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() const OVERRIDE;
+  virtual gfx::Size GetMaximumSize() const OVERRIDE;
 
   // Return true if the mouse event is handled.
   // |mouse_location| is in screen coordinate system.
@@ -132,7 +130,7 @@ class PanelView : public NativePanel,
   virtual bool CanMaximize() const OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
   virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
@@ -151,10 +149,6 @@ class PanelView : public NativePanel,
   virtual void OnWidgetBoundsChanged(views::Widget* widget,
                                      const gfx::Rect& new_bounds) OVERRIDE;
 
-  // Overridden from views::WidgetFocusChangeListener:
-  virtual void OnNativeFocusChange(gfx::NativeView focused_before,
-                                   gfx::NativeView focused_now) OVERRIDE;
-
   // Overridden from ui::HWNDMessageFilter:
 #if defined(OS_WIN)
   virtual bool FilterMessage(HWND hwnd,
@@ -165,15 +159,14 @@ class PanelView : public NativePanel,
 #endif
 
   // Overridden from AnimationDelegate:
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
 
   void UpdateLoadingAnimations(bool should_animate);
   void UpdateWindowTitle();
   void UpdateWindowIcon();
   void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
   bool EndDragging(bool cancelled);
-  void OnViewWasResized();
 
   // Sets the bounds of the underlying window to |new_bounds|. Note that this
   // might update the window style to work around the minimum overlapped
@@ -252,6 +245,8 @@ class PanelView : public NativePanel,
   // The last view that had focus in the panel. This is saved so that focus can
   // be restored properly when a drag ends.
   views::View* old_focused_view_;
+
+  scoped_ptr<AutoKeepAlive> keep_alive_;
 
 #if defined(OS_WIN)
   // Used to provide custom taskbar thumbnail for Windows 7 and later.

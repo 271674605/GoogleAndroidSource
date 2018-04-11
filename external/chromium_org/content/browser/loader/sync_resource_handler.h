@@ -20,6 +20,7 @@ class URLRequest;
 }
 
 namespace content {
+class ResourceContext;
 class ResourceDispatcherHostImpl;
 class ResourceMessageFilter;
 
@@ -27,36 +28,27 @@ class ResourceMessageFilter;
 // events from the resource dispatcher host.
 class SyncResourceHandler : public ResourceHandler {
  public:
-  SyncResourceHandler(ResourceMessageFilter* filter,
-                      net::URLRequest* request,
+  SyncResourceHandler(net::URLRequest* request,
                       IPC::Message* result_message,
                       ResourceDispatcherHostImpl* resource_dispatcher_host);
   virtual ~SyncResourceHandler();
 
-  virtual bool OnUploadProgress(int request_id,
-                                uint64 position,
-                                uint64 size) OVERRIDE;
-  virtual bool OnRequestRedirected(int request_id,
-                                   const GURL& new_url,
+  virtual bool OnUploadProgress(uint64 position, uint64 size) OVERRIDE;
+  virtual bool OnRequestRedirected(const GURL& new_url,
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
-  virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response,
+  virtual bool OnResponseStarted(ResourceResponse* response,
                                  bool* defer) OVERRIDE;
-  virtual bool OnWillStart(int request_id,
-                           const GURL& url,
-                           bool* defer) OVERRIDE;
-  virtual bool OnWillRead(int request_id,
-                          net::IOBuffer** buf,
+  virtual bool OnWillStart(const GURL& url, bool* defer) OVERRIDE;
+  virtual bool OnBeforeNetworkStart(const GURL& url, bool* defer) OVERRIDE;
+  virtual bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                           int* buf_size,
                           int min_size) OVERRIDE;
-  virtual bool OnReadCompleted(int request_id,
-                               int bytes_read,
-                               bool* defer) OVERRIDE;
-  virtual bool OnResponseCompleted(int request_id,
-                                   const net::URLRequestStatus& status,
-                                   const std::string& security_info) OVERRIDE;
-  virtual void OnDataDownloaded(int request_id, int bytes_downloaded) OVERRIDE;
+  virtual bool OnReadCompleted(int bytes_read, bool* defer) OVERRIDE;
+  virtual void OnResponseCompleted(const net::URLRequestStatus& status,
+                                   const std::string& security_info,
+                                   bool* defer) OVERRIDE;
+  virtual void OnDataDownloaded(int bytes_downloaded) OVERRIDE;
 
  private:
   enum { kReadBufSize = 3840 };
@@ -64,10 +56,9 @@ class SyncResourceHandler : public ResourceHandler {
   scoped_refptr<net::IOBuffer> read_buffer_;
 
   SyncLoadResult result_;
-  scoped_refptr<ResourceMessageFilter> filter_;
-  net::URLRequest* request_;
   IPC::Message* result_message_;
   ResourceDispatcherHostImpl* rdh_;
+  int64 total_transfer_size_;
 };
 
 }  // namespace content

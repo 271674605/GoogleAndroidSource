@@ -39,6 +39,7 @@
 #include <google/protobuf/compiler/javanano/javanano_params.h>
 #include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/descriptor.h>
+#include <google/protobuf/io/printer.h>
 
 namespace google {
 namespace protobuf {
@@ -111,6 +112,9 @@ string FieldConstantName(const FieldDescriptor *field);
 
 string FieldDefaultConstantName(const FieldDescriptor *field);
 
+// Print the field's proto-syntax definition as a comment.
+void PrintFieldComment(io::Printer* printer, const FieldDescriptor* field);
+
 enum JavaType {
   JAVATYPE_INT,
   JAVATYPE_LONG,
@@ -129,14 +133,53 @@ inline JavaType GetJavaType(const FieldDescriptor* field) {
   return GetJavaType(field->type());
 }
 
+string PrimitiveTypeName(JavaType type);
+
 // Get the fully-qualified class name for a boxed primitive type, e.g.
 // "java.lang.Integer" for JAVATYPE_INT.  Returns NULL for enum and message
 // types.
-const char* BoxedPrimitiveTypeName(JavaType type);
+string BoxedPrimitiveTypeName(JavaType type);
 
 string EmptyArrayName(const Params& params, const FieldDescriptor* field);
 
 string DefaultValue(const Params& params, const FieldDescriptor* field);
+
+
+// Methods for shared bitfields.
+
+// Gets the name of the shared bitfield for the given field index.
+string GetBitFieldName(int index);
+
+// Gets the name of the shared bitfield for the given bit index.
+// Effectively, GetBitFieldName(bit_index / 32)
+string GetBitFieldNameForBit(int bit_index);
+
+// Generates the java code for the expression that returns whether the bit at
+// the given bit index is set.
+// Example: "((bitField1_ & 0x04000000) != 0)"
+string GenerateGetBit(int bit_index);
+
+// Generates the java code for the expression that sets the bit at the given
+// bit index.
+// Example: "bitField1_ |= 0x04000000"
+string GenerateSetBit(int bit_index);
+
+// Generates the java code for the expression that clears the bit at the given
+// bit index.
+// Example: "bitField1_ = (bitField1_ & ~0x04000000)"
+string GenerateClearBit(int bit_index);
+
+// Generates the java code for the expression that returns whether the bit at
+// the given bit index contains different values in the current object and
+// another object accessible via the variable 'other'.
+// Example: "((bitField1_ & 0x04000000) != (other.bitField1_ & 0x04000000))"
+string GenerateDifferentBit(int bit_index);
+
+// Sets the 'get_*', 'set_*', 'clear_*' and 'different_*' variables, where * is
+// the given name of the bit, to the appropriate Java expressions for the given
+// bit index.
+void SetBitOperationVariables(const string name,
+    int bitIndex, map<string, string>* variables);
 
 }  // namespace javanano
 }  // namespace compiler

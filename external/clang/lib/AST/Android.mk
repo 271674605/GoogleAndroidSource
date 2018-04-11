@@ -10,6 +10,7 @@ TBLGEN_TABLES :=    \
 	AttrImpl.inc	\
 	AttrList.inc	\
 	Attrs.inc	\
+        AttrVisitor.inc \
 	CommentCommandInfo.inc \
 	CommentCommandList.inc \
 	CommentHTMLNamedCharacterReferences.inc \
@@ -49,7 +50,6 @@ clang_ast_SRC_FILES :=	\
 	DeclOpenMP.cpp	\
 	DeclPrinter.cpp	\
 	DeclTemplate.cpp	\
-	DumpXML.cpp	\
 	Expr.cpp	\
 	ExprClassification.cpp	\
 	ExprConstant.cpp	\

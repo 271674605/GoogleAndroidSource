@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_export.h"
@@ -18,6 +19,7 @@
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_handler_callbacks.h"
+#include "chromeos/network/network_policy_observer.h"
 #include "chromeos/network/network_state_handler_observer.h"
 
 namespace chromeos {
@@ -45,6 +47,7 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
     : public LoginState::Observer,
       public CertLoader::Observer,
       public NetworkStateHandlerObserver,
+      public NetworkPolicyObserver,
       public base::SupportsWeakPtr<NetworkConnectionHandler> {
  public:
   // Constants for |error_name| from |error_callback| for Connect.
@@ -86,13 +89,16 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
   // Constants for |error_name| from |error_callback| for Disconnect.
   static const char kErrorNotConnected[];
 
+  // Certificate load timed out.
+  static const char kErrorCertLoadTimeout[];
+
   virtual ~NetworkConnectionHandler();
 
   // ConnectToNetwork() will start an asynchronous connection attempt.
   // On success, |success_callback| will be called.
   // On failure, |error_callback| will be called with |error_name| one of the
-  //   constants defined above, or flimflam::kErrorConnectFailed or
-  //   flimflam::kErrorBadPassphrase if the Shill Error property (from a
+  //   constants defined above, or shill::kErrorConnectFailed or
+  //   shill::kErrorBadPassphrase if the Shill Error property (from a
   //   previous connect attempt) was set to one of those.
   // |error_message| will contain an additional error string for debugging.
   // If |check_error_state| is true, the current state of the network is
@@ -114,32 +120,26 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
                          const base::Closure& success_callback,
                          const network_handler::ErrorCallback& error_callback);
 
-  // ActivateNetwork() will start an asynchronous activation attempt.
-  // |carrier| may be empty or may specify a carrier to activate.
-  // On success, |success_callback| will be called.
-  // On failure, |error_callback| will be called with |error_name| one of:
-  //  kErrorNotFound if no network matching |service_path| is found.
-  //  kErrorShillError if a DBus or Shill error occurred.
-  // TODO(stevenjb/armansito): Move this to a separate NetworkActivationHandler.
-  void ActivateNetwork(const std::string& service_path,
-                       const std::string& carrier,
-                       const base::Closure& success_callback,
-                       const network_handler::ErrorCallback& error_callback);
-
   // Returns true if ConnectToNetwork has been called with |service_path| and
   // has not completed (i.e. success or error callback has been called).
   bool HasConnectingNetwork(const std::string& service_path);
+
+  // Returns true if there are any pending connect requests.
+  bool HasPendingConnectRequest();
 
   // NetworkStateHandlerObserver
   virtual void NetworkListChanged() OVERRIDE;
   virtual void NetworkPropertiesUpdated(const NetworkState* network) OVERRIDE;
 
   // LoginState::Observer
-  virtual void LoggedInStateChanged(LoginState::LoggedInState state) OVERRIDE;
+  virtual void LoggedInStateChanged() OVERRIDE;
 
   // CertLoader::Observer
   virtual void OnCertificatesLoaded(const net::CertificateList& cert_list,
                                     bool initial_load) OVERRIDE;
+
+  // NetworkPolicyObserver
+  virtual void PolicyChanged(const std::string& userhash) OVERRIDE;
 
  private:
   friend class NetworkHandler;
@@ -150,7 +150,9 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
   NetworkConnectionHandler();
 
   void Init(NetworkStateHandler* network_state_handler,
-            NetworkConfigurationHandler* network_configuration_handler);
+            NetworkConfigurationHandler* network_configuration_handler,
+            ManagedNetworkConfigurationHandler*
+                managed_network_configuration_handler);
 
   ConnectRequest* GetPendingRequest(const std::string& service_path);
 
@@ -163,16 +165,27 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
                                   const std::string& service_path,
                                   const base::DictionaryValue& properties);
 
+  // Queues a connect request until certificates have loaded.
+  void QueueConnectRequest(const std::string& service_path);
+
+  // Checks to see if certificates have loaded and if not, cancels any queued
+  // connect request and notifies the user.
+  void CheckCertificatesLoaded();
+
+  // Handles connecting to a queued network after certificates are loaded or
+  // handle cert load timeout.
+  void ConnectToQueuedNetwork();
+
   // Calls Shill.Manager.Connect asynchronously.
   void CallShillConnect(const std::string& service_path);
 
-  // Handle failure from ConfigurationHandler calls.
+  // Handles failure from ConfigurationHandler calls.
   void HandleConfigurationFailure(
       const std::string& service_path,
       const std::string& error_name,
       scoped_ptr<base::DictionaryValue> error_data);
 
-  // Handle success or failure from Shill.Service.Connect.
+  // Handles success or failure from Shill.Service.Connect.
   void HandleShillConnectSuccess(const std::string& service_path);
   void HandleShillConnectFailure(const std::string& service_path,
                                  const std::string& error_name,
@@ -197,21 +210,28 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
   void HandleShillDisconnectSuccess(const std::string& service_path,
                                     const base::Closure& success_callback);
 
-  // Calls Shill.Manager.Activate asynchronously.
-  void CallShillActivate(
-      const std::string& service_path,
-      const std::string& carrier,
-      const base::Closure& success_callback,
-      const network_handler::ErrorCallback& error_callback);
+  // If the policy to prevent unmanaged & shared networks to autoconnect is
+  // enabled, then disconnect all such networks except wired networks. Does
+  // nothing on consecutive calls.
+  // This is enforced once after a user logs in 1) to allow mananged networks to
+  // autoconnect and 2) to prevent a previous user from foisting a network on
+  // the new user. Therefore, this function is called on startup, at login and
+  // when the device policy is changed.
+  void DisconnectIfPolicyRequires();
 
-  // Handle success from Shill.Service.ActivateCellularModem.
-  void HandleShillActivateSuccess(const std::string& service_path,
-                                  const base::Closure& success_callback);
+  // Requests a connect to the 'best' available network once after login and
+  // after any disconnect required by policy is executed (see
+  // DisconnectIfPolicyRequires()). To include networks with client
+  // certificates, no request is sent until certificates are loaded. Therefore,
+  // this function is called on the initial certificate load and by
+  // DisconnectIfPolicyRequires().
+  void ConnectToBestNetworkAfterLogin();
 
   // Local references to the associated handler instances.
   CertLoader* cert_loader_;
   NetworkStateHandler* network_state_handler_;
-  NetworkConfigurationHandler* network_configuration_handler_;
+  NetworkConfigurationHandler* configuration_handler_;
+  ManagedNetworkConfigurationHandler* managed_configuration_handler_;
 
   // Map of pending connect requests, used to prevent repeated attempts while
   // waiting for Shill and to trigger callbacks on eventual success or failure.
@@ -221,6 +241,15 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
   // Track certificate loading state.
   bool logged_in_;
   bool certificates_loaded_;
+  base::TimeTicks logged_in_time_;
+
+  // Whether the autoconnect policy was applied already, see
+  // DisconnectIfPolicyRequires().
+  bool applied_autoconnect_policy_;
+
+  // Whether the handler already requested a 'ConnectToBestNetwork' after login,
+  // see ConnectToBestNetworkAfterLogin().
+  bool requested_connect_to_best_network_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectionHandler);
 };

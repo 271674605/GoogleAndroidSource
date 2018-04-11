@@ -7,6 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/prefs/pref_member.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "ui/views/context_menu_controller.h"
@@ -16,15 +17,17 @@ class AvatarMenuButton;
 class BrowserRootView;
 class BrowserView;
 class NativeBrowserFrame;
+class NewAvatarButton;
 class NonClientFrameView;
 class SystemMenuModelBuilder;
 
 namespace gfx {
-class Font;
+class FontList;
 class Rect;
 }
 
 namespace ui {
+class EventHandler;
 class MenuModel;
 class ThemeProvider;
 }
@@ -42,7 +45,7 @@ class BrowserFrame
   explicit BrowserFrame(BrowserView* browser_view);
   virtual ~BrowserFrame();
 
-  static const gfx::Font& GetTitleFont();
+  static const gfx::FontList& GetTitleFontList();
 
   // Initialize the frame (creates the underlying native window).
   void InitBrowserFrame();
@@ -58,11 +61,11 @@ class BrowserFrame
   // TabStrip view.
   gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const;
 
-  // Returns the y coordinate within the window at which the horizontal TabStrip
-  // begins (or would begin).  If |force_restored| is true, this is calculated
-  // as if we were in restored mode regardless of the current mode.
-  BrowserNonClientFrameView::TabStripInsets GetTabStripInsets(
-      bool force_restored) const;
+  // Returns the inset of the topmost view in the client view from the top of
+  // the non-client view. The topmost view depends on the window type. The
+  // topmost view is the tab strip for tabbed browser windows, the toolbar for
+  // popups, the web contents for app windows and varies for fullscreen windows
+  int GetTopInset() const;
 
   // Returns the amount that the theme background should be inset.
   int GetThemeBackgroundXInset() const;
@@ -73,15 +76,21 @@ class BrowserFrame
   // Returns the NonClientFrameView of this frame.
   views::View* GetFrameView() const;
 
-  // Notifies the frame that the tab strip display mode changed so it can update
-  // its frame treatment if necessary.
-  void TabStripDisplayModeChanged();
+  // Returns |true| if we should use the custom frame.
+  bool UseCustomFrame() const;
+
+  // Returns true when the window placement should be saved.
+  bool ShouldSaveWindowPlacement() const;
+
+  // Retrieves the window placement (show state and bounds) for restoring.
+  void GetWindowPlacement(gfx::Rect* bounds,
+                          ui::WindowShowState* show_state) const;
 
   // Overridden from views::Widget:
   virtual views::internal::RootView* CreateRootView() OVERRIDE;
   virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
   virtual bool GetAccelerator(int command_id,
-                              ui::Accelerator* accelerator) OVERRIDE;
+                              ui::Accelerator* accelerator) const OVERRIDE;
   virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void OnNativeWidgetActivationChanged(bool active) OVERRIDE;
@@ -98,10 +107,16 @@ class BrowserFrame
 
   AvatarMenuButton* GetAvatarMenuButton();
 
+  NewAvatarButton* GetNewAvatarMenuButton();
+
   // Returns the menu model. BrowserFrame owns the returned model.
+  // Note that in multi user mode this will upon each call create a new model.
   ui::MenuModel* GetSystemMenuModel();
 
  private:
+  // Called when the preference changes.
+  void OnUseCustomChromeFrameChanged();
+
   NativeBrowserFrame* native_browser_frame_;
 
   // A weak reference to the root view associated with the window. We save a
@@ -127,6 +142,11 @@ class BrowserFrame
   // externally).
   scoped_ptr<ui::ThemeProvider> owned_theme_provider_;
   ui::ThemeProvider* theme_provider_;
+
+  // Whether the custom Chrome frame preference is set.
+  BooleanPrefMember use_custom_frame_pref_;
+
+  scoped_ptr<ui::EventHandler> browser_command_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFrame);
 };

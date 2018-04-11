@@ -6,6 +6,7 @@
 #define CHROMEOS_NETWORK_ONC_ONC_TRANSLATION_TABLES_H_
 
 #include <string>
+#include <vector>
 
 #include "chromeos/network/onc/onc_signature.h"
 
@@ -15,11 +16,6 @@ namespace onc {
 struct FieldTranslationEntry {
   const char* onc_field_name;
   const char* shill_property_name;
-};
-
-struct OncValueTranslationEntry {
-  const OncValueSignature* onc_signature;
-  const FieldTranslationEntry* field_translation_table;
 };
 
 struct StringTranslationEntry {
@@ -36,7 +32,15 @@ extern const StringTranslationEntry kEAPOuterTable[];
 extern const StringTranslationEntry kEAP_PEAP_InnerTable[];
 extern const StringTranslationEntry kEAP_TTLS_InnerTable[];
 
+// A separate translation table for cellular properties that are stored in a
+// Shill Device instead of a Service. The |shill_property_name| entries
+// reference Device properties, not Service properties.
+extern const FieldTranslationEntry kCellularDeviceTable[];
+
 const FieldTranslationEntry* GetFieldTranslationTable(
+    const OncValueSignature& onc_signature);
+
+std::vector<std::string> GetPathToNestedShillDictionary(
     const OncValueSignature& onc_signature);
 
 bool GetShillPropertyName(const std::string& onc_field_name,

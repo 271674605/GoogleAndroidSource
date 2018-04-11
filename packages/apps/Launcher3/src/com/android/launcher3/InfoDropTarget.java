@@ -26,6 +26,8 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
 
+import com.android.launcher3.compat.UserHandleCompat;
+
 public class InfoDropTarget extends ButtonDropTarget {
 
     private ColorStateList mOriginalTextColor;
@@ -49,6 +51,13 @@ public class InfoDropTarget extends ButtonDropTarget {
         Resources r = getResources();
         mHoverColor = r.getColor(R.color.info_target_hover_tint);
         mDrawable = (TransitionDrawable) getCurrentDrawable();
+
+        if (mDrawable == null) {
+            // TODO: investigate why this is ever happening. Presently only on one known device.
+            mDrawable = (TransitionDrawable) r.getDrawable(R.drawable.info_target_selector);
+            setCompoundDrawablesRelativeWithIntrinsicBounds(mDrawable, null, null, null);
+        }
+
         if (null != mDrawable) {
             mDrawable.setCrossFadeEnabled(true);
         }
@@ -60,10 +69,6 @@ public class InfoDropTarget extends ButtonDropTarget {
                 setText("");
             }
         }
-    }
-
-    private boolean isFromAllApps(DragSource source) {
-        return (source instanceof AppsCustomizePagedView);
     }
 
     @Override
@@ -79,8 +84,15 @@ public class InfoDropTarget extends ButtonDropTarget {
         } else if (d.dragInfo instanceof PendingAddItemInfo) {
             componentName = ((PendingAddItemInfo) d.dragInfo).componentName;
         }
+        final UserHandleCompat user;
+        if (d.dragInfo instanceof ItemInfo) {
+            user = ((ItemInfo) d.dragInfo).user;
+        } else {
+            user = UserHandleCompat.myUserHandle();
+        }
+
         if (componentName != null) {
-            mLauncher.startApplicationDetailsActivity(componentName);
+            mLauncher.startApplicationDetailsActivity(componentName, user);
         }
 
         // There is no post-drop animation, so clean up the DragView now
@@ -93,7 +105,7 @@ public class InfoDropTarget extends ButtonDropTarget {
         boolean isVisible = true;
 
         // Hide this button unless we are dragging something from AllApps
-        if (!isFromAllApps(source)) {
+        if (!source.supportsAppInfoDropTarget()) {
             isVisible = false;
         }
 

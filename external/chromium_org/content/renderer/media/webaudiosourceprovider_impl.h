@@ -5,20 +5,22 @@
 #ifndef CONTENT_RENDERER_MEDIA_WEBAUDIOSOURCEPROVIDER_IMPL_H_
 #define CONTENT_RENDERER_MEDIA_WEBAUDIOSOURCEPROVIDER_IMPL_H_
 
+#include "base/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
 #include "media/base/audio_renderer_sink.h"
+#include "third_party/WebKit/public/platform/WebAudioSourceProvider.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
-#include "third_party/WebKit/public/web/WebAudioSourceProvider.h"
 
-namespace WebKit {
+namespace blink {
 class WebAudioSourceProviderClient;
 }
 
 namespace content {
 
 // WebAudioSourceProviderImpl provides a bridge between classes:
-//     WebKit::WebAudioSourceProvider <---> media::AudioRendererSink
+//     blink::WebAudioSourceProvider <---> media::AudioRendererSink
 //
 // WebAudioSourceProviderImpl wraps an existing audio sink that is used unless
 // WebKit has set a client via setClient(). While a client is set WebKit will
@@ -27,15 +29,15 @@ namespace content {
 //
 // All calls are protected by a lock.
 class CONTENT_EXPORT WebAudioSourceProviderImpl
-    : NON_EXPORTED_BASE(public WebKit::WebAudioSourceProvider),
+    : NON_EXPORTED_BASE(public blink::WebAudioSourceProvider),
       NON_EXPORTED_BASE(public media::AudioRendererSink) {
  public:
   explicit WebAudioSourceProviderImpl(
       const scoped_refptr<media::AudioRendererSink>& sink);
 
-  // WebKit::WebAudioSourceProvider implementation.
-  virtual void setClient(WebKit::WebAudioSourceProviderClient* client);
-  virtual void provideInput(const WebKit::WebVector<float*>& audio_data,
+  // blink::WebAudioSourceProvider implementation.
+  virtual void setClient(blink::WebAudioSourceProviderClient* client);
+  virtual void provideInput(const blink::WebVector<float*>& audio_data,
                             size_t number_of_frames);
 
   // media::AudioRendererSink implementation.
@@ -51,6 +53,12 @@ class CONTENT_EXPORT WebAudioSourceProviderImpl
   virtual ~WebAudioSourceProviderImpl();
 
  private:
+  // Calls setFormat() on |client_| from the Blink renderer thread.
+  void OnSetFormat();
+
+  // Closure that posts a task to call OnSetFormat() on the renderer thread.
+  base::Closure set_format_cb_;
+
   // Set to true when Initialize() is called.
   int channels_;
   int sample_rate_;
@@ -64,12 +72,15 @@ class CONTENT_EXPORT WebAudioSourceProviderImpl
   media::AudioRendererSink::RenderCallback* renderer_;
 
   // When set via setClient() it overrides |sink_| for consuming audio.
-  WebKit::WebAudioSourceProviderClient* client_;
+  blink::WebAudioSourceProviderClient* client_;
 
   // Where audio ends up unless overridden by |client_|.
   base::Lock sink_lock_;
   scoped_refptr<media::AudioRendererSink> sink_;
   scoped_ptr<media::AudioBus> bus_wrapper_;
+
+  // NOTE: Weak pointers must be invalidated before all other member variables.
+  base::WeakPtrFactory<WebAudioSourceProviderImpl> weak_factory_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(WebAudioSourceProviderImpl);
 };

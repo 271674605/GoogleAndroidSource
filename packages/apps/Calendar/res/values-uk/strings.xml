@@ -31,7 +31,7 @@
     <string name="no_title_label" msgid="302177118061368042">"(Без назви)"</string>
   <plurals name="Nminutes">
     <item quantity="one" msgid="4871052965772159239">"1 хв."</item>
-    <item quantity="other" msgid="5644461630927544936">"<xliff:g id="COUNT">%d</xliff:g> хв."</item>
+    <item quantity="other" msgid="5644461630927544936">"<xliff:g id="COUNT">%d</xliff:g> хв"</item>
   </plurals>
   <plurals name="Nmins">
     <item quantity="one" msgid="9191090668359663663">"1 хв."</item>
@@ -50,7 +50,7 @@
   </plurals>
     <string name="calendar_refresh" msgid="6172731193680500025">"Оновити"</string>
     <string name="show_day_view" msgid="5782512782605466016">"Показ. день"</string>
-    <string name="agenda_view" msgid="5566084759423843245">"Поряд. ден."</string>
+    <string name="agenda_view" msgid="5566084759423843245">"Порядок денний"</string>
     <string name="day_view" msgid="4467754504843584437">"День"</string>
     <string name="week_view" msgid="6775043022159508060">"Тиждень"</string>
     <string name="month_view" msgid="7287101431749285412">"Місяць"</string>
@@ -80,6 +80,9 @@
     <string name="empty_event" msgid="9018699257414338634">"Порожню подію не створено."</string>
     <string name="creating_event_with_guest" msgid="5758688413124191931">"Запрошення буде надіслано."</string>
     <string name="saving_event_with_guest" msgid="9184584438475689577">"Оновлення буде надіслано."</string>
+    <string name="rsvp_accepted" msgid="8146618862268962727">"Відповідь: \"Так\"."</string>
+    <string name="rsvp_tentative" msgid="6545510359501328718">"Відповідь: \"Можливо\"."</string>
+    <string name="rsvp_declined" msgid="8686330037802222895">"Відповідь: \"Ні\"."</string>
     <string name="create_event_dialog_save" msgid="1080859798521717414">"Зберегти"</string>
     <string name="alert_title" msgid="7869592820853066853">"Сповіщення календаря"</string>
     <string name="event_info_title" msgid="56024222340421620">"Перегл. подію"</string>
@@ -101,7 +104,7 @@
     <string name="view_event_organizer_label" msgid="2753151795647402277">"Організатор:"</string>
     <string name="choose_event_color_label" msgid="2192923501857428854">"Виберіть колір події"</string>
     <string name="event_color_picker_dialog_title" msgid="4631938661655159511">"Колір події"</string>
-    <string name="event_color_set_to_default" msgid="3447218820785647967">"Установити колір календаря за умовчанням"</string>
+    <string name="event_color_set_to_default" msgid="3447218820785647967">"Зробити кольором календаря за умовчанням"</string>
     <string name="calendar_color_picker_dialog_title" msgid="3595509200561433667">"Колір календаря"</string>
     <string name="calendar_square_color_picker_description" msgid="7430468363525563483">"Вибір кольору"</string>
     <string name="view_event_response_label" msgid="8382281658458798329">"Підете?"</string>
@@ -122,9 +125,9 @@
     <string name="quick_response_email_failed" msgid="5544066405231853245">"Не вдалося знайти поштову програму"</string>
   <string-array name="quick_response_defaults">
     <item msgid="1524421198348168403">"Запізнююся на декілька хвилин."</item>
-    <item msgid="6215158751728689832">"Буду через 10 хвилин."</item>
+    <item msgid="6215158751728689832">"Буду за 10 хвилин."</item>
     <item msgid="4485794001743679338">"Починайте без мене."</item>
-    <item msgid="8036557974294987511">"Вибачте, я не зможу. Доведеться перенести зустріч."</item>
+    <item msgid="8036557974294987511">"Не встигаю. Доведеться перенести."</item>
   </string-array>
     <string name="quick_response_custom_msg" msgid="8792374208224108798">"Напишіть власну відповідь…"</string>
     <string name="event_info_organizer" msgid="9138683335394832629">"Організатор:"</string>
@@ -242,7 +245,7 @@
   </plurals>
   <plurals name="N_remaining_events">
     <item quantity="one" msgid="431585781647034528">"і ще 1 подія"</item>
-    <item quantity="other" msgid="3609243840882275136">"та інші події (<xliff:g id="COUNT">%d</xliff:g>)"</item>
+    <item quantity="other" msgid="3609243840882275136">"Ще події: <xliff:g id="COUNT">%d</xliff:g>"</item>
   </plurals>
     <string name="acessibility_selected_marker_description" msgid="3010149843148810768">"Вибрана подія"</string>
     <string name="do_not_check" msgid="7815441673853466129">"НЕ ставте прапорець -&gt;"</string>

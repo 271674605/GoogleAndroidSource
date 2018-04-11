@@ -11,18 +11,17 @@ options.target_dir). This script then creates links in an apk's lib/ folder to
 those native libraries.
 """
 
-import json
 import optparse
 import os
 import sys
 
 from util import build_device
 from util import build_utils
-from util import md5_check
 
 BUILD_ANDROID_DIR = os.path.join(os.path.dirname(__file__), '..')
 sys.path.append(BUILD_ANDROID_DIR)
 
+from pylib import constants
 from pylib.utils import apk_helper
 
 def RunShellCommand(device, cmd):
@@ -79,7 +78,7 @@ def TriggerSymlinkScript(options):
   RunShellCommand(device, trigger_cmd)
 
 
-def main(argv):
+def main():
   parser = optparse.OptionParser()
   parser.add_option('--apk', help='Path to the apk.')
   parser.add_option('--script-host-path',
@@ -93,11 +92,14 @@ def main(argv):
   parser.add_option('--stamp', help='Path to touch on success.')
   parser.add_option('--build-device-configuration',
       help='Path to build device configuration.')
+  parser.add_option('--configuration-name',
+      help='The build CONFIGURATION_NAME')
   options, _ = parser.parse_args()
 
   required_options = ['apk', 'libraries_json', 'script_host_path',
-      'script_device_path', 'target_dir']
+      'script_device_path', 'target_dir', 'configuration_name']
   build_utils.CheckOptions(options, parser, required=required_options)
+  constants.SetBuildType(options.configuration_name)
 
   CreateSymlinkScript(options)
   TriggerSymlinkScript(options)
@@ -107,4 +109,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  sys.exit(main())

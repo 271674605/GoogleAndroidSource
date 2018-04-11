@@ -12,11 +12,14 @@
 #include "chrome/common/local_discovery/service_discovery_client.h"
 #include "chrome/utility/utility_message_handler.h"
 
+struct LocalDiscoveryMsg_SocketInfo;
+
 namespace net {
 class MDnsClient;
 }
 
 namespace base {
+struct FileDescriptor;
 class TaskRunner;
 class Thread;
 }
@@ -30,7 +33,7 @@ namespace local_discovery {
 class ServiceDiscoveryClient;
 
 // Handles messages related to local discovery inside utility process.
-class ServiceDiscoveryMessageHandler : public chrome::UtilityMessageHandler {
+class ServiceDiscoveryMessageHandler : public UtilityMessageHandler {
  public:
   ServiceDiscoveryMessageHandler();
   virtual ~ServiceDiscoveryMessageHandler();
@@ -52,8 +55,12 @@ class ServiceDiscoveryMessageHandler : public chrome::UtilityMessageHandler {
                 const base::Closure& task);
 
   // IPC message handlers.
+#if defined(OS_POSIX)
+  void OnSetSockets(const std::vector<LocalDiscoveryMsg_SocketInfo>& sockets);
+#endif  // OS_POSIX
   void OnStartWatcher(uint64 id, const std::string& service_type);
   void OnDiscoverServices(uint64 id, bool force_update);
+  void OnSetActivelyRefreshServices(uint64 id, bool actively_refresh_services);
   void OnDestroyWatcher(uint64 id);
   void OnResolveService(uint64 id, const std::string& service_name);
   void OnDestroyResolver(uint64 id);
@@ -64,12 +71,16 @@ class ServiceDiscoveryMessageHandler : public chrome::UtilityMessageHandler {
   void InitializeMdns();
   void StartWatcher(uint64 id, const std::string& service_type);
   void DiscoverServices(uint64 id, bool force_update);
+  void SetActivelyRefreshServices(uint64 id, bool actively_refresh_services);
   void DestroyWatcher(uint64 id);
   void ResolveService(uint64 id, const std::string& service_name);
   void DestroyResolver(uint64 id);
   void ResolveLocalDomain(uint64 id, const std::string& domain,
                           net::AddressFamily address_family);
   void DestroyLocalDomainResolver(uint64 id);
+
+  void ShutdownLocalDiscovery();
+  void ShutdownOnIOThread();
 
   // Is called by ServiceWatcher as callback.
   void OnServiceUpdated(uint64 id,
@@ -84,7 +95,10 @@ class ServiceDiscoveryMessageHandler : public chrome::UtilityMessageHandler {
   // Is called by LocalDomainResolver as callback.
   void OnLocalDomainResolved(uint64 id,
                              bool success,
-                             const net::IPAddressNumber& address);
+                             const net::IPAddressNumber& address_ipv4,
+                             const net::IPAddressNumber& address_ipv6);
+
+  void Send(IPC::Message* msg);
 
   ServiceWatchers service_watchers_;
   ServiceResolvers service_resolvers_;

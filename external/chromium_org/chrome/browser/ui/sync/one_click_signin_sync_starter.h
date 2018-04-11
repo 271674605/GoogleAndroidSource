@@ -12,11 +12,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_promo.h"
-#include "chrome/browser/signin/signin_tracker.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/profile_signin_confirmation_helper.h"
+#include "components/signin/core/browser/signin_tracker.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class Browser;
@@ -26,11 +25,7 @@ namespace content {
 class WebContents;
 }  // namespace content
 
-namespace policy {
-class CloudPolicyClient;
-}
-
-// Waits for successful singin notification from the signin manager and then
+// Waits for successful sign-in notification from the signin manager and then
 // starts the sync machine.  Instances of this class delete themselves once
 // the job is done.
 class OneClickSigninSyncStarter : public SigninTracker::Observer,
@@ -81,33 +76,39 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   // OneClickSigninSyncStarter from a browser, provide both.
   // If |display_confirmation| is true, the user will be prompted to confirm the
   // signin before signin completes.
-  // |web_contents| is used to show the sync setup page, if necessary. If NULL,
-  // the sync setup page will be loaded in either a new tab or a tab that is
-  // already showing it.
+  // |web_contents| is used to show the sync UI if it's showing a blank page
+  // and not about to be closed. It can be NULL.
+  // If |web_contents| is non-NULL and the |continue_url| is non-empty, the
+  // |web_contents| will be navigated to the |continue_url| once both signin and
+  // Sync setup are complete.
   // |callback| is always executed before OneClickSigninSyncStarter is deleted.
   // It can be empty.
   OneClickSigninSyncStarter(Profile* profile,
                             Browser* browser,
-                            const std::string& session_index,
                             const std::string& email,
                             const std::string& password,
+                            const std::string& refresh_token,
                             StartSyncMode start_mode,
                             content::WebContents* web_contents,
                             ConfirmationRequired display_confirmation,
-                            signin::Source source,
+                            const GURL& continue_url,
                             Callback callback);
 
   // chrome::BrowserListObserver override.
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
+  // If the |browser| argument is non-null, returns the pointer directly.
+  // Otherwise creates a new browser for the given profile on the given
+  // desktop, adds an empty tab and makes sure the browser is visible.
+  static Browser* EnsureBrowser(Browser* browser,
+                                Profile* profile,
+                                chrome::HostDesktopType desktop_type);
+
  private:
   friend class OneClickSigninSyncStarterTest;
-  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
-                           CallbackSigninFailed);
-  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
-                           CallbackSigninSucceeded);
-  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
-                           CallbackNull);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest, CallbackSigninFailed);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest, CallbackNull);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest, LoadContinueUrl);
 
   virtual ~OneClickSigninSyncStarter();
 
@@ -118,6 +119,8 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   // SigninTracker::Observer override.
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
+  virtual void MergeSessionComplete(
+      const GoogleServiceAuthError& error) OVERRIDE;
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // User input handler for the signin confirmation dialog.
@@ -136,8 +139,9 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   friend class SigninDialogDelegate;
 
   // Callback invoked once policy registration is complete. If registration
-  // fails, |client| will be null.
-  void OnRegisteredForPolicy(scoped_ptr<policy::CloudPolicyClient> client);
+  // fails, |dm_token| and |client_id| will be empty.
+  void OnRegisteredForPolicy(const std::string& dm_token,
+                             const std::string& client_id);
 
   // Callback invoked when a policy fetch request has completed. |success| is
   // true if policy was successfully fetched.
@@ -147,9 +151,9 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   // in-progress auth credentials currently stored in this object.
   void CreateNewSignedInProfile();
 
-  // Helper function that loads policy with the passed CloudPolicyClient, then
-  // completes the signin process.
-  void LoadPolicyWithCachedClient();
+  // Helper function that loads policy with the cached |dm_token_| and
+  // |client_id|, then completes the signin process.
+  void LoadPolicyWithCachedCredentials();
 
   // Callback invoked once a profile is created, so we can complete the
   // credentials transfer, load policy, and open the first window.
@@ -157,9 +161,10 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
                                  Profile* profile,
                                  Profile::CreateStatus status);
 
+#endif  // defined(ENABLE_CONFIGURATION_POLICY)
+
   // Cancels the in-progress signin for this profile.
   void CancelSigninAndDelete();
-#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
   // Callback invoked to check whether the user needs policy or if a
   // confirmation is required (in which case we have to prompt the user first).
@@ -183,21 +188,23 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
 
   void FinishProfileSyncServiceSetup();
 
-  // Displays the settings UI in a new tab. Brings up the advanced sync settings
-  // dialog if |configure_sync| is true.
-  void ShowSettingsPageInNewTab(bool configure_sync);
+  // Displays the settings UI and brings up the advanced sync settings
+  // dialog if |configure_sync| is true. The web contents provided to the
+  // constructor is used if it's showing a blank page and not about to be
+  // closed. Otherwise, a new tab or an existing settings tab is used.
+  void ShowSettingsPage(bool configure_sync);
 
-  // Displays the sync configuration UI in the provided web contents.
-  void ShowSyncSettingsPageInWebContents(content::WebContents* contents);
+  // Displays a settings page in the provided web contents. |sub_page| can be
+  // empty to show the main settings page.
+  void ShowSettingsPageInWebContents(content::WebContents* contents,
+                                     const std::string& sub_page);
 
   // Shows the post-signin confirmation bubble. If |custom_message| is empty,
   // the default "You are signed in" message is displayed.
-  void DisplayFinalConfirmationBubble(const string16& custom_message);
+  void DisplayFinalConfirmationBubble(const base::string16& custom_message);
 
-  // Makes sure browser_ points to a valid browser (opens a new browser if
-  // necessary). Useful in the case where the user has created a new Profile as
-  // part of the signin process.
-  void EnsureBrowser();
+  // Loads the |continue_url_| in the current tab.
+  void LoadContinueUrl();
 
   Profile* profile_;
   Browser* browser_;
@@ -206,18 +213,19 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   chrome::HostDesktopType desktop_type_;
   bool force_same_tab_navigation_;
   ConfirmationRequired confirmation_required_;
-  signin::Source source_;
+  GURL continue_url_;
 
   // Callback executed when sync setup succeeds or fails.
   Callback sync_setup_completed_callback_;
 
-  base::WeakPtrFactory<OneClickSigninSyncStarter> weak_pointer_factory_;
-
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  // CloudPolicyClient reference we keep while determining whether to create
+  // Policy credentials we keep while determining whether to create
   // a new profile for an enterprise user or not.
-  scoped_ptr<policy::CloudPolicyClient> policy_client_;
+  std::string dm_token_;
+  std::string client_id_;
 #endif
+
+  base::WeakPtrFactory<OneClickSigninSyncStarter> weak_pointer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninSyncStarter);
 };

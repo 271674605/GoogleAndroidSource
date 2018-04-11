@@ -20,7 +20,6 @@ import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.Type;
 import java.util.Random;
-import com.android.cts.stub.R;
 
 public class AllocationCopy2DRangeTest extends RSBaseCompute {
     private Allocation mInAllocation;
@@ -28,7 +27,7 @@ public class AllocationCopy2DRangeTest extends RSBaseCompute {
 
     public void testAllocationCopy2DRange() {
         ScriptC_allocationCopy2DRange mScript =
-                new ScriptC_allocationCopy2DRange(mRS, mRes, R.raw.allocationcopy2drange);
+                new ScriptC_allocationCopy2DRange(mRS);
         Random random = new Random(0x172d8ab9);
         int width = random.nextInt(512);
         int height = random.nextInt(512);

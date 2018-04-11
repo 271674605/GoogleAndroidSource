@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,19 +5,30 @@
  * found in the LICENSE file.
  */
 
-
 #include "SkRegionPriv.h"
 #include "SkBlitter.h"
 #include "SkScan.h"
 #include "SkTDArray.h"
 #include "SkPath.h"
 
+// The rgnbuilder caller *seems* to pass short counts, possible often seens early failure, so
+// we may not want to promote this to a "std" routine just yet.
+static bool sk_memeq32(const int32_t* SK_RESTRICT a, const int32_t* SK_RESTRICT b, int count) {
+    for (int i = 0; i < count; ++i) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 class SkRgnBuilder : public SkBlitter {
 public:
+    SkRgnBuilder();
     virtual ~SkRgnBuilder();
 
     // returns true if it could allocate the working storage needed
-    bool init(int maxHeight, int maxTransitions);
+    bool init(int maxHeight, int maxTransitions, bool pathIsInverse);
 
     void done() {
         if (fCurrScanline != NULL) {
@@ -86,9 +96,7 @@ private:
         if (fPrevScanline != NULL &&
             fPrevScanline->fLastY + 1 == fCurrScanline->fLastY &&
             fPrevScanline->fXCount == fCurrScanline->fXCount &&
-            !memcmp(fPrevScanline->firstX(),
-                    fCurrScanline->firstX(),
-                    fCurrScanline->fXCount * sizeof(SkRegion::RunType)))
+            sk_memeq32(fPrevScanline->firstX(), fCurrScanline->firstX(), fCurrScanline->fXCount))
         {
             // update the height of fPrevScanline
             fPrevScanline->fLastY = fCurrScanline->fLastY;
@@ -98,30 +106,46 @@ private:
     }
 };
 
+SkRgnBuilder::SkRgnBuilder()
+    : fStorage(NULL) {
+}
+
 SkRgnBuilder::~SkRgnBuilder() {
     sk_free(fStorage);
 }
 
-bool SkRgnBuilder::init(int maxHeight, int maxTransitions) {
+bool SkRgnBuilder::init(int maxHeight, int maxTransitions, bool pathIsInverse) {
     if ((maxHeight | maxTransitions) < 0) {
         return false;
     }
 
-    Sk64 count, size;
+    if (pathIsInverse) {
+        // allow for additional X transitions to "invert" each scanline
+        // [ L' ... normal transitions ... R' ]
+        //
+        maxTransitions += 2;
+    }
 
     // compute the count with +1 and +3 slop for the working buffer
-    count.setMul(maxHeight + 1, 3 + maxTransitions);
-    if (!count.is32() || count.isNeg()) {
-        return false;
-    }
-    fStorageCount = count.get32();
+    int64_t count = sk_64_mul(maxHeight + 1, 3 + maxTransitions);
 
-    size.setMul(fStorageCount, sizeof(SkRegion::RunType));
-    if (!size.is32() || size.isNeg()) {
-        return false;
+    if (pathIsInverse) {
+        // allow for two "empty" rows for the top and bottom
+        //      [ Y, 1, L, R, S] == 5 (*2 for top and bottom)
+        count += 10;
     }
 
-    fStorage = (SkRegion::RunType*)sk_malloc_flags(size.get32(), 0);
+    if (count < 0 || !sk_64_isS32(count)) {
+        return false;
+    }
+    fStorageCount = sk_64_asS32(count);
+
+    int64_t size = sk_64_mul(fStorageCount, sizeof(SkRegion::RunType));
+    if (size < 0 || !sk_64_isS32(size)) {
+        return false;
+    }
+
+    fStorage = (SkRegion::RunType*)sk_malloc_flags(sk_64_asS32(size), 0);
     if (NULL == fStorage) {
         return false;
     }
@@ -276,8 +300,8 @@ static int count_path_runtype_values(const SkPath& path, int* itop, int* ibot) {
     }
     SkASSERT(top <= bot);
 
-    *itop = SkScalarRound(top);
-    *ibot = SkScalarRound(bot);
+    *itop = SkScalarRoundToInt(top);
+    *ibot = SkScalarRoundToInt(bot);
     return maxEdges;
 }
 
@@ -312,7 +336,9 @@ bool SkRegion::setPath(const SkPath& path, const SkRegion& clip) {
 
     SkRgnBuilder builder;
 
-    if (!builder.init(bot - top, SkMax32(pathTransitions, clipTransitions))) {
+    if (!builder.init(bot - top,
+                      SkMax32(pathTransitions, clipTransitions),
+                      path.isInverseFillType())) {
         // can't allocate working space, so return false
         return this->setEmpty();
     }

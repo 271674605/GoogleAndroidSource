@@ -15,11 +15,13 @@ LOCAL_SHARED_LIBRARIES := \
     libhardware_legacy \
     librilutils
 
-LOCAL_CFLAGS :=
+#LOCAL_CFLAGS := -DANDROID_MULTI_SIM -DDSDA_RILD1
+
+ifeq ($(SIM_COUNT), 2)
+    LOCAL_CFLAGS += -DANDROID_SIM_COUNT_2
+endif
 
 LOCAL_MODULE:= libril
-
-LOCAL_LDLIBS += -lpthread
 
 include $(BUILD_SHARED_LIBRARY)
 
@@ -40,8 +42,6 @@ LOCAL_STATIC_LIBRARIES := \
 LOCAL_CFLAGS :=
 
 LOCAL_MODULE:= libril_static
-
-LOCAL_LDLIBS += -lpthread
 
 include $(BUILD_STATIC_LIBRARY)
 endif # ANDROID_BIONIC_TRANSITION

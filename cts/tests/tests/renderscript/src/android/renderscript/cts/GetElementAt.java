@@ -20,7 +20,6 @@ import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.Type;
 import android.renderscript.RSRuntimeException;
-import com.android.cts.stub.R;
 import java.util.Random;
 
 public class GetElementAt extends RSBaseCompute {
@@ -56,13 +55,13 @@ public class GetElementAt extends RSBaseCompute {
 
     public void testX () {
         setupArrays(INPUTSIZE);
-        script_x = new ScriptC_get_element_at_x(mRS, mRes, R.raw.get_element_at_x);
+        script_x = new ScriptC_get_element_at_x(mRS);
         gIn = Allocation.createSized(mRS, Element.U32(mRS), INPUTSIZE);
         gIn.copyFrom(in);
         mOut = Allocation.createTyped(mRS, gIn.getType());
         script_x.set_gIn(gIn);
         try {
-            RSUtils.forEach(this, TEST_ID_X, mOut);
+            forEach(TEST_ID_X, mOut);
         } catch (RSRuntimeException e) {
         }
         mOut.copyTo(out);
@@ -73,7 +72,7 @@ public class GetElementAt extends RSBaseCompute {
 
     public void testXY () {
         setupArrays(INPUTSIZE*INPUTSIZE);
-        script_xy = new ScriptC_get_element_at_x_y(mRS, mRes, R.raw.get_element_at_x_y);
+        script_xy = new ScriptC_get_element_at_x_y(mRS);
         Type.Builder builder = new Type.Builder(mRS, Element.U32(mRS));
         builder.setX(INPUTSIZE);
         builder.setY(INPUTSIZE);
@@ -83,7 +82,7 @@ public class GetElementAt extends RSBaseCompute {
         mOut = Allocation.createTyped(mRS, gIn.getType());
         script_xy.set_gIn(gIn);
         try {
-            RSUtils.forEach(this, TEST_ID_XY, mOut);
+            forEach(TEST_ID_XY, mOut);
         } catch (RSRuntimeException e) {
         }
         mOut.copyTo(out);

@@ -111,6 +111,7 @@ static int hal_get_max_nfcee (const struct nfc_nci_device *p_dev, uint8_t* maxNf
     return retval;
 }
 
+
 /*************************************
  * Generic device handling.
  *************************************/
@@ -149,8 +150,7 @@ static int nfc_open (const hw_module_t* module, const char* name, hw_device_t** 
         dev->nci_device.close = hal_close;
         dev->nci_device.control_granted = hal_control_granted;
         dev->nci_device.power_cycle = hal_power_cycle;
-        // TODO maco commented out for binary HAL compatibility
-        // dev->nci_device.get_max_ee = hal_get_max_nfcee;
+        //dev->nci_device.get_max_ee = hal_get_max_nfcee;
 
 
         // Copy in
@@ -179,9 +179,9 @@ struct nfc_nci_module_t HAL_MODULE_INFO_SYM =
     {
         .tag = HARDWARE_MODULE_TAG, .module_api_version = 0x0100, // [15:8] major, [7:0] minor (1.0)
         .hal_api_version = 0x00, // 0 is only valid value
-        .id = NFC_NCI_HARDWARE_MODULE_ID,
-        .name = "Default NFC NCI HW HAL",
-        .author = "The Android Open Source Project",
+        .id = NFC_NCI_BCM2079X_HARDWARE_MODULE_ID,
+        .name = "BCM2079x NFC NCI HW HAL",
+        .author = "Broadcom Corporation",
         .methods = &nfc_module_methods,
     },
 };

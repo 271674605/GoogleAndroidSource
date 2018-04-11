@@ -13,12 +13,16 @@
 
 namespace chromeos {
 
+class ClientCertResolver;
 class GeolocationHandler;
 class ManagedNetworkConfigurationHandler;
+class ManagedNetworkConfigurationHandlerImpl;
+class NetworkActivationHandler;
 class NetworkCertMigrator;
 class NetworkConfigurationHandler;
 class NetworkConnectionHandler;
 class NetworkDeviceHandler;
+class NetworkDeviceHandlerImpl;
 class NetworkProfileHandler;
 class NetworkStateHandler;
 class NetworkSmsHandler;
@@ -52,6 +56,7 @@ class CHROMEOS_EXPORT NetworkHandler {
   NetworkProfileHandler* network_profile_handler();
   NetworkConfigurationHandler* network_configuration_handler();
   ManagedNetworkConfigurationHandler* managed_network_configuration_handler();
+  NetworkActivationHandler* network_activation_handler();
   NetworkConnectionHandler* network_connection_handler();
   NetworkSmsHandler* network_sms_handler();
   GeolocationHandler* geolocation_handler();
@@ -65,12 +70,14 @@ class CHROMEOS_EXPORT NetworkHandler {
   // The order of these determines the (inverse) destruction order.
   scoped_refptr<base::MessageLoopProxy> message_loop_;
   scoped_ptr<NetworkStateHandler> network_state_handler_;
-  scoped_ptr<NetworkDeviceHandler> network_device_handler_;
+  scoped_ptr<NetworkDeviceHandlerImpl> network_device_handler_;
   scoped_ptr<NetworkProfileHandler> network_profile_handler_;
-  scoped_ptr<NetworkCertMigrator> network_cert_migrator_;
   scoped_ptr<NetworkConfigurationHandler> network_configuration_handler_;
-  scoped_ptr<ManagedNetworkConfigurationHandler>
+  scoped_ptr<ManagedNetworkConfigurationHandlerImpl>
       managed_network_configuration_handler_;
+  scoped_ptr<NetworkCertMigrator> network_cert_migrator_;
+  scoped_ptr<ClientCertResolver> client_cert_resolver_;
+  scoped_ptr<NetworkActivationHandler> network_activation_handler_;
   scoped_ptr<NetworkConnectionHandler> network_connection_handler_;
   scoped_ptr<NetworkSmsHandler> network_sms_handler_;
   scoped_ptr<GeolocationHandler> geolocation_handler_;

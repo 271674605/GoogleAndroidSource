@@ -90,7 +90,7 @@ void test16() {
   printg("Hello, world!\n"); /* expected-warning {{implicit declaration of function 'printg'}} */
 }
 
-struct x { int x,y[]; }; /* expected-warning {{Flexible array members are a C99-specific feature}} */
+struct x { int x,y[]; }; /* expected-warning {{flexible array members are a C99 feature}} */
 
 /* Duplicated type-qualifiers aren't allowed by C90 */
 const const int c_i; /* expected-warning {{duplicate 'const' declaration specifier}} */
@@ -110,6 +110,8 @@ typedef CI *array_of_pointer_to_CI[5];
 const array_of_pointer_to_CI mine3;
 
 void main() {} /* expected-error {{'main' must return 'int'}} */
+
+const int main() {} /* expected-error {{'main' must return 'int'}} */
 
 long long ll1 = /* expected-warning {{'long long' is an extension when C99 mode is not enabled}} */
          -42LL; /* expected-warning {{'long long' is an extension when C99 mode is not enabled}} */

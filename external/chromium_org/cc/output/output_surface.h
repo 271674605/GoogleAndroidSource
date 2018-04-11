@@ -5,15 +5,18 @@
 #ifndef CC_OUTPUT_OUTPUT_SURFACE_H_
 #define CC_OUTPUT_OUTPUT_SURFACE_H_
 
+#include <deque>
+
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/base/cc_export.h"
+#include "cc/base/rolling_time_delta_history.h"
+#include "cc/output/begin_frame_args.h"
 #include "cc/output/context_provider.h"
+#include "cc/output/overlay_candidate_validator.h"
 #include "cc/output/software_output_device.h"
-#include "cc/scheduler/frame_rate_controller.h"
-#include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 
 namespace base { class SingleThreadTaskRunner; }
 
@@ -31,7 +34,6 @@ class CompositorFrame;
 class CompositorFrameAck;
 struct ManagedMemoryPolicy;
 class OutputSurfaceClient;
-class OutputSurfaceCallbacks;
 
 // Represents the output surface for a compositor. The compositor owns
 // and manages its destruction. Its lifetime is:
@@ -40,18 +42,18 @@ class OutputSurfaceCallbacks;
 //      From here on, it will only be used on the compositor thread.
 //   3. If the 3D context is lost, then the compositor will delete the output
 //      surface (on the compositor thread) and go back to step 1.
-class CC_EXPORT OutputSurface : public FrameRateControllerClient {
+class CC_EXPORT OutputSurface {
  public:
   enum {
     DEFAULT_MAX_FRAMES_PENDING = 2
   };
 
-  explicit OutputSurface(scoped_ptr<WebKit::WebGraphicsContext3D> context3d);
+  explicit OutputSurface(scoped_refptr<ContextProvider> context_provider);
 
-  explicit OutputSurface(scoped_ptr<cc::SoftwareOutputDevice> software_device);
+  explicit OutputSurface(scoped_ptr<SoftwareOutputDevice> software_device);
 
-  OutputSurface(scoped_ptr<WebKit::WebGraphicsContext3D> context3d,
-                scoped_ptr<cc::SoftwareOutputDevice> software_device);
+  OutputSurface(scoped_refptr<ContextProvider> context_provider,
+                scoped_ptr<SoftwareOutputDevice> software_device);
 
   virtual ~OutputSurface();
 
@@ -61,7 +63,8 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
           max_frames_pending(0),
           deferred_gl_initialization(false),
           draw_and_swap_full_viewport_every_frame(false),
-          adjust_deadline_for_parent(true) {}
+          adjust_deadline_for_parent(true),
+          uses_default_gl_framebuffer(true) {}
     bool delegated_rendering;
     int max_frames_pending;
     bool deferred_gl_initialization;
@@ -69,28 +72,27 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
     // This doesn't handle the <webview> case, but once BeginFrame is
     // supported natively, we shouldn't need adjust_deadline_for_parent.
     bool adjust_deadline_for_parent;
+    // Whether this output surface renders to the default OpenGL zero
+    // framebuffer or to an offscreen framebuffer.
+    bool uses_default_gl_framebuffer;
   };
 
   const Capabilities& capabilities() const {
     return capabilities_;
   }
 
+  virtual bool HasExternalStencilTest() const;
+
   // Obtain the 3d context or the software device associated with this output
   // surface. Either of these may return a null pointer, but not both.
   // In the event of a lost context, the entire output surface should be
   // recreated.
-  WebKit::WebGraphicsContext3D* context3d() const {
-    return context3d_.get();
+  scoped_refptr<ContextProvider> context_provider() const {
+    return context_provider_.get();
   }
-
   SoftwareOutputDevice* software_device() const {
     return software_device_.get();
   }
-
-  // In the case where both the context3d and software_device are present
-  // (namely Android WebView), this is called to determine whether the software
-  // device should be used on the current frame.
-  virtual bool ForcedDrawToSoftwareDevice() const;
 
   // Called by the compositor on the compositor thread. This is a place where
   // thread-specific data for the output surface can be initialized, since from
@@ -98,17 +100,18 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   // thread.
   virtual bool BindToClient(OutputSurfaceClient* client);
 
-  void InitializeBeginFrameEmulation(
-      base::SingleThreadTaskRunner* task_runner,
-      bool throttle_frame_production,
-      base::TimeDelta interval);
+  // This is called by the compositor on the compositor thread inside ReleaseGL
+  // in order to release the ContextProvider. Only used with
+  // deferred_gl_initialization capability.
+  void ReleaseContextProvider();
 
-  void SetMaxFramesPending(int max_frames_pending);
+  // Enable or disable vsync.
+  void SetThrottleFrameProduction(bool enable);
 
   virtual void EnsureBackbuffer();
   virtual void DiscardBackbuffer();
 
-  virtual void Reshape(gfx::Size size, float scale_factor);
+  virtual void Reshape(const gfx::Size& size, float scale_factor);
   virtual gfx::Size SurfaceSize() const;
 
   virtual void BindFramebuffer();
@@ -117,6 +120,7 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   // passed in (though it will not take ownership of the CompositorFrame
   // itself).
   virtual void SwapBuffers(CompositorFrame* frame);
+  virtual void OnSwapBuffersComplete();
 
   // Notifies frame-rate smoothness preference. If true, all non-critical
   // processing should be stopped, or lowered in priority.
@@ -125,77 +129,65 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   // Requests a BeginFrame notification from the output surface. The
   // notification will be delivered by calling
   // OutputSurfaceClient::BeginFrame until the callback is disabled.
-  virtual void SetNeedsBeginFrame(bool enable);
+  virtual void SetNeedsBeginFrame(bool enable) {}
+
+  bool HasClient() { return !!client_; }
+
+  // Returns an estimate of the current GPU latency. When only a software
+  // device is present, returns 0.
+  base::TimeDelta GpuLatencyEstimate();
+
+  // Get the class capable of informing cc of hardware overlay capability.
+  OverlayCandidateValidator* overlay_candidate_validator() const {
+    return overlay_candidate_validator_.get();
+  }
 
  protected:
+  OutputSurfaceClient* client_;
+
   // Synchronously initialize context3d and enter hardware mode.
   // This can only supported in threaded compositing mode.
-  // |offscreen_context_provider| should match what is returned by
-  // LayerTreeClient::OffscreenContextProviderForCompositorThread.
-  bool InitializeAndSetContext3D(
-      scoped_ptr<WebKit::WebGraphicsContext3D> context3d,
-      scoped_refptr<ContextProvider> offscreen_context_provider);
+  bool InitializeAndSetContext3d(
+      scoped_refptr<ContextProvider> context_provider);
   void ReleaseGL();
 
   void PostSwapBuffersComplete();
 
-  struct cc::OutputSurface::Capabilities capabilities_;
-  scoped_ptr<OutputSurfaceCallbacks> callbacks_;
-  scoped_ptr<WebKit::WebGraphicsContext3D> context3d_;
-  scoped_ptr<cc::SoftwareOutputDevice> software_device_;
-  bool has_gl_discard_backbuffer_;
-  bool has_swap_buffers_complete_callback_;
+  struct OutputSurface::Capabilities capabilities_;
+  scoped_refptr<ContextProvider> context_provider_;
+  scoped_ptr<SoftwareOutputDevice> software_device_;
+  scoped_ptr<OverlayCandidateValidator> overlay_candidate_validator_;
   gfx::Size surface_size_;
   float device_scale_factor_;
-  base::WeakPtrFactory<OutputSurface> weak_ptr_factory_;
 
-  // The FrameRateController is deprecated.
-  // Platforms should move to native BeginFrames instead.
-  void OnVSyncParametersChanged(base::TimeTicks timebase,
-                                base::TimeDelta interval);
-  virtual void FrameRateControllerTick(bool throttled,
-                                       const BeginFrameArgs& args) OVERRIDE;
-  scoped_ptr<FrameRateController> frame_rate_controller_;
-  int max_frames_pending_;
-  int pending_swap_buffers_;
-  bool needs_begin_frame_;
-  bool begin_frame_pending_;
+  void CommitVSyncParameters(base::TimeTicks timebase,
+                             base::TimeDelta interval);
 
-  // Forwarded to OutputSurfaceClient but threaded through OutputSurface
-  // first so OutputSurface has a chance to update the FrameRateController
-  bool HasClient() { return !!client_; }
-  void SetNeedsRedrawRect(gfx::Rect damage_rect);
-  void BeginFrame(const BeginFrameArgs& args);
-  void DidSwapBuffers();
-  void OnSwapBuffersComplete(const CompositorFrameAck* ack);
+  void SetNeedsRedrawRect(const gfx::Rect& damage_rect);
+  void ReclaimResources(const CompositorFrameAck* ack);
   void DidLoseOutputSurface();
   void SetExternalStencilTest(bool enabled);
-  void SetExternalDrawConstraints(const gfx::Transform& transform,
-                                  gfx::Rect viewport,
-                                  gfx::Rect clip,
-                                  bool valid_for_tile_management);
-
-  // virtual for testing.
-  virtual base::TimeDelta RetroactiveBeginFramePeriod();
-  virtual void PostCheckForRetroactiveBeginFrame();
-  void CheckForRetroactiveBeginFrame();
+  void SetExternalDrawConstraints(
+      const gfx::Transform& transform,
+      const gfx::Rect& viewport,
+      const gfx::Rect& clip,
+      const gfx::Rect& viewport_rect_for_tile_priority,
+      const gfx::Transform& transform_for_tile_priority,
+      bool resourceless_software_draw);
 
  private:
-  OutputSurfaceClient* client_;
-  friend class OutputSurfaceCallbacks;
+  void SetUpContext3d();
+  void ResetContext3d();
+  void SetMemoryPolicy(const ManagedMemoryPolicy& policy);
+  void UpdateAndMeasureGpuLatency();
 
-  void SetContext3D(scoped_ptr<WebKit::WebGraphicsContext3D> context3d);
-  void ResetContext3D();
-  void SetMemoryPolicy(const ManagedMemoryPolicy& policy,
-                       bool discard_backbuffer_when_not_visible);
+  bool external_stencil_test_enabled_;
 
-  // This stores a BeginFrame that we couldn't process immediately, but might
-  // process retroactively in the near future.
-  BeginFrameArgs skipped_begin_frame_args_;
+  base::WeakPtrFactory<OutputSurface> weak_ptr_factory_;
 
-  // check_for_retroactive_begin_frame_pending_ is used to avoid posting
-  // redundant checks for a retroactive BeginFrame.
-  bool check_for_retroactive_begin_frame_pending_;
+  std::deque<unsigned> available_gpu_latency_query_ids_;
+  std::deque<unsigned> pending_gpu_latency_query_ids_;
+  RollingTimeDeltaHistory gpu_latency_history_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputSurface);
 };

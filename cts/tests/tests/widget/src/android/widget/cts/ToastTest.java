@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import android.app.Activity;
@@ -33,7 +33,7 @@ import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.Toast;
 
-public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
+public class ToastTest extends ActivityInstrumentationTestCase2<CtsActivity> {
     private static final String TEST_TOAST_TEXT = "test toast";
     private static final long TIME_FOR_UI_OPERATION  = 1000L;
     private static final long TIME_OUT = 5000L;
@@ -44,7 +44,7 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
     private ViewTreeObserver.OnGlobalLayoutListener mLayoutListener;
 
     public ToastTest() {
-        super("com.android.cts.stub", StubActivity.class);
+        super("com.android.cts.widget", CtsActivity.class);
     }
 
     @Override
@@ -53,7 +53,6 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
         mActivity = getActivity();
         mInstrumentation = getInstrumentation();
-        mToast = new Toast(mActivity);
         mLayoutDone = false;
         mLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
             public void onGlobalLayout() {
@@ -62,6 +61,7 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
         };
     }
 
+    @UiThreadTest
     public void testConstructor() {
         new Toast(mActivity);
 
@@ -113,13 +113,17 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
         view.getViewTreeObserver().removeOnGlobalLayoutListener(mLayoutListener);
     }
 
-    public void testShow() {
+    private void makeToast() {
         mActivity.runOnUiThread(new Runnable() {
             public void run() {
                 mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_LONG);
             }
         });
         mInstrumentation.waitForIdleSync();
+    }
+
+    public void testShow() {
+        makeToast();
 
         final View view = mToast.getView();
 
@@ -141,10 +145,11 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
     @UiThreadTest
     public void testShowFailure() {
+        Toast toast = new Toast(mActivity);
         // do not have any views.
-        assertNull(mToast.getView());
+        assertNull(toast.getView());
         try {
-            mToast.show();
+            toast.show();
             fail("did not throw RuntimeException when did not set any views.");
         } catch (RuntimeException e) {
             // expected, test success.
@@ -152,12 +157,7 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
     }
 
     public void testCancel() throws InterruptedException {
-        mActivity.runOnUiThread(new Runnable() {
-            public void run() {
-                mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_LONG);
-            }
-        });
-        mInstrumentation.waitForIdleSync();
+        makeToast();
 
         final View view = mToast.getView();
 
@@ -175,12 +175,7 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
     }
 
     public void testAccessView() {
-        mActivity.runOnUiThread(new Runnable() {
-            public void run() {
-                mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_LONG);
-            }
-        });
-        mInstrumentation.waitForIdleSync();
+        makeToast();
         assertFalse(mToast.getView() instanceof ImageView);
 
         final ImageView imageView = new ImageView(mActivity);
@@ -197,11 +192,12 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
         assertSame(imageView, mToast.getView());
         assertShowAndHide(imageView);
     }
+
     public void testAccessDuration() {
         long start = SystemClock.uptimeMillis();
+        makeToast();
         mActivity.runOnUiThread(new Runnable() {
             public void run() {
-                mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_LONG);
                 mToast.show();
             }
         });
@@ -230,12 +226,7 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
     }
 
     public void testAccessMargin() {
-        mActivity.runOnUiThread(new Runnable() {
-            public void run() {
-                mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_SHORT);
-            }
-        });
-        mInstrumentation.waitForIdleSync();
+        makeToast();
         View view = mToast.getView();
         assertFalse(view.getLayoutParams() instanceof WindowManager.LayoutParams);
 
@@ -289,9 +280,9 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
     }
 
     public void testAccessGravity() {
+        makeToast();
         mActivity.runOnUiThread(new Runnable() {
             public void run() {
-                mToast = Toast.makeText(mActivity, TEST_TOAST_TEXT, Toast.LENGTH_SHORT);
                 mToast.setGravity(Gravity.CENTER, 0, 0);
                 mToast.show();
                 registerLayoutListener(mToast.getView());
@@ -357,26 +348,26 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
     @UiThreadTest
     public void testMakeText1() {
-        mToast = Toast.makeText(mActivity, "android", Toast.LENGTH_SHORT);
-        assertNotNull(mToast);
-        assertEquals(Toast.LENGTH_SHORT, mToast.getDuration());
-        View view = mToast.getView();
+        Toast toast = Toast.makeText(mActivity, "android", Toast.LENGTH_SHORT);
+        assertNotNull(toast);
+        assertEquals(Toast.LENGTH_SHORT, toast.getDuration());
+        View view = toast.getView();
         assertNotNull(view);
 
-        mToast = Toast.makeText(mActivity, "cts", Toast.LENGTH_LONG);
-        assertNotNull(mToast);
-        assertEquals(Toast.LENGTH_LONG, mToast.getDuration());
-        view = mToast.getView();
+        toast = Toast.makeText(mActivity, "cts", Toast.LENGTH_LONG);
+        assertNotNull(toast);
+        assertEquals(Toast.LENGTH_LONG, toast.getDuration());
+        view = toast.getView();
         assertNotNull(view);
 
-        mToast = Toast.makeText(mActivity, null, Toast.LENGTH_LONG);
-        assertNotNull(mToast);
-        assertEquals(Toast.LENGTH_LONG, mToast.getDuration());
-        view = mToast.getView();
+        toast = Toast.makeText(mActivity, null, Toast.LENGTH_LONG);
+        assertNotNull(toast);
+        assertEquals(Toast.LENGTH_LONG, toast.getDuration());
+        view = toast.getView();
         assertNotNull(view);
 
         try {
-            mToast = Toast.makeText(null, "test", Toast.LENGTH_LONG);
+            toast = Toast.makeText(null, "test", Toast.LENGTH_LONG);
             fail("did not throw NullPointerException when context is null.");
         } catch (NullPointerException e) {
             //expected, test success.
@@ -385,21 +376,21 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
     @UiThreadTest
     public void testMakeText2() {
-        mToast = Toast.makeText(mActivity, R.string.hello_world, Toast.LENGTH_LONG);
+        Toast toast = Toast.makeText(mActivity, R.string.hello_world, Toast.LENGTH_LONG);
 
-        assertNotNull(mToast);
-        assertEquals(Toast.LENGTH_LONG, mToast.getDuration());
-        View view = mToast.getView();
+        assertNotNull(toast);
+        assertEquals(Toast.LENGTH_LONG, toast.getDuration());
+        View view = toast.getView();
         assertNotNull(view);
 
-        mToast = Toast.makeText(mActivity, R.string.hello_android, Toast.LENGTH_SHORT);
-        assertNotNull(mToast);
-        assertEquals(Toast.LENGTH_SHORT, mToast.getDuration());
-        view = mToast.getView();
+        toast = Toast.makeText(mActivity, R.string.hello_android, Toast.LENGTH_SHORT);
+        assertNotNull(toast);
+        assertEquals(Toast.LENGTH_SHORT, toast.getDuration());
+        view = toast.getView();
         assertNotNull(view);
 
         try {
-            mToast = Toast.makeText(null, R.string.hello_android, Toast.LENGTH_SHORT);
+            toast = Toast.makeText(null, R.string.hello_android, Toast.LENGTH_SHORT);
             fail("did not throw NullPointerException when context is null.");
         } catch (NullPointerException e) {
             //expected, test success.
@@ -408,16 +399,16 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
     @UiThreadTest
     public void testSetText1() {
-        mToast = Toast.makeText(mActivity, R.string.text, Toast.LENGTH_LONG);
+        Toast toast = Toast.makeText(mActivity, R.string.text, Toast.LENGTH_LONG);
 
-        mToast.setText(R.string.hello_world);
+        toast.setText(R.string.hello_world);
         // TODO: how to getText to assert?
 
-        mToast.setText(R.string.hello_android);
+        toast.setText(R.string.hello_android);
         // TODO: how to getText to assert?
 
         try {
-            mToast.setText(-1);
+            toast.setText(-1);
             fail("did not throw RuntimeException when resource id is negative.");
         } catch (RuntimeException e) {
             //expected, test success.
@@ -426,17 +417,17 @@ public class ToastTest extends ActivityInstrumentationTestCase2<StubActivity> {
 
     @UiThreadTest
     public void testSetText2() {
-        mToast = Toast.makeText(mActivity, R.string.text, Toast.LENGTH_LONG);
+        Toast toast = Toast.makeText(mActivity, R.string.text, Toast.LENGTH_LONG);
 
-        mToast.setText("cts");
+        toast.setText("cts");
         // TODO: how to getText to assert?
 
-        mToast.setText("android");
+        toast.setText("android");
         // TODO: how to getText to assert?
 
         try {
-            mToast.setView(null);
-            mToast.setText(null);
+            toast.setView(null);
+            toast.setText(null);
             fail("did not throw RuntimeException when view is null.");
         } catch (RuntimeException e) {
             //expected, test success.

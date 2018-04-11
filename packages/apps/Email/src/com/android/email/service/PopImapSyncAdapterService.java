@@ -37,9 +37,11 @@ import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.EmailContent;
 import com.android.emailcommon.provider.EmailContent.AccountColumns;
 import com.android.emailcommon.provider.EmailContent.Message;
+import com.android.emailcommon.provider.EmailContent.MessageColumns;
 import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.service.EmailServiceProxy;
 import com.android.emailcommon.service.EmailServiceStatus;
+import com.android.mail.providers.UIProvider;
 import com.android.mail.utils.LogUtils;
 
 import java.util.ArrayList;
@@ -111,7 +113,7 @@ public class PopImapSyncAdapterService extends Service {
                 !loadsFromServer(context, mailbox, protocol)) {
             // This is an update to a message in a non-syncing mailbox; delete this from the
             // updates table and return
-            resolver.delete(Message.UPDATED_CONTENT_URI, Message.MAILBOX_KEY + "=?",
+            resolver.delete(Message.UPDATED_CONTENT_URI, MessageColumns.MAILBOX_KEY + "=?",
                     new String[] {Long.toString(mailbox.mId)});
             return;
         }
@@ -130,7 +132,7 @@ public class PopImapSyncAdapterService extends Service {
                     EmailServiceStub.sendMailImpl(context, account.mId);
                 } else {
                     EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId,
-                            EmailServiceStatus.IN_PROGRESS, 0);
+                            EmailServiceStatus.IN_PROGRESS, 0, UIProvider.LastSyncResult.SUCCESS);
                     final int status;
                     if (protocol.equals(legacyImapProtocol)) {
                         status = ImapService.synchronizeMailboxSynchronous(context, account,
@@ -139,20 +141,31 @@ public class PopImapSyncAdapterService extends Service {
                         status = Pop3Service.synchronizeMailboxSynchronous(context, account,
                                 mailbox, deltaMessageCount);
                     }
-                    EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, status, 0);
+                    EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, status, 0,
+                            UIProvider.LastSyncResult.SUCCESS);
                 }
             } catch (MessagingException e) {
-                int cause = e.getExceptionType();
-                // XXX It's no good to put the MessagingException.cause here, that's not the
-                // same set of values that we use in EmailServiceStatus.
-                EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, cause, 0);
-                switch(cause) {
+                final int type = e.getExceptionType();
+                // type must be translated into the domain of values used by EmailServiceStatus
+                switch(type) {
                     case MessagingException.IOERROR:
+                        EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, type, 0,
+                                UIProvider.LastSyncResult.CONNECTION_ERROR);
                         syncResult.stats.numIoExceptions++;
                         break;
                     case MessagingException.AUTHENTICATION_FAILED:
+                        EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, type, 0,
+                                UIProvider.LastSyncResult.AUTH_ERROR);
                         syncResult.stats.numAuthExceptions++;
                         break;
+                    case MessagingException.SERVER_ERROR:
+                        EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, type, 0,
+                                UIProvider.LastSyncResult.SERVER_ERROR);
+                        break;
+
+                    default:
+                        EmailServiceStatus.syncMailboxStatus(resolver, extras, mailboxId, type, 0,
+                                UIProvider.LastSyncResult.INTERNAL_ERROR);
                 }
             }
         } finally {
@@ -182,8 +195,8 @@ public class PopImapSyncAdapterService extends Service {
                     // See if any boxes have mail...
                     ArrayList<Long> mailboxesToUpdate;
                     Cursor updatesCursor = provider.query(Message.UPDATED_CONTENT_URI,
-                            new String[] {Message.MAILBOX_KEY},
-                            Message.ACCOUNT_KEY + "=?",
+                            new String[] {MessageColumns.MAILBOX_KEY},
+                            MessageColumns.ACCOUNT_KEY + "=?",
                             new String[] {Long.toString(acct.mId)},
                             null);
                     try {
@@ -231,7 +244,8 @@ public class PopImapSyncAdapterService extends Service {
                         int deltaMessageCount =
                                 extras.getInt(Mailbox.SYNC_EXTRA_DELTA_MESSAGE_COUNT, 0);
                         for (long mailboxId : mailboxIds) {
-                            sync(context, mailboxId, extras, syncResult, uiRefresh, deltaMessageCount);
+                            sync(context, mailboxId, extras, syncResult, uiRefresh,
+                                    deltaMessageCount);
                         }
                     }
                 }

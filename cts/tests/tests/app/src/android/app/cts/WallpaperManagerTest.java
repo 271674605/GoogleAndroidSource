@@ -17,7 +17,11 @@
 package android.app.cts;
 
 import android.app.WallpaperManager;
+import android.content.Context;
+import android.graphics.Point;
 import android.test.AndroidTestCase;
+import android.view.Display;
+import android.view.WindowManager;
 
 public class WallpaperManagerTest extends AndroidTestCase {
 
@@ -29,11 +33,44 @@ public class WallpaperManagerTest extends AndroidTestCase {
         mWallpaperManager = WallpaperManager.getInstance(mContext);
     }
 
+    /**
+     * Suggesting desired dimensions is only a hint to the system that can be ignored.
+     *
+     * Test if the desired minimum width or height the WallpaperManager returns
+     * is greater than 0. If so, then we check whether that the size is at least the
+     * as big as the screen.
+     */
     public void testSuggestDesiredDimensions() {
-        mWallpaperManager.suggestDesiredDimensions(320, 480);
-        int desiredMinimumWidth = mWallpaperManager.getDesiredMinimumWidth();
-        int desiredMinimumHeight = mWallpaperManager.getDesiredMinimumHeight();
-        assertEquals(320, desiredMinimumWidth);
-        assertEquals(480, desiredMinimumHeight);
+        final Point min = getScreenSize();
+        final int w = min.x * 3;
+        final int h = min.y * 2;
+
+        assertDesiredMinimum(new Point(min.x / 2, min.y / 2), min);
+
+        assertDesiredMinimum(new Point(w, h),
+                             new Point(w, h));
+
+        assertDesiredMinimum(new Point(min.x / 2, h),
+                             new Point(min.x, h));
+
+        assertDesiredMinimum(new Point(w, min.y / 2),
+                             new Point(w, min.y));
+    }
+
+    private void assertDesiredMinimum(Point suggestedSize, Point expectedSize) {
+        mWallpaperManager.suggestDesiredDimensions(suggestedSize.x, suggestedSize.y);
+        Point actualSize = new Point(mWallpaperManager.getDesiredMinimumWidth(),
+                mWallpaperManager.getDesiredMinimumHeight());
+        if (actualSize.x > 0 || actualSize.y > 0) {
+            assertEquals(expectedSize, actualSize);
+        }
+    }
+
+    private Point getScreenSize() {
+        WindowManager wm = (WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE);
+        Display d = wm.getDefaultDisplay();
+        Point p = new Point();
+        d.getRealSize(p);
+        return p;
     }
 }

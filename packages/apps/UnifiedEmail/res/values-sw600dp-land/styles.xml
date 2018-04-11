@@ -16,7 +16,9 @@
      limitations under the License.
 -->
 <resources>
-    <style name="ComposeArea">
-        <item name="android:layout_width">@dimen/compose_scrollview_width</item>
+    <style name="ComposeArea" parent="AbstractComposeAreaWithRtl">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">70</item>
+        <item name="android:maxWidth">@dimen/compose_scrollview_max_width</item>
     </style>
 </resources>

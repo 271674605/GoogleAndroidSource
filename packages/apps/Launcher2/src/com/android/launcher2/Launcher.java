@@ -43,6 +43,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
@@ -50,10 +51,8 @@ import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.Rect;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.AsyncTask;
@@ -63,6 +62,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.StrictMode;
 import android.os.SystemClock;
+import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
@@ -180,6 +180,8 @@ public final class Launcher extends Activity
     private static final String RUNTIME_STATE_PENDING_ADD_SPAN_Y = "launcher.add_span_y";
     // Type: parcelable
     private static final String RUNTIME_STATE_PENDING_ADD_WIDGET_INFO = "launcher.add_widget_info";
+    // Type: parcelable
+    private static final String RUNTIME_STATE_PENDING_ADD_WIDGET_ID = "launcher.add_widget_id";
 
     private static final String TOOLBAR_ICON_METADATA_NAME = "com.android.launcher.toolbar_icon";
     private static final String TOOLBAR_SEARCH_ICON_METADATA_NAME =
@@ -223,6 +225,7 @@ public final class Launcher extends Activity
 
     private ItemInfo mPendingAddInfo = new ItemInfo();
     private AppWidgetProviderInfo mPendingAddWidgetInfo;
+    private int mPendingAddWidgetId = -1;
 
     private int[] mTmpAddItemCellCoordinates = new int[2];
 
@@ -623,6 +626,10 @@ public final class Launcher extends Activity
     @Override
     protected void onActivityResult(
             final int requestCode, final int resultCode, final Intent data) {
+
+        int pendingAddWidgetId = mPendingAddWidgetId;
+        mPendingAddWidgetId = -1;
+
         if (requestCode == REQUEST_BIND_APPWIDGET) {
             int appWidgetId = data != null ?
                     data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) : -1;
@@ -640,8 +647,15 @@ public final class Launcher extends Activity
 
         // We have special handling for widgets
         if (isWidgetDrop) {
-            int appWidgetId = data != null ?
-                    data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) : -1;
+            final int appWidgetId;
+            int widgetId = data != null ? data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
+                    : -1;
+            if (widgetId < 0) {
+                appWidgetId = pendingAddWidgetId;
+            } else {
+                appWidgetId = widgetId;
+            }
+
             if (appWidgetId < 0) {
                 Log.e(TAG, "Error: appWidgetId (EXTRA_APPWIDGET_ID) was not returned from the \\" +
                         "widget configuration activity.");
@@ -699,6 +713,7 @@ public final class Launcher extends Activity
                 }
             };
         } else if (resultCode == RESULT_CANCELED) {
+            mAppWidgetHost.deleteAppWidgetId(appWidgetId);
             animationType = Workspace.CANCEL_TWO_STAGE_WIDGET_DROP_ANIMATION;
             onCompleteRunnable = new Runnable() {
                 @Override
@@ -942,6 +957,7 @@ public final class Launcher extends Activity
             mPendingAddInfo.spanX = savedState.getInt(RUNTIME_STATE_PENDING_ADD_SPAN_X);
             mPendingAddInfo.spanY = savedState.getInt(RUNTIME_STATE_PENDING_ADD_SPAN_Y);
             mPendingAddWidgetInfo = savedState.getParcelable(RUNTIME_STATE_PENDING_ADD_WIDGET_INFO);
+            mPendingAddWidgetId = savedState.getInt(RUNTIME_STATE_PENDING_ADD_WIDGET_ID);
             mWaitingForResult = true;
             mRestoring = true;
         }
@@ -1066,11 +1082,13 @@ public final class Launcher extends Activity
             return;
         }
 
-        final ShortcutInfo info = mModel.getShortcutInfo(getPackageManager(), data, this);
+        final ShortcutInfo info = mModel.getShortcutInfo(getPackageManager(), data,
+                android.os.Process.myUserHandle(), this);
 
         if (info != null) {
-            info.setActivity(data.getComponent(), Intent.FLAG_ACTIVITY_NEW_TASK |
-                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            // Necessary flags are added when the activity is launched via
+            // LauncherApps
+            info.setActivity(data);
             info.container = ItemInfo.NO_ID;
             mWorkspace.addApplicationShortcut(info, layout, container, screen, cellXY[0], cellXY[1],
                     isWorkspaceLocked(), cellX, cellY);
@@ -1156,12 +1174,13 @@ public final class Launcher extends Activity
     }
 
     static int[] getSpanForWidget(Context context, PendingAddWidgetInfo info) {
-        return getSpanForWidget(context, info.componentName, info.minWidth, info.minHeight);
+        return getSpanForWidget(context, info.componentName, info.info.minWidth,
+                info.info.minHeight);
     }
 
     static int[] getMinSpanForWidget(Context context, PendingAddWidgetInfo info) {
-        return getSpanForWidget(context, info.componentName, info.minResizeWidth,
-                info.minResizeHeight);
+        return getSpanForWidget(context, info.componentName, info.info.minResizeWidth,
+                info.info.minResizeHeight);
     }
 
     /**
@@ -1228,6 +1247,7 @@ public final class Launcher extends Activity
         launcherInfo.spanY = spanXY[1];
         launcherInfo.minSpanX = mPendingAddInfo.minSpanX;
         launcherInfo.minSpanY = mPendingAddInfo.minSpanY;
+        launcherInfo.user = appWidgetInfo.getProfile();
 
         LauncherModel.addItemToDatabase(this, launcherInfo,
                 container, screen, cellXY[0], cellXY[1], false);
@@ -1272,6 +1292,9 @@ public final class Launcher extends Activity
             } else if (Intent.ACTION_USER_PRESENT.equals(action)) {
                 mUserPresent = true;
                 updateRunning();
+            } else if (Intent.ACTION_MANAGED_PROFILE_ADDED.equals(action)
+                    || Intent.ACTION_MANAGED_PROFILE_REMOVED.equals(action)) {
+                getModel().forceReload();
             }
         }
     };
@@ -1284,6 +1307,8 @@ public final class Launcher extends Activity
         final IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         filter.addAction(Intent.ACTION_USER_PRESENT);
+        filter.addAction(Intent.ACTION_MANAGED_PROFILE_ADDED);
+        filter.addAction(Intent.ACTION_MANAGED_PROFILE_REMOVED);
         registerReceiver(mReceiver, filter);
         FirstFrameAnimatorHelper.initializeDrawListener(getWindow().getDecorView());
         mAttached = true;
@@ -1534,6 +1559,7 @@ public final class Launcher extends Activity
             outState.putInt(RUNTIME_STATE_PENDING_ADD_SPAN_X, mPendingAddInfo.spanX);
             outState.putInt(RUNTIME_STATE_PENDING_ADD_SPAN_Y, mPendingAddInfo.spanY);
             outState.putParcelable(RUNTIME_STATE_PENDING_ADD_WIDGET_INFO, mPendingAddWidgetInfo);
+            outState.putInt(RUNTIME_STATE_PENDING_ADD_WIDGET_ID, mPendingAddWidgetId);
         }
 
         if (mFolderInfo != null && mWaitingForResult) {
@@ -1759,12 +1785,10 @@ public final class Launcher extends Activity
             AppWidgetProviderInfo appWidgetInfo) {
         if (appWidgetInfo.configure != null) {
             mPendingAddWidgetInfo = appWidgetInfo;
+            mPendingAddWidgetId = appWidgetId;
 
             // Launch over to configure widget, if needed
-            Intent intent = new Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
-            intent.setComponent(appWidgetInfo.configure);
-            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
-            startActivityForResultSafely(intent, REQUEST_CREATE_APPWIDGET);
+            startAppWidgetConfigureActivitySafely(appWidgetId);
         } else {
             // Otherwise just add it
             completeAddAppWidget(appWidgetId, info.container, info.screen, boundWidget,
@@ -1834,16 +1858,9 @@ public final class Launcher extends Activity
             // In this case, we either need to start an activity to get permission to bind
             // the widget, or we need to start an activity to configure the widget, or both.
             appWidgetId = getAppWidgetHost().allocateAppWidgetId();
-            Bundle options = info.bindOptions;
 
-            boolean success = false;
-            if (options != null) {
-                success = mAppWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId,
-                        info.componentName, options);
-            } else {
-                success = mAppWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId,
-                        info.componentName);
-            }
+            boolean success = mAppWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId,
+                    info.info.getProfile(), info.componentName, info.bindOptions);
             if (success) {
                 addAppWidgetImpl(appWidgetId, info, null, info.info);
             } else {
@@ -1851,6 +1868,8 @@ public final class Launcher extends Activity
                 Intent intent = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
                 intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
                 intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.componentName);
+                intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE,
+                        info.info.getProfile());
                 // TODO: we need to make sure that this accounts for the options bundle.
                 // intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, options);
                 startActivityForResult(intent, REQUEST_BIND_APPWIDGET);
@@ -2093,15 +2112,20 @@ public final class Launcher extends Activity
         }
     }
 
-    void startApplicationDetailsActivity(ComponentName componentName) {
-        String packageName = componentName.getPackageName();
-        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", packageName, null));
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
-        startActivitySafely(null, intent, "startApplicationDetailsActivity");
+    void startApplicationDetailsActivity(ComponentName componentName, UserHandle user) {
+        LauncherApps launcherApps = (LauncherApps) getSystemService(Context.LAUNCHER_APPS_SERVICE);
+        try {
+            launcherApps.startAppDetailsActivity(componentName, user, null, null);
+        } catch (SecurityException e) {
+            Toast.makeText(this, R.string.activity_not_found, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Launcher does not have permission to launch settings");
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, R.string.activity_not_found, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Unable to launch settings");
+        }
     }
 
-    void startApplicationUninstallActivity(ApplicationInfo appInfo) {
+    void startApplicationUninstallActivity(ApplicationInfo appInfo, UserHandle user) {
         if ((appInfo.flags & ApplicationInfo.DOWNLOADED_FLAG) == 0) {
             // System applications cannot be installed. For now, show a toast explaining that.
             // We may give them the option of disabling apps this way.
@@ -2114,6 +2138,9 @@ public final class Launcher extends Activity
                     Intent.ACTION_DELETE, Uri.fromParts("package", packageName, className));
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+            if (user != null) {
+                intent.putExtra(Intent.EXTRA_USER, user);
+            }
             startActivity(intent);
         }
     }
@@ -2126,13 +2153,27 @@ public final class Launcher extends Activity
             // private contract between launcher and may be ignored in the future).
             boolean useLaunchAnimation = (v != null) &&
                     !intent.hasExtra(INTENT_EXTRA_IGNORE_LAUNCH_ANIMATION);
+            UserHandle user = (UserHandle) intent.getParcelableExtra(ApplicationInfo.EXTRA_PROFILE);
+            LauncherApps launcherApps = (LauncherApps)
+                    this.getSystemService(Context.LAUNCHER_APPS_SERVICE);
             if (useLaunchAnimation) {
                 ActivityOptions opts = ActivityOptions.makeScaleUpAnimation(v, 0, 0,
                         v.getMeasuredWidth(), v.getMeasuredHeight());
-
-                startActivity(intent, opts.toBundle());
+                if (user == null || user.equals(android.os.Process.myUserHandle())) {
+                    // Could be launching some bookkeeping activity
+                    startActivity(intent, opts.toBundle());
+                } else {
+                    launcherApps.startMainActivity(intent.getComponent(), user,
+                            intent.getSourceBounds(),
+                            opts.toBundle());
+                }
             } else {
-                startActivity(intent);
+                if (user == null || user.equals(android.os.Process.myUserHandle())) {
+                    startActivity(intent);
+                } else {
+                    launcherApps.startMainActivity(intent.getComponent(), user,
+                            intent.getSourceBounds(), null);
+                }
             }
             return true;
         } catch (SecurityException e) {
@@ -2154,6 +2195,15 @@ public final class Launcher extends Activity
             Log.e(TAG, "Unable to launch. tag=" + tag + " intent=" + intent, e);
         }
         return success;
+    }
+
+    void startAppWidgetConfigureActivitySafely(int appWidgetId) {
+        try {
+            mAppWidgetHost.startAppWidgetConfigureActivityForResult(this, appWidgetId, 0,
+                    REQUEST_CREATE_APPWIDGET, null);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, R.string.activity_not_found, Toast.LENGTH_SHORT).show();
+        }
     }
 
     void startActivityForResultSafely(Intent intent, int requestCode) {
@@ -3753,19 +3803,19 @@ public final class Launcher extends Activity
      */
     public void bindComponentsRemoved(final ArrayList<String> packageNames,
                                       final ArrayList<ApplicationInfo> appInfos,
-                                      final boolean matchPackageNamesOnly) {
+            final boolean matchPackageNamesOnly, final UserHandle user) {
         if (waitUntilResume(new Runnable() {
             public void run() {
-                bindComponentsRemoved(packageNames, appInfos, matchPackageNamesOnly);
+                bindComponentsRemoved(packageNames, appInfos, matchPackageNamesOnly, user);
             }
         })) {
             return;
         }
 
         if (matchPackageNamesOnly) {
-            mWorkspace.removeItemsByPackageName(packageNames);
+            mWorkspace.removeItemsByPackageName(packageNames, user);
         } else {
-            mWorkspace.removeItemsByApplicationInfo(appInfos);
+            mWorkspace.removeItemsByApplicationInfo(appInfos, user);
         }
 
         if (mAppsCustomizeContent != null) {
@@ -3872,6 +3922,11 @@ public final class Launcher extends Activity
             if (restrictions.getBoolean(UserManager.DISALLOW_MODIFY_ACCOUNTS, false)) {
                return false;
             }
+        }
+        // Check if the system has requested skipping of first-use hints.
+        if (Settings.Secure.getInt(getContentResolver(),
+                Settings.Secure.SKIP_FIRST_USE_HINTS, 0) == 1) {
+            return false;
         }
         return true;
     }

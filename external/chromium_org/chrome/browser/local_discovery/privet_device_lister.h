@@ -9,51 +9,25 @@
 
 #include "base/callback.h"
 #include "base/time/time.h"
+#include "chrome/browser/local_discovery/device_description.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 
 namespace local_discovery {
 
-struct DeviceDescription {
-  enum ConnectionState {
-    ONLINE,
-    OFFLINE,
-    CONNECTING,
-    NOT_CONFIGURED,
-    UNKNOWN
-  };
-
-  DeviceDescription();
-  ~DeviceDescription();
-
-  // Display attributes
-  std::string name;
-  std::string description;
-
-  // Functional attributes
-  std::string url;
-  std::string id;
-  std::string type;
-  ConnectionState connection_state;
-
-  // Attributes related to local HTTP
-  net::HostPortPair address;
-  net::IPAddressNumber ip_address;
-  base::Time last_seen;
-};
-
 class PrivetDeviceLister {
  public:
+  PrivetDeviceLister();
+  virtual ~PrivetDeviceLister();
+
   class Delegate {
    public:
     virtual void DeviceChanged(bool added,
                                const std::string& name,
                                const DeviceDescription& description) = 0;
     virtual void DeviceRemoved(const std::string& name) = 0;
+    virtual void DeviceCacheFlushed() = 0;
   };
-
-
-  virtual ~PrivetDeviceLister() {}
 
   // Start the PrivetServiceLister.
   virtual void Start() = 0;

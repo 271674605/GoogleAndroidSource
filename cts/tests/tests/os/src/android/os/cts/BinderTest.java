@@ -20,8 +20,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 
-import android.app.cts.ActivityTestsBase;
-import android.app.cts.LocalService;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
@@ -51,7 +49,8 @@ public class BinderTest extends ActivityTestsBase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mService = new Intent(LocalService.SERVICE_LOCAL);
+        mService = new Intent(
+                LocalService.SERVICE_LOCAL, null /*uri*/, mContext, LocalService.class);
         mBinder = new MockBinder();
         mStartReceiver = new Binder() {
             @Override

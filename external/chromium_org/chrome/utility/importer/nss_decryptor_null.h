@@ -11,12 +11,12 @@
 #include "base/basictypes.h"
 #include "base/strings/string16.h"
 
-namespace base {
-class FilePath;
+namespace autofill {
+struct PasswordForm;
 }
 
-namespace content {
-struct PasswordForm;
+namespace base {
+class FilePath;
 }
 
 // A NULL wrapper for Firefox NSS decrypt component, for use in builds where
@@ -27,11 +27,13 @@ class NSSDecryptor {
   bool Init(const base::FilePath& dll_path, const base::FilePath& db_path) {
     return false;
   }
-  string16 Decrypt(const std::string& crypt) const { return string16(); }
+  base::string16 Decrypt(const std::string& crypt) const {
+    return base::string16();
+  }
   void ParseSignons(const std::string& content,
-                    std::vector<content::PasswordForm>* forms) {}
+                    std::vector<autofill::PasswordForm>* forms) {}
   bool ReadAndParseSignons(const base::FilePath& sqlite_file,
-                           std::vector<content::PasswordForm>* forms) {
+                           std::vector<autofill::PasswordForm>* forms) {
     return false;
   }
 

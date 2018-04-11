@@ -10,37 +10,45 @@
 
 namespace cc {
 
+class OutputSurface;
+
 class FakeOutputSurfaceClient : public OutputSurfaceClient {
  public:
   FakeOutputSurfaceClient()
-      : begin_frame_count_(0),
-        deferred_initialize_result_(true),
+      : output_surface_(NULL),
+        begin_frame_count_(0),
         deferred_initialize_called_(false),
         did_lose_output_surface_called_(false),
-        memory_policy_(0),
-        discard_backbuffer_when_not_visible_(false) {}
+        memory_policy_(0) {}
 
-  virtual bool DeferredInitialize(
-      scoped_refptr<ContextProvider> offscreen_context_provider) OVERRIDE;
-  virtual void ReleaseGL() OVERRIDE {}
-  virtual void SetNeedsRedrawRect(gfx::Rect damage_rect) OVERRIDE {}
+  explicit FakeOutputSurfaceClient(OutputSurface* output_surface)
+      : output_surface_(output_surface),
+        begin_frame_count_(0),
+        deferred_initialize_called_(false),
+        did_lose_output_surface_called_(false),
+        memory_policy_(0) {}
+
+  virtual void DeferredInitialize() OVERRIDE;
+  virtual void ReleaseGL() OVERRIDE;
+  virtual void CommitVSyncParameters(base::TimeTicks timebase,
+                                     base::TimeDelta interval) OVERRIDE {}
+  virtual void SetNeedsRedrawRect(const gfx::Rect& damage_rect) OVERRIDE {}
   virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE;
-  virtual void OnSwapBuffersComplete(const CompositorFrameAck* ack) OVERRIDE {}
+  virtual void DidSwapBuffers() OVERRIDE {}
+  virtual void DidSwapBuffersComplete() OVERRIDE {}
+  virtual void ReclaimResources(const CompositorFrameAck* ack) OVERRIDE {}
   virtual void DidLoseOutputSurface() OVERRIDE;
-  virtual void SetExternalDrawConstraints(const gfx::Transform& transform,
-                                          gfx::Rect viewport) OVERRIDE {}
-  virtual void SetExternalStencilTest(bool enable) OVERRIDE {}
+  virtual void SetExternalDrawConstraints(
+      const gfx::Transform& transform,
+      const gfx::Rect& viewport,
+      const gfx::Rect& clip,
+      const gfx::Rect& viewport_rect_for_tile_priority,
+      const gfx::Transform& transform_for_tile_priority,
+      bool resourceless_software_draw) OVERRIDE {}
   virtual void SetMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE;
-  virtual void SetDiscardBackBufferWhenNotVisible(bool discard) OVERRIDE;
   virtual void SetTreeActivationCallback(const base::Closure&) OVERRIDE {}
 
-  int begin_frame_count() {
-    return begin_frame_count_;
-  }
-
-  void set_deferred_initialize_result(bool result) {
-    deferred_initialize_result_ = result;
-  }
+  int begin_frame_count() { return begin_frame_count_; }
 
   bool deferred_initialize_called() {
     return deferred_initialize_called_;
@@ -52,17 +60,12 @@ class FakeOutputSurfaceClient : public OutputSurfaceClient {
 
   const ManagedMemoryPolicy& memory_policy() const { return memory_policy_; }
 
-  bool discard_backbuffer_when_not_visible() const {
-    return discard_backbuffer_when_not_visible_;
-  }
-
  private:
+  OutputSurface* output_surface_;
   int begin_frame_count_;
-  bool deferred_initialize_result_;
   bool deferred_initialize_called_;
   bool did_lose_output_surface_called_;
   ManagedMemoryPolicy memory_policy_;
-  bool discard_backbuffer_when_not_visible_;
 };
 
 }  // namespace cc

@@ -22,6 +22,7 @@ import static com.android.SdkConstants.STYLE_RESOURCE_PREFIX;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.ide.common.rendering.LayoutLibrary;
 import com.android.ide.common.rendering.api.Capability;
 import com.android.ide.common.resources.ResourceFolder;
 import com.android.ide.common.resources.ResourceRepository;
@@ -29,6 +30,7 @@ import com.android.ide.common.resources.configuration.DensityQualifier;
 import com.android.ide.common.resources.configuration.DeviceConfigHelper;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.ide.common.resources.configuration.LanguageQualifier;
+import com.android.ide.common.resources.configuration.LayoutDirectionQualifier;
 import com.android.ide.common.resources.configuration.NightModeQualifier;
 import com.android.ide.common.resources.configuration.RegionQualifier;
 import com.android.ide.common.resources.configuration.ScreenSizeQualifier;
@@ -37,12 +39,15 @@ import com.android.ide.common.resources.configuration.VersionQualifier;
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.editors.layout.gle2.RenderService;
 import com.android.ide.eclipse.adt.internal.editors.manifest.ManifestInfo;
+import com.android.ide.eclipse.adt.internal.editors.manifest.ManifestInfo.ActivityAttributes;
 import com.android.ide.eclipse.adt.internal.preferences.AdtPrefs;
 import com.android.ide.eclipse.adt.internal.resources.ResourceHelper;
 import com.android.ide.eclipse.adt.internal.resources.manager.ProjectResources;
 import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
+import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.resources.Density;
+import com.android.resources.LayoutDirection;
 import com.android.resources.NightMode;
 import com.android.resources.ScreenSize;
 import com.android.resources.UiMode;
@@ -59,7 +64,6 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.QualifiedName;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * A {@linkplain Configuration} is a selection of device, orientation, theme,
@@ -561,6 +565,28 @@ public class Configuration {
         Locale locale = getLocale();
         mFullConfig.setLanguageQualifier(locale.language);
         mFullConfig.setRegionQualifier(locale.region);
+        if (!locale.hasLanguage()) {
+            // Avoid getting the layout library if the locale doesn't have any language.
+            mFullConfig.setLayoutDirectionQualifier(
+                    new LayoutDirectionQualifier(LayoutDirection.LTR));
+        } else {
+            Sdk currentSdk = Sdk.getCurrent();
+            if (currentSdk != null) {
+                AndroidTargetData targetData = currentSdk.getTargetData(getTarget());
+                if (targetData != null) {
+                    LayoutLibrary layoutLib = targetData.getLayoutLibrary();
+                    if (layoutLib != null) {
+                        if (layoutLib.isRtl(locale.toLocaleId())) {
+                            mFullConfig.setLayoutDirectionQualifier(
+                                    new LayoutDirectionQualifier(LayoutDirection.RTL));
+                        } else {
+                            mFullConfig.setLayoutDirectionQualifier(
+                                    new LayoutDirectionQualifier(LayoutDirection.LTR));
+                        }
+                    }
+                }
+            }
+        }
 
         // Replace the UiMode with the selected one, if one is selected
         UiMode uiMode = getUiMode();
@@ -681,8 +707,10 @@ public class Configuration {
 
             String activity = getActivity();
             if (activity != null) {
-                Map<String, String> activityThemes = manifest.getActivityThemes();
-                preferred = activityThemes.get(activity);
+                ActivityAttributes attributes = manifest.getActivityAttributes(activity);
+                if (attributes != null) {
+                    preferred = attributes.getTheme();
+                }
             }
             if (preferred == null) {
                 preferred = defaultTheme;

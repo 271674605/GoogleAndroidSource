@@ -1,18 +1,20 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 import os
 import sys
 import time
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir))
 
 from telemetry.core import browser_finder
 from telemetry.core import browser_options
 
+
 def Main(args):
-  options = browser_options.BrowserOptions()
+  options = browser_options.BrowserFinderOptions()
   parser = options.CreateParser('telemetry_perf_test.py')
   options, args = parser.parse_args(args)
 
@@ -39,6 +41,7 @@ def Main(args):
       avg, stdev, min(times), percentile_75)
 
   return 0
+
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv[1:]))

@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TARGET_HEXAGON_GOT_H
-#define MCLD_TARGET_HEXAGON_GOT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef TARGET_HEXAGON_HEXAGONGOT_H
+#define TARGET_HEXAGON_HEXAGONGOT_H
 
 #include <mcld/Target/GOT.h>
 
@@ -41,12 +38,7 @@ public:
 
   ~HexagonGOT();
 
-  void reserve(size_t pNum = 1);
-
-  HexagonGOTEntry* consume();
-
-private:
-  HexagonGOTEntry* m_pLast; ///< the last consumed entry
+  HexagonGOTEntry* create();
 };
 
 } // namespace of mcld

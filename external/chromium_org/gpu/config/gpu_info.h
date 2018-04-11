@@ -33,15 +33,24 @@ struct GPU_EXPORT GPUInfo {
     // Device ids are unique to vendor, not to one another.
     uint32 device_id;
 
+    // Whether this GPU is the currently used one.
+    // Currently this field is only supported and meaningful on OS X.
+    bool active;
+
     // The strings that describe the GPU.
     // In Linux these strings are obtained through libpci.
     // In Win/MacOSX, these two strings are not filled at the moment.
+    // In Android, these are respectively GL_VENDOR and GL_RENDERER.
     std::string vendor_string;
     std::string device_string;
   };
 
   GPUInfo();
   ~GPUInfo();
+
+  bool SupportsAccelerated2dCanvas() const {
+    return !can_lose_context && !software_rendering;
+  }
 
   // Whether more GPUInfo fields might be collected in the future.
   bool finalized;
@@ -91,24 +100,28 @@ struct GPU_EXPORT GPUInfo {
   // The version of the vertex shader used by the gpu.
   std::string vertex_shader_version;
 
-  // The machine model identifier with format "name major.minor".
-  // Name should not contain any whitespaces.
-  std::string machine_model;
+  // The machine model identifier. They can contain any character, including
+  // whitespaces.  Currently it is supported on MacOSX and Android.
+  // Android examples: "Naxus 5", "XT1032".
+  // On MacOSX, the version is stripped out of the model identifier, for
+  // example, the original identifier is "MacBookPro7,2", and we put
+  // "MacBookPro" as machine_model_name, and "7.2" as machine_model_version.
+  std::string machine_model_name;
 
-  // The version of OpenGL we are using.
-  // TODO(zmo): should be able to tell if it's GL or GLES.
+  // The version of the machine model. Currently it is supported on MacOSX.
+  // See machine_model_name's comment.
+  std::string machine_model_version;
+
+  // The GL_VERSION string.
   std::string gl_version;
 
-  // The GL_VERSION string.  "" if we are not using OpenGL.
-  std::string gl_version_string;
-
-  // The GL_VENDOR string.  "" if we are not using OpenGL.
+  // The GL_VENDOR string.
   std::string gl_vendor;
 
-  // The GL_RENDERER string.  "" if we are not using OpenGL.
+  // The GL_RENDERER string.
   std::string gl_renderer;
 
-  // The GL_EXTENSIONS string.  "" if we are not using OpenGL.
+  // The GL_EXTENSIONS string.
   std::string gl_extensions;
 
   // GL window system binding vendor.  "" if not available.
@@ -133,6 +146,10 @@ struct GPU_EXPORT GPUInfo {
 
   bool software_rendering;
 
+  // Whether the driver uses direct rendering. True on most platforms, false on
+  // X11 when using remote X.
+  bool direct_rendering;
+
   // Whether the gpu process is running in a sandbox.
   bool sandboxed;
 
@@ -140,6 +157,41 @@ struct GPU_EXPORT GPUInfo {
   // The information returned by the DirectX Diagnostics Tool.
   DxDiagNode dx_diagnostics;
 #endif
+  // Note: when adding new members, please remember to update EnumerateFields
+  // in gpu_info.cc.
+
+  // In conjunction with EnumerateFields, this allows the embedder to
+  // enumerate the values in this structure without having to embed
+  // references to its specific member variables. This simplifies the
+  // addition of new fields to this type.
+  class Enumerator {
+   public:
+    // The following methods apply to the "current" object. Initially this
+    // is the root object, but calls to BeginGPUDevice/EndGPUDevice and
+    // BeginAuxAttributes/EndAuxAttributes change the object to which these
+    // calls should apply.
+    virtual void AddInt64(const char* name, int64 value) = 0;
+    virtual void AddInt(const char* name, int value) = 0;
+    virtual void AddString(const char* name, const std::string& value) = 0;
+    virtual void AddBool(const char* name, bool value) = 0;
+    virtual void AddTimeDeltaInSecondsF(const char* name,
+                                        const base::TimeDelta& value) = 0;
+
+    // Markers indicating that a GPUDevice is being described.
+    virtual void BeginGPUDevice() = 0;
+    virtual void EndGPUDevice() = 0;
+
+    // Markers indicating that "auxiliary" attributes of the GPUInfo
+    // (according to the DevTools protocol) are being described.
+    virtual void BeginAuxAttributes() = 0;
+    virtual void EndAuxAttributes() = 0;
+
+   protected:
+    virtual ~Enumerator() {}
+  };
+
+  // Outputs the fields in this structure to the provided enumerator.
+  void EnumerateFields(Enumerator* enumerator) const;
 };
 
 }  // namespace gpu

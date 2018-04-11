@@ -10,7 +10,6 @@
 #include "base/logging.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/test/base/test_browser_window.h"
-#include "content/public/test/test_browser_thread.h"
 #include "ui/gfx/rect.h"
 
 // Some standard primary monitor sizes (no task bar).
@@ -47,32 +46,6 @@ static const gfx::Rect taskbar_left_work_area(107, 0, 917, 768);
 static const gfx::Rect taskbar_right_work_area(0, 0, 917, 768);
 
 extern int kWindowTilePixels;
-
-// Testing implementation of WindowSizer::MonitorInfoProvider that we can use
-// to fake various monitor layouts and sizes.
-class TestMonitorInfoProvider : public MonitorInfoProvider {
- public:
-  TestMonitorInfoProvider();
-  virtual ~TestMonitorInfoProvider();
-
-  void AddMonitor(const gfx::Rect& bounds, const gfx::Rect& work_area);
-
-  // Overridden from WindowSizer::MonitorInfoProvider:
-  virtual gfx::Rect GetPrimaryDisplayWorkArea() const OVERRIDE;
-
-  virtual gfx::Rect GetPrimaryDisplayBounds() const OVERRIDE;
-
-  virtual gfx::Rect GetMonitorWorkAreaMatching(
-      const gfx::Rect& match_rect) const OVERRIDE;
-
- private:
-  size_t GetMonitorIndexMatchingBounds(const gfx::Rect& match_rect) const;
-
-  std::vector<gfx::Rect> monitor_bounds_;
-  std::vector<gfx::Rect> work_areas_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMonitorInfoProvider);
-};
 
 // Testing implementation of WindowSizer::StateProvider that we use to fake
 // persistent storage and existing windows.

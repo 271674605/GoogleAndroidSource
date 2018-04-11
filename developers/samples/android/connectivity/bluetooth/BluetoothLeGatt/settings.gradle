@@ -1,1 +1,1 @@
-include ':BluetoothLeGatt'
+include 'Application'

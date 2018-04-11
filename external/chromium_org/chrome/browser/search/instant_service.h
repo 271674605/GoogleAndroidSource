@@ -5,44 +5,37 @@
 #ifndef CHROME_BROWSER_SEARCH_INSTANT_SERVICE_H_
 #define CHROME_BROWSER_SEARCH_INSTANT_SERVICE_H_
 
-#include <map>
 #include <set>
-#include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/ui/search/instant_ntp_prerenderer.h"
-#include "chrome/common/instant_types.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "chrome/browser/search_engines/template_url_service_observer.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "url/gurl.h"
 
-class GURL;
-class InstantExtendedTest;
 class InstantIOContext;
+struct InstantMostVisitedItem;
+class InstantSearchPrerenderer;
 class InstantServiceObserver;
-class InstantTestBase;
 class Profile;
+struct TemplateURLData;
+class TemplateURLService;
+struct ThemeBackgroundInfo;
 class ThemeService;
 
 namespace content {
-class WebContents;
-}
-
-namespace net {
-class URLRequest;
+class RenderProcessHost;
 }
 
 // Tracks render process host IDs that are associated with Instant.
-class InstantService : public BrowserContextKeyedService,
-                       public content::NotificationObserver {
+class InstantService : public KeyedService,
+                       public content::NotificationObserver,
+                       public TemplateURLServiceObserver {
  public:
   explicit InstantService(Profile* profile);
   virtual ~InstantService();
@@ -86,41 +79,47 @@ class InstantService : public BrowserContextKeyedService,
   // NTP.
   void UpdateMostVisitedItemsInfo();
 
-  // Forwards the request to InstantNTPPrerenderer to release and return the
-  // preloaded InstantNTP WebContents. May be NULL. InstantNTPPrerenderer will
-  // load a new InstantNTP after releasing the preloaded contents.
-  scoped_ptr<content::WebContents> ReleaseNTPContents() WARN_UNUSED_RESULT;
+  // Sends the current set of search URLs to a renderer process.
+  void SendSearchURLsToRenderer(content::RenderProcessHost* rph);
 
-  // The NTP WebContents. May be NULL. InstantNTPPrerenderer retains ownership.
-  content::WebContents* GetNTPContents() const;
+  // Invoked to notify the Instant page that the omnibox start margin has
+  // changed.
+  void OnOmniboxStartMarginChanged(int start_margin);
 
-  // Notifies InstantService about the creation of a BrowserInstantController
-  // object. Used to preload InstantNTP.
-  void OnBrowserInstantControllerCreated();
+  InstantSearchPrerenderer* instant_search_prerenderer() {
+    return instant_prerenderer_.get();
+  }
 
-  // Notifies InstantService about the destruction of a BrowserInstantController
-  // object. Used to destroy the preloaded InstantNTP.
-  void OnBrowserInstantControllerDestroyed();
+  int omnibox_start_margin() const { return omnibox_start_margin_; }
 
  private:
   friend class InstantExtendedTest;
+  friend class InstantServiceTest;
   friend class InstantTestBase;
+  friend class InstantUnitTestBase;
 
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedNetworkTest,
-                           NTPReactsToNetworkChanges);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
-                           MANUAL_ShowsGoogleNTP);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
                            MANUAL_SearchesFromFakebox);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ProcessIsolation);
+  FRIEND_TEST_ALL_PREFIXES(InstantServiceEnabledTest,
+                           SendsSearchURLsToRenderer);
 
-  // Overridden from BrowserContextKeyedService:
+  // KeyedService:
   virtual void Shutdown() OVERRIDE;
 
-  // Overridden from content::NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // TemplateURLServiceObserver:
+  // Caches the previous value of the Default Search Provider and the Google
+  // base URL to filter out changes other than those affecting the Default
+  // Search Provider.
+  virtual void OnTemplateURLServiceChanged() OVERRIDE;
+
+  // Called when a renderer process is terminated.
+  void OnRendererProcessTerminated(int process_id);
 
   // Called when we get new most visited items from TopSites, registered as an
   // async callback. Parses them and sends them to the renderer via
@@ -133,10 +132,13 @@ class InstantService : public BrowserContextKeyedService,
   // Theme changed notification handler.
   void OnThemeChanged(ThemeService* theme_service);
 
-  // Used by tests.
-  InstantNTPPrerenderer* ntp_prerenderer();
+  void ResetInstantSearchPrerenderer();
 
   Profile* const profile_;
+
+  // The TemplateURLService that we are observing. It will outlive this
+  // InstantService due to the dependency declared in InstantServiceFactory.
+  TemplateURLService* template_url_service_;
 
   // The process ids associated with Instant processes.
   std::set<int> process_ids_;
@@ -147,20 +149,26 @@ class InstantService : public BrowserContextKeyedService,
   // Theme-related data for NTP overlay to adopt themes.
   scoped_ptr<ThemeBackgroundInfo> theme_info_;
 
+  // The start-edge margin of the omnibox, used by the Instant page to align
+  // text or assets properly with the omnibox.
+  int omnibox_start_margin_;
+
   ObserverList<InstantServiceObserver> observers_;
 
   content::NotificationRegistrar registrar_;
 
   scoped_refptr<InstantIOContext> instant_io_context_;
 
-  InstantNTPPrerenderer ntp_prerenderer_;
-
-  // Total number of BrowserInstantController objects (does not include objects
-  // created for OTR browser windows). Used to preload and delete InstantNTP.
-  size_t browser_instant_controller_object_count_;
+  // Set to NULL if the default search provider does not support Instant.
+  scoped_ptr<InstantSearchPrerenderer> instant_prerenderer_;
 
   // Used for Top Sites async retrieval.
   base::WeakPtrFactory<InstantService> weak_ptr_factory_;
+
+  // Used to check whether notifications from TemplateURLService indicate a
+  // change that affects the default search provider.
+  scoped_ptr<TemplateURLData> previous_default_search_provider_;
+  GURL previous_google_base_url_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantService);
 };

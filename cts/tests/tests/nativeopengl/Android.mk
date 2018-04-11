@@ -24,8 +24,8 @@ LOCAL_MODULE_TAGS := optional
 # When built, explicitly put it in the data partition.
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-# All tests should include android.test.runner.
-LOCAL_JAVA_LIBRARIES := android.test.runner
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
 
 LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner ctswrappedgtest
 

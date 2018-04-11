@@ -18,10 +18,12 @@ import os.path
 import sys
 import re
 import json
-import tempfile
 import time
 import unittest
+import socket
 import subprocess
+import hashlib
+import numpy
 
 class ItsSession(object):
     """Controls a device over adb to run ITS scripts.
@@ -30,54 +32,95 @@ class ItsSession(object):
     objects encoding CaptureRequests, specifying sets of parameters to use
     when capturing an image using the Camera2 APIs. This class encapsualtes
     sending the requests to the device, monitoring the device's progress, and
-    copying the resultant captures back to the host machine when done.
+    copying the resultant captures back to the host machine when done. TCP
+    forwarded over adb is the transport mechanism used.
 
     The device must have ItsService.apk installed.
 
-    The "adb logcat" command is used to receive messages from the service
-    running on the device.
-
     Attributes:
-        proc: The handle to the process in which "adb logcat" is invoked.
-        logcat: The stdout stream from the logcat process.
+        sock: The open socket.
     """
 
-    # TODO: Handle multiple connected devices.
-    # The adb program is used for communication with the device. Need to handle
-    # the case of multiple devices connected. Currently, uses the "-d" param
-    # to adb, which causes it to fail if there is more than one device.
-    ADB = "adb -d"
+    # Open a connection to localhost:6000, forwarded to port 6000 on the device.
+    # TODO: Support multiple devices running over different TCP ports.
+    IPADDR = '127.0.0.1'
+    PORT = 6000
+    BUFFER_SIZE = 4096
 
-    # Set to True to take a pre-shot before capture and throw it away (for
-    # debug purposes).
-    CAPTURE_THROWAWAY_SHOTS = False
+    # Seconds timeout on each socket operation.
+    SOCK_TIMEOUT = 10.0
 
-    DEVICE_FOLDER_ROOT = '/sdcard/its'
-    DEVICE_FOLDER_CAPTURE = 'captures'
-    INTENT_CAPTURE = 'com.android.camera2.its.CAPTURE'
-    INTENT_3A = 'com.android.camera2.its.3A'
-    INTENT_GETPROPS = 'com.android.camera2.its.GETPROPS'
-    TAG = 'CAMERA-ITS-PY'
+    PACKAGE = 'com.android.camera2.its'
+    INTENT_START = 'com.android.camera2.its.START'
 
-    MSG_RECV = "RECV"
-    MSG_SIZE = "SIZE"
-    MSG_FILE = "FILE"
-    MSG_CAPT = "CAPT"
-    MSG_DONE = "DONE"
-    MSG_FAIL = "FAIL"
-    MSG_AF   = "3A-F"
-    MSG_AE   = "3A-E"
-    MSG_AWB  = "3A-W"
-    MSGS = [MSG_RECV, MSG_SIZE, MSG_FILE, MSG_CAPT, MSG_DONE,
-            MSG_FAIL, MSG_AE,   MSG_AF,   MSG_AWB]
+    # Definitions for some of the common output format options for do_capture().
+    # Each gets images of full resolution for each requested format.
+    CAP_RAW = {"format":"raw"}
+    CAP_DNG = {"format":"dng"}
+    CAP_YUV = {"format":"yuv"}
+    CAP_JPEG = {"format":"jpeg"}
+    CAP_RAW_YUV = [{"format":"raw"}, {"format":"yuv"}]
+    CAP_DNG_YUV = [{"format":"dng"}, {"format":"yuv"}]
+    CAP_RAW_JPEG = [{"format":"raw"}, {"format":"jpeg"}]
+    CAP_DNG_JPEG = [{"format":"dng"}, {"format":"jpeg"}]
+    CAP_YUV_JPEG = [{"format":"yuv"}, {"format":"jpeg"}]
+    CAP_RAW_YUV_JPEG = [{"format":"raw"}, {"format":"yuv"}, {"format":"jpeg"}]
+    CAP_DNG_YUV_JPEG = [{"format":"dng"}, {"format":"yuv"}, {"format":"jpeg"}]
+
+    # Method to handle the case where the service isn't already running.
+    # This occurs when a test is invoked directly from the command line, rather
+    # than as a part of a separate test harness which is setting up the device
+    # and the TCP forwarding.
+    def __pre_init(self):
+        # TODO: Handle multiple connected devices.
+        adb =  "adb -d"
+
+        # This also includes the optional reboot handling: if the user
+        # provides a "reboot" or "reboot=N" arg, then reboot the device,
+        # waiting for N seconds (default 30) before returning.
+        for s in sys.argv[1:]:
+            if s[:6] == "reboot":
+                duration = 30
+                if len(s) > 7 and s[6] == "=":
+                    duration = int(s[7:])
+                print "Rebooting device"
+                _run("%s reboot" % (adb));
+                _run("%s wait-for-device" % (adb))
+                time.sleep(duration)
+                print "Reboot complete"
+
+        # TODO: Figure out why "--user 0" is needed, and fix the problem.
+        _run('%s shell am force-stop --user 0 %s' % (adb, self.PACKAGE))
+        _run(('%s shell am startservice --user 0 -t text/plain '
+              '-a %s') % (adb, self.INTENT_START))
+
+        # Wait until the socket is ready to accept a connection.
+        proc = subprocess.Popen(
+                adb.split() + ["logcat"],
+                stdout=subprocess.PIPE)
+        logcat = proc.stdout
+        while True:
+            line = logcat.readline().strip()
+            if line.find('ItsService ready') >= 0:
+                break
+        proc.kill()
+
+        # Setup the TCP-over-ADB forwarding.
+        _run('%s forward tcp:%d tcp:%d' % (adb,self.PORT,self.PORT))
 
     def __init__(self):
-        self.proc = None
-        reboot_device_on_argv()
-        self.__open_logcat()
+        if "noinit" not in sys.argv:
+            self.__pre_init()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect((self.IPADDR, self.PORT))
+        self.sock.settimeout(self.SOCK_TIMEOUT)
+        self.__close_camera()
+        self.__open_camera()
 
     def __del__(self):
-        self.__kill_logcat()
+        if hasattr(self, 'sock') and self.sock:
+            self.__close_camera()
+            self.sock.close()
 
     def __enter__(self):
         return self
@@ -85,256 +128,115 @@ class ItsSession(object):
     def __exit__(self, type, value, traceback):
         return False
 
-    def __open_logcat(self):
-        """Opens the "adb logcat" stream.
+    def __read_response_from_socket(self):
+        # Read a line (newline-terminated) string serialization of JSON object.
+        chars = []
+        while len(chars) == 0 or chars[-1] != '\n':
+            ch = self.sock.recv(1)
+            if len(ch) == 0:
+                # Socket was probably closed; otherwise don't get empty strings
+                raise its.error.Error('Problem with socket on device side')
+            chars.append(ch)
+        line = ''.join(chars)
+        jobj = json.loads(line)
+        # Optionally read a binary buffer of a fixed size.
+        buf = None
+        if jobj.has_key("bufValueSize"):
+            n = jobj["bufValueSize"]
+            buf = bytearray(n)
+            view = memoryview(buf)
+            while n > 0:
+                nbytes = self.sock.recv_into(view, n)
+                view = view[nbytes:]
+                n -= nbytes
+            buf = numpy.frombuffer(buf, dtype=numpy.uint8)
+        return jobj, buf
 
-        Internal function, called by this class's constructor.
+    def __open_camera(self):
+        # Get the camera ID to open as an argument.
+        camera_id = 0
+        for s in sys.argv[1:]:
+            if s[:7] == "camera=" and len(s) > 7:
+                camera_id = int(s[7:])
+        cmd = {"cmdName":"open", "cameraId":camera_id}
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'cameraOpened':
+            raise its.error.Error('Invalid command response')
 
-        Gets the adb logcat stream that is intended for parsing by this python
-        script. Flushes it first to clear out existing messages.
+    def __close_camera(self):
+        cmd = {"cmdName":"close"}
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'cameraClosed':
+            raise its.error.Error('Invalid command response')
 
-        Populates the proc and logcat members of this class.
-        """
-        _run('%s logcat -c' % (self.ADB))
-        self.proc = subprocess.Popen(
-                self.ADB.split() + ["logcat", "-s", "'%s:v'" % (self.TAG)],
-                stdout=subprocess.PIPE)
-        self.logcat = self.proc.stdout
-
-    def __get_next_msg(self):
-        """Gets the next message from the logcat stream.
-
-        Reads from the logcat stdout stream. Blocks until a new line is ready,
-        but exits in the event of a keyboard interrupt (to allow the script to
-        be Ctrl-C killed).
-
-        If the special message "FAIL" is received, kills the script; the test
-        shouldn't continue running if something went wrong. The user can then
-        manually inspect the device to see what the problem is, for example by
-        looking at logcat themself.
-
-        Returns:
-            The next string from the logcat stdout stream.
-        """
-        while True:
-            # Get the next logcat line.
-            line = self.logcat.readline().strip()
-            # Get the message, which is the string following the "###" code.
-            idx = line.find('### ')
-            if idx >= 0:
-                msg = line[idx+4:]
-                if self.__unpack_msg(msg)[0] == self.MSG_FAIL:
-                    raise its.error.Error('FAIL device msg received')
-                return msg
-
-    def __kill_logcat(self):
-        """Kill the logcat process.
-
-        Internal function called by this class's destructor.
-        """
-        if self.proc:
-            self.proc.kill()
-
-    def __send_intent(self, intent_string, intent_params=None):
-        """Send an intent to the device.
-
-        Takes a Python object object specifying the operation to be performed
-        on the device, converts it to JSON, sends it to the device over adb,
-        then sends an intent to ItsService.apk running on the device with
-        the path to that JSON file (including starting the service).
+    def do_vibrate(self, pattern):
+        """Cause the device to vibrate to a specific pattern.
 
         Args:
-            intent_string: The string corresponding to the intent to send (3A
-                or capture).
-            intent_params: A Python dictionary object containing the operations
-                to perform; for a capture intent, the dict. contains either
-                captureRequest or captureRequestList key, and for a 3A intent,
-                the dictionary contains a 3A params key.
-        """
-        _run('%s shell mkdir -p "%s"' % (
-             self.ADB, self.DEVICE_FOLDER_ROOT))
-        intent_args = ""
-        if intent_params:
-            with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False) as f:
-                tmpfname = f.name
-                f.write(json.dumps(intent_params))
-            _run('%s push %s %s' % (
-                 self.ADB, tmpfname, self.DEVICE_FOLDER_ROOT))
-            os.remove(tmpfname)
-            intent_args = ' -d "file://%s/%s"' % (
-                      self.DEVICE_FOLDER_ROOT, os.path.basename(tmpfname))
-        # TODO: Figure out why "--user 0" is needed, and fix the problem
-        _run(('%s shell am startservice --user 0 -t text/plain '
-              '-a %s%s') % (self.ADB, intent_string, intent_args))
-
-    def __start_capture(self, request):
-        self.__send_intent(self.INTENT_CAPTURE, request)
-
-    def __start_3a(self, params):
-        self.__send_intent(self.INTENT_3A, params)
-
-    def __start_getprops(self):
-        self.__send_intent(self.INTENT_GETPROPS)
-
-    def __unpack_msg(self, msg):
-        """Process a string containing a coded message from the device.
-
-        The logcat messages intended to be parsed by this script are of the
-        following form:
-            RECV                    - Indicates capture command was received
-            SIZE <WIDTH> <HEIGHT>   - The width,height of the captured image
-            FILE <PATH>             - The path on the device of the captured image
-            CAPT <I> of <N>         - Indicates capt cmd #I out of #N was issued
-            DONE                    - Indicates the capture sequence completed
-            FAIL                    - Indicates an error occurred
-
-        Args:
-            msg: The string message from the device.
+            pattern: Durations (ms) for which to turn on or off the vibrator.
+                The first value indicates the number of milliseconds to wait
+                before turning the vibrator on. The next value indicates the
+                number of milliseconds for which to keep the vibrator on
+                before turning it off. Subsequent values alternate between
+                durations in milliseconds to turn the vibrator off or to turn
+                the vibrator on.
 
         Returns:
-            Tuple containing the message type (a string) and the message
-            payload (a list).
+            Nothing.
         """
-        a = msg.split()
-        if a[0] not in self.MSGS:
-            raise its.error.Error('Invalid device message: %s' % (msg))
-        return a[0], a[1:]
+        cmd = {}
+        cmd["cmdName"] = "doVibrate"
+        cmd["pattern"] = pattern
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'vibrationStarted':
+            raise its.error.Error('Invalid command response')
 
-    def __wait_for_camera_properties(self):
-        """Block until the requested camera properties object is available.
+    def start_sensor_events(self):
+        """Start collecting sensor events on the device.
 
-        Monitors messages from the service on the device (via logcat), looking
-        for special coded messages that indicate the status of the request.
+        See get_sensor_events for more info.
 
         Returns:
-            The remote path (on the device) where the camera properties JSON
-            file is stored.
+            Nothing.
         """
-        fname = None
-        msg = self.__get_next_msg()
-        if self.__unpack_msg(msg)[0] != self.MSG_RECV:
-            raise its.error.Error('Device msg not RECV: %s' % (msg))
-        while True:
-            msg = self.__get_next_msg()
-            msgtype, msgparams = self.__unpack_msg(msg)
-            if msgtype == self.MSG_FILE:
-                fname = msgparams[0]
-            elif msgtype == self.MSG_DONE:
-                return fname
+        cmd = {}
+        cmd["cmdName"] = "startSensorEvents"
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'sensorEventsStarted':
+            raise its.error.Error('Invalid command response')
 
-    def __wait_for_capture_done_single(self):
-        """Block until a single capture is done.
+    def get_sensor_events(self):
+        """Get a trace of all sensor events on the device.
 
-        Monitors messages from the service on the device (via logcat), looking
-        for special coded messages that indicate the status of the captures.
+        The trace starts when the start_sensor_events function is called. If
+        the test runs for a long time after this call, then the device's
+        internal memory can fill up. Calling get_sensor_events gets all events
+        from the device, and then stops the device from collecting events and
+        clears the internal buffer; to start again, the start_sensor_events
+        call must be used again.
+
+        Events from the accelerometer, compass, and gyro are returned; each
+        has a timestamp and x,y,z values.
+
+        Note that sensor events are only produced if the device isn't in its
+        standby mode (i.e.) if the screen is on.
 
         Returns:
-            The remote path (on the device) where the image file was stored,
-            along with the image's width and height.
+            A Python dictionary with three keys ("accel", "mag", "gyro") each
+            of which maps to a list of objects containing "time","x","y","z"
+            keys.
         """
-        fname = None
-        w = None
-        h = None
-        msg = self.__get_next_msg()
-        if self.__unpack_msg(msg)[0] != self.MSG_RECV:
-            raise its.error.Error('Device msg not RECV: %s' % (msg))
-        while True:
-            msg = self.__get_next_msg()
-            msgtype, msgparams = self.__unpack_msg(msg)
-            if msgtype == self.MSG_SIZE:
-                w = int(msgparams[0])
-                h = int(msgparams[1])
-            elif msgtype == self.MSG_FILE:
-                fname = msgparams[0]
-            elif msgtype == self.MSG_DONE:
-                return fname, w, h
-
-    def __wait_for_capture_done_burst(self, num_req):
-        """Block until a burst of captures is done.
-
-        Monitors messages from the service on the device (via logcat), looking
-        for special coded messages that indicate the status of the captures.
-
-        Args:
-            num_req: The number of captures to wait for.
-
-        Returns:
-            The remote paths (on the device) where the image files were stored,
-            along with their width and height.
-        """
-        fnames = []
-        w = None
-        h = None
-        msg = self.__get_next_msg()
-        if self.__unpack_msg(msg)[0] != self.MSG_RECV:
-            raise its.error.Error('Device msg not RECV: %s' % (msg))
-        while True:
-            msg = self.__get_next_msg()
-            msgtype, msgparams = self.__unpack_msg(msg)
-            if msgtype == self.MSG_SIZE:
-                w = int(msgparams[0])
-                h = int(msgparams[1])
-            elif msgtype == self.MSG_FILE:
-                fnames.append(msgparams[0])
-            elif msgtype == self.MSG_DONE:
-                if len(fnames) != num_req or not w or not h:
-                    raise its.error.Error('Missing FILE or SIZE device msg')
-                return fnames, w, h
-
-    def __get_json_path(self, image_fname):
-        """Get the path of the JSON metadata file associated with an image.
-
-        Args:
-            image_fname: Path of the image file (local or remote).
-
-        Returns:
-            The path of the associated JSON metadata file, which has the same
-            basename but different extension.
-        """
-        base, ext = os.path.splitext(image_fname)
-        return base + ".json"
-
-    def __copy_captured_files(self, remote_fnames):
-        """Copy captured data from device back to host machine over adb.
-
-        Copy captured images and associated metadata from the device to the
-        host machine. The image and metadata files have the same basename, but
-        different file extensions; the captured image is .yuv/.jpg/.raw, and
-        the captured metadata is .json.
-
-        File names are unique, as each has the timestamp of the capture in it.
-
-        Deletes the files from the device after they have been transferred off.
-
-        Args:
-            remote_fnames: List of paths of the captured image files on the
-                remote device.
-
-        Returns:
-            List of paths of captured image files on the local host machine
-            (which is just in the current directory).
-        """
-        local_fnames = []
-        for fname in remote_fnames:
-            _run('%s pull %s .' % (self.ADB, fname))
-            _run('%s pull %s .' % (
-                       self.ADB, self.__get_json_path(fname)))
-            local_fnames.append(os.path.basename(fname))
-        _run('%s shell rm -rf %s/*' % (self.ADB, self.DEVICE_FOLDER_ROOT))
-        return local_fnames
-
-    def __parse_captured_json(self, local_fnames):
-        """Parse the JSON objects that are returned alongside captured images.
-
-        Args:
-            local_fnames: List of paths of captured image on the local machine.
-
-        Returns:
-            List of Python objects obtained from loading the argument files
-            and converting from the JSON object form to native Python.
-        """
-        return [json.load(open(self.__get_json_path(f))) for f in local_fnames]
+        cmd = {}
+        cmd["cmdName"] = "getSensorEvents"
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'sensorEvents':
+            raise its.error.Error('Invalid command response')
+        return data['objValue']
 
     def get_camera_properties(self):
         """Get the camera properties object for the device.
@@ -342,14 +244,20 @@ class ItsSession(object):
         Returns:
             The Python dictionary object for the CameraProperties object.
         """
-        self.__start_getprops()
-        remote_fname = self.__wait_for_camera_properties()
-        _run('%s pull %s .' % (self.ADB, remote_fname))
-        local_fname = os.path.basename(remote_fname)
-        return self.__parse_captured_json([local_fname])[0]['cameraProperties']
+        cmd = {}
+        cmd["cmdName"] = "getCameraProperties"
+        self.sock.send(json.dumps(cmd) + "\n")
+        data,_ = self.__read_response_from_socket()
+        if data['tag'] != 'cameraProperties':
+            raise its.error.Error('Invalid command response')
+        return data['objValue']['cameraProperties']
 
-    def do_3a(self, region_ae, region_awb, region_af,
-              do_ae=True, do_awb=True, do_af=True):
+    def do_3a(self, regions_ae=[[0,0,1,1,1]],
+                    regions_awb=[[0,0,1,1,1]],
+                    regions_af=[[0,0,1,1,1]],
+                    do_ae=True, do_awb=True, do_af=True,
+                    lock_ae=False, lock_awb=False,
+                    get_results=False):
         """Perform a 3A operation on the device.
 
         Triggers some or all of AE, AWB, and AF, and returns once they have
@@ -358,143 +266,242 @@ class ItsSession(object):
         Throws an assertion if 3A fails to converge.
 
         Args:
-            region_ae: Normalized rect. (x,y,w,h) specifying the AE region.
-            region_awb: Normalized rect. (x,y,w,h) specifying the AWB region.
-            region_af: Normalized rect. (x,y,w,h) specifying the AF region.
+            regions_ae: List of weighted AE regions.
+            regions_awb: List of weighted AWB regions.
+            regions_af: List of weighted AF regions.
+            do_ae: Trigger AE and wait for it to converge.
+            do_awb: Wait for AWB to converge.
+            do_af: Trigger AF and wait for it to converge.
+            lock_ae: Request AE lock after convergence, and wait for it.
+            lock_awb: Request AWB lock after convergence, and wait for it.
+            get_results: Return the 3A results from this function.
+
+        Region format in args:
+            Arguments are lists of weighted regions; each weighted region is a
+            list of 5 values, [x,y,w,h, wgt], and each argument is a list of
+            these 5-value lists. The coordinates are given as normalized
+            rectangles (x,y,w,h) specifying the region. For example:
+                [[0.0, 0.0, 1.0, 0.5, 5], [0.0, 0.5, 1.0, 0.5, 10]].
+            Weights are non-negative integers.
 
         Returns:
-            Five values:
+            Five values are returned if get_results is true::
             * AE sensitivity; None if do_ae is False
             * AE exposure time; None if do_ae is False
             * AWB gains (list); None if do_awb is False
             * AWB transform (list); None if do_awb is false
             * AF focus position; None if do_af is false
+            Otherwise, it returns five None values.
         """
-        params = {"regions" : {"ae": region_ae,
-                               "awb": region_awb,
-                               "af": region_af },
-                  "triggers": {"ae": do_ae,
-                               "af": do_af } }
         print "Running vendor 3A on device"
-        self.__start_3a(params)
+        cmd = {}
+        cmd["cmdName"] = "do3A"
+        cmd["regions"] = {"ae": sum(regions_ae, []),
+                          "awb": sum(regions_awb, []),
+                          "af": sum(regions_af, [])}
+        cmd["triggers"] = {"ae": do_ae, "af": do_af}
+        if lock_ae:
+            cmd["aeLock"] = True
+        if lock_awb:
+            cmd["awbLock"] = True
+        self.sock.send(json.dumps(cmd) + "\n")
+
+        # Wait for each specified 3A to converge.
         ae_sens = None
         ae_exp = None
         awb_gains = None
         awb_transform = None
         af_dist = None
+        converged = False
         while True:
-            msg = self.__get_next_msg()
-            msgtype, msgparams = self.__unpack_msg(msg)
-            if msgtype == self.MSG_AE:
-                ae_sens = int(msgparams[0])
-                ae_exp = int(msgparams[1])
-            elif msgtype == self.MSG_AWB:
-                awb_gains = [float(x) for x in msgparams[:4]]
-                awb_transform = [float(x) for x in msgparams[4:]]
-            elif msgtype == self.MSG_AF:
-                af_dist = float(msgparams[0]) if msgparams[0] != "null" else 0
-            elif msgtype == self.MSG_DONE:
-                if (do_ae and ae_sens == None or do_awb and awb_gains == None
-                                              or do_af and af_dist == None):
-                    raise its.error.Error('3A failed to converge')
-                return ae_sens, ae_exp, awb_gains, awb_transform, af_dist
+            data,_ = self.__read_response_from_socket()
+            vals = data['strValue'].split()
+            if data['tag'] == 'aeResult':
+                ae_sens, ae_exp = [int(i) for i in vals]
+            elif data['tag'] == 'afResult':
+                af_dist = float(vals[0])
+            elif data['tag'] == 'awbResult':
+                awb_gains = [float(f) for f in vals[:4]]
+                awb_transform = [float(f) for f in vals[4:]]
+            elif data['tag'] == '3aConverged':
+                converged = True
+            elif data['tag'] == '3aDone':
+                break
+            else:
+                raise its.error.Error('Invalid command response')
+        if converged and not get_results:
+            return None,None,None,None,None
+        if (do_ae and ae_sens == None or do_awb and awb_gains == None
+                or do_af and af_dist == None or not converged):
+            raise its.error.Error('3A failed to converge')
+        return ae_sens, ae_exp, awb_gains, awb_transform, af_dist
 
-    def do_capture(self, request, out_fname_prefix=None):
+    def do_capture(self, cap_request, out_surfaces=None):
         """Issue capture request(s), and read back the image(s) and metadata.
 
         The main top-level function for capturing one or more images using the
-        device. Captures a single image if the request has the "captureRequest"
-        key, and captures a burst if it has "captureRequestList".
+        device. Captures a single image if cap_request is a single object, and
+        captures a burst if it is a list of objects.
 
-        The request object may also contain an "outputSurface" field to specify
-        the width, height, and format of the captured image. Supported formats
-        are "yuv" and "jpeg". If no outputSurface field was passed inside the
-        request object, then the default is used, which is "yuv" (a YUV420
-        fully planar image) corresponding to a full sensor frame.
+        The out_surfaces field can specify the width(s), height(s), and
+        format(s) of the captured image. The formats may be "yuv", "jpeg",
+        "dng", "raw", or "raw10". The default is a YUV420 frame ("yuv")
+        corresponding to a full sensor frame.
 
-        Example request 1:
+        Note that one or more surfaces can be specified, allowing a capture to
+        request images back in multiple formats (e.g.) raw+yuv, raw+jpeg,
+        yuv+jpeg, raw+yuv+jpeg. If the size is omitted for a surface, the
+        default is the largest resolution available for the format of that
+        surface. At most one output surface can be specified for a given format,
+        and raw+dng, raw10+dng, and raw+raw10 are not supported as combinations.
+
+        Example of a single capture request:
 
             {
-                "captureRequest": {
+                "android.sensor.exposureTime": 100*1000*1000,
+                "android.sensor.sensitivity": 100
+            }
+
+        Example of a list of capture requests:
+
+            [
+                {
                     "android.sensor.exposureTime": 100*1000*1000,
                     "android.sensor.sensitivity": 100
+                },
+                {
+                    "android.sensor.exposureTime": 100*1000*1000,
+                    "android.sensor.sensitivity": 200
                 }
-            }
+            ]
 
-        Example request 2:
+        Examples of output surface specifications:
 
             {
-                "captureRequestList": [
-                    {
-                        "android.sensor.exposureTime": 100*1000*1000,
-                        "android.sensor.sensitivity": 100
-                    },
-                    {
-                        "android.sensor.exposureTime": 100*1000*1000,
-                        "android.sensor.sensitivity": 200
-                    }],
-                "outputSurface": {
-                    "width": 640,
-                    "height": 480,
-                    "format": "yuv"
-                }
+                "width": 640,
+                "height": 480,
+                "format": "yuv"
             }
 
+            [
+                {
+                    "format": "jpeg"
+                },
+                {
+                    "format": "raw"
+                }
+            ]
+
+        The following variables defined in this class are shortcuts for
+        specifying one or more formats where each output is the full size for
+        that format; they can be used as values for the out_surfaces arguments:
+
+            CAP_RAW
+            CAP_DNG
+            CAP_YUV
+            CAP_JPEG
+            CAP_RAW_YUV
+            CAP_DNG_YUV
+            CAP_RAW_JPEG
+            CAP_DNG_JPEG
+            CAP_YUV_JPEG
+            CAP_RAW_YUV_JPEG
+            CAP_DNG_YUV_JPEG
+
+        If multiple formats are specified, then this function returns multuple
+        capture objects, one for each requested format. If multiple formats and
+        multiple captures (i.e. a burst) are specified, then this function
+        returns multiple lists of capture objects. In both cases, the order of
+        the returned objects matches the order of the requested formats in the
+        out_surfaces parameter. For example:
+
+            yuv_cap            = do_capture( req1                           )
+            yuv_cap            = do_capture( req1,        yuv_fmt           )
+            yuv_cap,  raw_cap  = do_capture( req1,        [yuv_fmt,raw_fmt] )
+            yuv_caps           = do_capture( [req1,req2], yuv_fmt           )
+            yuv_caps, raw_caps = do_capture( [req1,req2], [yuv_fmt,raw_fmt] )
+
         Args:
-            request: The Python dictionary specifying the capture(s), which
+            cap_request: The Python dict/list specifying the capture(s), which
                 will be converted to JSON and sent to the device.
-            out_fname_prefix: (Optionally) the file name prefix to use for the
-                captured files. If this arg is present, then the captured files
-                will be renamed appropriately.
+            out_surfaces: (Optional) specifications of the output image formats
+                and sizes to use for each capture.
 
         Returns:
-            Four values:
-            * The path or list of paths of the captured images (depending on
-              whether the request was for a single or burst capture). The paths
-              are on the host machine. The captured metadata file(s) have the
-              same file names as their corresponding images, with a ".json"
-              extension.
-            * The width and height of the captured image(s). For a burst, all
-              are the same size.
-            * The Python dictionary or list of dictionaries (in the case of a
-              burst capture) containing the metadata of the captured image(s).
+            An object, list of objects, or list of lists of objects, where each
+            object contains the following fields:
+            * data: the image data as a numpy array of bytes.
+            * width: the width of the captured image.
+            * height: the height of the captured image.
+            * format: image the format, in ["yuv","jpeg","raw","raw10","dng"].
+            * metadata: the capture result object (Python dictionaty).
         """
-        if request.has_key("captureRequest"):
-            if self.CAPTURE_THROWAWAY_SHOTS:
-                print "Capturing throw-away image"
-                self.__start_capture(request)
-                self.__wait_for_capture_done_single()
-            print "Capturing image"
-            self.__start_capture(request)
-            remote_fname, w, h = self.__wait_for_capture_done_single()
-            local_fname = self.__copy_captured_files([remote_fname])[0]
-            out_metadata_obj = self.__parse_captured_json([local_fname])[0]
-            if out_fname_prefix:
-                _, image_ext = os.path.splitext(local_fname)
-                os.rename(local_fname, out_fname_prefix + image_ext)
-                os.rename(self.__get_json_path(local_fname),
-                          out_fname_prefix + ".json")
-                local_fname = out_fname_prefix + image_ext
-            return local_fname, w, h, out_metadata_obj
+        cmd = {}
+        cmd["cmdName"] = "doCapture"
+        if not isinstance(cap_request, list):
+            cmd["captureRequests"] = [cap_request]
         else:
-            if not request.has_key("captureRequestList"):
-                raise its.error.Error(
-                        'Missing captureRequest or captureRequestList arg key')
-            n = len(request['captureRequestList'])
-            print "Capture burst of %d images" % (n)
-            self.__start_capture(request)
-            remote_fnames, w, h = self.__wait_for_capture_done_burst(n)
-            local_fnames = self.__copy_captured_files(remote_fnames)
-            out_metadata_objs = self.__parse_captured_json(local_fnames)
-            if out_fname_prefix is not None:
-                for i in range(len(local_fnames)):
-                    _, image_ext = os.path.splitext(local_fnames[i])
-                    os.rename(local_fnames[i],
-                              "%s-%04d%s" % (out_fname_prefix, i, image_ext))
-                    os.rename(self.__get_json_path(local_fnames[i]),
-                              "%s-%04d.json" % (out_fname_prefix, i))
-                    local_fnames[i] = out_fname_prefix + image_ext
-            return local_fnames, w, h, out_metadata_objs
+            cmd["captureRequests"] = cap_request
+        if out_surfaces is not None:
+            if not isinstance(out_surfaces, list):
+                cmd["outputSurfaces"] = [out_surfaces]
+            else:
+                cmd["outputSurfaces"] = out_surfaces
+            formats = [c["format"] if c.has_key("format") else "yuv"
+                       for c in cmd["outputSurfaces"]]
+            formats = [s if s != "jpg" else "jpeg" for s in formats]
+        else:
+            formats = ['yuv']
+        ncap = len(cmd["captureRequests"])
+        nsurf = 1 if out_surfaces is None else len(cmd["outputSurfaces"])
+        if len(formats) > len(set(formats)):
+            raise its.error.Error('Duplicate format requested')
+        if "dng" in formats and "raw" in formats or \
+                "dng" in formats and "raw10" in formats or \
+                "raw" in formats and "raw10" in formats:
+            raise its.error.Error('Different raw formats not supported')
+        print "Capturing %d frame%s with %d format%s [%s]" % (
+                  ncap, "s" if ncap>1 else "", nsurf, "s" if nsurf>1 else "",
+                  ",".join(formats))
+        self.sock.send(json.dumps(cmd) + "\n")
+
+        # Wait for ncap*nsurf images and ncap metadata responses.
+        # Assume that captures come out in the same order as requested in
+        # the burst, however indifidual images of different formats ca come
+        # out in any order for that capture.
+        nbufs = 0
+        bufs = {"yuv":[], "raw":[], "raw10":[], "dng":[], "jpeg":[]}
+        mds = []
+        widths = None
+        heights = None
+        while nbufs < ncap*nsurf or len(mds) < ncap:
+            jsonObj,buf = self.__read_response_from_socket()
+            if jsonObj['tag'] in ['jpegImage', 'yuvImage', 'rawImage', \
+                    'raw10Image', 'dngImage'] and buf is not None:
+                fmt = jsonObj['tag'][:-5]
+                bufs[fmt].append(buf)
+                nbufs += 1
+            elif jsonObj['tag'] == 'captureResults':
+                mds.append(jsonObj['objValue']['captureResult'])
+                outputs = jsonObj['objValue']['outputs']
+                widths = [out['width'] for out in outputs]
+                heights = [out['height'] for out in outputs]
+            else:
+                # Just ignore other tags
+                None
+        rets = []
+        for j,fmt in enumerate(formats):
+            objs = []
+            for i in range(ncap):
+                obj = {}
+                obj["data"] = bufs[fmt][i]
+                obj["width"] = widths[j]
+                obj["height"] = heights[j]
+                obj["format"] = fmt
+                obj["metadata"] = mds[i]
+                objs.append(obj)
+            rets.append(objs if ncap>1 else objs[0])
+        return rets if len(rets)>1 else rets[0]
 
 def _run(cmd):
     """Replacement for os.system, with hiding of stdout+stderr messages.
@@ -502,50 +509,6 @@ def _run(cmd):
     with open(os.devnull, 'wb') as devnull:
         subprocess.check_call(
                 cmd.split(), stdout=devnull, stderr=subprocess.STDOUT)
-
-def reboot_device(sleep_duration=30):
-    """Function to reboot a device and block until it is ready.
-
-    Can be used at the start of a test to get the device into a known good
-    state. Will disconnect any other adb sessions, so this function is not
-    a part of the ItsSession class (which encapsulates a session with a
-    device.)
-
-    Args:
-        sleep_duration: (Optional) the length of time to sleep (seconds) after
-            the device comes online before returning; this gives the device
-            time to finish booting.
-    """
-    print "Rebooting device"
-    _run("%s reboot" % (ItsSession.ADB));
-    _run("%s wait-for-device" % (ItsSession.ADB))
-    time.sleep(sleep_duration)
-    print "Reboot complete"
-
-def reboot_device_on_argv():
-    """Examine sys.argv, and reboot if the "reboot" arg is present.
-
-    If the script command line contains either:
-
-        reboot
-        reboot=30
-
-    then the device will be rebooted, and if the optional numeric arg is
-    present, then that will be the sleep duration passed to the reboot
-    call.
-
-    Returns:
-        Boolean, indicating whether the device was rebooted.
-    """
-    for s in sys.argv[1:]:
-        if s[:6] == "reboot":
-            if len(s) > 7 and s[6] == "=":
-                duration = int(s[7:])
-                reboot_device(duration)
-            elif len(s) == 6:
-                reboot_device()
-            return True
-    return False
 
 class __UnitTest(unittest.TestCase):
     """Run a suite of unit tests on this module.

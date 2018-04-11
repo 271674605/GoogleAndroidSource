@@ -4,7 +4,6 @@
 
 package org.chromium.android_webview;
 
-import android.content.Context;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
@@ -12,9 +11,6 @@ import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintDocumentInfo;
-
-import android.util.Log;
-
 import android.webkit.ValueCallback;
 
 
@@ -25,28 +21,39 @@ import android.webkit.ValueCallback;
  */
 public class AwPrintDocumentAdapter extends PrintDocumentAdapter {
 
-    private static final String TAG = "AwPrintDocumentAdapter";
-
     private AwPdfExporter mPdfExporter;
     private PrintAttributes mAttributes;
+    private String mDocumentName;
+
+    /**
+     * Constructor.
+     * TODO(sgurun) remove in favor of constructor below once the AOSP changes are in.
+     *
+     * @param pdfExporter The PDF exporter to export the webview contents to a PDF file.
+     */
+    public AwPrintDocumentAdapter(AwPdfExporter pdfExporter) {
+        this(pdfExporter, "default");
+    }
 
     /**
      * Constructor.
      *
      * @param pdfExporter The PDF exporter to export the webview contents to a PDF file.
+     * @param documentName  The name of the pdf document.
      */
-    public AwPrintDocumentAdapter(AwPdfExporter pdfExporter) {
+    public AwPrintDocumentAdapter(AwPdfExporter pdfExporter, String documentName) {
         mPdfExporter = pdfExporter;
+        mDocumentName = documentName;
     }
+
 
     @Override
     public void onLayout(PrintAttributes oldAttributes, PrintAttributes newAttributes,
             CancellationSignal cancellationSignal, LayoutResultCallback callback,
             Bundle metadata) {
         mAttributes = newAttributes;
-        // TODO(sgurun) pass a meaningful string once b/10705082 is resolved
         PrintDocumentInfo documentInfo = new PrintDocumentInfo
-                .Builder("webview")
+                .Builder(mDocumentName)
                 .build();
         // TODO(sgurun) once componentization is done, do layout changes and
         // generate PDF here, set the page range information to documentinfo
@@ -57,57 +64,18 @@ public class AwPrintDocumentAdapter extends PrintDocumentAdapter {
 
     @Override
     public void onWrite(PageRange[] pages, ParcelFileDescriptor destination,
-            CancellationSignal cancellationSignal, WriteResultCallback callback) {
-        // TODO(sgurun) sometimes we receive spurious onWrite. ignore it.
-        if (mAttributes.getMediaSize() == null) {
-            throw new  IllegalArgumentException("attributes must specify a media size");
-        }
-        if (mAttributes.getResolution() == null) {
-            throw new IllegalArgumentException("attributes must specify print resolution");
-        }
-        if (mAttributes.getMinMargins() == null) {
-            throw new IllegalArgumentException("attributes must specify margins");
-        }
-        // TODO(sgurun) get rid of AwPdfExportAttributes after upstreaming
-        // and move this logic to AwPdfExporter
-        AwPdfExportAttributes pdfAttributes = new AwPdfExportAttributes();
-        pdfAttributes.pageWidth = mAttributes.getMediaSize().getWidthMils();
-        pdfAttributes.pageHeight = mAttributes.getMediaSize().getHeightMils();
-        pdfAttributes.dpi = getPrintDpi(mAttributes);
-        pdfAttributes.leftMargin = mAttributes.getMinMargins().getLeftMils();
-        pdfAttributes.rightMargin = mAttributes.getMinMargins().getRightMils();
-        pdfAttributes.topMargin = mAttributes.getMinMargins().getTopMils();
-        pdfAttributes.bottomMargin = mAttributes.getMinMargins().getBottomMils();
-        exportPdf(destination, pdfAttributes, cancellationSignal, callback);
-    }
-
-    private static int getPrintDpi(PrintAttributes attributes) {
-        // TODO(sgurun) android print attributes support horizontal and
-        // vertical DPI. Chrome has only one DPI. Revisit this.
-        int horizontalDpi = attributes.getResolution().getHorizontalDpi();
-        int verticalDpi = attributes.getResolution().getVerticalDpi();
-        if (horizontalDpi != verticalDpi) {
-            Log.w(TAG, "Horizontal and vertical DPIs differ. Using horizontal DPI " +
-                    " hDpi=" + horizontalDpi + " vDPI=" + verticalDpi);
-        }
-        return horizontalDpi;
-    }
-
-    private void exportPdf(final ParcelFileDescriptor destination,
-            final AwPdfExportAttributes attributes,
-            final CancellationSignal signal,
-            final WriteResultCallback callback) {
-        mPdfExporter.exportToPdf(destination, attributes, new ValueCallback<Boolean>() {
-                    @Override
-                    public void onReceiveValue(Boolean value) {
-                        if (value) {
-                            callback.onWriteFinished(new PageRange[] {PageRange.ALL_PAGES});
-                        } else {
-                            // TODO(sgurun) localized error message
-                            callback.onWriteFailed(null);
-                        }
-                    }
-                }, signal);
+            CancellationSignal cancellationSignal, final WriteResultCallback callback) {
+        mPdfExporter.exportToPdf(destination, mAttributes, new ValueCallback<Boolean>() {
+            @Override
+            public void onReceiveValue(Boolean value) {
+                if (value) {
+                    callback.onWriteFinished(new PageRange[] { PageRange.ALL_PAGES });
+                } else {
+                    // TODO(sgurun) provide a localized error message
+                    callback.onWriteFailed(null);
+                }
+            }
+        }, cancellationSignal);
     }
 }
 

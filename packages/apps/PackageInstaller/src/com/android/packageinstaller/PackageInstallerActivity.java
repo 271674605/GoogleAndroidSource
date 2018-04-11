@@ -28,6 +28,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ManifestDigest;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.PackageParser;
@@ -37,9 +38,9 @@ import android.content.pm.VerificationParams;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.support.v4.view.ViewPager;
-import android.util.EventLog;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -51,7 +52,6 @@ import android.widget.TabHost;
 import android.widget.TextView;
 
 import java.io.File;
-import java.io.Serializable;
 import java.util.List;
 
 /*
@@ -66,6 +66,8 @@ import java.util.List;
  */
 public class PackageInstallerActivity extends Activity implements OnCancelListener, OnClickListener {
     private static final String TAG = "PackageInstaller";
+
+    private int mSessionId = -1;
     private Uri mPackageURI;    
     private Uri mOriginatingURI;
     private Uri mReferrerURI;
@@ -74,6 +76,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
 
     private boolean localLOGV = false;
     PackageManager mPm;
+    PackageInstaller mInstaller;
     PackageInfo mPkgInfo;
     ApplicationInfo mSourceInfo;
 
@@ -332,12 +335,18 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         startActivity(launchSettingsIntent);
         finish();
     }
-    
+
     private boolean isInstallingUnknownAppsAllowed() {
-        return Settings.Global.getInt(getContentResolver(),
-            Settings.Global.INSTALL_NON_MARKET_APPS, 0) > 0;
+        UserManager um = (UserManager) getSystemService(USER_SERVICE);
+
+        boolean disallowedByUserManager = um.getUserRestrictions()
+                .getBoolean(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, false);
+        boolean allowedBySecureSettings = Settings.Secure.getInt(getContentResolver(),
+            Settings.Secure.INSTALL_NON_MARKET_APPS, 0) > 0;
+
+        return (allowedBySecureSettings && (!disallowedByUserManager));
     }
-    
+
     private boolean isInstallRequestFromUnknownSource(Intent intent) {
         String callerPackage = getCallingPackage();
         if (callerPackage != null && intent.getBooleanExtra(
@@ -358,6 +367,10 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
     }
 
     private boolean isVerifyAppsEnabled() {
+        UserManager um = (UserManager) getSystemService(USER_SERVICE);
+        if (um.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)) {
+            return true;
+        }
         return Settings.Global.getInt(getContentResolver(),
                 Settings.Global.PACKAGE_VERIFIER_ENABLE, 1) > 0;
     }
@@ -413,21 +426,40 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
-        // get intent information
-        final Intent intent = getIntent();
-        mPackageURI = intent.getData();
-        mOriginatingURI = intent.getParcelableExtra(Intent.EXTRA_ORIGINATING_URI);
-        mReferrerURI = intent.getParcelableExtra(Intent.EXTRA_REFERRER);
         mPm = getPackageManager();
+        mInstaller = mPm.getPackageInstaller();
+
+        final Intent intent = getIntent();
+        if (PackageInstaller.ACTION_CONFIRM_PERMISSIONS.equals(intent.getAction())) {
+            final int sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1);
+            final PackageInstaller.SessionInfo info = mInstaller.getSessionInfo(sessionId);
+            if (info == null || !info.sealed || info.resolvedBaseCodePath == null) {
+                Log.w(TAG, "Session " + mSessionId + " in funky state; ignoring");
+                finish();
+                return;
+            }
+
+            mSessionId = sessionId;
+            mPackageURI = Uri.fromFile(new File(info.resolvedBaseCodePath));
+            mOriginatingURI = null;
+            mReferrerURI = null;
+        } else {
+            mSessionId = -1;
+            mPackageURI = intent.getData();
+            mOriginatingURI = intent.getParcelableExtra(Intent.EXTRA_ORIGINATING_URI);
+            mReferrerURI = intent.getParcelableExtra(Intent.EXTRA_REFERRER);
+        }
 
         boolean requestFromUnknownSource = isInstallRequestFromUnknownSource(intent);
         mInstallFlowAnalytics = new InstallFlowAnalytics();
+        mInstallFlowAnalytics.setContext(this);
         mInstallFlowAnalytics.setStartTimestampMillis(SystemClock.elapsedRealtime());
         mInstallFlowAnalytics.setInstallsFromUnknownSourcesPermitted(
                 isInstallingUnknownAppsAllowed());
         mInstallFlowAnalytics.setInstallRequestFromUnknownSource(requestFromUnknownSource);
         mInstallFlowAnalytics.setVerifyAppsEnabled(isVerifyAppsEnabled());
         mInstallFlowAnalytics.setAppVerifierInstalled(isAppVerifierInstalled());
+        mInstallFlowAnalytics.setPackageUri(mPackageURI.toString());
 
         final String scheme = mPackageURI.getScheme();
         if (scheme != null && !"file".equals(scheme) && !"package".equals(scheme)) {
@@ -574,6 +606,9 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
 
     @Override
     public void onBackPressed() {
+        if (mSessionId != -1) {
+            mInstaller.setPermissionsResult(mSessionId, false);
+        }
         mInstallFlowAnalytics.setFlowFinished(
                 InstallFlowAnalytics.RESULT_CANCELLED_BY_USER);
         super.onBackPressed();
@@ -587,37 +622,46 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
     public void onClick(View v) {
         if(v == mOk) {
             if (mOkCanInstall || mScrollView == null) {
-                // Start subactivity to actually install the application
                 mInstallFlowAnalytics.setInstallButtonClicked();
-                Intent newIntent = new Intent();
-                newIntent.putExtra(PackageUtil.INTENT_ATTR_APPLICATION_INFO,
-                        mPkgInfo.applicationInfo);
-                newIntent.setData(mPackageURI);
-                newIntent.setClass(this, InstallAppProgress.class);
-                newIntent.putExtra(InstallAppProgress.EXTRA_MANIFEST_DIGEST, mPkgDigest);
-                newIntent.putExtra(
-                        InstallAppProgress.EXTRA_INSTALL_FLOW_ANALYTICS, mInstallFlowAnalytics);
-                String installerPackageName = getIntent().getStringExtra(
-                        Intent.EXTRA_INSTALLER_PACKAGE_NAME);
-                if (mOriginatingURI != null) {
-                    newIntent.putExtra(Intent.EXTRA_ORIGINATING_URI, mOriginatingURI);
+                if (mSessionId != -1) {
+                    mInstaller.setPermissionsResult(mSessionId, true);
+
+                    // We're only confirming permissions, so we don't really know how the
+                    // story ends; assume success.
+                    mInstallFlowAnalytics.setFlowFinishedWithPackageManagerResult(
+                            PackageManager.INSTALL_SUCCEEDED);
+                } else {
+                    // Start subactivity to actually install the application
+                    Intent newIntent = new Intent();
+                    newIntent.putExtra(PackageUtil.INTENT_ATTR_APPLICATION_INFO,
+                            mPkgInfo.applicationInfo);
+                    newIntent.setData(mPackageURI);
+                    newIntent.setClass(this, InstallAppProgress.class);
+                    newIntent.putExtra(InstallAppProgress.EXTRA_MANIFEST_DIGEST, mPkgDigest);
+                    newIntent.putExtra(
+                            InstallAppProgress.EXTRA_INSTALL_FLOW_ANALYTICS, mInstallFlowAnalytics);
+                    String installerPackageName = getIntent().getStringExtra(
+                            Intent.EXTRA_INSTALLER_PACKAGE_NAME);
+                    if (mOriginatingURI != null) {
+                        newIntent.putExtra(Intent.EXTRA_ORIGINATING_URI, mOriginatingURI);
+                    }
+                    if (mReferrerURI != null) {
+                        newIntent.putExtra(Intent.EXTRA_REFERRER, mReferrerURI);
+                    }
+                    if (mOriginatingUid != VerificationParams.NO_UID) {
+                        newIntent.putExtra(Intent.EXTRA_ORIGINATING_UID, mOriginatingUid);
+                    }
+                    if (installerPackageName != null) {
+                        newIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME,
+                                installerPackageName);
+                    }
+                    if (getIntent().getBooleanExtra(Intent.EXTRA_RETURN_RESULT, false)) {
+                        newIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+                        newIntent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
+                    }
+                    if(localLOGV) Log.i(TAG, "downloaded app uri="+mPackageURI);
+                    startActivity(newIntent);
                 }
-                if (mReferrerURI != null) {
-                    newIntent.putExtra(Intent.EXTRA_REFERRER, mReferrerURI);
-                }
-                if (mOriginatingUid != VerificationParams.NO_UID) {
-                    newIntent.putExtra(Intent.EXTRA_ORIGINATING_UID, mOriginatingUid);
-                }
-                if (installerPackageName != null) {
-                    newIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME,
-                            installerPackageName);
-                }
-                if (getIntent().getBooleanExtra(Intent.EXTRA_RETURN_RESULT, false)) {
-                    newIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
-                    newIntent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
-                }
-                if(localLOGV) Log.i(TAG, "downloaded app uri="+mPackageURI);
-                startActivity(newIntent);
                 finish();
             } else {
                 mScrollView.pageScroll(View.FOCUS_DOWN);
@@ -625,6 +669,9 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         } else if(v == mCancel) {
             // Cancel and finish
             setResult(RESULT_CANCELED);
+            if (mSessionId != -1) {
+                mInstaller.setPermissionsResult(mSessionId, false);
+            }
             mInstallFlowAnalytics.setFlowFinished(
                     InstallFlowAnalytics.RESULT_CANCELLED_BY_USER);
             finish();

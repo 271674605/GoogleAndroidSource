@@ -28,19 +28,17 @@ import junit.framework.TestCase;
 public class BuildVersionTest extends TestCase {
 
     private static final String LOG_TAG = "BuildVersionTest";
-    private static final Set<String> EXPECTED_RELEASES =
-            new HashSet<String>(Arrays.asList("4.4"));
-    private static final int EXPECTED_SDK = 19;
+    private static final Set<String> EXPECTED_RELEASES = new HashSet<String>(Arrays.asList("5.0"));
+    private static final int EXPECTED_SDK = 21;
+    private static final String EXPECTED_BUILD_VARIANT = "user";
+    private static final String EXPECTED_TAG = "release-keys";
 
     @SuppressWarnings("deprecation")
     public void testReleaseVersion() {
         // Applications may rely on the exact release version
-        assertTrue("Your Build.VERSION.RELEASE of " + Build.VERSION.RELEASE
-                + " was not one of the following: " + EXPECTED_RELEASES,
-                        EXPECTED_RELEASES.contains(Build.VERSION.RELEASE));
-
-        assertEquals("" + EXPECTED_SDK, Build.VERSION.SDK);
-        assertEquals(EXPECTED_SDK, Build.VERSION.SDK_INT);
+        assertAnyOf("BUILD.VERSION.RELEASE", Build.VERSION.RELEASE, EXPECTED_RELEASES);
+        assertEquals("Build.VERSION.SDK", "" + EXPECTED_SDK, Build.VERSION.SDK);
+        assertEquals("Build.VERSION.SDK_INT", EXPECTED_SDK, Build.VERSION.SDK_INT);
     }
 
     public void testIncremental() {
@@ -72,14 +70,24 @@ public class BuildVersionTest extends TestCase {
         assertEquals(Build.VERSION.RELEASE, devicePlatform[1]);
 
         assertEquals(Build.ID, fingerprintSegs[3]);
-        // no requirements for BUILD_NUMBER and BUILD_VARIANT
+
         assertTrue(fingerprintSegs[4].contains(":"));
-        // no strict requirement for TAGS
-        //assertEquals(Build.TAGS, fingerprintSegs[5]);
+        String[] buildNumberVariant = fingerprintSegs[4].split(":");
+        String buildVariant = buildNumberVariant[1];
+        assertEquals("Variant", EXPECTED_BUILD_VARIANT, buildVariant);
+        assertEquals("Tag", EXPECTED_TAG, fingerprintSegs[5]);
     }
 
     private void assertNotEmpty(String value) {
         assertNotNull(value);
         assertFalse(value.isEmpty());
+    }
+
+    /** Assert that {@code actualValue} is equals to one of {@code permittedValues}. */
+    private void assertAnyOf(String label, String actualValue, Set<String> permittedValues) {
+        if (!permittedValues.contains(actualValue)) {
+             fail("For: " + label + ", the value: " + actualValue +
+                     ", should be one of: " + permittedValues);
+        }
     }
 }

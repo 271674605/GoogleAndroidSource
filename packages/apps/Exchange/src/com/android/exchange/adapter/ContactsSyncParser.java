@@ -32,6 +32,7 @@ import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.RawContacts;
 import android.provider.ContactsContract.SyncState;
 import android.provider.SyncStateContract;
+import android.text.TextUtils;
 import android.text.util.Rfc822Token;
 import android.text.util.Rfc822Tokenizer;
 import android.util.Base64;
@@ -40,13 +41,14 @@ import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.Mailbox;
 import com.android.emailcommon.utility.Utility;
 import com.android.exchange.Eas;
-import com.android.exchange.service.EasContactsSyncHandler;
-import com.android.exchange.service.EasSyncHandler;
+import com.android.exchange.eas.EasSyncCollectionTypeBase;
+import com.android.exchange.eas.EasSyncContacts;
 import com.android.exchange.utility.CalendarUtilities;
 import com.android.mail.utils.LogUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.GregorianCalendar;
 import java.util.TimeZone;
@@ -279,6 +281,9 @@ public class ContactsSyncParser extends AbstractSyncParser {
                 case Tags.CONTACTS_ANNIVERSARY:
                     personal.anniversary = getValue();
                     break;
+                case Tags.CONTACTS_FILE_AS:
+                    personal.fileAs = getValue();
+                    break;
                 case Tags.CONTACTS_BIRTHDAY:
                     ops.addBirthday(entity, getValue());
                     break;
@@ -474,12 +479,16 @@ public class ContactsSyncParser extends AbstractSyncParser {
                                     RawContacts.CONTENT_URI, c.getLong(0));
                             uri = Uri.withAppendedPath(
                                     uri, RawContacts.Entity.CONTENT_DIRECTORY);
-                            EntityIterator entityIterator = RawContacts.newEntityIterator(
-                                mContentResolver.query(uri, null, null, null, null));
-                            if (entityIterator.hasNext()) {
-                                entity = entityIterator.next();
+                            final Cursor cursor = mContentResolver.query(uri,
+                                    null, null, null, null);
+                            if (cursor != null) {
+                                final EntityIterator entityIterator =
+                                    RawContacts.newEntityIterator(cursor);
+                                if (entityIterator.hasNext()) {
+                                    entity = entityIterator.next();
+                                }
+                                userLog("Changing contact ", serverId);
                             }
-                            userLog("Changing contact ", serverId);
                         }
                     } finally {
                         c.close();
@@ -518,12 +527,12 @@ public class ContactsSyncParser extends AbstractSyncParser {
         // Execute these all at once...
         ops.execute(mContext);
 
-        if (ops.mResults != null) {
-            ContentValues cv = new ContentValues();
+        if (ops.mResults != null && ops.mResults.length > 0) {
+            final ContentValues cv = new ContentValues();
             cv.put(RawContacts.DIRTY, 0);
             for (int i = 0; i < ops.mContactIndexCount; i++) {
-                int index = ops.mContactIndexArray[i];
-                Uri u = ops.mResults[index].uri;
+                final int index = ops.mContactIndexArray[i];
+                final Uri u = index < ops.mResults.length ? ops.mResults[index].uri : null;
                 if (u != null) {
                     String idString = u.getLastPathSegment();
                     mContentResolver.update(
@@ -799,7 +808,7 @@ public class ContactsSyncParser extends AbstractSyncParser {
         private int mCount = 0;
         private int mContactBackValue = mCount;
         // Make an array big enough for the max possible window size.
-        private final int[] mContactIndexArray = new int[EasSyncHandler.MAX_WINDOW_SIZE];
+        private final int[] mContactIndexArray = new int[EasSyncCollectionTypeBase.MAX_WINDOW_SIZE];
         private int mContactIndexCount = 0;
         private ContentProviderResult[] mResults = null;
 
@@ -842,6 +851,9 @@ public class ContactsSyncParser extends AbstractSyncParser {
             } catch (OperationApplicationException e) {
                 // There is nothing sensible to be done here
                 LogUtils.e(TAG, "problem inserting contact during server update", e);
+            } catch (IllegalArgumentException e) {
+                // CP2 has been disabled
+                LogUtils.e(TAG, "CP2 is disabled; unable to insert contact.");
             }
         }
 
@@ -856,14 +868,17 @@ public class ContactsSyncParser extends AbstractSyncParser {
         private static NamedContentValues findTypedData(ArrayList<NamedContentValues> list,
                 String contentItemType, int type, String stringType) {
             NamedContentValues result = null;
+            if (contentItemType == null) {
+                return result;
+            }
 
             // Loop through the ncv's, looking for an existing row
             for (NamedContentValues namedContentValues: list) {
-                Uri uri = namedContentValues.uri;
-                ContentValues cv = namedContentValues.values;
+                final Uri uri = namedContentValues.uri;
+                final ContentValues cv = namedContentValues.values;
                 if (Data.CONTENT_URI.equals(uri)) {
-                    String mimeType = cv.getAsString(Data.MIMETYPE);
-                    if (mimeType.equals(contentItemType)) {
+                    final String mimeType = cv.getAsString(Data.MIMETYPE);
+                    if (TextUtils.equals(mimeType, contentItemType)) {
                         if (stringType != null) {
                             if (cv.getAsString(GroupMembership.GROUP_ROW_ID).equals(stringType)) {
                                 result = namedContentValues;
@@ -900,17 +915,20 @@ public class ContactsSyncParser extends AbstractSyncParser {
          */
         private static ArrayList<NamedContentValues> findUntypedData(
                 ArrayList<NamedContentValues> list, int type, String contentItemType) {
-            ArrayList<NamedContentValues> result = new ArrayList<NamedContentValues>();
+            final ArrayList<NamedContentValues> result = new ArrayList<NamedContentValues>();
+            if (contentItemType == null) {
+                return result;
+            }
 
             // Loop through the ncv's, looking for an existing row
             for (NamedContentValues namedContentValues: list) {
-                Uri uri = namedContentValues.uri;
-                ContentValues cv = namedContentValues.values;
+                final Uri uri = namedContentValues.uri;
+                final ContentValues cv = namedContentValues.values;
                 if (Data.CONTENT_URI.equals(uri)) {
-                    String mimeType = cv.getAsString(Data.MIMETYPE);
-                    if (mimeType.equals(contentItemType)) {
+                    final String mimeType = cv.getAsString(Data.MIMETYPE);
+                    if (TextUtils.equals(mimeType, contentItemType)) {
                         if (type != -1) {
-                            int subtype = cv.getAsInteger(Phone.TYPE);
+                            final int subtype = cv.getAsInteger(Phone.TYPE);
                             if (type != subtype) {
                                 continue;
                             }
@@ -1043,7 +1061,14 @@ public class ContactsSyncParser extends AbstractSyncParser {
             if (cv != null && cvCompareString(cv, Event.START_DATE, birthday)) {
                 return;
             }
-            long millis = Utility.parseEmailDateTimeToMillis(birthday);
+            // TODO: Store the date in the format expected by EAS servers.
+            final long millis;
+            try {
+                millis = Utility.parseEmailDateTimeToMillis(birthday);
+            } catch (ParseException e) {
+                LogUtils.w(TAG, "Parse error for birthday date field.", e);
+                return;
+            }
             GregorianCalendar cal = new GregorianCalendar(TimeZone.getTimeZone("GMT"));
             cal.setTimeInMillis(millis);
             if (cal.get(GregorianCalendar.HOUR_OF_DAY) >= 12) {
@@ -1111,10 +1136,17 @@ public class ContactsSyncParser extends AbstractSyncParser {
         }
 
         public void addPhoto(Entity entity, String photo) {
-            RowBuilder builder = untypedRowBuilder(entity, Photo.CONTENT_ITEM_TYPE);
             // We're always going to add this; it's not worth trying to figure out whether the
             // picture is the same as the one stored.
-            byte[] pic = Base64.decode(photo, Base64.DEFAULT);
+            final byte[] pic;
+            try {
+                pic = Base64.decode(photo, Base64.DEFAULT);
+            } catch (IllegalArgumentException e) {
+                LogUtils.w(TAG, "Bad base-64 encoding; unable to decode photo.");
+                return;
+            }
+
+            final RowBuilder builder = untypedRowBuilder(entity, Photo.CONTENT_ITEM_TYPE);
             builder.withValue(Photo.PHOTO, pic);
             add(builder.build());
         }
@@ -1307,7 +1339,7 @@ public class ContactsSyncParser extends AbstractSyncParser {
     @Override
     protected void wipe() {
         LogUtils.w(TAG, "Wiping contacts for account %d", mAccount.mId);
-        EasContactsSyncHandler.wipeAccountFromContentProvider(mContext,
+        EasSyncContacts.wipeAccountFromContentProvider(mContext,
                 mAccount.mEmailAddress);
     }
 }

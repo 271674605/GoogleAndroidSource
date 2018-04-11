@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ import android.preference.PreferenceManager;
 import android.util.Log;
 
 import org.chromium.base.PathUtils;
-import org.chromium.ui.LocalizationUtils;
+import org.chromium.ui.base.LocalizationUtils;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -36,6 +36,7 @@ public class ResourceExtractor {
     private static final String LOGTAG = "ResourceExtractor";
     private static final String LAST_LANGUAGE = "Last language";
     private static final String PAK_FILENAMES = "Pak filenames";
+    private static final String ICU_DATA_FILENAME = "icudtl.dat";
 
     private static String[] sMandatoryPaks = null;
 
@@ -52,14 +53,15 @@ public class ResourceExtractor {
 
         @Override
         protected Void doInBackground(Void... unused) {
-            if (!mOutputDir.exists() && !mOutputDir.mkdirs()) {
+            final File outputDir = getOutputDir();
+            if (!outputDir.exists() && !outputDir.mkdirs()) {
                 Log.e(LOGTAG, "Unable to create pak resources directory!");
                 return null;
             }
 
-            String timestampFile = checkPakTimestamp();
+            String timestampFile = checkPakTimestamp(outputDir);
             if (timestampFile != null) {
-                deleteFiles(mContext);
+                deleteFiles();
             }
 
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(mContext);
@@ -72,7 +74,7 @@ public class ResourceExtractor {
                     &&  filenames.size() >= sMandatoryPaks.length) {
                 boolean filesPresent = true;
                 for (String file : filenames) {
-                    if (!new File(mOutputDir, file).exists()) {
+                    if (!new File(outputDir, file).exists()) {
                         filesPresent = false;
                         break;
                     }
@@ -96,6 +98,7 @@ public class ResourceExtractor {
                 p.append(currentLanguage);
                 p.append("(-\\w+)?\\.pak");
             }
+
             Pattern paksToInstall = Pattern.compile(p.toString());
 
             AssetManager manager = mContext.getResources().getAssets();
@@ -109,7 +112,8 @@ public class ResourceExtractor {
                     if (!paksToInstall.matcher(file).matches()) {
                         continue;
                     }
-                    File output = new File(mOutputDir, file);
+                    boolean isICUData = file.equals(ICU_DATA_FILENAME);
+                    File output = new File(isICUData ? getAppDataDir() : outputDir, file);
                     if (output.exists()) {
                         continue;
                     }
@@ -135,7 +139,12 @@ public class ResourceExtractor {
                             throw new IOException(file + " extracted with 0 length!");
                         }
 
-                        filenames.add(file);
+                        if (!isICUData) {
+                            filenames.add(file);
+                        } else {
+                            // icudata needs to be accessed by a renderer process.
+                            output.setReadable(true, false);
+                        }
                     } finally {
                         try {
                             if (is != null) {
@@ -154,7 +163,7 @@ public class ResourceExtractor {
                 // returning null? It might be useful to gather UMA here too to track if
                 // this happens with regularity.
                 Log.w(LOGTAG, "Exception unpacking required pak resources: " + e.getMessage());
-                deleteFiles(mContext);
+                deleteFiles();
                 return null;
             }
 
@@ -162,7 +171,7 @@ public class ResourceExtractor {
 
             if (timestampFile != null) {
                 try {
-                    new File(mOutputDir, timestampFile).createNewFile();
+                    new File(outputDir, timestampFile).createNewFile();
                 } catch (IOException e) {
                     // Worst case we don't write a timestamp, so we'll re-extract the resource
                     // paks next start up.
@@ -182,7 +191,7 @@ public class ResourceExtractor {
         // Note that we do this to avoid adding a BroadcastReceiver on
         // android.content.Intent#ACTION_PACKAGE_CHANGED as that causes process churn
         // on (re)installation of *all* APK files.
-        private String checkPakTimestamp() {
+        private String checkPakTimestamp(File outputDir) {
             final String TIMESTAMP_PREFIX = "pak_timestamp-";
             PackageManager pm = mContext.getPackageManager();
             PackageInfo pi = null;
@@ -199,7 +208,7 @@ public class ResourceExtractor {
 
             String expectedTimestamp = TIMESTAMP_PREFIX + pi.versionCode + "-" + pi.lastUpdateTime;
 
-            String[] timestamps = mOutputDir.list(new FilenameFilter() {
+            String[] timestamps = outputDir.list(new FilenameFilter() {
                 @Override
                 public boolean accept(File dir, String name) {
                     return name.startsWith(TIMESTAMP_PREFIX);
@@ -221,9 +230,8 @@ public class ResourceExtractor {
         }
     }
 
-    private Context mContext;
+    private final Context mContext;
     private ExtractTask mExtractTask;
-    private File mOutputDir;
 
     private static ResourceExtractor sInstance;
 
@@ -262,8 +270,7 @@ public class ResourceExtractor {
     }
 
     private ResourceExtractor(Context context) {
-        mContext = context;
-        mOutputDir = getOutputDirFromContext(mContext);
+        mContext = context.getApplicationContext();
     }
 
     public void waitForCompletion() {
@@ -275,22 +282,21 @@ public class ResourceExtractor {
 
         try {
             mExtractTask.get();
-        }
-        catch (CancellationException e) {
+        } catch (CancellationException e) {
             // Don't leave the files in an inconsistent state.
-            deleteFiles(mContext);
-        }
-        catch (ExecutionException e2) {
-            deleteFiles(mContext);
-        }
-        catch (InterruptedException e3) {
-            deleteFiles(mContext);
+            deleteFiles();
+        } catch (ExecutionException e2) {
+            deleteFiles();
+        } catch (InterruptedException e3) {
+            deleteFiles();
         }
     }
 
-    // This will extract the application pak resources in an
-    // AsyncTask. Call waitForCompletion() at the point resources
-    // are needed to block until the task completes.
+    /**
+     * This will extract the application pak resources in an
+     * AsyncTask. Call waitForCompletion() at the point resources
+     * are needed to block until the task completes.
+     */
     public void startExtractingResources() {
         if (mExtractTask != null) {
             return;
@@ -304,17 +310,32 @@ public class ResourceExtractor {
         mExtractTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
-    public static File getOutputDirFromContext(Context context) {
-        return new File(PathUtils.getDataDirectory(context.getApplicationContext()), "paks");
+    private File getAppDataDir() {
+        return new File(PathUtils.getDataDirectory(mContext));
     }
 
-    public static void deleteFiles(Context context) {
-        File dir = getOutputDirFromContext(context);
+    private File getOutputDir() {
+        return new File(getAppDataDir(), "paks");
+    }
+
+    /**
+     * Pak files (UI strings and other resources) should be updated along with
+     * Chrome. A version mismatch can lead to a rather broken user experience.
+     * The ICU data (icudtl.dat) is less version-sensitive, but still can
+     * lead to malfunction/UX misbehavior. So, we regard failing to update them
+     * as an error.
+     */
+    private void deleteFiles() {
+        File icudata = new File(getAppDataDir(), ICU_DATA_FILENAME);
+        if (icudata.exists() && !icudata.delete()) {
+            Log.e(LOGTAG, "Unable to remove the icudata " + icudata.getName());
+        }
+        File dir = getOutputDir();
         if (dir.exists()) {
             File[] files = dir.listFiles();
             for (File file : files) {
                 if (!file.delete()) {
-                    Log.w(LOGTAG, "Unable to remove existing resource " + file.getName());
+                    Log.e(LOGTAG, "Unable to remove existing resource " + file.getName());
                 }
             }
         }

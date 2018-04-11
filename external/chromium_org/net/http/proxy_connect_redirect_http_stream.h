@@ -33,7 +33,6 @@ class ProxyConnectRedirectHttpStream : public HttpStream {
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
-  virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual int ReadResponseBody(IOBuffer* buf,
                                int buf_len,
                                const CompletionCallback& callback) OVERRIDE;
@@ -50,6 +49,8 @@ class ProxyConnectRedirectHttpStream : public HttpStream {
   virtual void SetConnectionReused() OVERRIDE;
   virtual bool IsConnectionReusable() const OVERRIDE;
 
+  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
+
   // This function may be called.
   virtual bool GetLoadTimingInfo(
       LoadTimingInfo* load_timing_info) const OVERRIDE;
@@ -59,6 +60,10 @@ class ProxyConnectRedirectHttpStream : public HttpStream {
       SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual bool IsSpdyHttpStream() const OVERRIDE;
   virtual void Drain(HttpNetworkSession* session) OVERRIDE;
+
+  // This function may be called.
+  virtual void SetPriority(RequestPriority priority) OVERRIDE;
+
   virtual UploadProgress GetUploadProgress() const OVERRIDE;
   virtual HttpStream* RenewStreamForAuth() OVERRIDE;
 

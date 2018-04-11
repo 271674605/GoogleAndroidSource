@@ -34,6 +34,21 @@ void test_is_not_assignable()
     static_assert((!std::is_assignable<T, U>::value), "");
 }
 
+struct D;
+
+#ifndef _LIBCPP_HAS_NO_RVALUE_REFERENCES
+struct C
+{
+    template <class U>
+    D operator,(U&&);
+};
+
+struct E
+{
+    C operator=(int);
+};
+#endif
+
 int main()
 {
     test_is_assignable<int&, int&> ();
@@ -43,6 +58,8 @@ int main()
     test_is_assignable<void*&, void*> ();
 
 #ifndef _LIBCPP_HAS_NO_RVALUE_REFERENCES
+    test_is_assignable<E, int> ();
+
     test_is_not_assignable<int, int&> ();
     test_is_not_assignable<int, int> ();
 #endif

@@ -83,7 +83,7 @@ const char* cl_error_to_string(cl_int err) {
 }
 #endif
 
-// TODO refactor BenchTimer to be used here
+// TODO refactor Timer to be used here
 double get_seconds() {
 #if SK_BUILD_FOR_WIN32
     LARGE_INTEGER currentTime;
@@ -130,7 +130,7 @@ bool get_directory(const char path[], SkTArray<SkString>* entries) {
     return true;
 #elif SK_BUILD_FOR_WIN32
     char pathDirGlob[MAX_PATH];
-    char pathLength = strlen(path);
+    size_t pathLength = strlen(path);
     strncpy(pathDirGlob, path, pathLength);
 
     if (path[pathLength - 1] == '/' || path[pathLength - 1] == '\\') {

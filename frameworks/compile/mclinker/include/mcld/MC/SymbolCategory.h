@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_SYMBOL_CATEGORY_H
-#define MCLD_SYMBOL_CATEGORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_MC_SYMBOLCATEGORY_H
+#define MCLD_MC_SYMBOLCATEGORY_H
 #include <cstddef>
 #include <vector>
 

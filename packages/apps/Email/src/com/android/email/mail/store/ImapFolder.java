@@ -18,7 +18,6 @@ package com.android.email.mail.store;
 
 import android.content.Context;
 import android.text.TextUtils;
-import android.text.format.DateUtils;
 import android.util.Base64DataException;
 
 import com.android.email.mail.store.ImapStore.ImapException;
@@ -29,6 +28,7 @@ import com.android.email.mail.store.imap.ImapList;
 import com.android.email.mail.store.imap.ImapResponse;
 import com.android.email.mail.store.imap.ImapString;
 import com.android.email.mail.store.imap.ImapUtility;
+import com.android.email.service.ImapService;
 import com.android.email2.ui.MailActivityEmail;
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.internet.BinaryTempFileBody;
@@ -52,6 +52,11 @@ import com.android.emailcommon.utility.Utility;
 import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.commons.io.IOUtils;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -59,10 +64,10 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
-import java.util.Locale;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.TimeZone;
 
 class ImapFolder extends Folder {
@@ -657,10 +662,13 @@ class ImapFolder extends Folder {
             fetchFields.add(ImapConstants.FETCH_FIELD_BODY_PEEK);
         }
 
+        // TODO Why are we only fetching the first part given?
         final Part fetchPart = fp.getFirstPart();
         if (fetchPart != null) {
             final String[] partIds =
                     fetchPart.getHeader(MimeHeader.HEADER_ANDROID_ATTACHMENT_STORE_DATA);
+            // TODO Why can a single part have more than one Id? And why should we only fetch
+            // the first id if there are more than one?
             if (partIds != null) {
                 fetchFields.add(ImapConstants.FETCH_FIELD_BODY_PEEK_BARE
                         + "[" + partIds[0] + "]");
@@ -725,7 +733,7 @@ class ImapFolder extends Folder {
                                 parseBodyStructure(bs, message, ImapConstants.TEXT);
                             } catch (MessagingException e) {
                                 if (Logging.LOGD) {
-                                    LogUtils.v(Logging.LOG_TAG, "Error handling message", e);
+                                    LogUtils.v(Logging.LOG_TAG, e, "Error handling message");
                                 }
                                 message.setBody(null);
                             }
@@ -810,7 +818,7 @@ class ImapFolder extends Folder {
                 }
             }
         } catch (Base64DataException bde) {
-            String warning = "\n\n" + MailActivityEmail.getMessageDecodeErrorString();
+            String warning = "\n\n" + ImapService.getMessageDecodeErrorString();
             out.write(warning.getBytes());
         } finally {
             out.close();
@@ -1022,92 +1030,124 @@ class ImapFolder extends Folder {
      * Appends the given messages to the selected folder. This implementation also determines
      * the new UID of the given message on the IMAP server and sets the Message's UID to the
      * new server UID.
+     * @param message Message
+     * @param noTimeout Set to true on manual syncs, disables the timeout after sending the message
+     *                  content to the server
      */
     @Override
-    public void appendMessages(Message[] messages) throws MessagingException {
+    public void appendMessage(final Context context, final Message message, final boolean noTimeout)
+            throws MessagingException {
         checkOpen();
         try {
-            for (Message message : messages) {
-                // Create output count
-                CountingOutputStream out = new CountingOutputStream();
-                EOLConvertingOutputStream eolOut = new EOLConvertingOutputStream(out);
-                message.writeTo(eolOut);
-                eolOut.flush();
-                // Create flag list (most often this will be "\SEEN")
-                String flagList = "";
-                Flag[] flags = message.getFlags();
-                if (flags.length > 0) {
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0, count = flags.length; i < count; i++) {
-                        Flag flag = flags[i];
-                        if (flag == Flag.SEEN) {
-                            sb.append(" " + ImapConstants.FLAG_SEEN);
-                        } else if (flag == Flag.FLAGGED) {
-                            sb.append(" " + ImapConstants.FLAG_FLAGGED);
-                        }
-                    }
-                    if (sb.length() > 0) {
-                        flagList = sb.substring(1);
+            // Create temp file
+            /**
+             * We need to know the encoded message size before we upload it, and encoding
+             * attachments as Base64, possibly reading from a slow provider, is a non-trivial
+             * operation. So we write the contents to a temp file while measuring the size,
+             * and then use that temp file and size to do the actual upsync.
+             * For context, most classic email clients would store the message in RFC822 format
+             * internally, and so would not need to do this on-the-fly.
+             */
+            final File tempDir = context.getExternalCacheDir();
+            final File tempFile = File.createTempFile("IMAPupsync", ".eml", tempDir);
+            // Delete here so we don't leave the file lingering. We've got a handle to it so we
+            // can still use it.
+            final boolean deleteSuccessful = tempFile.delete();
+            if (!deleteSuccessful) {
+                LogUtils.w(LogUtils.TAG, "Could not delete temp file %s",
+                        tempFile.getAbsolutePath());
+            }
+            final OutputStream tempOut = new FileOutputStream(tempFile);
+            // Create output count while writing temp file
+            final CountingOutputStream out = new CountingOutputStream(tempOut);
+            final EOLConvertingOutputStream eolOut = new EOLConvertingOutputStream(out);
+            message.writeTo(eolOut);
+            eolOut.flush();
+            // Create flag list (most often this will be "\SEEN")
+            String flagList = "";
+            Flag[] flags = message.getFlags();
+            if (flags.length > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (final Flag flag : flags) {
+                    if (flag == Flag.SEEN) {
+                        sb.append(" " + ImapConstants.FLAG_SEEN);
+                    } else if (flag == Flag.FLAGGED) {
+                        sb.append(" " + ImapConstants.FLAG_FLAGGED);
                     }
                 }
+                if (sb.length() > 0) {
+                    flagList = sb.substring(1);
+                }
+            }
 
-                mConnection.sendCommand(
-                        String.format(Locale.US, ImapConstants.APPEND + " \"%s\" (%s) {%d}",
-                                ImapStore.encodeFolderName(mName, mStore.mPathPrefix),
-                                flagList,
-                                out.getCount()), false);
-                ImapResponse response;
-                do {
+            mConnection.sendCommand(
+                    String.format(Locale.US, ImapConstants.APPEND + " \"%s\" (%s) {%d}",
+                            ImapStore.encodeFolderName(mName, mStore.mPathPrefix),
+                            flagList,
+                            out.getCount()), false);
+            ImapResponse response;
+            do {
+                final int socketTimeout = mConnection.mTransport.getSoTimeout();
+                try {
+                    // Need to set the timeout to unlimited since we might be upsyncing a pretty
+                    // big attachment so who knows how long it'll take. It would sure be nice
+                    // if this only timed out after the send buffer drained but welp.
+                    if (noTimeout) {
+                        // For now, only unset the timeout if we're doing a manual sync
+                        mConnection.mTransport.setSoTimeout(0);
+                    }
                     response = mConnection.readResponse();
                     if (response.isContinuationRequest()) {
-                        eolOut = new EOLConvertingOutputStream(
-                                mConnection.mTransport.getOutputStream());
-                        message.writeTo(eolOut);
-                        eolOut.write('\r');
-                        eolOut.write('\n');
-                        eolOut.flush();
+                        final OutputStream transportOutputStream =
+                                mConnection.mTransport.getOutputStream();
+                        IOUtils.copyLarge(new FileInputStream(tempFile), transportOutputStream);
+                        transportOutputStream.write('\r');
+                        transportOutputStream.write('\n');
+                        transportOutputStream.flush();
                     } else if (!response.isTagged()) {
                         handleUntaggedResponse(response);
                     }
-                } while (!response.isTagged());
+                } finally {
+                    mConnection.mTransport.setSoTimeout(socketTimeout);
+                }
+            } while (!response.isTagged());
 
-                // TODO Why not check the response?
+            // TODO Why not check the response?
 
                 /*
                  * Try to recover the UID of the message from an APPENDUID response.
                  * e.g. 11 OK [APPENDUID 2 238268] APPEND completed
                  */
-                final ImapList appendList = response.getListOrEmpty(1);
-                if ((appendList.size() >= 3) && appendList.is(0, ImapConstants.APPENDUID)) {
-                    String serverUid = appendList.getStringOrEmpty(2).getString();
-                    if (!TextUtils.isEmpty(serverUid)) {
-                        message.setUid(serverUid);
-                        continue;
-                    }
+            final ImapList appendList = response.getListOrEmpty(1);
+            if ((appendList.size() >= 3) && appendList.is(0, ImapConstants.APPENDUID)) {
+                String serverUid = appendList.getStringOrEmpty(2).getString();
+                if (!TextUtils.isEmpty(serverUid)) {
+                    message.setUid(serverUid);
+                    return;
                 }
+            }
 
-                /*
-                 * Try to find the UID of the message we just appended using the
-                 * Message-ID header.  If there are more than one response, take the
-                 * last one, as it's most likely the newest (the one we just uploaded).
-                 */
-                final String messageId = message.getMessageId();
-                if (messageId == null || messageId.length() == 0) {
-                    continue;
-                }
-                // Most servers don't care about parenthesis in the search query [and, some
-                // fail to work if they are used]
-                String[] uids = searchForUids(
-                        String.format(Locale.US, "HEADER MESSAGE-ID %s", messageId));
-                if (uids.length > 0) {
-                    message.setUid(uids[0]);
-                }
-                // However, there's at least one server [AOL] that fails to work unless there
-                // are parenthesis, so, try this as a last resort
-                uids = searchForUids(String.format(Locale.US, "(HEADER MESSAGE-ID %s)", messageId));
-                if (uids.length > 0) {
-                    message.setUid(uids[0]);
-                }
+            /*
+             * Try to find the UID of the message we just appended using the
+             * Message-ID header.  If there are more than one response, take the
+             * last one, as it's most likely the newest (the one we just uploaded).
+             */
+            final String messageId = message.getMessageId();
+            if (messageId == null || messageId.length() == 0) {
+                return;
+            }
+            // Most servers don't care about parenthesis in the search query [and, some
+            // fail to work if they are used]
+            String[] uids = searchForUids(
+                    String.format(Locale.US, "HEADER MESSAGE-ID %s", messageId));
+            if (uids.length > 0) {
+                message.setUid(uids[0]);
+            }
+            // However, there's at least one server [AOL] that fails to work unless there
+            // are parenthesis, so, try this as a last resort
+            uids = searchForUids(String.format(Locale.US, "(HEADER MESSAGE-ID %s)", messageId));
+            if (uids.length > 0) {
+                message.setUid(uids[0]);
             }
         } catch (IOException ioe) {
             throw ioExceptionHandler(mConnection, ioe);
@@ -1233,7 +1273,7 @@ class ImapFolder extends Folder {
             mConnection = null; // To prevent close() from returning the connection to the pool.
             close(false);
         }
-        return new MessagingException("IO Error", ioe);
+        return new MessagingException(MessagingException.IOERROR, "IO Error", ioe);
     }
 
     @Override

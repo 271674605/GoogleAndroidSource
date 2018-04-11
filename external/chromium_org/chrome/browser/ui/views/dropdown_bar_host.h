@@ -8,10 +8,9 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "ui/base/animation/animation_delegate.h"
+#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
-#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/focus/focus_manager.h"
 
 class BrowserView;
@@ -22,9 +21,9 @@ namespace content {
 class WebContents;
 }
 
-namespace ui {
+namespace gfx {
 class SlideAnimation;
-}  // namespace ui
+}  // namespace gfx
 
 namespace views {
 class ExternalFocusTracker;
@@ -35,16 +34,15 @@ class Widget;
 ////////////////////////////////////////////////////////////////////////////////
 //
 // The DropdownBarHost implements the container widget for the UI that
-// is shown at the top of browser contents. It uses the appropriate
-// implementation from dropdown_bar_host_win.cc or dropdown_bar_host_aura.cc to
-// draw its content and is responsible for showing, hiding, animating, closing,
-// and moving the bar if needed, for example if the widget is
-// obscuring the selection results in FindBar.
+// is shown at the top of browser contents. It uses the implementation from
+// dropdown_bar_host_aura.cc to draw its content and is responsible for showing,
+// hiding, animating, closing, and moving the bar if needed, for example if the
+// widget is obscuring the selection results in FindBar.
 //
 ////////////////////////////////////////////////////////////////////////////////
 class DropdownBarHost : public ui::AcceleratorTarget,
                         public views::FocusChangeListener,
-                        public ui::AnimationDelegate {
+                        public gfx::AnimationDelegate {
  public:
   explicit DropdownBarHost(BrowserView* browser_view);
   virtual ~DropdownBarHost();
@@ -90,9 +88,9 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) = 0;
   virtual bool CanHandleAccelerators() const = 0;
 
-  // ui::AnimationDelegate implementation:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  // gfx::AnimationDelegate implementation:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
 
   // During testing we can disable animations by setting this flag to true,
   // so that opening and closing the dropdown bar is shown instantly, instead of
@@ -162,7 +160,7 @@ class DropdownBarHost : public ui::AcceleratorTarget,
       const ui::KeyEvent& key_event);
 
   // Returns the animation for the dropdown.
-  ui::SlideAnimation* animation() {
+  gfx::SlideAnimation* animation() {
     return animation_.get();
   }
 
@@ -184,7 +182,7 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   int animation_offset_;
 
   // The animation class to use when opening the Dropdown widget.
-  scoped_ptr<ui::SlideAnimation> animation_;
+  scoped_ptr<gfx::SlideAnimation> animation_;
 
   // The focus manager we register with to keep track of focus changes.
   views::FocusManager* focus_manager_;

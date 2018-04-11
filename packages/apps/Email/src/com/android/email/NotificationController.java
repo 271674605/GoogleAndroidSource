@@ -34,9 +34,10 @@ import android.os.Process;
 import android.provider.Settings;
 import android.support.v4.app.NotificationCompat;
 import android.text.TextUtils;
+import android.text.format.DateUtils;
 
 import com.android.email.activity.setup.AccountSecurity;
-import com.android.email.activity.setup.AccountSettings;
+import com.android.email.activity.setup.HeadlessAccountSettingsLoader;
 import com.android.email.provider.EmailProvider;
 import com.android.email.service.EmailServiceUtils;
 import com.android.emailcommon.provider.Account;
@@ -64,9 +65,6 @@ import java.util.Set;
 public class NotificationController {
     private static final String LOG_TAG = LogTag.getLogTag();
 
-    /** Reserved for {@link com.android.exchange.CalendarSyncEnabler} */
-    @SuppressWarnings("unused")
-    private static final int NOTIFICATION_ID_EXCHANGE_CALENDAR_ADDED = 2;
     private static final int NOTIFICATION_ID_ATTACHMENT_WARNING = 3;
     private static final int NOTIFICATION_ID_PASSWORD_EXPIRING = 4;
     private static final int NOTIFICATION_ID_PASSWORD_EXPIRED = 5;
@@ -88,7 +86,7 @@ public class NotificationController {
     private ContentObserver mAccountObserver;
 
     /** Constructor */
-    private NotificationController(Context context, Clock clock) {
+    protected NotificationController(Context context, Clock clock) {
         mContext = context.getApplicationContext();
         EmailContent.init(context);
         mNotificationManager = (NotificationManager) context.getSystemService(
@@ -148,7 +146,7 @@ public class NotificationController {
                 .setContentIntent(pending)
                 .setLargeIcon(largeIcon)
                 .setNumber(number == null ? 0 : number)
-                .setSmallIcon(R.drawable.stat_notify_email)
+                .setSmallIcon(R.drawable.ic_notification_mail_24dp)
                 .setWhen(mClock.getTime())
                 .setTicker(ticker)
                 .setOngoing(ongoing);
@@ -209,10 +207,50 @@ public class NotificationController {
     /**
      * Ensures the notification handler exists and is ready to handle requests.
      */
+
+    /**
+     * TODO: Notifications jump around too much because we get too many content updates.
+     * We should try to make the provider generate fewer updates instead.
+     */
+
+    private static final int NOTIFICATION_DELAYED_MESSAGE = 0;
+    private static final long NOTIFICATION_DELAY = 15 * DateUtils.SECOND_IN_MILLIS;
+    // True if we're coalescing notification updates
+    private static boolean sNotificationDelayedMessagePending;
+    // True if accounts have changed and we need to refresh everything
+    private static boolean sRefreshAllNeeded;
+    // Set of accounts we need to regenerate notifications for
+    private static final HashSet<Long> sRefreshAccountSet = new HashSet<Long>();
+    // These should all be accessed on-thread, but just in case...
+    private static final Object sNotificationDelayedMessageLock = new Object();
+
     private static synchronized void ensureHandlerExists() {
         if (sNotificationThread == null) {
             sNotificationThread = new NotificationThread();
-            sNotificationHandler = new Handler(sNotificationThread.getLooper());
+            sNotificationHandler = new Handler(sNotificationThread.getLooper(),
+                    new Handler.Callback() {
+                        @Override
+                        public boolean handleMessage(final android.os.Message message) {
+                            /**
+                             * To reduce spamming the notifications, we quiesce updates for a few
+                             * seconds to batch them up, then handle them here.
+                             */
+                            LogUtils.d(LOG_TAG, "Delayed notification processing");
+                            synchronized (sNotificationDelayedMessageLock) {
+                                sNotificationDelayedMessagePending = false;
+                                final Context context = (Context)message.obj;
+                                if (sRefreshAllNeeded) {
+                                    sRefreshAllNeeded = false;
+                                    refreshAllNotificationsInternal(context);
+                                }
+                                for (final Long accountId : sRefreshAccountSet) {
+                                    refreshNotificationsForAccountInternal(context, accountId);
+                                }
+                                sRefreshAccountSet.clear();
+                            }
+                            return true;
+                        }
+                    });
         }
     }
 
@@ -293,7 +331,7 @@ public class NotificationController {
         com.android.mail.providers.Account uiAccount = null;
         try {
             if (accountCursor.moveToFirst()) {
-                uiAccount = new com.android.mail.providers.Account(accountCursor);
+                uiAccount = com.android.mail.providers.Account.builder().buildFrom(accountCursor);
             }
         } finally {
             accountCursor.close();
@@ -350,10 +388,10 @@ public class NotificationController {
      *
      * NOTE: DO NOT CALL THIS METHOD FROM THE UI THREAD (DATABASE ACCESS)
      */
-    public void showDownloadForwardFailedNotification(Attachment attachment) {
-        Message message = Message.restoreMessageWithId(mContext, attachment.mMessageKey);
+    public void showDownloadForwardFailedNotificationSynchronous(Attachment attachment) {
+        final Message message = Message.restoreMessageWithId(mContext, attachment.mMessageKey);
         if (message == null) return;
-        Mailbox mailbox = Mailbox.restoreMailboxWithId(mContext, message.mMailboxKey);
+        final Mailbox mailbox = Mailbox.restoreMailboxWithId(mContext, message.mMailboxKey);
         showNotification(mailbox.mAccountKey,
                 mContext.getString(R.string.forward_download_failed_ticker),
                 mContext.getString(R.string.forward_download_failed_title),
@@ -374,22 +412,27 @@ public class NotificationController {
      *
      * NOTE: DO NOT CALL THIS METHOD FROM THE UI THREAD (DATABASE ACCESS)
      */
-    public void showLoginFailedNotification(long accountId) {
-        showLoginFailedNotification(accountId, null);
-    }
-
-    public void showLoginFailedNotification(long accountId, String reason) {
+    public void showLoginFailedNotificationSynchronous(long accountId, boolean incoming) {
         final Account account = Account.restoreAccountWithId(mContext, accountId);
         if (account == null) return;
-        final Mailbox mailbox = Mailbox.restoreMailboxOfType(mContext, account.mId,
+        final Mailbox mailbox = Mailbox.restoreMailboxOfType(mContext, accountId,
                 Mailbox.TYPE_INBOX);
         if (mailbox == null) return;
+
+        final Intent settingsIntent;
+        if (incoming) {
+            settingsIntent = new Intent(Intent.ACTION_VIEW,
+                    HeadlessAccountSettingsLoader.getIncomingSettingsUri(accountId));
+        } else {
+            settingsIntent = new Intent(Intent.ACTION_VIEW,
+                    HeadlessAccountSettingsLoader.getOutgoingSettingsUri(accountId));
+        }
         showNotification(mailbox.mAccountKey,
                 mContext.getString(R.string.login_failed_ticker, account.mDisplayName),
                 mContext.getString(R.string.login_failed_title),
                 account.getDisplayName(),
-                AccountSettings.createAccountSettingsIntent(accountId,
-                        account.mDisplayName, reason), getLoginFailedNotificationId(accountId));
+                settingsIntent,
+                getLoginFailedNotificationId(accountId));
     }
 
     /**
@@ -405,16 +448,16 @@ public class NotificationController {
      *
      * NOTE: DO NOT CALL THIS METHOD FROM THE UI THREAD (DATABASE ACCESS)
      */
-    public void showPasswordExpiringNotification(long accountId) {
-        Account account = Account.restoreAccountWithId(mContext, accountId);
+    public void showPasswordExpiringNotificationSynchronous(long accountId) {
+        final Account account = Account.restoreAccountWithId(mContext, accountId);
         if (account == null) return;
 
-        Intent intent = AccountSecurity.actionDevicePasswordExpirationIntent(mContext,
+        final Intent intent = AccountSecurity.actionDevicePasswordExpirationIntent(mContext,
                 accountId, false);
-        String accountName = account.getDisplayName();
-        String ticker =
+        final String accountName = account.getDisplayName();
+        final String ticker =
             mContext.getString(R.string.password_expire_warning_ticker_fmt, accountName);
-        String title = mContext.getString(R.string.password_expire_warning_content_title);
+        final String title = mContext.getString(R.string.password_expire_warning_content_title);
         showNotification(accountId, ticker, title, accountName, intent,
                 NOTIFICATION_ID_PASSWORD_EXPIRING);
     }
@@ -425,15 +468,15 @@ public class NotificationController {
      *
      * NOTE: DO NOT CALL THIS METHOD FROM THE UI THREAD (DATABASE ACCESS)
      */
-    public void showPasswordExpiredNotification(long accountId) {
-        Account account = Account.restoreAccountWithId(mContext, accountId);
+    public void showPasswordExpiredNotificationSynchronous(long accountId) {
+        final Account account = Account.restoreAccountWithId(mContext, accountId);
         if (account == null) return;
 
-        Intent intent = AccountSecurity.actionDevicePasswordExpirationIntent(mContext,
+        final Intent intent = AccountSecurity.actionDevicePasswordExpirationIntent(mContext,
                 accountId, true);
-        String accountName = account.getDisplayName();
-        String ticker = mContext.getString(R.string.password_expired_ticker);
-        String title = mContext.getString(R.string.password_expired_content_title);
+        final String accountName = account.getDisplayName();
+        final String ticker = mContext.getString(R.string.password_expired_ticker);
+        final String title = mContext.getString(R.string.password_expired_content_title);
         showNotification(accountId, ticker, title, accountName, intent,
                 NOTIFICATION_ID_PASSWORD_EXPIRED);
     }
@@ -465,11 +508,13 @@ public class NotificationController {
      * account settings screen where he can view the list of enforced policies
      */
     public void showSecurityChangedNotification(Account account) {
-        Intent intent = AccountSettings.createAccountSettingsIntent(account.mId, null, null);
-        String accountName = account.getDisplayName();
-        String ticker =
+        final Intent intent = new Intent(Intent.ACTION_VIEW,
+                HeadlessAccountSettingsLoader.getIncomingSettingsUri(account.getId()));
+        final String accountName = account.getDisplayName();
+        final String ticker =
             mContext.getString(R.string.security_changed_ticker_fmt, accountName);
-        String title = mContext.getString(R.string.security_notification_content_change_title);
+        final String title =
+                mContext.getString(R.string.security_notification_content_change_title);
         showNotification(account.mId, ticker, title, accountName, intent,
                 (int)(NOTIFICATION_ID_BASE_SECURITY_CHANGED + account.mId));
     }
@@ -479,11 +524,13 @@ public class NotificationController {
      * account settings screen where he can view the list of unsupported policies
      */
     public void showSecurityUnsupportedNotification(Account account) {
-        Intent intent = AccountSettings.createAccountSettingsIntent(account.mId, null, null);
-        String accountName = account.getDisplayName();
-        String ticker =
+        final Intent intent = new Intent(Intent.ACTION_VIEW,
+                HeadlessAccountSettingsLoader.getIncomingSettingsUri(account.getId()));
+        final String accountName = account.getDisplayName();
+        final String ticker =
             mContext.getString(R.string.security_unsupported_ticker_fmt, accountName);
-        String title = mContext.getString(R.string.security_notification_content_unsupported_title);
+        final String title =
+                mContext.getString(R.string.security_notification_content_unsupported_title);
         showNotification(account.mId, ticker, title, accountName, intent,
                 (int)(NOTIFICATION_ID_BASE_SECURITY_NEEDED + account.mId));
    }
@@ -533,6 +580,157 @@ public class NotificationController {
         notificationManager.cancel((int) (NOTIFICATION_ID_BASE_SECURITY_CHANGED + account.mId));
     }
 
+    private static void refreshNotificationsForAccount(final Context context,
+            final long accountId) {
+        synchronized (sNotificationDelayedMessageLock) {
+            if (sNotificationDelayedMessagePending) {
+                sRefreshAccountSet.add(accountId);
+            } else {
+                ensureHandlerExists();
+                sNotificationHandler.sendMessageDelayed(
+                        android.os.Message.obtain(sNotificationHandler,
+                                NOTIFICATION_DELAYED_MESSAGE, context), NOTIFICATION_DELAY);
+                sNotificationDelayedMessagePending = true;
+                refreshNotificationsForAccountInternal(context, accountId);
+            }
+        }
+    }
+
+    private static void refreshNotificationsForAccountInternal(final Context context,
+            final long accountId) {
+        final Uri accountUri = EmailProvider.uiUri("uiaccount", accountId);
+
+        final ContentResolver contentResolver = context.getContentResolver();
+
+        final Cursor mailboxCursor = contentResolver.query(
+                ContentUris.withAppendedId(EmailContent.MAILBOX_NOTIFICATION_URI, accountId),
+                null, null, null, null);
+        try {
+            while (mailboxCursor.moveToNext()) {
+                final long mailboxId =
+                        mailboxCursor.getLong(EmailContent.NOTIFICATION_MAILBOX_ID_COLUMN);
+                if (mailboxId == 0) continue;
+
+                final int unseenCount = mailboxCursor.getInt(
+                        EmailContent.NOTIFICATION_MAILBOX_UNSEEN_COUNT_COLUMN);
+
+                final int unreadCount;
+                // If nothing is unseen, clear the notification
+                if (unseenCount == 0) {
+                    unreadCount = 0;
+                } else {
+                    unreadCount = mailboxCursor.getInt(
+                            EmailContent.NOTIFICATION_MAILBOX_UNREAD_COUNT_COLUMN);
+                }
+
+                final Uri folderUri = EmailProvider.uiUri("uifolder", mailboxId);
+
+
+                LogUtils.d(LOG_TAG, "Changes to account " + accountId + ", folder: "
+                        + mailboxId + ", unreadCount: " + unreadCount + ", unseenCount: "
+                        + unseenCount);
+
+                final Intent intent = new Intent(UIProvider.ACTION_UPDATE_NOTIFICATION);
+                intent.setPackage(context.getPackageName());
+                intent.setType(EmailProvider.EMAIL_APP_MIME_TYPE);
+
+                intent.putExtra(UIProvider.UpdateNotificationExtras.EXTRA_ACCOUNT, accountUri);
+                intent.putExtra(UIProvider.UpdateNotificationExtras.EXTRA_FOLDER, folderUri);
+                intent.putExtra(UIProvider.UpdateNotificationExtras.EXTRA_UPDATED_UNREAD_COUNT,
+                        unreadCount);
+                intent.putExtra(UIProvider.UpdateNotificationExtras.EXTRA_UPDATED_UNSEEN_COUNT,
+                        unseenCount);
+
+                context.sendOrderedBroadcast(intent, null);
+            }
+        } finally {
+            mailboxCursor.close();
+        }
+    }
+
+    public static void handleUpdateNotificationIntent(Context context, Intent intent) {
+        final Uri accountUri =
+                intent.getParcelableExtra(UIProvider.UpdateNotificationExtras.EXTRA_ACCOUNT);
+        final Uri folderUri =
+                intent.getParcelableExtra(UIProvider.UpdateNotificationExtras.EXTRA_FOLDER);
+        final int unreadCount = intent.getIntExtra(
+                UIProvider.UpdateNotificationExtras.EXTRA_UPDATED_UNREAD_COUNT, 0);
+        final int unseenCount = intent.getIntExtra(
+                UIProvider.UpdateNotificationExtras.EXTRA_UPDATED_UNSEEN_COUNT, 0);
+
+        final ContentResolver contentResolver = context.getContentResolver();
+
+        final Cursor accountCursor = contentResolver.query(accountUri,
+                UIProvider.ACCOUNTS_PROJECTION,  null, null, null);
+
+        if (accountCursor == null) {
+            LogUtils.e(LOG_TAG, "Null account cursor for account " + accountUri);
+            return;
+        }
+
+        com.android.mail.providers.Account account = null;
+        try {
+            if (accountCursor.moveToFirst()) {
+                account = com.android.mail.providers.Account.builder().buildFrom(accountCursor);
+            }
+        } finally {
+            accountCursor.close();
+        }
+
+        if (account == null) {
+            LogUtils.d(LOG_TAG, "Tried to create a notification for a missing account "
+                    + accountUri);
+            return;
+        }
+
+        final Cursor folderCursor = contentResolver.query(folderUri, UIProvider.FOLDERS_PROJECTION,
+                null, null, null);
+
+        if (folderCursor == null) {
+            LogUtils.e(LOG_TAG, "Null folder cursor for account " + accountUri + ", mailbox "
+                    + folderUri);
+            return;
+        }
+
+        Folder folder = null;
+        try {
+            if (folderCursor.moveToFirst()) {
+                folder = new Folder(folderCursor);
+            } else {
+                LogUtils.e(LOG_TAG, "Empty folder cursor for account " + accountUri + ", mailbox "
+                        + folderUri);
+                return;
+            }
+        } finally {
+            folderCursor.close();
+        }
+
+        // TODO: we don't always want getAttention to be true, but we don't necessarily have a
+        // good heuristic for when it should or shouldn't be.
+        NotificationUtils.sendSetNewEmailIndicatorIntent(context, unreadCount, unseenCount,
+                account, folder, true /* getAttention */);
+    }
+
+    private static void refreshAllNotifications(final Context context) {
+        synchronized (sNotificationDelayedMessageLock) {
+            if (sNotificationDelayedMessagePending) {
+                sRefreshAllNeeded = true;
+            } else {
+                ensureHandlerExists();
+                sNotificationHandler.sendMessageDelayed(
+                        android.os.Message.obtain(sNotificationHandler,
+                                NOTIFICATION_DELAYED_MESSAGE, context), NOTIFICATION_DELAY);
+                sNotificationDelayedMessagePending = true;
+                refreshAllNotificationsInternal(context);
+            }
+        }
+    }
+
+    private static void refreshAllNotificationsInternal(final Context context) {
+        NotificationUtils.resendNotifications(
+                context, false, null, null, null /* ContactPhotoFetcher */);
+    }
+
     /**
      * Observer invoked whenever a message we're notifying the user about changes.
      */
@@ -549,79 +747,7 @@ public class NotificationController {
 
         @Override
         public void onChange(final boolean selfChange) {
-            final ContentResolver contentResolver = mContext.getContentResolver();
-
-            final Cursor accountCursor = contentResolver.query(
-                    EmailProvider.uiUri("uiaccount", mAccountId), UIProvider.ACCOUNTS_PROJECTION,
-                    null, null, null);
-
-            if (accountCursor == null) {
-                LogUtils.e(LOG_TAG, "Null account cursor for mAccountId %d", mAccountId);
-                return;
-            }
-
-            com.android.mail.providers.Account account = null;
-            try {
-                if (accountCursor.moveToFirst()) {
-                    account = new com.android.mail.providers.Account(accountCursor);
-                }
-            } finally {
-                accountCursor.close();
-            }
-
-            if (account == null) {
-                LogUtils.d(LOG_TAG, "Tried to create a notification for a missing account %d",
-                        mAccountId);
-                return;
-            }
-
-            final Cursor mailboxCursor = contentResolver.query(
-                    ContentUris.withAppendedId(EmailContent.MAILBOX_NOTIFICATION_URI, mAccountId),
-                    null, null, null, null);
-            try {
-                while (mailboxCursor.moveToNext()) {
-                    final long mailboxId =
-                            mailboxCursor.getLong(EmailContent.NOTIFICATION_MAILBOX_ID_COLUMN);
-                    if (mailboxId == 0) continue;
-
-                    final int unreadCount = mailboxCursor.getInt(
-                            EmailContent.NOTIFICATION_MAILBOX_UNREAD_COUNT_COLUMN);
-                    final int unseenCount = mailboxCursor.getInt(
-                            EmailContent.NOTIFICATION_MAILBOX_UNSEEN_COUNT_COLUMN);
-
-                    final Cursor folderCursor = contentResolver.query(
-                            EmailProvider.uiUri("uifolder", mailboxId),
-                            UIProvider.FOLDERS_PROJECTION, null, null, null);
-
-                    if (folderCursor == null) {
-                        LogUtils.e(LOG_TAG, "Null folder cursor for account %d, mailbox %d",
-                                mAccountId, mailboxId);
-                        continue;
-                    }
-
-                    Folder folder = null;
-                    try {
-                        if (folderCursor.moveToFirst()) {
-                            folder = new Folder(folderCursor);
-                        } else {
-                            LogUtils.e(LOG_TAG, "Empty folder cursor for account %d, mailbox %d",
-                                    mAccountId, mailboxId);
-                            continue;
-                        }
-                    } finally {
-                        folderCursor.close();
-                    }
-
-                    LogUtils.d(LOG_TAG, "Changes to account " + account.name + ", folder: "
-                            + folder.name + ", unreadCount: " + unreadCount + ", unseenCount: "
-                            + unseenCount);
-
-                    NotificationUtils.setNewEmailIndicator(mContext, unreadCount, unseenCount,
-                            account, folder, true);
-                }
-            } finally {
-                mailboxCursor.close();
-            }
+            refreshNotificationsForAccount(mContext, mAccountId);
         }
     }
 
@@ -674,7 +800,7 @@ public class NotificationController {
                 sInstance.unregisterMessageNotification(accountId);
             }
 
-            NotificationUtils.resendNotifications(mContext, false, null, null);
+            refreshAllNotifications(mContext);
         }
     }
 

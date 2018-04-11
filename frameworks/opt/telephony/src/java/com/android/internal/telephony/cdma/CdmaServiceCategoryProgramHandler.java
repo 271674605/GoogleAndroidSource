@@ -26,10 +26,12 @@ import android.os.Bundle;
 import android.os.Message;
 import android.provider.Telephony.Sms.Intents;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionManager;
 import android.telephony.cdma.CdmaSmsCbProgramData;
 import android.telephony.cdma.CdmaSmsCbProgramResults;
 
 import com.android.internal.telephony.CommandsInterface;
+import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.WakeLockStateMachine;
 import com.android.internal.telephony.cdma.sms.BearerData;
 import com.android.internal.telephony.cdma.sms.CdmaSmsAddress;
@@ -45,14 +47,13 @@ import java.util.ArrayList;
  */
 public final class CdmaServiceCategoryProgramHandler extends WakeLockStateMachine {
 
-    private final Context mContext;
     final CommandsInterface mCi;
 
     /**
      * Create a new CDMA inbound SMS handler.
      */
     CdmaServiceCategoryProgramHandler(Context context, CommandsInterface commandsInterface) {
-        super("CdmaServiceCategoryProgramHandler", context);
+        super("CdmaServiceCategoryProgramHandler", context, null);
         mContext = context;
         mCi = commandsInterface;
     }
@@ -104,7 +105,7 @@ public final class CdmaServiceCategoryProgramHandler extends WakeLockStateMachin
         Intent intent = new Intent(Intents.SMS_SERVICE_CATEGORY_PROGRAM_DATA_RECEIVED_ACTION);
         intent.putExtra("sender", sms.getOriginatingAddress());
         intent.putParcelableArrayListExtra("program_data", programDataList);
-
+        SubscriptionManager.putPhoneIdAndSubIdExtra(intent, mPhone.getPhoneId());
         mContext.sendOrderedBroadcast(intent, Manifest.permission.RECEIVE_SMS,
                 AppOpsManager.OP_RECEIVE_SMS, mScpResultsReceiver,
                 getHandler(), Activity.RESULT_OK, null, null);
@@ -159,7 +160,7 @@ public final class CdmaServiceCategoryProgramHandler extends WakeLockStateMachin
                 dos.writeInt(0); //servicePresent
                 dos.writeInt(0); //serviceCategory
                 CdmaSmsAddress destAddr = CdmaSmsAddress.parse(
-                        PhoneNumberUtils.cdmaCheckAndProcessPlusCode(sender));
+                        PhoneNumberUtils.cdmaCheckAndProcessPlusCodeForSms(sender));
                 dos.write(destAddr.digitMode);
                 dos.write(destAddr.numberMode);
                 dos.write(destAddr.ton); // number_type

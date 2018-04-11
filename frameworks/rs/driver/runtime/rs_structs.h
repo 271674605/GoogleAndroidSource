@@ -25,7 +25,11 @@ typedef enum {
 } rs_allocation_mipmap_control;
 
 typedef struct Allocation {
+#ifndef __LP64__
     char __pad[32];
+#else
+    char __pad[56];
+#endif
     struct {
         void * drv;
         struct {
@@ -63,6 +67,7 @@ typedef struct Allocation {
     } mHal;
 } Allocation_t;
 
+#ifndef __LP64__
 /*****************************************************************************
  * CAUTION
  *
@@ -124,6 +129,7 @@ typedef struct ProgramRaster {
         } state;
     } mHal;
 } ProgramRaster_t;
+#endif //__LP64__
 
 /*****************************************************************************
  * CAUTION
@@ -143,7 +149,11 @@ typedef struct ProgramRaster {
  *
  *****************************************************************************/
 typedef struct Sampler {
+#ifndef __LP64__
     char __pad[32];
+#else
+    char __pad[56];
+#endif
     struct {
         void *drv;
         struct {
@@ -175,7 +185,11 @@ typedef struct Sampler {
  *
  *****************************************************************************/
 typedef struct Element {
+#ifndef __LP64__
     char __pad[32];
+#else
+    char __pad[56];
+#endif
     struct {
         void *drv;
         struct {
@@ -213,7 +227,11 @@ typedef struct Element {
  *
  *****************************************************************************/
 typedef struct Type {
+#ifndef __LP64__
     char __pad[32];
+#else
+    char __pad[56];
+#endif
     struct {
         void *drv;
         struct {
@@ -231,6 +249,7 @@ typedef struct Type {
     } mHal;
 } Type_t;
 
+#ifndef __LP64__
 /*****************************************************************************
  * CAUTION
  *
@@ -264,4 +283,5 @@ typedef struct Mesh {
         } state;
     } mHal;
 } Mesh_t;
+#endif //__LP64__
 #endif // _RS_CORE_H_

@@ -11,13 +11,14 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_value_map.h"
-#include "chrome/browser/chromeos/settings/cros_settings_provider.h"
+#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
+#include "chromeos/settings/cros_settings_provider.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 
 namespace base {
 class Value;
@@ -33,6 +34,9 @@ namespace chromeos {
 class DeviceSettingsProvider : public CrosSettingsProvider,
                                public DeviceSettingsService::Observer {
  public:
+  // The callback type that is called to get the device mode.
+  typedef base::Callback<policy::DeviceMode(void)> GetDeviceModeCallback;
+
   DeviceSettingsProvider(const NotifyObserversCallback& notify_cb,
                          DeviceSettingsService* device_settings_service);
   virtual ~DeviceSettingsProvider();
@@ -96,6 +100,8 @@ class DeviceSettingsProvider : public CrosSettingsProvider,
 
   // Applies the data roaming policy.
   void ApplyRoamingSetting(bool new_value);
+  void ApplyRoamingSettingFromProto(
+      const enterprise_management::ChromeDeviceSettingsProto& settings);
 
   // Applies any changes of the policies that are not handled by the respective
   // subsystems.

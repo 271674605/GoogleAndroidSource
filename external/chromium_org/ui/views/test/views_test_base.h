@@ -14,13 +14,9 @@
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
 
-namespace aura {
-namespace test {
-class AuraTestHelper;
-}
-}
-
 namespace views {
+
+class ViewsTestHelper;
 
 // A base class for views unit test. It creates a message loop necessary
 // to drive UI events and takes care of OLE initialization for windows.
@@ -46,7 +42,7 @@ class ViewsTestBase : public testing::Test {
     views_delegate_.reset(views_delegate);
   }
 
-  base::MessageLoop* message_loop() { return &message_loop_; }
+  base::MessageLoopForUI* message_loop() { return &message_loop_; }
 
   // Returns a context view. In aura builds, this will be the
   // RootWindow. Everywhere else, NULL.
@@ -55,9 +51,7 @@ class ViewsTestBase : public testing::Test {
  private:
   base::MessageLoopForUI message_loop_;
   scoped_ptr<TestViewsDelegate> views_delegate_;
-#if defined(USE_AURA)
-  scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
-#endif
+  scoped_ptr<ViewsTestHelper> test_helper_;
   bool setup_called_;
   bool teardown_called_;
 

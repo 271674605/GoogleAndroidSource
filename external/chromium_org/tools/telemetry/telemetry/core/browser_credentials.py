@@ -1,13 +1,20 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 import logging
 import json
 import os
 
-from telemetry.core.chrome import facebook_credentials_backend
-from telemetry.core.chrome import google_credentials_backend
+from telemetry.core import util
+from telemetry.core.backends import facebook_credentials_backend
+from telemetry.core.backends import google_credentials_backend
 from telemetry.unittest import options_for_unittests
+
+
+class CredentialsError(Exception):
+  """Error that can be thrown when logging in."""
+
 
 class BrowserCredentials(object):
   def __init__(self, backends = None):
@@ -30,19 +37,22 @@ class BrowserCredentials(object):
 
   def IsLoggedIn(self, credentials_type):
     if credentials_type not in self._backends:
-      raise Exception('Unrecognized credentials type: %s', credentials_type)
+      raise CredentialsError(
+          'Unrecognized credentials type: %s', credentials_type)
     if credentials_type not in self._credentials:
       return False
     return self._backends[credentials_type].IsLoggedIn()
 
   def CanLogin(self, credentials_type):
     if credentials_type not in self._backends:
-      raise Exception('Unrecognized credentials type: %s', credentials_type)
+      raise CredentialsError(
+          'Unrecognized credentials type: %s', credentials_type)
     return credentials_type in self._credentials
 
   def LoginNeeded(self, tab, credentials_type):
     if credentials_type not in self._backends:
-      raise Exception('Unrecognized credentials type: %s', credentials_type)
+      raise CredentialsError(
+          'Unrecognized credentials type: %s', credentials_type)
     if credentials_type not in self._credentials:
       return False
     return self._backends[credentials_type].LoginNeeded(
@@ -126,11 +136,8 @@ class BrowserCredentials(object):
                                        page_set.credentials_path)))
       files_to_tweak.append('~/.telemetry-credentials')
 
-      example_credentials_file = (
-        os.path.relpath(
-          os.path.join(
-            os.path.dirname(__file__),
-            '..', 'examples', 'credentials_example.json')))
+      example_credentials_file = os.path.join(
+          util.GetTelemetryDir(), 'examples', 'credentials_example.json')
 
       logging.warning("""
         Credentials for %s were not found. %i pages will not be tested.

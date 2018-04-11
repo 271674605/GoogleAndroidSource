@@ -22,10 +22,6 @@
     <string name="details_hms" msgid="4842276230698703554">"%1$d:%2$02d:%3$02d"</string>
     <string name="set_image" msgid="3969690281401045698">"Đặt ảnh làm"</string>
     <string name="delete" msgid="2714492172818940424">"Xóa"</string>
-  <plurals name="delete_selection">
-    <item quantity="one" msgid="8811352590292754044">"Xóa mục đã chọn?"</item>
-    <item quantity="other" msgid="5075283252850066610">"Xóa các mục đã chọn?"</item>
-  </plurals>
     <string name="share" msgid="8581089487762243115">"Chia sẻ"</string>
     <string name="share_panorama" msgid="3558466186935359444">"Chia sẻ ảnh toàn cảnh"</string>
     <string name="share_as_photo" msgid="4831213580709167218">"Chia sẻ dưới dạng ảnh"</string>
@@ -33,21 +29,6 @@
     <string name="undo" msgid="5110048345890050107">"HOÀN TÁC"</string>
     <string name="details" msgid="4404020741542549488">"Chi tiết"</string>
     <string name="close" msgid="4826166926297479820">"Đóng"</string>
-  <plurals name="number_of_items_selected">
-    <item quantity="zero" msgid="9217673864242686656">"Đã chọn %1$d"</item>
-    <item quantity="one" msgid="5806616411905812727">"Đã chọn %1$d"</item>
-    <item quantity="other" msgid="3767743589502328221">"Đã chọn %1$d"</item>
-  </plurals>
-  <plurals name="number_of_albums_selected">
-    <item quantity="zero" msgid="8095100906728830821">"Đã chọn %1$d"</item>
-    <item quantity="one" msgid="9063509704521984072">"Đã chọn %1$d"</item>
-    <item quantity="other" msgid="135044054552480485">"Đã chọn %1$d"</item>
-  </plurals>
-  <plurals name="number_of_groups_selected">
-    <item quantity="zero" msgid="1942343672734097509">"Đã chọn %1$d"</item>
-    <item quantity="one" msgid="1456436514367094505">"Đã chọn %1$d"</item>
-    <item quantity="other" msgid="1511467088339194694">"Đã chọn %1$d"</item>
-  </plurals>
     <string name="show_on_map" msgid="8542853913632649160">"Hiển thị trên bản đồ"</string>
     <string name="rotate_left" msgid="2618440058490662604">"Xoay trái"</string>
     <string name="rotate_right" msgid="4896096424267838355">"Xoay phải"</string>
@@ -56,7 +37,6 @@
     <string name="trim_action" msgid="4736803320203951827">"Cắt ngắn"</string>
     <string name="set_as" msgid="5469055085024870081">"Đặt làm"</string>
     <string name="video_err" msgid="1562566029875081552">"Không thể phát video."</string>
-    <string name="crop_saved" msgid="4465794038855602739">"Đã lưu hình ảnh được cắt vào <xliff:g id="FOLDER_NAME">%s</xliff:g>."</string>
     <string name="title" msgid="8061744305671964703">"Tiêu đề"</string>
     <string name="description" msgid="8193138501982849808">"Mô tả"</string>
     <string name="time" msgid="5248213506417024287">"Thời gian"</string>
@@ -84,7 +64,6 @@
     <string name="unknown" msgid="564184550182858146">"Không xác định"</string>
     <string name="try_to_set_local_album_available_offline" msgid="3363125545009254117">"Mục này được lưu cục bộ và khả dụng ngoại tuyến."</string>
     <string name="please_wait" msgid="1416313324505140068">"Vui lòng chờ"</string>
-    <string name="rendering_photo_sphere" msgid="3032858512989313215">"Hiện ảnh toàn cảnh 360 độ"</string>
     <string name="camera_error_title" msgid="6200558085072670067">"Lỗi máy ảnh"</string>
     <string name="cannot_connect_camera" msgid="4311259792784598381">"Không thể kết nối với máy ảnh."</string>
     <string name="camera_disabled" msgid="6963443549010040595">"Máy ảnh đã bị tắt do chính sách bảo mật."</string>
@@ -93,39 +72,26 @@
     <string name="preparing_sd" product="default" msgid="7435693655017362767">"Đang chuẩn bị thẻ SD…"</string>
     <string name="access_sd_fail" product="default" msgid="2634861611082499811">"Không thể truy cập thẻ SD."</string>
     <string name="time_lapse_title" msgid="3267978566401228497">"Đang quay ở chế độ khoảng thời gian"</string>
+    <string name="capturing" msgid="5255164204641920893">"Đang chụp"</string>
     <string name="pref_camera_id_title" msgid="4680648115225411185">"Chọn máy ảnh"</string>
     <string name="pref_camera_id_entry_back" msgid="6386943973628160510">"Quay lại"</string>
     <string name="pref_camera_id_entry_front" msgid="6233067010315787044">"Trước"</string>
-    <string name="pref_camera_recordlocation_title" msgid="3354956161456185749">"Vị trí lưu trữ"</string>
+    <string name="pref_camera_save_location_title" msgid="2344235620113384017">"Vị trí lưu"</string>
     <string name="pref_camera_location_label" msgid="8695441802378057719">"VỊ TRÍ"</string>
     <string name="pref_camera_timer_title" msgid="4728838281741571323">"Đồng hồ đếm ngược"</string>
-  <plurals name="pref_camera_timer_entry">
-    <item quantity="one" msgid="8919878087230098328">"1 giây"</item>
-    <item quantity="other" msgid="5782794798884172289">"%d giây"</item>
-  </plurals>
     <!-- no translation found for pref_camera_timer_sound_default (6225207881203007747) -->
     <skip />
     <string name="pref_camera_timer_sound_title" msgid="9036987234878551217">"Tiếng bíp khi đếm ngược"</string>
     <string name="setting_off" msgid="6782191065550276632">"Tắt"</string>
     <string name="setting_on" msgid="9086728135773197891">"Bật"</string>
     <string name="pref_video_quality_title" msgid="5887153490982738588">"Chất lượng video"</string>
-    <string name="pref_video_quality_entry_high" msgid="1613578418842803393">"Cao"</string>
-    <string name="pref_video_quality_entry_low" msgid="737962621299050603">"Thấp"</string>
     <string name="pref_video_time_lapse_frame_interval_title" msgid="4975260837607993569">"Khoảng thời gian"</string>
     <string name="pref_camera_settings_category" msgid="4274141528139077830">"Cài đặt máy ảnh"</string>
     <string name="pref_camcorder_settings_category" msgid="3553148484755353397">"Cài đặt máy quay video"</string>
     <string name="pref_camera_picturesize_title" msgid="686045304547541815">"Kích thước hình ảnh"</string>
-    <string name="pref_camera_picturesize_entry_13mp" msgid="6728485576074234195">"13M pixel"</string>
-    <string name="pref_camera_picturesize_entry_8mp" msgid="7088352012301633667">"8M pixel"</string>
-    <string name="pref_camera_picturesize_entry_5mp" msgid="1501745661448065284">"5M pixel"</string>
-    <string name="pref_camera_picturesize_entry_4mp" msgid="4786178543089540678">"4M pixel"</string>
-    <string name="pref_camera_picturesize_entry_3mp" msgid="140799231761236311">"3M pixel"</string>
-    <string name="pref_camera_picturesize_entry_2mp" msgid="450006451326859328">"2M pixel"</string>
-    <string name="pref_camera_picturesize_entry_2mp_wide" msgid="1877997036497332813">"2M pixel (16:9)"</string>
-    <string name="pref_camera_picturesize_entry_1_3mp" msgid="3451742533756821502">"1,3M pixel"</string>
-    <string name="pref_camera_picturesize_entry_1mp" msgid="5043732005295894167">"1M pixel"</string>
-    <string name="pref_camera_picturesize_entry_vga" msgid="7387786033708903628">"VGA"</string>
-    <string name="pref_camera_picturesize_entry_qvga" msgid="6134562622041084167">"QVGA"</string>
+    <string name="pref_camera_picturesize_entry_large" msgid="9014447075089601575">"Lớn"</string>
+    <string name="pref_camera_picturesize_entry_medium" msgid="7708839551627003154">"Trung bình"</string>
+    <string name="pref_camera_picturesize_entry_small" msgid="2991239656622539068">"Nhỏ"</string>
     <string name="pref_camera_focusmode_title" msgid="3637702747984180030">"Chế độ tiêu điểm"</string>
     <string name="pref_camera_focusmode_entry_auto" msgid="8977409813328199501">"Tự động"</string>
     <string name="pref_camera_focusmode_entry_infinity" msgid="3887667853236656322">"Vô cực"</string>
@@ -157,10 +123,10 @@
     <string name="pref_camera_scenemode_entry_auto" msgid="9205644316260850379">"Tự động"</string>
     <string name="pref_camera_scenemode_entry_hdr_plus" msgid="6759085555519758794">"HDR+"</string>
     <string name="pref_camera_scenemode_entry_hdr" msgid="3098836808080630955">"HDR"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_plus_on" msgid="4762986338359862238">"Bật HDR+"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_plus_off" msgid="8027383906480914303">"Tắt HDR+"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_on" msgid="8567522693524539332">"Bật HDR"</string>
-    <string name="pref_camera_scenemode_entry_turn_hdr_off" msgid="1121637502250585531">"Tắt HDR"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_plus_on" msgid="1096746750342289067">"BẬT HDR+"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_plus_off" msgid="2668770361856397834">"TẮT HDR+"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_on" msgid="5232394324298489502">"BẬT HDR"</string>
+    <string name="pref_camera_scenemode_entry_turn_hdr_off" msgid="7694606461440250206">"TẮT HDR"</string>
     <string name="pref_camera_scenemode_entry_action" msgid="5753183620959062015">"Tác vụ"</string>
     <string name="pref_camera_scenemode_entry_night" msgid="3468037364159759991">"Đêm"</string>
     <string name="pref_camera_scenemode_entry_sunset" msgid="5884302914893488509">"Hoàng hôn"</string>
@@ -186,6 +152,7 @@
     <string name="pref_camera_id_label_back" msgid="1645608049757733858">"MÁY ẢNH MẶT TRƯỚC"</string>
     <string name="pref_camera_id_label_front" msgid="349308803062874842">"MÁY ẢNH MẶT SAU"</string>
     <string name="dialog_ok" msgid="774141340500181131">"OK"</string>
+    <string name="dialog_cancel" msgid="692365061128351656">"Hủy"</string>
     <string name="spaceIsLow_content" product="default" msgid="4522771065344332702">"Thẻ SD của bạn sắp hết dung lượng. Thay đổi cài đặt chất lượng hoặc xóa một số ảnh hoặc tệp khác."</string>
     <string name="video_reach_size_limit" msgid="9196836111505731836">"Đã đạt tới giới hạn kích thước."</string>
     <string name="pano_too_fast_prompt" msgid="2503148095578052177">"Quá nhanh"</string>
@@ -215,19 +182,39 @@
     <string name="effect_silly_faces" msgid="7952713419757286453">"MẶT XẤU"</string>
     <string name="effect_background" msgid="1358432220077975015">"MÀU NỀN"</string>
     <string name="accessibility_shutter_button" msgid="6040483605347230438">"Màn trập"</string>
-    <string name="accessibility_menu_button" msgid="7692103503958544723">"Nút trình đơn"</string>
-    <string name="accessibility_mode_picker" msgid="5107120667206453381">"Bộ chọn chế độ máy ảnh, video hoặc toàn cảnh"</string>
+    <string name="accessibility_cancel_button" msgid="5679989494636116448">"Hủy"</string>
+    <string name="accessibility_menu_button" msgid="7692103503958544723">"Nút menu"</string>
     <string name="accessibility_check_box" msgid="1084094675439953723">"Hộp kiểm %1$s"</string>
     <string name="accessibility_switch_to_camera" msgid="4518394037216725274">"Chuyển sang ảnh"</string>
     <string name="accessibility_switch_to_video" msgid="8174781871592793967">"Chuyển sang video"</string>
     <string name="accessibility_switch_to_panorama" msgid="8322228859117808037">"Chuyển sang chế độ toàn cảnh"</string>
     <string name="accessibility_switch_to_photo_sphere" msgid="5803217570370854725">"Chuyển sang Ảnh toàn cảnh 360 độ"</string>
     <string name="accessibility_switch_to_gcam" msgid="7562625440767034695">"Chuyển sang chất lượng cao"</string>
+    <string name="accessibility_switch_to_refocus" msgid="6796169367953860106">"Chuyển sang Lấy nét lại"</string>
     <string name="accessibility_review_cancel" msgid="5462850829869569629">"Hủy xem lại"</string>
     <string name="accessibility_review_ok" msgid="3486465319880320270">"Hoàn tất xem lại"</string>
     <string name="accessibility_review_retake" msgid="2547112860787022130">"Chụp lại ảnh xem lại"</string>
+    <string name="accessibility_mode_options" msgid="6376831760155403217">"Tùy chọn"</string>
+    <string name="accessibility_mode_list_hidden" msgid="3743267380450401866">"Đã đóng danh sách chế độ"</string>
+    <string name="accessibility_mode_list_shown" msgid="5284322142734069179">"Đã mở danh sách chế độ"</string>
+    <string name="media_accessibility_peek" msgid="234540330161031946">"Đã chụp"</string>
+    <string name="photo_accessibility_peek" msgid="5934133371001677250">"Đã chụp ảnh"</string>
+    <string name="video_accessibility_peek" msgid="7845916149291383132">"Đã quay video"</string>
+    <string name="accessibility_unlock_to_camera" msgid="1251880974313179442">"Mở khóa cho máy ảnh"</string>
+    <string name="media_date_content_description" msgid="2155634843596817141">"Phương tiện được chụp/quay vào %s"</string>
+    <string name="photo_date_content_description" msgid="5705865897898465619">"Ảnh được chụp vào %s"</string>
+    <string name="video_date_content_description" msgid="2151884014634284456">"Video được quay vào %s"</string>
+    <string name="panorama_date_content_description" msgid="990703578639006144">"Ảnh toàn cảnh được chụp vào %s"</string>
+    <string name="photosphere_date_content_description" msgid="4183741743409007876">"Ảnh toàn cảnh 360 độ được chụp vào %s"</string>
+    <string name="refocus_date_content_description" msgid="5630960320424345547">"Làm mờ ống kính được tiến hành vào %s"</string>
+    <string name="media_processing_content_description" msgid="8138587719107183754">"Xử lý phương tiện"</string>
+    <string name="accessibility_mode_list_toggle" msgid="4784230103566918645">"Chuyển đổi danh sách chế độ"</string>
+    <string name="btn_mode_list_toggle" msgid="3986242443098400164">"Danh sách chế độ"</string>
+    <string name="accessibility_filmstrip_toggle" msgid="6966978483643396442">"Chuyển đổi cuộn phim"</string>
+    <string name="btn_filmstrip_toggle" msgid="3666693972882351490">"Cuộn phim"</string>
     <string name="capital_on" msgid="1118214824959797269">"BẬT"</string>
     <string name="capital_off" msgid="3020696135020167263">"TẮT"</string>
+    <string name="video_control_play" msgid="6895236811408921715">"Phát video"</string>
     <string name="pref_video_time_lapse_frame_interval_off" msgid="3909611941842585497">"Tắt"</string>
     <string name="pref_video_time_lapse_frame_interval_500" msgid="1425296755074319221">"0,5 giây"</string>
     <string name="pref_video_time_lapse_frame_interval_1000" msgid="9126255690984179200">"1 giây"</string>
@@ -286,8 +273,96 @@
     <string name="saving_tiny_planet" msgid="8828265180177375494">"Đang lưu tiểu hành tinh …"</string>
     <string name="tiny_planet_zoom" msgid="2985522360577158474">"Thu phóng"</string>
     <string name="tiny_planet_rotate" msgid="5445336705705350004">"Xoay"</string>
+    <string name="photo_editor" msgid="1521994560971367225">"Trình chỉnh sửa ảnh"</string>
     <string name="crop_save" msgid="2841974981340098579">"Lưu"</string>
     <string name="cannot_load_image" msgid="4100136187076585580">"Không thể tải hình ảnh!"</string>
     <string name="switch_photo_filmstrip" msgid="1448511001008888767">"Chế độ xem cuộn phim"</string>
     <string name="setting_wallpaper" msgid="2397759659347872725">"Đang đặt hình nền"</string>
+    <string name="mode_settings" msgid="2021937261522670921">"Cài đặt"</string>
+    <string name="mode_camera" msgid="279763925715250603">"Máy ảnh"</string>
+    <string name="mode_video" msgid="8633929034048169139">"Video"</string>
+    <string name="mode_photosphere" msgid="5082338476237291833">"Ảnh toàn cảnh 360 độ"</string>
+    <string name="mode_timelapse" msgid="1517168724627815453">"Khoảng thời gian"</string>
+    <string name="mode_wideangle" msgid="1099640345041696830">"Góc nhìn rộng"</string>
+    <string name="mode_panorama" msgid="6882648621305828861">"Ảnh toàn cảnh"</string>
+    <string name="mode_refocus" msgid="172192967119469061">"Làm mờ ống kính"</string>
+    <string name="mode_camera_desc" msgid="3670807361165657278">"Chuyển sang Chế độ máy ảnh"</string>
+    <string name="mode_video_desc" msgid="4058407412929464689">"Chuyển sang Máy quay video"</string>
+    <string name="mode_photosphere_desc" msgid="2403816283825579161">"Chuyển sang Chế độ ảnh toàn cảnh 360 độ"</string>
+    <string name="mode_panorama_desc" msgid="6023020404237519590">"Chuyển sang Chế độ chụp ảnh toàn cảnh"</string>
+    <string name="mode_refocus_desc" msgid="6171183297515508465">"Chuyển sang chế độ Làm mờ ống kính"</string>
+    <string name="settings_open_desc" msgid="6914471293841793766">"Mở cài đặt"</string>
+    <string name="settings_close_desc" msgid="3095831199632813127">"Đóng cài đặt"</string>
+    <string name="hdr_plus_off_desc" msgid="5301287296717144319">"HDR Plus tắt"</string>
+    <string name="hdr_plus_on_desc" msgid="8204780034508139909">"HDR Plus bật"</string>
+    <string name="hdr_off_desc" msgid="7921924739852874675">"HDR tắt"</string>
+    <string name="hdr_on_desc" msgid="4591284110249047558">"HDR bật"</string>
+    <string name="flash_off_desc" msgid="7151559466286106797">"Đèn flash tắt"</string>
+    <string name="flash_auto_desc" msgid="3009043125539675717">"Đèn flash tự động"</string>
+    <string name="flash_on_desc" msgid="930372145324854699">"Đèn flash bật"</string>
+    <string name="hdr_plus_flash_off_desc" msgid="5335888906983788789">"HDR+ flash tắt"</string>
+    <string name="hdr_plus_flash_auto_desc" msgid="4812200236263011537">"HDR+ flash tự động"</string>
+    <string name="hdr_plus_flash_on_desc" msgid="8323389161987561284">"HDR+ flash bật"</string>
+    <string name="torch_on_desc" msgid="3069836196559213365">"Đèn pin bật"</string>
+    <string name="torch_off_desc" msgid="8304675202998742618">"Đèn pin tắt"</string>
+    <string name="camera_id_back_desc" msgid="3566327490758890635">"Máy ảnh mặt sau"</string>
+    <string name="camera_id_front_desc" msgid="7497517948130254220">"Máy ảnh mặt trước"</string>
+    <string name="grid_lines_off_desc" msgid="2022385817190451353">"Tắt đường lưới"</string>
+    <string name="grid_lines_on_desc" msgid="4601540461914364817">"Bật đường lưới"</string>
+    <string name="countdown_timer_off" msgid="1663008439564495948">"Đồng hồ đếm ngược đã tắt"</string>
+    <string name="countdown_timer_duration_3s" msgid="7435393834886072664">"Thời lượng của đồng hồ đếm ngược được đặt là 3 giây"</string>
+    <string name="countdown_timer_duration_10s" msgid="9085308782250002795">"Thời lượng của đồng hồ đếm ngược được đặt là 10 giây"</string>
+    <string name="more_options_desc" msgid="4628738800610478353">"Tùy chọn khác"</string>
+    <string name="cancel_button_description" msgid="3801167024006905033">"Hủy"</string>
+    <string name="done_button_description" msgid="1334963435441544592">"Xong"</string>
+    <string name="retake_button_description" msgid="4234613030674787714">"Chụp lại"</string>
+    <string name="share_button_description" msgid="5108508790540832053">"Chia sẻ"</string>
+    <string name="view_button_description" msgid="4985768837891362075">"Xem"</string>
+    <string name="edit_button_description" msgid="98550816724901925">"Chỉnh sửa"</string>
+    <string name="delete_button_description" msgid="2251065309677200911">"Xóa"</string>
+    <string name="manual_exposure_compensation_desc" msgid="5595219532556566042">"Bù phơi sáng thủ công"</string>
+    <string name="exposure_compensation_desc_n2" msgid="8957966533506294324">"Bù phơi sáng -2"</string>
+    <string name="exposure_compensation_desc_n1" msgid="3035027224866688267">"Bù phơi sáng -1"</string>
+    <string name="exposure_compensation_desc_0" msgid="2820273752287040523">"Bù phơi sáng 0"</string>
+    <string name="exposure_compensation_desc_p1" msgid="2328275401634452554">"Bù phơi sáng +1"</string>
+    <string name="exposure_compensation_desc_p2" msgid="4555277824096107142">"Bù phơi sáng +2"</string>
+    <string name="button_change_announcement" msgid="3759686152778772111">"Lúc này, nút ở chế độ %s"</string>
+    <string name="setting_location" msgid="4459859689227893838">"Vị trí"</string>
+    <string name="setting_back_camera_photo" msgid="256738900473265017">"Ảnh từ máy ảnh mặt sau"</string>
+    <string name="setting_back_camera_video" msgid="5220819479408164689">"Video từ máy ảnh mặt sau"</string>
+    <string name="setting_front_camera_photo" msgid="4131886734622868637">"Ảnh từ máy ảnh trước"</string>
+    <string name="setting_front_camera_video" msgid="2178799452805359752">"Video từ máy ảnh trước"</string>
+    <string name="setting_default_camera" msgid="6954076799301004779">"Máy ảnh mặc định"</string>
+    <string name="setting_google_help_and_feedback" msgid="2079580537079242775">"Trợ giúp và phản hồi"</string>
+    <string name="processing_hdr_plus" msgid="9160093263037540304">"Đang xử lý HDR+ …"</string>
+    <string name="open_source_licenses" msgid="2169711954264883060">"Giấy phép nguồn mở"</string>
+    <string name="pref_category_general" msgid="6737748849700581019">"Cài đặt chung"</string>
+    <string name="pref_category_resolution_quality" msgid="6641462402321962896">"Độ phân giải và chất lượng"</string>
+    <string name="pref_category_about" msgid="1966255405679342337">"Giới thiệu"</string>
+    <string name="pref_title_build_version" msgid="481489988124832651">"Phiên bản đóng gói"</string>
+    <string name="pref_video_quality_entry_low" msgid="737962621299050603">"Thấp"</string>
+    <string name="pref_video_quality_entry_high" msgid="1613578418842803393">"Cao"</string>
+    <string name="pref_video_quality_entry_qcif" msgid="1717816794399266216">"QCIF"</string>
+    <string name="pref_video_quality_entry_cif" msgid="645414019445016434">"CIF"</string>
+    <string name="pref_video_quality_entry_480p" msgid="5880250731066854583">"SD 480p"</string>
+    <string name="pref_video_quality_entry_720p" msgid="4076146428148167262">"HD 720p"</string>
+    <string name="pref_video_quality_entry_1080p" msgid="4539958891524211120">"HD 1080p"</string>
+    <string name="pref_video_quality_entry_qvga" msgid="342600517453781430">"QVGA"</string>
+    <string name="pref_video_quality_entry_2160p" msgid="4522927631413184505">"UHD 4K"</string>
+    <string name="setting_summary_x_megapixels" msgid="6533463462760866830">"%1$s megapixel"</string>
+    <string name="setting_summary_aspect_ratio_and_megapixels" msgid="5828440902461064821">"(%1$d:%2$d) %3$s megapixel"</string>
+    <string name="cling_text_for_refocus_editor_button" msgid="4785017397116829802">"Để lấy nét lại, chạm vào đây"</string>
+    <string name="pref_category_advanced" msgid="5921085080077574872">"Nâng cao"</string>
+    <string name="pref_camera_exposure_compensation" msgid="4143245817259719147">"Phơi sáng thủ công"</string>
+    <string name="settings_cling_text" msgid="5368054627268181292">"Trong Cài đặt, thay đổi độ phân giải và chất lượng hoặc thử các tính năng nâng cao."</string>
+    <string name="photo_size_selection_title" msgid="2789753590719172645">"Chọn kích thước ảnh"</string>
+    <string name="photo_aspect_ratio_selection_content" msgid="6668224437962196229">"Bạn có thể thay đổi cài đặt này sau trong Cài đặt."</string>
+    <string name="share_to" msgid="5144911209144798122">"Chia sẻ với"</string>
+    <string name="edit_with" msgid="615569327230783971">"Chỉnh sửa với"</string>
+    <string name="startup_dialog_button_next" msgid="1011831256978228993">"TIẾP THEO"</string>
+    <string name="confirm_button_text" msgid="7389949384482206814">"OK"</string>
+    <string name="full_sensor_4x3_aspect_ratio" msgid="1270461419743888925">"Cảm biến cỡ lớn \n(4:3)"</string>
+    <string name="cropped_sensor_16x9_aspect_ratio" msgid="4742161537633251795">"Cảm biến cỡ nhỏ \n(16:9)"</string>
+    <string name="pref_boolean_false" msgid="461317129020087333">"0"</string>
+    <string name="pref_boolean_true" msgid="4131945223998878009">"1"</string>
 </resources>

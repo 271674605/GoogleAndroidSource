@@ -7,7 +7,7 @@
 
 #include "cc/animation/animation_curve.h"
 #include "cc/base/cc_export.h"
-#include "third_party/skia/include/core/SkScalar.h"
+#include "ui/gfx/geometry/cubic_bezier.h"
 
 namespace cc {
 
@@ -18,6 +18,10 @@ class CC_EXPORT TimingFunction : public FloatAnimationCurve {
 
   // Partial implementation of FloatAnimationCurve.
   virtual double Duration() const OVERRIDE;
+
+  // The smallest and largest values returned by GetValue for inputs in
+  // [0, 1].
+  virtual void Range(float* min, float* max) const = 0;
 
  protected:
   TimingFunction();
@@ -36,13 +40,12 @@ class CC_EXPORT CubicBezierTimingFunction : public TimingFunction {
   virtual float GetValue(double time) const OVERRIDE;
   virtual scoped_ptr<AnimationCurve> Clone() const OVERRIDE;
 
+  virtual void Range(float* min, float* max) const OVERRIDE;
+
  protected:
   CubicBezierTimingFunction(double x1, double y1, double x2, double y2);
 
-  double x1_;
-  double y1_;
-  double x2_;
-  double y2_;
+  gfx::CubicBezier bezier_;
 
  private:
   DISALLOW_ASSIGN(CubicBezierTimingFunction);

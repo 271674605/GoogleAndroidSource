@@ -314,7 +314,7 @@
     <string name="permlab_stopAppSwitches" msgid="4138608610717425573">"tətbiqdən tətbiqə keçidin qarşısını almaq"</string>
     <string name="permdesc_stopAppSwitches" msgid="8262195802582255021">"İstifadəçinin başqa tətbiqə keçməsinin qarşısını alır."</string>
     <string name="permlab_getTopActivityInfo" msgid="2537922311411546016">"cari tətbiq informasiyası əldə etmək"</string>
-    <string name="permdesc_getTopActivityInfo" msgid="2512448855496067131">"Sahibinə ekranda öndə olan cari tətbiq haqda gizli məlumatı almaq icazəsi verir."</string>
+    <string name="permdesc_getTopActivityInfo" msgid="8153651434145132505">"Sahibə ekran önündə cari tətbiq və xidmətlər haqqında şəxsi məlumat əldə etməyə imkan verir."</string>
     <string name="permlab_runSetActivityWatcher" msgid="892239094867182656">"işə salınan bütün tətbiqləri izləyir və idarə edir"</string>
     <string name="permdesc_runSetActivityWatcher" msgid="6003603162578577406">"Tətbiqə sistemin fəaliyyətləri necə başlatdığını nəzarət və kontrol etməyə imkan verir. Zərərli tətbiqlər sistemi tamamilə kompromis edə bilər. Bu icazə yalnız inkişaf üçündür, heç vaxt normal istifadə üçün deyil."</string>
     <string name="permlab_broadcastPackageRemoved" msgid="2576333434893532475">"qaldırılmış yayım paketini göndər"</string>
@@ -470,6 +470,8 @@
     <string name="permdesc_accessSurfaceFlinger" msgid="1041619516733293551">"Tətbiqə aşağı səviyyəli SurfaceFnger özəlliklərini istifadə etməyə icazə verir."</string>
     <string name="permlab_readFrameBuffer" msgid="6690504248178498136">"freym buferi oxuyur"</string>
     <string name="permdesc_readFrameBuffer" msgid="4937405521809454680">"Tətbiqə freym buferinin kontentini oxumaq icazəsi verir."</string>
+    <string name="permlab_accessInputFlinger" msgid="5348635270689553857">"InputFlinger keçidi"</string>
+    <string name="permdesc_accessInputFlinger" msgid="2104864941201226616">"Tətbiqə aşağı səviyyəli InputFlinger funksiyalarını istifadə etməyə icazə verir."</string>
     <string name="permlab_configureWifiDisplay" msgid="5595661694746742168">"Wifi görüntülərini quraşdır"</string>
     <string name="permdesc_configureWifiDisplay" msgid="7916815158690218065">"Tətbiqə Wifi görüntülərini quraşdırmağa və onlara qoşulmağa imkan verir."</string>
     <string name="permlab_controlWifiDisplay" msgid="393641276723695496">"WiFi görüntülərini dəyişir"</string>
@@ -1584,5 +1586,6 @@
     <item quantity="other" msgid="4730868920742952817">"<xliff:g id="COUNT">%d</xliff:g> saniyə sonra təkrar yoxlayın"</item>
   </plurals>
     <string name="restr_pin_try_later" msgid="973144472490532377">"Daha sonra yenidən yoxlayın."</string>
-    <string name="immersive_mode_confirmation" msgid="8554991488096662508">"Paneli göstərmək üçün ekranın küncünü sürüşdürün"</string>
+    <string name="transient_navigation_confirmation" msgid="4907844043611123426">"Paneli göstərmək üçün ekranın küncünü sürüşdürün"</string>
+    <string name="transient_navigation_confirmation_long" msgid="8061685920508086697">"Sistem panelini göstərmək üçün ekranın küncündən sürüşdürün"</string>
 </resources>

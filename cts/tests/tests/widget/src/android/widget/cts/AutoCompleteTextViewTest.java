@@ -16,7 +16,7 @@
 
 package android.widget.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.widget.R;
 
 
 import org.xmlpull.v1.XmlPullParser;
@@ -24,7 +24,9 @@ import org.xmlpull.v1.XmlPullParserException;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.app.UiModeManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.cts.util.PollingCheck;
 import android.graphics.Rect;
 import android.test.ActivityInstrumentationTestCase2;
@@ -45,13 +47,13 @@ import android.widget.AutoCompleteTextView.Validator;
 import java.io.IOException;
 
 public class AutoCompleteTextViewTest extends
-        ActivityInstrumentationTestCase2<AutoCompleteStubActivity> {
+        ActivityInstrumentationTestCase2<AutoCompleteCtsActivity> {
 
     /**
      * Instantiates a new text view test.
      */
     public AutoCompleteTextViewTest() {
-        super("com.android.cts.stub", AutoCompleteStubActivity.class);
+        super("com.android.cts.widget", AutoCompleteCtsActivity.class);
     }
 
     /** The m activity. */
@@ -104,6 +106,13 @@ public class AutoCompleteTextViewTest extends
         }
     }
 
+    boolean isTvMode() {
+        UiModeManager uiModeManager = (UiModeManager) getActivity().getSystemService(
+                Context.UI_MODE_SERVICE);
+        return uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+    }
+
+    @UiThreadTest
     public void testConstructor() {
         XmlPullParser parser;
 
@@ -159,6 +168,7 @@ public class AutoCompleteTextViewTest extends
         assertFalse(mAutoCompleteTextView.enoughToFilter());
     }
 
+    @UiThreadTest
     public void testAccessAdapter() {
         MockAutoCompleteTextView autoCompleteTextView = new MockAutoCompleteTextView(mActivity);
 
@@ -222,6 +232,7 @@ public class AutoCompleteTextViewTest extends
         assertNull(mAutoCompleteTextView.getOnItemSelectedListener());
     }
 
+    @UiThreadTest
     public void testConvertSelectionToString() {
         MockAutoCompleteTextView autoCompleteTextView = new MockAutoCompleteTextView(mActivity);
 
@@ -234,6 +245,7 @@ public class AutoCompleteTextViewTest extends
         assertEquals(STRING_TEST, autoCompleteTextView.convertSelectionToString(STRING_TEST));
     }
 
+    @UiThreadTest
     public void testOnTextChanged() {
         MockAutoCompleteTextView autoCompleteTextView = new MockAutoCompleteTextView(mActivity);
 
@@ -287,6 +299,7 @@ public class AutoCompleteTextViewTest extends
         assertEquals(STRING_VALIDATED, mAutoCompleteTextView.getText().toString());
     }
 
+    @UiThreadTest
     public void testReplaceText() {
         MockAutoCompleteTextView autoCompleteTextView = new MockAutoCompleteTextView(mActivity);
 
@@ -303,6 +316,7 @@ public class AutoCompleteTextViewTest extends
         assertTrue(autoCompleteTextView.isOnTextChanged());
     }
 
+    @UiThreadTest
     public void testSetFrame() {
         MockAutoCompleteTextView autoCompleteTextView = new MockAutoCompleteTextView(mActivity);
 
@@ -426,6 +440,9 @@ public class AutoCompleteTextViewTest extends
     }
 
     public void testPerformFiltering() throws Throwable {
+        if (isTvMode()) {
+            return;
+        }
         runTestOnUiThread(new Runnable() {
             public void run() {
                 mAutoCompleteTextView.setAdapter(mAdapter);
@@ -496,6 +513,9 @@ public class AutoCompleteTextViewTest extends
     }
 
     public void testPerformCompletion() throws Throwable {
+        if (isTvMode()) {
+            return;
+        }
         final MockOnItemClickListener listener = new MockOnItemClickListener();
         assertFalse(mAutoCompleteTextView.isPerformingCompletion());
 

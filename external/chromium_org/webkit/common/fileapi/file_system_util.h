@@ -8,10 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/platform_file.h"
-#include "third_party/WebKit/public/web/WebFileError.h"
+#include "third_party/WebKit/public/platform/WebFileError.h"
 #include "third_party/WebKit/public/platform/WebFileSystemType.h"
+#include "webkit/common/fileapi/file_system_info.h"
 #include "webkit/common/fileapi/file_system_types.h"
 #include "webkit/common/quota/quota_types.h"
 #include "webkit/common/webkit_storage_common_export.h"
@@ -64,6 +65,16 @@ class WEBKIT_STORAGE_COMMON_EXPORT VirtualPath {
   static bool IsRootPath(const base::FilePath& path);
 };
 
+// Parses filesystem scheme |url| into uncracked file system URL components.
+// Example: For a URL 'filesystem:http://foo.com/temporary/foo/bar',
+// |origin_url| is set to 'http://foo.com', |type| is set to
+// kFileSystemTypeTemporary, and |virtual_path| is set to 'foo/bar'.
+WEBKIT_STORAGE_COMMON_EXPORT bool ParseFileSystemSchemeURL(
+    const GURL& url,
+    GURL* origin_url,
+    FileSystemType* type,
+    base::FilePath* virtual_path);
+
 // Returns the root URI of the filesystem that can be specified by a pair of
 // |origin_url| and |type|.  The returned URI can be used as a root path
 // of the filesystem (e.g. <returned_URI> + "/relative/path" will compose
@@ -74,7 +85,7 @@ class WEBKIT_STORAGE_COMMON_EXPORT VirtualPath {
 //
 // |type| needs to be public type as the returned URI is given to the renderer.
 WEBKIT_STORAGE_COMMON_EXPORT GURL GetFileSystemRootURI(const GURL& origin_url,
-                                         FileSystemType type);
+                                                       FileSystemType type);
 
 // Returns the name for the filesystem that is specified by a pair of
 // |origin_url| and |type|.
@@ -109,7 +120,7 @@ GetFileSystemTypeString(FileSystemType type);
 // Returns false if the |type_string| is invalid.
 WEBKIT_STORAGE_COMMON_EXPORT bool GetFileSystemPublicType(
     std::string type_string,
-    WebKit::WebFileSystemType* type);
+    blink::WebFileSystemType* type);
 
 // Encodes |file_path| to a string.
 // Following conditions should be held:
@@ -127,8 +138,8 @@ WEBKIT_STORAGE_COMMON_EXPORT base::FilePath StringToFilePath(
     const std::string& file_path_string);
 
 // File error conversion
-WEBKIT_STORAGE_COMMON_EXPORT WebKit::WebFileError
-PlatformFileErrorToWebFileError(base::PlatformFileError error_code);
+WEBKIT_STORAGE_COMMON_EXPORT blink::WebFileError
+FileErrorToWebFileError(base::File::Error error_code);
 
 // Generate a file system name for the given arguments. Should only be used by
 // platform apps.
@@ -144,6 +155,10 @@ WEBKIT_STORAGE_COMMON_EXPORT bool CrackIsolatedFileSystemName(
     const std::string& filesystem_name,
     std::string* filesystem_id);
 
+// Validates the given isolated file system id.
+WEBKIT_STORAGE_COMMON_EXPORT bool ValidateIsolatedFileSystemId(
+    const std::string& filesystem_id);
+
 // Returns the root URI for an isolated filesystem for origin |origin_url|
 // and |filesystem_id|. If the |optional_root_name| is given the resulting
 // root URI will point to the subfolder within the isolated filesystem.
@@ -157,6 +172,10 @@ WEBKIT_STORAGE_COMMON_EXPORT std::string GetIsolatedFileSystemRootURIString(
 WEBKIT_STORAGE_COMMON_EXPORT std::string GetExternalFileSystemRootURIString(
     const GURL& origin_url,
     const std::string& mount_name);
+
+// Translates the net::Error to base::File::Error.
+WEBKIT_STORAGE_COMMON_EXPORT base::File::Error
+NetErrorToFileError(int error);
 
 }  // namespace fileapi
 

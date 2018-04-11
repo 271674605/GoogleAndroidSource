@@ -31,14 +31,15 @@ namespace picasa {
 // utility process replies or when it dies.
 class SafePicasaAlbumTableReader : public content::UtilityProcessHostClient {
  public:
-  typedef base::Callback<void(bool,
+  typedef base::Callback<void(bool parse_success,
                               const std::vector<AlbumInfo>&,
-                              const std::vector<AlbumInfo>&)> ParserCallback;
+                              const std::vector<AlbumInfo>&)>
+      ParserCallback;
 
-  SafePicasaAlbumTableReader(const AlbumTableFiles& album_table_files,
-                             const ParserCallback& callback);
+  // This class takes ownership of |album_table_files| and will close them.
+  explicit SafePicasaAlbumTableReader(AlbumTableFiles album_table_files);
 
-  void Start();
+  void Start(const ParserCallback& callback);
 
  private:
   enum ParserState {
@@ -71,13 +72,13 @@ class SafePicasaAlbumTableReader : public content::UtilityProcessHostClient {
   virtual void OnProcessCrashed(int exit_code) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  const AlbumTableFiles album_table_files_;
+  AlbumTableFiles album_table_files_;
 
   // Only accessed on the IO thread.
   base::WeakPtr<content::UtilityProcessHost> utility_process_host_;
 
   // Only accessed on the Media Task Runner.
-  const ParserCallback callback_;
+  ParserCallback callback_;
 
   // Verifies the messages from the utility process came at the right time.
   // Initialized on the Media Task Runner, but only accessed on the IO thread.

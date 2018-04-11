@@ -55,7 +55,7 @@
     <string name="week_view" msgid="6775043022159508060">"Linggo"</string>
     <string name="month_view" msgid="7287101431749285412">"Buwan"</string>
     <string name="event_view" msgid="7621353079385122317">"Tingnan ang kaganapan"</string>
-    <string name="event_create" msgid="6941040556709110617">"Bagong kaganapan"</string>
+    <string name="event_create" msgid="6941040556709110617">"Bagong event"</string>
     <string name="event_edit" msgid="4006961928830064662">"I-edit ang kaganapan"</string>
     <string name="event_delete" msgid="2386667193277770442">"Tanggalin ang kaganapan"</string>
     <string name="goto_today" msgid="9162136434410891230">"Ngayong araw"</string>
@@ -80,6 +80,9 @@
     <string name="empty_event" msgid="9018699257414338634">"Hindi nalikha ang walang lamang kaganapan."</string>
     <string name="creating_event_with_guest" msgid="5758688413124191931">"Magpapadala ng mga imbitasyon."</string>
     <string name="saving_event_with_guest" msgid="9184584438475689577">"Magpapadala ng mga update."</string>
+    <string name="rsvp_accepted" msgid="8146618862268962727">"Sumagot ng oo."</string>
+    <string name="rsvp_tentative" msgid="6545510359501328718">"Sumagot ng siguro."</string>
+    <string name="rsvp_declined" msgid="8686330037802222895">"Sumagot ng hindi."</string>
     <string name="create_event_dialog_save" msgid="1080859798521717414">"I-save"</string>
     <string name="alert_title" msgid="7869592820853066853">"Mga notifcation sa kalendaryo"</string>
     <string name="event_info_title" msgid="56024222340421620">"Tingnan ang kaganapan"</string>

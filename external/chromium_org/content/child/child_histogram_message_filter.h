@@ -9,38 +9,26 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/metrics/histogram_base.h"
-#include "base/metrics/histogram_flattener.h"
-#include "base/metrics/histogram_snapshot_manager.h"
-#include "ipc/ipc_channel_proxy.h"
+#include "base/memory/scoped_ptr.h"
+#include "ipc/message_filter.h"
 
 namespace base {
-class HistogramSamples;
+class HistogramDeltaSerialization;
 class MessageLoopProxy;
 }  // namespace base
 
 namespace content {
 
-class ChildHistogramMessageFilter : public base::HistogramFlattener,
-                                    public IPC::ChannelProxy::MessageFilter {
+class ChildHistogramMessageFilter : public IPC::MessageFilter {
  public:
   ChildHistogramMessageFilter();
 
-  // IPC::ChannelProxy::MessageFilter implementation.
-  virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
+  // IPC::MessageFilter implementation.
+  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE;
   virtual void OnFilterRemoved() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void SendHistograms(int sequence_number);
-
-  // HistogramFlattener interface (override) methods.
-  virtual void RecordDelta(const base::HistogramBase& histogram,
-                           const base::HistogramSamples& snapshot) OVERRIDE;
-  virtual void InconsistencyDetected(
-      base::HistogramBase::Inconsistency problem) OVERRIDE;
-  virtual void UniqueInconsistencyDetected(
-      base::HistogramBase::Inconsistency problem) OVERRIDE;
-  virtual void InconsistencyDetectedInLoggedCount(int amount) OVERRIDE;
 
  private:
   typedef std::vector<std::string> HistogramPickledList;
@@ -54,15 +42,12 @@ class ChildHistogramMessageFilter : public base::HistogramFlattener,
   // Send only a delta to what we have already sent.
   void UploadAllHistograms(int sequence_number);
 
-  IPC::Channel* channel_;
+  IPC::Sender* sender_;
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
 
-  // Collection of histograms to send to the browser.
-  HistogramPickledList pickled_histograms_;
-
-  // |histogram_snapshot_manager_| prepares histogram deltas for transmission.
-  base::HistogramSnapshotManager histogram_snapshot_manager_;
+  // Prepares histogram deltas for transmission.
+  scoped_ptr<base::HistogramDeltaSerialization> histogram_delta_serialization_;
 
   DISALLOW_COPY_AND_ASSIGN(ChildHistogramMessageFilter);
 };

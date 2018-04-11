@@ -19,7 +19,11 @@
 #define MY_HANDLER_H_
 
 //#define LOG_NDEBUG 0
+
+#ifndef LOG_TAG
 #define LOG_TAG "MyHandler"
+#endif
+
 #include <utils/Log.h>
 
 #include "APacketSource.h"
@@ -41,6 +45,12 @@
 #include <netdb.h>
 
 #include "HTTPBase.h"
+
+#if LOG_NDEBUG
+#define UNUSED_UNLESS_VERBOSE(x) (void)(x)
+#else
+#define UNUSED_UNLESS_VERBOSE(x)
+#endif
 
 // If no access units are received within 5 secs, assume that the rtp
 // stream has ended and signal end of stream.
@@ -149,7 +159,7 @@ struct MyHandler : public AHandler {
             mSessionURL.append(StringPrintf("%u", port));
             mSessionURL.append(path);
 
-            ALOGI("rewritten session url: '%s'", mSessionURL.c_str());
+            ALOGV("rewritten session url: '%s'", mSessionURL.c_str());
         }
 
         mSessionHost = host;
@@ -178,7 +188,7 @@ struct MyHandler : public AHandler {
         mConn->connect(mOriginalSessionURL.c_str(), reply);
     }
 
-    AString getControlURL(sp<ASessionDescription> desc) {
+    AString getControlURL() {
         AString sessionLevelControlURL;
         if (mSessionDesc->findAttribute(
                 0,
@@ -244,7 +254,9 @@ struct MyHandler : public AHandler {
     static void addSDES(int s, const sp<ABuffer> &buffer) {
         struct sockaddr_in addr;
         socklen_t addrSize = sizeof(addr);
-        CHECK_EQ(0, getsockname(s, (sockaddr *)&addr, &addrSize));
+        if (getsockname(s, (sockaddr *)&addr, &addrSize) != 0) {
+            inet_aton("0.0.0.0", &(addr.sin_addr));
+        }
 
         uint8_t *data = buffer->data() + buffer->size();
         data[0] = 0x80 | 1;
@@ -478,21 +490,32 @@ struct MyHandler : public AHandler {
                     sp<ARTSPResponse> response =
                         static_cast<ARTSPResponse *>(obj.get());
 
-                    if (response->mStatusCode == 302) {
+                    if (response->mStatusCode == 301 || response->mStatusCode == 302) {
                         ssize_t i = response->mHeaders.indexOfKey("location");
                         CHECK_GE(i, 0);
 
-                        mSessionURL = response->mHeaders.valueAt(i);
+                        mOriginalSessionURL = response->mHeaders.valueAt(i);
+                        mSessionURL = mOriginalSessionURL;
 
-                        AString request;
-                        request = "DESCRIBE ";
-                        request.append(mSessionURL);
-                        request.append(" RTSP/1.0\r\n");
-                        request.append("Accept: application/sdp\r\n");
-                        request.append("\r\n");
+                        // Strip any authentication info from the session url, we don't
+                        // want to transmit user/pass in cleartext.
+                        AString host, path, user, pass;
+                        unsigned port;
+                        if (ARTSPConnection::ParseURL(
+                                    mSessionURL.c_str(), &host, &port, &path, &user, &pass)
+                                && user.size() > 0) {
+                            mSessionURL.clear();
+                            mSessionURL.append("rtsp://");
+                            mSessionURL.append(host);
+                            mSessionURL.append(":");
+                            mSessionURL.append(StringPrintf("%u", port));
+                            mSessionURL.append(path);
 
-                        sp<AMessage> reply = new AMessage('desc', id());
-                        mConn->sendRequest(request.c_str(), reply);
+                            ALOGI("rewritten session url: '%s'", mSessionURL.c_str());
+                        }
+
+                        sp<AMessage> reply = new AMessage('conn', id());
+                        mConn->connect(mOriginalSessionURL.c_str(), reply);
                         break;
                     }
 
@@ -545,7 +568,7 @@ struct MyHandler : public AHandler {
                                 mBaseURL = tmp;
                             }
 
-                            mControlURL = getControlURL(mSessionDesc);
+                            mControlURL = getControlURL();
 
                             if (mSessionDesc->countTracks() < 2) {
                                 // There's no actual tracks in this session.
@@ -591,7 +614,7 @@ struct MyHandler : public AHandler {
 
                         mSeekable = !isLiveStream(mSessionDesc);
 
-                        mControlURL = getControlURL(mSessionDesc);
+                        mControlURL = getControlURL();
 
                         if (mSessionDesc->countTracks() < 2) {
                             // There's no actual tracks in this session.
@@ -686,23 +709,27 @@ struct MyHandler : public AHandler {
                         i = response->mHeaders.indexOfKey("transport");
                         CHECK_GE(i, 0);
 
-                        if (!track->mUsingInterleavedTCP) {
-                            AString transport = response->mHeaders.valueAt(i);
+                        if (track->mRTPSocket != -1 && track->mRTCPSocket != -1) {
+                            if (!track->mUsingInterleavedTCP) {
+                                AString transport = response->mHeaders.valueAt(i);
 
-                            // We are going to continue even if we were
-                            // unable to poke a hole into the firewall...
-                            pokeAHole(
-                                    track->mRTPSocket,
-                                    track->mRTCPSocket,
-                                    transport);
+                                // We are going to continue even if we were
+                                // unable to poke a hole into the firewall...
+                                pokeAHole(
+                                        track->mRTPSocket,
+                                        track->mRTCPSocket,
+                                        transport);
+                            }
+
+                            mRTPConn->addStream(
+                                    track->mRTPSocket, track->mRTCPSocket,
+                                    mSessionDesc, index,
+                                    notify, track->mUsingInterleavedTCP);
+
+                            mSetupTracksSuccessful = true;
+                        } else {
+                            result = BAD_VALUE;
                         }
-
-                        mRTPConn->addStream(
-                                track->mRTPSocket, track->mRTCPSocket,
-                                mSessionDesc, index,
-                                notify, track->mUsingInterleavedTCP);
-
-                        mSetupTracksSuccessful = true;
                     }
                 }
 
@@ -726,7 +753,7 @@ struct MyHandler : public AHandler {
                 }
 
                 ++index;
-                if (index < mSessionDesc->countTracks()) {
+                if (result == OK && index < mSessionDesc->countTracks()) {
                     setupTrack(index);
                 } else if (mSetupTracksSuccessful) {
                     ++mKeepAliveGeneration;
@@ -1559,6 +1586,8 @@ private:
         info->mUsingInterleavedTCP = false;
         info->mFirstSeqNumInSegment = 0;
         info->mNewSegment = true;
+        info->mRTPSocket = -1;
+        info->mRTCPSocket = -1;
         info->mRTPAnchor = 0;
         info->mNTPAnchorUs = -1;
         info->mNormalPlayTimeRTP = 0;
@@ -1799,6 +1828,8 @@ private:
     bool addMediaTimestamp(
             int32_t trackIndex, const TrackInfo *track,
             const sp<ABuffer> &accessUnit) {
+        UNUSED_UNLESS_VERBOSE(trackIndex);
+
         uint32_t rtpTime;
         CHECK(accessUnit->meta()->findInt32(
                     "rtp-time", (int32_t *)&rtpTime));

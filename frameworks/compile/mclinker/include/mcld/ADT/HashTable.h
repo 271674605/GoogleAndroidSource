@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_HASH_TABLE_H
-#define MCLD_HASH_TABLE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_HASHTABLE_H
+#define MCLD_ADT_HASHTABLE_H
 
 #include <mcld/ADT/HashBase.h>
 #include <mcld/ADT/HashIterator.h>
@@ -63,7 +60,7 @@ public:
   // -----  constructor  ----- //
   explicit HashTable(size_type pSize=3);
   ~HashTable();
-  
+
   EntryFactoryTy& getEntryFactory()
   { return m_EntryFactory; }
 
@@ -88,7 +85,7 @@ public:
   const_iterator find(const key_type& pKey) const;
 
   size_type count(const key_type& pKey) const;
-  
+
   // -----  hash policy  ----- //
   float load_factor() const;
 

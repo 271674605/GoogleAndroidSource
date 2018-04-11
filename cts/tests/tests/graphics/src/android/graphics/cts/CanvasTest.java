@@ -41,8 +41,9 @@ import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.SpannedString;
 
-import com.android.cts.stub.R;
+import com.android.cts.graphics.R;
 
+import java.util.Vector;
 
 public class CanvasTest extends InstrumentationTestCase {
     private final static int PAINT_COLOR = 0xff00ff00;
@@ -265,6 +266,86 @@ public class CanvasTest extends InstrumentationTestCase {
         for (int i = 0; i < FLOAT_ARRAY_LEN; i++) {
             assertEquals(values1[i], values4[i]);
         }
+    }
+
+    public void testSaveFlags1() {
+        int[] flags = {
+            Canvas.MATRIX_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags2() {
+        int[] flags = {
+            Canvas.CLIP_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags3() {
+        int[] flags = {
+            Canvas.ALL_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags4() {
+        int[] flags = {
+            Canvas.ALL_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags5() {
+        int[] flags = {
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags6() {
+        int[] flags = {
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags7() {
+        int[] flags = {
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.ALL_SAVE_FLAG,
+            Canvas.ALL_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
+    }
+
+    public void testSaveFlags8() {
+        int[] flags = {
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.ALL_SAVE_FLAG,
+            Canvas.MATRIX_SAVE_FLAG,
+            Canvas.CLIP_SAVE_FLAG,
+            Canvas.ALL_SAVE_FLAG,
+        };
+        verifySaveFlagsSequence(flags);
     }
 
     public void testSaveLayer1() {
@@ -904,6 +985,30 @@ public class CanvasTest extends InstrumentationTestCase {
         assertFalse(mCanvas.clipRegion(r, Op.REVERSE_DIFFERENCE));
         assertFalse(mCanvas.clipRegion(r, Op.UNION));
         assertFalse(mCanvas.clipRegion(r, Op.XOR));
+    }
+
+    public void testClipRegion3() {
+        assertTrue(mCanvas.clipRegion(new Region(0, 0, 10, 10)));
+        final Rect clip = mCanvas.getClipBounds();
+        assertEquals(0, clip.left);
+        assertEquals(0, clip.top);
+        assertEquals(10, clip.right);
+        assertEquals(10, clip.bottom);
+    }
+
+    public void testClipRegion4() {
+        mCanvas.translate(10, 10);
+        mCanvas.scale(2, 2);
+
+        final Matrix beforeMatrix = mCanvas.getMatrix();
+        assertTrue(mCanvas.clipRegion(new Region(0, 0, 10, 10)));
+        assertEquals(beforeMatrix, mCanvas.getMatrix());
+
+        Rect clip = mCanvas.getClipBounds();
+        assertEquals(-5, clip.left);
+        assertEquals(-5, clip.top);
+        assertEquals(0, clip.right);
+        assertEquals(0, clip.bottom);
     }
 
     public void testGetDrawFilter() {
@@ -1726,5 +1831,50 @@ public class CanvasTest extends InstrumentationTestCase {
         assertEquals(0.0f, values[6]);
         assertEquals(0.0f, values[7]);
         assertEquals(1.0f, values[8]);
+    }
+
+    private RectF getDeviceClip() {
+        final RectF clip = new RectF(mCanvas.getClipBounds());
+        mCanvas.getMatrix().mapRect(clip);
+        return clip;
+    }
+
+    // Loops through the passed flags, applying each in order with successive calls
+    // to save, verifying the clip and matrix values when restoring.
+    private void verifySaveFlagsSequence(int[] saveFlags) {
+        final Vector<RectF> clips = new Vector<RectF>();
+        final Vector<Matrix> matrices = new Vector<Matrix>();
+
+        assertTrue(BITMAP_WIDTH > saveFlags.length);
+        assertTrue(BITMAP_HEIGHT > saveFlags.length);
+
+        for (int i = 0; i < saveFlags.length; ++i) {
+            clips.add(getDeviceClip());
+            matrices.add(mCanvas.getMatrix());
+            mCanvas.save(saveFlags[i]);
+
+            mCanvas.translate(1, 1);
+            mCanvas.clipRect(0, 0, BITMAP_WIDTH - i - 1, BITMAP_HEIGHT - i - 1);
+
+            if (i  > 0) {
+                // We are mutating the state on each iteration.
+                assertFalse(clips.elementAt(i).equals(clips.elementAt(i - 1)));
+                assertFalse(matrices.elementAt(i).equals(matrices.elementAt(i - 1)));
+            }
+        }
+
+        for (int i = saveFlags.length - 1; i >= 0; --i) {
+            // If clip/matrix flags are not set, the associated state should be preserved.
+            if ((saveFlags[i] & Canvas.CLIP_SAVE_FLAG) == 0) {
+                clips.elementAt(i).set(getDeviceClip());
+            }
+            if ((saveFlags[i] & Canvas.MATRIX_SAVE_FLAG) == 0) {
+                matrices.elementAt(i).set(mCanvas.getMatrix());
+            }
+
+            mCanvas.restore();
+            assertEquals(clips.elementAt(i), getDeviceClip());
+            assertEquals(matrices.elementAt(i), mCanvas.getMatrix());
+        }
     }
 }

@@ -57,7 +57,7 @@ ELFSectionRelTable<Bitwidth>::read(Archiver &AR,
 
   rsl_assert(sh->getType() == SHT_REL || sh->getType() == SHT_RELA);
 
-  llvm::OwningPtr<ELFSectionRelTable> rt(new ELFSectionRelTable());
+  std::unique_ptr<ELFSectionRelTable> rt(new ELFSectionRelTable());
 
   // Seek to the start of the table
   AR.seek(sh->getOffset(), true);
@@ -84,7 +84,7 @@ ELFSectionRelTable<Bitwidth>::read(Archiver &AR,
     return 0;
   }
 
-  return rt.take();
+  return rt.release();
 }
 
 template <unsigned Bitwidth>
@@ -103,6 +103,24 @@ getMaxNumStubs(ELFObjectTy const *obj) const {
         case R_ARM_THM_CALL:
         case R_ARM_JUMP24:
         case R_ARM_THM_JUMP24:
+          sym_index_set.insert(rel->getSymTabIndex());
+          break;
+        }
+      }
+
+      return sym_index_set.size();
+    }
+
+  case EM_AARCH64:
+    {
+      std::set<uint32_t> sym_index_set;
+
+      for (size_t i = 0; i < size(); ++i) {
+        ELFRelocTy *rel = table[i];
+
+        switch (rel->getType()) {
+        case R_AARCH64_CALL26:
+        case R_AARCH64_JUMP26:
           sym_index_set.insert(rel->getSymTabIndex());
           break;
         }

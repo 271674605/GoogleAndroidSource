@@ -65,16 +65,18 @@ void Script::setVar(uint32_t slot, const void *val, size_t len) {
 void Script::getVar(uint32_t slot, const void *val, size_t len) {
     //ALOGE("getVar %i %p %i", slot, val, len);
     if (slot >= mHal.info.exportedVariableCount) {
-        ALOGE("Script::getVar unable to set allocation, invalid slot index");
+        ALOGE("Script::getVar unable to set allocation, invalid slot index: "
+              "%u >= %zu", slot, mHal.info.exportedVariableCount);
         return;
     }
     mRSC->mHal.funcs.script.getGlobalVar(mRSC, this, slot, (void *)val, len);
 }
 
 void Script::setVar(uint32_t slot, const void *val, size_t len, Element *e,
-                    const size_t *dims, size_t dimLen) {
+                    const uint32_t *dims, size_t dimLen) {
     if (slot >= mHal.info.exportedVariableCount) {
-        ALOGE("Script::setVar unable to set allocation, invalid slot index");
+        ALOGE("Script::setVar unable to set allocation, invalid slot index: "
+              "%u >= %zu", slot, mHal.info.exportedVariableCount);
         return;
     }
     mRSC->mHal.funcs.script.setGlobalVarWithElemDims(mRSC, this, slot,
@@ -84,12 +86,20 @@ void Script::setVar(uint32_t slot, const void *val, size_t len, Element *e,
 void Script::setVarObj(uint32_t slot, ObjectBase *val) {
     //ALOGE("setVarObj %i %p", slot, val);
     if (slot >= mHal.info.exportedVariableCount) {
-        ALOGE("Script::setVarObj unable to set allocation, invalid slot index");
+        ALOGE("Script::setVarObj unable to set allocation, invalid slot index: "
+              "%u >= %zu", slot, mHal.info.exportedVariableCount);
         return;
     }
     mHasObjectSlots = true;
-    //ALOGE("setvarobj  %i %p", slot, val);
     mRSC->mHal.funcs.script.setGlobalObj(mRSC, this, slot, val);
+}
+
+void Script::callUpdateCacheObject(const Context *rsc, void *dstObj) const {
+    if (rsc->mHal.funcs.script.updateCachedObject != NULL) {
+        rsc->mHal.funcs.script.updateCachedObject(rsc, this, (rs_script *)dstObj);
+    } else {
+        *((const void **)dstObj) = this;
+    }
 }
 
 bool Script::freeChildren() {
@@ -195,6 +205,28 @@ void rsi_ScriptForEach(Context *rsc, RsScript vs, uint32_t slot,
 
 }
 
+void rsi_ScriptForEachMulti(Context *rsc, RsScript vs, uint32_t slot,
+                            RsAllocation *vains, size_t inLen,
+                            RsAllocation vaout, const void *params,
+                            size_t paramLen, const RsScriptCall *sc,
+                            size_t scLen) {
+    Script *s = static_cast<Script *>(vs);
+    // The rs.spec generated code does not handle the absence of an actual
+    // input for sc. Instead, it retains an existing pointer value (the prior
+    // field in the packed data object). This can cause confusion because
+    // drivers might now inspect bogus sc data.
+    if (scLen == 0) {
+        sc = NULL;
+    }
+
+    Allocation **ains = (Allocation**)(vains);
+
+    s->runForEach(rsc, slot,
+                  const_cast<const Allocation **>(ains), inLen,
+                  static_cast<Allocation *>(vaout), params, paramLen, sc);
+
+}
+
 void rsi_ScriptInvoke(Context *rsc, RsScript vs, uint32_t slot) {
     Script *s = static_cast<Script *>(vs);
     s->Invoke(rsc, slot, NULL, 0);
@@ -249,7 +281,7 @@ void rsi_ScriptGetVarV(Context *rsc, RsScript vs, uint32_t slot, void *data, siz
 
 void rsi_ScriptSetVarVE(Context *rsc, RsScript vs, uint32_t slot,
                         const void *data, size_t len, RsElement ve,
-                        const size_t *dims, size_t dimLen) {
+                        const uint32_t *dims, size_t dimLen) {
     Script *s = static_cast<Script *>(vs);
     Element *e = static_cast<Element *>(ve);
     s->setVar(slot, data, len, e, dims, dimLen);
@@ -257,4 +289,3 @@ void rsi_ScriptSetVarVE(Context *rsc, RsScript vs, uint32_t slot,
 
 }
 }
-

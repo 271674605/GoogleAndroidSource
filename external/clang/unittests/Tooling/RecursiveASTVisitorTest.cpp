@@ -8,10 +8,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "TestVisitor.h"
-
 #include <stack>
 
-namespace clang {
+using namespace clang;
+
+namespace {
 
 class TypeLocVisitor : public ExpectedLocationVisitor<TypeLocVisitor> {
 public:
@@ -35,6 +36,17 @@ public:
    Match(Variable->getNameAsString(), Variable->getLocStart());
    return true;
  }
+};
+
+class ParmVarDeclVisitorForImplicitCode :
+  public ExpectedLocationVisitor<ParmVarDeclVisitorForImplicitCode> {
+public:
+  bool shouldVisitImplicitCode() const { return true; }
+
+  bool VisitParmVarDecl(ParmVarDecl *ParamVar) {
+    Match(ParamVar->getNameAsString(), ParamVar->getLocStart());
+    return true;
+  }
 };
 
 class CXXMemberCallVisitor
@@ -102,7 +114,19 @@ public:
     return PendingBodies.empty();
   }
 private:
-  std::stack<LambdaExpr *> PendingBodies; 
+  std::stack<LambdaExpr *> PendingBodies;
+};
+
+// Matches the (optional) capture-default of a lambda-introducer.
+class LambdaDefaultCaptureVisitor
+  : public ExpectedLocationVisitor<LambdaDefaultCaptureVisitor> {
+public:
+  bool VisitLambdaExpr(LambdaExpr *Lambda) {
+    if (Lambda->getCaptureDefault() != LCD_None) {
+      Match("", Lambda->getCaptureDefaultLoc());
+    }
+    return true;
+  }
 };
 
 class TemplateArgumentLocTraverser
@@ -131,6 +155,24 @@ public:
     return true;
   }
 };
+
+// Test RAV visits parameter variable declaration of the implicit
+// copy assignment operator and implicit copy constructor.
+TEST(RecursiveASTVisitor, VisitsParmVarDeclForImplicitCode) {
+  ParmVarDeclVisitorForImplicitCode Visitor;
+  // Match parameter variable name of implicit copy assignment operator and
+  // implicit copy constructor.
+  // This parameter name does not have a valid IdentifierInfo, and shares
+  // same SourceLocation with its class declaration, so we match an empty name
+  // with the class' source location.
+  Visitor.ExpectMatch("", 1, 7);
+  Visitor.ExpectMatch("", 3, 7);
+  EXPECT_TRUE(Visitor.runOver(
+    "class X {};\n"
+    "void foo(X a, X b) {a = b;}\n"
+    "class Y {};\n"
+    "void bar(Y a) {Y b = a;}"));
+}
 
 TEST(RecursiveASTVisitor, VisitsBaseClassDeclarations) {
   TypeLocVisitor Visitor;
@@ -489,6 +531,15 @@ TEST(RecursiveASTVisitor, VisitsCompoundLiteralType) {
       TypeLocVisitor::Lang_C));
 }
 
+TEST(RecursiveASTVisitor, VisitsObjCPropertyType) {
+  TypeLocVisitor Visitor;
+  Visitor.ExpectMatch("NSNumber", 2, 33);
+  EXPECT_TRUE(Visitor.runOver(
+      "@class NSNumber; \n"
+      "@interface A @property (retain) NSNumber *x; @end\n",
+      TypeLocVisitor::Lang_OBJC));
+}
+
 TEST(RecursiveASTVisitor, VisitsLambdaExpr) {
   LambdaExprVisitor Visitor;
   Visitor.ExpectMatch("", 1, 12);
@@ -503,4 +554,85 @@ TEST(RecursiveASTVisitor, TraverseLambdaBodyCanBeOverridden) {
   EXPECT_TRUE(Visitor.allBodiesHaveBeenTraversed());
 }
 
-} // end namespace clang
+TEST(RecursiveASTVisitor, HasCaptureDefaultLoc) {
+  LambdaDefaultCaptureVisitor Visitor;
+  Visitor.ExpectMatch("", 1, 20);
+  EXPECT_TRUE(Visitor.runOver("void f() { int a; [=]{a;}; }",
+                              LambdaDefaultCaptureVisitor::Lang_CXX11));
+}
+
+TEST(RecursiveASTVisitor, VisitsCopyExprOfBlockDeclCapture) {
+  DeclRefExprVisitor Visitor;
+  Visitor.ExpectMatch("x", 3, 24);
+  EXPECT_TRUE(Visitor.runOver("void f(int(^)(int)); \n"
+                              "void g() { \n"
+                              "  f([&](int x){ return x; }); \n"
+                              "}",
+                              DeclRefExprVisitor::Lang_OBJCXX11));
+}
+
+// Checks for lambda classes that are not marked as implicitly-generated.
+// (There should be none.)
+class ClassVisitor : public ExpectedLocationVisitor<ClassVisitor> {
+public:
+  ClassVisitor() : SawNonImplicitLambdaClass(false) {}
+  bool VisitCXXRecordDecl(CXXRecordDecl* record) {
+    if (record->isLambda() && !record->isImplicit())
+      SawNonImplicitLambdaClass = true;
+    return true;
+  }
+
+  bool sawOnlyImplicitLambdaClasses() const {
+    return !SawNonImplicitLambdaClass;
+  }
+
+private:
+  bool SawNonImplicitLambdaClass;
+};
+
+TEST(RecursiveASTVisitor, LambdaClosureTypesAreImplicit) {
+  ClassVisitor Visitor;
+  EXPECT_TRUE(Visitor.runOver("auto lambda = []{};",
+			      ClassVisitor::Lang_CXX11));
+  EXPECT_TRUE(Visitor.sawOnlyImplicitLambdaClasses());
+}
+
+
+
+// Check to ensure that attributes and expressions within them are being
+// visited.
+class AttrVisitor : public ExpectedLocationVisitor<AttrVisitor> {
+public:
+  bool VisitMemberExpr(MemberExpr *ME) {
+    Match(ME->getMemberDecl()->getNameAsString(), ME->getLocStart());
+    return true;
+  }
+  bool VisitAttr(Attr *A) {
+    Match("Attr", A->getLocation());
+    return true;
+  }
+  bool VisitGuardedByAttr(GuardedByAttr *A) {
+    Match("guarded_by", A->getLocation());
+    return true;
+  }
+};
+
+
+TEST(RecursiveASTVisitor, AttributesAreVisited) {
+  AttrVisitor Visitor;
+  Visitor.ExpectMatch("Attr", 4, 24);
+  Visitor.ExpectMatch("guarded_by", 4, 24);
+  Visitor.ExpectMatch("mu1",  4, 35);
+  Visitor.ExpectMatch("Attr", 5, 29);
+  Visitor.ExpectMatch("mu1",  5, 54);
+  Visitor.ExpectMatch("mu2",  5, 59);
+  EXPECT_TRUE(Visitor.runOver(
+    "class Foo {\n"
+    "  int mu1;\n"
+    "  int mu2;\n"
+    "  int a __attribute__((guarded_by(mu1)));\n"
+    "  void bar() __attribute__((exclusive_locks_required(mu1, mu2)));\n"
+    "};\n"));
+}
+
+} // end anonymous namespace

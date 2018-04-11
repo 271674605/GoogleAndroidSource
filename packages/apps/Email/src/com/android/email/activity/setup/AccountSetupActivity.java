@@ -17,52 +17,46 @@
 package com.android.email.activity.setup;
 
 import android.app.Activity;
+import android.app.FragmentTransaction;
 import android.os.Bundle;
-
-import com.android.emailcommon.Logging;
-import com.android.mail.utils.LogUtils;
 
 /**
  * Superclass of all of the account setup activities; ensures that SetupData state is saved/restored
  * automatically as required
  */
-public class AccountSetupActivity extends Activity implements SetupData.SetupDataContainer {
-    private static final boolean DEBUG_SETUP_FLOWS = false;  // Don't check in set to true
-    protected SetupData mSetupData;
+public class AccountSetupActivity extends Activity implements SetupDataFragment.SetupDataContainer {
+    protected SetupDataFragment mSetupData;
 
+    private static final String SETUP_DATA_FRAGMENT_TAG = "setupData";
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        if (savedInstanceState != null) {
-            mSetupData = savedInstanceState.getParcelable(SetupData.EXTRA_SETUP_DATA);
-        } else {
+        super.onCreate(savedInstanceState);
+
+        if (savedInstanceState == null) {
             final Bundle b = getIntent().getExtras();
             if (b != null) {
-                mSetupData = b.getParcelable(SetupData.EXTRA_SETUP_DATA);
+                mSetupData = b.getParcelable(SetupDataFragment.EXTRA_SETUP_DATA);
+                if (mSetupData != null) {
+                    final FragmentTransaction ft = getFragmentManager().beginTransaction();
+                    ft.add(mSetupData, SETUP_DATA_FRAGMENT_TAG);
+                    ft.commit();
+                }
             }
+        } else {
+            mSetupData = (SetupDataFragment)getFragmentManager()
+                    .findFragmentByTag(SETUP_DATA_FRAGMENT_TAG);
         }
+
         if (mSetupData == null) {
-            mSetupData = new SetupData();
-        }
-
-        super.onCreate(savedInstanceState);
-        if (DEBUG_SETUP_FLOWS) {
-            LogUtils.d(Logging.LOG_TAG, "%s onCreate %s", getClass().getName(), mSetupData.debugString());
+            mSetupData = new SetupDataFragment();
+            final FragmentTransaction ft = getFragmentManager().beginTransaction();
+            ft.add(mSetupData, SETUP_DATA_FRAGMENT_TAG);
+            ft.commit();
         }
     }
 
     @Override
-    public void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        outState.putParcelable(SetupData.EXTRA_SETUP_DATA, mSetupData);
-    }
-
-    @Override
-    public SetupData getSetupData() {
+    public SetupDataFragment getSetupData() {
         return mSetupData;
-    }
-
-    @Override
-    public void setSetupData(SetupData setupData) {
-        mSetupData = setupData;
     }
 }

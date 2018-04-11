@@ -7,21 +7,18 @@
 
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
-#include "ui/aura/aura_export.h"
-#include "ui/gfx/font.h"
-#include "ui/views/controls/button/button.h"  // ButtonListener
 #include "ui/views/window/non_client_view.h"
 
 namespace views {
-class ImageButton;
+class ImageView;
 }
 
 namespace ash {
+class DefaultHeaderPainter;
+class FrameCaptionButtonContainerView;
+class FrameBorderHitTestController;
 
-class FramePainter;
-
-class ASH_EXPORT PanelFrameView : public views::NonClientFrameView,
-                                  public views::ButtonListener {
+class ASH_EXPORT PanelFrameView : public views::NonClientFrameView {
  public:
   // Internal class name.
   static const char kViewClassName[];
@@ -38,7 +35,10 @@ class ASH_EXPORT PanelFrameView : public views::NonClientFrameView,
   virtual const char* GetClassName() const OVERRIDE;
 
  private:
-  void InitFramePainter();
+  void InitHeaderPainter();
+
+  // Height from top of window to top of client area.
+  int NonClientTopBorderHeight() const;
 
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
@@ -52,23 +52,22 @@ class ASH_EXPORT PanelFrameView : public views::NonClientFrameView,
   virtual void UpdateWindowTitle() OVERRIDE;
 
   // Overridden from views::View:
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
-  // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
-
   // Child View class describing the panel's title bar behavior
   // and buttons, owned by the view hierarchy
-  scoped_ptr<FramePainter> frame_painter_;
   views::Widget* frame_;
-  views::ImageButton* close_button_;
-  views::ImageButton* minimize_button_;
-  views::ImageButton* window_icon_;
+  FrameCaptionButtonContainerView* caption_button_container_;
+  views::ImageView* window_icon_;
   gfx::Rect client_view_bounds_;
-  const gfx::Font title_font_;
+
+  // Helper class for painting the header.
+  scoped_ptr<DefaultHeaderPainter> header_painter_;
+
+  // Updates the hittest bounds overrides based on the window state type.
+  scoped_ptr<FrameBorderHitTestController> frame_border_hit_test_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelFrameView);
 };

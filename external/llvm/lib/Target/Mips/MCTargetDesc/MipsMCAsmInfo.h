@@ -14,13 +14,13 @@
 #ifndef MIPSTARGETASMINFO_H
 #define MIPSTARGETASMINFO_H
 
-#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCAsmInfoELF.h"
 
 namespace llvm {
   class StringRef;
 
-  class MipsMCAsmInfo : public MCAsmInfo {
-    virtual void anchor();
+  class MipsMCAsmInfo : public MCAsmInfoELF {
+    void anchor() override;
   public:
     explicit MipsMCAsmInfo(StringRef TT);
   };

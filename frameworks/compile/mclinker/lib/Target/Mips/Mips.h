@@ -6,14 +6,15 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_MIPS_H
-#define MCLD_MIPS_H
-
-#include "mcld/Support/TargetRegistry.h"
+#ifndef TARGET_MIPS_MIPS_H
+#define TARGET_MIPS_MIPS_H
 
 namespace mcld {
 
-extern mcld::Target TheMipselTarget;
+class Target;
+
+extern Target TheMipselTarget;
+extern Target TheMips64elTarget;
 
 } // namespace of mcld
 

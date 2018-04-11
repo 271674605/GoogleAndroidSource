@@ -1,5 +1,5 @@
 <!--
-    Copyright 2010 The Android Open Source Project
+    Copyright 2013 The Android Open Source Project
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@
   <li class="nav-section">
     <div class="nav-section-header">
       <a href="<?cs var:toroot ?>compatibility/index.html">
-        <span class="en">Overview</span>
+        <span class="en">Compatibility</span>
       </a>
     </div>
     <ul>
-      <li><a href="<?cs var:toroot ?>compatibility/overview.html">CTS Overview</a></li>
-      <li><a href="<?cs var:toroot ?>compatibility/cts-intro.html">CTS Introduction</a></li>
+      <li><a href="<?cs var:toroot ?>compatibility/overview.html">Overview</a></li>
+      <li><a href="<?cs var:toroot ?>compatibility/cts-intro.html">Compatibility Test Suite</a></li>
       <li><a href="<?cs var:toroot ?>compatibility/cts-development.html">CTS Development</a></li>
-      <li><a href="<?cs var:toroot ?>compatibility/android-4.3-cdd.pdf">Compatibility Definition Document (CDD)</a></li>
+      <li><a href="<?cs var:toroot ?>compatibility/android-cdd.pdf">Compatibility Definition Document (CDD)</a></li>
       <li><a href="<?cs var:toroot ?>compatibility/downloads.html">Downloads</a></li>
       <li><a href="<?cs var:toroot ?>compatibility/contact-us.html">Contact Us</a></li>
     </ul>

@@ -16,15 +16,22 @@
 
 package android.media.cts;
 
+import android.cts.util.CtsAndroidTestCase;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioTimestamp;
 import android.media.AudioTrack;
-import android.test.AndroidTestCase;
 import android.util.Log;
+import com.android.cts.util.ReportLog;
+import com.android.cts.util.ResultType;
+import com.android.cts.util.ResultUnit;
 
+import java.nio.ByteOrder;
 import java.nio.ByteBuffer;
+import java.nio.ShortBuffer;
+import java.nio.FloatBuffer;
 
-public class AudioTrackTest extends AndroidTestCase {
+public class AudioTrackTest extends CtsAndroidTestCase {
     private String TAG = "AudioTrackTest";
     private final long WAIT_MSEC = 200;
     private final int OFFSET_DEFAULT = 0;
@@ -446,10 +453,9 @@ public class AudioTrackTest extends AndroidTestCase {
     // Playback properties
     // ----------------------------------
 
-    // Test case 1: setStereoVolume() with max volume returns SUCCESS
-    public void testSetStereoVolumeMax() throws Exception {
+    // Common code for the testSetStereoVolume* and testSetVolume* tests
+    private void testSetVolumeCommon(String testName, float vol, boolean isStereo) throws Exception {
         // constants for test
-        final String TEST_NAME = "testSetStereoVolumeMax";
         final int TEST_SR = 22050;
         final int TEST_CONF = AudioFormat.CHANNEL_CONFIGURATION_STEREO;
         final int TEST_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
@@ -465,61 +471,35 @@ public class AudioTrackTest extends AndroidTestCase {
         track.write(data, OFFSET_DEFAULT, data.length);
         track.write(data, OFFSET_DEFAULT, data.length);
         track.play();
-        float maxVol = AudioTrack.getMaxVolume();
-        assertTrue(TEST_NAME, track.setStereoVolume(maxVol, maxVol) == AudioTrack.SUCCESS);
+        if (isStereo) {
+            // TODO to really test this, do a pan instead of using same value for left and right
+            assertTrue(testName, track.setStereoVolume(vol, vol) == AudioTrack.SUCCESS);
+        } else {
+            assertTrue(testName, track.setVolume(vol) == AudioTrack.SUCCESS);
+        }
         // -------- tear down --------------
         track.release();
+    }
+
+    // Test case 1: setStereoVolume() with max volume returns SUCCESS
+    public void testSetStereoVolumeMax() throws Exception {
+        final String TEST_NAME = "testSetStereoVolumeMax";
+        float maxVol = AudioTrack.getMaxVolume();
+        testSetVolumeCommon(TEST_NAME, maxVol, true /*isStereo*/);
     }
 
     // Test case 2: setStereoVolume() with min volume returns SUCCESS
     public void testSetStereoVolumeMin() throws Exception {
-        // constants for test
         final String TEST_NAME = "testSetStereoVolumeMin";
-        final int TEST_SR = 22050;
-        final int TEST_CONF = AudioFormat.CHANNEL_CONFIGURATION_STEREO;
-        final int TEST_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-        final int TEST_MODE = AudioTrack.MODE_STREAM;
-        final int TEST_STREAM_TYPE = AudioManager.STREAM_MUSIC;
-
-        // -------- initialization --------------
-        int minBuffSize = AudioTrack.getMinBufferSize(TEST_SR, TEST_CONF, TEST_FORMAT);
-        AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR, TEST_CONF, TEST_FORMAT,
-                2 * minBuffSize, TEST_MODE);
-        byte data[] = new byte[minBuffSize];
-        // -------- test --------------
-        track.write(data, OFFSET_DEFAULT, data.length);
-        track.write(data, OFFSET_DEFAULT, data.length);
-        track.play();
         float minVol = AudioTrack.getMinVolume();
-        assertTrue(TEST_NAME, track.setStereoVolume(minVol, minVol) == AudioTrack.SUCCESS);
-        // -------- tear down --------------
-        track.release();
+        testSetVolumeCommon(TEST_NAME, minVol, true /*isStereo*/);
     }
 
     // Test case 3: setStereoVolume() with mid volume returns SUCCESS
     public void testSetStereoVolumeMid() throws Exception {
-        // constants for test
         final String TEST_NAME = "testSetStereoVolumeMid";
-        final int TEST_SR = 22050;
-        final int TEST_CONF = AudioFormat.CHANNEL_CONFIGURATION_STEREO;
-        final int TEST_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-        final int TEST_MODE = AudioTrack.MODE_STREAM;
-        final int TEST_STREAM_TYPE = AudioManager.STREAM_MUSIC;
-
-        // -------- initialization --------------
-        int minBuffSize = AudioTrack.getMinBufferSize(TEST_SR, TEST_CONF, TEST_FORMAT);
-        AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR, TEST_CONF, TEST_FORMAT,
-                2 * minBuffSize, TEST_MODE);
-        byte data[] = new byte[minBuffSize];
-        // -------- test --------------
-
-        track.write(data, OFFSET_DEFAULT, data.length);
-        track.write(data, OFFSET_DEFAULT, data.length);
-        track.play();
         float midVol = (AudioTrack.getMaxVolume() - AudioTrack.getMinVolume()) / 2;
-        assertTrue(TEST_NAME, track.setStereoVolume(midVol, midVol) == AudioTrack.SUCCESS);
-        // -------- tear down --------------
-        track.release();
+        testSetVolumeCommon(TEST_NAME, midVol, true /*isStereo*/);
     }
 
     // Test case 4: setPlaybackRate() with half the content rate returns SUCCESS
@@ -642,6 +622,27 @@ public class AudioTrackTest extends AndroidTestCase {
                 track.setPlaybackRate(TEST_SR / 2));
         // -------- tear down --------------
         track.release();
+    }
+
+    // Test case 9: setVolume() with max volume returns SUCCESS
+    public void testSetVolumeMax() throws Exception {
+        final String TEST_NAME = "testSetVolumeMax";
+        float maxVol = AudioTrack.getMaxVolume();
+        testSetVolumeCommon(TEST_NAME, maxVol, false /*isStereo*/);
+    }
+
+    // Test case 10: setVolume() with min volume returns SUCCESS
+    public void testSetVolumeMin() throws Exception {
+        final String TEST_NAME = "testSetVolumeMin";
+        float minVol = AudioTrack.getMinVolume();
+        testSetVolumeCommon(TEST_NAME, minVol, false /*isStereo*/);
+    }
+
+    // Test case 11: setVolume() with mid volume returns SUCCESS
+    public void testSetVolumeMid() throws Exception {
+        final String TEST_NAME = "testSetVolumeMid";
+        float midVol = (AudioTrack.getMaxVolume() - AudioTrack.getMinVolume()) / 2;
+        testSetVolumeCommon(TEST_NAME, midVol, false /*isStereo*/);
     }
 
     // -----------------------------------------------------------------
@@ -1218,11 +1219,12 @@ public class AudioTrackTest extends AndroidTestCase {
             AudioTrack.ERROR_BAD_VALUE);
     }
 
-    // Test case 2: getMinBufferSize() return ERROR_BAD_VALUE if SR > 48000
+    // Test case 2: getMinBufferSize() return ERROR_BAD_VALUE if sample rate too high
     public void testGetMinBufferSizeTooHighSR() throws Exception {
         // constant for test
         final String TEST_NAME = "testGetMinBufferSizeTooHighSR";
-        final int TEST_SR = 48001;
+        // FIXME need an API to retrieve AudioTrack.SAMPLE_RATE_HZ_MAX
+        final int TEST_SR = 96001;
         final int TEST_CONF = AudioFormat.CHANNEL_CONFIGURATION_MONO;
         final int TEST_FORMAT = AudioFormat.ENCODING_PCM_8BIT;
 
@@ -1288,7 +1290,7 @@ public class AudioTrackTest extends AndroidTestCase {
 
         // -------- initialization --------------
         int bufferSize = AudioTrack.getMinBufferSize(TEST_SR, TEST_CONF, TEST_FORMAT);
-        byte data[] = createSoundDataInByteArray(bufferSize, TEST_SR);
+        byte data[] = createSoundDataInByteArray(bufferSize, TEST_SR, 1024);
         AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR, TEST_CONF, TEST_FORMAT,
                 bufferSize, TEST_MODE);
         // -------- test --------------
@@ -1306,10 +1308,10 @@ public class AudioTrackTest extends AndroidTestCase {
         track.release();
     }
 
-    public static byte[] createSoundDataInByteArray(int bufferSize, final int sampleRate) {
-        final int frequency = 1024;
+    public static byte[] createSoundDataInByteArray(int bufferSamples, final int sampleRate,
+            final double frequency) {
         final double rad = 2 * Math.PI * frequency / sampleRate;
-        byte[] vai = new byte[bufferSize];
+        byte[] vai = new byte[bufferSamples];
         for (int j = 0; j < vai.length; j++) {
             int unsigned =  (int)(Math.sin(j * rad) * Byte.MAX_VALUE) + Byte.MAX_VALUE & 0xFF;
             vai[j] = (byte) unsigned;
@@ -1317,51 +1319,353 @@ public class AudioTrackTest extends AndroidTestCase {
         return vai;
     }
 
-    public static short[] createSoundDataInShortArray(int bufferSize, final int sampleRate) {
-        final double frequency = 1024;
+    public static short[] createSoundDataInShortArray(int bufferSamples, final int sampleRate,
+            final double frequency) {
         final double rad = 2 * Math.PI * frequency / sampleRate;
-        short[] vai = new short[bufferSize];
+        short[] vai = new short[bufferSamples];
         for (int j = 0; j < vai.length; j++) {
-            vai[j] = (short) (Math.sin(j * rad) * Short.MAX_VALUE);
+            vai[j] = (short)(Math.sin(j * rad) * Short.MAX_VALUE);
         }
         return vai;
+    }
+
+    public static float[] createSoundDataInFloatArray(int bufferSamples, final int sampleRate,
+            final double frequency) {
+        final double rad = 2 * Math.PI * frequency / sampleRate;
+        float[] vaf = new float[bufferSamples];
+        for (int j = 0; j < vaf.length; j++) {
+            vaf[j] = (float)(Math.sin(j * rad));
+        }
+        return vaf;
     }
 
     public void testPlayStreamData() throws Exception {
         // constants for test
         final String TEST_NAME = "testPlayStreamData";
-        final int TEST_SR = 22050;
-        final int TEST_CONF = AudioFormat.CHANNEL_CONFIGURATION_MONO;
-        final int TEST_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
+        final int TEST_FORMAT_ARRAY[] = {  // should hear 40 increasing frequency tones, 3 times
+                AudioFormat.ENCODING_PCM_8BIT,
+                AudioFormat.ENCODING_PCM_16BIT,
+                AudioFormat.ENCODING_PCM_FLOAT,
+        };
+        final int TEST_SR_ARRAY[] = {
+                4000,
+                22050,
+                44100,
+                48000,
+                96000,
+        };
+        final int TEST_CONF_ARRAY[] = {
+                AudioFormat.CHANNEL_OUT_MONO,    // 1.0
+                AudioFormat.CHANNEL_OUT_STEREO,  // 2.0
+                AudioFormat.CHANNEL_OUT_STEREO | AudioFormat.CHANNEL_OUT_FRONT_CENTER, // 3.0
+                AudioFormat.CHANNEL_OUT_QUAD,    // 4.0
+                AudioFormat.CHANNEL_OUT_QUAD | AudioFormat.CHANNEL_OUT_FRONT_CENTER,   // 5.0
+                AudioFormat.CHANNEL_OUT_5POINT1, // 5.1
+                AudioFormat.CHANNEL_OUT_5POINT1 | AudioFormat.CHANNEL_OUT_BACK_CENTER, // 6.1
+                AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, // 7.1
+        };
         final int TEST_MODE = AudioTrack.MODE_STREAM;
         final int TEST_STREAM_TYPE = AudioManager.STREAM_MUSIC;
 
+        for (int TEST_FORMAT : TEST_FORMAT_ARRAY) {
+            double frequency = 400; // frequency changes for each test
+            for (int TEST_SR : TEST_SR_ARRAY) {
+                for (int TEST_CONF : TEST_CONF_ARRAY) {
+                    // -------- initialization --------------
+                    final int minBufferSize = AudioTrack.getMinBufferSize(TEST_SR,
+                            TEST_CONF, TEST_FORMAT); // in bytes
+                    final int bufferSamples = 12 * minBufferSize
+                            / AudioFormat.getBytesPerSample(TEST_FORMAT);
+                    final int channelCount = Integer.bitCount(TEST_CONF);
+                    final double testFrequency = frequency / channelCount;
+                    AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR,
+                            TEST_CONF, TEST_FORMAT, minBufferSize, TEST_MODE);
+                    assertTrue(TEST_NAME, track.getState() == AudioTrack.STATE_INITIALIZED);
+                    boolean hasPlayed = false;
+                    int written = 0;
+
+                    // -------- test --------------
+                    switch (TEST_FORMAT) {
+                    case AudioFormat.ENCODING_PCM_8BIT: {
+                        byte data[] = createSoundDataInByteArray(
+                                bufferSamples, TEST_SR,
+                                testFrequency);
+                        while (written < data.length) {
+                            int ret = track.write(data, written,
+                                    Math.min(data.length - written, minBufferSize));
+                            assertTrue(TEST_NAME, ret >= 0);
+                            written += ret;
+                            if (!hasPlayed) {
+                                track.play();
+                                hasPlayed = true;
+                            }
+                        }
+                        } break;
+                    case AudioFormat.ENCODING_PCM_16BIT: {
+                        short data[] = createSoundDataInShortArray(
+                                bufferSamples, TEST_SR,
+                                testFrequency);
+                        while (written < data.length) {
+                            int ret = track.write(data, written,
+                                    Math.min(data.length - written, minBufferSize));
+                            assertTrue(TEST_NAME, ret >= 0);
+                            written += ret;
+                            if (!hasPlayed) {
+                                track.play();
+                                hasPlayed = true;
+                            }
+                        }
+                        } break;
+                    case AudioFormat.ENCODING_PCM_FLOAT: {
+                        float data[] = createSoundDataInFloatArray(
+                                bufferSamples, TEST_SR,
+                                testFrequency);
+                        while (written < data.length) {
+                            int ret = track.write(data, written,
+                                    Math.min(data.length - written, minBufferSize),
+                                    AudioTrack.WRITE_BLOCKING);
+                            assertTrue(TEST_NAME, ret >= 0);
+                            written += ret;
+                            if (!hasPlayed) {
+                                track.play();
+                                hasPlayed = true;
+                            }
+                        }
+                        } break;
+                    }
+
+                    Thread.sleep(WAIT_MSEC);
+                    track.stop();
+                    Thread.sleep(WAIT_MSEC);
+                    // -------- tear down --------------
+                    track.release();
+                    frequency += 70; // increment test tone frequency
+                }
+            }
+        }
+    }
+
+    public void testPlayStreamByteBuffer() throws Exception {
+        // constants for test
+        final String TEST_NAME = "testPlayStreamByteBuffer";
+        final int TEST_FORMAT_ARRAY[] = {  // should hear 4 tones played 3 times
+                AudioFormat.ENCODING_PCM_8BIT,
+                AudioFormat.ENCODING_PCM_16BIT,
+                AudioFormat.ENCODING_PCM_FLOAT,
+        };
+        final int TEST_SR_ARRAY[] = {
+                48000,
+        };
+        final int TEST_CONF_ARRAY[] = {
+                AudioFormat.CHANNEL_OUT_STEREO,
+        };
+        final int TEST_WRITE_MODE_ARRAY[] = {
+                AudioTrack.WRITE_BLOCKING,
+                AudioTrack.WRITE_NON_BLOCKING,
+        };
+        final int TEST_MODE = AudioTrack.MODE_STREAM;
+        final int TEST_STREAM_TYPE = AudioManager.STREAM_MUSIC;
+
+        for (int TEST_FORMAT : TEST_FORMAT_ARRAY) {
+            double frequency = 800; // frequency changes for each test
+            for (int TEST_SR : TEST_SR_ARRAY) {
+                for (int TEST_CONF : TEST_CONF_ARRAY) {
+                    for (int TEST_WRITE_MODE : TEST_WRITE_MODE_ARRAY) {
+                        for (int useDirect = 0; useDirect < 2; ++useDirect) {
+                            // -------- initialization --------------
+                            int minBufferSize = AudioTrack.getMinBufferSize(TEST_SR,
+                                    TEST_CONF, TEST_FORMAT); // in bytes
+                            int bufferSize = 12 * minBufferSize;
+                            int bufferSamples = bufferSize
+                                    / AudioFormat.getBytesPerSample(TEST_FORMAT);
+                            AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR,
+                                    TEST_CONF, TEST_FORMAT, minBufferSize, TEST_MODE);
+                            assertTrue(TEST_NAME,
+                                    track.getState() == AudioTrack.STATE_INITIALIZED);
+                            boolean hasPlayed = false;
+                            int written = 0;
+                            ByteBuffer bb = (useDirect == 1)
+                                    ? ByteBuffer.allocateDirect(bufferSize)
+                                            : ByteBuffer.allocate(bufferSize);
+                            bb.order(java.nio.ByteOrder.nativeOrder());
+
+                            // -------- test --------------
+                            switch (TEST_FORMAT) {
+                                case AudioFormat.ENCODING_PCM_8BIT: {
+                                    byte data[] = createSoundDataInByteArray(
+                                            bufferSamples, TEST_SR,
+                                            frequency);
+                                    bb.put(data);
+                                    bb.flip();
+                                } break;
+                                case AudioFormat.ENCODING_PCM_16BIT: {
+                                    short data[] = createSoundDataInShortArray(
+                                            bufferSamples, TEST_SR,
+                                            frequency);
+                                    ShortBuffer sb = bb.asShortBuffer();
+                                    sb.put(data);
+                                    bb.limit(sb.limit() * 2);
+                                } break;
+                                case AudioFormat.ENCODING_PCM_FLOAT: {
+                                    float data[] = createSoundDataInFloatArray(
+                                            bufferSamples, TEST_SR,
+                                            frequency);
+                                    FloatBuffer fb = bb.asFloatBuffer();
+                                    fb.put(data);
+                                    bb.limit(fb.limit() * 4);
+                                } break;
+                            }
+
+                            while (written < bufferSize) {
+                                int ret = track.write(bb,
+                                        Math.min(bufferSize - written, minBufferSize),
+                                        TEST_WRITE_MODE);
+                                assertTrue(TEST_NAME, ret >= 0);
+                                written += ret;
+                                if (!hasPlayed) {
+                                    track.play();
+                                    hasPlayed = true;
+                                }
+                            }
+
+                            Thread.sleep(WAIT_MSEC);
+                            track.stop();
+                            Thread.sleep(WAIT_MSEC);
+                            // -------- tear down --------------
+                            track.release();
+                            frequency += 200; // increment test tone frequency
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void testGetTimestamp() throws Exception {
+        // constants for test
+        final String TEST_NAME = "testGetTimestamp";
+        final int TEST_SR = 22050;
+        final int TEST_CONF = AudioFormat.CHANNEL_OUT_MONO;
+        final int TEST_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
+        final int TEST_MODE = AudioTrack.MODE_STREAM;
+        final int TEST_STREAM_TYPE = AudioManager.STREAM_MUSIC;
+        final int TEST_LOOP_CNT = 10;
+        // For jitter we allow 30 msec in frames.  This is a large margin.
+        // Often this is just 0 or 1 frames, but that can depend on hardware.
+        final int TEST_JITTER_FRAMES_ALLOWED = TEST_SR * 30 / 1000;
+
         // -------- initialization --------------
-        int minBufferSize = AudioTrack.getMinBufferSize(TEST_SR, TEST_CONF, TEST_FORMAT);
-        int bufferSize = 3 * minBufferSize;
-        short data[] = createSoundDataInShortArray(bufferSize, TEST_SR);
+        final int bytesPerFrame =
+                AudioFormat.getBytesPerSample(TEST_FORMAT)
+                * AudioFormat.channelCountFromOutChannelMask(TEST_CONF);
+        final int minBufferSizeInBytes =
+                AudioTrack.getMinBufferSize(TEST_SR, TEST_CONF, TEST_FORMAT);
+        final int bufferSizeInBytes = minBufferSizeInBytes * 3;
+        byte[] data = new byte[bufferSizeInBytes];
         AudioTrack track = new AudioTrack(TEST_STREAM_TYPE, TEST_SR, TEST_CONF, TEST_FORMAT,
-                minBufferSize, TEST_MODE);
+                minBufferSizeInBytes, TEST_MODE);
         // -------- test --------------
         assertTrue(TEST_NAME, track.getState() == AudioTrack.STATE_INITIALIZED);
+
+        AudioTimestamp timestamp = new AudioTimestamp();
         boolean hasPlayed = false;
-        int written = 0;
-        while (written < data.length) {
-            if (data.length - written <= minBufferSize) {
-                written += track.write(data, written, data.length - written);
-            } else {
-                written += track.write(data, written, minBufferSize);
+
+        long framesWritten = 0, lastFramesPresented = 0, lastFramesPresentedAt = 0;
+        int cumulativeJitterCount = 0;
+        float cumulativeJitter = 0;
+        float maxJitter = 0;
+        for (int i = 0; i < TEST_LOOP_CNT; i++) {
+            final long writeTime = System.nanoTime();
+
+            for (int written = 0; written < data.length;) {
+                int ret = track.write(data, written,
+                        Math.min(data.length - written, minBufferSizeInBytes));
+                assertTrue(TEST_NAME, ret >= 0);
+                written += ret;
                 if (!hasPlayed) {
                     track.play();
                     hasPlayed = true;
                 }
             }
+            framesWritten += data.length / bytesPerFrame;
+
+            // track.getTimestamp may return false if there are no physical HAL outputs.
+            // This may occur on TV devices without connecting an HDMI monitor.
+            // It may also be true immediately after start-up, as the mixing thread could
+            // be idle, but since we've already pushed much more than the minimum buffer size,
+            // that is unlikely.
+            // Nevertheless, we don't want to have unnecessary failures, so we ignore the
+            // first iteration if we don't get a timestamp.
+            final boolean result = track.getTimestamp(timestamp);
+            assertTrue(TEST_NAME, result || i == 0);
+            if (!result) {
+                continue;
+            }
+
+            final long framesPresented = timestamp.framePosition;
+            final long framesPresentedAt = timestamp.nanoTime;
+
+            // We read timestamp here to ensure that seen is greater than presented.
+            // This is an "on-the-fly" read without pausing because pausing may cause the
+            // timestamp to become stale and affect our jitter measurements.
+            final int framesSeen = track.getPlaybackHeadPosition();
+            assertTrue(TEST_NAME, framesWritten >= framesSeen);
+            assertTrue(TEST_NAME, framesSeen >= framesPresented);
+
+            if (i > 1) { // need delta info from previous iteration (skipping first)
+                final long deltaFrames = framesPresented - lastFramesPresented;
+                final long deltaTime = framesPresentedAt - lastFramesPresentedAt;
+                final long NANOSECONDS_PER_SECOND = 1000000000;
+                final long expectedFrames = deltaTime * TEST_SR / NANOSECONDS_PER_SECOND;
+                final long jitterFrames = Math.abs(deltaFrames - expectedFrames);
+
+                //Log.d(TAG, "framesWritten(" + framesWritten
+                //        + ") framesSeen(" + framesSeen
+                //        + ") framesPresented(" + framesPresented
+                //        + ") jitter(" + jitterFrames + ")");
+
+                // We check that the timestamp position is reasonably accurate.
+                assertTrue(TEST_NAME, deltaTime >= 0);
+                assertTrue(TEST_NAME, deltaFrames >= 0);
+                if (i > 2) {
+                    // The first two periods may have inherent jitter as the audio pipe
+                    // is filling up. We check jitter only after that.
+                    assertTrue(TEST_NAME, jitterFrames < TEST_JITTER_FRAMES_ALLOWED);
+                    cumulativeJitter += jitterFrames;
+                    cumulativeJitterCount++;
+                    if (jitterFrames > maxJitter) {
+                        maxJitter = jitterFrames;
+                    }
+                }
+
+                //Log.d(TAG, "lastFramesPresentedAt(" + lastFramesPresentedAt
+                //        + ") writeTime(" + writeTime
+                //        + ") framesPresentedAt(" + framesPresentedAt + ")");
+
+                // We check that the timestamp time is reasonably current.
+                assertTrue(TEST_NAME, framesPresentedAt >= writeTime);
+                assertTrue(TEST_NAME, writeTime >= lastFramesPresentedAt);
+            }
+            lastFramesPresented = framesPresented;
+            lastFramesPresentedAt = framesPresentedAt;
         }
+        // Full drain.
         Thread.sleep(WAIT_MSEC);
         track.stop();
         Thread.sleep(WAIT_MSEC);
-        // -------- tear down --------------
         track.release();
+        // Log the average jitter
+        if (cumulativeJitterCount > 0) {
+            ReportLog log = getReportLog();
+            final float averageJitterInFrames = cumulativeJitter / cumulativeJitterCount;
+            final float averageJitterInMs = averageJitterInFrames * 1000 / TEST_SR;
+            final float maxJitterInMs = maxJitter * 1000 / TEST_SR;
+            // ReportLog needs at least one Value and Summary.
+            log.printValue("Maximum Jitter", maxJitterInMs,
+                    ResultType.LOWER_BETTER, ResultUnit.MS);
+            log.printSummary("Average Jitter", averageJitterInMs,
+                    ResultType.LOWER_BETTER, ResultUnit.MS);
+        }
     }
 
 /* Do not run in JB-MR1. will be re-opened in the next platform release.

@@ -21,13 +21,17 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace clang;
 
 raw_ostream &RewriteBuffer::write(raw_ostream &os) const {
-  // FIXME: eliminate the copy by writing out each chunk at a time
-  os << std::string(begin(), end());
+  // Walk RewriteRope chunks efficiently using MoveToNextPiece() instead of the
+  // character iterator.
+  for (RopePieceBTreeIterator I = begin(), E = end(); I != E;
+       I.MoveToNextPiece())
+    os << I.piece();
   return os;
 }
 
@@ -328,6 +332,8 @@ bool Rewriter::ReplaceText(SourceRange range, SourceRange replacementRange) {
 /// printer to generate the replacement code.  This returns true if the input
 /// could not be rewritten, or false if successful.
 bool Rewriter::ReplaceStmt(Stmt *From, Stmt *To) {
+  assert(From != nullptr && To != nullptr && "Expected non-null Stmt's");
+
   // Measaure the old text.
   int Size = getRangeSize(From->getSourceRange());
   if (Size == -1)
@@ -336,7 +342,7 @@ bool Rewriter::ReplaceStmt(Stmt *From, Stmt *To) {
   // Get the new text.
   std::string SStr;
   llvm::raw_string_ostream S(SStr);
-  To->printPretty(S, 0, PrintingPolicy(*LangOpts));
+  To->printPretty(S, nullptr, PrintingPolicy(*LangOpts));
   const std::string &Str = S.str();
 
   ReplaceText(From->getLocStart(), Size, Str);
@@ -344,9 +350,10 @@ bool Rewriter::ReplaceStmt(Stmt *From, Stmt *To) {
 }
 
 std::string Rewriter::ConvertToString(Stmt *From) {
+  assert(From != nullptr && "Expected non-null Stmt");
   std::string SStr;
   llvm::raw_string_ostream S(SStr);
-  From->printPretty(S, 0, PrintingPolicy(*LangOpts));
+  From->printPretty(S, nullptr, PrintingPolicy(*LangOpts));
   return S.str();
 }
 
@@ -446,30 +453,29 @@ public:
     if (!ok()) return;
 
     FileStream->flush();
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
     // Win32 does not allow rename/removing opened files.
     FileStream.reset();
 #endif
-    if (llvm::error_code ec =
-          llvm::sys::fs::rename(TempFilename.str(), Filename)) {
+    if (std::error_code ec =
+            llvm::sys::fs::rename(TempFilename.str(), Filename)) {
       AllWritten = false;
       Diagnostics.Report(clang::diag::err_unable_to_rename_temp)
         << TempFilename << Filename << ec.message();
-      bool existed;
       // If the remove fails, there's not a lot we can do - this is already an
       // error.
-      llvm::sys::fs::remove(TempFilename.str(), existed);
+      llvm::sys::fs::remove(TempFilename.str());
     }
   }
 
-  bool ok() { return FileStream.isValid(); }
+  bool ok() { return (bool)FileStream; }
   raw_ostream &getStream() { return *FileStream; }
 
 private:
   DiagnosticsEngine &Diagnostics;
   StringRef Filename;
   SmallString<128> TempFilename;
-  OwningPtr<llvm::raw_fd_ostream> FileStream;
+  std::unique_ptr<llvm::raw_fd_ostream> FileStream;
   bool &AllWritten;
 };
 } // end anonymous namespace

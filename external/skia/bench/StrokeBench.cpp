@@ -5,7 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkCanvas.h"
 #include "SkPaint.h"
 #include "SkRRect.h"
@@ -53,14 +53,13 @@ static const char* draw_oval(const RRectRec* rec, int count) {
 // Test drawing a small stroked version to see the effect of special-casing
 // our stroke code for these convex single-contour shapes.
 //
-class StrokeRRectBench : public SkBenchmark {
+class StrokeRRectBench : public Benchmark {
     SkString fName;
     SkPaint::Join fJoin;
     RRectRec fRec;
     DrawProc fProc;
-    enum { N = SkBENCHLOOP(500) };
 public:
-    StrokeRRectBench(void* param, SkPaint::Join j, DrawProc proc) : SkBenchmark(param) {
+    StrokeRRectBench(SkPaint::Join j, DrawProc proc) {
         static const char* gJoinName[] = {
             "miter", "round", "bevel"
         };
@@ -79,27 +78,27 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onDraw(SkCanvas* canvas) {
+    virtual void onDraw(const int loops, SkCanvas* canvas) {
         fRec.fCanvas = canvas;
         this->setupPaint(&fRec.fPaint);
         fRec.fPaint.setStyle(SkPaint::kStroke_Style);
         fRec.fPaint.setStrokeJoin(fJoin);
         fRec.fPaint.setStrokeWidth(5);
-        fProc(&fRec, N);
+        fProc(&fRec, loops);
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kRound_Join, draw_rect); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kBevel_Join, draw_rect); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kMiter_Join, draw_rect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kRound_Join, draw_rect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kBevel_Join, draw_rect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kMiter_Join, draw_rect); )
 
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kRound_Join, draw_rrect); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kBevel_Join, draw_rrect); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kMiter_Join, draw_rrect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kRound_Join, draw_rrect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kBevel_Join, draw_rrect); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kMiter_Join, draw_rrect); )
 
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kRound_Join, draw_oval); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kBevel_Join, draw_oval); )
-DEF_BENCH( return new StrokeRRectBench(p, SkPaint::kMiter_Join, draw_oval); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kRound_Join, draw_oval); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kBevel_Join, draw_oval); )
+DEF_BENCH( return new StrokeRRectBench(SkPaint::kMiter_Join, draw_oval); )

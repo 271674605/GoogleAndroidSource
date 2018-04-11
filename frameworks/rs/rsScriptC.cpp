@@ -17,11 +17,9 @@
 #include "rsContext.h"
 #include "rsScriptC.h"
 
-#ifndef RS_COMPATIBILITY_LIB
-#ifndef ANDROID_RS_SERIALIZE
+#if !defined(RS_COMPATIBILITY_LIB) && !defined(ANDROID_RS_SERIALIZE)
 #include <bcinfo/BitcodeTranslator.h>
 #include <bcinfo/BitcodeWrapper.h>
-#endif
 #endif
 
 #if !defined(RS_SERVER) && !defined(RS_COMPATIBILITY_LIB)
@@ -40,21 +38,17 @@ using namespace android::renderscript;
     ScriptC * sc = (ScriptC *) tls->mScript
 
 ScriptC::ScriptC(Context *rsc) : Script(rsc) {
-#ifndef RS_COMPATIBILITY_LIB
-#ifndef ANDROID_RS_SERIALIZE
+#if !defined(RS_COMPATIBILITY_LIB) && !defined(ANDROID_RS_SERIALIZE)
     BT = NULL;
-#endif
 #endif
 }
 
 ScriptC::~ScriptC() {
-#ifndef RS_COMPATIBILITY_LIB
-#ifndef ANDROID_RS_SERIALIZE
+#if !defined(RS_COMPATIBILITY_LIB) && !defined(ANDROID_RS_SERIALIZE)
     if (BT) {
         delete BT;
         BT = NULL;
     }
-#endif
 #endif
     if (mInitialized) {
         mRSC->mHal.funcs.script.invokeFreeChildren(mRSC, this);
@@ -190,6 +184,38 @@ void ScriptC::runForEach(Context *rsc,
         delete AString;
 }
 
+void ScriptC::runForEach(Context *rsc,
+                         uint32_t slot,
+                         const Allocation ** ains,
+                         size_t inLen,
+                         Allocation * aout,
+                         const void * usr,
+                         size_t usrBytes,
+                         const RsScriptCall *sc) {
+    // Trace this function call.
+    // To avoid overhead we only build the string if tracing is actually
+    // enabled.
+    String8 *AString = NULL;
+    const char *String = "";
+    if (ATRACE_ENABLED()) {
+        AString = new String8("runForEach_");
+        AString->append(mHal.info.exportedForeachFuncList[slot].first);
+        String = AString->string();
+    }
+    ATRACE_NAME(String);
+    (void)String;
+
+    Context::PushState ps(rsc);
+
+    setupGLState(rsc);
+    setupScript(rsc);
+
+    rsc->mHal.funcs.script.invokeForEachMulti(rsc, this, slot, ains, inLen, aout, usr, usrBytes, sc);
+
+    if (AString)
+        delete AString;
+}
+
 void ScriptC::Invoke(Context *rsc, uint32_t slot, const void *data, size_t len) {
     ATRACE_CALL();
 
@@ -204,43 +230,6 @@ void ScriptC::Invoke(Context *rsc, uint32_t slot, const void *data, size_t len) 
     }
     rsc->mHal.funcs.script.invokeFunction(rsc, this, slot, data, len);
 }
-
-ScriptCState::ScriptCState() {
-}
-
-ScriptCState::~ScriptCState() {
-}
-
-/*
-static void* symbolLookup(void* pContext, char const* name) {
-    const ScriptCState::SymbolTable_t *sym;
-    ScriptC *s = (ScriptC *)pContext;
-    if (!strcmp(name, "__isThreadable")) {
-      return (void*) s->mHal.info.isThreadable;
-    } else if (!strcmp(name, "__clearThreadable")) {
-      s->mHal.info.isThreadable = false;
-      return NULL;
-    }
-    sym = ScriptCState::lookupSymbol(name);
-    if (!sym) {
-        sym = ScriptCState::lookupSymbolCL(name);
-    }
-    if (!sym) {
-        sym = ScriptCState::lookupSymbolGL(name);
-    }
-    if (sym) {
-        s->mHal.info.isThreadable &= sym->threadable;
-        return sym->mPtr;
-    }
-    ALOGE("ScriptC sym lookup failed for %s", name);
-    return NULL;
-}
-*/
-
-#if 0
-extern const char rs_runtime_lib_bc[];
-extern unsigned rs_runtime_lib_bc_size;
-#endif
 
 bool ScriptC::runCompiler(Context *rsc,
                           const char *resName,
@@ -281,8 +270,8 @@ bool ScriptC::runCompiler(Context *rsc,
     }
     bitcode = (const uint8_t *) BT->getTranslatedBitcode();
     bitcodeLen = BT->getTranslatedBitcodeSize();
-#endif
 
+#endif
     if (!cacheDir) {
         // MUST BE FIXED BEFORE ANYTHING USING C++ API IS RELEASED
         cacheDir = getenv("EXTERNAL_STORAGE");

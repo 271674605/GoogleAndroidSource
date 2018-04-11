@@ -30,7 +30,7 @@ import com.android.email.NotificationController;
 import com.android.email.Preferences;
 import com.android.email.R;
 import com.android.email.provider.EmailProvider;
-import com.android.email.service.AttachmentDownloadService;
+import com.android.email.service.AttachmentService;
 import com.android.email.service.EmailServiceUtils;
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.TempDirectory;
@@ -69,21 +69,6 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
     public static boolean DEBUG_VERBOSE;
     public static boolean DEBUG_FILE;
 
-    /**
-     * If true, inhibit hardware graphics acceleration in UI (for a/b testing)
-     */
-    public static boolean sDebugInhibitGraphicsAcceleration = false;
-
-    /**
-     * This is used to force stacked UI to return to the "welcome" screen any time we change
-     * the accounts list (e.g. deleting accounts in the Account Manager preferences.)
-     */
-    private static boolean sAccountsChangedNotification = false;
-
-    private static String sMessageDecodeErrorString;
-
-    private static Thread sUiThread;
-
     private static final int MATCH_LEGACY_SHORTCUT_INTENT = 1;
     /**
      * A matcher for data URI's that specify conversation list info.
@@ -98,16 +83,16 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
     /**
      * Asynchronous version of {@link #setServicesEnabledSync(Context)}.  Use when calling from
      * UI thread (or lifecycle entry points.)
-     *
-     * @param context
      */
     public static void setServicesEnabledAsync(final Context context) {
-        EmailAsyncTask.runAsyncParallel(new Runnable() {
-            @Override
-            public void run() {
-                setServicesEnabledSync(context);
-            }
-        });
+        if (context.getResources().getBoolean(R.bool.enable_services)) {
+            EmailAsyncTask.runAsyncParallel(new Runnable() {
+                @Override
+                public void run() {
+                    setServicesEnabledSync(context);
+                }
+            });
+        }
     }
 
     /**
@@ -117,7 +102,6 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
      *
      * Blocking call - do not call from UI/lifecycle threads.
      *
-     * @param context
      * @return true if there are any accounts configured.
      */
     public static boolean setServicesEnabledSync(Context context) {
@@ -129,7 +113,7 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
                     Account.CONTENT_URI,
                     Account.ID_PROJECTION,
                     null, null, null);
-            boolean enable = c.getCount() > 0;
+            boolean enable = c != null && c.getCount() > 0;
             setServicesEnabled(context, enable);
             return enable;
         } finally {
@@ -142,13 +126,15 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
     private static void setServicesEnabled(Context context, boolean enabled) {
         PackageManager pm = context.getPackageManager();
         pm.setComponentEnabledSetting(
-                new ComponentName(context, AttachmentDownloadService.class),
+                new ComponentName(context, AttachmentService.class),
                 enabled ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED :
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP);
 
         // Start/stop the various services depending on whether there are any accounts
-        startOrStopService(enabled, context, new Intent(context, AttachmentDownloadService.class));
+        // TODO: Make sure that the AttachmentService responds to this request as it
+        // expects a particular set of data in the intents that it receives or it ignores.
+        startOrStopService(enabled, context, new Intent(context, AttachmentService.class));
         NotificationController.getInstance(context).watchForMessages();
     }
 
@@ -191,18 +177,13 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
         }
 
         super.onCreate(bundle);
-        sUiThread = Thread.currentThread();
-        Preferences prefs = Preferences.getPreferences(this);
+        final Preferences prefs = Preferences.getPreferences(this);
         DEBUG = prefs.getEnableDebugLogging();
-        sDebugInhibitGraphicsAcceleration = prefs.getInhibitGraphicsAcceleration();
         enableStrictMode(prefs.getEnableStrictMode());
         TempDirectory.setTempDirectory(this);
 
         // Enable logging in the EAS service, so it starts up as early as possible.
         updateLoggingFlags(this);
-
-        // Get a helper string used deep inside message decoders (which don't have context)
-        sMessageDecodeErrorString = getString(R.string.message_decode_error);
 
         // Make sure all required services are running when the app is started (can prevent
         // issues after an adb sync/install)
@@ -233,38 +214,6 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
         LogUtils.d(Logging.LOG_TAG, message);
     }
 
-    /**
-     * Called by the accounts reconciler to notify that accounts have changed, or by  "Welcome"
-     * to clear the flag.
-     * @param setFlag true to set the notification flag, false to clear it
-     */
-    public static synchronized void setNotifyUiAccountsChanged(boolean setFlag) {
-        sAccountsChangedNotification = setFlag;
-    }
-
-    /**
-     * Called from activity onResume() functions to check for an accounts-changed condition, at
-     * which point they should finish() and jump to the Welcome activity.
-     */
-    public static synchronized boolean getNotifyUiAccountsChanged() {
-        return sAccountsChangedNotification;
-    }
-
-    public static void warnIfUiThread() {
-        if (Thread.currentThread().equals(sUiThread)) {
-            LogUtils.w(Logging.LOG_TAG, "Method called on the UI thread",
-                    new Exception("STACK TRACE"));
-        }
-    }
-
-    /**
-     * Retrieve a simple string that can be used when message decoders encounter bad data.
-     * This is provided here because the protocol decoders typically don't have mContext.
-     */
-    public static String getMessageDecodeErrorString() {
-        return sMessageDecodeErrorString != null ? sMessageDecodeErrorString : "";
-    }
-
     public static void enableStrictMode(boolean enabled) {
         Utility.enableStrictMode(enabled);
     }
@@ -285,7 +234,7 @@ public class MailActivityEmail extends com.android.mail.ui.MailActivity {
         com.android.mail.providers.Account account = null;
         try {
             if (accountCursor.moveToFirst()) {
-                account = new com.android.mail.providers.Account(accountCursor);
+                account = com.android.mail.providers.Account.builder().buildFrom(accountCursor);
             }
         } finally {
             accountCursor.close();

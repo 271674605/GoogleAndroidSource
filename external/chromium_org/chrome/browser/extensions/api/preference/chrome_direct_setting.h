@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_API_PREFERENCE_CHROME_DIRECT_SETTING_H__
 
 #include "base/lazy_instance.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 class PrefService;
 
@@ -14,7 +14,7 @@ namespace extensions {
 namespace chromedirectsetting {
 
 // Base class to host instance method helpers.
-class DirectSettingFunctionBase : public SyncExtensionFunction {
+class DirectSettingFunctionBase : public ChromeSyncExtensionFunction {
  protected:
   DirectSettingFunctionBase();
   virtual ~DirectSettingFunctionBase();
@@ -38,7 +38,7 @@ class GetDirectSettingFunction : public DirectSettingFunctionBase {
 
  protected:
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   virtual ~GetDirectSettingFunction();
@@ -54,7 +54,7 @@ class SetDirectSettingFunction : public DirectSettingFunctionBase {
 
  protected:
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   virtual ~SetDirectSettingFunction();
@@ -70,7 +70,7 @@ class ClearDirectSettingFunction : public DirectSettingFunctionBase {
 
  protected:
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   virtual ~ClearDirectSettingFunction();

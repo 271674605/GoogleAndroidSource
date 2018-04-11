@@ -17,8 +17,11 @@
 #define SCNuS "Iu"
 #endif
 
-#elif defined(__native_client__)
+#else
 
+#if !defined(__STDC_FORMAT_MACROS)
+#define __STDC_FORMAT_MACROS 1
+#endif
 #include <inttypes.h>
 
 #if !defined(PRIuS)
@@ -29,6 +32,6 @@
 #define SCNuS "zu"
 #endif
 
-#endif  /* defined(__native_client__) */
+#endif
 
 #endif  /* NACL_IO_OSINTTYPES_H_ */

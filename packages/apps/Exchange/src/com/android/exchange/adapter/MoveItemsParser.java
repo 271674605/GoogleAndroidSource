@@ -49,6 +49,12 @@ public class MoveItemsParser extends Parser {
     }
 
     public int getStatusCode() {
+        if (mStatusCode == 0) {
+            LogUtils.e(TAG, "Trying to get status for MoveItems, but no status was set");
+            // TODO: We currently treat empty responses as retry, so for now we'll do the same for
+            // partially empty responses.
+            return STATUS_CODE_RETRY;
+        }
         return mStatusCode;
     }
 
@@ -60,7 +66,7 @@ public class MoveItemsParser extends Parser {
         return mSourceServerId;
     }
 
-    public void parseResponse() throws IOException {
+    private void parseResponse() throws IOException {
         while (nextTag(Tags.MOVE_RESPONSE) != END) {
             if (tag == Tags.MOVE_STATUS) {
                 int status = getValueInt();

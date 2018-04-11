@@ -22,6 +22,7 @@ import android.accounts.AccountManagerFuture;
 import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Service;
+import android.content.ComponentName;
 import android.content.ContentProviderClient;
 import android.content.ContentResolver;
 import android.content.ContentUris;
@@ -29,6 +30,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
@@ -44,15 +46,20 @@ import android.provider.CalendarContract.SyncState;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.RawContacts;
 import android.provider.SyncStateContract;
+import android.support.annotation.Nullable;
+import android.text.TextUtils;
 
 import com.android.email.R;
-import com.android.emailcommon.Api;
-import com.android.emailcommon.Logging;
+import com.android.emailcommon.VendorPolicyLoader;
 import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.EmailContent;
 import com.android.emailcommon.provider.EmailContent.AccountColumns;
+import com.android.emailcommon.provider.EmailContent.HostAuthColumns;
 import com.android.emailcommon.provider.HostAuth;
 import com.android.emailcommon.service.EmailServiceProxy;
+import com.android.emailcommon.service.EmailServiceStatus;
+import com.android.emailcommon.service.EmailServiceVersion;
+import com.android.emailcommon.service.HostAuthCompat;
 import com.android.emailcommon.service.IEmailService;
 import com.android.emailcommon.service.IEmailServiceCallback;
 import com.android.emailcommon.service.SearchParams;
@@ -185,6 +192,7 @@ public class EmailServiceUtils {
         public boolean defaultSsl;
         public boolean offerTls;
         public boolean offerCerts;
+        public boolean offerOAuth;
         public boolean usesSmtp;
         public boolean offerLocalDeletes;
         public int defaultLocalDeletes;
@@ -201,8 +209,10 @@ public class EmailServiceUtils {
         public int defaultSyncInterval;
         public String inferPrefix;
         public boolean offerLoadMore;
+        public boolean offerMoveTo;
         public boolean requiresSetup;
         public boolean hide;
+        public boolean isGmailStub;
 
         @Override
         public String toString() {
@@ -223,7 +233,7 @@ public class EmailServiceUtils {
             info = getServiceInfo(context, protocol);
         }
         if (info == null) {
-            LogUtils.w(Logging.LOG_TAG, "Returning NullService for " + protocol);
+            LogUtils.w(LogUtils.TAG, "Returning NullService for %s", protocol);
             return new EmailServiceProxy(context, NullService.class);
         } else  {
             return getServiceFromInfo(context, info);
@@ -258,11 +268,11 @@ public class EmailServiceUtils {
             // here, as there is nothing to actually do about them.
             future.getResult();
         } catch (OperationCanceledException e) {
-            LogUtils.w(Logging.LOG_TAG, e.toString());
+            LogUtils.w(LogUtils.TAG, e, "finishAccountManagerBlocker");
         } catch (AuthenticatorException e) {
-            LogUtils.w(Logging.LOG_TAG, e.toString());
+            LogUtils.w(LogUtils.TAG, e, "finishAccountManagerBlocker");
         } catch (IOException e) {
-            LogUtils.w(Logging.LOG_TAG, e.toString());
+            LogUtils.w(LogUtils.TAG, e, "finishAccountManagerBlocker");
         }
     }
 
@@ -279,19 +289,38 @@ public class EmailServiceUtils {
     public static AccountManagerFuture<Bundle> setupAccountManagerAccount(final Context context,
             final Account account, final boolean email, final boolean calendar,
             final boolean contacts, final AccountManagerCallback<Bundle> callback) {
-        final Bundle options = new Bundle(5);
         final HostAuth hostAuthRecv =
                 HostAuth.restoreHostAuthWithId(context, account.mHostAuthKeyRecv);
-        if (hostAuthRecv == null) {
+        return setupAccountManagerAccount(context, account, email, calendar, contacts,
+                hostAuthRecv, callback);
+    }
+
+    /**
+     * Add an account to the AccountManager.
+     * @param context Our {@link Context}.
+     * @param account The {@link Account} we're adding.
+     * @param email Whether the user wants to sync email on this account.
+     * @param calendar Whether the user wants to sync calendar on this account.
+     * @param contacts Whether the user wants to sync contacts on this account.
+     * @param hostAuth HostAuth that identifies the protocol and password for this account.
+     * @param callback A callback for when the AccountManager is done.
+     * @return The result of {@link AccountManager#addAccount}.
+     */
+    public static AccountManagerFuture<Bundle> setupAccountManagerAccount(final Context context,
+            final Account account, final boolean email, final boolean calendar,
+            final boolean contacts, final HostAuth hostAuth,
+            final AccountManagerCallback<Bundle> callback) {
+        if (hostAuth == null) {
             return null;
         }
         // Set up username/password
+        final Bundle options = new Bundle(5);
         options.putString(EasAuthenticatorService.OPTIONS_USERNAME, account.mEmailAddress);
-        options.putString(EasAuthenticatorService.OPTIONS_PASSWORD, hostAuthRecv.mPassword);
+        options.putString(EasAuthenticatorService.OPTIONS_PASSWORD, hostAuth.mPassword);
         options.putBoolean(EasAuthenticatorService.OPTIONS_CONTACTS_SYNC_ENABLED, contacts);
         options.putBoolean(EasAuthenticatorService.OPTIONS_CALENDAR_SYNC_ENABLED, calendar);
         options.putBoolean(EasAuthenticatorService.OPTIONS_EMAIL_SYNC_ENABLED, email);
-        final EmailServiceInfo info = getServiceInfo(context, hostAuthRecv.mProtocol);
+        final EmailServiceInfo info = getServiceInfo(context, hostAuth.mProtocol);
         return AccountManager.get(context).addAccount(info.accountType, null, null, options, null,
                 callback, null);
     }
@@ -320,8 +349,7 @@ public class EmailServiceUtils {
                     return;
                 }
 
-                LogUtils.w(Logging.LOG_TAG, "Converting " + amAccount.name + " to "
-                        + newProtocol);
+                LogUtils.w(LogUtils.TAG, "Converting %s to %s", amAccount.name, newProtocol);
 
                 final ContentValues accountValues = new ContentValues();
                 int oldFlags = account.mFlags;
@@ -335,10 +363,10 @@ public class EmailServiceUtils {
                 // Change the HostAuth to reference the new protocol; this has to be done before
                 // trying to create the AccountManager account (below)
                 final ContentValues hostValues = new ContentValues();
-                hostValues.put(HostAuth.PROTOCOL, newProtocol);
+                hostValues.put(HostAuthColumns.PROTOCOL, newProtocol);
                 resolver.update(ContentUris.withAppendedId(HostAuth.CONTENT_URI, hostAuth.mId),
                         hostValues, null, null);
-                LogUtils.w(Logging.LOG_TAG, "Updated HostAuths");
+                LogUtils.w(LogUtils.TAG, "Updated HostAuths");
 
                 try {
                     // Get current settings for the existing AccountManager account
@@ -353,8 +381,8 @@ public class EmailServiceUtils {
                             ContactsContract.AUTHORITY);
                     final boolean calendar = ContentResolver.getSyncAutomatically(amAccount,
                             CalendarContract.AUTHORITY);
-                    LogUtils.w(Logging.LOG_TAG, "Email: " + email + ", Contacts: " + contacts + ","
-                            + " Calendar: " + calendar);
+                    LogUtils.w(LogUtils.TAG, "Email: %s, Contacts: %s Calendar: %s",
+                            email, contacts, calendar);
 
                     // Get sync keys for calendar/contacts
                     final String amName = amAccount.name;
@@ -367,7 +395,7 @@ public class EmailServiceUtils {
                                 asCalendarSyncAdapter(SyncState.CONTENT_URI, amName, oldType),
                                 new android.accounts.Account(amName, oldType));
                     } catch (RemoteException e) {
-                        LogUtils.w(Logging.LOG_TAG, "Get calendar key FAILED");
+                        LogUtils.w(LogUtils.TAG, "Get calendar key FAILED");
                     } finally {
                         client.release();
                     }
@@ -379,24 +407,24 @@ public class EmailServiceUtils {
                                 ContactsContract.SyncState.CONTENT_URI,
                                 new android.accounts.Account(amName, oldType));
                     } catch (RemoteException e) {
-                        LogUtils.w(Logging.LOG_TAG, "Get contacts key FAILED");
+                        LogUtils.w(LogUtils.TAG, "Get contacts key FAILED");
                     } finally {
                         client.release();
                     }
                     if (calendarSyncKey != null) {
-                        LogUtils.w(Logging.LOG_TAG, "Got calendar key: "
-                                + new String(calendarSyncKey));
+                        LogUtils.w(LogUtils.TAG, "Got calendar key: %s",
+                                new String(calendarSyncKey));
                     }
                     if (contactsSyncKey != null) {
-                        LogUtils.w(Logging.LOG_TAG, "Got contacts key: "
-                                + new String(contactsSyncKey));
+                        LogUtils.w(LogUtils.TAG, "Got contacts key: %s",
+                                new String(contactsSyncKey));
                     }
 
                     // Set up a new AccountManager account with new type and old settings
                     AccountManagerFuture<?> amFuture = setupAccountManagerAccount(context, account,
                             email, calendar, contacts, null);
                     finishAccountManagerBlocker(amFuture);
-                    LogUtils.w(Logging.LOG_TAG, "Created new AccountManager account");
+                    LogUtils.w(LogUtils.TAG, "Created new AccountManager account");
 
                     // TODO: Clean up how we determine the type.
                     final String accountType = protocolMap.get(hostAuth.mProtocol + "_type");
@@ -409,7 +437,7 @@ public class EmailServiceUtils {
                     amFuture = AccountManager.get(context)
                             .removeAccount(amAccount, null, null);
                     finishAccountManagerBlocker(amFuture);
-                    LogUtils.w(Logging.LOG_TAG, "Deleted old AccountManager account");
+                    LogUtils.w(LogUtils.TAG, "Deleted old AccountManager account");
 
                     // Restore sync keys for contacts/calendar
 
@@ -423,9 +451,9 @@ public class EmailServiceUtils {
                                             accountType),
                                     new android.accounts.Account(amName, accountType),
                                     calendarSyncKey);
-                            LogUtils.w(Logging.LOG_TAG, "Set calendar key...");
+                            LogUtils.w(LogUtils.TAG, "Set calendar key...");
                         } catch (RemoteException e) {
-                            LogUtils.w(Logging.LOG_TAG, "Set calendar key FAILED");
+                            LogUtils.w(LogUtils.TAG, "Set calendar key FAILED");
                         } finally {
                             client.release();
                         }
@@ -439,19 +467,19 @@ public class EmailServiceUtils {
                                     ContactsContract.SyncState.CONTENT_URI,
                                     new android.accounts.Account(amName, accountType),
                                     contactsSyncKey);
-                            LogUtils.w(Logging.LOG_TAG, "Set contacts key...");
+                            LogUtils.w(LogUtils.TAG, "Set contacts key...");
                         } catch (RemoteException e) {
-                            LogUtils.w(Logging.LOG_TAG, "Set contacts key FAILED");
+                            LogUtils.w(LogUtils.TAG, "Set contacts key FAILED");
                         }
                     }
 
                     // That's all folks!
-                    LogUtils.w(Logging.LOG_TAG, "Account update completed.");
+                    LogUtils.w(LogUtils.TAG, "Account update completed.");
                 } finally {
                     // Clear the incomplete flag on the provider account
                     accountValues.put(AccountColumns.FLAGS, oldFlags);
                     resolver.update(accountUri, accountValues, null, null);
-                    LogUtils.w(Logging.LOG_TAG, "[Incomplete flag cleared]");
+                    LogUtils.w(LogUtils.TAG, "[Incomplete flag cleared]");
                 }
             }
         } finally {
@@ -543,6 +571,8 @@ public class EmailServiceUtils {
                         info.offerTls = ta.getBoolean(R.styleable.EmailServiceInfo_offerTls, false);
                         info.offerCerts =
                                 ta.getBoolean(R.styleable.EmailServiceInfo_offerCerts, false);
+                        info.offerOAuth =
+                                ta.getBoolean(R.styleable.EmailServiceInfo_offerOAuth, false);
                         info.offerLocalDeletes =
                             ta.getBoolean(R.styleable.EmailServiceInfo_offerLocalDeletes, false);
                         info.defaultLocalDeletes =
@@ -576,8 +606,12 @@ public class EmailServiceUtils {
                         info.inferPrefix = ta.getString(R.styleable.EmailServiceInfo_inferPrefix);
                         info.offerLoadMore =
                                 ta.getBoolean(R.styleable.EmailServiceInfo_offerLoadMore, false);
+                        info.offerMoveTo =
+                                ta.getBoolean(R.styleable.EmailServiceInfo_offerMoveTo, false);
                         info.requiresSetup =
                                 ta.getBoolean(R.styleable.EmailServiceInfo_requiresSetup, false);
+                        info.isGmailStub =
+                                ta.getBoolean(R.styleable.EmailServiceInfo_isGmailStub, false);
 
                         // Must have either "class" (local) or "intent" (remote)
                         if (klass != null) {
@@ -589,7 +623,9 @@ public class EmailServiceUtils {
                                         "Class not found in service descriptor: " + klass);
                             }
                         }
-                        if (info.klass == null && info.intentAction == null) {
+                        if (info.klass == null &&
+                                info.intentAction == null &&
+                                !info.isGmailStub) {
                             throw new IllegalStateException(
                                     "No class or intent action specified in service descriptor");
                         }
@@ -610,6 +646,31 @@ public class EmailServiceUtils {
         }
     }
 
+    /**
+     * Resolves a service name into a protocol name, or null if ambiguous
+     * @param context for loading service map
+     * @param accountType sync adapter service name
+     * @return protocol name or null
+     */
+    public static @Nullable String getProtocolFromAccountType(final Context context,
+            final String accountType) {
+        if (TextUtils.isEmpty(accountType)) {
+            return null;
+        }
+        final Map <String, EmailServiceInfo> serviceInfoMap = getServiceMap(context);
+        String protocol = null;
+        for (final EmailServiceInfo info : serviceInfoMap.values()) {
+            if (TextUtils.equals(accountType, info.accountType)) {
+                if (!TextUtils.isEmpty(protocol) && !TextUtils.equals(protocol, info.protocol)) {
+                    // More than one protocol matches
+                    return null;
+                }
+                protocol = info.protocol;
+            }
+        }
+        return protocol;
+    }
+
     private static Uri asCalendarSyncAdapter(Uri uri, String account, String accountType) {
         return uri.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(Calendars.ACCOUNT_NAME, account)
@@ -626,54 +687,20 @@ public class EmailServiceUtils {
         }
 
         @Override
-        public Bundle validate(HostAuth hostauth) throws RemoteException {
+        public Bundle validate(HostAuthCompat hostauth) throws RemoteException {
             return null;
         }
 
         @Override
-        public void startSync(long mailboxId, boolean userRequest, int deltaMessageCount)
-                throws RemoteException {
+        public void loadAttachment(final IEmailServiceCallback cb, final long accountId,
+                final long attachmentId, final boolean background) throws RemoteException {
         }
 
         @Override
-        public void stopSync(long mailboxId) throws RemoteException {
-        }
+        public void updateFolderList(long accountId) throws RemoteException {}
 
         @Override
-        public void loadMore(long messageId) throws RemoteException {
-        }
-
-        @Override
-        public void loadAttachment(final IEmailServiceCallback cb, final long attachmentId,
-                final boolean background) throws RemoteException {
-        }
-
-        @Override
-        public void updateFolderList(long accountId) throws RemoteException {
-        }
-
-        @Override
-        public boolean createFolder(long accountId, String name) throws RemoteException {
-            return false;
-        }
-
-        @Override
-        public boolean deleteFolder(long accountId, String name) throws RemoteException {
-            return false;
-        }
-
-        @Override
-        public boolean renameFolder(long accountId, String oldName, String newName)
-                throws RemoteException {
-            return false;
-        }
-
-        @Override
-        public void setLogging(int on) throws RemoteException {
-        }
-
-        @Override
-        public void hostChanged(long accountId) throws RemoteException {
+        public void setLogging(int flags) throws RemoteException {
         }
 
         @Override
@@ -686,12 +713,7 @@ public class EmailServiceUtils {
         }
 
         @Override
-        public void deleteAccountPIMData(final String emailAddress) throws RemoteException {
-        }
-
-        @Override
-        public int getApiLevel() throws RemoteException {
-            return Api.LEVEL;
+        public void deleteExternalAccountPIMData(final String emailAddress) throws RemoteException {
         }
 
         @Override
@@ -705,12 +727,48 @@ public class EmailServiceUtils {
         }
 
         @Override
-        public void serviceUpdated(String emailAddress) throws RemoteException {
+        public void pushModify(long accountId) throws RemoteException {
         }
 
         @Override
-        public int getCapabilities(Account acct) throws RemoteException {
-            return 0;
+        public int sync(final long accountId, final Bundle syncExtras) {
+            return EmailServiceStatus.SUCCESS;
+        }
+
+        public int getApiVersion() {
+            return EmailServiceVersion.CURRENT;
         }
     }
+
+    public static void setComponentStatus(final Context context, Class<?> clazz, boolean enabled) {
+        final ComponentName c = new ComponentName(context, clazz.getName());
+        context.getPackageManager().setComponentEnabledSetting(c,
+                enabled ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        : PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP);
+    }
+
+    /**
+     * This is a helper function that enables the proper Exchange component and disables
+     * the other Exchange component ensuring that only one is enabled at a time.
+     */
+    public static void enableExchangeComponent(final Context context) {
+        if (VendorPolicyLoader.getInstance(context).useAlternateExchangeStrings()) {
+            LogUtils.d(LogUtils.TAG, "Enabling alternate EAS authenticator");
+            setComponentStatus(context, EasAuthenticatorServiceAlternate.class, true);
+            setComponentStatus(context, EasAuthenticatorService.class, false);
+        } else {
+            LogUtils.d(LogUtils.TAG, "Enabling EAS authenticator");
+            setComponentStatus(context, EasAuthenticatorService.class, true);
+            setComponentStatus(context,
+                    EasAuthenticatorServiceAlternate.class, false);
+        }
+    }
+
+    public static void disableExchangeComponents(final Context context) {
+        LogUtils.d(LogUtils.TAG, "Disabling EAS authenticators");
+        setComponentStatus(context, EasAuthenticatorServiceAlternate.class, false);
+        setComponentStatus(context, EasAuthenticatorService.class, false);
+    }
+
 }

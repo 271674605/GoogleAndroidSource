@@ -9,24 +9,29 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/shelf/shelf_types.h"
 #include "ash/system/user/login_status.h"
+#include "ash/wm/cursor_manager_chromeos.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "ui/aura/client/activation_change_observer.h"
-#include "ui/base/events/event_target.h"
+#include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/events/event_target.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
-#include "ui/views/corewm/cursor_manager.h"
+#include "ui/wm/core/cursor_manager.h"
+#include "ui/wm/public/activation_change_observer.h"
 
-class CommandLine;
-
+namespace app_list {
+class AppListView;
+}
 namespace aura {
 class EventFilter;
 class RootWindow;
@@ -34,14 +39,7 @@ class Window;
 namespace client {
 class ActivationClient;
 class FocusClient;
-class UserActionClient;
 }
-}
-namespace chromeos {
-class OutputConfigurator;
-}
-namespace content {
-class BrowserContext;
 }
 
 namespace gfx {
@@ -49,83 +47,106 @@ class ImageSkia;
 class Point;
 class Rect;
 }
+
 namespace ui {
+class DisplayConfigurator;
 class Layer;
+class UserActivityPowerManagerNotifier;
 }
 namespace views {
 class NonClientFrameView;
 class Widget;
 namespace corewm {
+class TooltipController;
+}
+}
+
+namespace wm {
+class AcceleratorFilter;
 class CompoundEventFilter;
 class InputMethodEventFilter;
+class NestedAcceleratorController;
 class ShadowController;
-class TooltipController;
 class VisibilityController;
+class UserActivityDetector;
 class WindowModalityController;
-}
 }
 
 namespace ash {
 
 class AcceleratorController;
-class AshNativeCursorManager;
-class CapsLockDelegate;
-class DesktopBackgroundController;
-class DisplayController;
-class HighContrastController;
-class Launcher;
-class LauncherDelegate;
-class LauncherModel;
-class MagnificationController;
-class MruWindowTracker;
-class NestedDispatcherController;
-class PartialMagnificationController;
-class PowerButtonController;
-class RootWindowHostFactory;
-class ScreenAsh;
-class LockStateController;
-class SessionStateDelegate;
-class ShellDelegate;
-class ShellObserver;
-class SystemTray;
-class SystemTrayDelegate;
-class SystemTrayNotifier;
-class UserActivityDetector;
-class UserWallpaperDelegate;
-class VideoDetector;
-class WebNotificationTray;
-class WindowCycleController;
-class WindowSelectorController;
-
-namespace internal {
-class AcceleratorFilter;
-class ActivationController;
+class AccelerometerController;
+class AccessibilityDelegate;
 class AppListController;
+class AshNativeCursorManager;
+class AutoclickController;
+class BluetoothNotificationController;
 class CaptureController;
-class DisplayChangeObserverX11;
+class DesktopBackgroundController;
+class DisplayChangeObserver;
+class DisplayConfiguratorAnimation;
+class DisplayController;
 class DisplayErrorObserver;
 class DisplayManager;
 class DragDropController;
 class EventClientImpl;
 class EventRewriterEventFilter;
 class EventTransformationHandler;
+class FirstRunHelper;
 class FocusCycler;
+class GPUSupport;
+class HighContrastController;
+class KeyboardUMAEventFilter;
+class LastWindowClosedLogoutReminder;
 class LocaleNotificationController;
+class LockStateController;
+class LogoutConfirmationController;
+class MagnificationController;
+class MaximizeModeController;
+class MaximizeModeWindowManager;
+class MediaDelegate;
 class MouseCursorEventFilter;
-class OutputConfiguratorAnimation;
+class MruWindowTracker;
+class NewWindowDelegate;
 class OverlayEventFilter;
+class PartialMagnificationController;
+class PowerButtonController;
+class PowerEventObserver;
+class ProjectingObserver;
 class ResizeShadowController;
 class ResolutionNotificationController;
 class RootWindowController;
-class RootWindowLayoutManager;
 class ScopedTargetRootWindow;
+class ScreenAsh;
 class ScreenPositionController;
+class SessionStateDelegate;
+class Shelf;
+class ShelfDelegate;
+class ShelfItemDelegateManager;
+class ShelfModel;
+class ShelfWindowWatcher;
+class ShellDelegate;
+struct ShellInitParams;
+class ShellObserver;
 class SlowAnimationEventFilter;
 class StatusAreaWidget;
+class StickyKeysController;
 class SystemGestureEventFilter;
 class SystemModalContainerEventFilter;
+class SystemTray;
+class SystemTrayDelegate;
+class SystemTrayNotifier;
+class ToplevelWindowEventHandler;
+class TouchTransformerController;
 class TouchObserverHUD;
-}
+class UserActivityDetector;
+class UserWallpaperDelegate;
+class VideoActivityNotifier;
+class VideoDetector;
+class WebNotificationTray;
+class WindowCycleController;
+class WindowPositioner;
+class WindowSelectorController;
 
 namespace shell {
 class WindowWatcher;
@@ -140,13 +161,11 @@ class ShellTestApi;
 //
 // Upon creation, the Shell sets itself as the RootWindow's delegate, which
 // takes ownership of the Shell.
-class ASH_EXPORT Shell
-    : public internal::SystemModalContainerEventFilterDelegate,
-      public ui::EventTarget,
-      public aura::client::ActivationChangeObserver {
+class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
+                         public ui::EventTarget,
+                         public aura::client::ActivationChangeObserver {
  public:
-  typedef std::vector<aura::RootWindow*> RootWindowList;
-  typedef std::vector<internal::RootWindowController*> RootWindowControllerList;
+  typedef std::vector<RootWindowController*> RootWindowControllerList;
 
   enum Direction {
     FORWARD,
@@ -156,7 +175,7 @@ class ASH_EXPORT Shell
   // A shell must be explicitly created so that it can call |Init()| with the
   // delegate set. |delegate| can be NULL (if not required for initialization).
   // Takes ownership of |delegate|.
-  static Shell* CreateInstance(ShellDelegate* delegate);
+  static Shell* CreateInstance(const ShellInitParams& init_params);
 
   // Should never be called before |CreateInstance()|.
   static Shell* GetInstance();
@@ -168,33 +187,32 @@ class ASH_EXPORT Shell
 
   // Returns the root window controller for the primary root window.
   // TODO(oshima): move this to |RootWindowController|
-  static internal::RootWindowController* GetPrimaryRootWindowController();
+  static RootWindowController* GetPrimaryRootWindowController();
 
   // Returns all root window controllers.
   // TODO(oshima): move this to |RootWindowController|
   static RootWindowControllerList GetAllRootWindowControllers();
 
-  // Returns the primary RootWindow. The primary RootWindow is the one
-  // that has a launcher.
-  static aura::RootWindow* GetPrimaryRootWindow();
+  // Returns the primary root Window. The primary root Window is the one that
+  // has a launcher.
+  static aura::Window* GetPrimaryRootWindow();
 
-  // Returns a RootWindow when used as a target when creating a new window.
+  // Returns a root Window when used as a target when creating a new window.
   // The root window of the active window is used in most cases, but can
   // be overridden by using ScopedTargetRootWindow().
-  // If you want to get a RootWindow of the active window, just use
+  // If you want to get the root Window of the active window, just use
   // |wm::GetActiveWindow()->GetRootWindow()|.
-  // TODO(oshima): Rename to GetTargetRootWindow() crbug.com/266378.
-  static aura::RootWindow* GetActiveRootWindow();
+  static aura::Window* GetTargetRootWindow();
 
   // Returns the global Screen object that's always active in ash.
   static gfx::Screen* GetScreen();
 
   // Returns all root windows.
-  static RootWindowList GetAllRootWindows();
+  static aura::Window::Windows GetAllRootWindows();
 
-  static aura::Window* GetContainer(aura::RootWindow* root_window,
+  static aura::Window* GetContainer(aura::Window* root_window,
                                     int container_id);
-  static const aura::Window* GetContainer(const aura::RootWindow* root_window,
+  static const aura::Window* GetContainer(const aura::Window* root_window,
                                           int container_id);
 
   // Returns the list of containers that match |container_id| in
@@ -202,13 +220,9 @@ class ASH_EXPORT Shell
   // in the |priority_root| will be inserted at the top of the list.
   static std::vector<aura::Window*> GetContainersFromAllRootWindows(
       int container_id,
-      aura::RootWindow* priority_root);
+      aura::Window* priority_root);
 
-  // True if an experimental maximize mode is enabled which forces browser and
-  // application windows to be maximized only.
-  static bool IsForcedMaximizeMode();
-
-  void set_active_root_window(aura::RootWindow* target_root_window) {
+  void set_target_root_window(aura::Window* target_root_window) {
     target_root_window_ = target_root_window;
   }
 
@@ -227,6 +241,9 @@ class ASH_EXPORT Shell
 
   // Returns app list window or NULL if it is not visible.
   aura::Window* GetAppListWindow();
+
+  // Returns app list view or NULL if it is not visible.
+  app_list::AppListView* GetAppListView();
 
   // Returns true if a system-modal dialog window is currently open.
   bool IsSystemModalWindowOpen() const;
@@ -254,6 +271,9 @@ class ASH_EXPORT Shell
   // Called when the user logs in.
   void OnLoginStateChanged(user::LoginStatus status);
 
+  // Called after the logged-in user's profile is ready.
+  void OnLoginUserProfilePrepared();
+
   // Called when the login status changes.
   // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
   void UpdateAfterLoginStatusChange(user::LoginStatus status);
@@ -265,40 +285,70 @@ class ASH_EXPORT Shell
   // unlocked.
   void OnLockStateChanged(bool locked);
 
-  // Initializes |launcher_|.  Does nothing if it's already initialized.
-  void CreateLauncher();
+  // Called when a casting session is started or stopped.
+  void OnCastingSessionStartedOrStopped(bool started);
 
-  // Show launcher view if it was created hidden (before session has started).
-  void ShowLauncher();
+  // Called when the overview mode is about to be started (before the windows
+  // get re-arranged).
+  void OnOverviewModeStarting();
+
+  // Called before the overview mode is ending (before the windows get arranged
+  // to their final position).
+  void OnOverviewModeEnding();
+
+  // Called after maximize mode has started, windows might still animate though.
+  void OnMaximizeModeStarted();
+
+  // Called after maximize mode has ended, windows might still be returning to
+  // their original position.
+  void OnMaximizeModeEnded();
+
+  // Called when a root window is created.
+  void OnRootWindowAdded(aura::Window* root_window);
+
+  // Initializes |shelf_|.  Does nothing if it's already initialized.
+  void CreateShelf();
+
+  // Called when the shelf is created for |root_window|.
+  void OnShelfCreatedForRootWindow(aura::Window* root_window);
+
+  // Creates a virtual keyboard. Deletes the old virtual keyboard if it already
+  // exists.
+  void CreateKeyboard();
+
+  // Deactivates the virtual keyboard.
+  void DeactivateKeyboard();
+
+  // Show shelf view if it was created hidden (before session has started).
+  void ShowShelf();
 
   // Adds/removes observer.
   void AddShellObserver(ShellObserver* observer);
   void RemoveShellObserver(ShellObserver* observer);
 
-#if !defined(OS_MACOSX)
+#if defined(OS_CHROMEOS)
+  // Test if MaximizeModeWindowManager is not enabled, and if
+  // MaximizeModeController is not currently setting a display rotation. Or if
+  // the |resolution_notification_controller_| is not showing its confirmation
+  // dialog. If true then changes to display settings can be saved.
+  bool ShouldSaveDisplaySettings();
+#endif
+
   AcceleratorController* accelerator_controller() {
     return accelerator_controller_.get();
   }
-#endif  // !defined(OS_MACOSX)
 
-  internal::DisplayManager* display_manager() {
-    return display_manager_.get();
-  }
-  views::corewm::InputMethodEventFilter* input_method_filter() {
+  DisplayManager* display_manager() { return display_manager_.get(); }
+  ::wm::InputMethodEventFilter* input_method_filter() {
     return input_method_filter_.get();
   }
-  views::corewm::CompoundEventFilter* env_filter() {
+  ::wm::CompoundEventFilter* env_filter() {
     return env_filter_.get();
   }
   views::corewm::TooltipController* tooltip_controller() {
     return tooltip_controller_.get();
   }
-  internal::EventRewriterEventFilter* event_rewriter_filter() {
-    return event_rewriter_filter_.get();
-  }
-  internal::OverlayEventFilter* overlay_filter() {
-    return overlay_filter_.get();
-  }
+  OverlayEventFilter* overlay_filter() { return overlay_filter_.get(); }
   DesktopBackgroundController* desktop_background_controller() {
     return desktop_background_controller_.get();
   }
@@ -311,7 +361,7 @@ class ASH_EXPORT Shell
   MruWindowTracker* mru_window_tracker() {
     return mru_window_tracker_.get();
   }
-  UserActivityDetector* user_activity_detector() {
+  ::wm::UserActivityDetector* user_activity_detector() {
     return user_activity_detector_.get();
   }
   VideoDetector* video_detector() {
@@ -323,19 +373,22 @@ class ASH_EXPORT Shell
   WindowSelectorController* window_selector_controller() {
     return window_selector_controller_.get();
   }
-  internal::FocusCycler* focus_cycler() {
-    return focus_cycler_.get();
-  }
+  FocusCycler* focus_cycler() { return focus_cycler_.get(); }
   DisplayController* display_controller() {
     return display_controller_.get();
   }
-  internal::MouseCursorEventFilter* mouse_cursor_filter() {
+#if defined(OS_CHROMEOS) && defined(USE_X11)
+  TouchTransformerController* touch_transformer_controller() {
+    return touch_transformer_controller_.get();
+  }
+#endif  // defined(OS_CHROMEOS) && defined(USE_X11)
+  MouseCursorEventFilter* mouse_cursor_filter() {
     return mouse_cursor_filter_.get();
   }
-  internal::EventTransformationHandler* event_transformation_handler() {
+  EventTransformationHandler* event_transformation_handler() {
     return event_transformation_handler_.get();
   }
-  views::corewm::CursorManager* cursor_manager() { return &cursor_manager_; }
+  ::wm::CursorManager* cursor_manager() { return &cursor_manager_; }
 
   ShellDelegate* delegate() { return delegate_.get(); }
 
@@ -343,12 +396,20 @@ class ASH_EXPORT Shell
     return user_wallpaper_delegate_.get();
   }
 
-  CapsLockDelegate* caps_lock_delegate() {
-    return caps_lock_delegate_.get();
-  }
-
   SessionStateDelegate* session_state_delegate() {
     return session_state_delegate_.get();
+  }
+
+  AccessibilityDelegate* accessibility_delegate() {
+    return accessibility_delegate_.get();
+  }
+
+  NewWindowDelegate* new_window_delegate() {
+    return new_window_delegate_.get();
+  }
+
+  MediaDelegate* media_delegate() {
+    return media_delegate_.get();
   }
 
   HighContrastController* high_contrast_controller() {
@@ -362,11 +423,18 @@ class ASH_EXPORT Shell
   PartialMagnificationController* partial_magnification_controller() {
     return partial_magnification_controller_.get();
   }
+
+  AutoclickController* autoclick_controller() {
+    return autoclick_controller_.get();
+  }
+
   aura::client::ActivationClient* activation_client() {
     return activation_client_;
   }
 
-  ScreenAsh* screen() { return screen_; }
+  ShelfItemDelegateManager* shelf_item_delegate_manager() {
+    return shelf_item_delegate_manager_.get();
+  }
 
   // Force the shelf to query for it's current visibility state.
   void UpdateShelfVisibility();
@@ -376,17 +444,22 @@ class ASH_EXPORT Shell
 
   // Sets/gets the shelf auto-hide behavior on |root_window|.
   void SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior,
-                                aura::RootWindow* root_window);
+                                aura::Window* root_window);
   ShelfAutoHideBehavior GetShelfAutoHideBehavior(
-      aura::RootWindow* root_window) const;
+      aura::Window* root_window) const;
 
   // Sets/gets shelf's alignment on |root_window|.
   void SetShelfAlignment(ShelfAlignment alignment,
-                         aura::RootWindow* root_window);
-  ShelfAlignment GetShelfAlignment(aura::RootWindow* root_window);
+                         aura::Window* root_window);
+  ShelfAlignment GetShelfAlignment(const aura::Window* root_window);
 
   // Dims or undims the screen.
   void SetDimming(bool should_dim);
+
+  // Notifies |observers_| when entering or exiting fullscreen mode in
+  // |root_window|.
+  void NotifyFullscreenStateChange(bool is_fullscreen,
+                                   aura::Window* root_window);
 
   // Creates a modal background (a partially-opaque fullscreen window)
   // on all displays for |window|.
@@ -418,54 +491,61 @@ class ASH_EXPORT Shell
     initially_hide_cursor_ = hide;
   }
 
-  internal::ResizeShadowController* resize_shadow_controller() {
+  ResizeShadowController* resize_shadow_controller() {
     return resize_shadow_controller_.get();
   }
 
   // Made available for tests.
-  views::corewm::ShadowController* shadow_controller() {
+  ::wm::ShadowController* shadow_controller() {
     return shadow_controller_.get();
   }
-
-  content::BrowserContext* browser_context() { return browser_context_; }
-  void set_browser_context(content::BrowserContext* browser_context) {
-    browser_context_ = browser_context;
-  }
-
-  // Initializes the root window to be used for a secondary display.
-  void InitRootWindowForSecondaryDisplay(aura::RootWindow* root);
 
   // Starts the animation that occurs on first login.
   void DoInitialWorkspaceAnimation();
 
-#if defined(OS_CHROMEOS) && defined(USE_X11)
+  AccelerometerController* accelerometer_controller() {
+    return accelerometer_controller_.get();
+  }
+
+  MaximizeModeController* maximize_mode_controller() {
+    return maximize_mode_controller_.get();
+  }
+
+#if defined(OS_CHROMEOS)
   // TODO(oshima): Move these objects to DisplayController.
-  chromeos::OutputConfigurator* output_configurator() {
-    return output_configurator_.get();
+  ui::DisplayConfigurator* display_configurator() {
+    return display_configurator_.get();
   }
-  internal::OutputConfiguratorAnimation* output_configurator_animation() {
-    return output_configurator_animation_.get();
+  DisplayConfiguratorAnimation* display_configurator_animation() {
+    return display_configurator_animation_.get();
   }
-  internal::DisplayErrorObserver* display_error_observer() {
+  DisplayErrorObserver* display_error_observer() {
     return display_error_observer_.get();
   }
-#endif  // defined(OS_CHROMEOS) && defined(USE_X11)
 
-  internal::ResolutionNotificationController*
-      resolution_notification_controller() {
+  ResolutionNotificationController* resolution_notification_controller() {
     return resolution_notification_controller_.get();
   }
 
-  RootWindowHostFactory* root_window_host_factory() {
-    return root_window_host_factory_.get();
+  LogoutConfirmationController* logout_confirmation_controller() {
+    return logout_confirmation_controller_.get();
+  }
+#endif  // defined(OS_CHROMEOS)
+
+  ShelfModel* shelf_model() {
+    return shelf_model_.get();
   }
 
-  LauncherModel* launcher_model() {
-    return launcher_model_.get();
+  WindowPositioner* window_positioner() {
+    return window_positioner_.get();
   }
 
   // Returns the launcher delegate, creating if necesary.
-  LauncherDelegate* GetLauncherDelegate();
+  ShelfDelegate* GetShelfDelegate();
+
+  UserMetricsRecorder* metrics() {
+    return user_metrics_recorder_.get();
+  }
 
   void SetTouchHudProjectionEnabled(bool enabled);
 
@@ -473,12 +553,28 @@ class ASH_EXPORT Shell
     return is_touch_hud_projection_enabled_;
   }
 
+#if defined(OS_CHROMEOS)
+  // Creates instance of FirstRunHelper. Caller is responsible for deleting
+  // returned object.
+  ash::FirstRunHelper* CreateFirstRunHelper();
+
+  // Toggles cursor compositing on/off. Native cursor is disabled when cursor
+  // compositing is enabled, and vice versa.
+  void SetCursorCompositingEnabled(bool enabled);
+
+  StickyKeysController* sticky_keys_controller() {
+    return sticky_keys_controller_.get();
+  }
+#endif  // defined(OS_CHROMEOS)
+
+  GPUSupport* gpu_support() { return gpu_support_.get(); }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
   FRIEND_TEST_ALL_PREFIXES(WindowManagerTest, MouseEventCursors);
   FRIEND_TEST_ALL_PREFIXES(WindowManagerTest, TransformActivate);
-  friend class internal::RootWindowController;
-  friend class internal::ScopedTargetRootWindow;
+  friend class RootWindowController;
+  friend class ScopedTargetRootWindow;
   friend class test::ShellTestApi;
   friend class shell::WindowWatcher;
 
@@ -488,20 +584,22 @@ class ASH_EXPORT Shell
   explicit Shell(ShellDelegate* delegate);
   virtual ~Shell();
 
-  void Init();
+  void Init(const ShellInitParams& init_params);
 
-  // Initializes the root window and root window controller so that it
-  // can host browser windows. |first_run_after_boot| is true for the
-  // primary display only first time after boot.
-  void InitRootWindowController(internal::RootWindowController* root,
-                                bool first_run_after_boot);
+  // Initializes virtual keyboard controller.
+  void InitKeyboard();
 
-  // ash::internal::SystemModalContainerEventFilterDelegate overrides:
+  // Initializes the root window so that it can host browser windows.
+  void InitRootWindow(aura::Window* root_window);
+
+  // ash::SystemModalContainerEventFilterDelegate overrides:
   virtual bool CanWindowReceiveEvents(aura::Window* window) OVERRIDE;
 
   // Overridden from ui::EventTarget:
   virtual bool CanAcceptEvent(const ui::Event& event) OVERRIDE;
   virtual EventTarget* GetParentTarget() OVERRIDE;
+  virtual scoped_ptr<ui::EventTargetIterator> GetChildIterator() const OVERRIDE;
+  virtual ui::EventTargeter* GetEventTargeter() OVERRIDE;
   virtual void OnEvent(ui::Event* event) OVERRIDE;
 
   // Overridden from aura::client::ActivationChangeObserver:
@@ -514,122 +612,145 @@ class ASH_EXPORT Shell
   // when the screen is initially created.
   static bool initially_hide_cursor_;
 
-  ScreenAsh* screen_;
-
   // When no explicit target display/RootWindow is given, new windows are
   // created on |scoped_target_root_window_| , unless NULL in
   // which case they are created on |target_root_window_|.
   // |target_root_window_| never becomes NULL during the session.
-  aura::RootWindow* target_root_window_;
-  aura::RootWindow* scoped_target_root_window_;
+  aura::Window* target_root_window_;
+  aura::Window* scoped_target_root_window_;
 
   // The CompoundEventFilter owned by aura::Env object.
-  scoped_ptr<views::corewm::CompoundEventFilter> env_filter_;
+  scoped_ptr< ::wm::CompoundEventFilter> env_filter_;
 
   std::vector<WindowAndBoundsPair> to_restore_;
 
-#if !defined(OS_MACOSX)
-  scoped_ptr<NestedDispatcherController> nested_dispatcher_controller_;
-
+  scoped_ptr<UserMetricsRecorder> user_metrics_recorder_;
+  scoped_ptr< ::wm::NestedAcceleratorController> nested_accelerator_controller_;
   scoped_ptr<AcceleratorController> accelerator_controller_;
-#endif  // !defined(OS_MACOSX)
-
   scoped_ptr<ShellDelegate> delegate_;
   scoped_ptr<SystemTrayDelegate> system_tray_delegate_;
   scoped_ptr<SystemTrayNotifier> system_tray_notifier_;
   scoped_ptr<UserWallpaperDelegate> user_wallpaper_delegate_;
-  scoped_ptr<CapsLockDelegate> caps_lock_delegate_;
   scoped_ptr<SessionStateDelegate> session_state_delegate_;
-  scoped_ptr<LauncherDelegate> launcher_delegate_;
+  scoped_ptr<AccessibilityDelegate> accessibility_delegate_;
+  scoped_ptr<NewWindowDelegate> new_window_delegate_;
+  scoped_ptr<MediaDelegate> media_delegate_;
+  scoped_ptr<ShelfDelegate> shelf_delegate_;
+  scoped_ptr<ShelfItemDelegateManager> shelf_item_delegate_manager_;
+  scoped_ptr<ShelfWindowWatcher> shelf_window_watcher_;
 
-  scoped_ptr<LauncherModel> launcher_model_;
+  scoped_ptr<ShelfModel> shelf_model_;
+  scoped_ptr<WindowPositioner> window_positioner_;
 
-  scoped_ptr<internal::AppListController> app_list_controller_;
+  scoped_ptr<AppListController> app_list_controller_;
 
-  scoped_ptr<internal::ActivationController> activation_controller_;
-  scoped_ptr<internal::CaptureController> capture_controller_;
-  scoped_ptr<internal::DragDropController> drag_drop_controller_;
-  scoped_ptr<internal::ResizeShadowController> resize_shadow_controller_;
-  scoped_ptr<views::corewm::ShadowController> shadow_controller_;
-  scoped_ptr<views::corewm::VisibilityController> visibility_controller_;
-  scoped_ptr<views::corewm::WindowModalityController>
-      window_modality_controller_;
+  scoped_ptr<DragDropController> drag_drop_controller_;
+  scoped_ptr<ResizeShadowController> resize_shadow_controller_;
+  scoped_ptr< ::wm::ShadowController> shadow_controller_;
+  scoped_ptr< ::wm::VisibilityController> visibility_controller_;
+  scoped_ptr< ::wm::WindowModalityController> window_modality_controller_;
   scoped_ptr<views::corewm::TooltipController> tooltip_controller_;
   scoped_ptr<DesktopBackgroundController> desktop_background_controller_;
   scoped_ptr<PowerButtonController> power_button_controller_;
   scoped_ptr<LockStateController> lock_state_controller_;
   scoped_ptr<MruWindowTracker> mru_window_tracker_;
-  scoped_ptr<UserActivityDetector> user_activity_detector_;
+  scoped_ptr< ::wm::UserActivityDetector> user_activity_detector_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
   scoped_ptr<WindowSelectorController> window_selector_controller_;
-  scoped_ptr<internal::FocusCycler> focus_cycler_;
+  scoped_ptr<FocusCycler> focus_cycler_;
   scoped_ptr<DisplayController> display_controller_;
   scoped_ptr<HighContrastController> high_contrast_controller_;
   scoped_ptr<MagnificationController> magnification_controller_;
   scoped_ptr<PartialMagnificationController> partial_magnification_controller_;
+  scoped_ptr<AutoclickController> autoclick_controller_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
-  scoped_ptr<aura::client::UserActionClient> user_action_client_;
   aura::client::ActivationClient* activation_client_;
-  scoped_ptr<internal::MouseCursorEventFilter> mouse_cursor_filter_;
-  scoped_ptr<internal::ScreenPositionController> screen_position_controller_;
-  scoped_ptr<internal::SystemModalContainerEventFilter> modality_filter_;
-  scoped_ptr<internal::EventClientImpl> event_client_;
-  scoped_ptr<internal::EventTransformationHandler>
-      event_transformation_handler_;
-  scoped_ptr<RootWindowHostFactory> root_window_host_factory_;
 
-  // An event filter that rewrites or drops an event.
-  scoped_ptr<internal::EventRewriterEventFilter> event_rewriter_filter_;
+  scoped_ptr<MouseCursorEventFilter> mouse_cursor_filter_;
+  scoped_ptr<ScreenPositionController> screen_position_controller_;
+  scoped_ptr<SystemModalContainerEventFilter> modality_filter_;
+  scoped_ptr<EventClientImpl> event_client_;
+  scoped_ptr<EventTransformationHandler> event_transformation_handler_;
 
   // An event filter that pre-handles key events while the partial
   // screenshot UI or the keyboard overlay is active.
-  scoped_ptr<internal::OverlayEventFilter> overlay_filter_;
+  scoped_ptr<OverlayEventFilter> overlay_filter_;
+
+  // An event filter for logging keyboard-related metrics.
+  scoped_ptr<KeyboardUMAEventFilter> keyboard_metrics_filter_;
+
+  // An event filter which handles moving and resizing windows.
+  scoped_ptr<ToplevelWindowEventHandler> toplevel_window_event_handler_;
 
   // An event filter which handles system level gestures
-  scoped_ptr<internal::SystemGestureEventFilter> system_gesture_filter_;
+  scoped_ptr<SystemGestureEventFilter> system_gesture_filter_;
 
-#if !defined(OS_MACOSX)
   // An event filter that pre-handles global accelerators.
-  scoped_ptr<internal::AcceleratorFilter> accelerator_filter_;
-#endif
+  scoped_ptr< ::wm::AcceleratorFilter> accelerator_filter_;
 
   // An event filter that pre-handles all key events to send them to an IME.
-  scoped_ptr<views::corewm::InputMethodEventFilter> input_method_filter_;
+  scoped_ptr< ::wm::InputMethodEventFilter> input_method_filter_;
 
-  scoped_ptr<internal::DisplayManager> display_manager_;
+  scoped_ptr<DisplayManager> display_manager_;
+  scoped_ptr<base::WeakPtrFactory<DisplayManager> >
+      weak_display_manager_factory_;
 
-  scoped_ptr<internal::LocaleNotificationController>
-      locale_notification_controller_;
+  scoped_ptr<LocaleNotificationController> locale_notification_controller_;
 
-#if defined(OS_CHROMEOS) && defined(USE_X11)
-  // Controls video output device state.
-  scoped_ptr<chromeos::OutputConfigurator> output_configurator_;
-  scoped_ptr<internal::OutputConfiguratorAnimation>
-      output_configurator_animation_;
-  scoped_ptr<internal::DisplayErrorObserver> display_error_observer_;
+  scoped_ptr<AccelerometerController> accelerometer_controller_;
 
-  // Receives output change events and udpates the display manager.
-  scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
-#endif  // defined(OS_CHROMEOS) && defined(USE_X11)
-
-  scoped_ptr<internal::ResolutionNotificationController>
+#if defined(OS_CHROMEOS)
+  scoped_ptr<PowerEventObserver> power_event_observer_;
+  scoped_ptr<ui::UserActivityPowerManagerNotifier> user_activity_notifier_;
+  scoped_ptr<VideoActivityNotifier> video_activity_notifier_;
+  scoped_ptr<StickyKeysController> sticky_keys_controller_;
+  scoped_ptr<ResolutionNotificationController>
       resolution_notification_controller_;
+  scoped_ptr<BluetoothNotificationController>
+      bluetooth_notification_controller_;
+  scoped_ptr<LogoutConfirmationController> logout_confirmation_controller_;
+  scoped_ptr<LastWindowClosedLogoutReminder>
+      last_window_closed_logout_reminder_;
+  // Controls video output device state.
+  scoped_ptr<ui::DisplayConfigurator> display_configurator_;
+  scoped_ptr<DisplayConfiguratorAnimation> display_configurator_animation_;
+  scoped_ptr<DisplayErrorObserver> display_error_observer_;
+  scoped_ptr<ProjectingObserver> projecting_observer_;
+
+  // Listens for output changes and updates the display manager.
+  scoped_ptr<DisplayChangeObserver> display_change_observer_;
+
+#if defined(USE_X11)
+  scoped_ptr<ui::EventHandler> magnifier_key_scroll_handler_;
+  scoped_ptr<ui::EventHandler> speech_feedback_handler_;
+  scoped_ptr<TouchTransformerController> touch_transformer_controller_;
+#endif  // defined(USE_X11)
+#endif  // defined(OS_CHROMEOS)
+
+  scoped_ptr<MaximizeModeController> maximize_mode_controller_;
 
   // |native_cursor_manager_| is owned by |cursor_manager_|, but we keep a
   // pointer to vend to test code.
   AshNativeCursorManager* native_cursor_manager_;
-  views::corewm::CursorManager cursor_manager_;
+
+// Cursor may be hidden on certain key events in ChromeOS, whereas we never hide
+// the cursor on Windows.
+#if defined(OS_CHROMEOS)
+  CursorManager cursor_manager_;
+#else  // !defined(OS_CHROMEOS)
+  ::wm::CursorManager cursor_manager_;
+#endif  // defined(OS_CHROMEOS)
 
   ObserverList<ShellObserver> observers_;
-
-  // Used by ash/shell.
-  content::BrowserContext* browser_context_;
 
   // For testing only: simulate that a modal window is open
   bool simulate_modal_window_open_for_testing_;
 
   bool is_touch_hud_projection_enabled_;
+
+  // Injected content::GPUDataManager support.
+  scoped_ptr<GPUSupport> gpu_support_;
 
   DISALLOW_COPY_AND_ASSIGN(Shell);
 };

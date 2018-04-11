@@ -6,39 +6,11 @@
 -dontwarn android.support.v13.**
 -dontwarn com.android.ex.photo.**
 
-# keep names that are used by reflection, from javascript or from unit tests
+# keep names that are used by reflection, or from javascript
 
--keepclasseswithmembers class com.android.mail.compose.ComposeActivity {
-  *** registerTestSendOrSaveCallback(...);
-}
-
--keepclasseswithmembers class com.android.mail.providers.protos.mock.MockUiProvider {
-  *** getAccountsUri(...);
-}
-
--keepclasseswithmembers class com.android.mail.providers.UIProvider {
-  *** getAccountsUri(...);
-}
-
--keepclasseswithmembers class com.android.mail.utils.LogUtils {
-  public <methods>;
-}
-
-# Needed for Parcelable/SafeParcelable Creators to not get stripped
+# TODO(skennedy) Remove this when the base file includes it
 -keep class * implements android.os.Parcelable {
-    public static final ** CREATOR;
-}
-
--keepclasseswithmembers class com.google.common.collect.ImmutableMap {
-  *** of(...);
-}
-
--keepclasseswithmembers class com.google.common.collect.ImmutableList {
-  *** of(...);
-}
-
--keepclasseswithmembers class com.google.common.collect.Sets {
-  *** of(...);
+  public static final ** CREATOR;
 }
 
 -keepclasseswithmembers class com.android.mail.ui.LeaveBehindItem {
@@ -49,28 +21,11 @@
   public <methods>;
 }
 
--keepclasseswithmembers class com.android.mail.ui.ConversationViewFragment$MessageJsBridge {
-  public <methods>;
-}
-
--keepclasseswithmembers class com.android.mail.ui.TwoPaneLayout {
-  *** setFoldersLeft(...);
-  *** setListBitmapLeft(...);
-  *** setListBitmapAlpha(...);
-  *** setListLeft(...);
-  *** setListAlpha(...);
-  *** setConversationLeft(...);
-}
-
 -keepclasseswithmembers class com.android.mail.browse.ConversationItemView {
   *** setAnimatedHeightFraction(...);
-  *** setPhotoFlipFraction(...);
-}
-
--keepclasseswithmembers class com.android.mail.ui.MailActivity {
-  *** doNothingClickHandler(...);
 }
 
 -keepclasseswithmembers class * extends com.android.mail.ui.ConversationSpecialItemView {
   *** setAnimatedHeight(...);
 }
+

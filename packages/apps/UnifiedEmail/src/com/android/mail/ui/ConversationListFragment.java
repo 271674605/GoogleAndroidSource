@@ -17,20 +17,21 @@
 
 package com.android.mail.ui;
 
+import android.animation.LayoutTransition;
 import android.app.Activity;
-import android.app.ListFragment;
+import android.app.Fragment;
 import android.app.LoaderManager;
-import android.content.Context;
 import android.content.res.Resources;
 import android.database.DataSetObserver;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Parcelable;
-import android.text.format.DateUtils;
+import android.support.annotation.IdRes;
+import android.support.v4.widget.SwipeRefreshLayout.OnRefreshListener;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemLongClickListener;
 import android.widget.ListView;
@@ -39,6 +40,7 @@ import android.widget.TextView;
 import com.android.mail.ConversationListContext;
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
+import com.android.mail.analytics.AnalyticsTimer;
 import com.android.mail.browse.ConversationCursor;
 import com.android.mail.browse.ConversationItemView;
 import com.android.mail.browse.ConversationItemViewModel;
@@ -54,11 +56,10 @@ import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.AccountCapabilities;
 import com.android.mail.providers.UIProvider.ConversationListIcon;
 import com.android.mail.providers.UIProvider.FolderCapabilities;
-import com.android.mail.providers.UIProvider.FolderType;
 import com.android.mail.providers.UIProvider.Swipe;
-import com.android.mail.ui.AnimatedAdapter.ConversationListListener;
 import com.android.mail.ui.SwipeableListView.ListItemSwipedListener;
 import com.android.mail.ui.SwipeableListView.ListItemsRemovedListener;
+import com.android.mail.ui.SwipeableListView.SwipeListener;
 import com.android.mail.ui.ViewMode.ModeChangeListener;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
@@ -68,11 +69,14 @@ import com.google.common.collect.ImmutableList;
 import java.util.Collection;
 import java.util.List;
 
+import static android.view.View.OnKeyListener;
+
 /**
  * The conversation list UI component.
  */
-public final class ConversationListFragment extends ListFragment implements
-        OnItemLongClickListener, ModeChangeListener, ListItemSwipedListener {
+public final class ConversationListFragment extends Fragment implements
+        OnItemLongClickListener, ModeChangeListener, ListItemSwipedListener, OnRefreshListener,
+        SwipeListener, OnKeyListener, AdapterView.OnItemClickListener {
     /** Key used to pass data to {@link ConversationListFragment}. */
     private static final String CONVERSATION_LIST_KEY = "conversation-list";
     /** Key used to keep track of the scroll state of the list. */
@@ -85,13 +89,16 @@ public final class ConversationListFragment extends ListFragment implements
     // True if we are on a tablet device
     private static boolean mTabletDevice;
 
+    // Delay before displaying the loading view.
+    private static int LOADING_DELAY_MS;
+    // Minimum amount of time to keep the loading view displayed.
+    private static int MINIMUM_LOADING_DURATION;
+
     /**
      * Frequency of update of timestamps. Initialized in
      * {@link #onCreate(Bundle)} and final afterwards.
      */
     private static int TIMESTAMP_UPDATE_INTERVAL = 0;
-
-    private static long NO_NEW_MESSAGE_DURATION = 1 * DateUtils.SECOND_IN_MILLIS;
 
     private ControllableActivity mActivity;
 
@@ -100,15 +107,11 @@ public final class ConversationListFragment extends ListFragment implements
 
     private final Handler mHandler = new Handler();
 
-    private ConversationListView mConversationListView;
-
     // The internal view objects.
     private SwipeableListView mListView;
 
+    private View mSearchHeaderView;
     private TextView mSearchResultCountTextView;
-    private TextView mSearchStatusTextView;
-
-    private View mSearchStatusView;
 
     /**
      * Current Account being viewed
@@ -129,7 +132,8 @@ public final class ConversationListFragment extends ListFragment implements
     private AnimatedAdapter mListAdapter;
 
     private ConversationListFooterView mFooterView;
-    private View mEmptyView;
+    private ConversationListEmptyView mEmptyView;
+    private View mLoadingView;
     private ErrorListener mErrorListener;
     private FolderObserver mFolderObserver;
     private DataSetObserver mConversationCursorObserver;
@@ -145,17 +149,75 @@ public final class ConversationListFragment extends ListFragment implements
     private ConversationUpdater mUpdater;
     /** Hash of the Conversation Cursor we last obtained from the controller. */
     private int mConversationCursorHash;
+    // The number of items in the last known ConversationCursor
+    private int mConversationCursorLastCount;
+    // State variable to keep track if we just loaded a new list, used for analytics only
+    // True if NO DATA has returned, false if we either partially or fully loaded the data
+    private boolean mInitialCursorLoading;
+
+    private @IdRes int mNextFocusLeftId;
+    // Tracks if a onKey event was initiated from the listview (received ACTION_DOWN before
+    // ACTION_UP). If not, the listview only receives ACTION_UP.
+    private boolean mKeyInitiatedFromList;
 
     /** Duration, in milliseconds, of the CAB mode (peek icon) animation. */
     private static long sSelectionModeAnimationDuration = -1;
-    /** The time at which we last exited CAB mode. */
-    private long mSelectionModeExitedTimestamp = -1;
+
+    // Let's ensure that we are only showing one out of the three views at once
+    private void showListView() {
+        mListView.setVisibility(View.VISIBLE);
+        mEmptyView.setVisibility(View.INVISIBLE);
+        mLoadingView.setVisibility(View.INVISIBLE);
+    }
+
+    private void showEmptyView() {
+        mEmptyView.setupEmptyView(
+                mFolder, mViewContext.searchQuery, mListAdapter.getBidiFormatter());
+        mListView.setVisibility(View.INVISIBLE);
+        mEmptyView.setVisibility(View.VISIBLE);
+        mLoadingView.setVisibility(View.INVISIBLE);
+    }
+
+    private void showLoadingView() {
+        mListView.setVisibility(View.INVISIBLE);
+        mEmptyView.setVisibility(View.INVISIBLE);
+        mLoadingView.setVisibility(View.VISIBLE);
+    }
+
+    private final Runnable mLoadingViewRunnable = new FragmentRunnable("LoadingRunnable", this) {
+        @Override
+        public void go() {
+            if (!isCursorReadyToShow()) {
+                mCanTakeDownLoadingView = false;
+                showLoadingView();
+                mHandler.removeCallbacks(mHideLoadingRunnable);
+                mHandler.postDelayed(mHideLoadingRunnable, MINIMUM_LOADING_DURATION);
+            }
+            mLoadingViewPending = false;
+        }
+    };
+
+    private final Runnable mHideLoadingRunnable = new FragmentRunnable("CancelLoading", this) {
+        @Override
+        public void go() {
+            mCanTakeDownLoadingView = true;
+            if (isCursorReadyToShow()) {
+                hideLoadingViewAndShowContents();
+            }
+        }
+    };
+
+    // Keep track of if we are waiting for the loading view. This variable is also used to check
+    // if the cursor corresponding to the current folder loaded (either partially or completely).
+    private boolean mLoadingViewPending;
+    private boolean mCanTakeDownLoadingView;
 
     /**
      * If <code>true</code>, we have restored (or attempted to restore) the list's scroll position
      * from when we were last on this conversation list.
      */
     private boolean mScrollPositionRestored = false;
+    private MailSwipeRefreshLayout mSwipeRefreshWidget;
 
     /**
      * Constructor needs to be public to handle orientation changes and activity
@@ -163,6 +225,16 @@ public final class ConversationListFragment extends ListFragment implements
      */
     public ConversationListFragment() {
         super();
+    }
+
+    @Override
+    public void onBeginSwipe() {
+        mSwipeRefreshWidget.setEnabled(false);
+    }
+
+    @Override
+    public void onEndSwipe() {
+        mSwipeRefreshWidget.setEnabled(true);
     }
 
     private class ConversationCursorObserver extends DataSetObserver {
@@ -188,66 +260,19 @@ public final class ConversationListFragment extends ListFragment implements
      * Show the header if the current conversation list is showing search
      * results.
      */
-    void configureSearchResultHeader() {
-        if (mActivity == null) {
-            return;
-        }
-        // Only show the header if the context is for a search result
-        final Resources res = getResources();
-        final boolean showHeader = ConversationListContext.isSearchResult(mViewContext);
-        // TODO(viki): This code contains intimate understanding of the view.
-        // Much of this logic
-        // needs to reside in a separate class that handles the text view in
-        // isolation. Then,
-        // that logic can be reused in other fragments.
-        if (showHeader) {
-            mSearchStatusTextView.setText(res.getString(R.string.search_results_searching_header));
-            // Initially reset the count
-            mSearchResultCountTextView.setText("");
-        }
-        mSearchStatusView.setVisibility(showHeader ? View.VISIBLE : View.GONE);
-        int marginTop = showHeader ? (int) res.getDimension(R.dimen.notification_view_height) : 0;
-        MarginLayoutParams layoutParams = (MarginLayoutParams) mListView.getLayoutParams();
-        layoutParams.topMargin = marginTop;
-        mListView.setLayoutParams(layoutParams);
-    }
-
-    /**
-     * Show the header if the current conversation list is showing search
-     * results.
-     */
     private void updateSearchResultHeader(int count) {
-        if (mActivity == null) {
+        if (mActivity == null || mSearchHeaderView == null) {
             return;
         }
-        // Only show the header if the context is for a search result
-        final Resources res = getResources();
-        final boolean showHeader = ConversationListContext.isSearchResult(mViewContext);
-        if (showHeader) {
-            mSearchStatusTextView.setText(res.getString(R.string.search_results_header));
-            mSearchResultCountTextView
-                    .setText(res.getString(R.string.search_results_loaded, count));
-        }
-    }
-
-    /**
-     * Initializes all internal state for a rendering.
-     */
-    private void initializeUiForFirstDisplay() {
-        // TODO(mindyp): find some way to make the notification container more
-        // re-usable.
-        // TODO(viki): refactor according to comment in
-        // configureSearchResultHandler()
-        mSearchStatusView = mActivity.findViewById(R.id.search_status_view);
-        mSearchStatusTextView = (TextView) mActivity.findViewById(R.id.search_status_text_view);
-        mSearchResultCountTextView = (TextView) mActivity
-                .findViewById(R.id.search_result_count_view);
+        mSearchResultCountTextView.setText(
+                getResources().getString(R.string.search_results_loaded, count));
     }
 
     @Override
     public void onActivityCreated(Bundle savedState) {
         super.onActivityCreated(savedState);
-
+        mLoadingViewPending = false;
+        mCanTakeDownLoadingView = true;
         if (sSelectionModeAnimationDuration < 0) {
             sSelectionModeAnimationDuration = getResources().getInteger(
                     R.integer.conv_item_view_cab_anim_duration);
@@ -275,12 +300,10 @@ public final class ConversationListFragment extends ListFragment implements
         mCallbacks = mActivity.getListHandler();
         mErrorListener = mActivity.getErrorListener();
         // Start off with the current state of the folder being viewed.
-        Context activityContext = mActivity.getActivityContext();
-        mFooterView = (ConversationListFooterView) LayoutInflater.from(
-                activityContext).inflate(R.layout.conversation_list_footer_view,
-                null);
+        final LayoutInflater inflater = LayoutInflater.from(mActivity.getActivityContext());
+        mFooterView = (ConversationListFooterView) inflater.inflate(
+                R.layout.conversation_list_footer_view, null);
         mFooterView.setClickListener(mActivity);
-        mConversationListView.setActivity(mActivity);
         final ConversationCursor conversationCursor = getConversationListCursor();
         final LoaderManager manager = getLoaderManager();
 
@@ -300,9 +323,17 @@ public final class ConversationListFragment extends ListFragment implements
         }
 
         mListAdapter = new AnimatedAdapter(mActivity.getApplicationContext(), conversationCursor,
-                mActivity.getSelectedSet(), mActivity, mConversationListListener, mListView,
-                specialItemViews);
+                mActivity.getSelectedSet(), mActivity, mListView, specialItemViews);
         mListAdapter.addFooter(mFooterView);
+        // Show search result header only if we are in search mode
+        final boolean showSearchHeader = ConversationListContext.isSearchResult(mViewContext);
+        if (showSearchHeader) {
+            mSearchHeaderView = inflater.inflate(R.layout.search_results_view, null);
+            mSearchResultCountTextView = (TextView)
+                    mSearchHeaderView.findViewById(R.id.search_result_count_view);
+            mListAdapter.addHeader(mSearchHeaderView);
+        }
+
         mListView.setAdapter(mListAdapter);
         mSelectedSet = mActivity.getSelectedSet();
         mListView.setSelectionSet(mSelectedSet);
@@ -318,8 +349,6 @@ public final class ConversationListFragment extends ListFragment implements
         mUpdater = mActivity.getConversationUpdater();
         mUpdater.registerConversationListObserver(mConversationCursorObserver);
         mTabletDevice = Utils.useTabletUI(mActivity.getApplicationContext().getResources());
-        initializeUiForFirstDisplay();
-        configureSearchResultHeader();
         // The onViewModeChanged callback doesn't get called when the mode
         // object is created, so
         // force setting the mode manually this time around.
@@ -383,6 +412,8 @@ public final class ConversationListFragment extends ListFragment implements
         // Initialize fragment constants from resources
         final Resources res = getResources();
         TIMESTAMP_UPDATE_INTERVAL = res.getInteger(R.integer.timestamp_update_interval);
+        LOADING_DELAY_MS = res.getInteger(R.integer.conversationview_show_loading_delay);
+        MINIMUM_LOADING_DURATION = res.getInteger(R.integer.conversationview_min_show_loading);
         mUpdateTimestampsRunnable = new Runnable() {
             @Override
             public void run() {
@@ -418,26 +449,47 @@ public final class ConversationListFragment extends ListFragment implements
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedState) {
         View rootView = inflater.inflate(R.layout.conversation_list, null);
-        mEmptyView = rootView.findViewById(R.id.empty_view);
-        mConversationListView =
-                (ConversationListView) rootView.findViewById(R.id.conversation_list);
-        mConversationListView.setConversationContext(mViewContext);
-        mListView = (SwipeableListView) rootView.findViewById(android.R.id.list);
+        mEmptyView = (ConversationListEmptyView) rootView.findViewById(R.id.empty_view);
+        mLoadingView = rootView.findViewById(R.id.background_view);
+        mLoadingView.setVisibility(View.GONE);
+        mLoadingView.findViewById(R.id.loading_progress).setVisibility(View.VISIBLE);
+        mListView = (SwipeableListView) rootView.findViewById(R.id.conversation_list_view);
         mListView.setHeaderDividersEnabled(false);
         mListView.setOnItemLongClickListener(this);
         mListView.enableSwipe(mAccount.supportsCapability(AccountCapabilities.UNDO));
-        mListView.setSwipedListener(this);
+        mListView.setListItemSwipedListener(this);
+        mListView.setSwipeListener(this);
+        mListView.setOnKeyListener(this);
+        mListView.setOnItemClickListener(this);
+        if (mNextFocusLeftId != 0) {
+            mListView.setNextFocusLeftId(mNextFocusLeftId);
+        }
+
+        // enable animateOnLayout (equivalent of setLayoutTransition) only for >=JB (b/14302062)
+        if (Utils.isRunningJellybeanOrLater()) {
+            ((ViewGroup) rootView.findViewById(R.id.conversation_list_parent_frame))
+                    .setLayoutTransition(new LayoutTransition());
+        }
+
+        // By default let's show the list view
+        showListView();
 
         if (savedState != null && savedState.containsKey(LIST_STATE_KEY)) {
             mListView.onRestoreInstanceState(savedState.getParcelable(LIST_STATE_KEY));
         }
+        mSwipeRefreshWidget =
+                (MailSwipeRefreshLayout) rootView.findViewById(R.id.swipe_refresh_widget);
+        mSwipeRefreshWidget.setColorScheme(R.color.swipe_refresh_color1,
+                R.color.swipe_refresh_color2,
+                R.color.swipe_refresh_color3, R.color.swipe_refresh_color4);
+        mSwipeRefreshWidget.setOnRefreshListener(this);
+        mSwipeRefreshWidget.setScrollableChild(mListView);
 
         return rootView;
     }
 
     /**
      * Sets the choice mode of the list view
-     * @param choiceMode ListView#
      */
     private final void setChoiceMode(int choiceMode) {
         mListView.setChoiceMode(choiceMode);
@@ -541,7 +593,11 @@ public final class ConversationListFragment extends ListFragment implements
      * {@inheritDoc}
      */
     @Override
-    public void onListItemClick(ListView l, View view, int position, long id) {
+    public void onItemClick(AdapterView<?> adapterView, View view, int position, long id) {
+        onListItemSelected(view, position);
+    }
+
+    private void onListItemSelected(View view, int position) {
         if (view instanceof ToggleableItem) {
             final boolean showSenderImage =
                     (mAccount.settings.convListIcon == ConversationListIcon.SENDER_IMAGE);
@@ -553,6 +609,7 @@ public final class ConversationListFragment extends ListFragment implements
                     // this is a peek.
                     Analytics.getInstance().sendEvent("peek", null, null, mSelectedSet.size());
                 }
+                AnalyticsTimer.getInstance().trackStart(AnalyticsTimer.OPEN_CONV_VIEW_FROM_LIST);
                 viewConversation(position);
             }
         } else {
@@ -568,8 +625,42 @@ public final class ConversationListFragment extends ListFragment implements
     }
 
     @Override
+    public boolean onKey(View view, int keyCode, KeyEvent keyEvent) {
+        SwipeableListView list = (SwipeableListView) view;
+        // Don't need to handle ENTER because it's auto-handled as a "click".
+        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            if (keyEvent.getAction() == KeyEvent.ACTION_UP) {
+                if (mKeyInitiatedFromList) {
+                    onListItemSelected(list.getSelectedView(), list.getSelectedItemPosition());
+                }
+                mKeyInitiatedFromList = false;
+            } else if (keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+                mKeyInitiatedFromList = true;
+            }
+            return true;
+        } else if (keyEvent.getAction() == KeyEvent.ACTION_UP) {
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                final int position = list.getSelectedItemPosition();
+                final Object item = getAnimatedAdapter().getItem(position);
+                if (item != null && item instanceof ConversationCursor) {
+                    final Conversation conv = ((ConversationCursor) item).getConversation();
+                    mCallbacks.onConversationFocused(conv);
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
+
+        if (!isCursorReadyToShow()) {
+            // If the cursor got reset, let's reset the analytics state variable and show the list
+            // view since we are waiting for load again
+            mInitialCursorLoading = true;
+            showListView();
+        }
 
         final ConversationCursor conversationCursor = getConversationListCursor();
         if (conversationCursor != null) {
@@ -607,7 +698,7 @@ public final class ConversationListFragment extends ListFragment implements
     public void onStart() {
         super.onStart();
         mHandler.postDelayed(mUpdateTimestampsRunnable, TIMESTAMP_UPDATE_INTERVAL);
-        Analytics.getInstance().sendView(getClass().getName());
+        Analytics.getInstance().sendView("ConversationListFragment");
     }
 
     @Override
@@ -627,12 +718,27 @@ public final class ConversationListFragment extends ListFragment implements
         if (mFooterView != null) {
             mFooterView.onViewModeChanged(newMode);
         }
+
+        // Set default navigation
+        if (ViewMode.isListMode(newMode)) {
+            mListView.setNextFocusRightId(R.id.conversation_list_view);
+            mListView.requestFocus();
+        } else if (ViewMode.isConversationMode(newMode)) {
+            // This would only happen in two_pane
+            mListView.setNextFocusRightId(R.id.conversation_pager);
+        }
     }
 
     public boolean isAnimating() {
         final AnimatedAdapter adapter = getAnimatedAdapter();
-        return (adapter != null && adapter.isAnimating()) ||
-                (mListView != null && mListView.isScrolling());
+        if (adapter != null && adapter.isAnimating()) {
+            return true;
+        }
+        final boolean isScrolling = (mListView != null && mListView.isScrolling());
+        if (isScrolling) {
+            LogUtils.i(LOG_TAG, "CLF.isAnimating=true due to scrolling");
+        }
+        return isScrolling;
     }
 
     private void clearChoicesAndActivated() {
@@ -648,9 +754,24 @@ public final class ConversationListFragment extends ListFragment implements
      * must be called on the UI thread.
      */
     private void showList() {
-        mListView.setEmptyView(null);
+        mInitialCursorLoading = true;
         onFolderUpdated(mActivity.getFolderController().getFolder());
         onConversationListStatusUpdated();
+
+        // try to get an order-of-magnitude sense for message count within folders
+        // (N.B. this count currently isn't working for search folders, since their counts stream
+        // in over time in pieces.)
+        final Folder f = mViewContext.folder;
+        if (f != null) {
+            final long countLog;
+            if (f.totalCount > 0) {
+                countLog = (long) Math.log10(f.totalCount);
+            } else {
+                countLog = 0;
+            }
+            Analytics.getInstance().sendEvent("view_folder", f.getTypeDescription(),
+                    Long.toString(countLog), f.totalCount);
+        }
     }
 
     /**
@@ -681,15 +802,6 @@ public final class ConversationListFragment extends ListFragment implements
         setSelected(conv.position, true);
         mCallbacks.onConversationSelected(conv, false /* inLoaderCallbacks */);
     }
-
-    private final ConversationListListener mConversationListListener =
-            new ConversationListListener() {
-        @Override
-        public boolean isExitingSelectionMode() {
-            return System.currentTimeMillis() <
-                    (mSelectionModeExitedTimestamp + sSelectionModeAnimationDuration);
-        }
-    };
 
     /**
      * Sets the selected conversation to the position given here.
@@ -762,9 +874,8 @@ public final class ConversationListFragment extends ListFragment implements
                 action.performAction();
             }
         };
-        final SwipeableListView listView = (SwipeableListView) getListView();
-        if (listView.getSwipeAction() == actionId) {
-            if (!listView.destroyItems(conversations, listener)) {
+        if (mListView.getSwipeAction() == actionId) {
+            if (!mListView.destroyItems(conversations, listener)) {
                 // The listView failed to destroy the items, perform the action manually
                 LogUtils.e(LOG_TAG, "ConversationListFragment.requestDelete: " +
                         "listView failed to destroy items.");
@@ -778,8 +889,23 @@ public final class ConversationListFragment extends ListFragment implements
     }
 
     public void onFolderUpdated(Folder folder) {
+        if (!isCursorReadyToShow()) {
+            // Wait a bit before showing either the empty or loading view. If the messages are
+            // actually local, it's disorienting to see this appear on every folder transition.
+            // If they aren't, then it will likely take more than 200 milliseconds to load, and
+            // then we'll see the loading view.
+            if (!mLoadingViewPending) {
+                mHandler.postDelayed(mLoadingViewRunnable, LOADING_DELAY_MS);
+                mLoadingViewPending = true;
+            }
+        }
+
         mFolder = folder;
         setSwipeAction();
+
+        // Update enabled state of swipe to refresh.
+        mSwipeRefreshWidget.setEnabled(!ConversationListContext.isSearchResult(mViewContext));
+
         if (mFolder == null) {
             return;
         }
@@ -789,8 +915,8 @@ public final class ConversationListFragment extends ListFragment implements
             mErrorListener.onError(mFolder, false);
         }
 
-        // Notify of changes to the Folder.
-        onFolderStatusUpdated();
+        // Update the sync status bar with sync results if needed
+        checkSyncStatus();
 
         // Blow away conversation items cache.
         ConversationItemViewModel.onFolderUpdated(mFolder);
@@ -800,36 +926,30 @@ public final class ConversationListFragment extends ListFragment implements
      * Updates the footer visibility and updates the conversation cursor
      */
     public void onConversationListStatusUpdated() {
-        final ConversationCursor cursor = getConversationListCursor();
-        final boolean showFooter = mFooterView.updateStatus(cursor);
-        // Update the folder status, in case the cursor could affect it.
-        onFolderStatusUpdated();
-        mListAdapter.setFooterVisibility(showFooter);
-
         // Also change the cursor here.
         onCursorUpdated();
+
+        if (isCursorReadyToShow() && mCanTakeDownLoadingView) {
+            hideLoadingViewAndShowContents();
+        }
     }
 
-    private void onFolderStatusUpdated() {
+    private void hideLoadingViewAndShowContents() {
+        final ConversationCursor cursor = getConversationListCursor();
+        final boolean showFooter = mFooterView.updateStatus(cursor);
         // Update the sync status bar with sync results if needed
         checkSyncStatus();
+        mListAdapter.setFooterVisibility(showFooter);
+        mLoadingViewPending = false;
+        mHandler.removeCallbacks(mLoadingViewRunnable);
 
-        final ConversationCursor cursor = getConversationListCursor();
-        Bundle extras = cursor != null ? cursor.getExtras() : Bundle.EMPTY;
-        int errorStatus = extras.containsKey(UIProvider.CursorExtraKeys.EXTRA_ERROR) ?
-                extras.getInt(UIProvider.CursorExtraKeys.EXTRA_ERROR)
-                : UIProvider.LastSyncResult.SUCCESS;
-        int cursorStatus = extras.getInt(UIProvider.CursorExtraKeys.EXTRA_STATUS);
-        // We want to update the UI with this information if either we are loaded or complete, or
-        // we have a folder with a non-0 count.
-        final int folderCount = mFolder != null ? mFolder.totalCount : 0;
-        if (errorStatus == UIProvider.LastSyncResult.SUCCESS
-                && (cursorStatus == UIProvider.CursorStatus.LOADED
-                || cursorStatus == UIProvider.CursorStatus.COMPLETE) || folderCount > 0) {
-            updateSearchResultHeader(folderCount);
-            if (folderCount == 0) {
-                mListView.setEmptyView(mEmptyView);
-            }
+        // Even though cursor might be empty, the list adapter might have teasers/footers.
+        // So we check the list adapter count if the cursor is fully/partially loaded.
+        if (cursor != null && ConversationCursor.isCursorReadyToShow(cursor) &&
+                mListAdapter.getCount() == 0) {
+            showEmptyView();
+        } else {
+            showListView();
         }
     }
 
@@ -842,16 +962,23 @@ public final class ConversationListFragment extends ListFragment implements
         } else {
             final int action;
             mListView.enableSwipe(true);
-            if (ConversationListContext.isSearchResult(mViewContext)
-                    || (mFolder != null && mFolder.isType(FolderType.SPAM))) {
-                action = R.id.delete;
-            } else if (mFolder == null) {
+            if (mFolder == null) {
                 action = R.id.remove_folder;
             } else {
-                // We have enough information to respect user settings.
                 switch (swipeSetting) {
+                    // Try to respect user's setting as best as we can and default to doing nothing
+                    case Swipe.DELETE:
+                        // Delete in Outbox means discard failed message and put it in draft
+                        if (mFolder.isType(UIProvider.FolderType.OUTBOX)) {
+                            action = R.id.discard_outbox;
+                        } else {
+                            action = R.id.delete;
+                        }
+                        break;
                     case Swipe.ARCHIVE:
-                        if (mAccount.supportsCapability(AccountCapabilities.ARCHIVE)) {
+                        // Special case spam since it shouldn't remove spam folder label on swipe
+                        if (mAccount.supportsCapability(AccountCapabilities.ARCHIVE)
+                                && !mFolder.isSpam()) {
                             if (mFolder.supportsCapability(FolderCapabilities.ARCHIVE)) {
                                 action = R.id.archive;
                                 break;
@@ -864,12 +991,12 @@ public final class ConversationListFragment extends ListFragment implements
 
                         /*
                          * If we get here, we don't support archive, on either the account or the
-                         * folder, so we want to fall through into the delete case.
+                         * folder, so we want to fall through to swipe doing nothing
                          */
                         //$FALL-THROUGH$
-                    case Swipe.DELETE:
                     default:
-                        action = R.id.delete;
+                        mListView.enableSwipe(false);
+                        action = 0; // Use default value so setSwipeAction essentially has no effect
                         break;
                 }
             }
@@ -906,9 +1033,14 @@ public final class ConversationListFragment extends ListFragment implements
         }
         mConversationCursorHash = newCursorHash;
 
-        if (newCursor != null && newCursor.getCount() > 0) {
-            newCursor.markContentsSeen();
-            restoreLastScrolledPosition();
+        updateAnalyticsData(newCursor);
+        if (newCursor != null) {
+            final int newCursorCount = newCursor.getCount();
+            updateSearchResultHeader(newCursorCount);
+            if (newCursorCount > 0) {
+                newCursor.markContentsSeen();
+                restoreLastScrolledPosition();
+            }
         }
 
         // If a current conversation is available, and none is selected in the list, then ask
@@ -941,7 +1073,7 @@ public final class ConversationListFragment extends ListFragment implements
         } else {
             // Finished syncing:
             LogUtils.d(LOG_TAG, "CLF.checkSyncStatus done syncing");
-            mConversationListView.onSyncFinished();
+            mSwipeRefreshWidget.setRefreshing(false);
         }
     }
 
@@ -950,7 +1082,7 @@ public final class ConversationListFragment extends ListFragment implements
      * should only be called if user manually requested a sync, and not for background syncs.
      */
     protected void showSyncStatusBar() {
-        mConversationListView.showSyncStatusBar();
+        mSwipeRefreshWidget.setRefreshing(true);
     }
 
     /**
@@ -963,12 +1095,13 @@ public final class ConversationListFragment extends ListFragment implements
     private final ConversationSetObserver mConversationSetObserver = new ConversationSetObserver() {
         @Override
         public void onSetPopulated(final ConversationSelectionSet set) {
-            // Do nothing
+            // Disable the swipe to refresh widget.
+            mSwipeRefreshWidget.setEnabled(false);
         }
 
         @Override
         public void onSetEmpty() {
-            mSelectionModeExitedTimestamp = System.currentTimeMillis();
+            mSwipeRefreshWidget.setEnabled(true);
         }
 
         @Override
@@ -999,6 +1132,93 @@ public final class ConversationListFragment extends ListFragment implements
                 mListView.onRestoreInstanceState(savedState);
             }
             mScrollPositionRestored = true;
+        }
+    }
+
+    /* (non-Javadoc)
+     * @see android.support.v4.widget.SwipeRefreshLayout.OnRefreshListener#onRefresh()
+     */
+    @Override
+    public void onRefresh() {
+        Analytics.getInstance().sendEvent(Analytics.EVENT_CATEGORY_MENU_ITEM, "swipe_refresh", null,
+                0);
+
+        // This will call back to showSyncStatusBar():
+        mActivity.getFolderController().requestFolderRefresh();
+
+        // Clear list adapter state out of an abundance of caution.
+        // There is a class of bugs where an animation that should have finished doesn't (maybe
+        // it didn't start, or it didn't finish), and the list gets stuck pretty much forever.
+        // Clearing the state here is in line with user expectation for 'refresh'.
+        getAnimatedAdapter().clearAnimationState();
+        // possibly act on the now-cleared state
+        mActivity.onAnimationEnd(mListAdapter);
+    }
+
+    /**
+     * Extracted function that handles Analytics state and logging updates for each new cursor
+     * @param newCursor the new cursor pointer
+     */
+    private void updateAnalyticsData(ConversationCursor newCursor) {
+        if (newCursor != null) {
+            // Check if the initial data returned yet
+            if (mInitialCursorLoading) {
+                // This marks the very first time the cursor with the data the user sees returned.
+                // We either have a cursor in LOADING state with cursor's count > 0, OR the cursor
+                // completed loading.
+                // Use this point to log the appropriate timing information that depends on when
+                // the conversation list view finishes loading
+                if (isCursorReadyToShow()) {
+                    if (newCursor.getCount() == 0) {
+                        Analytics.getInstance().sendEvent("empty_state", "post_label_change",
+                                mFolder.getTypeDescription(), 0);
+                    }
+                    AnalyticsTimer.getInstance().logDuration(AnalyticsTimer.COLD_START_LAUNCHER,
+                            true /* isDestructive */, "cold_start_to_list", "from_launcher", null);
+                    // Don't need null checks because the activity, controller, and folder cannot
+                    // be null in this case
+                    if (mActivity.getFolderController().getFolder().isSearch()) {
+                        AnalyticsTimer.getInstance().logDuration(AnalyticsTimer.SEARCH_TO_LIST,
+                                true /* isDestructive */, "search_to_list", null, null);
+                    }
+
+                    mInitialCursorLoading = false;
+                }
+            } else {
+                // Log the appropriate events that happen after the initial cursor is loaded
+                if (newCursor.getCount() == 0 && mConversationCursorLastCount > 0) {
+                    Analytics.getInstance().sendEvent("empty_state", "post_delete",
+                            mFolder.getTypeDescription(), 0);
+                }
+            }
+
+            // We save the count here because for folders that are empty, multiple successful
+            // cursor loads will occur with size of 0. Thus we don't want to emit any false
+            // positive post_delete events.
+            mConversationCursorLastCount = newCursor.getCount();
+        } else {
+            mConversationCursorLastCount = 0;
+        }
+    }
+
+    /**
+     * Helper function to determine if the current cursor is ready to populate the UI
+     * Since we extracted the functionality into a static function in ConversationCursor,
+     * this function remains for the sole purpose of readability.
+     * @return
+     */
+    private boolean isCursorReadyToShow() {
+        return ConversationCursor.isCursorReadyToShow(getConversationListCursor());
+    }
+
+    public ListView getListView() {
+        return mListView;
+    }
+
+    public void setNextFocusLeftId(@IdRes int id) {
+        mNextFocusLeftId = id;
+        if (mListView != null) {
+            mListView.setNextFocusLeftId(mNextFocusLeftId);
         }
     }
 }

@@ -15,15 +15,19 @@ public:
     PointsGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() {
         return SkString("points");
     }
 
     virtual SkISize onISize() {
-        return make_isize(640, 490);
+        return SkISize::Make(640, 490);
     }
 
-    static void fill_pts(SkPoint pts[], size_t n, SkRandom* rand) {
+    static void fill_pts(SkPoint pts[], size_t n, SkLCGRandom* rand) {
         for (size_t i = 0; i < n; i++) {
             // Compute these independently and store in variables, rather
             // than in the parameter-passing expression, to get consistent
@@ -37,7 +41,7 @@ protected:
     virtual void onDraw(SkCanvas* canvas) {
         canvas->translate(SK_Scalar1, SK_Scalar1);
 
-        SkRandom rand;
+        SkLCGRandom rand;
         SkPaint  p0, p1, p2, p3;
         const size_t n = 99;
 

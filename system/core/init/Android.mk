@@ -10,7 +10,6 @@ LOCAL_SRC_FILES:= \
 	property_service.c \
 	util.c \
 	parser.c \
-	logo.c \
 	keychords.c \
 	signal_handler.c \
 	init_parser.c \
@@ -18,14 +17,19 @@ LOCAL_SRC_FILES:= \
 	ueventd_parser.c \
 	watchdogd.c
 
+LOCAL_CFLAGS    += -Wno-unused-parameter
+
 ifeq ($(strip $(INIT_BOOTCHART)),true)
 LOCAL_SRC_FILES += bootchart.c
 LOCAL_CFLAGS    += -DBOOTCHART=1
 endif
 
 ifneq (,$(filter userdebug eng,$(TARGET_BUILD_VARIANT)))
-LOCAL_CFLAGS += -DALLOW_LOCAL_PROP_OVERRIDE=1
+LOCAL_CFLAGS += -DALLOW_LOCAL_PROP_OVERRIDE=1 -DALLOW_DISABLE_SELINUX=1
 endif
+
+# Enable ueventd logging
+#LOCAL_CFLAGS += -DLOG_UEVENTS=1
 
 LOCAL_MODULE:= init
 
@@ -42,6 +46,8 @@ LOCAL_STATIC_LIBRARIES := \
 	libselinux \
 	libmincrypt \
 	libext4_utils_static
+
+LOCAL_ADDITIONAL_DEPENDENCIES += $(LOCAL_PATH)/Android.mk
 
 include $(BUILD_EXECUTABLE)
 

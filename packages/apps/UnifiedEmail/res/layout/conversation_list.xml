@@ -16,39 +16,37 @@
      limitations under the License.
 -->
 
-<RelativeLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/between_chrome"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <include layout="@layout/search_results_view"/>
-
-    <com.android.mail.ui.ConversationListView
-        android:id="@+id/conversation_list"
+    <com.android.mail.ui.MailSwipeRefreshLayout
+        android:id="@+id/swipe_refresh_widget"
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <!-- Note: intentionally not called "empty" because we call
+        <FrameLayout
+            android:id="@+id/conversation_list_parent_frame"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="true">
+
+            <!-- Note: intentionally not called "empty" because we call
              setEmptyView programmatically-->
-        <!-- Offset by height of undo bar and action bar -->
-        <com.android.mail.ui.EmptyConversationListView
-            android:id="@+id/empty_view"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:textAppearance="?android:attr/textAppearanceLarge"
-            android:text="@string/no_conversations"
-            android:layout_marginTop="@dimen/empty_view_top_padding"
-            android:visibility="gone" />
+            <!-- Offset by height of undo bar and action bar -->
+            <include layout="@layout/conversation_list_empty_view" />
 
-        <com.android.mail.ui.SwipeableListView android:id="@android:id/list"
-            style="@style/ConversationListFade"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fadingEdge="none"
-            android:layout_alignParentTop="true"/>
+            <com.android.mail.ui.SwipeableListView
+                android:id="@+id/conversation_list_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                style="@style/ConversationListFade" />
 
-    </com.android.mail.ui.ConversationListView>
+            <include layout="@layout/conversation_load_spinner" />
+
+        </FrameLayout>
+
+    </com.android.mail.ui.MailSwipeRefreshLayout>
 
 </RelativeLayout>

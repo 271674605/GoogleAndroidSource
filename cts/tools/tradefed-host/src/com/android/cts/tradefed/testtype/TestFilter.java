@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Filter for {@link TestIdentifier}s.
@@ -33,8 +34,12 @@ public class TestFilter {
 
     private final Set<String> mExcludedClasses;
     private final Set<TestIdentifier> mExcludedTests;
+
+    private final Set<String> mIncludedClasses;
+    private final Set<TestIdentifier> mIncludedTests;
+
     private String mIncludedClass = null;
-    private String mIncludedMethod = null;
+    private Pattern mIncludedMethod = null;
 
     /**
      * Creates a {@link TestFilter}
@@ -42,6 +47,9 @@ public class TestFilter {
     public TestFilter() {
         mExcludedClasses = new HashSet<String>();
         mExcludedTests = new HashSet<TestIdentifier>();
+
+        mIncludedClasses = new HashSet<String>();
+        mIncludedTests = new HashSet<TestIdentifier>();
     }
 
     /**
@@ -79,6 +87,36 @@ public class TestFilter {
     }
 
     /**
+     * Adds a test class to the filter.
+     * <p/>
+     * All tests in this class should be allowed.
+     */
+    public void addIncludedClass(String className) {
+        mIncludedClasses.add(className);
+    }
+
+    /**
+     * Adds a test class to the filter. All tests in this class should be excluded.
+     */
+    public void addIncludedTest(TestIdentifier test) {
+        mIncludedTests.add(test);
+    }
+
+    /**
+     * @return the mIncludedClasses
+     */
+    public Set<String> getIncludedClasses() {
+        return mIncludedClasses;
+    }
+
+    /**
+     * @return the mIncludedTests
+     */
+    public Set<TestIdentifier> getIncludedTests() {
+        return mIncludedTests;
+    }
+
+    /**
      * Sets the class name and optionally method that should pass this filter. If non-null, all
      * other tests will be excluded.
      *
@@ -87,7 +125,9 @@ public class TestFilter {
      */
     public void setTestInclusion(String className, String method) {
         mIncludedClass = className;
-        mIncludedMethod = method;
+        if (method != null) {
+            mIncludedMethod = Pattern.compile(method);
+        }
     }
 
     /**
@@ -96,14 +136,14 @@ public class TestFilter {
      * @param tests the list of tests to filter
      * @return a new sorted list of tests that passed the filter
      */
-    public Collection<TestIdentifier> filter(Collection<TestIdentifier > tests) {
+    public Collection<TestIdentifier> filter(Collection<TestIdentifier> tests) {
         List<TestIdentifier> filteredTests = new ArrayList<TestIdentifier>(tests.size());
         for (TestIdentifier test : tests) {
             if (mIncludedClass != null && !test.getClassName().equals(mIncludedClass)) {
                 // skip
                 continue;
             }
-            if (mIncludedMethod != null && !test.getTestName().equals(mIncludedMethod)) {
+            if (mIncludedMethod != null && !mIncludedMethod.matcher(test.getTestName()).matches()) {
                 // skip
                 continue;
             }
@@ -112,6 +152,12 @@ public class TestFilter {
                 continue;
             }
             if (mExcludedTests.contains(test)) {
+                // skip
+                continue;
+            }
+            if ((!mIncludedTests.isEmpty() || !mIncludedClasses.isEmpty())
+                    && !(mIncludedClasses.contains(test.getClassName())
+                            || mIncludedTests.contains(test))) {
                 // skip
                 continue;
             }
@@ -126,6 +172,13 @@ public class TestFilter {
      */
     public boolean hasExclusion() {
         return !mExcludedClasses.isEmpty() || !mExcludedTests.isEmpty();
+    }
+
+    /**
+     * @return true if there are inclusion rules defined.
+     */
+    public boolean hasInclusion() {
+        return !mIncludedClasses.isEmpty() || !mIncludedTests.isEmpty();
     }
 
     /**

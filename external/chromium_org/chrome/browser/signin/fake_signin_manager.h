@@ -8,22 +8,31 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/browser/signin_metrics.h"
+
+namespace content {
+class BrowserContext;
+}
 
 class Profile;
-class BrowserContextKeyedService;
+
+// SigninManager to use for testing. Tests should use the type
+// SigninManagerForTesting to ensure that the right type for their platform is
+// used.
 
 // Overrides InitTokenService to do-nothing in tests.
 class FakeSigninManagerBase : public SigninManagerBase {
  public:
-  explicit FakeSigninManagerBase();
+  explicit FakeSigninManagerBase(Profile* profile);
   virtual ~FakeSigninManagerBase();
 
-  virtual void InitTokenService() OVERRIDE;
-
   // Helper function to be used with
-  // BrowserContextKeyedService::SetTestingFactory().
-  static BrowserContextKeyedService* Build(content::BrowserContext* profile);
+  // KeyedService::SetTestingFactory(). In order to match
+  // the API of SigninManagerFactory::GetForProfile(), returns a
+  // FakeSigninManagerBase* on ChromeOS, and a FakeSigninManager* on all other
+  // platforms. The returned instance is initialized.
+  static KeyedService* Build(content::BrowserContext* context);
 };
 
 #if !defined(OS_CHROMEOS)
@@ -39,26 +48,40 @@ class FakeSigninManager : public SigninManager {
     possibly_invalid_username_ = username;
   }
 
-  virtual void SignOut() OVERRIDE;
-  virtual void InitTokenService() OVERRIDE;
-  virtual void StartSignIn(const std::string& username,
-                           const std::string& password,
-                           const std::string& login_token,
-                           const std::string& login_captcha) OVERRIDE;
+  void set_password(const std::string& password) { password_ = password; }
 
-  virtual void StartSignInWithCredentials(
-      const std::string& session_index,
+  void SignIn(const std::string& username, const std::string& password);
+
+  void FailSignin(const GoogleServiceAuthError& error);
+
+  virtual void StartSignInWithRefreshToken(
+      const std::string& refresh_token,
       const std::string& username,
       const std::string& password,
       const OAuthTokenFetchedCallback& oauth_fetched_callback) OVERRIDE;
 
+  virtual void SignOut(signin_metrics::ProfileSignout signout_source_metric)
+      OVERRIDE;
+
   virtual void CompletePendingSignin() OVERRIDE;
 
-  // Helper function to be used with
-  // BrowserContextKeyedService::SetTestingFactory().
-  static BrowserContextKeyedService* Build(content::BrowserContext* profile);
+  virtual void AddMergeSessionObserver(
+      MergeSessionHelper::Observer* observer) OVERRIDE;
+  virtual void RemoveMergeSessionObserver(
+      MergeSessionHelper::Observer* observer) OVERRIDE;
+
+  void NotifyMergeSessionObservers(const GoogleServiceAuthError& error);
+
+ private:
+  ObserverList<MergeSessionHelper::Observer, true> merge_session_observer_list_;
 };
 
 #endif  // !defined (OS_CHROMEOS)
+
+#if defined(OS_CHROMEOS)
+typedef FakeSigninManagerBase FakeSigninManagerForTesting;
+#else
+typedef FakeSigninManager FakeSigninManagerForTesting;
+#endif
 
 #endif  // CHROME_BROWSER_SIGNIN_FAKE_SIGNIN_MANAGER_H_

@@ -12,39 +12,57 @@
     # detection of ABI mismatches and prevents silent errors.
     'linux_link_pulseaudio%': 0,
     'conditions': [
-      ['OS=="android" or OS=="ios"', {
-        # Android and iOS don't use ffmpeg.
+      ['OS=="android"', {
+        # Android doesn't use ffmpeg.
         'media_use_ffmpeg%': 0,
-        # Android and iOS don't use libvpx.
+        # Android doesn't use libvpx.
         'media_use_libvpx%': 0,
-      }, {  # 'OS!="android" and OS!="ios"'
+      }, {  # 'OS!="android"'
         'media_use_ffmpeg%': 1,
         'media_use_libvpx%': 1,
       }],
-      # ALSA usage.
-      ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
+      # Enable ALSA and Pulse for runtime selection.
+      ['(OS=="linux" or OS=="freebsd" or OS=="solaris") and embedded!=1', {
+        # ALSA is always needed for Web MIDI even if the cras is enabled.
         'use_alsa%': 1,
+        'conditions': [
+          ['use_cras==1', {
+            'use_pulseaudio%': 0,
+          }, {
+            'use_pulseaudio%': 1,
+          }],
+        ],
       }, {
         'use_alsa%': 0,
-      }],
-      ['os_posix==1 and OS!="mac" and OS!="ios" and OS!="android" and chromeos!=1', {
-        'use_pulseaudio%': 1,
-      }, {
         'use_pulseaudio%': 0,
+      }],
+      ['sysroot!=""', {
+        'pkg-config': '../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)" "<(system_libdir)"',
+      }, {
+        'pkg-config': 'pkg-config'
       }],
     ],
   },
+  'includes': [
+    'media_cdm.gypi',
+  ],
   'targets': [
     {
       'target_name': 'media',
       'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../crypto/crypto.gyp:crypto',
+        '../gpu/gpu.gyp:command_buffer_common',
         '../skia/skia.gyp:skia',
         '../third_party/opus/opus.gyp:opus',
-        '../ui/ui.gyp:ui',
+        '../ui/events/events.gyp:events_base',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
         '../url/url.gyp:url_lib',
+        'shared_memory_support',
       ],
       'defines': [
         'MEDIA_IMPLEMENTATION',
@@ -54,15 +72,25 @@
       ],
       'sources': [
         'audio/agc_audio_stream.h',
+        'audio/alsa/alsa_input.cc',
+        'audio/alsa/alsa_input.h',
+        'audio/alsa/alsa_output.cc',
+        'audio/alsa/alsa_output.h',
+        'audio/alsa/alsa_util.cc',
+        'audio/alsa/alsa_util.h',
+        'audio/alsa/alsa_wrapper.cc',
+        'audio/alsa/alsa_wrapper.h',
+        'audio/alsa/audio_manager_alsa.cc',
+        'audio/alsa/audio_manager_alsa.h',
         'audio/android/audio_manager_android.cc',
         'audio/android/audio_manager_android.h',
+        'audio/android/audio_record_input.cc',
+        'audio/android/audio_record_input.h',
         'audio/android/opensles_input.cc',
         'audio/android/opensles_input.h',
         'audio/android/opensles_output.cc',
         'audio/android/opensles_output.h',
-        'audio/async_socket_io_handler.h',
-        'audio/async_socket_io_handler_posix.cc',
-        'audio/async_socket_io_handler_win.cc',
+        'audio/android/opensles_wrapper.cc',
         'audio/audio_buffers_state.cc',
         'audio/audio_buffers_state.h',
         'audio/audio_device_name.cc',
@@ -97,40 +125,25 @@
         'audio/audio_power_monitor.cc',
         'audio/audio_power_monitor.h',
         'audio/audio_source_diverter.h',
-        'audio/audio_util.cc',
-        'audio/audio_util.h',
+        'audio/clockless_audio_sink.cc',
+        'audio/clockless_audio_sink.h',
         'audio/cras/audio_manager_cras.cc',
         'audio/cras/audio_manager_cras.h',
         'audio/cras/cras_input.cc',
         'audio/cras/cras_input.h',
         'audio/cras/cras_unified.cc',
         'audio/cras/cras_unified.h',
-        'audio/cross_process_notification.cc',
-        'audio/cross_process_notification.h',
-        'audio/cross_process_notification_posix.cc',
-        'audio/cross_process_notification_win.cc',
         'audio/fake_audio_consumer.cc',
         'audio/fake_audio_consumer.h',
         'audio/fake_audio_input_stream.cc',
         'audio/fake_audio_input_stream.h',
+        'audio/fake_audio_log_factory.h',
+        'audio/fake_audio_log_factory.cc',
+        'audio/fake_audio_manager.cc',
+        'audio/fake_audio_manager.h',
         'audio/fake_audio_output_stream.cc',
         'audio/fake_audio_output_stream.h',
-        'audio/ios/audio_manager_ios.h',
-        'audio/ios/audio_manager_ios.mm',
-        'audio/ios/audio_session_util_ios.h',
-        'audio/ios/audio_session_util_ios.mm',
-        'audio/linux/alsa_input.cc',
-        'audio/linux/alsa_input.h',
-        'audio/linux/alsa_output.cc',
-        'audio/linux/alsa_output.h',
-        'audio/linux/alsa_util.cc',
-        'audio/linux/alsa_util.h',
-        'audio/linux/alsa_wrapper.cc',
-        'audio/linux/alsa_wrapper.h',
         'audio/linux/audio_manager_linux.cc',
-        'audio/linux/audio_manager_linux.h',
-        'audio/mac/aggregate_device_manager.cc',
-        'audio/mac/aggregate_device_manager.h',
         'audio/mac/audio_auhal_mac.cc',
         'audio/mac/audio_auhal_mac.h',
         'audio/mac/audio_device_listener_mac.cc',
@@ -139,34 +152,32 @@
         'audio/mac/audio_input_mac.h',
         'audio/mac/audio_low_latency_input_mac.cc',
         'audio/mac/audio_low_latency_input_mac.h',
-        'audio/mac/audio_low_latency_output_mac.cc',
-        'audio/mac/audio_low_latency_output_mac.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
-        'audio/mac/audio_synchronized_mac.cc',
-        'audio/mac/audio_synchronized_mac.h',
-        'audio/mac/audio_unified_mac.cc',
-        'audio/mac/audio_unified_mac.h',
         'audio/null_audio_sink.cc',
         'audio/null_audio_sink.h',
         'audio/openbsd/audio_manager_openbsd.cc',
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/pulse/audio_manager_pulse.cc',
         'audio/pulse/audio_manager_pulse.h',
-        'audio/pulse/pulse_output.cc',
-        'audio/pulse/pulse_output.h',
         'audio/pulse/pulse_input.cc',
         'audio/pulse/pulse_input.h',
-        'audio/pulse/pulse_unified.cc',
-        'audio/pulse/pulse_unified.h',
+        'audio/pulse/pulse_output.cc',
+        'audio/pulse/pulse_output.h',
         'audio/pulse/pulse_util.cc',
         'audio/pulse/pulse_util.h',
         'audio/sample_rates.cc',
         'audio/sample_rates.h',
-        'audio/scoped_loop_observer.cc',
-        'audio/scoped_loop_observer.h',
+        'audio/scoped_task_runner_observer.cc',
+        'audio/scoped_task_runner_observer.h',
         'audio/simple_sources.cc',
         'audio/simple_sources.h',
+        'audio/sounds/audio_stream_handler.cc',
+        'audio/sounds/audio_stream_handler.h',
+        'audio/sounds/sounds_manager.cc',
+        'audio/sounds/sounds_manager.h',
+        'audio/sounds/wav_audio_handler.cc',
+        'audio/sounds/wav_audio_handler.h',
         'audio/virtual_audio_input_stream.cc',
         'audio/virtual_audio_input_stream.h',
         'audio/virtual_audio_output_stream.cc',
@@ -179,18 +190,17 @@
         'audio/win/audio_low_latency_output_win.h',
         'audio/win/audio_manager_win.cc',
         'audio/win/audio_manager_win.h',
-        'audio/win/audio_unified_win.cc',
-        'audio/win/audio_unified_win.h',
         'audio/win/avrt_wrapper_win.cc',
         'audio/win/avrt_wrapper_win.h',
-        'audio/win/device_enumeration_win.cc',
-        'audio/win/device_enumeration_win.h',
         'audio/win/core_audio_util_win.cc',
         'audio/win/core_audio_util_win.h',
+        'audio/win/device_enumeration_win.cc',
+        'audio/win/device_enumeration_win.h',
         'audio/win/wavein_input_win.cc',
         'audio/win/wavein_input_win.h',
         'audio/win/waveout_output_win.cc',
         'audio/win/waveout_output_win.h',
+        'base/android/demuxer_android.h',
         'base/android/demuxer_stream_player_params.cc',
         'base/android/demuxer_stream_player_params.h',
         'base/android/media_player_manager.h',
@@ -201,12 +211,16 @@
         'base/audio_buffer_queue.cc',
         'base/audio_buffer_queue.h',
         'base/audio_capturer_source.h',
+        'base/audio_buffer_converter.cc',
+        'base/audio_buffer_converter.h',
         'base/audio_converter.cc',
         'base/audio_converter.h',
         'base/audio_decoder.cc',
         'base/audio_decoder.h',
         'base/audio_decoder_config.cc',
         'base/audio_decoder_config.h',
+        'base/audio_discard_helper.cc',
+        'base/audio_discard_helper.h',
         'base/audio_fifo.cc',
         'base/audio_fifo.h',
         'base/audio_hardware_config.cc',
@@ -217,22 +231,29 @@
         'base/audio_pull_fifo.h',
         'base/audio_renderer.cc',
         'base/audio_renderer.h',
-        'base/audio_renderer_sink.h',
         'base/audio_renderer_mixer.cc',
         'base/audio_renderer_mixer.h',
         'base/audio_renderer_mixer_input.cc',
         'base/audio_renderer_mixer_input.h',
+        'base/audio_renderer_sink.h',
         'base/audio_splicer.cc',
         'base/audio_splicer.h',
         'base/audio_timestamp_helper.cc',
         'base/audio_timestamp_helper.h',
-        'base/bind_to_loop.h',
-        'base/bitstream_buffer.h',
+        'base/audio_video_metadata_extractor.cc',
+        'base/audio_video_metadata_extractor.h',
+        'base/bind_to_current_loop.h',
         'base/bit_reader.cc',
         'base/bit_reader.h',
+        'base/bit_reader_core.cc',
+        'base/bit_reader_core.h',
+        'base/bitstream_buffer.h',
+        'base/buffering_state.h',
         'base/buffers.h',
         'base/byte_queue.cc',
         'base/byte_queue.h',
+        'base/cdm_promise.cc',
+        'base/cdm_promise.h',
         'base/channel_mixer.cc',
         'base/channel_mixer.h',
         'base/clock.cc',
@@ -247,10 +268,10 @@
         'base/decoder_buffer.h',
         'base/decoder_buffer_queue.cc',
         'base/decoder_buffer_queue.h',
-        'base/decryptor.cc',
-        'base/decryptor.h',
         'base/decrypt_config.cc',
         'base/decrypt_config.h',
+        'base/decryptor.cc',
+        'base/decryptor.h',
         'base/demuxer.cc',
         'base/demuxer.h',
         'base/demuxer_stream.cc',
@@ -259,6 +280,8 @@
         'base/djb2.h',
         'base/filter_collection.cc',
         'base/filter_collection.h',
+        'base/keyboard_event_counter.cc',
+        'base/keyboard_event_counter.h',
         'base/media.cc',
         'base/media.h',
         'base/media_file_checker.cc',
@@ -276,8 +299,9 @@
         'base/multi_channel_resampler.h',
         'base/pipeline.cc',
         'base/pipeline.h',
-        'base/pipeline_status.cc',
         'base/pipeline_status.h',
+        'base/player_tracker.cc',
+        'base/player_tracker.h',
         'base/ranges.cc',
         'base/ranges.h',
         'base/sample_format.cc',
@@ -301,13 +325,28 @@
         'base/stream_parser.h',
         'base/stream_parser_buffer.cc',
         'base/stream_parser_buffer.h',
+        'base/text_cue.cc',
+        'base/text_cue.h',
+        'base/text_ranges.cc',
+        'base/text_ranges.h',
+        'base/text_renderer.cc',
+        'base/text_renderer.h',
         'base/text_track.h',
+        'base/text_track_config.cc',
+        'base/text_track_config.h',
+        'base/user_input_monitor.cc',
+        'base/user_input_monitor.h',
+        'base/user_input_monitor_linux.cc',
+        'base/user_input_monitor_mac.cc',
+        'base/user_input_monitor_win.cc',
         'base/video_decoder.cc',
         'base/video_decoder.h',
         'base/video_decoder_config.cc',
         'base/video_decoder_config.h',
         'base/video_frame.cc',
         'base/video_frame.h',
+        'base/video_frame_pool.cc',
+        'base/video_frame_pool.h',
         'base/video_renderer.cc',
         'base/video_renderer.h',
         'base/video_util.cc',
@@ -316,10 +355,17 @@
         'base/yuv_convert.h',
         'cdm/aes_decryptor.cc',
         'cdm/aes_decryptor.h',
+        'cdm/json_web_key.cc',
+        'cdm/json_web_key.h',
+        'cdm/key_system_names.cc',
+        'cdm/key_system_names.h',
+        'cdm/player_tracker_impl.cc',
+        'cdm/player_tracker_impl.h',
         'ffmpeg/ffmpeg_common.cc',
         'ffmpeg/ffmpeg_common.h',
-        'filters/audio_decoder_selector.cc',
-        'filters/audio_decoder_selector.h',
+        'ffmpeg/ffmpeg_deleters.h',
+        'filters/audio_clock.cc',
+        'filters/audio_clock.h',
         'filters/audio_file_reader.cc',
         'filters/audio_file_reader.h',
         'filters/audio_renderer_algorithm.cc',
@@ -330,6 +376,12 @@
         'filters/blocking_url_protocol.h',
         'filters/chunk_demuxer.cc',
         'filters/chunk_demuxer.h',
+        'filters/decoder_selector.cc',
+        'filters/decoder_selector.h',
+        'filters/decoder_stream.cc',
+        'filters/decoder_stream.h',
+        'filters/decoder_stream_traits.cc',
+        'filters/decoder_stream_traits.h',
         'filters/decrypting_audio_decoder.cc',
         'filters/decrypting_audio_decoder.h',
         'filters/decrypting_demuxer_stream.cc',
@@ -342,18 +394,22 @@
         'filters/ffmpeg_demuxer.h',
         'filters/ffmpeg_glue.cc',
         'filters/ffmpeg_glue.h',
-        'filters/ffmpeg_h264_to_annex_b_bitstream_converter.cc',
-        'filters/ffmpeg_h264_to_annex_b_bitstream_converter.h',
         'filters/ffmpeg_video_decoder.cc',
         'filters/ffmpeg_video_decoder.h',
         'filters/file_data_source.cc',
         'filters/file_data_source.h',
+        'filters/frame_processor.cc',
+        'filters/frame_processor.h',
+        'filters/frame_processor_base.cc',
+        'filters/frame_processor_base.h',
+        'filters/gpu_video_accelerator_factories.cc',
+        'filters/gpu_video_accelerator_factories.h',
         'filters/gpu_video_decoder.cc',
         'filters/gpu_video_decoder.h',
-        'filters/gpu_video_decoder_factories.cc',
-        'filters/gpu_video_decoder_factories.h',
-        'filters/h264_to_annex_b_bitstream_converter.cc',
-        'filters/h264_to_annex_b_bitstream_converter.h',
+        'filters/h264_bit_reader.cc',
+        'filters/h264_bit_reader.h',
+        'filters/h264_parser.cc',
+        'filters/h264_parser.h',
         'filters/in_memory_url_protocol.cc',
         'filters/in_memory_url_protocol.h',
         'filters/opus_audio_decoder.cc',
@@ -364,38 +420,85 @@
         'filters/source_buffer_stream.h',
         'filters/stream_parser_factory.cc',
         'filters/stream_parser_factory.h',
-        'filters/video_decoder_selector.cc',
-        'filters/video_decoder_selector.h',
-        'filters/video_frame_stream.cc',
-        'filters/video_frame_stream.h',
-        'filters/video_renderer_base.cc',
-        'filters/video_renderer_base.h',
+        'filters/video_frame_scheduler.h',
+        'filters/video_frame_scheduler_impl.cc',
+        'filters/video_frame_scheduler_impl.h',
+        'filters/video_frame_scheduler_proxy.cc',
+        'filters/video_frame_scheduler_proxy.h',
+        'filters/video_renderer_impl.cc',
+        'filters/video_renderer_impl.h',
         'filters/vpx_video_decoder.cc',
         'filters/vpx_video_decoder.h',
-        'midi/midi_manager.h',
+        'filters/webvtt_util.h',
+        'filters/wsola_internals.cc',
+        'filters/wsola_internals.h',
         'midi/midi_manager.cc',
-        'midi/midi_manager_mac.h',
+        'midi/midi_manager.h',
+        'midi/midi_manager_alsa.cc',
+        'midi/midi_manager_alsa.h',
+        'midi/midi_manager_android.cc',
         'midi/midi_manager_mac.cc',
-        'midi/midi_port_info.h',
+        'midi/midi_manager_mac.h',
+        'midi/midi_manager_usb.cc',
+        'midi/midi_manager_usb.h',
+        'midi/midi_manager_win.cc',
+        'midi/midi_manager_win.h',
+        'midi/midi_message_queue.cc',
+        'midi/midi_message_queue.h',
+        'midi/midi_message_util.cc',
+        'midi/midi_message_util.h',
         'midi/midi_port_info.cc',
+        'midi/midi_port_info.h',
+        'midi/usb_midi_descriptor_parser.cc',
+        'midi/usb_midi_descriptor_parser.h',
+        'midi/usb_midi_device.h',
+        'midi/usb_midi_device_android.cc',
+        'midi/usb_midi_device_android.h',
+        'midi/usb_midi_device_factory_android.cc',
+        'midi/usb_midi_device_factory_android.h',
+        'midi/usb_midi_input_stream.cc',
+        'midi/usb_midi_input_stream.h',
+        'midi/usb_midi_jack.h',
+        'midi/usb_midi_output_stream.cc',
+        'midi/usb_midi_output_stream.h',
+        'ozone/media_ozone_platform.cc',
+        'ozone/media_ozone_platform.h',
         'video/capture/android/video_capture_device_android.cc',
         'video/capture/android/video_capture_device_android.h',
+        'video/capture/android/video_capture_device_factory_android.cc',
+        'video/capture/android/video_capture_device_factory_android.h',
         'video/capture/fake_video_capture_device.cc',
         'video/capture/fake_video_capture_device.h',
+        'video/capture/fake_video_capture_device_factory.h',
+        'video/capture/fake_video_capture_device_factory.cc',
+        'video/capture/file_video_capture_device.cc',
+        'video/capture/file_video_capture_device.h',
+        'video/capture/file_video_capture_device_factory.h',
+        'video/capture/file_video_capture_device_factory.cc',
+        'video/capture/linux/video_capture_device_factory_linux.cc',
+        'video/capture/linux/video_capture_device_factory_linux.h',
         'video/capture/linux/video_capture_device_linux.cc',
         'video/capture/linux/video_capture_device_linux.h',
+        'video/capture/linux/video_capture_device_chromeos.cc',
+        'video/capture/linux/video_capture_device_chromeos.h',
+        'video/capture/mac/avfoundation_glue.h',
+        'video/capture/mac/avfoundation_glue.mm',
+        'video/capture/mac/coremedia_glue.h',
+        'video/capture/mac/coremedia_glue.mm',
+        'video/capture/mac/platform_video_capturing_mac.h',
+        'video/capture/mac/video_capture_device_avfoundation_mac.h',
+        'video/capture/mac/video_capture_device_avfoundation_mac.mm',
+        'video/capture/mac/video_capture_device_factory_mac.h',
+        'video/capture/mac/video_capture_device_factory_mac.mm',
         'video/capture/mac/video_capture_device_mac.h',
         'video/capture/mac/video_capture_device_mac.mm',
         'video/capture/mac/video_capture_device_qtkit_mac.h',
         'video/capture/mac/video_capture_device_qtkit_mac.mm',
-
-        'video/capture/video_capture.h',
         'video/capture/video_capture_device.cc',
         'video/capture/video_capture_device.h',
-        'video/capture/video_capture_device_dummy.cc',
-        'video/capture/video_capture_device_dummy.h',
-        'video/capture/video_capture_proxy.cc',
-        'video/capture/video_capture_proxy.h',
+        'video/capture/video_capture_device_factory.cc',
+        'video/capture/video_capture_device_factory.h',
+        'video/capture/video_capture_types.cc',
         'video/capture/video_capture_types.h',
         'video/capture/win/capability_list_win.cc',
         'video/capture/win/capability_list_win.h',
@@ -408,6 +511,8 @@
         'video/capture/win/sink_filter_win.h',
         'video/capture/win/sink_input_pin_win.cc',
         'video/capture/win/sink_input_pin_win.h',
+        'video/capture/win/video_capture_device_factory_win.cc',
+        'video/capture/win/video_capture_device_factory_win.h',
         'video/capture/win/video_capture_device_mf_win.cc',
         'video/capture/win/video_capture_device_mf_win.h',
         'video/capture/win/video_capture_device_win.cc',
@@ -416,30 +521,34 @@
         'video/picture.h',
         'video/video_decode_accelerator.cc',
         'video/video_decode_accelerator.h',
-        'webm/webm_audio_client.cc',
-        'webm/webm_audio_client.h',
-        'webm/webm_cluster_parser.cc',
-        'webm/webm_cluster_parser.h',
-        'webm/webm_constants.cc',
-        'webm/webm_constants.h',
-        'webm/webm_content_encodings.cc',
-        'webm/webm_content_encodings.h',
-        'webm/webm_content_encodings_client.cc',
-        'webm/webm_content_encodings_client.h',
-        'webm/webm_crypto_helpers.cc',
-        'webm/webm_crypto_helpers.h',
-        'webm/webm_info_parser.cc',
-        'webm/webm_info_parser.h',
-        'webm/webm_parser.cc',
-        'webm/webm_parser.h',
-        'webm/webm_stream_parser.cc',
-        'webm/webm_stream_parser.h',
-        'webm/webm_tracks_parser.cc',
-        'webm/webm_tracks_parser.h',
-        'webm/webm_video_client.cc',
-        'webm/webm_video_client.h',
-        'webm/webm_webvtt_parser.cc',
-        'webm/webm_webvtt_parser.h'
+        'video/video_encode_accelerator.cc',
+        'video/video_encode_accelerator.h',
+        'formats/common/offset_byte_queue.cc',
+        'formats/common/offset_byte_queue.h',
+        'formats/webm/webm_audio_client.cc',
+        'formats/webm/webm_audio_client.h',
+        'formats/webm/webm_cluster_parser.cc',
+        'formats/webm/webm_cluster_parser.h',
+        'formats/webm/webm_constants.cc',
+        'formats/webm/webm_constants.h',
+        'formats/webm/webm_content_encodings.cc',
+        'formats/webm/webm_content_encodings.h',
+        'formats/webm/webm_content_encodings_client.cc',
+        'formats/webm/webm_content_encodings_client.h',
+        'formats/webm/webm_crypto_helpers.cc',
+        'formats/webm/webm_crypto_helpers.h',
+        'formats/webm/webm_info_parser.cc',
+        'formats/webm/webm_info_parser.h',
+        'formats/webm/webm_parser.cc',
+        'formats/webm/webm_parser.h',
+        'formats/webm/webm_stream_parser.cc',
+        'formats/webm/webm_stream_parser.h',
+        'formats/webm/webm_tracks_parser.cc',
+        'formats/webm/webm_tracks_parser.h',
+        'formats/webm/webm_video_client.cc',
+        'formats/webm/webm_video_client.h',
+        'formats/webm/webm_webvtt_parser.cc',
+        'formats/webm/webm_webvtt_parser.h'
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -452,13 +561,6 @@
             'USE_NEON'
           ],
         }],
-        ['OS!="ios"', {
-          'dependencies': [
-            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-            '../gpu/gpu.gyp:command_buffer_common',
-            'shared_memory_support',
-          ],
-        }],
         ['media_use_ffmpeg==1', {
           'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
@@ -466,6 +568,8 @@
         }, {  # media_use_ffmpeg==0
           # Exclude the sources that depend on ffmpeg.
           'sources!': [
+            'base/audio_video_metadata_extractor.cc',
+            'base/audio_video_metadata_extractor.h',
             'base/container_names.cc',
             'base/container_names.h',
             'base/media_file_checker.cc',
@@ -487,6 +591,8 @@
             'filters/ffmpeg_h264_to_annex_b_bitstream_converter.h',
             'filters/ffmpeg_video_decoder.cc',
             'filters/ffmpeg_video_decoder.h',
+            'filters/in_memory_url_protocol.cc',
+            'filters/in_memory_url_protocol.h',
           ],
         }],
         ['media_use_libvpx==1', {
@@ -505,58 +611,14 @@
             'filters/vpx_video_decoder.h',
           ],
         }],
-        ['OS=="ios"', {
-          'includes': [
-            # For shared_memory_support_sources variable.
-            'shared_memory_support.gypi',
-          ],
+        ['enable_browser_cdms==1', {
           'sources': [
-            'base/media_stub.cc',
-            # These sources are normally built via a dependency on the
-            # shared_memory_support target, but that target is not built on iOS.
-            # Instead, directly build only the files that are needed for iOS.
-            '<@(shared_memory_support_sources)',
+            'base/browser_cdm.cc',
+            'base/browser_cdm.h',
+            'base/browser_cdm_factory.h',
           ],
-          'sources/': [
-            # Exclude everything but iOS-specific files.
-            ['exclude', '\\.(cc|mm)$'],
-            ['include', '_ios\\.(cc|mm)$'],
-            ['include', '(^|/)ios/'],
-            # Re-include specific pieces.
-            # iOS support is limited to audio input only.
-            ['include', '^audio/audio_buffers_state\\.'],
-            ['include', '^audio/audio_input_controller\\.'],
-            ['include', '^audio/audio_manager\\.'],
-            ['include', '^audio/audio_manager_base\\.'],
-            ['include', '^audio/audio_parameters\\.'],
-            ['include', '^audio/fake_audio_consumer\\.'],
-            ['include', '^audio/fake_audio_input_stream\\.'],
-            ['include', '^audio/fake_audio_output_stream\\.'],
-            ['include', '^base/audio_bus\\.'],
-            ['include', '^base/channel_layout\\.'],
-            ['include', '^base/media\\.cc$'],
-            ['include', '^base/media_stub\\.cc$'],
-            ['include', '^base/media_switches\\.'],
-            ['include', '^base/vector_math\\.'],
-          ],
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
-              '$(SDKROOT)/System/Library/Frameworks/AVFoundation.framework',
-              '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
-              '$(SDKROOT)/System/Library/Frameworks/CoreMIDI.framework',
-            ],
-          },
         }],
         ['OS=="android"', {
-          'link_settings': {
-            'libraries': [
-              '-lOpenSLES',
-            ],
-          },
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/media',
-          ],
           'dependencies': [
             'media_android_jni_headers',
             'player_android',
@@ -567,12 +629,19 @@
             'base/media.h',
             'base/media_stub.cc',
           ],
+          'sources!': [
+            'filters/opus_audio_decoder.cc',
+            'filters/opus_audio_decoder.h',
+          ],
           'conditions': [
             ['android_webview_build==0', {
               'dependencies': [
                 'media_java',
               ],
             }],
+          ],
+          'defines': [
+            'DISABLE_USER_INPUT_MONITOR',
           ],
         }],
         # A simple WebM encoder for animated avatars on ChromeOS.
@@ -582,10 +651,15 @@
             '../third_party/libyuv/libyuv.gyp:libyuv',
           ],
           'sources': [
-            'webm/chromeos/ebml_writer.cc',
-            'webm/chromeos/ebml_writer.h',
-            'webm/chromeos/webm_encoder.cc',
-            'webm/chromeos/webm_encoder.h',
+            'formats/webm/chromeos/ebml_writer.cc',
+            'formats/webm/chromeos/ebml_writer.h',
+            'formats/webm/chromeos/webm_encoder.cc',
+            'formats/webm/chromeos/webm_encoder.h',
+          ],
+        }],
+        ['OS!="ios"', {
+          'dependencies': [
+            '../third_party/libyuv/libyuv.gyp:libyuv',
           ],
         }],
         ['use_alsa==1', {
@@ -594,9 +668,14 @@
               '-lasound',
             ],
           },
+          'defines': [
+            'USE_ALSA',
+          ],
         }, { # use_alsa==0
-          'sources/': [ ['exclude', '/alsa_'],
-                      ['exclude', '/audio_manager_linux'] ],
+          'sources/': [
+            ['exclude', '(^|/)alsa/'],
+            ['exclude', '_alsa\\.(h|cc)$'],
+          ],
         }],
         ['OS!="openbsd"', {
           'sources!': [
@@ -605,25 +684,22 @@
           ],
         }],
         ['OS=="linux"', {
-          'variables': {
-            'conditions': [
-              ['sysroot!=""', {
-                'pkg-config': '../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)"',
-              }, {
-                'pkg-config': 'pkg-config'
-              }],
-            ],
-          },
           'conditions': [
             ['use_x11==1', {
-              'link_settings': {
-                'libraries': [
-                  '-lX11',
-                  '-lXdamage',
-                  '-lXext',
-                  '-lXfixes',
-                ],
-              },
+              'dependencies': [
+                '../build/linux/system.gyp:x11',
+                '../build/linux/system.gyp:xdamage',
+                '../build/linux/system.gyp:xext',
+                '../build/linux/system.gyp:xfixes',
+                '../build/linux/system.gyp:xtst',
+              ],
+            }, {  # else: use_x11==0
+              'sources!': [
+                'base/user_input_monitor_linux.cc',
+              ],
+              'defines': [
+                'DISABLE_USER_INPUT_MONITOR',
+              ],
             }],
             ['use_cras==1', {
               'cflags': [
@@ -649,6 +725,49 @@
             }],
           ],
         }],
+        ['use_ozone==1', {
+          'variables': {
+            'platform_list_txt_file': '<(SHARED_INTERMEDIATE_DIR)/ui/ozone/platform_list.txt',
+            'constructor_list_cc_file': '<(INTERMEDIATE_DIR)/media/ozone/constructor_list.cc',
+          },
+          'include_dirs': [
+              # Used for the generated listing header (ui/ozone/platform_list.h)
+              '<(SHARED_INTERMEDIATE_DIR)',
+          ],
+          'sources': [
+            '<(constructor_list_cc_file)',
+          ],
+          'dependencies': [
+            '../ui/ozone/ozone.gyp:ozone',
+          ],
+          'actions': [
+            {
+              # Ozone platform objects are auto-generated using similar
+              # patterns for naming and classes constructors. Here we build the
+              # object MediaOzonePlatform.
+              'action_name': 'generate_constructor_list',
+              'variables': {
+                'generator_path': '../ui/ozone/generate_constructor_list.py',
+              },
+              'inputs': [
+                '<(generator_path)',
+                '<(platform_list_txt_file)',
+              ],
+              'outputs': [
+                '<(constructor_list_cc_file)',
+              ],
+              'action': [
+                'python',
+                '<(generator_path)',
+                '--platform_list=<(platform_list_txt_file)',
+                '--output_cc=<(constructor_list_cc_file)',
+                '--namespace=media',
+                '--typename=MediaOzonePlatform',
+                '--include="media/ozone/media_ozone_platform.h"'
+              ],
+            },
+          ]
+        }],
         ['OS!="linux"', {
           'sources!': [
             'audio/cras/audio_manager_cras.cc',
@@ -661,7 +780,7 @@
         }],
         ['use_pulseaudio==1', {
           'cflags': [
-            '<!@(pkg-config --cflags libpulse)',
+            '<!@(<(pkg-config) --cflags libpulse)',
           ],
           'defines': [
             'USE_PULSEAUDIO',
@@ -707,7 +826,7 @@
                              '<@(_inputs)',
                   ],
                   'process_outputs_as_sources': 1,
-                  'message': 'Generating Pulse stubs for dynamic loading.',
+                  'message': 'Generating Pulse stubs for dynamic loading',
                 },
               ],
               'conditions': [
@@ -723,10 +842,10 @@
             }, {  # else: linux_link_pulseaudio==0
               'link_settings': {
                 'ldflags': [
-                  '<!@(pkg-config --libs-only-L --libs-only-other libpulse)',
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other libpulse)',
                 ],
                 'libraries': [
-                  '<!@(pkg-config --libs-only-l libpulse)',
+                  '<!@(<(pkg-config) --libs-only-l libpulse)',
                 ],
               },
             }],
@@ -739,16 +858,8 @@
             'audio/pulse/pulse_input.h',
             'audio/pulse/pulse_output.cc',
             'audio/pulse/pulse_output.h',
-            'audio/pulse/pulse_unified.cc',
-            'audio/pulse/pulse_unified.h',
             'audio/pulse/pulse_util.cc',
             'audio/pulse/pulse_util.h',
-          ],
-        }],
-        ['os_posix==1', {
-          'sources!': [
-            'video/capture/video_capture_device_dummy.cc',
-            'video/capture/video_capture_device_dummy.h',
           ],
         }],
         ['OS=="mac"', {
@@ -765,10 +876,6 @@
           },
         }],
         ['OS=="win"', {
-          'sources!': [
-            'video/capture/video_capture_device_dummy.cc',
-            'video/capture/video_capture_device_dummy.h',
-          ],
           'link_settings':  {
             'libraries': [
               '-lmf.lib',
@@ -807,57 +914,80 @@
             }],
           ],
         }],
-        ['proprietary_codecs==1 or branding=="Chrome"', {
+        ['proprietary_codecs==1', {
           'sources': [
-            'mp4/aac.cc',
-            'mp4/aac.h',
-            'mp4/avc.cc',
-            'mp4/avc.h',
-            'mp4/box_definitions.cc',
-            'mp4/box_definitions.h',
-            'mp4/box_reader.cc',
-            'mp4/box_reader.h',
-            'mp4/cenc.cc',
-            'mp4/cenc.h',
-            'mp4/es_descriptor.cc',
-            'mp4/es_descriptor.h',
-            'mp4/mp4_stream_parser.cc',
-            'mp4/mp4_stream_parser.h',
-            'mp4/offset_byte_queue.cc',
-            'mp4/offset_byte_queue.h',
-            'mp4/track_run_iterator.cc',
-            'mp4/track_run_iterator.h',
+            'filters/ffmpeg_h264_to_annex_b_bitstream_converter.cc',
+            'filters/ffmpeg_h264_to_annex_b_bitstream_converter.h',
+            'filters/h264_to_annex_b_bitstream_converter.cc',
+            'filters/h264_to_annex_b_bitstream_converter.h',
+            'formats/mp2t/es_parser.h',
+            'formats/mp2t/es_parser_adts.cc',
+            'formats/mp2t/es_parser_adts.h',
+            'formats/mp2t/es_parser_h264.cc',
+            'formats/mp2t/es_parser_h264.h',
+            'formats/mp2t/mp2t_common.h',
+            'formats/mp2t/mp2t_stream_parser.cc',
+            'formats/mp2t/mp2t_stream_parser.h',
+            'formats/mp2t/ts_packet.cc',
+            'formats/mp2t/ts_packet.h',
+            'formats/mp2t/ts_section.h',
+            'formats/mp2t/ts_section_pat.cc',
+            'formats/mp2t/ts_section_pat.h',
+            'formats/mp2t/ts_section_pes.cc',
+            'formats/mp2t/ts_section_pes.h',
+            'formats/mp2t/ts_section_pmt.cc',
+            'formats/mp2t/ts_section_pmt.h',
+            'formats/mp2t/ts_section_psi.cc',
+            'formats/mp2t/ts_section_psi.h',
+            'formats/mp4/aac.cc',
+            'formats/mp4/aac.h',
+            'formats/mp4/avc.cc',
+            'formats/mp4/avc.h',
+            'formats/mp4/box_definitions.cc',
+            'formats/mp4/box_definitions.h',
+            'formats/mp4/box_reader.cc',
+            'formats/mp4/box_reader.h',
+            'formats/mp4/cenc.cc',
+            'formats/mp4/cenc.h',
+            'formats/mp4/es_descriptor.cc',
+            'formats/mp4/es_descriptor.h',
+            'formats/mp4/mp4_stream_parser.cc',
+            'formats/mp4/mp4_stream_parser.h',
+            'formats/mp4/sample_to_group_iterator.cc',
+            'formats/mp4/sample_to_group_iterator.h',
+            'formats/mp4/track_run_iterator.cc',
+            'formats/mp4/track_run_iterator.h',
+            'formats/mpeg/adts_constants.cc',
+            'formats/mpeg/adts_constants.h',
+            'formats/mpeg/adts_stream_parser.cc',
+            'formats/mpeg/adts_stream_parser.h',
+            'formats/mpeg/mp3_stream_parser.cc',
+            'formats/mpeg/mp3_stream_parser.h',
+            'formats/mpeg/mpeg_audio_stream_parser_base.cc',
+            'formats/mpeg/mpeg_audio_stream_parser_base.h',
+          ],
+          'conditions': [
+            ['enable_mpeg2ts_stream_parser==1', {
+              'defines': [
+                'ENABLE_MPEG2TS_STREAM_PARSER',
+              ],
+            }],
           ],
         }],
-        ['toolkit_uses_gtk==1', {
-          'dependencies': [
-            '../build/linux/system.gyp:gtk',
-          ],
-        }],
-        # ios check is necessary due to http://crbug.com/172682.
-        ['OS!="ios" and (target_arch=="ia32" or target_arch=="x64")', {
+        ['target_arch=="ia32" or target_arch=="x64"', {
           'dependencies': [
             'media_asm',
             'media_mmx',
-            'media_sse',
             'media_sse2',
           ],
           'sources': [
             'base/simd/convert_yuv_to_rgb_x86.cc',
           ],
         }],
-        ['google_tv==1', {
-          'defines': [
-            'ENABLE_EAC3_PLAYBACK',
-          ],
-        }],
-      ],
-      'target_conditions': [
-        ['OS=="ios"', {
-          'sources/': [
-            # Pull in specific Mac files for iOS (which have been filtered out
-            # by file name rules).
-            ['include', '^audio/mac/audio_input_mac\\.'],
+        ['OS!="linux" and OS!="win"', {
+          'sources!': [
+            'base/keyboard_event_counter.cc',
+            'base/keyboard_event_counter.h',
           ],
         }],
       ],
@@ -868,48 +998,59 @@
       'dependencies': [
         'media',
         'media_test_support',
+        'shared_memory_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
+        '../gpu/gpu.gyp:command_buffer_common',
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../ui/ui.gyp:ui',
+        '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
+        '../ui/base/ui_base.gyp:ui_base',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
+        '../url/url.gyp:url_lib',
       ],
       'sources': [
-        'audio/async_socket_io_handler_unittest.cc',
+        'audio/android/audio_android_unittest.cc',
+        'audio/alsa/alsa_output_unittest.cc',
         'audio/audio_input_controller_unittest.cc',
-        'audio/audio_input_device_unittest.cc',
         'audio/audio_input_unittest.cc',
         'audio/audio_input_volume_unittest.cc',
         'audio/audio_low_latency_input_output_unittest.cc',
+        'audio/audio_manager_unittest.cc',
         'audio/audio_output_controller_unittest.cc',
         'audio/audio_output_device_unittest.cc',
         'audio/audio_output_proxy_unittest.cc',
         'audio/audio_parameters_unittest.cc',
         'audio/audio_power_monitor_unittest.cc',
-        'audio/cross_process_notification_unittest.cc',
         'audio/fake_audio_consumer_unittest.cc',
-        'audio/ios/audio_manager_ios_unittest.cc',
-        'audio/linux/alsa_output_unittest.cc',
         'audio/mac/audio_auhal_mac_unittest.cc',
         'audio/mac/audio_device_listener_mac_unittest.cc',
         'audio/mac/audio_low_latency_input_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
+        'audio/sounds/audio_stream_handler_unittest.cc',
+        'audio/sounds/sounds_manager_unittest.cc',
+        'audio/sounds/test_data.cc',
+        'audio/sounds/test_data.h',
+        'audio/sounds/wav_audio_handler_unittest.cc',
         'audio/virtual_audio_input_stream_unittest.cc',
         'audio/virtual_audio_output_stream_unittest.cc',
         'audio/win/audio_device_listener_win_unittest.cc',
         'audio/win/audio_low_latency_input_win_unittest.cc',
         'audio/win/audio_low_latency_output_win_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
-        'audio/win/audio_unified_win_unittest.cc',
         'audio/win/core_audio_util_win_unittest.cc',
         'base/android/media_codec_bridge_unittest.cc',
+        'base/android/media_drm_bridge_unittest.cc',
         'base/android/media_source_player_unittest.cc',
+        'base/audio_buffer_converter_unittest.cc',
         'base/audio_buffer_unittest.cc',
         'base/audio_buffer_queue_unittest.cc',
         'base/audio_bus_unittest.cc',
         'base/audio_converter_unittest.cc',
+        'base/audio_discard_helper_unittest.cc',
         'base/audio_fifo_unittest.cc',
         'base/audio_hardware_config_unittest.cc',
         'base/audio_hash_unittest.cc',
@@ -918,7 +1059,8 @@
         'base/audio_renderer_mixer_unittest.cc',
         'base/audio_splicer_unittest.cc',
         'base/audio_timestamp_helper_unittest.cc',
-        'base/bind_to_loop_unittest.cc',
+        'base/audio_video_metadata_extractor_unittest.cc',
+        'base/bind_to_current_loop_unittest.cc',
         'base/bit_reader_unittest.cc',
         'base/callback_holder.h',
         'base/callback_holder_unittest.cc',
@@ -936,17 +1078,23 @@
         'base/ranges_unittest.cc',
         'base/run_all_unittests.cc',
         'base/scoped_histogram_timer_unittest.cc',
+        'base/serial_runner_unittest.cc',
         'base/seekable_buffer_unittest.cc',
         'base/sinc_resampler_unittest.cc',
-        'base/test_data_util.cc',
-        'base/test_data_util.h',
+        'base/stream_parser_unittest.cc',
+        'base/text_ranges_unittest.cc',
+        'base/text_renderer_unittest.cc',
+        'base/user_input_monitor_unittest.cc',
         'base/vector_math_testing.h',
         'base/vector_math_unittest.cc',
         'base/video_frame_unittest.cc',
+        'base/video_frame_pool_unittest.cc',
         'base/video_util_unittest.cc',
         'base/yuv_convert_unittest.cc',
         'cdm/aes_decryptor_unittest.cc',
+        'cdm/json_web_key_unittest.cc',
         'ffmpeg/ffmpeg_common_unittest.cc',
+        'filters/audio_clock_unittest.cc',
         'filters/audio_decoder_selector_unittest.cc',
         'filters/audio_file_reader_unittest.cc',
         'filters/audio_renderer_algorithm_unittest.cc',
@@ -965,38 +1113,50 @@
         'filters/ffmpeg_audio_decoder_unittest.cc',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
-        'filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc',
         'filters/ffmpeg_video_decoder_unittest.cc',
         'filters/file_data_source_unittest.cc',
-        'filters/h264_to_annex_b_bitstream_converter_unittest.cc',
+        'filters/frame_processor_unittest.cc',
+        'filters/h264_bit_reader_unittest.cc',
+        'filters/h264_parser_unittest.cc',
+        'filters/in_memory_url_protocol_unittest.cc',
+        'filters/opus_audio_decoder_unittest.cc',
         'filters/pipeline_integration_test.cc',
         'filters/pipeline_integration_test_base.cc',
         'filters/skcanvas_video_renderer_unittest.cc',
         'filters/source_buffer_stream_unittest.cc',
         'filters/video_decoder_selector_unittest.cc',
+        'filters/video_frame_scheduler_impl_unittest.cc',
+        'filters/video_frame_scheduler_unittest.cc',
         'filters/video_frame_stream_unittest.cc',
-        'filters/video_renderer_base_unittest.cc',
+        'filters/video_renderer_impl_unittest.cc',
+        'midi/midi_manager_unittest.cc',
+        'midi/midi_manager_usb_unittest.cc',
+        'midi/midi_message_queue_unittest.cc',
+        'midi/midi_message_util_unittest.cc',
+        'midi/usb_midi_descriptor_parser_unittest.cc',
+        'midi/usb_midi_input_stream_unittest.cc',
+        'midi/usb_midi_output_stream_unittest.cc',
+        'video/capture/fake_video_capture_device_unittest.cc',
         'video/capture/video_capture_device_unittest.cc',
-        'webm/cluster_builder.cc',
-        'webm/cluster_builder.h',
-        'webm/tracks_builder.cc',
-        'webm/tracks_builder.h',
-        'webm/webm_cluster_parser_unittest.cc',
-        'webm/webm_content_encodings_client_unittest.cc',
-        'webm/webm_parser_unittest.cc',
-        'webm/webm_tracks_parser_unittest.cc',
-        'webm/webm_webvtt_parser_unittest.cc',
+        'formats/common/offset_byte_queue_unittest.cc',
+        'formats/webm/cluster_builder.cc',
+        'formats/webm/cluster_builder.h',
+        'formats/webm/tracks_builder.cc',
+        'formats/webm/tracks_builder.h',
+        'formats/webm/webm_cluster_parser_unittest.cc',
+        'formats/webm/webm_content_encodings_client_unittest.cc',
+        'formats/webm/webm_parser_unittest.cc',
+        'formats/webm/webm_tracks_parser_unittest.cc',
+        'formats/webm/webm_webvtt_parser_unittest.cc',
+      ],
+      'include_dirs': [
+        # Needed by media_drm_bridge.cc.
+        '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'conditions': [
         ['arm_neon==1', {
           'defines': [
             'USE_NEON'
-          ],
-        }],
-        ['OS!="ios"', {
-          'dependencies': [
-            '../gpu/gpu.gyp:command_buffer_common',
-            'shared_memory_support',
           ],
         }],
         ['media_use_ffmpeg==1', {
@@ -1005,27 +1165,27 @@
           ],
         }, {  # media_use_ffmpeg== 0
           'sources!': [
+            'base/audio_video_metadata_extractor_unittest.cc',
             'base/media_file_checker_unittest.cc',
           ],
         }],
-        ['os_posix==1 and OS!="mac" and OS!="ios"', {
+        ['use_alsa==1', {
+          'defines': [
+            'USE_ALSA',
+          ],
+        }],
+        ['use_pulseaudio==1', {
+          'defines': [
+            'USE_PULSEAUDIO',
+          ],
+        }],
+        ['os_posix==1 and OS!="mac"', {
           'conditions': [
-            ['linux_use_tcmalloc==1', {
+            ['use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
             }],
-          ],
-        }],
-        ['OS=="ios"', {
-          'sources/': [
-            ['exclude', '.*'],
-            ['include', '^audio/audio_input_controller_unittest\\.cc$'],
-            ['include', '^audio/audio_input_unittest\\.cc$'],
-            ['include', '^audio/audio_parameters_unittest\\.cc$'],
-            ['include', '^audio/ios/audio_manager_ios_unittest\\.cc$'],
-            ['include', '^base/mock_reader\\.h$'],
-            ['include', '^base/run_all_unittests\\.cc$'],
           ],
         }],
         ['OS=="android"', {
@@ -1035,24 +1195,19 @@
             'ffmpeg/ffmpeg_common_unittest.cc',
             'filters/audio_file_reader_unittest.cc',
             'filters/blocking_url_protocol_unittest.cc',
-            'filters/chunk_demuxer_unittest.cc',
             'filters/ffmpeg_audio_decoder_unittest.cc',
             'filters/ffmpeg_demuxer_unittest.cc',
             'filters/ffmpeg_glue_unittest.cc',
             'filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc',
             'filters/ffmpeg_video_decoder_unittest.cc',
+            'filters/in_memory_url_protocol_unittest.cc',
+            'filters/opus_audio_decoder_unittest.cc',
             'filters/pipeline_integration_test.cc',
             'filters/pipeline_integration_test_base.cc',
-            'mp4/mp4_stream_parser_unittest.cc',
-            'webm/webm_cluster_parser_unittest.cc',
           ],
-          'conditions': [
-            ['gtest_target_type=="shared_library"', {
-              'dependencies': [
-                '../testing/android/native_test.gyp:native_test_native_code',
-                'player_android',
-              ],
-            }],
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
+            'player_android',
           ],
         }],
         ['OS=="linux"', {
@@ -1070,30 +1225,99 @@
         }],
         ['use_alsa==0', {
           'sources!': [
-            'audio/linux/alsa_output_unittest.cc',
+            'audio/alsa/alsa_output_unittest.cc',
             'audio/audio_low_latency_input_output_unittest.cc',
           ],
         }],
-        ['OS!="ios" and (target_arch=="ia32" or target_arch=="x64")', {
+        ['target_arch=="ia32" or target_arch=="x64"', {
           'sources': [
             'base/simd/convert_rgb_to_yuv_unittest.cc',
           ],
         }],
-        ['proprietary_codecs==1 or branding=="Chrome"', {
+        ['proprietary_codecs==1', {
           'sources': [
-            'mp4/aac_unittest.cc',
-            'mp4/avc_unittest.cc',
-            'mp4/box_reader_unittest.cc',
-            'mp4/es_descriptor_unittest.cc',
-            'mp4/mp4_stream_parser_unittest.cc',
-            'mp4/offset_byte_queue_unittest.cc',
-            'mp4/track_run_iterator_unittest.cc',
+            'filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc',
+            'filters/h264_to_annex_b_bitstream_converter_unittest.cc',
+            'formats/common/stream_parser_test_base.cc',
+            'formats/common/stream_parser_test_base.h',
+            'formats/mp2t/es_parser_h264_unittest.cc',
+            'formats/mp2t/mp2t_stream_parser_unittest.cc',
+            'formats/mp4/aac_unittest.cc',
+            'formats/mp4/avc_unittest.cc',
+            'formats/mp4/box_reader_unittest.cc',
+            'formats/mp4/es_descriptor_unittest.cc',
+            'formats/mp4/mp4_stream_parser_unittest.cc',
+            'formats/mp4/sample_to_group_iterator_unittest.cc',
+            'formats/mp4/track_run_iterator_unittest.cc',
+            'formats/mpeg/adts_stream_parser_unittest.cc',
+            'formats/mpeg/mp3_stream_parser_unittest.cc',
+          ],
+        }],
+        ['enable_mpeg2ts_stream_parser==1', {
+          'defines': [
+            'ENABLE_MPEG2TS_STREAM_PARSER',
           ],
         }],
         # TODO(wolenetz): Fix size_t to int truncations in win64. See
         # http://crbug.com/171009
         ['OS=="win" and target_arch=="x64"', {
           'msvs_disabled_warnings': [ 4267, ],
+        }],
+        ['OS=="mac"', {
+          'sources': [
+            'video/capture/mac/video_capture_device_factory_mac_unittest.mm',
+          ]
+        }],
+      ],
+    },
+    {
+      'target_name': 'media_perftests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        '../base/base.gyp:test_support_base',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
+        '../testing/perf/perf_test.gyp:perf_test',
+        '../ui/base/ui_base.gyp:ui_base',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
+        '../ui/gl/gl.gyp:gl',
+        'media',
+        'media_test_support',
+        'shared_memory_support',
+      ],
+      'sources': [
+        'base/audio_bus_perftest.cc',
+        'base/audio_converter_perftest.cc',
+        'base/demuxer_perftest.cc',
+        'base/run_all_perftests.cc',
+        'base/sinc_resampler_perftest.cc',
+        'base/vector_math_perftest.cc',
+        'base/yuv_convert_perftest.cc',
+        'filters/pipeline_integration_perftest.cc',
+        'filters/pipeline_integration_test_base.cc',
+      ],
+      'conditions': [
+        ['arm_neon==1', {
+          'defines': [
+            'USE_NEON'
+          ],
+        }],
+        ['OS=="android"', {
+            'dependencies': [
+              '../testing/android/native_test.gyp:native_test_native_code',
+            ],
+        }],
+        ['media_use_ffmpeg==1', {
+          'dependencies': [
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+        }, {  # media_use_ffmpeg==0
+          'sources!': [
+            'base/demuxer_perftest.cc',
+            'filters/pipeline_integration_perftest.cc',
+            'filters/pipeline_integration_test_base.cc',
+          ],
         }],
       ],
     },
@@ -1102,6 +1326,7 @@
       'type': 'static_library',
       'dependencies': [
         'media',
+        'shared_memory_support',
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
@@ -1110,30 +1335,69 @@
       'sources': [
         'audio/mock_audio_manager.cc',
         'audio/mock_audio_manager.h',
+        'audio/mock_audio_source_callback.cc',
+        'audio/mock_audio_source_callback.h',
         'audio/test_audio_input_controller_factory.cc',
         'audio/test_audio_input_controller_factory.h',
         'base/fake_audio_render_callback.cc',
         'base/fake_audio_render_callback.h',
+        'base/fake_audio_renderer_sink.cc',
+        'base/fake_audio_renderer_sink.h',
+        'base/fake_text_track_stream.cc',
+        'base/fake_text_track_stream.h',
         'base/gmock_callback_support.h',
         'base/mock_audio_renderer_sink.cc',
         'base/mock_audio_renderer_sink.h',
-        'base/mock_data_source_host.cc',
-        'base/mock_data_source_host.h',
         'base/mock_demuxer_host.cc',
         'base/mock_demuxer_host.h',
         'base/mock_filters.cc',
         'base/mock_filters.h',
+        'base/test_data_util.cc',
+        'base/test_data_util.h',
         'base/test_helpers.cc',
         'base/test_helpers.h',
-        'filters/mock_gpu_video_decoder_factories.cc',
-        'filters/mock_gpu_video_decoder_factories.h',
+        'filters/clockless_video_frame_scheduler.cc',
+        'filters/clockless_video_frame_scheduler.h',
+        'filters/mock_gpu_video_accelerator_factories.cc',
+        'filters/mock_gpu_video_accelerator_factories.h',
+        'filters/test_video_frame_scheduler.cc',
+        'filters/test_video_frame_scheduler.h',
         'video/mock_video_decode_accelerator.cc',
         'video/mock_video_decode_accelerator.h',
       ],
     },
+    {
+      # Minimal target for NaCl and other renderer side media clients which
+      # only need to send audio data across the shared memory to the browser
+      # process.
+      'target_name': 'shared_memory_support',
+      'type': '<(component)',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'defines': [
+        'MEDIA_IMPLEMENTATION',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'includes': [
+        'shared_memory_support.gypi',
+      ],
+      'sources': [
+        '<@(shared_memory_support_sources)',
+      ],
+      'conditions': [
+        ['arm_neon==1', {
+          'defines': [
+            'USE_NEON'
+          ],
+        }],
+      ],
+    },
   ],
   'conditions': [
-    ['OS!="ios" and target_arch!="arm"', {
+    ['target_arch!="arm"', {
       'targets': [
        {
           'target_name': 'media_asm',
@@ -1184,11 +1448,12 @@
                 'conditions': [
                   ['target_arch=="ia32"', {
                     'yasm_flags': [
-                      '-DX86_32',
+                      '-DARCH_X86_32',
                       '-DELF',
                     ],
-                  }, {
+                  }, { # target_arch=="x64"
                     'yasm_flags': [
+                      '-DARCH_X86_64',
                       '-DELF',
                       '-DPIC',
                     ],
@@ -1232,29 +1497,8 @@
           'include_dirs': [
             '..',
           ],
-          'conditions': [
-            # TODO(jschuh): Get MMX enabled on Win64. crbug.com/179657
-            ['OS!="win" or target_arch=="ia32"', {
-              'sources': [
-                'base/simd/filter_yuv_mmx.cc',
-              ],
-            }],
-          ],
-        },
-        {
-          'target_name': 'media_sse',
-          'type': 'static_library',
-          'cflags': [
-            '-msse',
-          ],
-          'defines': [
-            'MEDIA_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '..',
-          ],
           'sources': [
-            'base/simd/sinc_resampler_sse.cc',
+            'base/simd/filter_yuv_mmx.cc',
           ],
         },
         {
@@ -1275,142 +1519,7 @@
             'base/simd/filter_yuv_sse2.cc',
           ],
         },
-        {
-          'target_name': 'shared_memory_support_sse',
-          'type': 'static_library',
-          'cflags': [
-            '-msse',
-          ],
-          'defines': [
-            'MEDIA_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'base/simd/vector_math_sse.cc',
-          ],
-        },
       ], # targets
-    }],
-    ['OS!="ios"', {
-      'includes': [
-        'media_cdm.gypi',
-      ],
-      'targets': [
-        {
-          # Minimal target for NaCl and other renderer side media clients which
-          # only need to send audio data across the shared memory to the browser
-          # process.
-          'target_name': 'shared_memory_support',
-          'type': '<(component)',
-          'dependencies': [
-            '../base/base.gyp:base',
-          ],
-          'defines': [
-            'MEDIA_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'includes': [
-            'shared_memory_support.gypi',
-          ],
-          'sources': [
-            '<@(shared_memory_support_sources)',
-          ],
-          'conditions': [
-            ['arm_neon==1', {
-              'defines': [
-                'USE_NEON'
-              ],
-            }],
-            ['target_arch=="ia32" or target_arch=="x64"', {
-              'dependencies': [
-                'shared_memory_support_sse'
-              ],
-            }],
-          ],
-        },
-        {
-          'target_name': 'seek_tester',
-          'type': 'executable',
-          'dependencies': [
-            'media',
-            '../base/base.gyp:base',
-          ],
-          'sources': [
-            'tools/seek_tester/seek_tester.cc',
-          ],
-        },
-        {
-          'target_name': 'demuxer_bench',
-          'type': 'executable',
-          'dependencies': [
-            'media',
-            '../base/base.gyp:base',
-          ],
-          'sources': [
-            'tools/demuxer_bench/demuxer_bench.cc',
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        },
-      ],
-    }],
-    ['(OS=="win" or toolkit_uses_gtk==1) and use_aura!=1', {
-      'targets': [
-        {
-          'target_name': 'shader_bench',
-          'type': 'executable',
-          'dependencies': [
-            'media',
-            '../base/base.gyp:base',
-            '../ui/gl/gl.gyp:gl',
-            '../ui/ui.gyp:ui',
-          ],
-          'sources': [
-            'tools/shader_bench/cpu_color_painter.cc',
-            'tools/shader_bench/cpu_color_painter.h',
-            'tools/shader_bench/gpu_color_painter.cc',
-            'tools/shader_bench/gpu_color_painter.h',
-            'tools/shader_bench/gpu_painter.cc',
-            'tools/shader_bench/gpu_painter.h',
-            'tools/shader_bench/painter.cc',
-            'tools/shader_bench/painter.h',
-            'tools/shader_bench/shader_bench.cc',
-            'tools/shader_bench/window.cc',
-            'tools/shader_bench/window.h',
-          ],
-          'conditions': [
-            ['toolkit_uses_gtk==1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-              'sources': [
-                'tools/shader_bench/window_linux.cc',
-              ],
-            }],
-            ['OS=="win"', {
-              'dependencies': [
-                '../third_party/angle_dx11/src/build_angle.gyp:libEGL',
-                '../third_party/angle_dx11/src/build_angle.gyp:libGLESv2',
-              ],
-              'sources': [
-                'tools/shader_bench/window_win.cc',
-              ],
-            }],
-            # See http://crbug.com/162998#c4 for why this is needed.
-            ['OS=="linux" and linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        },
-      ],
     }],
     ['use_x11==1', {
       'targets': [
@@ -1419,17 +1528,15 @@
           'type': 'executable',
           'dependencies': [
             'media',
+            'shared_memory_support',
             '../base/base.gyp:base',
             '../ui/gl/gl.gyp:gl',
-            '../ui/ui.gyp:ui',
+            '../ui/gfx/gfx.gyp:gfx',
+            '../ui/gfx/gfx.gyp:gfx_geometry',
+            '../build/linux/system.gyp:x11',
+            '../build/linux/system.gyp:xext',
+            '../build/linux/system.gyp:xrender',
           ],
-          'link_settings': {
-            'libraries': [
-              '-lX11',
-              '-lXrender',
-              '-lXext',
-            ],
-          },
           'conditions': [
             # Linux/Solaris need libdl for dlopen() and friends.
             ['OS=="linux" or OS=="solaris"', {
@@ -1452,9 +1559,7 @@
         },
       ],
     }],
-    # Special target to wrap a gtest_target_type==shared_library
-    # media_unittests into an android apk for execution.
-    ['OS=="android" and gtest_target_type=="shared_library"', {
+    ['OS=="android"', {
       'targets': [
         {
           'target_name': 'media_unittests_apk',
@@ -1465,7 +1570,18 @@
           ],
           'variables': {
             'test_suite_name': 'media_unittests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)media_unittests<(SHARED_LIB_SUFFIX)',
+          },
+          'includes': ['../build/apk_test.gypi'],
+        },
+        {
+          'target_name': 'media_perftests_apk',
+          'type': 'none',
+          'dependencies': [
+            'media_java',
+            'media_perftests',
+          ],
+          'variables': {
+            'test_suite_name': 'media_perftests',
           },
           'includes': ['../build/apk_test.gypi'],
         },
@@ -1478,9 +1594,13 @@
           'type': 'none',
           'sources': [
             'base/android/java/src/org/chromium/media/AudioManagerAndroid.java',
+            'base/android/java/src/org/chromium/media/AudioRecordInput.java',
             'base/android/java/src/org/chromium/media/MediaCodecBridge.java',
+            'base/android/java/src/org/chromium/media/MediaDrmBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerListener.java',
+            'base/android/java/src/org/chromium/media/UsbMidiDeviceAndroid.java',
+            'base/android/java/src/org/chromium/media/UsbMidiDeviceFactoryAndroid.java',
             'base/android/java/src/org/chromium/media/WebAudioMediaCodecBridge.java',
           ],
           'variables': {
@@ -1493,6 +1613,7 @@
           'type': 'none',
           'sources': [
             'base/android/java/src/org/chromium/media/VideoCapture.java',
+            'base/android/java/src/org/chromium/media/VideoCaptureFactory.java',
           ],
           'variables': {
             'jni_gen_package': 'media',
@@ -1503,8 +1624,13 @@
           'target_name': 'player_android',
           'type': 'static_library',
           'sources': [
+            'base/android/audio_decoder_job.cc',
+            'base/android/audio_decoder_job.h',
+            'base/android/browser_cdm_factory_android.cc',
             'base/android/media_codec_bridge.cc',
             'base/android/media_codec_bridge.h',
+            'base/android/media_decoder_job.cc',
+            'base/android/media_decoder_job.h',
             'base/android/media_drm_bridge.cc',
             'base/android/media_drm_bridge.h',
             'base/android/media_jni_registrar.cc',
@@ -1517,21 +1643,26 @@
             'base/android/media_player_listener.h',
             'base/android/media_source_player.cc',
             'base/android/media_source_player.h',
+            'base/android/media_url_interceptor.h',
+            'base/android/video_decoder_job.cc',
+            'base/android/video_decoder_job.h',
             'base/android/webaudio_media_codec_bridge.cc',
             'base/android/webaudio_media_codec_bridge.h',
             'base/android/webaudio_media_codec_info.h',
           ],
           'dependencies': [
             '../base/base.gyp:base',
+            '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
             '../ui/gl/gl.gyp:gl',
             '../url/url.gyp:url_lib',
             'media_android_jni_headers',
           ],
+          'include_dirs': [
+            # Needed by media_drm_bridge.cc.
+            '<(SHARED_INTERMEDIATE_DIR)',
+          ],
           'defines': [
             'MEDIA_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/media',
           ],
         },
         {
@@ -1539,6 +1670,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
+            'media_android_imageformat_list',
           ],
           'export_dependent_settings': [
             '../base/base.gyp:base',
@@ -1548,7 +1680,18 @@
           },
           'includes': ['../build/java.gypi'],
         },
-
+        {
+          'target_name': 'media_android_imageformat_list',
+          'type': 'none',
+          'sources': [
+            'base/android/java/src/org/chromium/media/ImageFormat.template',
+          ],
+          'variables': {
+            'package_name': 'org/chromium/media',
+            'template_deps': ['video/capture/android/imageformat_list.h'],
+          },
+          'includes': [ '../build/android/java_cpp_template.gypi' ],
+        },
       ],
     }],
     ['media_use_ffmpeg==1', {
@@ -1569,24 +1712,6 @@
           'sources': [
             'ffmpeg/ffmpeg_unittest.cc',
           ],
-          'conditions': [
-            ['toolkit_uses_gtk==1', {
-              'dependencies': [
-                # Needed for the following #include chain:
-                #   base/run_all_unittests.cc
-                #   ../base/test_suite.h
-                #   gtk/gtk.h
-                '../build/linux/system.gyp:gtk',
-              ],
-              'conditions': [
-                ['linux_use_tcmalloc==1', {
-                  'dependencies': [
-                    '../base/allocator/allocator.gyp:allocator',
-                  ],
-                }],
-              ],
-            }],
-          ],
         },
         {
           'target_name': 'ffmpeg_regression_tests',
@@ -1596,19 +1721,19 @@
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+            '../ui/gfx/gfx.gyp:gfx_geometry',
             'media',
             'media_test_support',
           ],
           'sources': [
             'base/run_all_unittests.cc',
-            'base/test_data_util.cc',
             'ffmpeg/ffmpeg_regression_tests.cc',
             'filters/pipeline_integration_test_base.cc',
           ],
           'conditions': [
             ['os_posix==1 and OS!="mac"', {
               'conditions': [
-                ['linux_use_tcmalloc==1', {
+                ['use_allocator!="none"', {
                   'dependencies': [
                     '../base/allocator/allocator.gyp:allocator',
                   ],
@@ -1616,34 +1741,6 @@
               ],
             }],
           ],
-        },
-        {
-          'target_name': 'ffmpeg_tests',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-            'media',
-          ],
-          'sources': [
-            'test/ffmpeg_tests/ffmpeg_tests.cc',
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
-        },
-        {
-          'target_name': 'media_bench',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-            'media',
-          ],
-          'sources': [
-            'tools/media_bench/media_bench.cc',
-          ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
         },
       ],
     }],

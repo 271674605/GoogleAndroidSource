@@ -16,8 +16,6 @@
 
 package android.cts.rscpp;
 
-import com.android.cts.stub.R;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.test.AndroidTestCase;
@@ -35,13 +33,12 @@ public class RS3DLUTTest extends RSCppTest {
 
     private final int lutSize = 64;
 
-    native boolean lutTest(int X, int Y, int lutSize, byte[] input, byte[] input2, byte[] output);
+    native boolean lutTest(String path, int X, int Y, int lutSize, byte[] input, byte[] input2, byte[] output);
     public void testRSLUT() {
         int[] baseAlloc = new int[X * Y * 4];
         RSUtils.genRandom(0x419144, 255, 1, -128, baseAlloc);
         int[] colorCube = new int[lutSize * lutSize * lutSize * 4];
         RSUtils.genRandom(0x555007, 255, 1, -128, colorCube);
-        RenderScript mRS = RenderScript.create(getContext());
         byte[] byteAlloc = new byte[X * Y * 4];
         byte[] byteColorCube = new byte[lutSize * lutSize * lutSize * 4];
         for (int i = 0; i < X * Y * 4; i++) {
@@ -51,7 +48,6 @@ public class RS3DLUTTest extends RSCppTest {
             byteColorCube[i] = (byte)colorCube[i];
         }
 
-
         Type.Builder build = new Type.Builder(mRS, Element.RGBA_8888(mRS));
         build.setX(X);
         build.setY(Y);
@@ -60,10 +56,10 @@ public class RS3DLUTTest extends RSCppTest {
         rsInput.copyFromUnchecked(byteAlloc);
 
         Type.Builder buildCube = new Type.Builder(mRS, Element.RGBA_8888(mRS));
-        build.setX(lutSize);
-        build.setY(lutSize);
-        build.setZ(lutSize);
-        Allocation cube = Allocation.createTyped(mRS, build.create());
+        buildCube.setX(lutSize);
+        buildCube.setY(lutSize);
+        buildCube.setZ(lutSize);
+        Allocation cube = Allocation.createTyped(mRS, buildCube.create());
         cube.copyFromUnchecked(byteColorCube);
         ScriptIntrinsic3DLUT lut = ScriptIntrinsic3DLUT.create(mRS, Element.RGBA_8888(mRS));
 
@@ -71,12 +67,12 @@ public class RS3DLUTTest extends RSCppTest {
         lut.forEach(rsInput, rsOutput);
 
         byte[] nativeByteAlloc = new byte[X * Y * 4];
-        lutTest(X, Y, lutSize, byteAlloc, byteColorCube, nativeByteAlloc);
-        rsOutput.copyTo(byteAlloc);
+        lutTest(this.getContext().getCacheDir().toString(), X, Y, lutSize, byteAlloc, byteColorCube, nativeByteAlloc);
 
-        for (int i = 0; i < X * Y * 4; i++) {
-            assertTrue(byteAlloc[i] == nativeByteAlloc[i]);
-        }
+        Allocation rsCppOutput = Allocation.createTyped(mRS, build.create());
+        rsCppOutput.copyFromUnchecked(nativeByteAlloc);
+        mVerify.invoke_verify(rsOutput, rsCppOutput, rsInput);
+        checkForErrors();
 
     }
 

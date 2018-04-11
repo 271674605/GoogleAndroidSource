@@ -19,10 +19,16 @@ package com.android.mail.browse;
 
 import android.content.Context;
 import android.util.AttributeSet;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.ViewConfiguration;
 import android.widget.ScrollView;
 
 import com.android.mail.utils.LogUtils;
+
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * A container that tries to play nice with an internally scrollable {@link Touchable} child view.
@@ -32,7 +38,8 @@ import com.android.mail.utils.LogUtils;
  * <p>
  * Touch events on any other child of this ScrollView are intercepted in the standard fashion.
  */
-public class MessageScrollView extends ScrollView {
+public class MessageScrollView extends ScrollView implements ScrollNotifier,
+        ScaleGestureDetector.OnScaleGestureListener, GestureDetector.OnDoubleTapListener {
 
     /**
      * A View that reports whether onTouchEvent() was recently called.
@@ -40,6 +47,8 @@ public class MessageScrollView extends ScrollView {
     public interface Touchable {
         boolean wasTouched();
         void clearTouched();
+        boolean zoomIn();
+        boolean zoomOut();
     }
 
     /**
@@ -58,6 +67,42 @@ public class MessageScrollView extends ScrollView {
      */
     private Touchable mTouchableChild;
 
+    /**
+     * We want to detect the scale gesture so that we don't try to scroll instead, but we don't
+     * care about actually interpreting it because the webview does that by itself when it handles
+     * the touch events.
+     *
+     * This might lead to really weird interactions if the two gesture detectors' implementations
+     * drift...
+     */
+    private ScaleGestureDetector mScaleDetector;
+    private boolean mInScaleGesture;
+
+    /**
+     * We also want to detect double-tap gestures, but in a way that doesn't conflict with
+     * tap-tap-drag gestures
+     */
+    private GestureDetector mGestureDetector;
+    private boolean mDoubleTapOccurred;
+    private boolean mZoomedIn;
+
+    /**
+     * Touch slop used to determine if this double tap is valid for starting a scale or should be
+     * ignored.
+     */
+    private int mTouchSlopSquared;
+
+    /**
+     * X and Y coordinates for the current down event. Since mDoubleTapOccurred only contains the
+     * information that there was a double tap event, use these to get the secondary tap
+     * information to determine if a user has moved beyond touch slop.
+     */
+    private float mDownFocusX;
+    private float mDownFocusY;
+
+    private final Set<ScrollListener> mScrollListeners =
+            new CopyOnWriteArraySet<ScrollListener>();
+
     public static final String LOG_TAG = "MsgScroller";
 
     public MessageScrollView(Context c) {
@@ -66,6 +111,11 @@ public class MessageScrollView extends ScrollView {
 
     public MessageScrollView(Context c, AttributeSet attrs) {
         super(c, attrs);
+        final int touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
+        mTouchSlopSquared = touchSlop * touchSlop;
+        mScaleDetector = new ScaleGestureDetector(c, this);
+        mGestureDetector = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener());
+        mGestureDetector.setOnDoubleTapListener(this);
     }
 
     public void setInnerScrollableView(Touchable child) {
@@ -100,10 +150,14 @@ public class MessageScrollView extends ScrollView {
         if (mTouchableChild != null) {
             mTouchableChild.clearTouched();
         }
+
+        mScaleDetector.onTouchEvent(ev);
+        mGestureDetector.onTouchEvent(ev);
+
         final boolean handled = super.dispatchTouchEvent(ev);
         LogUtils.d(LOG_TAG, "OUT ScrollView.dispatchTouch, handled=%s ev=%s", handled, ev);
 
-        if (mWantToIntercept) {
+        if (mWantToIntercept && !mInScaleGesture) {
             final boolean touchedChild = (mTouchableChild != null && mTouchableChild.wasTouched());
             if (touchedChild) {
                 // also give the event to this scroll view if the WebView got the event
@@ -119,4 +173,122 @@ public class MessageScrollView extends ScrollView {
         return handled;
     }
 
+    @Override
+    public boolean onScale(ScaleGestureDetector detector) {
+        return true;
+    }
+
+    @Override
+    public boolean onScaleBegin(ScaleGestureDetector detector) {
+        LogUtils.d(LOG_TAG, "Begin scale gesture");
+        mInScaleGesture = true;
+        return true;
+    }
+
+    @Override
+    public void onScaleEnd(ScaleGestureDetector detector) {
+        LogUtils.d(LOG_TAG, "End scale gesture");
+        mInScaleGesture = false;
+    }
+
+    @Override
+    public boolean onSingleTapConfirmed(MotionEvent e) {
+        return false;
+    }
+
+    @Override
+    public boolean onDoubleTap(MotionEvent e) {
+        mDoubleTapOccurred = true;
+        return false;
+    }
+
+    @Override
+    public boolean onDoubleTapEvent(MotionEvent e) {
+        final int action = e.getAction();
+        boolean handled = false;
+
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+                mDownFocusX = e.getX();
+                mDownFocusY = e.getY();
+                break;
+            case MotionEvent.ACTION_UP:
+                handled = triggerZoom();
+                break;
+            case MotionEvent.ACTION_MOVE:
+                final int deltaX = (int) (e.getX() - mDownFocusX);
+                final int deltaY = (int) (e.getY() - mDownFocusY);
+                int distance = (deltaX * deltaX) + (deltaY * deltaY);
+                if (distance > mTouchSlopSquared) {
+                    mDoubleTapOccurred = false;
+                }
+                break;
+
+        }
+        return handled;
+    }
+
+    private boolean triggerZoom() {
+        boolean handled = false;
+        if (mDoubleTapOccurred) {
+            if (mZoomedIn) {
+                mTouchableChild.zoomOut();
+            } else {
+                mTouchableChild.zoomIn();
+            }
+            mZoomedIn = !mZoomedIn;
+            LogUtils.d(LogUtils.TAG, "Trigger Zoom!");
+            handled = true;
+        }
+        mDoubleTapOccurred = false;
+        return handled;
+    }
+
+    @Override
+    public void addScrollListener(ScrollListener l) {
+        mScrollListeners.add(l);
+    }
+
+    @Override
+    public void removeScrollListener(ScrollListener l) {
+        mScrollListeners.remove(l);
+    }
+
+    @Override
+    protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+        for (ScrollListener listener : mScrollListeners) {
+            listener.onNotifierScroll(t);
+        }
+    }
+
+    @Override
+    public int computeVerticalScrollRange() {
+        return super.computeVerticalScrollRange();
+    }
+
+    @Override
+    public int computeVerticalScrollOffset() {
+        return super.computeVerticalScrollOffset();
+    }
+
+    @Override
+    public int computeVerticalScrollExtent() {
+        return super.computeVerticalScrollExtent();
+    }
+
+    @Override
+    public int computeHorizontalScrollRange() {
+        return super.computeHorizontalScrollRange();
+    }
+
+    @Override
+    public int computeHorizontalScrollOffset() {
+        return super.computeHorizontalScrollOffset();
+    }
+
+    @Override
+    public int computeHorizontalScrollExtent() {
+        return super.computeHorizontalScrollExtent();
+    }
 }

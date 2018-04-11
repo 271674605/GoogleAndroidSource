@@ -12,11 +12,13 @@
 
 EXTERN_C_BEGIN
 
+typedef void (*nacl_io_exit_handler_t)(int status, void* user_data);
+
 /**
  * Initialize nacl_io.
  *
  * NOTE: If you initialize nacl_io with this constructor, you cannot
- * use any mounts that require PPAPI; e.g. persistent storage, etc.
+ * use any filesystems that require PPAPI; e.g. persistent storage, etc.
  */
 void nacl_io_init();
 
@@ -38,9 +40,10 @@ void nacl_io_init();
  *   |get_interface| can be retrieved via
  *       pp::Module::Get()->get_browser_interface()
  */
-void nacl_io_init_ppapi(PP_Instance instance,
-                        PPB_GetInterface get_interface);
+void nacl_io_init_ppapi(PP_Instance instance, PPB_GetInterface get_interface);
 
+int nacl_io_register_exit_handler(nacl_io_exit_handler_t exit_handler,
+                                  void* user_data);
 
 /**
  * Mount a new filesystem type.
@@ -72,7 +75,7 @@ void nacl_io_init_ppapi(PP_Instance instance,
  *     data: Unused.
  *
  *   "html5fs": A filesystem that uses PPAPI FileSystem interface, which can be
- *              read in JavaScript via the HTML5 FileSystem API. This mount
+ *              read in JavaScript via the HTML5 FileSystem API. This filesystem
  *              provides the use of persistent storage. Please read the
  *              documentation in ppapi/c/ppb_file_system.h for more information.
  *     source: Unused.
@@ -81,6 +84,12 @@ void nacl_io_init_ppapi(PP_Instance instance,
  *           "PERSISTENT" and "TEMPORARY". The default is "PERSISTENT".
  *       "expected_size": The expected file-system size. Note that this does
  *           not request quota -- you must do that from JavaScript.
+ *       "filesystem_resource": If specified, this is a string that contains
+ *           the integer ID of the Filesystem resource to use instead of
+ *           creating a new one. The "type" and "expected_size" parameters are
+ *           ignored in this case. This parameter is useful when you pass a
+ *           Filesystem resource from JavaScript, but still want to be able to
+ *           call open/read/write/etc.
  *
  *   "httpfs": A filesystem that reads from a URL via HTTP.
  *     source: The root URL to read from. All paths read from this filesystem
@@ -89,7 +98,7 @@ void nacl_io_init_ppapi(PP_Instance instance,
  *             "foo/bar.txt" will attempt to read from the URL
  *             "http://example.com/path/foo/bar.txt".
  *     data: A string of parameters:
- *       "allow_cross_origin_request": If "true", then reads from this
+ *       "allow_cross_origin_requests": If "true", then reads from this
  *           filesystem will follow the CORS standard for cross-origin requests.
  *           See http://www.w3.org/TR/access-control.
  *       "allow_credentials": If "true", credentials are sent with cross-origin
@@ -99,7 +108,7 @@ void nacl_io_init_ppapi(PP_Instance instance,
  *       HTTP requests.
  *
  *   "passthroughfs": A filesystem that passes all requests through to the
- *                    underlying NaCL calls. The primary use of this filesystem
+ *                    underlying NaCl calls. The primary use of this filesystem
  *                    is to allow reading NMF resources.
  *     source: Unused.
  *     data: Unused.
@@ -117,6 +126,67 @@ void nacl_io_init_ppapi(PP_Instance instance,
  *         unsigned long mountflags, const void *data) NOTHROW;
  */
 
+/**
+ * Register a new filesystem type, using a FUSE interface to implement it.
+ *
+ * Example:
+ *   int my_open(const char* path, struct fuse_file_info*) {
+ *     ...
+ *   }
+ *
+ *   int my_read(const char* path, char* buf, size_t count, off_t offset, struct
+ *               fuse_file_info* info) {
+ *     ...
+ *   }
+ *
+ *   struct fuse_operations my_fuse_ops = {
+ *     ...
+ *     my_open,
+ *     NULL,  // opendir() not implemented.
+ *     my_read,
+ *     ...
+ *   };
+ *
+ *   ...
+ *
+ *   const char fs_type[] = "my_fs";
+ *   int result = nacl_io_register_fs_type(fs_type, &my_fuse_ops);
+ *   if (!result) {
+ *     fprintf(stderr, "Error registering filesystem type %s.\n", fs_type);
+ *     exit(1);
+ *   }
+ *
+ *   ...
+ *
+ *   int result = mount("", "/fs/foo", fs_type, 0, NULL);
+ *   if (!result) {
+ *     fprintf(stderr, "Error mounting %s.\n", fs_type);
+ *     exit(1);
+ *   }
+ *
+ * See fuse.h for more information about the FUSE interface.
+ * Also see fuse.sourceforge.net for more information about FUSE in general.
+ *
+ * @param[in] fs_type The name of the new filesystem type.
+ * @param[in] fuse_ops A pointer to the FUSE interface that will be used to
+ *     implement this filesystem type. This pointer must be valid for the
+ *     lifetime of all filesystems and nodes that are created with it.
+ * @return 0 on success, -1 on failure (with errno set).
+ */
+struct fuse_operations;
+int nacl_io_register_fs_type(const char* fs_type,
+                             struct fuse_operations* fuse_ops);
+
+/**
+ * Unregister a filesystem type, previously registered by
+ * nacl_io_register_fs_type().
+ *
+ * @param[in] fs_type The name of the filesystem type; the same identifier that
+ *     was passed to nacl_io_register_fs_type().
+ * @return 0 on success, -1 on failure (with errno set).
+ */
+int nacl_io_unregister_fs_type(const char* fs_type);
+
 EXTERN_C_END
 
-#endif  /* LIBRARIES_NACL_IO_NACL_IO_H_ */
+#endif /* LIBRARIES_NACL_IO_NACL_IO_H_ */

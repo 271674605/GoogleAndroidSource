@@ -1,17 +1,17 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "Test.h"
-#include "SkDevice.h"
-#include "SkTemplates.h"
-#include "SkShader.h"
+
+#include "SkBitmapDevice.h"
 #include "SkColorShader.h"
 #include "SkEmptyShader.h"
 #include "SkGradientShader.h"
+#include "SkShader.h"
+#include "SkTemplates.h"
+#include "Test.h"
 
 struct GradRec {
     int             fColorCount;
@@ -142,12 +142,10 @@ static void TestConstantGradient(skiatest::Reporter*) {
                                                             2,
                                                             SkShader::kClamp_TileMode));
     SkBitmap outBitmap;
-    outBitmap.setConfig(SkBitmap::kARGB_8888_Config, 10, 1);
-    outBitmap.allocPixels();
+    outBitmap.allocN32Pixels(10, 1);
     SkPaint paint;
     paint.setShader(s.get());
-    SkDevice device(outBitmap);
-    SkCanvas canvas(&device);
+    SkCanvas canvas(outBitmap);
     canvas.drawPaint(paint);
     SkAutoLockPixels alp(outBitmap);
     for (int i = 0; i < 10; i++) {
@@ -192,9 +190,7 @@ static void TestGradientShaders(skiatest::Reporter* reporter) {
     }
 }
 
-static void TestGradients(skiatest::Reporter* reporter) {
+DEF_TEST(Gradient, reporter) {
     TestGradientShaders(reporter);
     TestConstantGradient(reporter);
 }
-#include "TestClassDef.h"
-DEFINE_TESTCLASS("Gradients", TestGradientsClass, TestGradients)

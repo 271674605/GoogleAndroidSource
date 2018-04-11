@@ -56,6 +56,8 @@ public:
     };
     Hal mHal;
 
+    void operator delete(void* ptr);
+
     Type * createTex2D(const Element *, size_t w, size_t h, bool mip);
 
     size_t getCellCount() const {return mCellCount;}
@@ -111,6 +113,7 @@ public:
 
     void incRefs(const void *ptr, size_t ct, size_t startOff = 0) const;
     void decRefs(const void *ptr, size_t ct, size_t startOff = 0) const;
+    virtual void callUpdateCacheObject(const Context *rsc, void *dstObj) const;
 
 protected:
     void makeLODTable();

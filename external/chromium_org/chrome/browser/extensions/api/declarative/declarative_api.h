@@ -8,11 +8,11 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/api/declarative/rules_registry.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 
 namespace extensions {
 
-class RulesFunction : public AsyncExtensionFunction {
+class RulesFunction : public ChromeAsyncExtensionFunction {
  public:
   RulesFunction();
 
@@ -21,12 +21,12 @@ class RulesFunction : public AsyncExtensionFunction {
 
   // ExtensionFunction:
   virtual bool HasPermission() OVERRIDE;
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   // Concrete implementation of the RulesFunction that is being called
   // on the thread on which the respective RulesRegistry lives.
   // Returns false in case of errors.
-  virtual bool RunImplOnCorrectThread() = 0;
+  virtual bool RunAsyncOnCorrectThread() = 0;
 
   scoped_refptr<RulesRegistry> rules_registry_;
 };
@@ -39,7 +39,7 @@ class EventsEventAddRulesFunction : public RulesFunction {
   virtual ~EventsEventAddRulesFunction() {}
 
   // RulesFunction:
-  virtual bool RunImplOnCorrectThread() OVERRIDE;
+  virtual bool RunAsyncOnCorrectThread() OVERRIDE;
 };
 
 class EventsEventRemoveRulesFunction : public RulesFunction {
@@ -50,7 +50,7 @@ class EventsEventRemoveRulesFunction : public RulesFunction {
   virtual ~EventsEventRemoveRulesFunction() {}
 
   // RulesFunction:
-  virtual bool RunImplOnCorrectThread() OVERRIDE;
+  virtual bool RunAsyncOnCorrectThread() OVERRIDE;
 };
 
 class EventsEventGetRulesFunction : public RulesFunction {
@@ -61,7 +61,7 @@ class EventsEventGetRulesFunction : public RulesFunction {
   virtual ~EventsEventGetRulesFunction() {}
 
   // RulesFunction:
-  virtual bool RunImplOnCorrectThread() OVERRIDE;
+  virtual bool RunAsyncOnCorrectThread() OVERRIDE;
 };
 
 }  // namespace extensions

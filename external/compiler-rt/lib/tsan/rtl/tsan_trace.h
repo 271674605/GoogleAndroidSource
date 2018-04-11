@@ -15,7 +15,7 @@
 
 #include "tsan_defs.h"
 #include "tsan_mutex.h"
-#include "tsan_sync.h"
+#include "tsan_stack_trace.h"
 #include "tsan_mutexset.h"
 
 namespace __tsan {
@@ -62,6 +62,11 @@ struct TraceHeader {
 struct Trace {
   TraceHeader headers[kTraceParts];
   Mutex mtx;
+#ifndef TSAN_GO
+  // Must be last to catch overflow as paging fault.
+  // Go shadow stack is dynamically allocated.
+  uptr shadow_stack[kShadowStackSize];
+#endif
 
   Trace()
     : mtx(MutexTypeTrace, StatMtxTrace) {

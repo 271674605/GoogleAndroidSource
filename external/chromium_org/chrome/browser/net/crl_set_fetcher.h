@@ -20,14 +20,15 @@ namespace net {
 class CRLSet;
 }
 
-class ComponentUpdateService;
-
-class CRLSetFetcher : public ComponentInstaller,
+class CRLSetFetcher : public component_updater::ComponentInstaller,
                       public base::RefCountedThreadSafe<CRLSetFetcher> {
  public:
   CRLSetFetcher();
 
-  void StartInitialLoad(ComponentUpdateService* cus);
+  void StartInitialLoad(component_updater::ComponentUpdateService* cus);
+
+  // DeleteFromDisk asynchronously delete the CRLSet file.
+  void DeleteFromDisk();
 
   // ComponentInstaller interface
   virtual void OnUpdateError(int error) OVERRIDE;
@@ -62,7 +63,11 @@ class CRLSetFetcher : public ComponentInstaller,
   // RegisterComponent registers this object as a component updater.
   void RegisterComponent(uint32 sequence_of_loaded_crl);
 
-  ComponentUpdateService* cus_;
+  // DoDeleteFromDisk runs on the FILE thread and removes the CRLSet file from
+  // the disk.
+  void DoDeleteFromDisk();
+
+  component_updater::ComponentUpdateService* cus_;
 
   // We keep a pointer to the current CRLSet for use on the FILE thread when
   // applying delta updates.

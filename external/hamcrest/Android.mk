@@ -26,14 +26,11 @@ include $(BUILD_HOST_JAVA_LIBRARY)
 
 # build for the host dalvik
 # -------------------------
-ifeq ($(WITH_HOST_DALVIK),true)
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES := $(call all-java-files-under, src)
 LOCAL_MODULE := hamcrest-hostdex
 LOCAL_MODULE_TAGS := optional
-LOCAL_BUILD_HOST_DEX := true
-include $(BUILD_HOST_JAVA_LIBRARY)
-endif
+include $(BUILD_HOST_DALVIK_JAVA_LIBRARY)
 
 
 
@@ -51,3 +48,5 @@ LOCAL_SDK_VERSION := 4
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_STATIC_JAVA_LIBRARY)
+
+include $(call all-makefiles-under, $(LOCAL_PATH))

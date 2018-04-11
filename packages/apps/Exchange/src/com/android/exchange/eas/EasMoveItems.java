@@ -4,7 +4,6 @@ import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.SyncResult;
 
 import com.android.emailcommon.provider.Account;
 import com.android.emailcommon.provider.EmailContent;
@@ -52,30 +51,48 @@ public class EasMoveItems extends EasOperation {
     }
 
     // TODO: Allow multiple messages in one request. Requires parser changes.
-    public int upsyncMovedMessages(final SyncResult syncResult) {
-        final List<MessageMove> moves = MessageMove.getMoves(mContext, mAccountId);
+    public int upsyncMovedMessages() {
+        final List<MessageMove> moves = MessageMove.getMoves(mContext, getAccountId());
         if (moves == null) {
             return RESULT_NO_MESSAGES;
         }
 
         final long[][] messageIds = new long[3][moves.size()];
         final int[] counts = new int[3];
+        int result = RESULT_NO_MESSAGES;
 
         for (final MessageMove move : moves) {
             mMove = move;
-            final int result = performOperation(syncResult);
+            if (result >= 0) {
+                // If our previous time through the loop succeeded, keep making server requests.
+                // Otherwise, we carry through the loop for all messages with the last error
+                // response, which will stop trying this iteration and force the rest of the
+                // messages into the retry state.
+                result = performOperation();
+            }
             final int status;
-            if (result == RESULT_OK) {
-                processResponse(mMove, mResponse);
-                status = mResponse.moveStatus;
+            if (result >= 0) {
+                if (result == RESULT_OK) {
+                    processResponse(mMove, mResponse);
+                    status = mResponse.moveStatus;
+                } else {
+                    // TODO: Should this really be a retry?
+                    // We got a 200 response with an empty payload. It's not clear we ought to
+                    // retry, but this is how our implementation has worked in the past.
+                    status = MoveItemsParser.STATUS_CODE_RETRY;
+                }
             } else {
-                // TODO: Perhaps not all errors should be retried?
-                // Notably, if the server returns 200 with an empty response, we retry. This is
-                // how the previous version worked, and I can't find documentation about what this
-                // response state really means.
+                // performOperation returned a negative status code, indicating a failure before the
+                // server actually was able to tell us yea or nay, so we must retry.
                 status = MoveItemsParser.STATUS_CODE_RETRY;
             }
-            final int index = status - 1;
+            final int index;
+            if (status <= 0) {
+                LogUtils.e(LOG_TAG, "MoveItems gave us an invalid status %d", status);
+                index = MoveItemsParser.STATUS_CODE_RETRY - 1;
+            } else {
+                index = status - 1;
+            }
             messageIds[index][counts[index]] = mMove.getMessageId();
             ++counts[index];
         }
@@ -85,7 +102,10 @@ public class EasMoveItems extends EasOperation {
         MessageMove.upsyncFail(cr, messageIds[1], counts[1]);
         MessageMove.upsyncRetry(cr, messageIds[2], counts[2]);
 
-        return RESULT_OK;
+        if (result >= 0) {
+            return RESULT_OK;
+        }
+        return result;
     }
 
     @Override
@@ -107,8 +127,7 @@ public class EasMoveItems extends EasOperation {
     }
 
     @Override
-    protected int handleResponse(final EasResponse response, final SyncResult syncResult)
-            throws IOException {
+    protected int handleResponse(final EasResponse response) throws IOException {
         if (!response.isEmpty()) {
             final MoveItemsParser parser = new MoveItemsParser(response.getInputStream());
             parser.parse();
@@ -124,9 +143,23 @@ public class EasMoveItems extends EasOperation {
     private void processResponse(final MessageMove request, final MoveResponse response) {
         // TODO: Eventually this should use a transaction.
         // TODO: Improve how the parser reports statuses and how we handle them here.
-        if (!response.sourceMessageId.equals(request.getServerId())) {
-            // TODO: This is bad, but I think we need to respect the response anyway.
-            LogUtils.e(LOG_TAG, "Got a response for a message we didn't request");
+
+        final String sourceMessageId;
+
+        if (response.sourceMessageId == null) {
+            // The response didn't contain SrcMsgId, despite it being required.
+            LogUtils.e(LOG_TAG,
+                    "MoveItems response for message %d has no SrcMsgId, using request's server id",
+                    request.getMessageId());
+            sourceMessageId = request.getServerId();
+        } else {
+            sourceMessageId = response.sourceMessageId;
+            if (!sourceMessageId.equals(request.getServerId())) {
+                // TODO: This is bad, but we still need to process the response. Just log for now.
+                LogUtils.e(LOG_TAG,
+                        "MoveItems response for message %d has SrcMsgId != request's server id",
+                        request.getMessageId());
+            }
         }
 
         final ContentValues cv = new ContentValues(1);
@@ -134,8 +167,7 @@ public class EasMoveItems extends EasOperation {
             // Restore the old mailbox id
             cv.put(EmailContent.MessageColumns.MAILBOX_KEY, request.getSourceFolderKey());
         } else if (response.moveStatus == MoveItemsParser.STATUS_CODE_SUCCESS) {
-            if (response.newMessageId != null
-                    && !response.newMessageId.equals(response.sourceMessageId)) {
+            if (response.newMessageId != null && !response.newMessageId.equals(sourceMessageId)) {
                 cv.put(EmailContent.SyncColumns.SERVER_ID, response.newMessageId);
             }
         }

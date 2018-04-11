@@ -22,15 +22,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_util.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/font_list.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
@@ -41,9 +41,6 @@ class DownloadShelfContextMenuView;
 namespace gfx {
 class Image;
 class ImageSkia;
-}
-
-namespace ui {
 class SlideAnimation;
 }
 
@@ -56,10 +53,9 @@ class DownloadItemView : public views::ButtonListener,
                          public views::View,
                          public views::ContextMenuController,
                          public content::DownloadItem::Observer,
-                         public ui::AnimationDelegate {
+                         public gfx::AnimationDelegate {
  public:
-  DownloadItemView(content::DownloadItem* download,
-                   DownloadShelfView* parent);
+  DownloadItemView(content::DownloadItem* download, DownloadShelfView* parent);
   virtual ~DownloadItemView();
 
   // Timer callback for handling animations
@@ -80,7 +76,7 @@ class DownloadItemView : public views::ButtonListener,
 
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
@@ -89,8 +85,8 @@ class DownloadItemView : public views::ButtonListener,
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
-                              string16* tooltip) const OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+                              base::string16* tooltip) const OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
 
   // Overridden from ui::EventHandler:
@@ -105,12 +101,15 @@ class DownloadItemView : public views::ButtonListener,
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
 
-  // ui::AnimationDelegate implementation.
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  // gfx::AnimationDelegate implementation.
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
 
  protected:
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
 
  private:
   enum State {
@@ -147,10 +146,14 @@ class DownloadItemView : public views::ButtonListener,
 
   void OpenDownload();
 
-  // Submit the downloaded file to the safebrowsing download feedback service.
-  // If true is returned, the DownloadItem and |this| have been deleted.  If
-  // false is returned, nothing has changed.
-  bool BeginDownloadFeedback();
+  // Submits the downloaded file to the safebrowsing download feedback service.
+  // Returns whether submission was successful. On successful submission,
+  // |this| and the DownloadItem will have been deleted.
+  bool SubmitDownloadToFeedbackService();
+
+  // If the user has |enabled| uploading, calls SubmitDownloadToFeedbackService.
+  // Otherwise, it simply removes the DownloadItem without uploading.
+  void PossiblySubmitDownloadToFeedbackService(bool enabled);
 
   void LoadIcon();
   void LoadIconIfItemPathChanged();
@@ -195,7 +198,7 @@ class DownloadItemView : public views::ButtonListener,
 
   // Sets |size| with the size of the Save and Discard buttons (they have the
   // same size).
-  gfx::Size GetButtonSize();
+  gfx::Size GetButtonSize() const;
 
   // Sizes the dangerous download label to a minimum width available using 2
   // lines.  The size is computed only the first time this method is invoked
@@ -224,7 +227,7 @@ class DownloadItemView : public views::ButtonListener,
   // Show/Hide/Reset |animation| based on the state transition specified by
   // |from| and |to|.
   void AnimateStateTransition(State from, State to,
-                              ui::SlideAnimation* animation);
+                              gfx::SlideAnimation* animation);
 
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;
@@ -243,13 +246,13 @@ class DownloadItemView : public views::ButtonListener,
   DownloadShelfView* shelf_;
 
   // Elements of our particular download
-  string16 status_text_;
+  base::string16 status_text_;
 
-  // The font used to print the file name and status.
-  gfx::Font font_;
+  // The font list used to print the file name and status.
+  gfx::FontList font_list_;
 
   // The tooltip.  Only displayed when not showing a warning dialog.
-  string16 tooltip_text_;
+  base::string16 tooltip_text_;
 
   // The current state (normal, hot or pushed) of the body and drop-down.
   State body_state_;
@@ -284,17 +287,17 @@ class DownloadItemView : public views::ButtonListener,
   gfx::Point drag_start_point_;
 
   // For canceling an in progress icon request.
-  CancelableTaskTracker cancelable_task_tracker_;
+  base::CancelableTaskTracker cancelable_task_tracker_;
 
   // A model class to control the status text we display.
   DownloadItemModel model_;
 
   // Hover animations for our body and drop buttons.
-  scoped_ptr<ui::SlideAnimation> body_hover_animation_;
-  scoped_ptr<ui::SlideAnimation> drop_hover_animation_;
+  scoped_ptr<gfx::SlideAnimation> body_hover_animation_;
+  scoped_ptr<gfx::SlideAnimation> drop_hover_animation_;
 
   // Animation for download complete.
-  scoped_ptr<ui::SlideAnimation> complete_animation_;
+  scoped_ptr<gfx::SlideAnimation> complete_animation_;
 
   // Progress animation
   base::RepeatingTimer<DownloadItemView> progress_timer_;
@@ -310,13 +313,16 @@ class DownloadItemView : public views::ButtonListener,
   bool dangerous_download_label_sized_;
 
   // The size of the buttons.  Cached so animation works when hidden.
-  gfx::Size cached_button_size_;
+  mutable gfx::Size cached_button_size_;
 
   // Whether we are currently disabled as part of opening the downloaded file.
   bool disabled_while_opening_;
 
   // The time at which this view was created.
   base::Time creation_time_;
+
+  // The time at which a dangerous download warning was displayed.
+  base::Time time_download_warning_shown_;
 
   // Method factory used to delay reenabling of the item when opening the
   // downloaded file.
@@ -326,7 +332,7 @@ class DownloadItemView : public views::ButtonListener,
   scoped_ptr<DownloadShelfContextMenuView> context_menu_;
 
   // The name of this view as reported to assistive technology.
-  string16 accessible_name_;
+  base::string16 accessible_name_;
 
   // The icon loaded in the download shelf is based on the file path of the
   // item.  Store the path used, so that we can detect a change in the path

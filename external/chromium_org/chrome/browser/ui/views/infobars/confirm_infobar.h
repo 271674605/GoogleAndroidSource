@@ -11,6 +11,7 @@
 #include "ui/views/controls/link_listener.h"
 
 class ConfirmInfoBarDelegate;
+class ElevationIconSetter;
 
 namespace views {
 class Label;
@@ -22,7 +23,7 @@ class Label;
 class ConfirmInfoBar : public InfoBarView,
                        public views::LinkListener {
  public:
-  ConfirmInfoBar(InfoBarService* owner, ConfirmInfoBarDelegate* delegate);
+  explicit ConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate> delegate);
 
  private:
   virtual ~ConfirmInfoBar();
@@ -40,10 +41,15 @@ class ConfirmInfoBar : public InfoBarView,
 
   ConfirmInfoBarDelegate* GetDelegate();
 
+  // Returns the width of all content other than the label and link.  Layout()
+  // uses this to determine how much space the label and link can take.
+  int NonLabelWidth() const;
+
   views::Label* label_;
   views::LabelButton* ok_button_;
   views::LabelButton* cancel_button_;
   views::Link* link_;
+  scoped_ptr<ElevationIconSetter> elevation_icon_setter_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmInfoBar);
 };

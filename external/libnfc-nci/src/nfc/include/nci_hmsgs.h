@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ UINT8 nci_snd_parameter_update_cmd (UINT8 *p_param_tlvs, UINT8 tlv_size);
 #if ((NFC_NFCEE_INCLUDED == TRUE) && (NFC_RW_ONLY == FALSE))
 UINT8 nci_snd_nfcee_discover (UINT8 discover_action);
 UINT8 nci_snd_nfcee_mode_set (UINT8 nfcee_id, UINT8 nfcee_mode);
-UINT8 nci_snd_set_routing_cmd (BOOLEAN more, UINT8 target_handle, UINT8 num_tlv, UINT8 tlv_size, UINT8 *p_param_tlvs);
+UINT8 nci_snd_set_routing_cmd (BOOLEAN more, UINT8 num_tlv, UINT8 tlv_size, UINT8 *p_param_tlvs);
 UINT8 nci_snd_get_routing_cmd (void);
 #endif
 

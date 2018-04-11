@@ -18,17 +18,21 @@ include $(CLEAR_VARS)
 
 # don't include this package in any target
 LOCAL_MODULE_TAGS := optional
+
+# Include both the 32 and 64 bit versions of libs
+LOCAL_MULTILIB := both
+
 # and when built explicitly put it in the data partition
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
+LOCAL_JAVA_LIBRARIES := android.test.runner telephony-common
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner
+LOCAL_STATIC_JAVA_LIBRARIES := ctsdeviceutil ctstestrunner
+
+LOCAL_JNI_SHARED_LIBRARIES := libcts_jni
 
 LOCAL_SRC_FILES := $(call all-java-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsProviderTestCases
-
-LOCAL_INSTRUMENTATION_FOR := CtsTestStubs
 
 include $(BUILD_CTS_PACKAGE)

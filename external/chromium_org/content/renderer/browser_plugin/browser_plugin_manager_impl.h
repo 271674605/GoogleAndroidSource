@@ -5,11 +5,10 @@
 #ifndef CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_MANAGER_IMPL_H_
 #define CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_MANAGER_IMPL_H_
 
+#include <map>
+
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
 #include "ui/gfx/size.h"
-
-struct BrowserPluginMsg_UpdateRect_Params;
-class WebCursor;
 
 namespace gfx {
 class Point;
@@ -24,9 +23,8 @@ class BrowserPluginManagerImpl : public BrowserPluginManager {
   // BrowserPluginManager implementation.
   virtual BrowserPlugin* CreateBrowserPlugin(
       RenderViewImpl* render_view,
-      WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params) OVERRIDE;
-  virtual void AllocateInstanceID(BrowserPlugin* browser_plugin) OVERRIDE;
+      blink::WebFrame* frame,
+      bool auto_navigate) OVERRIDE;
 
   // IPC::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -37,16 +35,6 @@ class BrowserPluginManagerImpl : public BrowserPluginManager {
 
  private:
   virtual ~BrowserPluginManagerImpl();
-
-  void OnAllocateInstanceIDACK(const IPC::Message& message,
-                               int request_id,
-                               int guest_instance_id);
-  void OnPluginAtPositionRequest(const IPC::Message& message,
-                                 int request_id,
-                                 const gfx::Point& position);
-
-  int request_id_counter_;
-  IDMap<BrowserPlugin> pending_allocate_guest_instance_id_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPluginManagerImpl);
 };

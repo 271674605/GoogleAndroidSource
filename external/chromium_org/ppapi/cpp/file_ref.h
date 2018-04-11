@@ -46,9 +46,12 @@ class FileRef : public Resource {
   /// A constructor that creates a weak pointer to a file in the given file
   /// system. File paths are POSIX style.
   ///
+  /// If the <code>path</code> is malformed, the resulting <code>FileRef</code>
+  /// will have a null <code>PP_Resource</code>.
+  ///
   /// @param[in] file_system A <code>FileSystem</code> corresponding to a file
   /// system type.
-  /// @param[in] path A path to the file.
+  /// @param[in] path A path to the file. Must begin with a '/' character.
   FileRef(const FileSystem& file_system, const char* path);
 
   /// The copy constructor for <code>FileRef</code>.
@@ -87,30 +90,20 @@ class FileRef : public Resource {
   /// <code>PP_FileSystemType_External</code>.
   FileRef GetParent() const;
 
-  /// MakeDirectory() makes a new directory in the file system.  It is not
-  /// valid to make a directory in the external file system.
-  /// <strong>Note:</strong> Use MakeDirectoryIncludingAncestors() to create
-  /// parent directories.
+  /// MakeDirectory() makes a new directory in the file system according to the
+  /// given <code>make_directory_flags</code>, which is a bit-mask of the
+  /// <code>PP_MakeDirectoryFlags</code> values.  It is not valid to make a
+  /// directory in the external file system.
   ///
+  /// @param[in] make_directory_flags A bit-mask of the
+  /// <code>PP_MakeDirectoryFlags</code> values.
+  /// See <code>ppb_file_ref.h</code> for more details.
   /// @param[in] cc A <code>CompletionCallback</code> to be called upon
   /// completion of MakeDirectory().
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  /// Succeeds if the directory already exists. Fails if ancestor
-  /// directortories do not exist (see MakeDirectoryIncludingAncestors for the
-  /// alternative).
-  int32_t MakeDirectory(const CompletionCallback& cc);
-
-  /// MakeDirectoryIncludingAncestors() makes a new directory in the file
-  /// system as well as any parent directories. It is not valid to make a
-  /// directory in the external file system.
-  ///
-  /// @param[in] cc A <code>CompletionCallback</code> to be called upon
-  /// completion of MakeDirectoryIncludingAncestors().
-  ///
-  /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  /// Succeeds if the directory already exists.
-  int32_t MakeDirectoryIncludingAncestors(const CompletionCallback& cc);
+  int32_t MakeDirectory(int32_t make_directory_flags,
+                        const CompletionCallback& cc);
 
   /// Touch() Updates time stamps for a file.  You must have write access to the
   /// file if it exists in the external filesystem.

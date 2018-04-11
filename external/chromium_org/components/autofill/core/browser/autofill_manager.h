@@ -19,16 +19,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "components/autofill/content/browser/autocheckout_manager.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
+#include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_download.h"
-#include "components/autofill/core/browser/autofill_manager_delegate.h"
+#include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/core/common/autocheckout_status.h"
 #include "components/autofill/core/common/form_data.h"
-#include "components/autofill/core/common/forms_seen_state.h"
-#include "third_party/WebKit/public/web/WebFormElement.h"
 
 class GURL;
 
@@ -48,12 +45,11 @@ class PrefRegistrySyncable;
 
 namespace autofill {
 
-class AutofillDriver;
 class AutofillDataModel;
 class AutofillDownloadManager;
 class AutofillExternalDelegate;
 class AutofillField;
-class AutofillManagerDelegate;
+class AutofillClient;
 class AutofillManagerTestDelegate;
 class AutofillMetrics;
 class AutofillProfile;
@@ -77,8 +73,12 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Registers our Enable/Disable Autofill pref.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  static void MigrateUserPrefs(PrefService* prefs);
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
   AutofillManager(AutofillDriver* driver,
-                  autofill::AutofillManagerDelegate* delegate,
+                  AutofillClient* client,
                   const std::string& app_locale,
                   AutofillDownloadManagerState enable_download_manager);
   virtual ~AutofillManager();
@@ -86,14 +86,29 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Sets an external delegate.
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
 
+  void ShowAutofillSettings();
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // Whether the field represented by |fieldData| should show an entry to prompt
+  // the user to give Chrome access to the user's address book.
+  bool ShouldShowAccessAddressBookSuggestion(const FormData& data,
+                                             const FormFieldData& field_data);
+
+  // If Chrome has not prompted for access to the user's address book, the
+  // method prompts the user for permission and blocks the process. Otherwise,
+  // this method has no effect. The return value reflects whether the user was
+  // prompted with a modal dialog.
+  bool AccessAddressBook();
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
   // Called from our external delegate so they cannot be private.
-  virtual void OnFillAutofillFormData(int query_id,
-                                      const FormData& form,
-                                      const FormFieldData& field,
-                                      int unique_id);
-  void OnDidShowAutofillSuggestions(bool is_new_popup);
+  virtual void FillOrPreviewForm(AutofillDriver::RendererFormDataAction action,
+                                 int query_id,
+                                 const FormData& form,
+                                 const FormFieldData& field,
+                                 int unique_id);
+  void DidShowSuggestions(bool is_new_popup);
   void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
-  void OnShowAutofillDialog();
   void OnDidPreviewAutofillFormData();
 
   // Remove the credit card or Autofill profile that matches |unique_id|
@@ -104,35 +119,21 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   void RemoveAutocompleteEntry(const base::string16& name,
                                const base::string16& value);
 
-  // Returns the present web_contents state.
-  content::WebContents* GetWebContents() const;
-
   // Returns the present form structures seen by Autofill manager.
   const std::vector<FormStructure*>& GetFormStructures();
-
-  // Causes the dialog for request autocomplete feature to be shown.
-  virtual void ShowRequestAutocompleteDialog(
-      const FormData& form,
-      const GURL& source_url,
-      autofill::DialogType dialog_type,
-      const base::Callback<void(const FormStructure*,
-                                const std::string&)>& callback);
 
   // Happens when the autocomplete dialog runs its callback when being closed.
   void RequestAutocompleteDialogClosed();
 
-  autofill::AutofillManagerDelegate* delegate() const {
-    return manager_delegate_;
-  }
+  AutofillClient* client() const { return client_; }
 
   const std::string& app_locale() const { return app_locale_; }
 
   // Only for testing.
-  void SetTestDelegate(autofill::AutofillManagerTestDelegate* delegate);
+  void SetTestDelegate(AutofillManagerTestDelegate* delegate);
 
   void OnFormsSeen(const std::vector<FormData>& forms,
-                   const base::TimeTicks& timestamp,
-                   autofill::FormsSeenState state);
+                   const base::TimeTicks& timestamp);
 
   // Processes the submitted |form|, saving any new Autofill data and uploading
   // the possible field types for the submitted fields to the crowdsourcing
@@ -151,47 +152,31 @@ class AutofillManager : public AutofillDownloadManager::Observer {
                                 const gfx::RectF& bounding_box,
                                 bool display_warning);
   void OnDidEndTextFieldEditing();
-  void OnHideAutofillUI();
-  void OnAddPasswordFormMapping(
-      const FormFieldData& form,
-      const PasswordFormFillData& fill_data);
-  void OnShowPasswordSuggestions(
-      const FormFieldData& field,
-      const gfx::RectF& bounds,
-      const std::vector<base::string16>& suggestions,
-      const std::vector<base::string16>& realms);
+  void OnHidePopup();
   void OnSetDataList(const std::vector<base::string16>& values,
                      const std::vector<base::string16>& labels);
 
-  // Requests an interactive autocomplete UI be shown.
-  void OnRequestAutocomplete(const FormData& form,
-                             const GURL& frame_url);
-
-  // Called to signal a page is completed in renderer in the Autocheckout flow.
-  void OnAutocheckoutPageCompleted(autofill::AutocheckoutStatus status);
-
-  // Shows the Autocheckout bubble if conditions are right. See comments for
-  // AutocheckoutManager::MaybeShowAutocheckoutBubble. Input element requesting
-  // bubble belongs to |form|. |bounding_box| is the bounding box of the input
-  // field in focus.
-  virtual void OnMaybeShowAutocheckoutBubble(const FormData& form,
-                                             const gfx::RectF& bounding_box);
+  // Try and upload |form|. This differs from OnFormSubmitted() in a few ways.
+  //   - This function will only label the first <input type="password"> field
+  //     as ACCOUNT_CREATION_PASSWORD. Other fields will stay unlabeled, as they
+  //     should have been labeled during the upload for OnFormSubmitted().
+  //   - This function does not assume that |form| is being uploaded during
+  //     the same browsing session as it was originally submitted (as we may
+  //     not have the necessary information to classify the form at that time)
+  //     so it bypasses the cache and doesn't log the same quality UMA metrics.
+  bool UploadPasswordGenerationForm(const FormData& form);
 
   // Resets cache.
   virtual void Reset();
 
-  autofill::AutocheckoutManager* autocheckout_manager() {
-    return &autocheckout_manager_;
-  }
+  // Returns the value of the AutofillEnabled pref.
+  virtual bool IsAutofillEnabled() const;
 
  protected:
   // Test code should prefer to use this constructor.
   AutofillManager(AutofillDriver* driver,
-                  autofill::AutofillManagerDelegate* delegate,
+                  AutofillClient* client,
                   PersonalDataManager* personal_data);
-
-  // Returns the value of the AutofillEnabled pref.
-  virtual bool IsAutofillEnabled() const;
 
   // Uploads the form data to the Autofill server.
   virtual void UploadFormData(const FormStructure& submitted_form);
@@ -227,34 +212,23 @@ class AutofillManager : public AutofillDownloadManager::Observer {
     return external_delegate_;
   }
 
-  // Tell the renderer the current interactive autocomplete finished.
-  virtual void ReturnAutocompleteResult(
-      WebKit::WebFormElement::AutocompleteResult result,
-      const FormData& form_data);
-
  private:
-
   // AutofillDownloadManager::Observer:
   virtual void OnLoadedServerPredictions(
       const std::string& response_xml) OVERRIDE;
 
-  // Passes return data for an OnRequestAutocomplete call back to the page.
-  void ReturnAutocompleteData(const FormStructure* result,
-                              const std::string& unused_transaction_id);
-
-  // Returns the matched whitelist URL prefix for the current tab's url.
-  virtual std::string GetAutocheckoutURLPrefix() const;
-
-  // Fills |host| with the RenderViewHost for this tab.
-  // Returns false if Autofill is disabled or if the host is unavailable.
-  bool GetHost(content::RenderViewHost** host) const WARN_UNUSED_RESULT;
+  // Returns false if Autofill is disabled or if no Autofill data is available.
+  bool RefreshDataModels() const;
 
   // Unpacks |unique_id| and fills |form_group| and |variant| with the
-  // appropriate data source and variant index.  Returns false if the unpacked
-  // id cannot be found.
+  // appropriate data source and variant index. Sets |is_credit_card| to true
+  // if |data_model| points to a CreditCard data model, false if it's a
+  // profile data model.
+  // Returns false if the unpacked id cannot be found.
   bool GetProfileOrCreditCard(int unique_id,
                               const AutofillDataModel** data_model,
-                              size_t* variant) const WARN_UNUSED_RESULT;
+                              size_t* variant,
+                              bool* is_credit_card) const WARN_UNUSED_RESULT;
 
   // Fills |form_structure| cached element corresponding to |form|.
   // Returns false if the cached element was not found.
@@ -310,11 +284,14 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   void UpdateInitialInteractionTimestamp(
       const base::TimeTicks& interaction_timestamp);
 
+  // Shared code to determine if |form| should be uploaded.
+  bool ShouldUploadForm(const FormStructure& form);
+
   // Provides driver-level context to the shared code of the component. Must
   // outlive this object.
   AutofillDriver* driver_;
 
-  autofill::AutofillManagerDelegate* const manager_delegate_;
+  AutofillClient* const client_;
 
   std::string app_locale_;
 
@@ -333,9 +310,6 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Handles single-field autocomplete form data.
   scoped_ptr<AutocompleteHistoryManager> autocomplete_history_manager_;
 
-  // Handles autocheckout flows.
-  autofill::AutocheckoutManager autocheckout_manager_;
-
   // For logging UMA metrics. Overridden by metrics tests.
   scoped_ptr<const AutofillMetrics> metric_logger_;
   // Have we logged whether Autofill is enabled for this page load?
@@ -351,8 +325,8 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   bool user_did_autofill_;
   // Has the user edited a field that was previously autofilled?
   bool user_did_edit_autofilled_field_;
-  // When the page finished loading.
-  base::TimeTicks forms_loaded_timestamp_;
+  // When the form finished loading.
+  std::map<FormData, base::TimeTicks> forms_loaded_timestamps_;
   // When the user first interacted with a potentially fillable form on this
   // page.
   base::TimeTicks initial_interaction_timestamp_;
@@ -369,12 +343,12 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   AutofillExternalDelegate* external_delegate_;
 
   // Delegate used in test to get notifications on certain events.
-  autofill::AutofillManagerTestDelegate* test_delegate_;
+  AutofillManagerTestDelegate* test_delegate_;
 
   base::WeakPtrFactory<AutofillManager> weak_ptr_factory_;
 
   friend class AutofillManagerTest;
-  friend class autofill::FormStructureBrowserTest;
+  friend class FormStructureBrowserTest;
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            DeterminePossibleFieldTypesForUpload);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,

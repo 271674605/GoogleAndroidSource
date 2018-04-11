@@ -54,9 +54,7 @@ X86_64PLT1::X86_64PLT1(SectionData& pParent)
 //===----------------------------------------------------------------------===//
 // X86PLT
 //===----------------------------------------------------------------------===//
-X86PLT::X86PLT(LDSection& pSection,
-	       const LinkerConfig& pConfig,
-	       int got_size)
+X86PLT::X86PLT(LDSection& pSection, const LinkerConfig& pConfig, int got_size)
   : PLT(pSection),
     m_Config(pConfig)
 {
@@ -71,7 +69,7 @@ X86PLT::X86PLT(LDSection& pSection,
       m_PLT0Size = sizeof (x86_32_dyn_plt0);
       m_PLT1Size = sizeof (x86_32_dyn_plt1);
       // create PLT0
-      new X86_32DynPLT0(*m_SectionData);
+      new X86_32DynPLT0(*m_pSectionData);
     }
     else {
       m_PLT0 = x86_32_exec_plt0;
@@ -79,7 +77,7 @@ X86PLT::X86PLT(LDSection& pSection,
       m_PLT0Size = sizeof (x86_32_exec_plt0);
       m_PLT1Size = sizeof (x86_32_exec_plt1);
       // create PLT0
-      new X86_32ExecPLT0(*m_SectionData);
+      new X86_32ExecPLT0(*m_pSectionData);
     }
   }
   else {
@@ -89,10 +87,8 @@ X86PLT::X86PLT(LDSection& pSection,
     m_PLT0Size = sizeof (x86_64_plt0);
     m_PLT1Size = sizeof (x86_64_plt1);
     // create PLT0
-    new X86_64PLT0(*m_SectionData);
-    m_Last = m_SectionData->begin();
+    new X86_64PLT0(*m_pSectionData);
   }
-  m_Last = m_SectionData->begin();
 }
 
 X86PLT::~X86PLT()
@@ -111,13 +107,13 @@ void X86PLT::finalizeSectionSize()
   if (end() != it) {
     // plt1 size
     PLTEntryBase* plt1 = &(llvm::cast<PLTEntryBase>(*it));
-    size += (m_SectionData->size() - 1) * plt1->size();
+    size += (m_pSectionData->size() - 1) * plt1->size();
   }
   m_Section.setSize(size);
 
   uint32_t offset = 0;
-  SectionData::iterator frag, fragEnd = m_SectionData->end();
-  for (frag = m_SectionData->begin(); frag != fragEnd; ++frag) {
+  SectionData::iterator frag, fragEnd = m_pSectionData->end();
+  for (frag = m_pSectionData->begin(); frag != fragEnd; ++frag) {
     frag->setOffset(offset);
     offset += frag->size();
   }
@@ -125,39 +121,22 @@ void X86PLT::finalizeSectionSize()
 
 bool X86PLT::hasPLT1() const
 {
-  return (m_SectionData->size() > 1);
+  return (m_pSectionData->size() > 1);
 }
 
-void X86PLT::reserveEntry(size_t pNum)
+PLTEntryBase* X86PLT::create()
 {
-  PLTEntryBase* plt1_entry = NULL;
-
-  for (size_t i = 0; i < pNum; ++i) {
-
-    if (LinkerConfig::DynObj == m_Config.codeGenType())
-      plt1_entry = new X86_32DynPLT1(*m_SectionData);
-    else
-      plt1_entry = new X86_32ExecPLT1(*m_SectionData);
-
-    if (NULL == plt1_entry)
-      fatal(diag::fail_allocate_memory_plt);
-  }
-}
-
-PLTEntryBase* X86PLT::consume()
-{
-  // This will skip PLT0.
-  ++m_Last;
-  assert(m_Last != m_SectionData->end() &&
-         "The number of PLT Entries and ResolveInfo doesn't match");
-  return llvm::cast<PLTEntryBase>(&(*m_Last));
+  if (LinkerConfig::DynObj == m_Config.codeGenType())
+    return new X86_32DynPLT1(*m_pSectionData);
+  else
+    return new X86_32ExecPLT1(*m_pSectionData);
 }
 
 PLTEntryBase* X86PLT::getPLT0() const
 {
-  iterator first = m_SectionData->getFragmentList().begin();
+  iterator first = m_pSectionData->getFragmentList().begin();
 
-  assert(first != m_SectionData->getFragmentList().end() &&
+  assert(first != m_pSectionData->getFragmentList().end() &&
          "FragmentList is empty, getPLT0 failed!");
 
   PLTEntryBase* plt0 = &(llvm::cast<PLTEntryBase>(*first));
@@ -169,8 +148,8 @@ PLTEntryBase* X86PLT::getPLT0() const
 // X86_32PLT
 //===----------------------------------------------------------------------===//
 X86_32PLT::X86_32PLT(LDSection& pSection,
-		     X86_32GOTPLT& pGOTPLT,
-		     const LinkerConfig& pConfig)
+                     X86_32GOTPLT& pGOTPLT,
+                     const LinkerConfig& pConfig)
   : X86PLT(pSection, pConfig, 32),
     m_GOTPLT(pGOTPLT) {
 }
@@ -203,8 +182,8 @@ void X86_32PLT::applyPLT1()
 {
   assert(m_Section.addr() && ".plt base address is NULL!");
 
-  X86PLT::iterator it = m_SectionData->begin();
-  X86PLT::iterator ie = m_SectionData->end();
+  X86PLT::iterator it = m_pSectionData->begin();
+  X86PLT::iterator ie = m_pSectionData->end();
   assert(it != ie && "FragmentList is empty, applyPLT1 failed!");
 
   uint64_t GOTEntrySize = X86_32GOTEntry::EntrySize;
@@ -255,8 +234,8 @@ void X86_32PLT::applyPLT1()
 // X86_64PLT
 //===----------------------------------------------------------------------===//
 X86_64PLT::X86_64PLT(LDSection& pSection,
-		     X86_64GOTPLT& pGOTPLT,
-		     const LinkerConfig& pConfig)
+                     X86_64GOTPLT& pGOTPLT,
+                     const LinkerConfig& pConfig)
   : X86PLT(pSection, pConfig, 64),
     m_GOTPLT(pGOTPLT) {
 }
@@ -289,8 +268,8 @@ void X86_64PLT::applyPLT1()
 {
   assert(m_Section.addr() && ".plt base address is NULL!");
 
-  X86PLT::iterator it = m_SectionData->begin();
-  X86PLT::iterator ie = m_SectionData->end();
+  X86PLT::iterator it = m_pSectionData->begin();
+  X86PLT::iterator ie = m_pSectionData->end();
   assert(it != ie && "FragmentList is empty, applyPLT1 failed!");
 
   uint64_t GOTEntrySize = X86_64GOTEntry::EntrySize;

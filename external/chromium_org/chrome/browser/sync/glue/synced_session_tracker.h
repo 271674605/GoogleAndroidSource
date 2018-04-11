@@ -15,7 +15,7 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sync/glue/synced_session.h"
-#include "chrome/browser/sync/glue/tab_node_pool.h"
+#include "chrome/browser/sync/sessions/tab_node_pool.h"
 
 namespace browser_sync {
 
@@ -58,6 +58,10 @@ class SyncedSessionTracker {
   bool LookupSessionTab(const std::string& session_tag,
                         SessionID::id_type tab_id,
                         const SessionTab** tab) const;
+
+  // Allows retrieval of existing data for the local session. Unlike GetSession
+  // this won't create-if-not-present.
+  bool LookupLocalSession(const SyncedSession** output) const;
 
   // Returns a pointer to the SyncedSession object associated with
   // |session_tag|.  If none exists, creates one. Ownership of the

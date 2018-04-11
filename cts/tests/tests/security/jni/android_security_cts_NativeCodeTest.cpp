@@ -15,16 +15,31 @@
  */
 
 #include <jni.h>
+#include <linux/futex.h>
+#include <linux/netlink.h>
+#include <linux/sock_diag.h>
+#include <stdio.h>
+#include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
+#include <fcntl.h>
 #include <cutils/log.h>
 #include <linux/perf_event.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <linux/sysctl.h>
+
+#define PASSED 0
+#define UNKNOWN_ERROR -1
 
 /*
  * Returns true iff this device is vulnerable to CVE-2013-2094.
@@ -74,65 +89,82 @@ static jboolean android_security_cts_NativeCodeTest_doPerfEventTest2(JNIEnv* env
     return true;
 }
 
-#define SEARCH_SIZE 0x4000
+/*
+ * Will hang if vulnerable, return 0 if successful, -1 on unforseen
+ * error.
+ */
+static jint android_security_cts_NativeCodeTest_doSockDiagTest(JNIEnv* env, jobject thiz)
+{
+    int fd, nlmsg_size, err, len;
+    char buf[1024];
+    struct sockaddr_nl nladdr;
+    struct nlmsghdr *nlh;
+    struct msghdr msg;
+    struct iovec iov;
+    struct sock_diag_req* sock_diag_data;
 
-static int secret;
-
-static bool isValidChildAddress(pid_t child, uintptr_t addr) {
-    long word;
-    long ret = syscall(__NR_ptrace, PTRACE_PEEKDATA, child, addr, &word);
-    return (ret == 0);
-}
-
-/* A lazy, do nothing child. GET A JOB. */
-static void child() {
-    int res;
-    ALOGE("in child");
-    secret = 0xbaadadd4;
-    res = prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
-    if (res != 0) {
-        ALOGE("prctl failed");
+    int major, minor;
+    struct utsname uts;
+    if (uname(&uts) != -1 &&
+        sscanf(uts.release, "%d.%d", &major, &minor) == 2 &&
+        ((major > 3) || ((major == 3) && (minor > 8)))) {
+        // Kernels above 3.8 are patched against CVE-2013-1763
+        // This test generates false positives if run on > 3.8.
+        // b/17253473
+        return PASSED;
     }
-    res = ptrace(PTRACE_TRACEME, 0, 0, 0);
-    if (res != 0) {
-        ALOGE("child ptrace failed");
-    }
-    signal(SIGSTOP, SIG_IGN);
-    kill(getpid(), SIGSTOP);
-}
 
-static jboolean parent(pid_t child) {
-    int status;
-    // Wait for the child to suspend itself so we can trace it.
-    waitpid(child, &status, 0);
-    jboolean result = true;
-
-    uintptr_t addr;
-    for (addr = 0x00000000; addr < 0xFFFF1000; addr+=SEARCH_SIZE) {
-        if (isValidChildAddress(child, addr)) {
-            // Don't scribble on our memory.
-            // (which has the same mapping as our child)
-            // We don't want to corrupt ourself.
-            continue;
+    fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_SOCK_DIAG);
+    if (fd == -1) {
+        switch (errno) {
+            /* NETLINK_SOCK_DIAG not accessible, vector dne */
+            case EACCES:
+            case EAFNOSUPPORT:
+            case EPERM:
+            case EPROTONOSUPPORT:
+                return PASSED;
+            default:
+                return UNKNOWN_ERROR;
         }
+    }
+    /* prepare and send netlink packet */
+    memset(&nladdr, 0, sizeof(nladdr));
+    nladdr.nl_family = AF_NETLINK;
+    nlmsg_size = NLMSG_ALIGN(NLMSG_HDRLEN + sizeof(sock_diag_data));
+    nlh = (nlmsghdr *)malloc(nlmsg_size);
+    nlh->nlmsg_len = nlmsg_size;
+    nlh->nlmsg_pid = 0;      //send packet to kernel
+    nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+    iov = { (void *) nlh, nlmsg_size };
+    msg = { (void *) &nladdr, sizeof(nladdr), &iov, 1, NULL, 0, 0 };
+    sock_diag_data = (sock_diag_req *) NLMSG_DATA(nlh);
+    sock_diag_data->sdiag_family = AF_MAX+1;
+    if ((err = sendmsg(fd, &msg, 0)) == -1) {
+        /* SELinux blocked it */
+        if (errno == 22) {
+            return PASSED;
+        } else {
+            return UNKNOWN_ERROR;
+        }
+    }
+    free(nlh);
 
-        errno = 0;
-        syscall(__NR_ptrace, PTRACE_PEEKDATA, child, &secret, addr);
-        if (errno == 0) {
-            result = false;
-            // We found an address which isn't in our our, or our child's,
-            // address space, but yet which is still writable. Scribble
-            // all over it.
-            ALOGE("parent: found writable at %x", addr);
-            uintptr_t addr2;
-            for (addr2 = addr; addr2 < addr + SEARCH_SIZE; addr2++) {
-                syscall(__NR_ptrace, PTRACE_PEEKDATA, child, &secret, addr2);
+    memset(&nladdr, 0, sizeof(nladdr));
+    iov = { buf, sizeof(buf) };
+    msg = { (void *) &nladdr, sizeof(nladdr), &iov, 1, NULL, 0, 0 };
+    if ((len = recvmsg(fd, &msg, 0)) == -1) {
+        return UNKNOWN_ERROR;
+    }
+    for (nlh = (struct nlmsghdr *) buf; NLMSG_OK(nlh, len); nlh = NLMSG_NEXT (nlh, len)){
+        if (nlh->nlmsg_type == NLMSG_ERROR) {
+            /* -22 = -EINVAL from kernel */
+            if (*(int *)NLMSG_DATA(nlh) == -22) {
+                return PASSED;
             }
         }
     }
-
-    ptrace(PTRACE_DETACH, child, 0, 0);
-    return result;
+    return UNKNOWN_ERROR;
 }
 
 /*
@@ -142,34 +174,128 @@ static jboolean parent(pid_t child) {
  * that reads/writes outside the process's address space are not
  * allowed.
  *
- * In this test, we use prctl(PTRACE_PEEKDATA) to force a write to
- * an address outside of our address space. Without the patch applied,
- * this write succeeds, because prctl(PTRACE_PEEKDATA) uses the
- * vulnerable put_user call.
+ * In this test, we use sysctl to force a read from an address outside
+ * of our address space (but in the kernel's address space). Without the
+ * patch applied, this read succeeds, because sysctl uses the
+ * vulnerable get_user call.
+ *
+ * This function returns true if the patch above is applied, or false
+ * otherwise.
+ *
+ * Credit: https://twitter.com/grsecurity/status/401443359912239105
  */
 static jboolean android_security_cts_NativeCodeTest_doVrootTest(JNIEnv*, jobject)
 {
+#ifdef __arm__
     ALOGE("Starting doVrootTest");
-    pid_t pid = fork();
-    if (pid == -1) {
-        return false;
-    }
 
-    if (pid == 0) {
-        child();
-        exit(0);
-    }
+    struct __sysctl_args args;
+    char osname[100];
+    int name[] = { CTL_KERN, KERN_OSTYPE };
 
-    return parent(pid);
+    memset(&args, 0, sizeof(struct __sysctl_args));
+    args.name = name;
+    args.nlen = sizeof(name)/sizeof(name[0]);
+    args.oldval = osname;
+    args.oldlenp = (size_t *) 0xc0000000; // PAGE_OFFSET
+
+    int result = syscall(__NR__sysctl, &args);
+    return ((result == -1) && (errno == EFAULT));
+#else
+    return true;
+#endif
 }
+
+static void* mmap_syscall(void* addr, size_t len, int prot, int flags, int fd, off_t offset)
+{
+#ifdef __LP64__
+    return mmap(addr, len, prot, flags, fd, offset);
+#else
+    return (void*) syscall(__NR_mmap2, addr, len, prot, flags, fd, offset);
+#endif
+}
+
+#define KBASE_REG_COOKIE_TB         2
+#define KBASE_REG_COOKIE_MTP        3
+
+/*
+ * Returns true if the device is immune to CVE-2014-1710,
+ * false if the device is vulnerable.
+ */
+static jboolean android_security_cts_NativeCodeTest_doCVE20141710Test(JNIEnv*, jobject)
+{
+    jboolean result = false;
+    int fd = open("/dev/mali0", O_RDWR);
+    if (fd < 0) {
+        return true; /* not vulnerable */
+    }
+
+    void* a = mmap_syscall(NULL, 0x1000, PROT_READ, MAP_SHARED, fd, KBASE_REG_COOKIE_MTP);
+    void* b = mmap_syscall(NULL, 0x1000, PROT_READ, MAP_SHARED, fd, KBASE_REG_COOKIE_TB);
+
+    if (a == MAP_FAILED) {
+        result = true; /* assume not vulnerable */
+        goto done;
+    }
+
+    if (b == MAP_FAILED) {
+        result = true; /* assume not vulnerable */
+        goto done;
+    }
+
+    /* mprotect should return an error if not vulnerable */
+    result = (mprotect(b, 0x1000, PROT_READ | PROT_WRITE) == -1);
+
+ done:
+    if (a != MAP_FAILED) {
+        munmap(a, 0x1000);
+    }
+    if (b != MAP_FAILED) {
+        munmap(b, 0x1000);
+    }
+    close(fd);
+    return result;
+}
+
+static inline int futex_syscall(volatile int* uaddr, int op, int val, const struct timespec* ts,
+                                volatile int* uaddr2, int val3) {
+    return syscall(__NR_futex, uaddr, op, val, ts, uaddr2, val3);
+}
+
+/*
+ * Test for vulnerability to CVE-2014-3153, a bug in the futex() syscall that can
+ * lead to privilege escalation and was used by the towelroot exploit. Returns true
+ * if device is patched, false if still vulnerable.
+ */
+static jboolean android_security_cts_NativeCodeTest_doFutexTest(JNIEnv*, jobject)
+{
+    jboolean result = false;
+
+    int futex = 1;
+    int ret;
+
+    /* The patch will reject FUTEX_CMP_REQUEUE_PI calls where addr == addr2, so
+     * that's what we're checking for - they're both &futex. Patched systems will
+     * return -1 and set errno to 22 (EINVAL), vulnerable systems will return 0.
+     */
+    ret = futex_syscall(&futex, FUTEX_CMP_REQUEUE_PI, 1, NULL, &futex, 0);
+    return (ret == -1 && errno == EINVAL);
+}
+
 
 static JNINativeMethod gMethods[] = {
     {  "doPerfEventTest", "()Z",
             (void *) android_security_cts_NativeCodeTest_doPerfEventTest },
     {  "doPerfEventTest2", "()Z",
             (void *) android_security_cts_NativeCodeTest_doPerfEventTest2 },
+    {  "doSockDiagTest", "()I",
+            (void *) android_security_cts_NativeCodeTest_doSockDiagTest },
     {  "doVrootTest", "()Z",
             (void *) android_security_cts_NativeCodeTest_doVrootTest },
+    {  "doCVE20141710Test", "()Z",
+            (void *) android_security_cts_NativeCodeTest_doCVE20141710Test },
+    {  "doFutexTest", "()Z",
+            (void *) android_security_cts_NativeCodeTest_doFutexTest },
 };
 
 int register_android_security_cts_NativeCodeTest(JNIEnv* env)

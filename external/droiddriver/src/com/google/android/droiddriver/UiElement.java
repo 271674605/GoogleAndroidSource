@@ -19,12 +19,12 @@ package com.google.android.droiddriver;
 import android.graphics.Rect;
 
 import com.google.android.droiddriver.actions.Action;
-import com.google.android.droiddriver.actions.ScrollDirection;
-import com.google.android.droiddriver.exceptions.ElementNotVisibleException;
+import com.google.android.droiddriver.actions.InputInjector;
 import com.google.android.droiddriver.finders.Attribute;
+import com.google.android.droiddriver.finders.Predicate;
 import com.google.android.droiddriver.instrumentation.InstrumentationDriver;
+import com.google.android.droiddriver.scroll.Direction.PhysicalDirection;
 import com.google.android.droiddriver.uiautomation.UiAutomationDriver;
-import com.google.common.base.Predicate;
 
 import java.util.List;
 
@@ -140,7 +140,6 @@ public interface UiElement {
    * Executes the given action.
    *
    * @param action The action to execute
-   * @throws ElementNotVisibleException when the element is not visible
    * @return true if the action is successful
    */
   boolean perform(Action action);
@@ -149,45 +148,57 @@ public interface UiElement {
    * Sets the text of this element.
    *
    * @param text The text to enter.
-   * @throws ElementNotVisibleException when the element is not visible
    */
-  // TODO: Should this clear the text before setting?
   void setText(String text);
 
   /**
    * Clicks this element. The click will be at the center of the visible
    * element.
-   *
-   * @throws ElementNotVisibleException when the element is not visible
    */
   void click();
 
   /**
    * Long-clicks this element. The click will be at the center of the visible
    * element.
-   *
-   * @throws ElementNotVisibleException when the element is not visible
    */
   void longClick();
 
   /**
    * Double-clicks this element. The click will be at the center of the visible
    * element.
-   *
-   * @throws ElementNotVisibleException when the element is not visible
    */
   void doubleClick();
 
   /**
-   * Scrolls in the given direction. Scrolling down means swiping upwards.
+   * Scrolls in the given direction.
+   *
+   * @param direction specifies where the view port will move, instead of the
+   *        finger.
    */
-  void scroll(ScrollDirection direction);
+  void scroll(PhysicalDirection direction);
 
   /**
    * Gets an immutable {@link List} of immediate children that satisfy
-   * {@code predicate}. It always filters children that are null.
+   * {@code predicate}. It always filters children that are null. This gives a
+   * low level access to the underlying data. Do not use it unless you are sure
+   * about the subtle details. Note the count may not be what you expect. For
+   * instance, a dynamic list may show more items when scrolling beyond the end,
+   * varying the count. The count also depends on the driver implementation:
+   * <ul>
+   * <li>{@link InstrumentationDriver} includes all.</li>
+   * <li>the Accessibility API (which {@link UiAutomationDriver} depends on)
+   * does not include off-screen children, but may include invisible on-screen
+   * children.</li>
+   * </ul>
+   * <p>
+   * Another discrepancy between {@link InstrumentationDriver}
+   * {@link UiAutomationDriver} is the order of children. The Accessibility API
+   * returns children in the order of layout (see
+   * {@link android.view.ViewGroup#addChildrenForAccessibility}, which is added
+   * in API16).
+   * </p>
    */
-  List<UiElement> getChildren(Predicate<? super UiElement> predicate);
+  List<? extends UiElement> getChildren(Predicate<? super UiElement> predicate);
 
   /**
    * Filters out invisible children.
@@ -204,29 +215,13 @@ public interface UiElement {
     }
   };
 
-  // TODO: remove getChildCount and getChild.
-  /**
-   * Gets the child at given index.
-   */
-  UiElement getChild(int index);
-
-  /**
-   * Gets the child count. This gives a low level access to the underlying data.
-   * Do not use it unless you are sure about the subtle details. Note the count
-   * may not be what you expect. For instance, a dynamic list may show more
-   * items when scrolling beyond the end, varying the count. The count also
-   * depends on the driver implementation:
-   * <ul>
-   * <li>{@link InstrumentationDriver} includes all.</li>
-   * <li>the Accessibility API (which {@link UiAutomationDriver} depends on)
-   * does not include off-screen children, but may include invisible on-screen
-   * children.</li>
-   * </ul>
-   */
-  int getChildCount();
-
   /**
    * Gets the parent.
    */
   UiElement getParent();
+
+  /**
+   * Gets the {@link InputInjector} for injecting InputEvent.
+   */
+  InputInjector getInjector();
 }

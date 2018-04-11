@@ -372,6 +372,7 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
                 ALOGE("upio_set : write(%s) failed: %s (%d)",
                         VENDOR_LPM_PROC_NODE, strerror(errno),errno);
             }
+#if (PROC_BTWRITE_TIMER_TIMEOUT_MS != 0)
             else
             {
                 if (action == UPIO_ASSERT)
@@ -395,6 +396,7 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
                     }
                 }
             }
+#endif
 
             if (fd >= 0)
                 close(fd);
@@ -434,9 +436,10 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
             /*
              *  Kick proc btwrite node only at UPIO_ASSERT
              */
+#if (BT_WAKE_VIA_PROC_NOTIFY_DEASSERT == FALSE)
             if (action == UPIO_DEASSERT)
                 return;
-
+#endif
             fd = open(VENDOR_BTWRITE_PROC_NODE, O_WRONLY);
 
             if (fd < 0)
@@ -445,14 +448,19 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
                         VENDOR_BTWRITE_PROC_NODE, strerror(errno), errno);
                 return;
             }
-
-            buffer = '1';
+#if (BT_WAKE_VIA_PROC_NOTIFY_DEASSERT == TRUE)
+            if (action == UPIO_DEASSERT)
+                buffer = '0';
+            else
+#endif
+                buffer = '1';
 
             if (write(fd, &buffer, 1) < 0)
             {
                 ALOGE("upio_set : write(%s) failed: %s (%d)",
                         VENDOR_BTWRITE_PROC_NODE, strerror(errno),errno);
             }
+#if (PROC_BTWRITE_TIMER_TIMEOUT_MS != 0)
             else
             {
                 lpm_proc_cb.btwrite_active = TRUE;
@@ -462,13 +470,14 @@ void upio_set(uint8_t pio, uint8_t action, uint8_t polarity)
                     struct itimerspec ts;
 
                     ts.it_value.tv_sec = PROC_BTWRITE_TIMER_TIMEOUT_MS/1000;
-                    ts.it_value.tv_nsec = 1000*(PROC_BTWRITE_TIMER_TIMEOUT_MS%1000);
+                    ts.it_value.tv_nsec = 1000000*(PROC_BTWRITE_TIMER_TIMEOUT_MS%1000);
                     ts.it_interval.tv_sec = 0;
                     ts.it_interval.tv_nsec = 0;
 
                     timer_settime(lpm_proc_cb.timer_id, 0, &ts, 0);
                 }
             }
+#endif
 
             UPIODBG("proc btwrite assertion");
 

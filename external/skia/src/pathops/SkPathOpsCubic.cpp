@@ -9,8 +9,57 @@
 #include "SkPathOpsLine.h"
 #include "SkPathOpsQuad.h"
 #include "SkPathOpsRect.h"
+#include "SkTSort.h"
 
 const int SkDCubic::gPrecisionUnit = 256;  // FIXME: test different values in test framework
+
+// give up when changing t no longer moves point
+// also, copy point rather than recompute it when it does change
+double SkDCubic::binarySearch(double min, double max, double axisIntercept,
+        SearchAxis xAxis) const {
+    double t = (min + max) / 2;
+    double step = (t - min) / 2;
+    SkDPoint cubicAtT = ptAtT(t);
+    double calcPos = (&cubicAtT.fX)[xAxis];
+    double calcDist = calcPos - axisIntercept;
+    do {
+        double priorT = t - step;
+        SkASSERT(priorT >= min);
+        SkDPoint lessPt = ptAtT(priorT);
+        if (approximately_equal(lessPt.fX, cubicAtT.fX)
+                && approximately_equal(lessPt.fY, cubicAtT.fY)) {
+            return -1;  // binary search found no point at this axis intercept
+        }
+        double lessDist = (&lessPt.fX)[xAxis] - axisIntercept;
+#if DEBUG_CUBIC_BINARY_SEARCH
+        SkDebugf("t=%1.9g calc=%1.9g dist=%1.9g step=%1.9g less=%1.9g\n", t, calcPos, calcDist,
+                step, lessDist);
+#endif
+        double lastStep = step;
+        step /= 2;
+        if (calcDist > 0 ? calcDist > lessDist : calcDist < lessDist) {
+            t = priorT;
+        } else {
+            double nextT = t + lastStep;
+            SkASSERT(nextT <= max);
+            SkDPoint morePt = ptAtT(nextT);
+            if (approximately_equal(morePt.fX, cubicAtT.fX)
+                    && approximately_equal(morePt.fY, cubicAtT.fY)) {
+                return -1;  // binary search found no point at this axis intercept
+            }
+            double moreDist = (&morePt.fX)[xAxis] - axisIntercept;
+            if (calcDist > 0 ? calcDist <= moreDist : calcDist >= moreDist) {
+                continue;
+            }
+            t = nextT;
+        }
+        SkDPoint testAtT = ptAtT(t);
+        cubicAtT = testAtT;
+        calcPos = (&cubicAtT.fX)[xAxis];
+        calcDist = calcPos - axisIntercept;
+    } while (!approximately_equal(calcPos, axisIntercept));
+    return t;
+}
 
 // FIXME: cache keep the bounds and/or precision with the caller?
 double SkDCubic::calcPrecision() const {
@@ -93,7 +142,33 @@ bool SkDCubic::monotonicInY() const {
             && between(fPts[0].fY, fPts[2].fY, fPts[3].fY);
 }
 
+int SkDCubic::searchRoots(double extremeTs[6], int extrema, double axisIntercept,
+        SearchAxis xAxis, double* validRoots) const {
+    extrema += findInflections(&extremeTs[extrema]);
+    extremeTs[extrema++] = 0;
+    extremeTs[extrema] = 1;
+    SkTQSort(extremeTs, extremeTs + extrema);
+    int validCount = 0;
+    for (int index = 0; index < extrema; ) {
+        double min = extremeTs[index];
+        double max = extremeTs[++index];
+        if (min == max) {
+            continue;
+        }
+        double newT = binarySearch(min, max, axisIntercept, xAxis);
+        if (newT >= 0) {
+            validRoots[validCount++] = newT;
+        }
+    }
+    return validCount;
+}
+
 bool SkDCubic::serpentine() const {
+#if 0  // FIXME: enabling this fixes cubicOp114 but breaks cubicOp58d and cubicOp53d
+    double tValues[2];
+    // OPTIMIZATION : another case where caching the present of cubic inflections would be useful
+    return findInflections(tValues) > 1;
+#endif
     if (!controlsContainedByEnds()) {
         return false;
     }
@@ -129,7 +204,7 @@ int SkDCubic::RootsReal(double A, double B, double C, double D, double s[3]) {
     sk_bzero(str, sizeof(str));
     SK_SNPRINTF(str, sizeof(str), "Solve[%1.19g x^3 + %1.19g x^2 + %1.19g x + %1.19g == 0, x]",
             A, B, C, D);
-    mathematica_ize(str, sizeof(str));
+    SkPathOpsDebug::MathematicaIze(str, sizeof(str));
 #if ONE_OFF_DEBUG && ONE_OFF_DEBUG_MATHEMATICA
     SkDebugf("%s\n", str);
 #endif
@@ -155,7 +230,7 @@ int SkDCubic::RootsReal(double A, double B, double C, double D, double s[3]) {
     if (approximately_zero(A + B + C + D)) {  // 1 is one root
         int num = SkDQuad::RootsReal(A, A + B, -D, s);
         for (int i = 0; i < num; ++i) {
-            if (AlmostEqualUlps(s[i], 1)) {
+            if (AlmostDequalUlps(s[i], 1)) {
                 return num;
             }
         }
@@ -186,11 +261,11 @@ int SkDCubic::RootsReal(double A, double B, double C, double D, double s[3]) {
         *roots++ = r;
 
         r = neg2RootQ * cos((theta + 2 * PI) / 3) - adiv3;
-        if (!AlmostEqualUlps(s[0], r)) {
+        if (!AlmostDequalUlps(s[0], r)) {
             *roots++ = r;
         }
         r = neg2RootQ * cos((theta - 2 * PI) / 3) - adiv3;
-        if (!AlmostEqualUlps(s[0], r) && (roots - s == 1 || !AlmostEqualUlps(s[1], r))) {
+        if (!AlmostDequalUlps(s[0], r) && (roots - s == 1 || !AlmostDequalUlps(s[1], r))) {
             *roots++ = r;
         }
     } else {  // we have 1 real root
@@ -205,9 +280,9 @@ int SkDCubic::RootsReal(double A, double B, double C, double D, double s[3]) {
         }
         r = A - adiv3;
         *roots++ = r;
-        if (AlmostEqualUlps(R2, Q3)) {
+        if (AlmostDequalUlps((double) R2, (double) Q3)) {
             r = -A / 2 - adiv3;
-            if (!AlmostEqualUlps(s[0], r)) {
+            if (!AlmostDequalUlps(s[0], r)) {
                 *roots++ = r;
             }
         }
@@ -455,16 +530,16 @@ void SkDCubic::subDivide(const SkDPoint& a, const SkDPoint& d,
     if (t1 == 1 || t2 == 1) {
         align(3, 2, t1 == 1 ? &dst[0] : &dst[1]);
     }
-    if (precisely_subdivide_equal(dst[0].fX, a.fX)) {
+    if (AlmostBequalUlps(dst[0].fX, a.fX)) {
         dst[0].fX = a.fX;
     }
-    if (precisely_subdivide_equal(dst[0].fY, a.fY)) {
+    if (AlmostBequalUlps(dst[0].fY, a.fY)) {
         dst[0].fY = a.fY;
     }
-    if (precisely_subdivide_equal(dst[1].fX, d.fX)) {
+    if (AlmostBequalUlps(dst[1].fX, d.fX)) {
         dst[1].fX = d.fX;
     }
-    if (precisely_subdivide_equal(dst[1].fY, d.fY)) {
+    if (AlmostBequalUlps(dst[1].fY, d.fY)) {
         dst[1].fY = d.fY;
     }
 }

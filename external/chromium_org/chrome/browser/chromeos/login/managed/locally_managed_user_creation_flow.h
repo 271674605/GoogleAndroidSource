@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
+#include "chrome/browser/chromeos/login/users/user.h"
 
 class Profile;
 
@@ -20,17 +21,19 @@ class LocallyManagedUserCreationFlow : public ExtendedUserFlow {
   explicit LocallyManagedUserCreationFlow(const std::string& manager_id);
   virtual ~LocallyManagedUserCreationFlow();
 
+  virtual bool CanLockScreen() OVERRIDE;
   virtual bool ShouldShowSettings() OVERRIDE;
   virtual bool ShouldLaunchBrowser() OVERRIDE;
   virtual bool ShouldSkipPostLoginScreens() OVERRIDE;
   virtual bool HandleLoginFailure(const LoginFailure& failure) OVERRIDE;
+  virtual void HandleLoginSuccess(const UserContext& context) OVERRIDE;
   virtual bool HandlePasswordChangeDetected() OVERRIDE;
   virtual void HandleOAuthTokenStatusChange(User::OAuthTokenStatus status)
       OVERRIDE;
   virtual void LaunchExtraSteps(Profile* profile) OVERRIDE;
  private:
   // Display name for user being created.
-  string16 name_;
+  base::string16 name_;
   // Password for user being created.
   std::string password_;
 
@@ -40,6 +43,10 @@ class LocallyManagedUserCreationFlow : public ExtendedUserFlow {
   // Indicates if manager was successfully authenticated against
   // local cryptohome.
   bool logged_in_;
+
+  // Indicates that cryptohome is mounted and OAuth2 token is validated.
+  // Used to avoid multiple notifications.
+  bool session_started_;
 
   Profile* manager_profile_;
 

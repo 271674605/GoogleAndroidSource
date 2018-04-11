@@ -11,7 +11,8 @@
 #include "SkColorMatrixFilter.h"
 #include "SkDevice.h"
 #include "SkColorFilter.h"
-#include "SkFlattenableBuffers.h"
+#include "SkReadBuffer.h"
+#include "SkWriteBuffer.h"
 
 namespace {
 
@@ -57,7 +58,7 @@ bool matrix_needs_clamping(SkScalar matrix[20]) {
 };
 
 SkColorFilterImageFilter* SkColorFilterImageFilter::Create(SkColorFilter* cf,
-        SkImageFilter* input, const SkIRect* cropRect) {
+        SkImageFilter* input, const CropRect* cropRect) {
     SkASSERT(cf);
     SkScalar colorMatrix[20], inputMatrix[20];
     SkColorFilter* inputColorFilter;
@@ -67,8 +68,8 @@ SkColorFilterImageFilter* SkColorFilterImageFilter::Create(SkColorFilter* cf,
         SkAutoUnref autoUnref(inputColorFilter);
         if (inputColorFilter->asColorMatrix(inputMatrix) && !matrix_needs_clamping(inputMatrix)) {
             SkScalar combinedMatrix[20];
-            mult_color_matrix(inputMatrix, colorMatrix, combinedMatrix);
-            SkAutoTUnref<SkColorFilter> newCF(SkNEW_ARGS(SkColorMatrixFilter, (combinedMatrix)));
+            mult_color_matrix(colorMatrix, inputMatrix, combinedMatrix);
+            SkAutoTUnref<SkColorFilter> newCF(SkColorMatrixFilter::Create(combinedMatrix));
             return SkNEW_ARGS(SkColorFilterImageFilter, (newCF, input->getInput(0), cropRect));
         }
     }
@@ -76,17 +77,18 @@ SkColorFilterImageFilter* SkColorFilterImageFilter::Create(SkColorFilter* cf,
 }
 
 SkColorFilterImageFilter::SkColorFilterImageFilter(SkColorFilter* cf,
-        SkImageFilter* input, const SkIRect* cropRect)
+        SkImageFilter* input, const CropRect* cropRect)
     : INHERITED(input, cropRect), fColorFilter(cf) {
     SkASSERT(cf);
     SkSafeRef(cf);
 }
 
-SkColorFilterImageFilter::SkColorFilterImageFilter(SkFlattenableReadBuffer& buffer) : INHERITED(buffer) {
-    fColorFilter = buffer.readFlattenableT<SkColorFilter>();
+SkColorFilterImageFilter::SkColorFilterImageFilter(SkReadBuffer& buffer)
+  : INHERITED(1, buffer) {
+    fColorFilter = buffer.readColorFilter();
 }
 
-void SkColorFilterImageFilter::flatten(SkFlattenableWriteBuffer& buffer) const {
+void SkColorFilterImageFilter::flatten(SkWriteBuffer& buffer) const {
     this->INHERITED::flatten(buffer);
 
     buffer.writeFlattenable(fColorFilter);
@@ -97,36 +99,39 @@ SkColorFilterImageFilter::~SkColorFilterImageFilter() {
 }
 
 bool SkColorFilterImageFilter::onFilterImage(Proxy* proxy, const SkBitmap& source,
-                                             const SkMatrix& matrix,
+                                             const Context& ctx,
                                              SkBitmap* result,
-                                             SkIPoint* loc) {
+                                             SkIPoint* offset) const {
     SkBitmap src = source;
-    if (getInput(0) && !getInput(0)->filterImage(proxy, source, matrix, &src, loc)) {
+    SkIPoint srcOffset = SkIPoint::Make(0, 0);
+    if (getInput(0) && !getInput(0)->filterImage(proxy, source, ctx, &src, &srcOffset)) {
         return false;
     }
 
     SkIRect bounds;
-    src.getBounds(&bounds);
-    if (!this->applyCropRect(&bounds)) {
+    if (!this->applyCropRect(ctx, src, srcOffset, &bounds)) {
         return false;
     }
 
-    SkAutoTUnref<SkDevice> device(proxy->createDevice(bounds.width(), bounds.height()));
+    SkAutoTUnref<SkBaseDevice> device(proxy->createDevice(bounds.width(), bounds.height()));
+    if (NULL == device.get()) {
+        return false;
+    }
     SkCanvas canvas(device.get());
     SkPaint paint;
 
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     paint.setColorFilter(fColorFilter);
-    canvas.drawSprite(src, -bounds.fLeft, -bounds.fTop, &paint);
+    canvas.drawSprite(src, srcOffset.fX - bounds.fLeft, srcOffset.fY - bounds.fTop, &paint);
 
     *result = device.get()->accessBitmap(false);
-    loc->fX += bounds.fLeft;
-    loc->fY += bounds.fTop;
+    offset->fX = bounds.fLeft;
+    offset->fY = bounds.fTop;
     return true;
 }
 
 bool SkColorFilterImageFilter::asColorFilter(SkColorFilter** filter) const {
-    if (cropRect().isLargest()) {
+    if (!cropRectIsSet()) {
         if (filter) {
             *filter = fColorFilter;
             fColorFilter->ref();

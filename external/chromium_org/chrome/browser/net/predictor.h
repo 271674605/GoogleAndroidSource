@@ -29,6 +29,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/net/referrer.h"
+#include "chrome/browser/net/spdyproxy/proxy_advisor.h"
 #include "chrome/browser/net/timed_cache.h"
 #include "chrome/browser/net/url_info.h"
 #include "chrome/common/net/predictor_common.h"
@@ -45,6 +46,8 @@ class WaitableEvent;
 
 namespace net {
 class HostResolver;
+class SSLConfigService;
+class TransportSecurityState;
 class URLRequestContextGetter;
 }
 
@@ -58,6 +61,17 @@ typedef chrome_common_net::UrlList UrlList;
 typedef chrome_common_net::NameList NameList;
 typedef std::map<GURL, UrlInfo> Results;
 
+// An observer for testing.
+class PredictorObserver {
+ public:
+  virtual ~PredictorObserver() {}
+
+  virtual void OnPreconnectUrl(const GURL& original_url,
+                               const GURL& first_party_for_cookies,
+                               UrlInfo::ResolutionMotivation motivation,
+                               int count) = 0;
+};
+
 // Predictor is constructed during Profile construction (on the UI thread),
 // but it is destroyed on the IO thread when ProfileIOData goes away. All of
 // its core state and functionality happens on the IO thread. The only UI
@@ -66,6 +80,15 @@ typedef std::map<GURL, UrlInfo> Results;
 // the IO thread.
 class Predictor {
  public:
+  // Enum describing when to allow network predictions based on connection type.
+  // The same enum must be used by the platform-dependent components.
+  // TODO(bnc): implement as per crbug.com/334602.
+  enum NetworkPredictionOptions {
+    NETWORK_PREDICTION_ALWAYS,
+    NETWORK_PREDICTION_WIFI_ONLY,
+    NETWORK_PREDICTION_NEVER
+  };
+
   // A version number for prefs that are saved. This should be incremented when
   // we change the format so that we discard old data.
   static const int kPredictorReferrerVersion;
@@ -135,7 +158,7 @@ class Predictor {
 
   static void set_max_parallel_resolves(size_t max_parallel_resolves);
 
-  virtual void ShutdownOnUIThread(PrefService* user_prefs);
+  virtual void ShutdownOnUIThread();
 
   // ------------- End UI thread methods.
 
@@ -267,12 +290,25 @@ class Predictor {
     host_resolver_ = host_resolver;
   }
   // Used for testing.
+  void SetTransportSecurityState(
+      net::TransportSecurityState* transport_security_state) {
+    transport_security_state_ = transport_security_state;
+  }
+  // Used for testing.
+  void SetProxyAdvisor(ProxyAdvisor* proxy_advisor) {
+    proxy_advisor_.reset(proxy_advisor);
+  }
+  // Used for testing.
   size_t max_concurrent_dns_lookups() const {
     return max_concurrent_dns_lookups_;
   }
   // Used for testing.
   void SetShutdown(bool shutdown) {
     shutdown_ = shutdown;
+  }
+  // Used for testing.
+  void SetObserver(PredictorObserver* observer) {
+    observer_ = observer;
   }
 
   // Flag setting to use preconnection instead of just DNS pre-fetching.
@@ -295,6 +331,9 @@ class Predictor {
   FRIEND_TEST_ALL_PREFIXES(PredictorTest, PriorityQueuePushPopTest);
   FRIEND_TEST_ALL_PREFIXES(PredictorTest, PriorityQueueReorderTest);
   FRIEND_TEST_ALL_PREFIXES(PredictorTest, ReferrerSerializationTrimTest);
+  FRIEND_TEST_ALL_PREFIXES(PredictorTest, SingleLookupTestWithDisabledAdvisor);
+  FRIEND_TEST_ALL_PREFIXES(PredictorTest, SingleLookupTestWithEnabledAdvisor);
+  FRIEND_TEST_ALL_PREFIXES(PredictorTest, TestSimplePreconnectAdvisor);
   friend class WaitForResolutionHelper;  // For testing.
 
   class LookupRequest;
@@ -405,6 +444,13 @@ class Predictor {
   // Only for testing;
   size_t peak_pending_lookups() const { return peak_pending_lookups_; }
 
+  // If a proxy advisor is defined, let it know that |url| will be prefetched or
+  // preconnected to. Can be called on either UI or IO threads and will post to
+  // the IO thread if necessary, invoking AdviseProxyOnIOThread().
+  void AdviseProxy(const GURL& url,
+                   UrlInfo::ResolutionMotivation motivation,
+                   bool is_preconnect);
+
   // ------------- Start IO thread methods.
 
   // Perform actual resolution or preconnection to subresources now.  This is
@@ -421,9 +467,11 @@ class Predictor {
                       const GURL& url, bool found);
 
   // Queue hostname for resolution.  If queueing was done, return the pointer
-  // to the queued instance, otherwise return NULL.
+  // to the queued instance, otherwise return NULL. If the proxy advisor is
+  // enabled, and |url| is likely to be proxied, the hostname will not be
+  // queued as the browser is not expected to fetch it directly.
   UrlInfo* AppendToResolutionQueue(const GURL& url,
-      UrlInfo::ResolutionMotivation motivation);
+                                   UrlInfo::ResolutionMotivation motivation);
 
   // Check to see if too much queuing delay has been noted for the given info,
   // which indicates that there is "congestion" or growing delay in handling the
@@ -457,6 +505,15 @@ class Predictor {
   // If it does not process all the URLs in that vector, it posts a task to
   // continue with them shortly (i.e., it yeilds and continues).
   void IncrementalTrimReferrers(bool trim_all_now);
+
+  // If a proxy advisor is defined, let it know that |url| will be prefetched or
+  // preconnected to.
+  void AdviseProxyOnIOThread(const GURL& url,
+                             UrlInfo::ResolutionMotivation motivation,
+                             bool is_preconnect);
+
+  // Applies the HSTS redirect for |url|, if any.
+  GURL GetHSTSRedirectOnIOThread(const GURL& url);
 
   // ------------- End IO thread methods.
 
@@ -497,6 +554,13 @@ class Predictor {
   // The host resolver we warm DNS entries for.
   net::HostResolver* host_resolver_;
 
+  // The TransportSecurityState instance we query HSTS redirects from.
+  net::TransportSecurityState* transport_security_state_;
+
+  // The SSLConfigService we query SNI support from (used in querying HSTS
+  // redirects).
+  net::SSLConfigService* ssl_config_service_;
+
   // Are we currently using preconnection, rather than just DNS resolution, for
   // subresources and omni-box search URLs.
   bool preconnect_enabled_;
@@ -532,6 +596,11 @@ class Predictor {
 
   scoped_ptr<base::WeakPtrFactory<Predictor> > weak_factory_;
 
+  scoped_ptr<ProxyAdvisor> proxy_advisor_;
+
+  // An observer for testing.
+  PredictorObserver* observer_;
+
   DISALLOW_COPY_AND_ASSIGN(Predictor);
 };
 
@@ -546,7 +615,7 @@ class SimplePredictor : public Predictor {
       PrefService* local_state,
       IOThread* io_thread,
       net::URLRequestContextGetter* getter) OVERRIDE;
-  virtual void ShutdownOnUIThread(PrefService* user_prefs) OVERRIDE;
+  virtual void ShutdownOnUIThread() OVERRIDE;
 };
 
 }  // namespace chrome_browser_net

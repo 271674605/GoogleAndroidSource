@@ -30,19 +30,29 @@ Where <src-dir> is the location of toolchain sources, <ndk-dir> is
 the top-level NDK installation path."
 
 RELEASE=`date +%Y%m%d`
-BUILD_OUT=/tmp/ndk-$USER/build/toolchain
-TOOLCHAIN_BUILD_PREFIX="$BUILD_OUT/../prefix"
-ARCHS="$DEFAULT_ARCHS"
+ABIS="$PREBUILT_ABIS"
 BUILDTOOLS=$ANDROID_NDK_ROOT/build/tools
 
+BUILD_OUT=/tmp/ndk-$USER/build/toolchain
+OPTION_BUILD_OUT=
+register_var_option "--build-out=<path>" OPTION_BUILD_OUT "Set temporary build directory"
+
+OUT_DIR="$BUILD_OUT/../prefix"
 OPTION_OUT_DIR=
 register_var_option "--out-dir=<path>" OPTION_OUT_DIR "On-device toolchain will be put at <path>"
 
-OPTION_ARCH=
-register_var_option "--arch=<arm,x86,mips>" OPTION_ARCH "Default: all"
+OPTION_ABIS=
+register_var_option "--abis=<armeabi,armeabi-v7a,x86,mips,armeabi-v7a-hard>" OPTION_ABIS "Default: $ABIS"
 
 OPTION_GCC_VERSION=
 register_var_option "--gcc-version=<version>" OPTION_GCC_VERSION "Specify GCC toolchain version [Default: $DEFAULT_GCC_VERSION]"
+
+STL=stlport
+register_var_option "--stl=<name>" STL "Specify C++ STL"
+
+SHARED=
+do_shared_option () { SHARED=yes; }
+register_option "--shared" do_shared_option "Build libLLVM*.so shared by on-device llvm toolchain, and link lib*stl_shared.so"
 
 register_jobs_option
 
@@ -50,10 +60,12 @@ extract_parameters "$@"
 
 prepare_canadian_toolchain /tmp/ndk-$USER/build
 
-fix_option TOOLCHAIN_BUILD_PREFIX "$OPTION_OUT_DIR" "On-device toolchain will be put at <path>"
-fix_option ARCHS "$OPTION_ARCH" "on-device architecture"
-ARCHS="`commas_to_spaces $ARCHS`"
+fix_option ABIS "$OPTION_ABIS" "on-device architecture"
+ABIS=($commas_to_spaces $ABIS)
+fix_option BUILD_OUT "$OPTION_BUILD_OUT" "build directory"
 setup_default_log_file $BUILD_OUT/config.log
+fix_option OUT_DIR "$OPTION_OUT_DIR" "On-device toolchain will be put at <path>"
+TOOLCHAIN_BUILD_PREFIX="$OUT_DIR"
 
 set_parameters ()
 {
@@ -107,11 +119,6 @@ prepare_target_build
 prepare_abi_configure_build
 set_toolchain_ndk $NDK_DIR $TOOLCHAIN
 
-if [ "$MINGW" != "yes" -a "$DARWIN" != "yes" ] ; then
-    dump "Using C compiler: $CC"
-    dump "Using C++ compiler: $CXX"
-fi
-
 rm -rf $BUILD_OUT
 mkdir -p $BUILD_OUT
 
@@ -138,54 +145,80 @@ aosp_regex="${aosp}/[^:]*:"
 PATH="`echo $PATH | sed -e \"s#$aosp_regex##g\"`"
 export PATH
 
-for arch in $ARCHS; do
-  dump "Rebuild for architecture $arch"
+for abi in $ABIS; do
+  dump "Rebuild for ABI $abi with $STL"
 
   # configure the toolchain
   dump "Configure: $TOOLCHAIN toolchain build"
-  LLVM_BUILD_OUT=$BUILD_OUT/llvm/$arch
-  mkdir -p $LLVM_BUILD_OUT && cd $LLVM_BUILD_OUT
+  LLVM_BUILD_OUT=$BUILD_OUT/llvm/$abi
+  run mkdir -p $LLVM_BUILD_OUT && cd $LLVM_BUILD_OUT
   fail_panic "Couldn't cd into llvm build path: $LLVM_BUILD_OUT"
 
-  toolchain_prefix=`get_default_toolchain_prefix_for_arch $arch`
-  toolchain_name=`get_default_toolchain_name_for_arch $arch`
+  arch="$(convert_abi_to_arch $abi)"
   if [ -n "$OPTION_GCC_VERSION" ]; then
-    toolchain_name="${toolchain_name//${DEFAULT_GCC_VERSION}/${OPTION_GCC_VERSION}}"
+    GCCVER=$OPTION_GCC_VERSION
+  else
+    GCCVER=$(get_default_gcc_version_for_arch $arch)
   fi
-  extra_configure_flags=''
-  if [ $arch = "arm" ]; then
-    extra_configure_flags='-mthumb -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16'
-  fi
+  toolchain_prefix=`get_default_toolchain_prefix_for_arch $arch`
+  toolchain_name=`get_toolchain_name_for_arch $arch $GCCVER`
+  CFLAGS="-fomit-frame-pointer -fstrict-aliasing -ffunction-sections -fdata-sections"
+  case $abi in
+    armeabi)
+      # No -mthumb, because ./llvm/lib/Target/ARM/ARMJITInfo.cpp now contain inline assembly
+      # code such as "stmdb sp!,{r0,r1,r2,r3,lr}" which doesn't support thumb1
+      CFLAGS=$CFLAGS" -march=armv5te -msoft-float"
+      ;;
+    armeabi-v7a|armeabi-v7a-hard)
+      CFLAGS=$CFLAGS" -mthumb -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16"
+      if [ "$arbi" = "armeabi-v7a-hard" ]; then
+        CFLAGS=$CFLAGS" -mhard-float -D_NDK_MATH_NO_SOFTFP=1 -Wl,--no-warn-mismatch -lm_hard"
+      fi
+      ;;
+    mips)
+      CFLAGS=$CFLAGS" -fmessage-length=0 -fno-inline-functions-called-once -fgcse-after-reload -frerun-cse-after-loop -frename-registers"
+      ;;
+  esac
 
   run $BUILDTOOLS/make-standalone-toolchain.sh \
     --toolchain=$toolchain_name \
-    --stl=stlport \
+    --stl=$STL \
     --arch=$arch \
-    --system=linux-$HOST_ARCH \
-    --platform=android-9 \
+    --system=$HOST_TAG \
+    --platform=android-19 \
     --install-dir=$BUILD_OUT/ndk-standalone-$arch
   fail_panic "Couldn't make standalone for $arch"
 
-  mkdir -p $TOOLCHAIN_BUILD_PREFIX/$arch
-  cp -f $BUILD_OUT/ndk-standalone-$arch/$toolchain_prefix/lib/libstlport_shared.so $TOOLCHAIN_BUILD_PREFIX/$arch
+  run mkdir -p $TOOLCHAIN_BUILD_PREFIX/$abi
+  if [ "$SHARED" = "yes" ]; then
+    run cp -f $BUILD_OUT/ndk-standalone-$arch/$toolchain_prefix/lib/lib${STL}_shared.so $TOOLCHAIN_BUILD_PREFIX/$abi
+  fi
 
   CC=$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-gcc
   CXX=$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-g++
   export CC CXX
 
+  EXTRA_LLVM_CONFIG=""
+  EXTRA_MCLINKER_CONFIG=""
+  if [ "$SHARED" = "yes" ]; then
+    EXTRA_LLVM_CONFIG="--enable-shared --with-extra-ld-options=-l${STL}_shared"
+    EXTRA_MCLINKER_CONFIG="--with-llvm-shared-lib=$LLVM_BUILD_OUT/Release/lib/libLLVM-${DEFAULT_LLVM_VERSION}.so"
+  fi
+
   run $SRC_DIR/$TOOLCHAIN/llvm/configure \
-    --prefix=$TOOLCHAIN_BUILD_PREFIX/$arch \
+    --prefix=$TOOLCHAIN_BUILD_PREFIX/$abi \
     --host=$toolchain_prefix \
     --with-bug-report-url=$DEFAULT_ISSUE_TRACKER_URL \
     --enable-targets=$arch \
     --enable-optimized \
+    --enable-shrink-binary-size \
     --disable-polly \
     --with-clang-srcdir=/dev/null \
-    --enable-shared \
-    --with-extra-ld-options=-lstlport_shared \
     --disable-assertions \
-    --with-extra-options="$extra_configure_flags"
-  fail_panic "Couldn't configure llvm toolchain for $arch"
+    --disable-terminfo \
+    --with-extra-options="$CFLAGS" \
+    $EXTRA_LLVM_CONFIG
+  fail_panic "Couldn't configure llvm toolchain for ABI $abi"
 
   dump "Building : llvm toolchain [this can take a long time]."
   unset CC CXX  # Need for BuildTools
@@ -194,28 +227,36 @@ for arch in $ARCHS; do
   fail_panic "Couldn't compile llvm toolchain"
 
   # Copy binaries what we need
-  mkdir -p $TOOLCHAIN_BUILD_PREFIX/$arch
-  cp -f $LLVM_BUILD_OUT/Release/lib/libLLVM-${DEFAULT_LLVM_VERSION}.so $TOOLCHAIN_BUILD_PREFIX/$arch
-  cp -f $LLVM_BUILD_OUT/Release/bin/le32-none-ndk-translate $TOOLCHAIN_BUILD_PREFIX/$arch
-  cp -f $LLVM_BUILD_OUT/Release/bin/llc $TOOLCHAIN_BUILD_PREFIX/$arch
+  run mkdir -p $TOOLCHAIN_BUILD_PREFIX/$abi
+  if [ "$SHARED" = "yes" ]; then
+    run cp -f $LLVM_BUILD_OUT/Release/lib/libLLVM-${DEFAULT_LLVM_VERSION}.so $TOOLCHAIN_BUILD_PREFIX/$abi
+  fi
+  run cp -f $LLVM_BUILD_OUT/Release/bin/ndk-translate $TOOLCHAIN_BUILD_PREFIX/$abi
+  run cp -f $LLVM_BUILD_OUT/Release/bin/llc $TOOLCHAIN_BUILD_PREFIX/$abi
+  run cd $TOOLCHAIN_BUILD_PREFIX/$abi && ln -s ndk-translate le32-none-ndk-translate
+  run cd $TOOLCHAIN_BUILD_PREFIX/$abi && ln -s ndk-translate le64-none-ndk-translate
 
   # build mclinker only against default the LLVM version, once
   dump "Configure: mclinker against $TOOLCHAIN"
-  MCLINKER_BUILD_OUT=$MCLINKER_SRC_DIR/build/$arch
-  mkdir -p $MCLINKER_BUILD_OUT && cd $MCLINKER_BUILD_OUT
+  MCLINKER_BUILD_OUT=$MCLINKER_SRC_DIR/build/$abi
+  run mkdir -p $MCLINKER_BUILD_OUT && cd $MCLINKER_BUILD_OUT
   fail_panic "Couldn't cd into mclinker build path: $MCLINKER_BUILD_OUT"
 
-  CC=$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-gcc
-  CXX="$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-g++ -lstlport_shared"
+  CC="$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-gcc $CFLAGS"
+  CXX="$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-g++ $CFLAGS"
+  if [ "$SHARED" = "yes" ]; then
+    CXX="$CXX -l${STL}_shared"
+  fi
   export CC CXX
 
   run $MCLINKER_SRC_DIR/configure \
-    --prefix=$TOOLCHAIN_BUILD_PREFIX/$arch \
+    --prefix=$TOOLCHAIN_BUILD_PREFIX/$abi \
     --with-llvm-config=$LLVM_BUILD_OUT/BuildTools/Release/bin/llvm-config \
-    --with-llvm-shared-lib=$LLVM_BUILD_OUT/Release/lib/libLLVM-${DEFAULT_LLVM_VERSION}.so \
     --enable-targets=$arch \
-    --host=$toolchain_prefix
-  fail_panic "Couldn't configure mclinker for $arch"
+    --host=$toolchain_prefix \
+    --enable-shrink-binary-size \
+    $EXTRA_MCLINKER_CONFIG
+  fail_panic "Couldn't configure mclinker for ABI $abi"
 
   CXXFLAGS="$CXXFLAGS -fexceptions"  # optimized/ScriptParser.cc needs it
   export CXXFLAGS
@@ -224,14 +265,25 @@ for arch in $ARCHS; do
   run make -j$NUM_JOBS $MAKE_FLAGS CXXFLAGS="$CXXFLAGS"
   fail_panic "Couldn't compile mclinker"
 
-  mkdir -p $TOOLCHAIN_BUILD_PREFIX/$arch
-  cp -f $MCLINKER_BUILD_OUT/optimized/ld.mcld $TOOLCHAIN_BUILD_PREFIX/$arch
+  run mkdir -p $TOOLCHAIN_BUILD_PREFIX/$abi
+  if [ -f $MCLINKER_BUILD_OUT/tools/lite/ld.lite ]; then
+    run cp -f $MCLINKER_BUILD_OUT/tools/lite/ld.lite $TOOLCHAIN_BUILD_PREFIX/$abi/ld.mcld
+  else
+    run cp -f $MCLINKER_BUILD_OUT/optimized/ld.mcld $TOOLCHAIN_BUILD_PREFIX/$abi
+  fi
+  fail_panic "Couldn't copy mclinker"
 
   # Strip
   STRIP=$BUILD_OUT/ndk-standalone-$arch/bin/$toolchain_prefix-strip
-  find $TOOLCHAIN_BUILD_PREFIX/$arch -maxdepth 1 -type f -exec $STRIP --strip-all {} \;
+  find $TOOLCHAIN_BUILD_PREFIX/$abi -maxdepth 1 -type f -exec $STRIP --strip-all {} \;
+
+  # copy SOURCES
+  run cp "$SRC_DIR/SOURCES" $TOOLCHAIN_BUILD_PREFIX/$abi
 done
 
 TOOLCHAIN_BUILD_PREFIX="`cd $TOOLCHAIN_BUILD_PREFIX; pwd`"
+
 dump "Done. Output is under $TOOLCHAIN_BUILD_PREFIX"
-rm -rf $BUILD_OUT
+if [ -z "$OPTION_BUILD_OUT" ] ; then
+  rm -rf $BUILD_OUT
+fi

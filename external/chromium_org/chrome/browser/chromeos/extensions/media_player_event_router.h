@@ -7,30 +7,29 @@
 
 #include "base/basictypes.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 
 // Event router class for events related to Mediaplayer.
 class MediaPlayerEventRouter {
  public:
-  explicit MediaPlayerEventRouter(Profile* profile);
+  explicit MediaPlayerEventRouter(content::BrowserContext* context);
   virtual ~MediaPlayerEventRouter();
 
   // Send notification that next-track shortcut key was pressed.
   void NotifyNextTrack();
 
-  // Send notification that playlist changed.
-  void NotifyPlaylistChanged();
-
-  // Send notification that previous-track shortcut key was pressed.
+ // Send notification that previous-track shortcut key was pressed.
   void NotifyPrevTrack();
 
   // Send notification that play/pause shortcut key was pressed.
   void NotifyTogglePlayState();
 
  private:
-  Profile* profile_;
+  content::BrowserContext* browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaPlayerEventRouter);
 };

@@ -70,13 +70,10 @@ struct MediaLogEvent {
     TOTAL_BYTES_SET,
     NETWORK_ACTIVITY_SET,
 
-    // Audio/Video stream playback has ended.
+    // Audio/Video/Text stream playback has ended.
     AUDIO_ENDED,
     VIDEO_ENDED,
-
-    // The audio renderer has been disabled.
-    // params: none.
-    AUDIO_RENDERER_DISABLED,
+    TEXT_ENDED,
 
     // The extents of the sliding buffer have changed.
     // params: "buffer_start": <first buffered byte>.

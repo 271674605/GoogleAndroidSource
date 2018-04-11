@@ -17,23 +17,21 @@
 -->
 <!-- Action bar items for the tablet when viewing a conversation -->
 
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Depends on AccountCapabilities.ARCHIVE and
-         FolderCapabilities.ARCHIVE. Only one of archive or
-         remove_folder are shown, and they have the same drawable, so
-         show the first one.
-    -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+      xmlns:app="http://schemas.android.com/apk/res-auto">
+
     <item
         android:id="@+id/archive"
         android:title="@string/archive"
-        android:showAsAction="never"
-        android:icon="@drawable/archive"
+        app:showAsAction="always"
+        android:icon="@drawable/ic_archive_wht_24dp"
         android:alphabeticShortcut="@string/trigger_y_char" />
+
     <item
         android:id="@+id/remove_folder"
         android:title="@string/remove_folder"
-        android:showAsAction="never"
-        android:icon="@drawable/ic_remove_label"
+        app:showAsAction="always"
+        android:icon="@drawable/ic_remove_label_wht_24dp"
         android:alphabeticShortcut="@string/trigger_y_char"
         android:visible="false" />
 
@@ -41,41 +39,50 @@
     <item
         android:id="@+id/delete"
         android:title="@string/delete"
-        android:showAsAction="never"
-        android:icon="@drawable/trash" />
+        app:showAsAction="always"
+        android:icon="@drawable/ic_delete_wht_24dp" />
+
     <!-- Depends on the user viewing a draft label, and the above menu item not being shown -->
     <item
         android:id="@+id/discard_drafts"
         android:title="@string/discard_drafts"
-        android:showAsAction="never"
-        android:icon="@drawable/trash"
+        app:showAsAction="always"
+        android:icon="@drawable/ic_delete_wht_24dp"
+        android:visible="false" />
+    <!-- Depends on the user viewing a outbox label and the setting supports delete -->
+    <item
+        android:id="@+id/discard_outbox"
+        android:title="@string/discard_failed"
+        app:showAsAction="always"
+        android:icon="@drawable/ic_delete_wht_24dp"
         android:visible="false" />
 
     <!-- Always available -->
     <item
         android:id="@+id/inside_conversation_unread"
         android:title="@string/mark_unread"
-        android:showAsAction="never"
-        android:icon="@drawable/ic_menu_mark_unread_holo_light" />
+        app:showAsAction="always"
+        android:icon="@drawable/ic_menu_mark_unread_wht_24dp" />
 
     <!-- Always available -->
     <item
         android:id="@+id/move_to"
         android:title="@string/menu_move_to"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:icon="@drawable/ic_menu_move_to_holo_light" />
 
     <!-- Always available -->
     <item
         android:id="@+id/change_folders"
         android:title="@string/menu_change_folders"
-        android:showAsAction="never"
-        android:icon="@drawable/ic_menu_folders_holo_light" />
+        app:showAsAction="never"
+        android:icon="@drawable/ic_change_labels_wht_24dp" />
 
     <item
         android:id="@+id/move_to_inbox"
-        android:showAsAction="never"
-        android:title="@string/menu_move_to_inbox" />
+        app:showAsAction="never"
+        android:title="@string/menu_move_to_inbox"
+        android:icon="@drawable/ic_move_to_inbox_wht_24dp"/>
 
     <!-- Always available -->
     <item
@@ -92,6 +99,11 @@
     <item
         android:id="@+id/mute"
         android:title="@string/mute" />
+
+    <item android:id="@+id/print_all"
+          android:title="@string/print_all"
+          android:visible="false" />
+
     <item
         android:id="@+id/show_original"
         android:title="@string/menu_show_original"/>
@@ -111,17 +123,4 @@
         android:title="@string/report_phishing"
         android:visible="false" />
 
-    <!-- Always available -->
-    <item android:id="@+id/settings"
-        android:title="@string/menu_settings" />
-
-    <!-- Always available -->
-    <item
-        android:id="@+id/feedback_menu_item"
-        android:title="@string/feedback" />
-
-    <!-- Always available -->
-    <item
-        android:id="@+id/help_info_menu_item"
-        android:title="@string/help_and_info" />
 </menu>

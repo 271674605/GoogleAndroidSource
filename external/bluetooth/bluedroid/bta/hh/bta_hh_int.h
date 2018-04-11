@@ -67,6 +67,7 @@ enum
     BTA_HH_GATT_READ_DESCR_CMPL_EVT,
     BTA_HH_GATT_WRITE_DESCR_CMPL_EVT,
     BTA_HH_API_SCPP_UPDATE_EVT,
+    BTA_HH_GATT_ENC_CMPL_EVT,
 #endif
 
     /* not handled by execute state machine */
@@ -182,6 +183,7 @@ typedef union
     tBTA_HH_LE_CLOSE         le_close;
     tBTA_GATTC_OPEN          le_open;
     tBTA_HH_SCPP_UPDATE      le_scpp_update;
+    tBTA_GATTC_ENC_CMPL_CB   le_enc_cmpl;
 #endif
 } tBTA_HH_DATA;
 
@@ -192,34 +194,30 @@ typedef struct
     BOOLEAN                 in_use;
     UINT8                   inst_id;    /* share service instance ID and report instance ID, as
                                            hi 4 for service instance ID, low 4 as charatceristic instance ID */
-    tBTA_HH_RPT_TYPE	    rpt_type;
+    tBTA_HH_RPT_TYPE        rpt_type;
     UINT16                  uuid;
-    UINT16				    prop;
-    UINT8				    rpt_id;
-    BOOLEAN			        client_cfg_exist;
-    UINT16				    client_cfg_value;
+    UINT8                   prop;
+    UINT8                   rpt_id;
+    BOOLEAN                 client_cfg_exist;
+    UINT16                  client_cfg_value;
 }tBTA_HH_LE_RPT;
 
 #ifndef BTA_HH_LE_RPT_MAX
-#define BTA_HH_LE_RPT_MAX       10
+#define BTA_HH_LE_RPT_MAX       20
 #endif
 
 typedef struct
 {
     BOOLEAN                 in_use;
-    tBTA_HH_LE_RPT		    report[BTA_HH_LE_RPT_MAX];
+    tBTA_HH_LE_RPT          report[BTA_HH_LE_RPT_MAX];
 
 #define BTA_HH_LE_PROTO_MODE_BIT        0x01
 #define BTA_HH_LE_CP_BIT                0x02
-    UINT8		            option_char; /* control point char exisit or not */
+    UINT8                   option_char; /* control point char exisit or not */
 
     BOOLEAN                 expl_incl_srvc;
     UINT8                   incl_srvc_inst; /* assuming only one included service : battery service */
     UINT8                   cur_expl_char_idx; /* currently discovering service index */
-
-#define BTA_HH_LE_REMOTE_WAKE   0x01
-#define BTA_HH_LE_NORMAL_CONN   0x02
-    UINT8                   flag;           /* HID Information flag */
     UINT8                   *rpt_map;
     UINT16                  ext_rpt_ref;
     tBTA_HH_DEV_DESCR       descriptor;
@@ -283,6 +281,7 @@ typedef struct
     UINT8               scps_notify;   /* scan refresh supported/notification enabled */
 #endif
 
+    BOOLEAN             security_pending;
 } tBTA_HH_DEV_CB;
 
 /* key board parsing control block */
@@ -380,6 +379,7 @@ extern tBTA_HH_STATUS bta_hh_read_ssr_param(BD_ADDR bd_addr, UINT16 *p_max_ssr_l
 
 /* functions for LE HID */
 extern void bta_hh_le_enable(void);
+extern BOOLEAN bta_hh_le_is_hh_gatt_if(tBTA_GATTC_IF client_if);
 extern void bta_hh_le_deregister(void);
 extern BOOLEAN bta_hh_is_le_device(tBTA_HH_DEV_CB *p_cb, BD_ADDR remote_bda);
 extern void bta_hh_le_open_conn(tBTA_HH_DEV_CB *p_cb, BD_ADDR remote_bda);
@@ -403,7 +403,8 @@ extern void bta_hh_le_write_char_descr_cmpl(tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *
 extern void bta_hh_start_security(tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *p_buf);
 extern void bta_hh_security_cmpl(tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *p_buf);
 extern void bta_hh_le_update_scpp(tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *p_buf);
-
+extern void bta_hh_le_notify_enc_cmpl(tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *p_data);
+extern void bta_hh_ci_load_rpt (tBTA_HH_DEV_CB *p_cb, tBTA_HH_DATA *p_buf);
 
 #if BTA_HH_DEBUG
 extern void bta_hh_trace_dev_db(void);

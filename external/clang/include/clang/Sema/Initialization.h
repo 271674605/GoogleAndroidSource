@@ -86,6 +86,10 @@ public:
     /// \brief The entity being initialized is a function parameter; function
     /// is member of group of audited CF APIs.
     EK_Parameter_CF_Audited
+
+    // Note: err_init_conversion_failed in DiagnosticSemaKinds.td uses this
+    // enum as an index for its first %select.  When modifying this list,
+    // that diagnostic text needs to be updated as well.
   };
   
 private:
@@ -98,6 +102,9 @@ private:
 
   /// \brief The type of the object or reference being initialized.
   QualType Type;
+
+  /// \brief The mangling number for the next reference temporary to be created.
+  mutable unsigned ManglingNumber;
 
   struct LN {
     /// \brief When Kind == EK_Result, EK_Exception, EK_New, the
@@ -112,8 +119,8 @@ private:
   };
 
   struct C {
-    /// \brief The variable being captured by an EK_LambdaCapture.
-    VarDecl *Var;
+    /// \brief The name of the variable being captured by an EK_LambdaCapture.
+    IdentifierInfo *VarID;
 
     /// \brief The source location at which the capture occurs.
     unsigned Location;
@@ -125,7 +132,7 @@ private:
     DeclaratorDecl *VariableOrMember;
     
     /// \brief When Kind == EK_RelatedResult, the ObjectiveC method where
-    /// result type was implicitly changed to accomodate ARC semantics.
+    /// result type was implicitly changed to accommodate ARC semantics.
     ObjCMethodDecl *MethodDecl;
 
     /// \brief When Kind == EK_Parameter, the ParmVarDecl, with the
@@ -151,19 +158,19 @@ private:
     struct C Capture;
   };
 
-  InitializedEntity() { }
+  InitializedEntity() : ManglingNumber(0) {}
 
   /// \brief Create the initialization entity for a variable.
   InitializedEntity(VarDecl *Var)
-    : Kind(EK_Variable), Parent(0), Type(Var->getType()),
-      VariableOrMember(Var) { }
+    : Kind(EK_Variable), Parent(nullptr), Type(Var->getType()),
+      ManglingNumber(0), VariableOrMember(Var) { }
   
   /// \brief Create the initialization entity for the result of a
   /// function, throwing an object, performing an explicit cast, or
   /// initializing a parameter for which there is no declaration.
   InitializedEntity(EntityKind Kind, SourceLocation Loc, QualType Type,
                     bool NRVO = false)
-    : Kind(Kind), Parent(0), Type(Type)
+    : Kind(Kind), Parent(nullptr), Type(Type), ManglingNumber(0)
   {
     LocAndNRVO.Location = Loc.getRawEncoding();
     LocAndNRVO.NRVO = NRVO;
@@ -172,17 +179,18 @@ private:
   /// \brief Create the initialization entity for a member subobject.
   InitializedEntity(FieldDecl *Member, const InitializedEntity *Parent) 
     : Kind(EK_Member), Parent(Parent), Type(Member->getType()),
-      VariableOrMember(Member) { }
+      ManglingNumber(0), VariableOrMember(Member) { }
   
   /// \brief Create the initialization entity for an array element.
   InitializedEntity(ASTContext &Context, unsigned Index, 
                     const InitializedEntity &Parent);
 
   /// \brief Create the initialization entity for a lambda capture.
-  InitializedEntity(VarDecl *Var, FieldDecl *Field, SourceLocation Loc)
-    : Kind(EK_LambdaCapture), Parent(0), Type(Field->getType()) 
+  InitializedEntity(IdentifierInfo *VarID, QualType FieldType, SourceLocation Loc)
+    : Kind(EK_LambdaCapture), Parent(nullptr), Type(FieldType),
+      ManglingNumber(0)
   {
-    Capture.Var = Var;
+    Capture.VarID = VarID;
     Capture.Location = Loc.getRawEncoding();
   }
   
@@ -210,7 +218,7 @@ public:
     Entity.Kind = EK_Parameter;
     Entity.Type =
       Context.getVariableArrayDecayedType(Type.getUnqualifiedType());
-    Entity.Parent = 0;
+    Entity.Parent = nullptr;
     Entity.Parameter
       = (static_cast<uintptr_t>(Consumed) | reinterpret_cast<uintptr_t>(Parm));
     return Entity;
@@ -224,7 +232,7 @@ public:
     InitializedEntity Entity;
     Entity.Kind = EK_Parameter;
     Entity.Type = Context.getVariableArrayDecayedType(Type);
-    Entity.Parent = 0;
+    Entity.Parent = nullptr;
     Entity.Parameter = (Consumed);
     return Entity;
   }
@@ -254,7 +262,7 @@ public:
   /// \brief Create the initialization entity for a temporary.
   static InitializedEntity InitializeTemporary(QualType Type) {
     InitializedEntity Result(EK_Temporary, SourceLocation(), Type);
-    Result.TypeInfo = 0;
+    Result.TypeInfo = nullptr;
     return Result;
   }
 
@@ -286,14 +294,16 @@ public:
   }
   
   /// \brief Create the initialization entity for a member subobject.
-  static InitializedEntity InitializeMember(FieldDecl *Member,
-                                          const InitializedEntity *Parent = 0) {
+  static InitializedEntity
+  InitializeMember(FieldDecl *Member,
+                   const InitializedEntity *Parent = nullptr) {
     return InitializedEntity(Member, Parent);
   }
   
   /// \brief Create the initialization entity for a member subobject.
-  static InitializedEntity InitializeMember(IndirectFieldDecl *Member,
-                                      const InitializedEntity *Parent = 0) {
+  static InitializedEntity
+  InitializeMember(IndirectFieldDecl *Member,
+                   const InitializedEntity *Parent = nullptr) {
     return InitializedEntity(Member->getAnonField(), Parent);
   }
 
@@ -305,10 +315,10 @@ public:
   }
 
   /// \brief Create the initialization entity for a lambda capture.
-  static InitializedEntity InitializeLambdaCapture(VarDecl *Var,
-                                                   FieldDecl *Field,
+  static InitializedEntity InitializeLambdaCapture(IdentifierInfo *VarID,
+                                                   QualType FieldType,
                                                    SourceLocation Loc) {
-    return InitializedEntity(Var, Field, Loc);
+    return InitializedEntity(VarID, FieldType, Loc);
   }
 
   /// \brief Create the entity for a compound literal initializer.
@@ -337,7 +347,7 @@ public:
     if (Kind == EK_Temporary || Kind == EK_CompoundLiteralInit)
       return TypeInfo;
     
-    return 0;
+    return nullptr;
   }
   
   /// \brief Retrieve the name of the entity being initialized.
@@ -391,6 +401,13 @@ public:
     return SourceLocation::getFromRawEncoding(LocAndNRVO.Location);
   }
 
+  /// \brief If this is an array, vector, or complex number element, get the
+  /// element's index.
+  unsigned getElementIndex() const {
+    assert(getKind() == EK_ArrayElement || getKind() == EK_VectorElement ||
+           getKind() == EK_ComplexElement);
+    return Index;
+  }
   /// \brief If this is already the initializer for an array or vector
   /// element, sets the element index.
   void setElementIndex(unsigned Index) {
@@ -398,13 +415,11 @@ public:
            getKind() == EK_ComplexElement);
     this->Index = Index;
   }
-
-  /// \brief Retrieve the variable for a captured variable in a lambda.
-  VarDecl *getCapturedVar() const {
+  /// \brief For a lambda capture, return the capture's name.
+  StringRef getCapturedVarName() const {
     assert(getKind() == EK_LambdaCapture && "Not a lambda capture!");
-    return Capture.Var;
+    return Capture.VarID->getName();
   }
-  
   /// \brief Determine the location of the capture when initializing
   /// field from a captured variable in a lambda.
   SourceLocation getCaptureLoc() const {
@@ -415,6 +430,8 @@ public:
   void setParameterCFAudited() {
     Kind = EK_Parameter_CF_Audited;
   }
+
+  unsigned allocateManglingNumber() const { return ++ManglingNumber; }
 
   /// Dump a representation of the initialized entity to standard error,
   /// for debugging purposes.
@@ -582,8 +599,10 @@ public:
   bool AllowExplicit() const { return !isCopyInit(); }
 
   /// \brief Retrieve whether this initialization allows the use of explicit
-  /// conversion functions.
-  bool allowExplicitConversionFunctions() const {
+  /// conversion functions when binding a reference. If the reference is the
+  /// first parameter in a copy or move constructor, such conversions are
+  /// permitted even though we are performing copy-initialization.
+  bool allowExplicitConversionFunctionsInRefBinding() const {
     return !isCopyInit() || Context == IC_ExplicitConvs;
   }
   
@@ -648,6 +667,8 @@ public:
     SK_LValueToRValue,
     /// \brief Perform an implicit conversion sequence.
     SK_ConversionSequence,
+    /// \brief Perform an implicit conversion sequence without narrowing.
+    SK_ConversionSequenceNoNarrowing,
     /// \brief Perform list-initialization without a constructor
     SK_ListInitialization,
     /// \brief Perform list-initialization with a constructor.
@@ -836,11 +857,19 @@ public:
   /// \param Kind the kind of initialization being performed.
   ///
   /// \param Args the argument(s) provided for initialization.
+  ///
+  /// \param TopLevelOfInitList true if we are initializing from an expression
+  ///        at the top level inside an initializer list. This disallows
+  ///        narrowing conversions in C++11 onwards.
   InitializationSequence(Sema &S, 
                          const InitializedEntity &Entity,
                          const InitializationKind &Kind,
-                         MultiExprArg Args);
-  
+                         MultiExprArg Args,
+                         bool TopLevelOfInitList = false);
+  void InitializeFrom(Sema &S, const InitializedEntity &Entity,
+                      const InitializationKind &Kind, MultiExprArg Args,
+                      bool TopLevelOfInitList);
+
   ~InitializationSequence();
   
   /// \brief Perform the actual initialization of the given entity based on
@@ -868,7 +897,7 @@ public:
                      const InitializedEntity &Entity,
                      const InitializationKind &Kind,
                      MultiExprArg Args,
-                     QualType *ResultType = 0);
+                     QualType *ResultType = nullptr);
   
   /// \brief Diagnose an potentially-invalid initialization sequence.
   ///
@@ -975,7 +1004,7 @@ public:
 
   /// \brief Add a new step that applies an implicit conversion sequence.
   void AddConversionSequenceStep(const ImplicitConversionSequence &ICS,
-                                 QualType T);
+                                 QualType T, bool TopLevelOfInitList = false);
 
   /// \brief Add a list-initialization step.
   void AddListInitializationStep(QualType T);

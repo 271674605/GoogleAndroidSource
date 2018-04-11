@@ -5,16 +5,14 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_PRIVATE_API_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_PRIVATE_API_H_
 
-#include "ash/desktop_background/desktop_background_controller.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/chromeos/login/user.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/chromeos/extensions/wallpaper_function_base.h"
+#include "chrome/common/extensions/api/wallpaper_private.h"
 #include "net/url_request/url_fetcher_delegate.h"
-#include "ui/gfx/image/image_skia.h"
 
 namespace chromeos {
 class UserImage;
-}
+}  // namespace chromeos
 
 // Wallpaper manager strings.
 class WallpaperPrivateGetStringsFunction : public SyncExtensionFunction {
@@ -26,32 +24,7 @@ class WallpaperPrivateGetStringsFunction : public SyncExtensionFunction {
   virtual ~WallpaperPrivateGetStringsFunction() {}
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
-// Wallpaper manager function base. It contains a JPEG decoder to decode
-// wallpaper data.
-class WallpaperFunctionBase : public AsyncExtensionFunction {
- public:
-  WallpaperFunctionBase();
-
- protected:
-  virtual ~WallpaperFunctionBase();
-
-  // A class to decode JPEG file.
-  class WallpaperDecoder;
-
-  // Holds an instance of WallpaperDecoder.
-  static WallpaperDecoder* wallpaper_decoder_;
-
-  // Starts to decode |data|. Must run on UI thread.
-  void StartDecode(const std::string& data);
-
-  // Handles failure or cancel cases. Passes error message to Javascript side.
-  void OnFailureOrCancel(const std::string& error);
-
- private:
-  virtual void OnWallpaperDecoded(const gfx::ImageSkia& wallpaper) = 0;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class WallpaperPrivateSetWallpaperIfExistsFunction
@@ -66,10 +39,10 @@ class WallpaperPrivateSetWallpaperIfExistsFunction
   virtual ~WallpaperPrivateSetWallpaperIfExistsFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  virtual void OnWallpaperDecoded(const gfx::ImageSkia& wallpaper) OVERRIDE;
+  virtual void OnWallpaperDecoded(const gfx::ImageSkia& image) OVERRIDE;
 
   // File doesn't exist. Sets javascript callback parameter to false.
   void OnFileNotExists(const std::string& error);
@@ -79,19 +52,15 @@ class WallpaperPrivateSetWallpaperIfExistsFunction
   void ReadFileAndInitiateStartDecode(const base::FilePath& file_path,
                                       const base::FilePath& fallback_path);
 
-  // Online wallpaper URL or file name of custom wallpaper.
-  std::string urlOrFile_;
+  scoped_ptr<extensions::api::wallpaper_private::SetWallpaperIfExists::Params>
+      params;
 
-  // Layout of the loaded wallpaper.
-  ash::WallpaperLayout layout_;
-
-  // Type of the loaded wallpaper.
-  chromeos::User::WallpaperType type_;
+  // User id of the active user when this api is been called.
+  std::string user_id_;
 
   // Sequence token associated with wallpaper operations. Shared with
   // WallpaperManager.
   base::SequencedWorkerPool::SequenceToken sequence_token_;
-
 };
 
 class WallpaperPrivateSetWallpaperFunction : public WallpaperFunctionBase {
@@ -105,32 +74,25 @@ class WallpaperPrivateSetWallpaperFunction : public WallpaperFunctionBase {
   virtual ~WallpaperPrivateSetWallpaperFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  virtual void OnWallpaperDecoded(const gfx::ImageSkia& wallpaper) OVERRIDE;
+  virtual void OnWallpaperDecoded(const gfx::ImageSkia& image) OVERRIDE;
 
   // Saves the image data to a file.
   void SaveToFile();
 
   // Sets wallpaper to the decoded image.
-  void SetDecodedWallpaper(scoped_ptr<gfx::ImageSkia> wallpaper);
+  void SetDecodedWallpaper(scoped_ptr<gfx::ImageSkia> image);
 
-  // Layout of the downloaded wallpaper.
-  ash::WallpaperLayout layout_;
+  scoped_ptr<extensions::api::wallpaper_private::SetWallpaper::Params> params;
 
   // The decoded wallpaper. It may accessed from UI thread to set wallpaper or
   // FILE thread to resize and save wallpaper to disk.
   gfx::ImageSkia wallpaper_;
 
-  // Email address of logged in user.
-  std::string email_;
-
-  // High resolution wallpaper URL.
-  std::string url_;
-
-  // String representation of downloaded wallpaper.
-  std::string image_data_;
+  // User id of the active user when this api is been called.
+  std::string user_id_;
 
   // Sequence token associated with wallpaper operations. Shared with
   // WallpaperManager.
@@ -149,7 +111,7 @@ class WallpaperPrivateResetWallpaperFunction
   virtual ~WallpaperPrivateResetWallpaperFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class WallpaperPrivateSetCustomWallpaperFunction
@@ -164,7 +126,7 @@ class WallpaperPrivateSetCustomWallpaperFunction
   virtual ~WallpaperPrivateSetCustomWallpaperFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   virtual void OnWallpaperDecoded(const gfx::ImageSkia& wallpaper) OVERRIDE;
@@ -177,20 +139,14 @@ class WallpaperPrivateSetCustomWallpaperFunction
   // Thumbnail is ready. Calls api function javascript callback.
   void ThumbnailGenerated(base::RefCountedBytes* data);
 
-  // Layout of the downloaded wallpaper.
-  ash::WallpaperLayout layout_;
+  scoped_ptr<extensions::api::wallpaper_private::SetCustomWallpaper::Params>
+      params;
 
-  // True if need to generate thumbnail and pass to callback.
-  bool generate_thumbnail_;
+  // User id of the active user when this api is been called.
+  std::string user_id_;
 
-  // Unique file name of the custom wallpaper.
-  std::string file_name_;
-
-  // Email address of logged in user.
-  std::string email_;
-
-  // String representation of downloaded wallpaper.
-  std::string image_data_;
+  // User id hash of the logged in user.
+  std::string user_id_hash_;
 
   // Sequence token associated with wallpaper operations. Shared with
   // WallpaperManager.
@@ -209,7 +165,7 @@ class WallpaperPrivateSetCustomWallpaperLayoutFunction
   virtual ~WallpaperPrivateSetCustomWallpaperLayoutFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class WallpaperPrivateMinimizeInactiveWindowsFunction
@@ -224,7 +180,7 @@ class WallpaperPrivateMinimizeInactiveWindowsFunction
   virtual ~WallpaperPrivateMinimizeInactiveWindowsFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class WallpaperPrivateRestoreMinimizedWindowsFunction
@@ -239,7 +195,7 @@ class WallpaperPrivateRestoreMinimizedWindowsFunction
   virtual ~WallpaperPrivateRestoreMinimizedWindowsFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class WallpaperPrivateGetThumbnailFunction : public AsyncExtensionFunction {
@@ -253,7 +209,7 @@ class WallpaperPrivateGetThumbnailFunction : public AsyncExtensionFunction {
   virtual ~WallpaperPrivateGetThumbnailFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // Failed to get thumbnail for |file_name|.
@@ -286,7 +242,7 @@ class WallpaperPrivateSaveThumbnailFunction : public AsyncExtensionFunction {
   virtual ~WallpaperPrivateSaveThumbnailFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // Failed to save thumbnail for |file_name|.
@@ -314,11 +270,11 @@ class WallpaperPrivateGetOfflineWallpaperListFunction
   virtual ~WallpaperPrivateGetOfflineWallpaperListFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  // Enumerates the list of files in wallpaper directory of given |source|.
-  void GetList(const std::string& email, const std::string& source);
+  // Enumerates the list of files in online wallpaper directory.
+  void GetList();
 
   // Sends the list of files to extension api caller. If no files or no
   // directory, sends empty list.

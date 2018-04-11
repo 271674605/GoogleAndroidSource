@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2010-2013 Broadcom Corporation
+ *  Copyright (C) 2010-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -44,8 +44,10 @@ enum
     NFA_EE_MODE_SET_EVT,        /* The status for activating or deactivating an NFCEE    */
     NFA_EE_ADD_AID_EVT,         /* The status for adding an AID to a routing table entry */
     NFA_EE_REMOVE_AID_EVT,      /* The status for removing an AID from a routing table   */
+    NFA_EE_REMAINING_SIZE_EVT,  /* The remaining size of the Listen Mode Routing Table   */
     NFA_EE_SET_TECH_CFG_EVT,    /* The status for setting the routing based on RF tech.  */
     NFA_EE_SET_PROTO_CFG_EVT,   /* The status for setting the routing based on protocols */
+    NFA_EE_UPDATED_EVT,         /* The status for NFA_EeUpdateNow                        */
     NFA_EE_CONNECT_EVT,         /* Result of NFA_EeConnect                               */
     NFA_EE_DATA_EVT,            /* Received data from NFCEE.                             */
     NFA_EE_DISCONNECT_EVT,      /* NFCEE connection closed.                              */
@@ -128,7 +130,7 @@ typedef struct
     tNFA_EE_INTERFACE   ee_interface;   /* NFCEE interface associated with this connection  */
 } tNFA_EE_CONNECT;
 
-#define NFA_EE_TRGR_SELECT              NFC_EE_TRIG_7816_SELECT  /* ISO 7816-4 SELECT command */
+#define NFA_EE_TRGR_SELECT              NFC_EE_TRIG_SELECT       /* ISO 7816-4 SELECT command */
 #define NFA_EE_TRGR_RF_PROTOCOL         NFC_EE_TRIG_RF_PROTOCOL  /* RF Protocol changed       */
 #define NFA_EE_TRGR_RF_TECHNOLOGY       NFC_EE_TRIG_RF_TECHNOLOGY/* RF Technology changed     */
 #define NFA_EE_TRGR_APP_INIT            NFC_EE_TRIG_APP_INIT     /* Application initiation    */
@@ -171,7 +173,7 @@ typedef struct
 {
     UINT8                   status;                         /* NFA_STATUS_OK if successful   */
     UINT8                   num_ee;                         /* number of MFCEE information   */
-    tNFA_EE_DISCOVER_INFO   ee_disc_info[NFA_DM_MAX_UICC];  /* MFCEE DISCOVER Request info   */
+    tNFA_EE_DISCOVER_INFO   ee_disc_info[NFA_EE_MAX_EE_SUPPORTED - 1]; /* NFCEE DISCOVER Request info   */
 } tNFA_EE_DISCOVER_REQ;
 
 /* Data for NFA_EE_DATA_EVT */
@@ -195,6 +197,7 @@ typedef union
     tNFA_STATUS             remove_aid;
     tNFA_STATUS             set_tech;
     tNFA_STATUS             set_proto;
+    UINT16                  size;
     tNFA_EE_CONNECT         connect;
     tNFA_EE_ACTION          action;
     tNFA_EE_MODE_SET        mode_set;
@@ -391,12 +394,31 @@ NFC_API extern tNFA_STATUS NFA_EeRemoveAidRouting (UINT8     aid_len,
 
 /*******************************************************************************
 **
+** Function         NFA_EeGetLmrtRemainingSize
+**
+** Description      This function is called to get remaining size of the
+**                  Listen Mode Routing Table.
+**                  The remaining size is reported in NFA_EE_REMAINING_SIZE_EVT
+**
+** Returns          NFA_STATUS_OK if successfully initiated
+**                  NFA_STATUS_FAILED otherwise
+**
+*******************************************************************************/
+NFC_API extern tNFA_STATUS NFA_EeGetLmrtRemainingSize (void);
+
+/*******************************************************************************
+**
 ** Function         NFA_EeUpdateNow
 **
 ** Description      This function is called to send the current listen mode
-**                  routing table and VS configuration to the NFCC
+**                  routing table and VS configuration to the NFCC (without waiting
+**                  for NFA_EE_ROUT_TIMEOUT_VAL).
+**
+**                  The status of this operation is
+**                  reported with the NFA_EE_UPDATED_EVT.
 **
 ** Returns          NFA_STATUS_OK if successfully initiated
+**                  NFA_STATUS_SEMANTIC_ERROR is update is currently in progress
 **                  NFA_STATUS_FAILED otherwise
 **
 *******************************************************************************/

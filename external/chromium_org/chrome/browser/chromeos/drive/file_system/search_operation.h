@@ -11,17 +11,14 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
-
-class GURL;
+#include "google_apis/drive/gdata_errorcode.h"
 
 namespace base {
 class SequencedTaskRunner;
 }  // namespace base
 
 namespace google_apis {
-class ResourceEntry;
-class ResourceList;
+class FileList;
 }  // namespace google_apis
 
 namespace drive {
@@ -29,6 +26,7 @@ namespace drive {
 class JobScheduler;
 
 namespace internal {
+class LoaderController;
 class ResourceMetadata;
 }  // namespace internal
 
@@ -40,38 +38,38 @@ class SearchOperation {
  public:
   SearchOperation(base::SequencedTaskRunner* blocking_task_runner,
                   JobScheduler* scheduler,
-                  internal::ResourceMetadata* metadata);
+                  internal::ResourceMetadata* metadata,
+                  internal::LoaderController* loader_controller);
   ~SearchOperation();
 
   // Performs server side content search operation for |search_query|.  If
-  // |next_url| is set, this is the search result url that will be fetched.
+  // |next_link| is set, this is the search result url that will be fetched.
   // Upon completion, |callback| will be called with the result.  This is
   // implementation of FileSystemInterface::Search() method.
   //
   // |callback| must not be null.
   void Search(const std::string& search_query,
-              const GURL& next_url,
+              const GURL& next_link,
               const SearchCallback& callback);
 
  private:
-  // Part of Search(). This is called after the ResourceList is fetched from
-  // the server.
-  void SearchAfterGetResourceList(
+  // Part of Search(), called after the FileList is fetched from the server.
+  void SearchAfterGetFileList(
       const SearchCallback& callback,
       google_apis::GDataErrorCode gdata_error,
-      scoped_ptr<google_apis::ResourceList> resource_list);
+      scoped_ptr<google_apis::FileList> file_list);
 
-  // Part of Search(). This is called after the RefreshEntryOnBlockingPool
-  // is completed.
-  void SearchAfterRefreshEntry(
+  // Part of Search(), called after |result| is filled on the blocking pool.
+  void SearchAfterResolveSearchResult(
       const SearchCallback& callback,
-      const GURL& next_url,
+      const GURL& next_link,
       scoped_ptr<std::vector<SearchResultInfo> > result,
       FileError error);
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   JobScheduler* scheduler_;
   internal::ResourceMetadata* metadata_;
+  internal::LoaderController* loader_controller_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

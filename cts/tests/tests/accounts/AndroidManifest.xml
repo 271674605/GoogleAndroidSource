@@ -28,6 +28,13 @@
     <application>
         <uses-library android:name="android.test.runner" />
 
+        <activity android:name="android.accounts.cts.AccountDummyActivity" >
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <service android:name="MockAccountService" android:exported="true"
                  android:process="android.accounts.cts">
             <intent-filter>
@@ -39,9 +46,12 @@
         </service>
     </application>
 
-    <instrumentation android:name="android.test.InstrumentationCtsTestRunner"
+    <instrumentation android:name="android.support.test.runner.AndroidJUnitRunner"
                      android:targetPackage="android.accounts.cts"
-                     android:label="CTS tests for android.accounts"/>
+                     android:label="CTS tests for android.accounts">
+        <meta-data android:name="listener"
+            android:value="com.android.cts.runner.CtsTestRunListener" />
+    </instrumentation>
 
 </manifest>
 

@@ -34,7 +34,7 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 
-#include "llvm/Assembly/PrintModulePass.h"
+#include "llvm/IR/IRPrintingPasses.h"
 
 #include "llvm/Bitcode/ReaderWriter.h"
 
@@ -55,6 +55,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 
 #include "slang_assert.h"
+#include "strip_unknown_attributes.h"
 #include "BitWriter_2_9/ReaderWriter_2_9.h"
 #include "BitWriter_2_9_func/ReaderWriter_2_9_func.h"
 #include "BitWriter_3_2/ReaderWriter_3_2.h"
@@ -64,23 +65,21 @@ namespace slang {
 void Backend::CreateFunctionPasses() {
   if (!mPerFunctionPasses) {
     mPerFunctionPasses = new llvm::FunctionPassManager(mpModule);
-    mPerFunctionPasses->add(new llvm::DataLayout(mpModule));
+    mPerFunctionPasses->add(new llvm::DataLayoutPass(mpModule));
 
     llvm::PassManagerBuilder PMBuilder;
     PMBuilder.OptLevel = mCodeGenOpts.OptimizationLevel;
     PMBuilder.populateFunctionPassManager(*mPerFunctionPasses);
   }
-  return;
 }
 
 void Backend::CreateModulePasses() {
   if (!mPerModulePasses) {
     mPerModulePasses = new llvm::PassManager();
-    mPerModulePasses->add(new llvm::DataLayout(mpModule));
+    mPerModulePasses->add(new llvm::DataLayoutPass(mpModule));
 
     llvm::PassManagerBuilder PMBuilder;
     PMBuilder.OptLevel = mCodeGenOpts.OptimizationLevel;
-    PMBuilder.SizeLevel = mCodeGenOpts.OptimizeSize;
     PMBuilder.SizeLevel = mCodeGenOpts.OptimizeSize;
     if (mCodeGenOpts.UnitAtATime) {
       PMBuilder.DisableUnitAtATime = 0;
@@ -95,8 +94,9 @@ void Backend::CreateModulePasses() {
     }
 
     PMBuilder.populateModulePassManager(*mPerModulePasses);
+    // Add a pass to strip off unknown/unsupported attributes.
+    mPerModulePasses->add(createStripUnknownAttributesPass());
   }
-  return;
 }
 
 bool Backend::CreateCodeGenPasses() {
@@ -108,7 +108,7 @@ bool Backend::CreateCodeGenPasses() {
     return true;
   } else {
     mCodeGenPasses = new llvm::FunctionPassManager(mpModule);
-    mCodeGenPasses->add(new llvm::DataLayout(mpModule));
+    mCodeGenPasses->add(new llvm::DataLayoutPass(mpModule));
   }
 
   // Create the TargetMachine for generating code.
@@ -144,7 +144,7 @@ bool Backend::CreateCodeGenPasses() {
   // This is set for the linker (specify how large of the virtual addresses we
   // can access for all unknown symbols.)
   llvm::CodeModel::Model CM;
-  if (mpModule->getPointerSize() == llvm::Module::Pointer32) {
+  if (mpModule->getDataLayout()->getPointerSize() == 4) {
     CM = llvm::CodeModel::Small;
   } else {
     // The target may have pointer size greater than 32 (e.g. x86_64
@@ -224,15 +224,12 @@ Backend::Backend(clang::DiagnosticsEngine *DiagEngine,
                                llvm::formatted_raw_ostream::PRESERVE_STREAM);
   mGen = CreateLLVMCodeGen(mDiagEngine, "", mCodeGenOpts,
                            mTargetOpts, mLLVMContext);
-  return;
 }
 
 void Backend::Initialize(clang::ASTContext &Ctx) {
   mGen->Initialize(Ctx);
 
   mpModule = mGen->GetModule();
-
-  return;
 }
 
 // Encase the Bitcode in a wrapper containing RS version information.
@@ -249,7 +246,6 @@ void Backend::WrapBitcode(llvm::raw_string_ostream &Bitcode) {
 
   // Write out the actual encoded bitcode.
   FormattedOutStream << Bitcode.str();
-  return;
 }
 
 bool Backend::HandleTopLevelDecl(clang::DeclGroupRef D) {
@@ -340,7 +336,7 @@ void Backend::HandleTranslationUnit(clang::ASTContext &Ctx) {
     }
     case Slang::OT_LLVMAssembly: {
       llvm::PassManager *LLEmitPM = new llvm::PassManager();
-      LLEmitPM->add(llvm::createPrintModulePass(&FormattedOutStream));
+      LLEmitPM->add(llvm::createPrintModulePass(FormattedOutStream));
       LLEmitPM->run(*mpModule);
       break;
     }
@@ -364,8 +360,9 @@ void Backend::HandleTranslationUnit(clang::ASTContext &Ctx) {
           break;
         }
         default: {
-          if (TargetAPI < SLANG_MINIMUM_TARGET_API ||
-              TargetAPI > SLANG_MAXIMUM_TARGET_API) {
+          if (TargetAPI != SLANG_DEVELOPMENT_TARGET_API &&
+              (TargetAPI < SLANG_MINIMUM_TARGET_API ||
+               TargetAPI > SLANG_MAXIMUM_TARGET_API)) {
             slangAssert(false && "Invalid target API value");
           }
           // Switch to the 3.2 BitcodeWriter by default, and don't use
@@ -389,18 +386,14 @@ void Backend::HandleTranslationUnit(clang::ASTContext &Ctx) {
   }
 
   FormattedOutStream.flush();
-
-  return;
 }
 
 void Backend::HandleTagDeclDefinition(clang::TagDecl *D) {
   mGen->HandleTagDeclDefinition(D);
-  return;
 }
 
 void Backend::CompleteTentativeDefinition(clang::VarDecl *D) {
   mGen->CompleteTentativeDefinition(D);
-  return;
 }
 
 Backend::~Backend() {
@@ -409,7 +402,6 @@ Backend::~Backend() {
   delete mPerFunctionPasses;
   delete mPerModulePasses;
   delete mCodeGenPasses;
-  return;
 }
 
 }  // namespace slang

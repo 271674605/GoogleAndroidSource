@@ -16,12 +16,12 @@
 
 package android.content.cts;
 
-import android.app.cts.MockActivity;
 import android.content.Context;
 import android.content.MutableContextWrapper;
-import android.test.AndroidTestCase;
+import android.test.InstrumentationTestCase;
+import android.test.UiThreadTest;
 
-public class MutableContextWrapperTest extends AndroidTestCase {
+public class MutableContextWrapperTest extends InstrumentationTestCase {
 
     MutableContextWrapper mMutableContextWrapper;
     Context mContext;
@@ -30,7 +30,7 @@ public class MutableContextWrapperTest extends AndroidTestCase {
     protected void setUp() throws Exception {
         super.setUp();
         mMutableContextWrapper = null;
-        mContext = getContext();
+        mContext = getInstrumentation().getTargetContext();
     }
 
     public void testConstructor() {
@@ -39,6 +39,7 @@ public class MutableContextWrapperTest extends AndroidTestCase {
         assertNotNull(mMutableContextWrapper);
     }
 
+    @UiThreadTest
     public void testSetBaseContext() {
         mMutableContextWrapper = new MutableContextWrapper(mContext);
         assertTrue(mContext.equals(mMutableContextWrapper.getBaseContext()));

@@ -36,7 +36,7 @@
 // Target-independent helper functions
 namespace __cxxabiv1 {
 
-  void call_terminate(_Unwind_Exception* unwind_exception) _GABIXX_HIDDEN;
+  _GABIXX_NORETURN void call_terminate(_Unwind_Exception* unwind_exception) _GABIXX_HIDDEN;
 
 #if __arm__
   uint32_t decodeRelocTarget2 (uint32_t ptr) _GABIXX_HIDDEN;
@@ -85,6 +85,12 @@ namespace __cxxabiv1 {
 
   // Make it easier to adapt to Itanium PR
 #ifdef __arm__
+
+  extern "C"
+  _Unwind_Reason_Code __gxx_personality_v0(_Unwind_State,
+                                           _Unwind_Exception*,
+                                           _Unwind_Context*) _GABIXX_DEFAULT;
+
 #  define BEGIN_DEFINE_PERSONALITY_FUNC \
     __gxx_personality_v0(_Unwind_State state, \
                          _Unwind_Exception* unwind_exception, \
@@ -114,6 +120,12 @@ namespace __cxxabiv1 {
       } \
       _Unwind_SetGR (context, UNWIND_POINTER_REG, reinterpret_cast<uint32_t>(unwind_exception));
 #else // ! __arm__
+
+  extern "C"
+  _Unwind_Reason_Code __gxx_personality_v0(int, _Unwind_Action, uint64_t,
+                                           _Unwind_Exception*,
+                                           _Unwind_Context*) _GABIXX_DEFAULT;
+
 #  define BEGIN_DEFINE_PERSONALITY_FUNC \
       __gxx_personality_v0(int version, _Unwind_Action actions, uint64_t exceptionClass, \
                            _Unwind_Exception* unwind_exception, _Unwind_Context* context) {

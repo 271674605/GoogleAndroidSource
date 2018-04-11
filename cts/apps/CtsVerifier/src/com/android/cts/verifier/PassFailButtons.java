@@ -23,12 +23,15 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.os.PowerManager.WakeLock;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.widget.Button;
+import android.widget.ImageButton;
 
 /**
  * {@link Activity}s to handle clicks to the pass and fail buttons of the pass fail buttons layout.
@@ -74,7 +77,7 @@ public class PassFailButtons {
          */
         void setInfoResources(int titleId, int messageId, int viewId);
 
-        Button getPassButton();
+        View getPassButton();
 
         /**
          * Returns a unique identifier for the test.  Usually, this is just the class name.
@@ -83,9 +86,35 @@ public class PassFailButtons {
 
         /** @return null or details about the test run. */
         String getTestDetails();
+
+        /**
+         * Set the result of the test and finish the activity.
+         *
+         * @param passed Whether or not the test passed.
+         */
+        void setTestResultAndFinish(boolean passed);
     }
 
     public static class Activity extends android.app.Activity implements PassFailActivity {
+        private WakeLock mWakeLock;
+
+        @Override
+        protected void onResume() {
+            super.onResume();
+            if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH)) {
+                mWakeLock = ((PowerManager) getSystemService(Context.POWER_SERVICE))
+                        .newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "PassFailButtons");
+                mWakeLock.acquire();
+            }
+        }
+
+        @Override
+        protected void onPause() {
+            super.onPause();
+            if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH)) {
+                mWakeLock.release();
+            }
+        }
 
         @Override
         public void setPassFailButtonClickListeners() {
@@ -98,7 +127,7 @@ public class PassFailButtons {
         }
 
         @Override
-        public Button getPassButton() {
+        public View getPassButton() {
             return getPassButtonView(this);
         }
 
@@ -115,6 +144,12 @@ public class PassFailButtons {
         @Override
         public String getTestDetails() {
             return null;
+        }
+
+        @Override
+        public void setTestResultAndFinish(boolean passed) {
+            PassFailButtons.setTestResultAndFinishHelper(this, getTestId(), getTestDetails(),
+                    passed);
         }
     }
 
@@ -131,7 +166,7 @@ public class PassFailButtons {
         }
 
         @Override
-        public Button getPassButton() {
+        public View getPassButton() {
             return getPassButtonView(this);
         }
 
@@ -148,6 +183,12 @@ public class PassFailButtons {
         @Override
         public String getTestDetails() {
             return null;
+        }
+
+        @Override
+        public void setTestResultAndFinish(boolean passed) {
+            PassFailButtons.setTestResultAndFinishHelper(this, getTestId(), getTestDetails(),
+                    passed);
         }
     }
 
@@ -165,7 +206,7 @@ public class PassFailButtons {
         }
 
         @Override
-        public Button getPassButton() {
+        public View getPassButton() {
             return getPassButtonView(this);
         }
 
@@ -182,6 +223,12 @@ public class PassFailButtons {
         @Override
         public String getTestDetails() {
             return null;
+        }
+
+        @Override
+        public void setTestResultAndFinish(boolean passed) {
+            PassFailButtons.setTestResultAndFinishHelper(this, getTestId(), getTestDetails(),
+                    passed);
         }
     }
 
@@ -306,11 +353,11 @@ public class PassFailButtons {
             default:
                 throw new IllegalArgumentException("Unknown id: " + target.getId());
         }
-        setTestResultAndFinish(activity, testId, testDetails, passed);
+        setTestResultAndFinishHelper(activity, testId, testDetails, passed);
     }
 
     /** Set the test result and finish the activity. */
-    public static void setTestResultAndFinish(android.app.Activity activity, String testId,
+    private static void setTestResultAndFinishHelper(android.app.Activity activity, String testId,
             String testDetails, boolean passed) {
         if (passed) {
             TestResult.setPassedResult(activity, testId, testDetails);
@@ -321,7 +368,7 @@ public class PassFailButtons {
         activity.finish();
     }
 
-    private static Button getPassButtonView(android.app.Activity activity) {
-        return (Button) activity.findViewById(R.id.pass_button);
+    private static ImageButton getPassButtonView(android.app.Activity activity) {
+        return (ImageButton) activity.findViewById(R.id.pass_button);
     }
 }

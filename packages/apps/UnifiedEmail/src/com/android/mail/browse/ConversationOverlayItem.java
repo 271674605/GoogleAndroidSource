@@ -25,6 +25,7 @@ import android.view.ViewGroup;
 import android.widget.Adapter;
 import android.widget.CursorAdapter;
 
+import com.android.mail.browse.ConversationViewAdapter.ConversationViewType;
 import com.android.mail.ui.ConversationViewFragment;
 import com.android.mail.utils.LogUtils;
 
@@ -37,10 +38,14 @@ public abstract class ConversationOverlayItem {
 
     private int mPosition;
 
+    // The view to focus when this overlay item should be focused.
+    protected View mRootView;
+
     /**
      * @see Adapter#getItemViewType(int)
      */
-    public abstract int getType();
+    public abstract @ConversationViewType int getType();
+
     /**
      * Inflate and perform one-time initialization on a view for later binding.
      */
@@ -54,6 +59,7 @@ public abstract class ConversationOverlayItem {
      * know they can cut certain corners that do not affect a view's height)
      */
     public abstract void bindView(View v, boolean measureOnly);
+
     /**
      * Returns true if this overlay view is meant to be positioned right on top of the overlay
      * below. This special positioning allows {@link ConversationContainer} to stack overlays
@@ -61,6 +67,10 @@ public abstract class ConversationOverlayItem {
      * apart.
      */
     public abstract boolean isContiguous();
+
+    public View.OnKeyListener getOnKeyListener() {
+        return null;
+    }
 
     /**
      * Returns true if this overlay view is in its expanded state.
@@ -179,5 +189,21 @@ public abstract class ConversationOverlayItem {
      */
     public void rebindView(View view) {
         // DO NOTHING
+    }
+
+    public View getFocusableView() {
+        // Focus the root view by default
+        return mRootView;
+    }
+
+    public void registerOnKeyListeners(View... views) {
+        final View.OnKeyListener listener = getOnKeyListener();
+        if (listener != null) {
+            for (View v : views) {
+                if (v != null) {
+                    v.setOnKeyListener(listener);
+                }
+            }
+        }
     }
 }

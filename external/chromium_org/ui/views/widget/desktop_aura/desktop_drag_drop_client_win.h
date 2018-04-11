@@ -7,28 +7,26 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "ui/aura/client/drag_drop_client.h"
 #include "ui/views/views_export.h"
+#include "ui/wm/public/drag_drop_client.h"
 
 namespace ui {
 class DragSourceWin;
-class RootWindow;
 }
 
 namespace views {
-class DesktopDragDragSourceWin;
 class DesktopDropTargetWin;
 
 class VIEWS_EXPORT DesktopDragDropClientWin
     : public aura::client::DragDropClient {
  public:
-  DesktopDragDropClientWin(aura::RootWindow* root_window, HWND window);
+  DesktopDragDropClientWin(aura::Window* root_window, HWND window);
   virtual ~DesktopDragDropClientWin();
 
   // Overridden from aura::client::DragDropClient:
   virtual int StartDragAndDrop(
       const ui::OSExchangeData& data,
-      aura::RootWindow* root_window,
+      aura::Window* root_window,
       aura::Window* source_window,
       const gfx::Point& root_location,
       int operation,

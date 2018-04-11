@@ -11,7 +11,9 @@
 #include "base/process/launch.h"
 #include "content/common/content_export.h"
 
+namespace base {
 class CommandLine;
+}
 
 namespace content {
 class SandboxedProcessLauncherDelegate;
@@ -27,6 +29,8 @@ class CONTENT_EXPORT ChildProcessLauncher {
     // constructed on.
     virtual void OnProcessLaunched() = 0;
 
+    virtual void OnProcessLaunchFailed() {};
+
    protected:
     virtual ~Client() {}
   };
@@ -37,14 +41,8 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // this object destructs, it will be terminated.
   // Takes ownership of cmd_line.
   ChildProcessLauncher(
-#if defined(OS_WIN)
       SandboxedProcessLauncherDelegate* delegate,
-#elif defined(OS_POSIX)
-      bool use_zygote,
-      const base::EnvironmentVector& environ,
-      int ipcfd,
-#endif
-      CommandLine* cmd_line,
+      base::CommandLine* cmd_line,
       int child_process_id,
       Client* client);
   ~ChildProcessLauncher();
@@ -58,6 +56,11 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // Call this when the child process exits to know what happened to it.
   // |known_dead| can be true if we already know the process is dead as it can
   // help the implemention figure the proper TerminationStatus.
+  // On Linux, the use of |known_dead| is subtle and can be crucial if an
+  // accurate status is important. With |known_dead| set to false, a dead
+  // process could be seen as running. With |known_dead| set to true, the
+  // process will be killed if it was still running. See ZygoteHostImpl for
+  // more discussion of Linux implementation details.
   // |exit_code| is the exit code of the process if it exited (e.g. status from
   // waitpid if on posix, from GetExitCodeProcess on Windows). |exit_code| may
   // be NULL.

@@ -8,26 +8,27 @@
 #include <CoreMIDI/MIDIServices.h>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/threading/thread.h"
 #include "media/midi/midi_manager.h"
 #include "media/midi/midi_port_info.h"
 
 namespace media {
 
-class MEDIA_EXPORT MIDIManagerMac : public MIDIManager {
+class MEDIA_EXPORT MidiManagerMac : public MidiManager {
  public:
-  MIDIManagerMac();
-  virtual ~MIDIManagerMac();
+  MidiManagerMac();
+  virtual ~MidiManagerMac();
 
-  // MIDIManager implementation.
-  virtual bool Initialize() OVERRIDE;
-  virtual void SendMIDIData(MIDIManagerClient* client,
-                            int port_index,
-                            const uint8* data,
-                            size_t length,
-                            double timestamp) OVERRIDE;
+  // MidiManager implementation.
+  virtual void StartInitialization() OVERRIDE;
+  virtual void DispatchSendMidiData(MidiManagerClient* client,
+                                    uint32 port_index,
+                                    const std::vector<uint8>& data,
+                                    double timestamp) OVERRIDE;
 
  private:
   // CoreMIDI callback for MIDI data.
@@ -39,8 +40,14 @@ class MEDIA_EXPORT MIDIManagerMac : public MIDIManager {
       void *src_conn_refcon);
   virtual void ReadMidi(MIDIEndpointRef source, const MIDIPacketList *pktlist);
 
+  // An internal callback that runs on MidiSendThread.
+  void SendMidiData(MidiManagerClient* client,
+                    uint32 port_index,
+                    const std::vector<uint8>& data,
+                    double timestamp);
+
   // Helper
-  static media::MIDIPortInfo GetPortInfoFromEndpoint(MIDIEndpointRef endpoint);
+  static media::MidiPortInfo GetPortInfoFromEndpoint(MIDIEndpointRef endpoint);
   static double MIDITimeStampToSeconds(MIDITimeStamp timestamp);
   static MIDITimeStamp SecondsToMIDITimeStamp(double seconds);
 
@@ -54,7 +61,7 @@ class MEDIA_EXPORT MIDIManagerMac : public MIDIManager {
   MIDIPacketList* packet_list_;
   MIDIPacket* midi_packet_;
 
-  typedef std::map<MIDIEndpointRef, int> SourceMap;
+  typedef std::map<MIDIEndpointRef, uint32> SourceMap;
 
   // Keeps track of the index (0-based) for each of our sources.
   SourceMap source_map_;
@@ -62,7 +69,10 @@ class MEDIA_EXPORT MIDIManagerMac : public MIDIManager {
   // Keeps track of all destinations.
   std::vector<MIDIEndpointRef> destinations_;
 
-  DISALLOW_COPY_AND_ASSIGN(MIDIManagerMac);
+  // |send_thread_| is used to send MIDI data.
+  base::Thread send_thread_;
+
+  DISALLOW_COPY_AND_ASSIGN(MidiManagerMac);
 };
 
 }  // namespace media

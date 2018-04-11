@@ -308,12 +308,24 @@ _mm256_permutevar_ps(__m256 __a, __m256i __c)
 #define _mm256_blend_pd(V1, V2, M) __extension__ ({ \
   __m256d __V1 = (V1); \
   __m256d __V2 = (V2); \
-  (__m256d)__builtin_ia32_blendpd256((__v4df)__V1, (__v4df)__V2, (M)); })
+  (__m256d)__builtin_shufflevector((__v4df)__V1, (__v4df)__V2, \
+                                   (((M) & 0x01) ? 4 : 0), \
+                                   (((M) & 0x02) ? 5 : 1), \
+                                   (((M) & 0x04) ? 6 : 2), \
+                                   (((M) & 0x08) ? 7 : 3)); })
 
 #define _mm256_blend_ps(V1, V2, M) __extension__ ({ \
   __m256 __V1 = (V1); \
   __m256 __V2 = (V2); \
-  (__m256)__builtin_ia32_blendps256((__v8sf)__V1, (__v8sf)__V2, (M)); })
+  (__m256)__builtin_shufflevector((__v8sf)__V1, (__v8sf)__V2, \
+                                  (((M) & 0x01) ?  8 : 0), \
+                                  (((M) & 0x02) ?  9 : 1), \
+                                  (((M) & 0x04) ? 10 : 2), \
+                                  (((M) & 0x08) ? 11 : 3), \
+                                  (((M) & 0x10) ? 12 : 4), \
+                                  (((M) & 0x20) ? 13 : 5), \
+                                  (((M) & 0x40) ? 14 : 6), \
+                                  (((M) & 0x80) ? 15 : 7)); })
 
 static __inline __m256d __attribute__((__always_inline__, __nodebug__))
 _mm256_blendv_pd(__m256d __a, __m256d __b, __m256d __c)
@@ -435,21 +447,21 @@ static __inline int __attribute__((__always_inline__, __nodebug__))
 _mm256_extract_epi32(__m256i __a, int const __imm)
 {
   __v8si __b = (__v8si)__a;
-  return __b[__imm];
+  return __b[__imm & 7];
 }
 
 static __inline int __attribute__((__always_inline__, __nodebug__))
 _mm256_extract_epi16(__m256i __a, int const __imm)
 {
   __v16hi __b = (__v16hi)__a;
-  return __b[__imm];
+  return __b[__imm & 15];
 }
 
 static __inline int __attribute__((__always_inline__, __nodebug__))
 _mm256_extract_epi8(__m256i __a, int const __imm)
 {
   __v32qi __b = (__v32qi)__a;
-  return __b[__imm];
+  return __b[__imm & 31];
 }
 
 #ifdef __x86_64__
@@ -457,7 +469,7 @@ static __inline long long  __attribute__((__always_inline__, __nodebug__))
 _mm256_extract_epi64(__m256i __a, const int __imm)
 {
   __v4di __b = (__v4di)__a;
-  return __b[__imm];
+  return __b[__imm & 3];
 }
 #endif
 
@@ -725,19 +737,22 @@ _mm256_zeroupper(void)
 static __inline __m128 __attribute__((__always_inline__, __nodebug__))
 _mm_broadcast_ss(float const *__a)
 {
-  return (__m128)__builtin_ia32_vbroadcastss(__a);
+  float __f = *__a;
+  return (__m128)(__v4sf){ __f, __f, __f, __f };
 }
 
 static __inline __m256d __attribute__((__always_inline__, __nodebug__))
 _mm256_broadcast_sd(double const *__a)
 {
-  return (__m256d)__builtin_ia32_vbroadcastsd256(__a);
+  double __d = *__a;
+  return (__m256d)(__v4df){ __d, __d, __d, __d };
 }
 
 static __inline __m256 __attribute__((__always_inline__, __nodebug__))
 _mm256_broadcast_ss(float const *__a)
 {
-  return (__m256)__builtin_ia32_vbroadcastss256(__a);
+  float __f = *__a;
+  return (__m256)(__v8sf){ __f, __f, __f, __f, __f, __f, __f, __f };
 }
 
 static __inline __m256d __attribute__((__always_inline__, __nodebug__))

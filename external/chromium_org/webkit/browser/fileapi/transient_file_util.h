@@ -6,7 +6,7 @@
 #define WEBKIT_BROWSER_FILEAPI_TRANSIENT_FILE_UTIL_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "webkit/browser/fileapi/isolated_file_util.h"
+#include "webkit/browser/fileapi/local_file_util.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
 
 namespace fileapi {
@@ -14,17 +14,17 @@ namespace fileapi {
 class FileSystemOperationContext;
 
 class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE TransientFileUtil
-    : public IsolatedFileUtil {
+    : public LocalFileUtil {
  public:
   TransientFileUtil() {}
   virtual ~TransientFileUtil() {}
 
-  // IsolatedFileUtil overrides.
+  // LocalFileUtil overrides.
   virtual webkit_blob::ScopedFile CreateSnapshotFile(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
-      base::PlatformFileError* error,
-      base::PlatformFileInfo* file_info,
+      base::File::Error* error,
+      base::File::Info* file_info,
       base::FilePath* platform_path) OVERRIDE;
 
  private:

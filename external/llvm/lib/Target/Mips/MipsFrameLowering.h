@@ -15,7 +15,6 @@
 #define MIPS_FRAMEINFO_H
 
 #include "Mips.h"
-#include "MipsSubtarget.h"
 #include "llvm/Target/TargetFrameLowering.h"
 
 namespace llvm {
@@ -32,7 +31,7 @@ public:
   static const MipsFrameLowering *create(MipsTargetMachine &TM,
                                          const MipsSubtarget &ST);
 
-  bool hasFP(const MachineFunction &MF) const;
+  bool hasFP(const MachineFunction &MF) const override;
 
 protected:
   uint64_t estimateStackSize(const MachineFunction &MF) const;

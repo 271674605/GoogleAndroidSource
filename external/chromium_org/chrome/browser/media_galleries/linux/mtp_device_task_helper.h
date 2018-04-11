@@ -11,12 +11,9 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
 #include "device/media_transfer_protocol/mtp_file_entry.pb.h"
 #include "webkit/browser/fileapi/async_file_util.h"
-
-namespace chrome {
 
 class MTPReadFileWorker;
 struct SnapshotRequestInfo;
@@ -87,7 +84,14 @@ class MTPDeviceTaskHelper {
   // |snapshot_file_info| specifies the metadata of the snapshot file.
   void WriteDataIntoSnapshotFile(
       const SnapshotRequestInfo& request_info,
-      const base::PlatformFileInfo& snapshot_file_info);
+      const base::File::Info& snapshot_file_info);
+
+  // Dispatches the read bytes request to the MediaTransferProtocolManager.
+  //
+  // |request| contains details about the byte request including the file path,
+  // byte range, and the callbacks. The callbacks specified within |request| are
+  // called on the IO thread to notify the caller about success or failure.
+  void ReadBytes(const MTPDeviceAsyncDelegate::ReadBytesRequest& request);
 
   // Dispatches the CloseStorage request to the MediaTransferProtocolManager.
   void CloseStorage() const;
@@ -132,12 +136,33 @@ class MTPDeviceTaskHelper {
       const std::vector<MtpFileEntry>& file_entries,
       bool error) const;
 
+  // Intermediate step to finish a ReadBytes request.
+  void OnGetFileInfoToReadBytes(
+      const MTPDeviceAsyncDelegate::ReadBytesRequest& request,
+      const MtpFileEntry& file_entry,
+      bool error);
+
+  // Query callback for ReadBytes();
+  //
+  // If there is no error, |error| is set to false, the buffer within |request|
+  // is written to, and the success callback within |request| is invoked on the
+  // IO thread to notify the caller.
+  //
+  // If there is an error, |error| is set to true, the buffer within |request|
+  // is untouched, and the error callback within |request| is invoked on the
+  // IO thread to notify the caller.
+  void OnDidReadBytes(
+      const MTPDeviceAsyncDelegate::ReadBytesRequest& request,
+      const base::File::Info& file_info,
+      const std::string& data,
+      bool error) const;
+
   // Called when the device is uninitialized.
   //
   // Runs |error_callback| on the IO thread to notify the caller about the
   // device |error|.
   void HandleDeviceError(const ErrorCallback& error_callback,
-                         base::PlatformFileError error) const;
+                         base::File::Error error) const;
 
   // Handle to communicate with the MTP device.
   std::string device_handle_;
@@ -150,7 +175,5 @@ class MTPDeviceTaskHelper {
 
   DISALLOW_COPY_AND_ASSIGN(MTPDeviceTaskHelper);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_LINUX_MTP_DEVICE_TASK_HELPER_H_

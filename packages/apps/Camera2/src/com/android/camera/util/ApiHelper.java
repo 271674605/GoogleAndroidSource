@@ -38,6 +38,8 @@ public class ApiHelper {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
     public static final boolean HAS_SURFACE_TEXTURE_RECORDING =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
+    public static final boolean HAS_ROBOTO_MEDIUM_FONT =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
 
     public static final boolean HAS_CAMERA_HDR_PLUS = isKitKatOrHigher();
     public static final boolean HAS_CAMERA_HDR =
@@ -51,6 +53,12 @@ public class ApiHelper {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2;
 
     public static final boolean HAS_HIDEYBARS = isKitKatOrHigher();
+
+    public static final boolean IS_NEXUS_4 = "mako".equalsIgnoreCase(Build.DEVICE);
+    public static final boolean IS_NEXUS_5 = "LGE".equalsIgnoreCase(Build.MANUFACTURER)
+            && "hammerhead".equalsIgnoreCase(Build.DEVICE);
+    public static final boolean IS_NEXUS_6 = "motorola".equalsIgnoreCase(Build.MANUFACTURER)
+            && "shamu".equalsIgnoreCase(Build.DEVICE);
 
     public static int getIntFieldIfExists(Class<?> klass, String fieldName,
             Class<?> obj, int defaultVal) {
@@ -66,5 +74,10 @@ public class ApiHelper {
         // TODO: Remove CODENAME check as soon as VERSION_CODES.KITKAT is final.
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT
                 || "KeyLimePie".equals(Build.VERSION.CODENAME);
+    }
+
+    public static boolean isLOrHigher() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                || "L".equals(Build.VERSION.CODENAME);
     }
 }

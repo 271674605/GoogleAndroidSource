@@ -20,12 +20,23 @@
 #include <rs_hal.h>
 #include <rsRuntime.h>
 
+#ifndef RS_COMPATIBILITY_LIB
+#include <bcc/ExecutionEngine/CompilerRTSymbolResolver.h>
+#include <bcc/ExecutionEngine/SymbolResolverProxy.h>
+#include <vector>
+#include <utility>
+#endif
+
 #include "rsCpuCore.h"
 
 namespace bcc {
     class BCCContext;
     class RSCompilerDriver;
     class RSExecutable;
+}
+
+namespace bcinfo {
+    class MetadataExtractor;
 }
 
 namespace android {
@@ -47,7 +58,8 @@ public:
 #endif
 
     bool init(char const *resName, char const *cacheDir,
-              uint8_t const *bitcode, size_t bitcodeSize, uint32_t flags);
+              uint8_t const *bitcode, size_t bitcodeSize, uint32_t flags,
+              char const *bccPluginName = NULL);
     virtual void populateScript(Script *);
 
     virtual void invokeFunction(uint32_t slot, const void *params, size_t paramLength);
@@ -64,13 +76,21 @@ public:
                        const void * usr,
                        uint32_t usrLen,
                        const RsScriptCall *sc);
+
+    virtual void invokeForEachMulti(uint32_t slot,
+                                     const Allocation** ains,
+                                     uint32_t inLen,
+                                     Allocation* aout,
+                                     const void* usr,
+                                     uint32_t usrLen,
+                                     const RsScriptCall* sc);
     virtual void invokeInit();
     virtual void invokeFreeChildren();
 
     virtual void setGlobalVar(uint32_t slot, const void *data, size_t dataLength);
     virtual void getGlobalVar(uint32_t slot, void *data, size_t dataLength);
     virtual void setGlobalVarWithElemDims(uint32_t slot, const void *data, size_t dataLength,
-                                  const Element *e, const size_t *dims, size_t dimLength);
+                                  const Element *e, const uint32_t *dims, size_t dimLength);
     virtual void setGlobalBind(uint32_t slot, Allocation *data);
     virtual void setGlobalObj(uint32_t slot, ObjectBase *data);
 
@@ -83,6 +103,11 @@ public:
     void forEachMtlsSetup(const Allocation * ain, Allocation * aout,
                           const void * usr, uint32_t usrLen,
                           const RsScriptCall *sc, MTLaunchStruct *mtls);
+
+    void forEachMtlsSetup(const Allocation ** ains, uint32_t inLen,
+                          Allocation * aout, const void * usr, uint32_t usrLen,
+                          const RsScriptCall *sc, MTLaunchStruct *mtls);
+
     virtual void forEachKernelSetup(uint32_t slot, MTLaunchStruct *mtls);
 
 
@@ -100,13 +125,21 @@ protected:
     const Script *mScript;
 
 #ifndef RS_COMPATIBILITY_LIB
+    // Returns the path to the core library we'll use.
+    const char* findCoreLib(const bcinfo::MetadataExtractor& bitCodeMetaData, const char* bitcode,
+                            size_t bitcodeSize);
     int (*mRoot)();
     int (*mRootExpand)();
     void (*mInit)();
     void (*mFreeChildren)();
 
+    std::vector<std::pair<const char *, uint32_t> > mExportedForEachFuncList;
+
     bcc::BCCContext *mCompilerContext;
     bcc::RSCompilerDriver *mCompilerDriver;
+    bcc::CompilerRTSymbolResolver mCompilerRuntime;
+    bcc::LookupFunctionSymbolResolver<void *> mRSRuntime;
+    bcc::SymbolResolverProxy mResolver;
     bcc::RSExecutable *mExecutable;
 #else
     void *mScriptSO;
@@ -131,9 +164,7 @@ protected:
     Allocation **mBoundAllocs;
     void * mIntrinsicData;
     bool mIsThreadable;
-
 };
-
 
 Allocation * rsdScriptGetAllocationForPointer(
                         const Context *dc,

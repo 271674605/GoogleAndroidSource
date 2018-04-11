@@ -14,6 +14,10 @@
       'sources': [
         '../src/sfnt/SkIBMFamilyClass.h',
         '../src/sfnt/SkOTTableTypes.h',
+        '../src/sfnt/SkOTTable_EBDT.h',
+        '../src/sfnt/SkOTTable_EBLC.h',
+        '../src/sfnt/SkOTTable_EBSC.h',
+        '../src/sfnt/SkOTTable_gasp.h',
         '../src/sfnt/SkOTTable_glyf.h',
         '../src/sfnt/SkOTTable_head.h',
         '../src/sfnt/SkOTTable_hhea.h',
@@ -48,9 +52,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

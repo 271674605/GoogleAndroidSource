@@ -16,6 +16,7 @@
 
 package com.android.nfc;
 
+import android.nfc.INfcUnlockHandler;
 import com.android.nfc.RegisteredComponentCache.ComponentInfo;
 import com.android.nfc.handover.HandoverManager;
 
@@ -49,36 +50,48 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 
 /**
  * Dispatch of NFC events to start activities
  */
-public class NfcDispatcher {
-    static final boolean DBG = true;
-    static final String TAG = "NfcDispatcher";
+class NfcDispatcher {
+    private static final boolean DBG = false;
+    private static final String TAG = "NfcDispatcher";
 
-    final Context mContext;
-    final IActivityManager mIActivityManager;
-    final RegisteredComponentCache mTechListFilters;
-    final ContentResolver mContentResolver;
-    final HandoverManager mHandoverManager;
-    final String[] mProvisioningMimes;
+    static final int DISPATCH_SUCCESS = 1;
+    static final int DISPATCH_FAIL = 2;
+    static final int DISPATCH_UNLOCK = 3;
+
+    private final Context mContext;
+    private final IActivityManager mIActivityManager;
+    private final RegisteredComponentCache mTechListFilters;
+    private final ContentResolver mContentResolver;
+    private final HandoverManager mHandoverManager;
+    private final String[] mProvisioningMimes;
+    private final ScreenStateHelper mScreenStateHelper;
+    private final NfcUnlockManager mNfcUnlockManager;
 
     // Locked on this
-    PendingIntent mOverrideIntent;
-    IntentFilter[] mOverrideFilters;
-    String[][] mOverrideTechLists;
-    boolean mProvisioningOnly;
+    private PendingIntent mOverrideIntent;
+    private IntentFilter[] mOverrideFilters;
+    private String[][] mOverrideTechLists;
+    private boolean mProvisioningOnly;
 
-    public NfcDispatcher(Context context, HandoverManager handoverManager, boolean provisionOnly) {
+    NfcDispatcher(Context context,
+                  HandoverManager handoverManager,
+                  boolean provisionOnly) {
         mContext = context;
         mIActivityManager = ActivityManagerNative.getDefault();
         mTechListFilters = new RegisteredComponentCache(mContext,
                 NfcAdapter.ACTION_TECH_DISCOVERED, NfcAdapter.ACTION_TECH_DISCOVERED);
         mContentResolver = context.getContentResolver();
         mHandoverManager = handoverManager;
+        mScreenStateHelper = new ScreenStateHelper(context);
+        mNfcUnlockManager = NfcUnlockManager.getInstance();
+
         synchronized (this) {
             mProvisioningOnly = provisionOnly;
         }
@@ -200,21 +213,19 @@ public class NfcDispatcher {
         }
     }
 
-    /** Returns false if no activities were found to dispatch to */
-    public boolean dispatchTag(Tag tag) {
-        NdefMessage message = null;
-        Ndef ndef = Ndef.get(tag);
-        if (ndef != null) {
-            message = ndef.getCachedNdefMessage();
-        }
-        if (DBG) Log.d(TAG, "dispatch tag: " + tag.toString() + " message: " + message);
-
+    /** Returns:
+     * <ul>
+     *  <li /> DISPATCH_SUCCESS if dispatched to an activity,
+     *  <li /> DISPATCH_FAIL if no activities were found to dispatch to,
+     *  <li /> DISPATCH_UNLOCK if the tag was used to unlock the device
+     * </ul>
+     */
+    public int dispatchTag(Tag tag) {
         PendingIntent overrideIntent;
         IntentFilter[] overrideFilters;
         String[][] overrideTechLists;
         boolean provisioningOnly;
 
-        DispatchInfo dispatch = new DispatchInfo(mContext, tag, message);
         synchronized (this) {
             overrideFilters = mOverrideFilters;
             overrideIntent = mOverrideIntent;
@@ -222,38 +233,73 @@ public class NfcDispatcher {
             provisioningOnly = mProvisioningOnly;
         }
 
-        resumeAppSwitches();
-
-        if (tryOverrides(dispatch, tag, message, overrideIntent, overrideFilters, overrideTechLists)) {
-            return true;
+        boolean screenUnlocked = false;
+        if (!provisioningOnly &&
+                mScreenStateHelper.checkScreenState() == ScreenStateHelper.SCREEN_STATE_ON_LOCKED) {
+            screenUnlocked = handleNfcUnlock(tag);
+            if (!screenUnlocked) {
+                return DISPATCH_FAIL;
+            }
         }
 
-        if (!provisioningOnly && mHandoverManager.tryHandover(message)) {
+        NdefMessage message = null;
+        Ndef ndef = Ndef.get(tag);
+        if (ndef != null) {
+            message = ndef.getCachedNdefMessage();
+        }
+
+        if (DBG) Log.d(TAG, "dispatch tag: " + tag.toString() + " message: " + message);
+
+        DispatchInfo dispatch = new DispatchInfo(mContext, tag, message);
+
+        resumeAppSwitches();
+
+        if (tryOverrides(dispatch, tag, message, overrideIntent, overrideFilters,
+                overrideTechLists)) {
+            return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
+        }
+
+        if (mHandoverManager.tryHandover(message)) {
             if (DBG) Log.i(TAG, "matched BT HANDOVER");
-            return true;
+            return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
+        }
+
+        if (NfcWifiProtectedSetup.tryNfcWifiSetup(ndef, mContext)) {
+            if (DBG) Log.i(TAG, "matched NFC WPS TOKEN");
+            return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
         }
 
         if (tryNdef(dispatch, message, provisioningOnly)) {
-            return true;
+            return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
+        }
+
+        if (screenUnlocked) {
+            // We only allow NDEF-based mimeType matching in case of an unlock
+            return DISPATCH_UNLOCK;
         }
 
         if (provisioningOnly) {
             // We only allow NDEF-based mimeType matching
-            return false;
+            return DISPATCH_FAIL;
         }
 
+        // Only allow NDEF-based mimeType matching for unlock tags
         if (tryTech(dispatch, tag)) {
-            return true;
+            return DISPATCH_SUCCESS;
         }
 
         dispatch.setTagIntent();
         if (dispatch.tryStartActivity()) {
             if (DBG) Log.i(TAG, "matched TAG");
-            return true;
+            return DISPATCH_SUCCESS;
         }
 
         if (DBG) Log.i(TAG, "no match");
-        return false;
+        return DISPATCH_FAIL;
+    }
+
+    private boolean handleNfcUnlock(Tag tag) {
+        return mNfcUnlockManager.tryUnlock(tag);
     }
 
     boolean tryOverrides(DispatchInfo dispatch, Tag tag, NdefMessage message, PendingIntent overrideIntent,

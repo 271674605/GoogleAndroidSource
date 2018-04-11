@@ -8,18 +8,15 @@
 #include "base/callback.h"
 #include "base/observer_list.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 
 #include <string>
 
-namespace dbus {
-class Bus;
-}
-
 namespace chromeos {
 
 // UpdateEngineClient is used to communicate with the update engine.
-class CHROMEOS_EXPORT UpdateEngineClient {
+class CHROMEOS_EXPORT UpdateEngineClient : public DBusClient {
  public:
   // Edges for state machine
   //    IDLE->CHECKING_FOR_UPDATE
@@ -37,7 +34,8 @@ class CHROMEOS_EXPORT UpdateEngineClient {
     UPDATE_STATUS_VERIFYING,
     UPDATE_STATUS_FINALIZING,
     UPDATE_STATUS_UPDATED_NEED_REBOOT,
-    UPDATE_STATUS_REPORTING_ERROR_EVENT
+    UPDATE_STATUS_REPORTING_ERROR_EVENT,
+    UPDATE_STATUS_ATTEMPTING_ROLLBACK
   };
 
   // The status of the ongoing update attempt.
@@ -87,6 +85,17 @@ class CHROMEOS_EXPORT UpdateEngineClient {
   // Reboots if update has been performed.
   virtual void RebootAfterUpdate() = 0;
 
+  // Starts Rollback.
+  virtual void Rollback() = 0;
+
+  // Called once CanRollbackCheck() is complete. Takes one parameter:
+  // - bool: the result of the rollback availability check.
+  typedef base::Callback<void(bool can_rollback)> RollbackCheckCallback;
+
+  // Checks if Rollback is available and calls |callback| when completed.
+  virtual void CanRollbackCheck(
+      const RollbackCheckCallback& callback) = 0;
+
   // Called once GetChannel() is complete. Takes one parameter;
   // - string: the channel name like "beta-channel".
   typedef base::Callback<void(const std::string& channel_name)>
@@ -123,8 +132,7 @@ class CHROMEOS_EXPORT UpdateEngineClient {
   static UpdateCheckCallback EmptyUpdateCheckCallback();
 
   // Creates the instance.
-  static UpdateEngineClient* Create(DBusClientImplementationType type,
-                                    dbus::Bus* bus);
+  static UpdateEngineClient* Create(DBusClientImplementationType type);
 
  protected:
   // Create() should be used instead.

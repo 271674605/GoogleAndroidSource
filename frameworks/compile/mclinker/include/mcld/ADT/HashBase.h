@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_HASH_BASE_H
-#define MCLD_HASH_BASE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_ADT_HASHBASE_H
+#define MCLD_ADT_HASHBASE_H
 #include <llvm/ADT/StringRef.h>
 #include <cstdlib>
 

@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_DWARF_LINE_INFO_H
-#define MCLD_DWARF_LINE_INFO_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_LD_DWARFLINEINFO_H
+#define MCLD_LD_DWARFLINEINFO_H
 #include <mcld/LD/DiagnosticLineInfo.h>
 
 namespace mcld

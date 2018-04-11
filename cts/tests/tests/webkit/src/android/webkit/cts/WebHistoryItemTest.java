@@ -16,6 +16,7 @@
 
 package android.webkit.cts;
 
+import android.cts.util.NullWebViewUtils;
 import android.cts.util.PollingCheck;
 import android.graphics.Bitmap;
 import android.test.ActivityInstrumentationTestCase2;
@@ -25,7 +26,7 @@ import android.webkit.WebHistoryItem;
 import android.webkit.WebIconDatabase;
 import android.webkit.WebView;
 
-public class WebHistoryItemTest extends ActivityInstrumentationTestCase2<WebViewStubActivity> {
+public class WebHistoryItemTest extends ActivityInstrumentationTestCase2<WebViewCtsActivity> {
     private final static long TEST_TIMEOUT = 10000;
     private CtsTestServer mWebServer;
     private WebViewOnUiThread mOnUiThread;
@@ -47,19 +48,24 @@ public class WebHistoryItemTest extends ActivityInstrumentationTestCase2<WebView
     };
 
     public WebHistoryItemTest() {
-        super("com.android.cts.stub", WebViewStubActivity.class);
+        super("com.android.cts.webkit", WebViewCtsActivity.class);
     }
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
         mWebServer = new CtsTestServer(getActivity());
-        mOnUiThread = new WebViewOnUiThread(this, getActivity().getWebView());
+        WebView webview = getActivity().getWebView();
+        if (webview != null) {
+            mOnUiThread = new WebViewOnUiThread(this, webview);
+        }
     }
 
     @Override
     protected void tearDown() throws Exception {
-        mOnUiThread.cleanUp();
+        if (mOnUiThread != null) {
+            mOnUiThread.cleanUp();
+        }
         mWebServer.shutdown();
         super.tearDown();
         if (mIconDb != null) {
@@ -69,6 +75,9 @@ public class WebHistoryItemTest extends ActivityInstrumentationTestCase2<WebView
     }
 
     public void testWebHistoryItem() throws Throwable {
+        if (!NullWebViewUtils.isWebViewAvailable()) {
+            return;
+        }
         final WaitForIconClient waitForIconClient = new WaitForIconClient(mOnUiThread);
         mOnUiThread.setWebChromeClient(waitForIconClient);
         runTestOnUiThread(new Runnable() {

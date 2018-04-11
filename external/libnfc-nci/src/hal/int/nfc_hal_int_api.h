@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2013 Broadcom Corporation
+ *  Copyright (C) 2009-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,7 +43,8 @@ enum
     NFC_HAL_XTAL_INDEX_38400,
     NFC_HAL_XTAL_INDEX_52000,
     NFC_HAL_XTAL_INDEX_37400,
-    NFC_HAL_XTAL_INDEX_MAX
+    NFC_HAL_XTAL_INDEX_MAX,
+    NFC_HAL_XTAL_INDEX_SPECIAL = 0xFF
 };
 typedef UINT8 tNFC_HAL_XTAL_INDEX;
 

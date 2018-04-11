@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Path.h" // FIXME: Kill when CompilationInfo
+#include <memory>
                               // lands.
 #include <list>
 #include <set>
@@ -42,6 +43,7 @@ namespace driver {
   class Compilation;
   class InputInfo;
   class JobAction;
+  class SanitizerArgs;
   class ToolChain;
 
 /// Driver - Encapsulate logic for constructing compilation processes
@@ -186,12 +188,11 @@ private:
   // getFinalPhase - Determine which compilation mode we are in and record 
   // which option we used to determine the final phase.
   phases::ID getFinalPhase(const llvm::opt::DerivedArgList &DAL,
-                           llvm::opt::Arg **FinalPhaseArg = 0) const;
+                           llvm::opt::Arg **FinalPhaseArg = nullptr) const;
 
 public:
   Driver(StringRef _ClangExecutable,
          StringRef _DefaultTargetTriple,
-         StringRef _DefaultImageName,
          DiagnosticsEngine &_Diags);
   ~Driver();
 
@@ -257,7 +258,7 @@ public:
   /// \param Args - The input arguments.
   /// \param Inputs - The list to store the resulting compilation 
   /// inputs onto.
-  void BuildInputs(const ToolChain &TC, const llvm::opt::DerivedArgList &Args,
+  void BuildInputs(const ToolChain &TC, llvm::opt::DerivedArgList &Args,
                    InputList &Inputs) const;
 
   /// BuildActions - Construct the list of actions to perform for the
@@ -266,7 +267,7 @@ public:
   /// \param TC - The default host tool chain.
   /// \param Args - The input arguments.
   /// \param Actions - The list to store the resulting actions onto.
-  void BuildActions(const ToolChain &TC, const llvm::opt::DerivedArgList &Args,
+  void BuildActions(const ToolChain &TC, llvm::opt::DerivedArgList &Args,
                     const InputList &Inputs, ActionList &Actions) const;
 
   /// BuildUniversalActions - Construct the list of actions to perform
@@ -276,7 +277,7 @@ public:
   /// \param Args - The input arguments.
   /// \param Actions - The list to store the resulting actions onto.
   void BuildUniversalActions(const ToolChain &TC,
-                             const llvm::opt::DerivedArgList &Args,
+                             llvm::opt::DerivedArgList &Args,
                              const InputList &BAInputs,
                              ActionList &Actions) const;
 
@@ -312,9 +313,6 @@ public:
   ///
   /// \param ShowHidden - Show hidden options.
   void PrintHelp(bool ShowHidden) const;
-
-  /// PrintOptions - Print the list of arguments.
-  void PrintOptions(const llvm::opt::ArgList &Args) const;
 
   /// PrintVersion - Print the driver version.
   void PrintVersion(const Compilation &C, raw_ostream &OS) const;
@@ -415,6 +413,10 @@ public:
                                 unsigned &Minor, unsigned &Micro,
                                 bool &HadExtra);
 };
+
+/// \return True if the last defined optimization level is -Ofast.
+/// And False otherwise.
+bool isOptimizationLevelFast(const llvm::opt::ArgList &Args);
 
 } // end namespace driver
 } // end namespace clang

@@ -11,9 +11,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/history/history_types.h"
 
-class CancelableTaskTracker;
-
 namespace base {
+class CancelableTaskTracker;
 class FilePath;
 }
 
@@ -28,8 +27,7 @@ class TopSitesBackend : public base::RefCountedThreadSafe<TopSitesBackend> {
  public:
   // The boolean parameter indicates if the DB existed on disk or needs to be
   // migrated.
-  typedef base::Callback<void(const scoped_refptr<MostVisitedThumbnails>&,
-                              const bool*)>
+  typedef base::Callback<void(const scoped_refptr<MostVisitedThumbnails>&)>
       GetMostVisitedThumbnailsCallback;
 
   TopSitesBackend();
@@ -42,7 +40,7 @@ class TopSitesBackend : public base::RefCountedThreadSafe<TopSitesBackend> {
   // Fetches MostVisitedThumbnails.
   void GetMostVisitedThumbnails(
       const GetMostVisitedThumbnailsCallback& callback,
-      CancelableTaskTracker* tracker);
+      base::CancelableTaskTracker* tracker);
 
   // Updates top sites database from the specified delta.
   void UpdateTopSites(const TopSitesDelta& delta);
@@ -59,7 +57,7 @@ class TopSitesBackend : public base::RefCountedThreadSafe<TopSitesBackend> {
   // the the calling thread with a reply. This is used to make sure the db has
   // finished processing a request.
   void DoEmptyRequest(const base::Closure& reply,
-                      CancelableTaskTracker* tracker);
+                      base::CancelableTaskTracker* tracker);
 
  private:
   friend class base::RefCountedThreadSafe<TopSitesBackend>;
@@ -74,8 +72,7 @@ class TopSitesBackend : public base::RefCountedThreadSafe<TopSitesBackend> {
 
   // Does the work of getting the most visted thumbnails.
   void GetMostVisitedThumbnailsOnDBThread(
-      scoped_refptr<MostVisitedThumbnails> thumbnails,
-      bool* need_history_migration);
+      scoped_refptr<MostVisitedThumbnails> thumbnails);
 
   // Updates top sites.
   void UpdateTopSitesOnDBThread(const TopSitesDelta& delta);

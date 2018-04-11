@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,8 @@ import java.util.List;
  */
 public class VideoTestWebServer {
 
+    // VIDEO_ID must be kept in sync with the id in full_screen_video_test.html.
+    public static final String VIDEO_ID = "video";
     public static final String ONE_PIXEL_ONE_FRAME_WEBM_FILENAME = "one_pixel_one_frame.webm";
     public static final String ONE_PIXEL_ONE_FRAME_WEBM_BASE64 =
             "GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQN8VSalmQCgq17FAAw9C" +
@@ -83,5 +85,5 @@ public class VideoTestWebServer {
             len = in.read(buffer, 0, buflen);
         }
         return os.toString();
-  }
+    }
 }

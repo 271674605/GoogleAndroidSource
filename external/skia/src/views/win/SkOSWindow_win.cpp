@@ -27,7 +27,7 @@
 
 #define ANGLE_GL_CALL(IFACE, X)                                 \
     do {                                                        \
-        (IFACE)->f##X;                                          \
+        (IFACE)->fFunctions.f##X;                               \
     } while (false)
 
 #endif
@@ -124,15 +124,18 @@ bool SkOSWindow::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             }
         } break;
         case WM_UNICHAR:
-            this->handleChar(wParam);
+            this->handleChar((SkUnichar) wParam);
             return true;
         case WM_CHAR: {
             this->handleChar(SkUTF8_ToUnichar((char*)&wParam));
             return true;
         } break;
-        case WM_SIZE:
-            this->resize(lParam & 0xFFFF, lParam >> 16);
+        case WM_SIZE: {
+            INT width = LOWORD(lParam);
+            INT height = HIWORD(lParam);
+            this->resize(width, height);
             break;
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
@@ -358,7 +361,9 @@ bool SkOSWindow::attachGL(int msaaSampleCount, AttachmentInfo* info) {
             info->fSampleCount = 0;
         }
 
-        glViewport(0, 0, SkScalarRound(this->width()), SkScalarRound(this->height()));
+        glViewport(0, 0,
+                   SkScalarRoundToInt(this->width()),
+                   SkScalarRoundToInt(this->height()));
         return true;
     }
     return false;
@@ -497,8 +502,9 @@ bool SkOSWindow::attachANGLE(int msaaSampleCount, AttachmentInfo* info) {
         SkAutoTUnref<const GrGLInterface> intf(GrGLCreateANGLEInterface());
 
         if (intf ) {
-            ANGLE_GL_CALL(intf, Viewport(0, 0, SkScalarRound(this->width()),
-                                      SkScalarRound(this->height())));
+            ANGLE_GL_CALL(intf, Viewport(0, 0,
+                                         SkScalarRoundToInt(this->width()),
+                                         SkScalarRoundToInt(this->height())));
         }
         return true;
     }

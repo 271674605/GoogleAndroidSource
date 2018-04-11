@@ -7,15 +7,22 @@
 
 #include <bitset>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
-#include "chrome/browser/policy/cloud/cloud_policy_client.h"
-#include "chrome/browser/policy/cloud/cloud_policy_manager.h"
-#include "chrome/browser/policy/cloud/cloud_policy_store.h"
+#include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
+#include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/cloud_policy_manager.h"
+#include "components/policy/core/common/cloud/cloud_policy_store.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace chromeos {
 namespace attestation {
@@ -40,9 +47,15 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   typedef std::bitset<32> AllowedDeviceModes;
   typedef base::Callback<void(EnrollmentStatus)> EnrollmentCallback;
 
+  // |task_runner| is the runner for policy refresh tasks.
+  // |background_task_runner| is used to execute long-running background tasks
+  // that may involve file I/O.
   DeviceCloudPolicyManagerChromeOS(
       scoped_ptr<DeviceCloudPolicyStoreChromeOS> store,
-      EnterpriseInstallAttributes* install_attributes);
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
+      const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
+      EnterpriseInstallAttributes* install_attributes,
+      ServerBackedStateKeysBroker* state_keys_broker);
   virtual ~DeviceCloudPolicyManagerChromeOS();
 
   // Establishes the connection to the cloud, updating policy as necessary.
@@ -70,8 +83,17 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   // Checks whether enterprise enrollment should be a regular step during OOBE.
   bool ShouldAutoStartEnrollment() const;
 
+  // Checks whether enterprise enrollment recovery is required.
+  bool ShouldRecoverEnrollment() const;
+
+  // Looks up the domain from |install_attributes_|.
+  std::string GetEnrollmentRecoveryDomain() const;
+
   // Checks whether the user can cancel enrollment.
   bool CanExitEnrollment() const;
+
+  // Gets the domain this device is supposed to be enrolled to.
+  std::string GetForcedEnrollmentDomain() const;
 
   // CloudPolicyManager:
   virtual void Shutdown() OVERRIDE;
@@ -105,10 +127,26 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   void EnrollmentCompleted(const EnrollmentCallback& callback,
                            EnrollmentStatus status);
 
+  // Starts the connection via |client_to_connect|.
+  void StartConnection(scoped_ptr<CloudPolicyClient> client_to_connect);
+
+  // Saves the state keys received from |session_manager_client_|.
+  void OnStateKeysUpdated();
+
+  // Initializes requisition settings at OOBE with values from VPD.
+  void InitializeRequisition();
+
+  // Gets the device restore mode as stored in |local_state_|.
+  std::string GetRestoreMode() const;
+
   // Points to the same object as the base CloudPolicyManager::store(), but with
   // actual device policy specific type.
   scoped_ptr<DeviceCloudPolicyStoreChromeOS> device_store_;
+  scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
   EnterpriseInstallAttributes* install_attributes_;
+  ServerBackedStateKeysBroker* state_keys_broker_;
+
+  ServerBackedStateKeysBroker::Subscription state_keys_update_subscription_;
 
   DeviceManagementService* device_management_service_;
   scoped_ptr<CloudPolicyClient::StatusProvider> device_status_provider_;

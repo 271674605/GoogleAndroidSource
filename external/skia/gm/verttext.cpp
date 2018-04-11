@@ -23,7 +23,7 @@ static const char gText[] = "Hello";
 //static const char gText[] = "﹁テスト︒﹂";
 //static const char gText[] = {0xEF,0xB9,0x81, 0xE3,0x83,0x86, 0xE3,0x82,0xB9, 0xE3,0x83,0x88, 0xEF,0xB8,0x92, 0xEF,0xB9,0x82, 0x0};
 
-static const size_t gLen = sizeof(gText) - 1;
+static const size_t gLen = sizeof(gText) - sizeof(gText[0]);
 
 class VertTextGM : public GM {
 public:
@@ -49,12 +49,15 @@ public:
     //SkAutoTUnref<SkTypeface> fFace;
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
 
     SkString onShortName() {
         return SkString("verttext");
     }
 
-    SkISize onISize() { return make_isize(640, 480); }
+    SkISize onISize() { return SkISize::Make(640, 480); }
 
     static void drawBaseline(SkCanvas* canvas, const SkPaint& paint,
                              SkScalar x, SkScalar y) {
@@ -70,8 +73,8 @@ protected:
 
         p.setColor(0xFF0000FF);
         SkScalar adv[gLen];
-        paint.getTextWidths(gText, gLen, adv, NULL);
-        for (size_t i = 0; i < gLen; ++i) {
+        int numChars = paint.getTextWidths(gText, gLen, adv, NULL);
+        for (int i = 0; i < numChars; ++i) {
             canvas->drawCircle(x, y, SK_Scalar1 * 3 / 2, p);
             if (paint.isVerticalText()) {
                 y += adv[i];

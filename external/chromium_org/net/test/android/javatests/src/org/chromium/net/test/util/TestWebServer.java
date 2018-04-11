@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,7 @@ public class TestWebServer {
     public static final String SHUTDOWN_PREFIX = "/shutdown";
 
     private static TestWebServer sInstance;
+    private static TestWebServer sSecureInstance;
     private static Hashtable<Integer, String> sReasons;
 
     private final ServerThread mServerThread;
@@ -78,13 +79,17 @@ public class TestWebServer {
         final byte[] mResponseData;
         final List<Pair<String, String>> mResponseHeaders;
         final boolean mIsRedirect;
+        final Runnable mResponseAction;
+        final boolean mIsNotFound;
 
-        Response(byte[] resposneData, List<Pair<String, String>> responseHeaders,
-                boolean isRedirect) {
+        Response(byte[] responseData, List<Pair<String, String>> responseHeaders,
+                boolean isRedirect, boolean isNotFound, Runnable responseAction) {
             mIsRedirect = isRedirect;
-            mResponseData = resposneData;
+            mIsNotFound = isNotFound;
+            mResponseData = responseData;
             mResponseHeaders = responseHeaders == null ?
                     new ArrayList<Pair<String, String>>() : responseHeaders;
+            mResponseAction = responseAction;
         }
     }
 
@@ -101,24 +106,21 @@ public class TestWebServer {
      * @throws Exception
      */
     public TestWebServer(boolean ssl) throws Exception {
-        if (sInstance != null) {
-            // attempt to start a new instance while one is still running
-            // shut down the old instance first
-            sInstance.shutdown();
-        }
-        setStaticInstance(this);
         mSsl = ssl;
         if (mSsl) {
+            if (sSecureInstance != null) {
+                sSecureInstance.shutdown();
+            }
             mServerUri = "https://localhost:" + SSL_SERVER_PORT;
         } else {
+            if (sInstance != null) {
+                sInstance.shutdown();
+            }
             mServerUri = "http://localhost:" + SERVER_PORT;
         }
+        setInstance(this, mSsl);
         mServerThread = new ServerThread(this, mSsl);
         mServerThread.start();
-    }
-
-    private static void setStaticInstance(TestWebServer instance) {
-        sInstance = instance;
     }
 
     /**
@@ -153,20 +155,31 @@ public class TestWebServer {
             throw new IllegalStateException(e);
         }
 
-        setStaticInstance(null);
+        setInstance(null, mSsl);
     }
 
-    private final static int RESPONSE_STATUS_NORMAL = 0;
-    private final static int RESPONSE_STATUS_MOVED_TEMPORARILY = 1;
+    private static void setInstance(TestWebServer instance, boolean isSsl) {
+        if (isSsl) {
+            sSecureInstance = instance;
+        } else {
+            sInstance = instance;
+        }
+    }
+
+    private static final int RESPONSE_STATUS_NORMAL = 0;
+    private static final int RESPONSE_STATUS_MOVED_TEMPORARILY = 1;
+    private static final int RESPONSE_STATUS_NOT_FOUND = 2;
 
     private String setResponseInternal(
             String requestPath, byte[] responseData,
-            List<Pair<String, String>> responseHeaders,
+            List<Pair<String, String>> responseHeaders, Runnable responseAction,
             int status) {
         final boolean isRedirect = (status == RESPONSE_STATUS_MOVED_TEMPORARILY);
+        final boolean isNotFound = (status == RESPONSE_STATUS_NOT_FOUND);
 
         synchronized (mLock) {
-            mResponseMap.put(requestPath, new Response(responseData, responseHeaders, isRedirect));
+            mResponseMap.put(requestPath, new Response(
+                    responseData, responseHeaders, isRedirect, isNotFound, responseAction));
             mResponseCountMap.put(requestPath, Integer.valueOf(0));
             mLastRequestMap.put(requestPath, null);
         }
@@ -186,6 +199,19 @@ public class TestWebServer {
     }
 
     /**
+     * Sets a 404 (not found) response to be returned when a particular request path is passed in.
+     *
+     * @param requestPath The path to respond to.
+     * @return The full URL including the path that should be requested to get the expected
+     *         response.
+     */
+    public String setResponseWithNotFoundStatus(
+            String requestPath) {
+        return setResponseInternal(requestPath, "".getBytes(), null, null,
+                RESPONSE_STATUS_NOT_FOUND);
+    }
+
+    /**
      * Sets a response to be returned when a particular request path is passed
      * in (with the option to specify additional headers).
      *
@@ -199,7 +225,30 @@ public class TestWebServer {
     public String setResponse(
             String requestPath, String responseString,
             List<Pair<String, String>> responseHeaders) {
-        return setResponseInternal(requestPath, responseString.getBytes(), responseHeaders,
+        return setResponseInternal(requestPath, responseString.getBytes(), responseHeaders, null,
+                RESPONSE_STATUS_NORMAL);
+    }
+
+    /**
+     * Sets a response to be returned when a particular request path is passed
+     * in with the option to specify additional headers as well as an arbitrary action to be
+     * executed on each request.
+     *
+     * @param requestPath The path to respond to.
+     * @param responseString The response body that will be returned.
+     * @param responseHeaders Any additional headers that should be returned along with the
+     *                        response (null is acceptable).
+     * @param responseAction The action to be performed when fetching the response.  This action
+     *                       will be executed for each request and will be handled on a background
+     *                       thread.
+     * @return The full URL including the path that should be requested to get the expected
+     *         response.
+     */
+    public String setResponseWithRunnableAction(
+            String requestPath, String responseString, List<Pair<String, String>> responseHeaders,
+            Runnable responseAction) {
+        return setResponseInternal(
+                requestPath, responseString.getBytes(), responseHeaders, responseAction,
                 RESPONSE_STATUS_NORMAL);
     }
 
@@ -216,7 +265,7 @@ public class TestWebServer {
         List<Pair<String, String>> responseHeaders = new ArrayList<Pair<String, String>>();
         responseHeaders.add(Pair.create("Location", targetPath));
 
-        return setResponseInternal(requestPath, targetPath.getBytes(), responseHeaders,
+        return setResponseInternal(requestPath, targetPath.getBytes(), responseHeaders, null,
                 RESPONSE_STATUS_MOVED_TEMPORARILY);
     }
 
@@ -235,10 +284,9 @@ public class TestWebServer {
     public String setResponseBase64(
             String requestPath, String base64EncodedResponse,
             List<Pair<String, String>> responseHeaders) {
-        return setResponseInternal(requestPath,
-                                   Base64.decode(base64EncodedResponse, Base64.DEFAULT),
-                                   responseHeaders,
-                                   RESPONSE_STATUS_NORMAL);
+        return setResponseInternal(
+                requestPath, Base64.decode(base64EncodedResponse, Base64.DEFAULT),
+                responseHeaders, null, RESPONSE_STATUS_NORMAL);
     }
 
     /**
@@ -334,9 +382,18 @@ public class TestWebServer {
 
     /**
      * Generate a response to the given request.
+     *
+     * <p>Always executed on the background server thread.
+     *
+     * <p>If there is an action associated with the response, it will be executed inside of
+     * this function.
+     *
      * @throws InterruptedException
      */
     private HttpResponse getResponse(HttpRequest request) throws InterruptedException {
+        assert Thread.currentThread() == mServerThread
+                : "getResponse called from non-server thread";
+
         RequestLine requestLine = request.getRequestLine();
         HttpResponse httpResponse = null;
         Log.i(TAG, requestLine.getMethod() + ": " + requestLine.getUri());
@@ -346,12 +403,15 @@ public class TestWebServer {
 
         Response response = null;
         synchronized (mLock) {
-          response = mResponseMap.get(path);
+            response = mResponseMap.get(path);
         }
         if (path.equals(SHUTDOWN_PREFIX)) {
             httpResponse = createResponse(HttpStatus.SC_OK);
         } else if (response == null) {
             httpResponse = createResponse(HttpStatus.SC_NOT_FOUND);
+        } else if (response.mIsNotFound) {
+            httpResponse = createResponse(HttpStatus.SC_NOT_FOUND);
+            servedResponseFor(path, request);
         } else if (response.mIsRedirect) {
             httpResponse = createResponse(HttpStatus.SC_MOVED_TEMPORARILY);
             for (Pair<String, String> header : response.mResponseHeaders) {
@@ -359,6 +419,8 @@ public class TestWebServer {
             }
             servedResponseFor(path, request);
         } else {
+            if (response.mResponseAction != null) response.mResponseAction.run();
+
             httpResponse = createResponse(HttpStatus.SC_OK);
             httpResponse.setEntity(createEntity(response.mResponseData));
             for (Pair<String, String> header : response.mResponseHeaders) {

@@ -8,118 +8,119 @@
 #include "SkBitmap.h"
 #include "SkBlurImageFilter.h"
 #include "SkColorPriv.h"
-#include "SkFlattenableBuffers.h"
+#include "SkReadBuffer.h"
+#include "SkWriteBuffer.h"
 #include "SkGpuBlurUtils.h"
+#include "SkBlurImage_opts.h"
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
-#include "SkImageFilterUtils.h"
 #endif
 
-SkBlurImageFilter::SkBlurImageFilter(SkFlattenableReadBuffer& buffer)
-  : INHERITED(buffer) {
+// This rather arbitrary-looking value results in a maximum box blur kernel size
+// of 1000 pixels on the raster path, which matches the WebKit and Firefox
+// implementations. Since the GPU path does not compute a box blur, putting
+// the limit on sigma ensures consistent behaviour between the GPU and
+// raster paths.
+#define MAX_SIGMA SkIntToScalar(532)
+
+SkBlurImageFilter::SkBlurImageFilter(SkReadBuffer& buffer)
+  : INHERITED(1, buffer) {
     fSigma.fWidth = buffer.readScalar();
     fSigma.fHeight = buffer.readScalar();
+    buffer.validate(SkScalarIsFinite(fSigma.fWidth) &&
+                    SkScalarIsFinite(fSigma.fHeight) &&
+                    (fSigma.fWidth >= 0) &&
+                    (fSigma.fHeight >= 0));
 }
 
 SkBlurImageFilter::SkBlurImageFilter(SkScalar sigmaX,
                                      SkScalar sigmaY,
                                      SkImageFilter* input,
-                                     const SkIRect* cropRect)
+                                     const CropRect* cropRect)
     : INHERITED(input, cropRect), fSigma(SkSize::Make(sigmaX, sigmaY)) {
     SkASSERT(sigmaX >= 0 && sigmaY >= 0);
 }
 
-void SkBlurImageFilter::flatten(SkFlattenableWriteBuffer& buffer) const {
+void SkBlurImageFilter::flatten(SkWriteBuffer& buffer) const {
     this->INHERITED::flatten(buffer);
     buffer.writeScalar(fSigma.fWidth);
     buffer.writeScalar(fSigma.fHeight);
 }
 
-static void boxBlurX(const SkBitmap& src, SkBitmap* dst, int kernelSize,
-                     int leftOffset, int rightOffset, const SkIRect& bounds)
+enum BlurDirection {
+    kX, kY
+};
+
+/**
+ *
+ * In order to make memory accesses cache-friendly, we reorder the passes to
+ * use contiguous memory reads wherever possible.
+ *
+ * For example, the 6 passes of the X-and-Y blur case are rewritten as
+ * follows. Instead of 3 passes in X and 3 passes in Y, we perform
+ * 2 passes in X, 1 pass in X transposed to Y on write, 2 passes in X,
+ * then 1 pass in X transposed to Y on write.
+ *
+ * +----+       +----+       +----+        +---+       +---+       +---+        +----+
+ * + AB + ----> | AB | ----> | AB | -----> | A | ----> | A | ----> | A | -----> | AB |
+ * +----+ blurX +----+ blurX +----+ blurXY | B | blurX | B | blurX | B | blurXY +----+
+ *                                         +---+       +---+       +---+
+ *
+ * In this way, two of the y-blurs become x-blurs applied to transposed
+ * images, and all memory reads are contiguous.
+ */
+
+template<BlurDirection srcDirection, BlurDirection dstDirection>
+static void boxBlur(const SkPMColor* src, int srcStride, SkPMColor* dst, int kernelSize,
+                    int leftOffset, int rightOffset, int width, int height)
 {
-    int width = bounds.width(), height = bounds.height();
     int rightBorder = SkMin32(rightOffset + 1, width);
+    int srcStrideX = srcDirection == kX ? 1 : srcStride;
+    int dstStrideX = dstDirection == kX ? 1 : height;
+    int srcStrideY = srcDirection == kX ? srcStride : 1;
+    int dstStrideY = dstDirection == kX ? width : 1;
+    uint32_t scale = (1 << 24) / kernelSize;
+    uint32_t half = 1 << 23;
     for (int y = 0; y < height; ++y) {
         int sumA = 0, sumR = 0, sumG = 0, sumB = 0;
-        SkPMColor* p = src.getAddr32(bounds.fLeft, y + bounds.fTop);
+        const SkPMColor* p = src;
         for (int i = 0; i < rightBorder; ++i) {
             sumA += SkGetPackedA32(*p);
             sumR += SkGetPackedR32(*p);
             sumG += SkGetPackedG32(*p);
             sumB += SkGetPackedB32(*p);
-            p++;
+            p += srcStrideX;
         }
 
-        const SkColor* sptr = src.getAddr32(bounds.fLeft, bounds.fTop + y);
-        SkColor* dptr = dst->getAddr32(0, y);
+        const SkPMColor* sptr = src;
+        SkColor* dptr = dst;
         for (int x = 0; x < width; ++x) {
-            *dptr = SkPackARGB32(sumA / kernelSize,
-                                 sumR / kernelSize,
-                                 sumG / kernelSize,
-                                 sumB / kernelSize);
+            *dptr = SkPackARGB32((sumA * scale + half) >> 24,
+                                 (sumR * scale + half) >> 24,
+                                 (sumG * scale + half) >> 24,
+                                 (sumB * scale + half) >> 24);
             if (x >= leftOffset) {
-                SkColor l = *(sptr - leftOffset);
+                SkColor l = *(sptr - leftOffset * srcStrideX);
                 sumA -= SkGetPackedA32(l);
                 sumR -= SkGetPackedR32(l);
                 sumG -= SkGetPackedG32(l);
                 sumB -= SkGetPackedB32(l);
             }
             if (x + rightOffset + 1 < width) {
-                SkColor r = *(sptr + rightOffset + 1);
+                SkColor r = *(sptr + (rightOffset + 1) * srcStrideX);
                 sumA += SkGetPackedA32(r);
                 sumR += SkGetPackedR32(r);
                 sumG += SkGetPackedG32(r);
                 sumB += SkGetPackedB32(r);
             }
-            sptr++;
-            dptr++;
-        }
-    }
-}
-
-static void boxBlurY(const SkBitmap& src, SkBitmap* dst, int kernelSize,
-                     int topOffset, int bottomOffset, const SkIRect& bounds)
-{
-    int width = bounds.width(), height = bounds.height();
-    int bottomBorder = SkMin32(bottomOffset + 1, height);
-    int srcStride = src.rowBytesAsPixels();
-    int dstStride = dst->rowBytesAsPixels();
-    for (int x = 0; x < width; ++x) {
-        int sumA = 0, sumR = 0, sumG = 0, sumB = 0;
-        SkColor* p = src.getAddr32(bounds.fLeft + x, bounds.fTop);
-        for (int i = 0; i < bottomBorder; ++i) {
-            sumA += SkGetPackedA32(*p);
-            sumR += SkGetPackedR32(*p);
-            sumG += SkGetPackedG32(*p);
-            sumB += SkGetPackedB32(*p);
-            p += srcStride;
-        }
-
-        const SkColor* sptr = src.getAddr32(bounds.fLeft + x, bounds.fTop);
-        SkColor* dptr = dst->getAddr32(x, 0);
-        for (int y = 0; y < height; ++y) {
-            *dptr = SkPackARGB32(sumA / kernelSize,
-                                 sumR / kernelSize,
-                                 sumG / kernelSize,
-                                 sumB / kernelSize);
-            if (y >= topOffset) {
-                SkColor l = *(sptr - topOffset * srcStride);
-                sumA -= SkGetPackedA32(l);
-                sumR -= SkGetPackedR32(l);
-                sumG -= SkGetPackedG32(l);
-                sumB -= SkGetPackedB32(l);
+            sptr += srcStrideX;
+            if (srcDirection == kY) {
+                SK_PREFETCH(sptr + (rightOffset + 1) * srcStrideX);
             }
-            if (y + bottomOffset + 1 < height) {
-                SkColor r = *(sptr + (bottomOffset + 1) * srcStride);
-                sumA += SkGetPackedA32(r);
-                sumR += SkGetPackedR32(r);
-                sumG += SkGetPackedG32(r);
-                sumB += SkGetPackedB32(r);
-            }
-            sptr += srcStride;
-            dptr += dstStride;
+            dptr += dstStrideX;
         }
+        src += srcStrideY;
+        dst += dstStrideY;
     }
 }
 
@@ -140,14 +141,20 @@ static void getBox3Params(SkScalar s, int *kernelSize, int* kernelSize3, int *lo
 }
 
 bool SkBlurImageFilter::onFilterImage(Proxy* proxy,
-                                      const SkBitmap& source, const SkMatrix& ctm,
-                                      SkBitmap* dst, SkIPoint* offset) {
+                                      const SkBitmap& source, const Context& ctx,
+                                      SkBitmap* dst, SkIPoint* offset) const {
     SkBitmap src = source;
-    if (getInput(0) && !getInput(0)->filterImage(proxy, source, ctm, &src, offset)) {
+    SkIPoint srcOffset = SkIPoint::Make(0, 0);
+    if (getInput(0) && !getInput(0)->filterImage(proxy, source, ctx, &src, &srcOffset)) {
         return false;
     }
 
-    if (src.config() != SkBitmap::kARGB_8888_Config) {
+    if (src.colorType() != kN32_SkColorType) {
+        return false;
+    }
+
+    SkIRect srcBounds, dstBounds;
+    if (!this->applyCropRect(ctx, proxy, src, &srcOffset, &srcBounds, &src)) {
         return false;
     }
 
@@ -156,79 +163,127 @@ bool SkBlurImageFilter::onFilterImage(Proxy* proxy,
         return false;
     }
 
-    SkIRect srcBounds, dstBounds;
-    src.getBounds(&srcBounds);
-    if (!this->applyCropRect(&srcBounds)) {
+    if (!dst->allocPixels(src.info().makeWH(srcBounds.width(), srcBounds.height()))) {
         return false;
     }
-
-    dst->setConfig(src.config(), srcBounds.width(), srcBounds.height());
     dst->getBounds(&dstBounds);
-    dst->allocPixels();
+
+    SkVector sigma = SkVector::Make(fSigma.width(), fSigma.height());
+    ctx.ctm().mapVectors(&sigma, 1);
+    sigma.fX = SkMinScalar(sigma.fX, MAX_SIGMA);
+    sigma.fY = SkMinScalar(sigma.fY, MAX_SIGMA);
+
     int kernelSizeX, kernelSizeX3, lowOffsetX, highOffsetX;
     int kernelSizeY, kernelSizeY3, lowOffsetY, highOffsetY;
-    getBox3Params(fSigma.width(), &kernelSizeX, &kernelSizeX3, &lowOffsetX, &highOffsetX);
-    getBox3Params(fSigma.height(), &kernelSizeY, &kernelSizeY3, &lowOffsetY, &highOffsetY);
+    getBox3Params(sigma.x(), &kernelSizeX, &kernelSizeX3, &lowOffsetX, &highOffsetX);
+    getBox3Params(sigma.y(), &kernelSizeY, &kernelSizeY3, &lowOffsetY, &highOffsetY);
 
     if (kernelSizeX < 0 || kernelSizeY < 0) {
         return false;
     }
 
     if (kernelSizeX == 0 && kernelSizeY == 0) {
-        src.copyTo(dst, dst->config());
+        src.copyTo(dst, dst->colorType());
+        offset->fX = srcBounds.fLeft;
+        offset->fY = srcBounds.fTop;
         return true;
     }
 
     SkBitmap temp;
-    temp.setConfig(dst->config(), dst->width(), dst->height());
-    if (!temp.allocPixels()) {
+    if (!temp.allocPixels(dst->info())) {
         return false;
+    }
+
+    offset->fX = srcBounds.fLeft;
+    offset->fY = srcBounds.fTop;
+    srcBounds.offset(-srcOffset);
+    const SkPMColor* s = src.getAddr32(srcBounds.left(), srcBounds.top());
+    SkPMColor* t = temp.getAddr32(0, 0);
+    SkPMColor* d = dst->getAddr32(0, 0);
+    int w = dstBounds.width(), h = dstBounds.height();
+    int sw = src.rowBytesAsPixels();
+    SkBoxBlurProc boxBlurX, boxBlurY, boxBlurXY, boxBlurYX;
+    if (!SkBoxBlurGetPlatformProcs(&boxBlurX, &boxBlurY, &boxBlurXY, &boxBlurYX)) {
+        boxBlurX = boxBlur<kX, kX>;
+        boxBlurY = boxBlur<kY, kY>;
+        boxBlurXY = boxBlur<kX, kY>;
+        boxBlurYX = boxBlur<kY, kX>;
     }
 
     if (kernelSizeX > 0 && kernelSizeY > 0) {
-        boxBlurX(src,  &temp, kernelSizeX,  lowOffsetX,  highOffsetX, srcBounds);
-        boxBlurY(temp, dst,   kernelSizeY,  lowOffsetY,  highOffsetY, dstBounds);
-        boxBlurX(*dst, &temp, kernelSizeX,  highOffsetX, lowOffsetX, dstBounds);
-        boxBlurY(temp, dst,   kernelSizeY,  highOffsetY, lowOffsetY, dstBounds);
-        boxBlurX(*dst, &temp, kernelSizeX3, highOffsetX, highOffsetX, dstBounds);
-        boxBlurY(temp, dst,   kernelSizeY3, highOffsetY, highOffsetY, dstBounds);
+        boxBlurX(s,  sw, t, kernelSizeX,  lowOffsetX,  highOffsetX, w, h);
+        boxBlurX(t,  w,  d, kernelSizeX,  highOffsetX, lowOffsetX,  w, h);
+        boxBlurXY(d, w,  t, kernelSizeX3, highOffsetX, highOffsetX, w, h);
+        boxBlurX(t,  h,  d, kernelSizeY,  lowOffsetY,  highOffsetY, h, w);
+        boxBlurX(d,  h,  t, kernelSizeY,  highOffsetY, lowOffsetY,  h, w);
+        boxBlurXY(t, h,  d, kernelSizeY3, highOffsetY, highOffsetY, h, w);
     } else if (kernelSizeX > 0) {
-        boxBlurX(src,  dst,   kernelSizeX,  lowOffsetX,  highOffsetX, srcBounds);
-        boxBlurX(*dst, &temp, kernelSizeX,  highOffsetX, lowOffsetX, dstBounds);
-        boxBlurX(temp, dst,   kernelSizeX3, highOffsetX, highOffsetX, dstBounds);
+        boxBlurX(s,  sw, d, kernelSizeX,  lowOffsetX,  highOffsetX, w, h);
+        boxBlurX(d,  w,  t, kernelSizeX,  highOffsetX, lowOffsetX,  w, h);
+        boxBlurX(t,  w,  d, kernelSizeX3, highOffsetX, highOffsetX, w, h);
     } else if (kernelSizeY > 0) {
-        boxBlurY(src,  dst,   kernelSizeY,  lowOffsetY,  highOffsetY, srcBounds);
-        boxBlurY(*dst, &temp, kernelSizeY,  highOffsetY, lowOffsetY, dstBounds);
-        boxBlurY(temp, dst,   kernelSizeY3, highOffsetY, highOffsetY, dstBounds);
+        boxBlurYX(s, sw, d, kernelSizeY,  lowOffsetY,  highOffsetY, h, w);
+        boxBlurX(d,  h,  t, kernelSizeY,  highOffsetY, lowOffsetY,  h, w);
+        boxBlurXY(t, h,  d, kernelSizeY3, highOffsetY, highOffsetY, h, w);
     }
-    offset->fX += srcBounds.fLeft;
-    offset->fY += srcBounds.fTop;
     return true;
 }
 
-bool SkBlurImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const SkMatrix& ctm,
-                                       SkBitmap* result, SkIPoint* offset) {
+
+void SkBlurImageFilter::computeFastBounds(const SkRect& src, SkRect* dst) const {
+    if (getInput(0)) {
+        getInput(0)->computeFastBounds(src, dst);
+    } else {
+        *dst = src;
+    }
+
+    dst->outset(SkScalarMul(fSigma.width(), SkIntToScalar(3)),
+                SkScalarMul(fSigma.height(), SkIntToScalar(3)));
+}
+
+bool SkBlurImageFilter::onFilterBounds(const SkIRect& src, const SkMatrix& ctm,
+                                       SkIRect* dst) const {
+    SkIRect bounds = src;
+    if (getInput(0) && !getInput(0)->filterBounds(src, ctm, &bounds)) {
+        return false;
+    }
+    SkVector sigma = SkVector::Make(fSigma.width(), fSigma.height());
+    ctm.mapVectors(&sigma, 1);
+    bounds.outset(SkScalarCeilToInt(SkScalarMul(sigma.x(), SkIntToScalar(3))),
+                  SkScalarCeilToInt(SkScalarMul(sigma.y(), SkIntToScalar(3))));
+    *dst = bounds;
+    return true;
+}
+
+bool SkBlurImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Context& ctx,
+                                       SkBitmap* result, SkIPoint* offset) const {
 #if SK_SUPPORT_GPU
-    SkBitmap input;
-    if (!SkImageFilterUtils::GetInputResultGPU(getInput(0), proxy, src, ctm, &input, offset)) {
+    SkBitmap input = src;
+    SkIPoint srcOffset = SkIPoint::Make(0, 0);
+    if (getInput(0) && !getInput(0)->getInputResultGPU(proxy, src, ctx, &input, &srcOffset)) {
+        return false;
+    }
+    SkIRect rect;
+    if (!this->applyCropRect(ctx, proxy, input, &srcOffset, &rect, &input)) {
         return false;
     }
     GrTexture* source = input.getTexture();
-    SkIRect rect;
-    src.getBounds(&rect);
-    if (!this->applyCropRect(&rect)) {
-        return false;
-    }
+    SkVector sigma = SkVector::Make(fSigma.width(), fSigma.height());
+    ctx.ctm().mapVectors(&sigma, 1);
+    sigma.fX = SkMinScalar(sigma.fX, MAX_SIGMA);
+    sigma.fY = SkMinScalar(sigma.fY, MAX_SIGMA);
+    offset->fX = rect.fLeft;
+    offset->fY = rect.fTop;
+    rect.offset(-srcOffset);
     SkAutoTUnref<GrTexture> tex(SkGpuBlurUtils::GaussianBlur(source->getContext(),
                                                              source,
                                                              false,
                                                              SkRect::Make(rect),
                                                              true,
-                                                             fSigma.width(),
-                                                             fSigma.height()));
-    offset->fX += rect.fLeft;
-    offset->fY += rect.fTop;
-    return SkImageFilterUtils::WrapTexture(tex, rect.width(), rect.height(), result);
+                                                             sigma.x(),
+                                                             sigma.y()));
+    WrapTexture(tex, rect.width(), rect.height(), result);
+    return true;
 #else
     SkDEBUGFAIL("Should not call in GPU-less build");
     return false;

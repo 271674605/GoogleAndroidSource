@@ -23,10 +23,12 @@ class ButtonMenuItemModel;
 // items. This makes it easy to construct fixed menus. Menus populated by
 // dynamic data sources may be better off implementing MenuModel directly.
 // The breadth of MenuModel is not exposed through this API.
-class UI_EXPORT SimpleMenuModel : public MenuModel {
+class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
  public:
-  class UI_EXPORT Delegate {
+  class UI_BASE_EXPORT Delegate {
    public:
+    virtual ~Delegate() {}
+
     // Methods for determining the state of specific command ids.
     virtual bool IsCommandIdChecked(int command_id) const = 0;
     virtual bool IsCommandIdEnabled(int command_id) const = 0;
@@ -38,10 +40,12 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
         int command_id,
         ui::Accelerator* accelerator) = 0;
 
-    // Some command ids have labels, sublabels and icons that change over time.
+    // Some command ids have labels, sublabels, minor text and icons that change
+    // over time.
     virtual bool IsItemForCommandIdDynamic(int command_id) const;
     virtual base::string16 GetLabelForCommandId(int command_id) const;
     virtual base::string16 GetSublabelForCommandId(int command_id) const;
+    virtual base::string16 GetMinorTextForCommandId(int command_id) const;
     // Gets the icon for the item with the specified id, returning true if there
     // is an icon, false otherwise.
     virtual bool GetIconForCommandId(int command_id,
@@ -61,9 +65,6 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
 
     // Notifies the delegate that the menu has closed.
     virtual void MenuClosed(SimpleMenuModel* source);
-
-   protected:
-    virtual ~Delegate() {}
   };
 
   // The Delegate can be NULL, though if it is items can't be checked or
@@ -119,11 +120,17 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
   void InsertSubMenuWithStringIdAt(
       int index, int command_id, int string_id, MenuModel* model);
 
+  // Remove item at specified index from the model.
+  void RemoveItemAt(int index);
+
   // Sets the icon for the item at |index|.
   void SetIcon(int index, const gfx::Image& icon);
 
   // Sets the sublabel for the item at |index|.
   void SetSublabel(int index, const base::string16& sublabel);
+
+  // Sets the minor text for the item at |index|.
+  void SetMinorText(int index, const base::string16& minor_text);
 
   // Clears all items. Note that it does not free MenuModel of submenu.
   void Clear();
@@ -140,6 +147,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
   virtual int GetCommandIdAt(int index) const OVERRIDE;
   virtual base::string16 GetLabelAt(int index) const OVERRIDE;
   virtual base::string16 GetSublabelAt(int index) const OVERRIDE;
+  virtual base::string16 GetMinorTextAt(int index) const OVERRIDE;
   virtual bool IsItemDynamicAt(int index) const OVERRIDE;
   virtual bool GetAcceleratorAt(int index,
                                 ui::Accelerator* accelerator) const OVERRIDE;
@@ -163,6 +171,10 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
  protected:
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
   Delegate* delegate() { return delegate_; }
+
+  // One or more of the menu menu items associated with the model has changed.
+  // Do any handling if necessary.
+  virtual void MenuItemsChanged();
 
  private:
   struct Item;

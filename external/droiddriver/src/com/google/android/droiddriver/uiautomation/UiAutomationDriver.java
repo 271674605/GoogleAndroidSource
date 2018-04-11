@@ -16,20 +16,25 @@
 
 package com.google.android.droiddriver.uiautomation;
 
-import android.app.UiAutomation;
 import android.app.Instrumentation;
-import android.graphics.Bitmap;
+import android.app.UiAutomation;
+import android.content.Context;
 import android.os.SystemClock;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import com.google.android.droiddriver.base.AbstractDroidDriver;
+import com.google.android.droiddriver.actions.InputInjector;
+import com.google.android.droiddriver.base.BaseDroidDriver;
 import com.google.android.droiddriver.exceptions.TimeoutException;
-import com.google.common.primitives.Longs;
+import com.google.android.droiddriver.uiautomation.UiAutomationContext.UiAutomationCallable;
+import com.google.android.droiddriver.util.Logs;
 
 /**
- * Implementation of a DroidDriver that is driven via the accessibility layer.
+ * Implementation of DroidDriver that gets attributes via the Accessibility API
+ * and is acted upon via synthesized events.
  */
-public class UiAutomationDriver extends AbstractDroidDriver {
+public class UiAutomationDriver extends BaseDroidDriver<AccessibilityNodeInfo, UiAutomationElement> {
   // TODO: magic const from UiAutomator, but may not be useful
   /**
    * This value has the greatest bearing on the appearance of test execution
@@ -39,34 +44,56 @@ public class UiAutomationDriver extends AbstractDroidDriver {
   private static final long QUIET_TIME_TO_BE_CONSIDERD_IDLE_STATE = 500;// ms
 
   private final UiAutomationContext context;
-  private final UiAutomation uiAutomation;
+  private final InputInjector injector;
+  private final UiAutomationUiDevice uiDevice;
+  private AccessibilityNodeInfoCacheClearer clearer =
+      new WindowStateAccessibilityNodeInfoCacheClearer();
 
   public UiAutomationDriver(Instrumentation instrumentation) {
-    super(instrumentation);
-    this.uiAutomation = instrumentation.getUiAutomation();
-    this.context = new UiAutomationContext(uiAutomation);
+    context = new UiAutomationContext(instrumentation, this);
+    injector = new UiAutomationInputInjector(context);
+    uiDevice = new UiAutomationUiDevice(context);
   }
 
   @Override
-  protected UiAutomationElement getNewRootElement() {
-    return context.getUiElement(getRootNode());
+  public InputInjector getInjector() {
+    return injector;
   }
 
   @Override
-  protected UiAutomationContext getContext() {
-    return context;
+  protected UiAutomationElement newRootElement() {
+    return context.newRootElement(getRootNode());
+  }
+
+  @Override
+  protected UiAutomationElement newUiElement(AccessibilityNodeInfo rawElement,
+      UiAutomationElement parent) {
+    return new UiAutomationElement(context, rawElement, parent);
   }
 
   private AccessibilityNodeInfo getRootNode() {
-    long timeoutMillis = getPoller().getTimeoutMillis();
-    try {
-      uiAutomation.waitForIdle(QUIET_TIME_TO_BE_CONSIDERD_IDLE_STATE, timeoutMillis);
-    } catch (java.util.concurrent.TimeoutException e) {
-      throw new TimeoutException(e);
-    }
+    final long timeoutMillis = getPoller().getTimeoutMillis();
+    context.callUiAutomation(new UiAutomationCallable<Void>() {
+      @Override
+      public Void call(UiAutomation uiAutomation) {
+        try {
+          uiAutomation.waitForIdle(QUIET_TIME_TO_BE_CONSIDERD_IDLE_STATE, timeoutMillis);
+          return null;
+        } catch (java.util.concurrent.TimeoutException e) {
+          throw new TimeoutException(e);
+        }
+      }
+    });
+
     long end = SystemClock.uptimeMillis() + timeoutMillis;
     while (true) {
-      AccessibilityNodeInfo root = uiAutomation.getRootInActiveWindow();
+      AccessibilityNodeInfo root =
+          context.callUiAutomation(new UiAutomationCallable<AccessibilityNodeInfo>() {
+            @Override
+            public AccessibilityNodeInfo call(UiAutomation uiAutomation) {
+              return uiAutomation.getRootInActiveWindow();
+            }
+          });
       if (root != null) {
         return root;
       }
@@ -76,12 +103,56 @@ public class UiAutomationDriver extends AbstractDroidDriver {
             String.format("Timed out after %d milliseconds waiting for root AccessibilityNodeInfo",
                 timeoutMillis));
       }
-      SystemClock.sleep(Longs.min(250, remainingMillis));
+      SystemClock.sleep(Math.min(250, remainingMillis));
     }
   }
 
+  /**
+   * Some widgets fail to trigger some AccessibilityEvent's after actions,
+   * resulting in stale AccessibilityNodeInfo's. As a work-around, force to
+   * clear the AccessibilityNodeInfoCache.
+   */
+  public void clearAccessibilityNodeInfoCache() {
+    Logs.call(this, "clearAccessibilityNodeInfoCache");
+    clearer.clearAccessibilityNodeInfoCache(this);
+  }
+
+  public interface AccessibilityNodeInfoCacheClearer {
+    void clearAccessibilityNodeInfoCache(UiAutomationDriver driver);
+  }
+
+  /**
+   * Clears AccessibilityNodeInfoCache by turning screen off then on.
+   */
+  public static class ScreenOffAccessibilityNodeInfoCacheClearer implements
+      AccessibilityNodeInfoCacheClearer {
+    public void clearAccessibilityNodeInfoCache(UiAutomationDriver driver) {
+      driver.getUiDevice().sleep();
+      driver.getUiDevice().wakeUp();
+    }
+  }
+
+  /**
+   * Clears AccessibilityNodeInfoCache by exploiting an implementation detail of
+   * AccessibilityNodeInfoCache. This is a hack; use it at your own discretion.
+   */
+  public static class WindowStateAccessibilityNodeInfoCacheClearer implements
+      AccessibilityNodeInfoCacheClearer {
+    public void clearAccessibilityNodeInfoCache(UiAutomationDriver driver) {
+      AccessibilityManager accessibilityManager =
+          (AccessibilityManager) driver.context.getInstrumentation().getTargetContext()
+              .getSystemService(Context.ACCESSIBILITY_SERVICE);
+      accessibilityManager.sendAccessibilityEvent(AccessibilityEvent
+          .obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED));
+    }
+  }
+
+  public void setAccessibilityNodeInfoCacheClearer(AccessibilityNodeInfoCacheClearer clearer) {
+    this.clearer = clearer;
+  }
+
   @Override
-  protected Bitmap takeScreenshot() {
-    return uiAutomation.takeScreenshot();
+  public UiAutomationUiDevice getUiDevice() {
+    return uiDevice;
   }
 }

@@ -53,15 +53,18 @@ class ExternalProtocolHandler {
   // LaunchUrlWithoutSecurityCheck is called on the io thread and the
   // application is launched.
   // Must run on the UI thread.
-  static void LaunchUrl(const GURL& url, int render_process_host_id,
+  static void LaunchUrl(const GURL& url,
+                        int render_process_host_id,
                         int tab_contents_id) {
-      LaunchUrlWithDelegate(url, render_process_host_id, tab_contents_id, NULL);
+    LaunchUrlWithDelegate(url, render_process_host_id, tab_contents_id, NULL);
   }
 
   // Version of LaunchUrl allowing use of a delegate to facilitate unit
   // testing.
-  static void LaunchUrlWithDelegate(const GURL& url, int render_process_host_id,
-                                    int tab_contents_id, Delegate* delegate);
+  static void LaunchUrlWithDelegate(const GURL& url,
+                                    int render_process_host_id,
+                                    int tab_contents_id,
+                                    Delegate* delegate);
 
   // Creates and runs a External Protocol dialog box.
   // |url| - The url of the request.
@@ -88,8 +91,9 @@ class ExternalProtocolHandler {
   // NOTE: You should Not call this function directly unless you are sure the
   // url you have has been checked against the blacklist, and has been escaped.
   // All calls to this function should originate in some way from LaunchUrl.
-  // This will execute on the file thread.
-  static void LaunchUrlWithoutSecurityCheck(const GURL& url);
+  static void LaunchUrlWithoutSecurityCheck(const GURL& url,
+                                            int render_process_host_id,
+                                            int tab_contents_id);
 
   // Prepopulates the dictionary with known protocols to deny or allow, if
   // preferences for them do not already exist.
@@ -100,6 +104,9 @@ class ExternalProtocolHandler {
   // each extension API function. Note that each call to LaunchUrl resets
   // the state to false (not allowed).
   static void PermitLaunchUrl();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ExternalProtocolHandler);
 };
 
 #endif  // CHROME_BROWSER_EXTERNAL_PROTOCOL_EXTERNAL_PROTOCOL_HANDLER_H_

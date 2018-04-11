@@ -12,7 +12,6 @@
 #include <mcld/Target/GNULDBackend.h>
 #include <mcld/LD/ELFFileFormat.h>
 #include <mcld/LinkerConfig.h>
-#include <mcld/Support/MemoryRegion.h>
 #include <mcld/Support/MsgHandling.h>
 
 using namespace mcld;
@@ -111,6 +110,11 @@ void ELFDynamic::reserveEntries(const ELFFileFormat& pFormat)
   if (pFormat.hasFini())
     reserveOne(llvm::ELF::DT_FINI); // DT_FINI
 
+  if (pFormat.hasPreInitArray()) {
+    reserveOne(llvm::ELF::DT_PREINIT_ARRAY); // DT_PREINIT_ARRAY
+    reserveOne(llvm::ELF::DT_PREINIT_ARRAYSZ); // DT_PREINIT_ARRAYSZ
+  }
+
   if (pFormat.hasInitArray()) {
     reserveOne(llvm::ELF::DT_INIT_ARRAY); // DT_INIT_ARRAY
     reserveOne(llvm::ELF::DT_INIT_ARRAYSZ); // DT_INIT_ARRAYSZ
@@ -140,10 +144,8 @@ void ELFDynamic::reserveEntries(const ELFFileFormat& pFormat)
 
   reserveTargetEntries(pFormat); // DT_PLTGOT
 
-  if (pFormat.hasRelPlt() || pFormat.hasRelaPlt())
+  if (pFormat.hasRelPlt() || pFormat.hasRelaPlt()) {
     reserveOne(llvm::ELF::DT_PLTREL); // DT_PLTREL
-
-  if (pFormat.hasPLT()) {
     reserveOne(llvm::ELF::DT_JMPREL); // DT_JMPREL
     reserveOne(llvm::ELF::DT_PLTRELSZ); // DT_PLTRELSZ
   }
@@ -210,6 +212,13 @@ void ELFDynamic::applyEntries(const ELFFileFormat& pFormat)
 
   if (pFormat.hasFini())
     applyOne(llvm::ELF::DT_FINI, pFormat.getFini().addr()); // DT_FINI
+
+  if (pFormat.hasPreInitArray()) {
+    // DT_PREINIT_ARRAY
+    applyOne(llvm::ELF::DT_PREINIT_ARRAY, pFormat.getPreInitArray().addr());
+    // DT_PREINIT_ARRAYSZ
+    applyOne(llvm::ELF::DT_PREINIT_ARRAYSZ, pFormat.getPreInitArray().size());
+  }
 
   if (pFormat.hasInitArray()) {
     // DT_INIT_ARRAY
@@ -343,7 +352,7 @@ void ELFDynamic::emit(const LDSection& pSection, MemoryRegion& pRegion) const
                              llvm::Twine(" than the section's demaind.\n"));
   }
 
-  uint8_t* address = (uint8_t*)pRegion.start();
+  uint8_t* address = (uint8_t*)pRegion.begin();
   EntryListType::const_iterator entry, entryEnd = m_NeedList.end();
   for (entry = m_NeedList.begin(); entry != entryEnd; ++entry)
     address += (*entry)->emit(address);

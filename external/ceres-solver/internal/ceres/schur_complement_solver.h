@@ -35,6 +35,8 @@
 #include <utility>
 #include <vector>
 
+#include "ceres/internal/port.h"
+
 #include "ceres/block_random_access_matrix.h"
 #include "ceres/block_sparse_matrix.h"
 #include "ceres/block_structure.h"
@@ -44,6 +46,10 @@
 #include "ceres/suitesparse.h"
 #include "ceres/internal/scoped_ptr.h"
 #include "ceres/types.h"
+
+#ifdef CERES_USE_EIGEN_SPARSE
+#include "Eigen/SparseCholesky"
+#endif
 
 namespace ceres {
 namespace internal {
@@ -126,7 +132,8 @@ class SchurComplementSolver : public BlockSparseMatrixSolver {
 
  private:
   virtual void InitStorage(const CompressedRowBlockStructure* bs) = 0;
-  virtual bool SolveReducedLinearSystem(double* solution) = 0;
+  virtual LinearSolver::Summary SolveReducedLinearSystem(
+      double* solution) = 0;
 
   LinearSolver::Options options_;
 
@@ -146,12 +153,12 @@ class DenseSchurComplementSolver : public SchurComplementSolver {
 
  private:
   virtual void InitStorage(const CompressedRowBlockStructure* bs);
-  virtual bool SolveReducedLinearSystem(double* solution);
+  virtual LinearSolver::Summary SolveReducedLinearSystem(
+      double* solution);
 
   CERES_DISALLOW_COPY_AND_ASSIGN(DenseSchurComplementSolver);
 };
 
-#if !defined(CERES_NO_SUITESPARSE) || !defined(CERES_NO_CXSPARE)
 // Sparse Cholesky factorization based solver.
 class SparseSchurComplementSolver : public SchurComplementSolver {
  public:
@@ -160,9 +167,14 @@ class SparseSchurComplementSolver : public SchurComplementSolver {
 
  private:
   virtual void InitStorage(const CompressedRowBlockStructure* bs);
-  virtual bool SolveReducedLinearSystem(double* solution);
-  bool SolveReducedLinearSystemUsingSuiteSparse(double* solution);
-  bool SolveReducedLinearSystemUsingCXSparse(double* solution);
+  virtual LinearSolver::Summary SolveReducedLinearSystem(
+      double* solution);
+  LinearSolver::Summary SolveReducedLinearSystemUsingSuiteSparse(
+      double* solution);
+  LinearSolver::Summary SolveReducedLinearSystemUsingCXSparse(
+      double* solution);
+  LinearSolver::Summary SolveReducedLinearSystemUsingEigen(
+      double* solution);
 
   // Size of the blocks in the Schur complement.
   vector<int> blocks_;
@@ -175,10 +187,15 @@ class SparseSchurComplementSolver : public SchurComplementSolver {
   CXSparse cxsparse_;
   // Cached factorization
   cs_dis* cxsparse_factor_;
+
+#ifdef CERES_USE_EIGEN_SPARSE
+  typedef Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > SimplicialLDLT;
+  scoped_ptr<SimplicialLDLT> simplicial_ldlt_;
+#endif
+
   CERES_DISALLOW_COPY_AND_ASSIGN(SparseSchurComplementSolver);
 };
 
-#endif  // !defined(CERES_NO_SUITESPARSE) || !defined(CERES_NO_CXSPARE)
 }  // namespace internal
 }  // namespace ceres
 

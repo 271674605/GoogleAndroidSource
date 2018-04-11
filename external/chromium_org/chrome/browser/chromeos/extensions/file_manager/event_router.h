@@ -8,18 +8,35 @@
 #include <map>
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/files/file_path_watcher.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_observer.h"
 #include "chrome/browser/chromeos/drive/job_list.h"
-#include "chrome/browser/chromeos/extensions/file_manager/file_watcher.h"
+#include "chrome/browser/chromeos/drive/sync_client.h"
+#include "chrome/browser/chromeos/file_manager/file_watcher.h"
+#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/file_manager/volume_manager.h"
+#include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
 #include "chrome/browser/drive/drive_service_interface.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
+#include "chrome/common/extensions/api/file_browser_private.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "chromeos/network/network_state_handler_observer.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "webkit/browser/fileapi/file_system_operation.h"
 
 class PrefChangeRegistrar;
 class Profile;
+
+using file_manager::util::EntryDefinition;
+
+namespace base {
+class ListValue;
+}
 
 namespace chromeos {
 class NetworkState;
@@ -27,18 +44,16 @@ class NetworkState;
 
 namespace file_manager {
 
-class DesktopNotifications;
-class MountedDiskMonitor;
-
 // Monitors changes in disk mounts, network connection state and preferences
 // affecting File Manager. Dispatches appropriate File Browser events.
 class EventRouter
-    : public chromeos::disks::DiskMountManager::Observer,
-      public chromeos::NetworkStateHandlerObserver,
-      public drive::DriveIntegrationServiceObserver,
+    : public chromeos::NetworkStateHandlerObserver,
       public drive::FileSystemObserver,
       public drive::JobListObserver,
-      public drive::DriveServiceObserver {
+      public drive::DriveServiceObserver,
+      public VolumeManagerObserver,
+      public content::NotificationObserver,
+      public chrome::MultiUserWindowManager::Observer {
  public:
   explicit EventRouter(Profile* profile);
   virtual ~EventRouter();
@@ -46,7 +61,7 @@ class EventRouter
   void Shutdown();
 
   // Starts observing file system change events.
-  void ObserveFileSystemEvents();
+  void ObserveEvents();
 
   typedef base::Callback<void(bool success)> BoolCallback;
 
@@ -64,25 +79,22 @@ class EventRouter
   void RemoveFileWatch(const base::FilePath& local_path,
                        const std::string& extension_id);
 
-  // CrosDisksClient::Observer overrides.
-  virtual void OnDiskEvent(
-      chromeos::disks::DiskMountManager::DiskEvent event,
-      const chromeos::disks::DiskMountManager::Disk* disk) OVERRIDE;
-  virtual void OnDeviceEvent(
-      chromeos::disks::DiskMountManager::DeviceEvent event,
-      const std::string& device_path) OVERRIDE;
-  virtual void OnMountEvent(
-      chromeos::disks::DiskMountManager::MountEvent event,
-      chromeos::MountError error_code,
-      const chromeos::disks::DiskMountManager::MountPointInfo& mount_info)
-      OVERRIDE;
-  virtual void OnFormatEvent(
-      chromeos::disks::DiskMountManager::FormatEvent event,
-      chromeos::FormatError error_code,
-      const std::string& device_path) OVERRIDE;
+  // Called when a copy task is completed.
+  void OnCopyCompleted(
+      int copy_id, const GURL& source_url, const GURL& destination_url,
+      base::File::Error error);
+
+  // Called when a copy task progress is updated.
+  void OnCopyProgress(int copy_id,
+                      fileapi::FileSystemOperation::CopyProgressType type,
+                      const GURL& source_url,
+                      const GURL& destination_url,
+                      int64 size);
+
+  // Register observer to the multi user window manager.
+  void RegisterMultiUserWindowManagerObserver();
 
   // chromeos::NetworkStateHandlerObserver overrides.
-  virtual void NetworkManagerChanged() OVERRIDE;
   virtual void DefaultNetworkChanged(
       const chromeos::NetworkState* network) OVERRIDE;
 
@@ -96,29 +108,39 @@ class EventRouter
   virtual void OnRefreshTokenInvalid() OVERRIDE;
 
   // drive::FileSystemObserver overrides.
-  virtual void OnDirectoryChanged(
-      const base::FilePath& directory_path) OVERRIDE;
+  virtual void OnDirectoryChanged(const base::FilePath& drive_path) OVERRIDE;
+  virtual void OnDriveSyncError(drive::file_system::DriveSyncErrorType type,
+                                const base::FilePath& drive_path) OVERRIDE;
 
-  // drive::DriveIntegrationServiceObserver overrides.
-  virtual void OnFileSystemMounted() OVERRIDE;
-  virtual void OnFileSystemBeingUnmounted() OVERRIDE;
+  // VolumeManagerObserver overrides.
+  virtual void OnDiskAdded(
+      const chromeos::disks::DiskMountManager::Disk& disk,
+      bool mounting) OVERRIDE;
+  virtual void OnDiskRemoved(
+      const chromeos::disks::DiskMountManager::Disk& disk) OVERRIDE;
+  virtual void OnDeviceAdded(const std::string& device_path) OVERRIDE;
+  virtual void OnDeviceRemoved(const std::string& device_path,
+                               bool hard_unplugged) OVERRIDE;
+  virtual void OnVolumeMounted(chromeos::MountError error_code,
+                               const VolumeInfo& volume_info,
+                               bool is_remounting) OVERRIDE;
+  virtual void OnVolumeUnmounted(chromeos::MountError error_code,
+                                 const VolumeInfo& volume_info) OVERRIDE;
+  virtual void OnFormatStarted(
+      const std::string& device_path, bool success) OVERRIDE;
+  virtual void OnFormatCompleted(
+      const std::string& device_path, bool success) OVERRIDE;
+
+  // content::NotificationObserver overrides.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // chrome::MultiUserWindowManager::Observer overrides:
+  virtual void OnOwnerEntryChanged(aura::Window* window) OVERRIDE;
 
  private:
   typedef std::map<base::FilePath, FileWatcher*> WatcherMap;
-
-  // USB mount event handlers.
-  void OnDiskAdded(const chromeos::disks::DiskMountManager::Disk* disk);
-  void OnDiskRemoved(const chromeos::disks::DiskMountManager::Disk* disk);
-  void OnDiskMounted(const chromeos::disks::DiskMountManager::Disk* disk);
-  void OnDiskUnmounted(const chromeos::disks::DiskMountManager::Disk* disk);
-  void OnDeviceAdded(const std::string& device_path);
-  void OnDeviceRemoved(const std::string& device_path);
-  void OnDeviceScanned(const std::string& device_path);
-  void OnFormatStarted(const std::string& device_path, bool success);
-  void OnFormatCompleted(const std::string& device_path, bool success);
-
-  // Called on change to kExternalStorageDisabled pref.
-  void OnExternalStorageDisabledChanged();
 
   // Called when prefs related to file manager change.
   void OnFileManagerPrefsChanged();
@@ -133,17 +155,23 @@ class EventRouter
       bool error,
       const std::vector<std::string>& extension_ids);
 
-  void DispatchMountEvent(
-      chromeos::disks::DiskMountManager::MountEvent event,
-      chromeos::MountError error_code,
-      const chromeos::disks::DiskMountManager::MountPointInfo& mount_info);
+  // Sends directory change event, after converting the file definition to entry
+  // definition.
+  void DispatchDirectoryChangeEventWithEntryDefinition(
+      bool watcher_error,
+      const EntryDefinition& entry_definition);
 
   // If needed, opens a file manager window for the removable device mounted at
   // |mount_path|. Disk.mount_path() is empty, since it is being filled out
   // after calling notifying observers by DiskMountManager.
-  void ShowRemovableDeviceInFileManager(
-      const chromeos::disks::DiskMountManager::Disk& disk,
-      const base::FilePath& mount_path);
+  void ShowRemovableDeviceInFileManager(VolumeType type,
+                                        const base::FilePath& mount_path);
+
+  // Dispatches an onDeviceChanged event containing |type| and |path| to
+  // extensions.
+  void DispatchDeviceEvent(
+      extensions::api::file_browser_private::DeviceEventType type,
+      const std::string& path);
 
   // Sends onFileTranferUpdated to extensions if needed. If |always| is true,
   // it sends the event always. Otherwise, it sends the event if enough time has
@@ -160,12 +188,14 @@ class EventRouter
   };
   std::map<drive::JobID, DriveJobInfoWithStatus> drive_jobs_;
   base::Time last_file_transfer_event_;
+  base::Time last_copy_progress_event_;
 
   WatcherMap file_watchers_;
-  scoped_ptr<DesktopNotifications> notifications_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
-  scoped_ptr<MountedDiskMonitor> mounted_disk_monitor_;
   Profile* profile_;
+
+  content::NotificationRegistrar notification_registrar_;
+  bool multi_user_window_manager_observer_registered_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

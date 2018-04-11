@@ -1,20 +1,20 @@
-LOCAL_PATH:= $(call my-dir)
+LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_SRC_FILES:= \
+LOCAL_SRC_FILES := \
 	audio_a2dp_hw.c
 
-LOCAL_C_INCLUDES+= .
+LOCAL_C_INCLUDES += \
+	. \
+	$(LOCAL_PATH)/../utils/include
 
-LOCAL_SHARED_LIBRARIES := \
-	libcutils liblog
-
-LOCAL_SHARED_LIBRARIES += \
-	libpower
+LOCAL_CFLAGS += -std=c99
 
 LOCAL_MODULE := audio.a2dp.default
-LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+LOCAL_MODULE_RELATIVE_PATH := hw
+
+LOCAL_SHARED_LIBRARIES := libcutils liblog
 
 LOCAL_MODULE_TAGS := optional
 

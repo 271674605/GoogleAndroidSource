@@ -9,8 +9,12 @@
 
 #include "components/autofill/core/common/form_data.h"
 
-namespace content {
-class WebContents;
+namespace base {
+class SequencedWorkerPool;
+}
+
+namespace net {
+class URLRequestContextGetter;
 }
 
 namespace autofill {
@@ -32,22 +36,30 @@ class AutofillDriver {
 
   virtual ~AutofillDriver() {}
 
-  // TODO(blundell): Remove this method once shared code no longer needs to
-  // know about WebContents.
-  virtual content::WebContents* GetWebContents() = 0;
+  // Returns whether the user is currently operating in an off-the-record
+  // (i.e., incognito) context.
+  virtual bool IsOffTheRecord() const = 0;
+
+  // Returns the URL request context information associated with this driver.
+  virtual net::URLRequestContextGetter* GetURLRequestContext() = 0;
+
+  // Returns the SequencedWorkerPool on which core Autofill code should run
+  // tasks that may block. This pool must live at least as long as the driver.
+  virtual base::SequencedWorkerPool* GetBlockingPool() = 0;
 
   // Returns true iff the renderer is available for communication.
   virtual bool RendererIsAvailable() = 0;
 
-  // Informs the renderer what action to take with the next form data that it
-  // receives. Must be called before each call to |SendFormDataToRenderer|.
-  virtual void SetRendererActionOnFormDataReception(
-      RendererFormDataAction action) = 0;
-
   // Forwards |data| to the renderer. |query_id| is the id of the renderer's
-  // original request for the data. This method is a no-op if the renderer is
-  // not currently available.
-  virtual void SendFormDataToRenderer(int query_id, const FormData& data) = 0;
+  // original request for the data. |action| is the action the renderer should
+  // perform with the |data|. This method is a no-op if the renderer is not
+  // currently available.
+  virtual void SendFormDataToRenderer(int query_id,
+                                      RendererFormDataAction action,
+                                      const FormData& data) = 0;
+
+  // Pings renderer. The renderer will return an IPC acknowledging the ping.
+  virtual void PingRenderer() = 0;
 
   // Sends the field type predictions specified in |forms| to the renderer. This
   // method is a no-op if the renderer is not available or the appropriate
@@ -55,11 +67,23 @@ class AutofillDriver {
   virtual void SendAutofillTypePredictionsToRenderer(
       const std::vector<FormStructure*>& forms) = 0;
 
+  // Tells the renderer to accept data list suggestions for |value|.
+  virtual void RendererShouldAcceptDataListSuggestion(
+      const base::string16& value) = 0;
+
   // Tells the renderer to clear the currently filled Autofill results.
   virtual void RendererShouldClearFilledForm() = 0;
 
   // Tells the renderer to clear the currently previewed Autofill results.
   virtual void RendererShouldClearPreviewedForm() = 0;
+
+  // Tells the renderer to set the node text.
+  virtual void RendererShouldFillFieldWithValue(
+      const base::string16& value) = 0;
+
+  // Tells the renderer to preview the node with suggested text.
+  virtual void RendererShouldPreviewFieldWithValue(
+      const base::string16& value) = 0;
 };
 
 }  // namespace autofill

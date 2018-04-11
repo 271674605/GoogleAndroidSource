@@ -309,6 +309,10 @@ final class LocalBluetoothProfileManager {
         return mPbapProfile;
     }
 
+    MapProfile getMapProfile(){
+        return mMapProfile;
+    }
+
     /**
      * Fill in a list of LocalBluetoothProfile objects that are supported by
      * the local device and the remote device.
@@ -321,7 +325,7 @@ final class LocalBluetoothProfileManager {
     synchronized void updateProfiles(ParcelUuid[] uuids, ParcelUuid[] localUuids,
             Collection<LocalBluetoothProfile> profiles,
             Collection<LocalBluetoothProfile> removedProfiles,
-            boolean isPanNapConnected) {
+            boolean isPanNapConnected, BluetoothDevice device) {
         // Copy previous profile list into removedProfiles
         removedProfiles.clear();
         removedProfiles.addAll(profiles);
@@ -366,6 +370,13 @@ final class LocalBluetoothProfileManager {
             mPanProfile != null) || isPanNapConnected) {
             profiles.add(mPanProfile);
             removedProfiles.remove(mPanProfile);
+        }
+
+        if ((mMapProfile != null) &&
+            (mMapProfile.getConnectionStatus(device) == BluetoothProfile.STATE_CONNECTED)) {
+            profiles.add(mMapProfile);
+            removedProfiles.remove(mMapProfile);
+            mMapProfile.setPreferred(device, true);
         }
     }
 

@@ -23,8 +23,6 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
-import android.view.ScaleGestureDetector.OnScaleGestureListener;
 
 import com.android.mail.R;
 import com.android.mail.utils.LogTag;
@@ -139,8 +137,6 @@ public class ConversationWebView extends MailWebView implements ScrollNotifier {
         mVisible = visible;
     }
 
-    private ScaleGestureDetector mScaleDetector;
-
     private final int mViewportWidth;
     private final float mDensity;
 
@@ -179,20 +175,12 @@ public class ConversationWebView extends MailWebView implements ScrollNotifier {
         mScrollListeners.remove(l);
     }
 
-    public void setOnScaleGestureListener(OnScaleGestureListener l) {
-        if (l == null) {
-            mScaleDetector = null;
-        } else {
-            mScaleDetector = new ScaleGestureDetector(getContext(), l);
-        }
-    }
-
     @Override
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
 
         for (ScrollListener listener : mScrollListeners) {
-            listener.onNotifierScroll(l, t);
+            listener.onNotifierScroll(t);
         }
     }
 
@@ -207,12 +195,6 @@ public class ConversationWebView extends MailWebView implements ScrollNotifier {
             case MotionEvent.ACTION_POINTER_DOWN:
                 LogUtils.d(LOG_TAG, "WebView disabling intercepts: POINTER_DOWN");
                 requestDisallowInterceptTouchEvent(true);
-                if (mScaleDetector != null) {
-                    mIgnoringTouch = true;
-                    final MotionEvent fakeCancel = MotionEvent.obtain(ev);
-                    fakeCancel.setAction(MotionEvent.ACTION_CANCEL);
-                    super.onTouchEvent(fakeCancel);
-                }
                 break;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
@@ -222,10 +204,6 @@ public class ConversationWebView extends MailWebView implements ScrollNotifier {
         }
 
         final boolean handled = mIgnoringTouch || super.onTouchEvent(ev);
-
-        if (mScaleDetector != null) {
-            mScaleDetector.onTouchEvent(ev);
-        }
 
         return handled;
     }
@@ -239,15 +217,33 @@ public class ConversationWebView extends MailWebView implements ScrollNotifier {
     }
 
     /**
+     * Returns the effective width available for HTML content in DP units. This width takes into
+     * account the given margin (in screen px) by excluding it. This is not the same as DOM width,
+     * since the document is rendered at CSS px={@link #mViewportWidth}.
+     *
+     * @param sideMarginPx HTML body margin, if any (in screen px)
+     * @return width available for HTML content (in dp)
+     */
+    public int getWidthInDp(int sideMarginPx) {
+        return (int) ((getWidth() - sideMarginPx * 2) / mDensity);
+    }
+
+    /**
      * Similar to {@link #getScale()}, except that it returns the initially expected scale, as
      * determined by the ratio of actual screen pixels to logical HTML pixels.
      * <p>This assumes that we are able to control the logical HTML viewport with a meta-viewport
      * tag.
      */
     public float getInitialScale() {
-        // an HTML meta-viewport width of "device-width" and unspecified (medium) density means
-        // that the default scale is effectively the screen density.
-        return mDensity;
+        final float scale;
+        if (getSettings().getLoadWithOverviewMode()) {
+            // in overview mode (aka auto-fit mode), the base ratio is screen px : viewport px
+            scale = (float) getWidth() / getViewportWidth();
+        } else {
+            // in no-zoom mode, the base ratio is just screen px : mdpi css px (i.e. density)
+            scale = mDensity;
+        }
+        return scale;
     }
 
     public int screenPxToWebPx(int screenPx) {

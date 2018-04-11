@@ -67,6 +67,7 @@ static void btavrcp_remote_features_callback(bt_bdaddr_t* bd_addr, btrc_remote_f
     sCallbackEnv->SetByteArrayRegion(addr, 0, sizeof(bt_bdaddr_t), (jbyte*) bd_addr);
     sCallbackEnv->CallVoidMethod(mCallbacksObj, method_getRcFeatures, addr, (jint)features);
     checkAndClearExceptionFromCallback(sCallbackEnv, __FUNCTION__);
+    sCallbackEnv->DeleteLocalRef(addr);
 }
 
 static void btavrcp_get_play_status_callback() {
@@ -154,7 +155,7 @@ static btrc_callbacks_t sBluetoothAvrcpCallbacks = {
     btavrcp_get_element_attr_callback,
     btavrcp_register_notification_callback,
     btavrcp_volume_change_callback,
-    btavrcp_passthrough_command_callback
+    btavrcp_passthrough_command_callback,
 };
 
 static void classInitNative(JNIEnv* env, jclass clazz) {
@@ -407,12 +408,12 @@ static JNINativeMethod sMethods[] = {
     {"registerNotificationRspPlayPosNative", "(II)Z",
      (void *) registerNotificationRspPlayPosNative},
     {"setVolumeNative", "(I)Z",
-     (void *) setVolumeNative}
+     (void *) setVolumeNative},
 };
 
 int register_com_android_bluetooth_avrcp(JNIEnv* env)
 {
-    return jniRegisterNativeMethods(env, "com/android/bluetooth/a2dp/Avrcp",
+    return jniRegisterNativeMethods(env, "com/android/bluetooth/avrcp/Avrcp",
                                     sMethods, NELEM(sMethods));
 }
 

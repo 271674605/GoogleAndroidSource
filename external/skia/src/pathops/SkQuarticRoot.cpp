@@ -40,7 +40,7 @@ int SkReducedQuarticRoots(const double t4, const double t3, const double t2, con
     SK_SNPRINTF(str, sizeof(str),
             "Solve[%1.19g x^4 + %1.19g x^3 + %1.19g x^2 + %1.19g x + %1.19g == 0, x]",
             t4, t3, t2, t1, t0);
-    mathematica_ize(str, sizeof(str));
+    SkPathOpsDebug::MathematicaIze(str, sizeof(str));
 #if ONE_OFF_DEBUG && ONE_OFF_DEBUG_MATHEMATICA
     SkDebugf("%s\n", str);
 #endif
@@ -71,7 +71,9 @@ int SkReducedQuarticRoots(const double t4, const double t3, const double t2, con
         return num;
     }
     if (oneHint) {
-        SkASSERT(approximately_zero(t4 + t3 + t2 + t1 + t0));  // 1 is one root
+        SkASSERT(approximately_zero_double(t4 + t3 + t2 + t1 + t0) ||
+                approximately_zero_when_compared_to(t4 + t3 + t2 + t1 + t0,  // 1 is one root
+                SkTMax(fabs(t4), SkTMax(fabs(t3), SkTMax(fabs(t2), SkTMax(fabs(t1), fabs(t0)))))));
         // note that -C == A + B + D + E
         int num = SkDCubic::RootsReal(t4, t4 + t3, -(t1 + t0), -t0, roots);
         for (int i = 0; i < num; ++i) {
@@ -101,7 +103,8 @@ int SkQuarticRootsReal(int firstCubicRoot, const double A, const double B, const
     const double q = a2 * a / 8 - a * b / 2 + c;
     const double r = -3 * a2 * a2 / 256 + a2 * b / 16 - a * c / 4 + d;
     int num;
-    if (approximately_zero(r)) {
+    double largest = SkTMax(fabs(p), fabs(q));
+    if (approximately_zero_when_compared_to(r, largest)) {
     /* no absolute term: y(y^3 + py + q) = 0 */
         num = SkDCubic::RootsReal(1, 0, p, q, s);
         s[num++] = 0;
@@ -152,7 +155,7 @@ int SkQuarticRootsReal(int firstCubicRoot, const double A, const double B, const
     // eliminate duplicates
     for (int i = 0; i < num - 1; ++i) {
         for (int j = i + 1; j < num; ) {
-            if (AlmostEqualUlps(s[i], s[j])) {
+            if (AlmostDequalUlps(s[i], s[j])) {
                 if (j < --num) {
                     s[j] = s[num];
                 }

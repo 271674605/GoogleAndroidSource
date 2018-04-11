@@ -1,4 +1,4 @@
-<div class="step hidden" id="managed-user-creation">
+<div class="step hidden" id="managed-user-creation" hidden>
   <div class="step-contents">
     <div id="managed-user-creation-intro" class="step-no-logo">
       <div id="managed-user-creation-marketing-intro"
@@ -25,16 +25,19 @@
         <div id="managed-user-creation-managers-pane"></div>
       </div>
     </div>
-    <div id="managed-user-creation-username" class="page-no-marketing" hidden>
+    <div id="managed-user-creation-username" class="page-no-marketing"
+        role="group"
+        i18n-values="aria-label:createManagedUserNameAccessibleTitle" hidden>
       <div class="logo-padded-text">
-        <div>
+        <div class="hide-on-import">
           <div class="page-title inline"
               i18n-content="createManagedUserNameTitle"></div>
           <div id="managed-user-creation-name-explanation"
               class="page-title-explanation inline"></div>
         </div>
-        <div id="managed-user-creation-name-block">
-          <input id="managed-user-creation-name" type="text" maxlength="50" />
+        <div id="managed-user-creation-name-block" class="hide-on-import">
+          <input id="managed-user-creation-name" type="text" maxlength="50"
+              i18n-values="placeholder:createManagedUserNameHint" />
           <span id="managed-user-creation-name-error" class="no-error">
           </span>
         </div>
@@ -72,9 +75,9 @@
             <div class="spinner"></div>
           </div>
           <p id="managed-user-creation-image-preview-caption"></p>
-          <button id="managed-user-creation-flip-photo"
-              class="custom-appearance"
-              i18n-values="title:flipPhoto"></button>
+            <button id="managed-user-creation-flip-photo"
+                class="custom-appearance"
+                i18n-values="title:flipPhoto"></button>
           <button id="managed-user-creation-discard-photo"
               i18n-values="title:discardPhoto"></button>
           <button id="managed-user-creation-take-photo"
@@ -82,16 +85,29 @@
         </div>
       </div>
     </div>
-    <div id="managed-user-creation-created-1" class="step-no-logo" hidden>
+
+    <div id="managed-user-creation-import" class="page-no-marketing" hidden>
+      <div class="logo-padded-text">
+        <div>
+          <div class="page-title"
+              i18n-content="importExistingSupervisedUserTitle"></div>
+          <div class="page-title-explanation"
+              i18n-content="importExistingSupervisedUserText"></div>
+        </div>
+      </div>
+      <div id="managed-user-creation-import-pane"></div>
+    </div>
+
+    <div id="managed-user-creation-created" class="step-no-logo" hidden>
       <div class="marketing">
         <img src="chrome://theme/IDR_SUPERVISED_ILLUSTRATION_DONE">
       </div>
       <div class="below-marketing">
         <div>
-          <div id="managed-user-creation-created-1-text-1"
+          <div id="managed-user-creation-created-text-1"
               class="page-title"></div>
-          <div id="managed-user-creation-created-1-text-2"></div>
-          <div id="managed-user-creation-created-1-text-3"></div>
+          <div id="managed-user-creation-created-text-2"></div>
+          <div id="managed-user-creation-created-text-3"></div>
         </div>
       </div>
     </div>
@@ -108,6 +124,12 @@
     </div>
   </div>
   <div id="managed-user-creation-controls" class="step-controls">
+  </div>
+  <div class="template-import-supervised-user-link button-link" hidden>
+    <a href="#" class="signin-link" i18n-content="importSupervisedUserLink"></a>
+  </div>
+  <div class="template-create-supervised-user-link button-link" hidden>
+    <a href="#" class="signin-link" i18n-content="createSupervisedUserLink"></a>
   </div>
   <div class="template-status-container status-container" hidden>
     <span class="id-text"></span>
@@ -128,5 +150,9 @@
       <input class="managed-user-creation-manager-password" type="password"
           i18n-values="placeholder:createManagedUserManagerPasswordHint" />
     </div>
+  </div>
+  <div id="managed-user-creation-import-template" hidden class="import-pod">
+    <img class="import-pod-image"></img>
+    <div class="import-pod-name"></div>
   </div>
 </div>

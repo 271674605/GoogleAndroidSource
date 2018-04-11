@@ -8,15 +8,16 @@
 #include "base/strings/string16.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/views/ime/input_method_delegate.h"
 #include "ui/views/widget/native_widget.h"
 
 namespace gfx {
+class FontList;
 class ImageSkia;
 class Rect;
 }
 
 namespace ui {
+class InputMethod;
 class NativeTheme;
 class OSExchangeData;
 }
@@ -25,6 +26,7 @@ namespace views {
 class InputMethod;
 class TooltipManager;
 namespace internal {
+class InputMethodDelegate;
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetPrivate interface
@@ -61,6 +63,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
 
   static void GetAllChildWidgets(gfx::NativeView native_view,
                                  Widget::Widgets* children);
+  static void GetAllOwnedWidgets(gfx::NativeView native_view,
+                                 Widget::Widgets* owned);
   static void ReparentNativeView(gfx::NativeView native_view,
                                  gfx::NativeView new_parent);
 
@@ -70,6 +74,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   // Returns true if any touch device is currently down.
   static bool IsTouchDown();
 
+  static gfx::FontList GetWindowTitleFontList();
+
   // Initializes the NativeWidget.
   virtual void InitNativeWidget(const Widget::InitParams& params) = 0;
 
@@ -78,6 +84,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   virtual NonClientFrameView* CreateNonClientFrameView() = 0;
 
   virtual bool ShouldUseNativeFrame() const = 0;
+  virtual bool ShouldWindowContentsBeTransparent() const = 0;
   virtual void FrameTypeChanged() = 0;
 
   // Returns the Widget associated with this NativeWidget. This function is
@@ -139,6 +146,10 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   // Returns the InputMethodDelegate for this native widget.
   virtual InputMethodDelegate* GetInputMethodDelegate() = 0;
 
+  // Returns the ui::InputMethod for this native widget.
+  // TODO(yukishiino): Rename this method to GetInputMethod once we remove
+  // views::InputMethod.
+  virtual ui::InputMethod* GetHostInputMethod() = 0;
 
   // Centers the window and sizes it to the specified size.
   virtual void CenterWindow(const gfx::Size& size) = 0;
@@ -149,8 +160,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const = 0;
 
-  // Sets the NativeWindow title.
-  virtual void SetWindowTitle(const string16& title) = 0;
+  // Sets the NativeWindow title. Returns true if the title changed.
+  virtual bool SetWindowTitle(const base::string16& title) = 0;
 
   // Sets the Window icons. |window_icon| is a 16x16 icon suitable for use in
   // a title bar. |app_icon| is a larger size for use in the host environment
@@ -186,6 +197,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   virtual void Deactivate() = 0;
   virtual bool IsActive() const = 0;
   virtual void SetAlwaysOnTop(bool always_on_top) = 0;
+  virtual bool IsAlwaysOnTop() const = 0;
+  virtual void SetVisibleOnAllWorkspaces(bool always_visible) = 0;
   virtual void Maximize() = 0;
   virtual void Minimize() = 0;
   virtual bool IsMaximized() const = 0;
@@ -206,17 +219,21 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   virtual bool IsMouseEventsEnabled() const = 0;
   virtual void ClearNativeFocus() = 0;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const = 0;
-  virtual void SetInactiveRenderingDisabled(bool value) = 0;
   virtual Widget::MoveLoopResult RunMoveLoop(
       const gfx::Vector2d& drag_offset,
-      Widget::MoveLoopSource source) = 0;
+      Widget::MoveLoopSource source,
+      Widget::MoveLoopEscapeBehavior escape_behavior) = 0;
   virtual void EndMoveLoop() = 0;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) = 0;
   virtual ui::NativeTheme* GetNativeTheme() const = 0;
+  virtual void OnRootViewLayout() const = 0;
+  virtual bool IsTranslucentWindowOpacitySupported() const = 0;
+
+  // Repost an unhandled event to the native widget for default OS processing.
+  virtual void RepostNativeEvent(gfx::NativeEvent native_event) = 0;
 
   // Overridden from NativeWidget:
   virtual internal::NativeWidgetPrivate* AsNativeWidgetPrivate() OVERRIDE;
-  virtual ui::EventHandler* GetEventHandler() = 0;
 };
 
 }  // namespace internal

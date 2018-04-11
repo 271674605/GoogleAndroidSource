@@ -21,7 +21,6 @@ import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.TimeInterpolator;
 import android.app.AlarmManager;
-import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -32,12 +31,12 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
-import android.provider.Settings;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextUtils;
@@ -61,6 +60,7 @@ import com.android.deskclock.worldclock.CityObj;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.GregorianCalendar;
 import java.util.Locale;
 import java.util.TimeZone;
 
@@ -78,9 +78,20 @@ public class Utils {
      */
     private static String sCachedVersionCode = null;
 
+    /**
+     * Array of single-character day of week symbols {'S', 'M', 'T', 'W', 'T', 'F', 'S'}
+     */
+    private static String[] sShortWeekdays = null;
+
     /** Types that may be used for clock displays. **/
     public static final String CLOCK_TYPE_DIGITAL = "digital";
     public static final String CLOCK_TYPE_ANALOG = "analog";
+
+    /** The background colors of the app, it changes thru out the day to mimic the sky. **/
+    public static final String[] BACKGROUND_SPECTRUM = { "#212121", "#27232e", "#2d253a",
+            "#332847", "#382a53", "#3e2c5f", "#442e6c", "#393a7a", "#2e4687", "#235395", "#185fa2",
+            "#0d6baf", "#0277bd", "#0d6cb1", "#1861a6", "#23569b", "#2d4a8f", "#383f84", "#433478",
+            "#3d3169", "#382e5b", "#322b4d", "#2c273e", "#272430" };
 
     /**
      * Returns whether the SDK is KitKat or later
@@ -138,7 +149,7 @@ public class Utils {
             } catch (NameNotFoundException e) {
                 // Cannot find the package name, so don't add in the version parameter
                 // This shouldn't happen.
-                Log.wtf("Invalid package name for context " + e);
+                LogUtils.wtf("Invalid package name for context " + e);
             }
         } else {
             builder.appendQueryParameter(PARAM_VERSION, sCachedVersionCode);
@@ -180,7 +191,7 @@ public class Utils {
      *   any effect on the button press states, and those must be changed separately.
     **/
     public static int getPressedColorId() {
-        return R.color.clock_red;
+        return R.color.hot_pink;
     }
 
     /**  The un-pressed color used throughout the app. If this method is changed, it will not have
@@ -352,12 +363,16 @@ public class Utils {
         Calendar nextQuarter = Calendar.getInstance();
         //  Set 1 second to ensure quarter-hour threshold passed.
         nextQuarter.set(Calendar.SECOND, 1);
+        nextQuarter.set(Calendar.MILLISECOND, 0);
         int minute = nextQuarter.get(Calendar.MINUTE);
         nextQuarter.add(Calendar.MINUTE, 15 - (minute % 15));
         long alarmOnQuarterHour = nextQuarter.getTimeInMillis();
-        if (0 >= (alarmOnQuarterHour - System.currentTimeMillis())
-                || (alarmOnQuarterHour - System.currentTimeMillis()) > 901000) {
-            Log.wtf("quarterly alarm calculation error");
+        long now = System.currentTimeMillis();
+        long delta = alarmOnQuarterHour - now;
+        if (0 >= delta || delta > 901000) {
+            // Something went wrong in the calculation, schedule something that is
+            // about 15 minutes. Next time , it will align with the 15 minutes border.
+            alarmOnQuarterHour = now + 901000;
         }
         return alarmOnQuarterHour;
     }
@@ -444,10 +459,25 @@ public class Utils {
         clockView.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
     }
 
+    /**
+     * @return The next alarm from {@link AlarmManager}
+     */
+    public static String getNextAlarm(Context context) {
+        String timeString = null;
+        final AlarmManager.AlarmClockInfo info = ((AlarmManager) context.getSystemService(
+                Context.ALARM_SERVICE)).getNextAlarmClock();
+        if (info != null) {
+            final long triggerTime = info.getTriggerTime();
+            final Calendar alarmTime = Calendar.getInstance();
+            alarmTime.setTimeInMillis(triggerTime);
+            timeString = AlarmUtils.getFormattedTime(context, alarmTime);
+        }
+        return timeString;
+    }
+
     /** Clock views can call this to refresh their alarm to the next upcoming value. **/
     public static void refreshAlarm(Context context, View clock) {
-        String nextAlarm = Settings.System.getString(context.getContentResolver(),
-                Settings.System.NEXT_ALARM_FORMATTED);
+        final String nextAlarm = getNextAlarm(context);
         TextView nextAlarmView;
         nextAlarmView = (TextView) clock.findViewById(R.id.nextAlarm);
         if (!TextUtils.isEmpty(nextAlarm) && nextAlarmView != null) {
@@ -514,11 +544,11 @@ public class Utils {
             return pattern;
         }
         Spannable sp = new SpannableString(pattern);
-        sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), amPmPos, amPmPos + 1,
+        sp.setSpan(new StyleSpan(Typeface.NORMAL), amPmPos, amPmPos + 1,
                 Spannable.SPAN_POINT_MARK);
         sp.setSpan(new AbsoluteSizeSpan(amPmFontSize), amPmPos, amPmPos + 1,
                 Spannable.SPAN_POINT_MARK);
-        sp.setSpan(new TypefaceSpan("sans-serif-condensed"), amPmPos, amPmPos + 1,
+        sp.setSpan(new TypefaceSpan("sans-serif"), amPmPos, amPmPos + 1,
                 Spannable.SPAN_POINT_MARK);
         return sp;
     }
@@ -538,7 +568,7 @@ public class Utils {
         int minLength = cities.length;
         if (cities.length != timezones.length || ids.length != cities.length) {
             minLength = Math.min(cities.length, Math.min(timezones.length, ids.length));
-            Log.e("City lists sizes are not the same, trancating");
+            LogUtils.e("City lists sizes are not the same, truncating");
         }
         CityObj[] tempList = new CityObj[minLength];
         for (int i = 0; i < cities.length; i++) {
@@ -552,7 +582,7 @@ public class Utils {
      */
     public static String getGMTHourOffset(TimeZone timezone, boolean showMinutes) {
         StringBuilder sb = new StringBuilder();
-        sb.append("GMT");
+        sb.append("GMT  ");
         int gmtOffset = timezone.getRawOffset();
         if (gmtOffset < 0) {
             sb.append('-');
@@ -575,5 +605,33 @@ public class Utils {
 
     public static String getCityName(CityObj city, CityObj dbCity) {
         return (city.mCityId == null || dbCity == null) ? city.mCityName : dbCity.mCityName;
+    }
+
+    public static int getCurrentHourColor() {
+        final int hourOfDay = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return Color.parseColor(BACKGROUND_SPECTRUM[hourOfDay]);
+    }
+
+    public static int getNextHourColor() {
+        final int currHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return Color.parseColor(BACKGROUND_SPECTRUM[currHour < 24 ? currHour + 1 : 1]);
+    }
+
+    /**
+     * To get an array of single-character day of week symbols {'S', 'M', 'T', 'W', 'T', 'F', 'S'}
+     * @return the array of symbols
+     */
+    public static String[] getShortWeekdays() {
+        if (sShortWeekdays == null) {
+            final String[] shortWeekdays = new String[7];
+            final SimpleDateFormat format = new SimpleDateFormat("EEEEE");
+            // Create a date (2014/07/20) that is a Sunday
+            long aSunday = new GregorianCalendar(2014, Calendar.JULY, 20).getTimeInMillis();
+            for (int day = 0; day < 7; day++) {
+                shortWeekdays[day] = format.format(new Date(aSunday + day * DateUtils.DAY_IN_MILLIS));
+            }
+            sShortWeekdays = shortWeekdays;
+        }
+        return sShortWeekdays;
     }
 }

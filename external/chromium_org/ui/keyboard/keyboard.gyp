@@ -43,8 +43,12 @@
         '../../skia/skia.gyp:skia',
         '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',
+        '../base/ui_base.gyp:ui_base',
         '../compositor/compositor.gyp:compositor',
-        '../ui.gyp:ui',
+        '../events/events.gyp:events',
+        '../gfx/gfx.gyp:gfx',
+        '../gfx/gfx.gyp:gfx_geometry',
+        '../wm/wm.gyp:wm',
         'keyboard_resources',
       ],
       'defines': [
@@ -60,13 +64,11 @@
         'keyboard_controller_observer.h',
         'keyboard_controller_proxy.cc',
         'keyboard_controller_proxy.h',
+        'keyboard_layout_manager.h',
+        'keyboard_layout_manager.cc',
         'keyboard_export.h',
         'keyboard_switches.cc',
         'keyboard_switches.h',
-        'keyboard_ui_controller.cc',
-        'keyboard_ui_controller.h',
-        'keyboard_ui_handler.cc',
-        'keyboard_ui_handler.h',
         'keyboard_util.cc',
         'keyboard_util.h',
       ]
@@ -80,25 +82,34 @@
         '../../content/content.gyp:content',
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
+        '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',
         '../aura/aura.gyp:aura_test_support',
+        '../base/ui_base.gyp:ui_base',
         '../compositor/compositor.gyp:compositor',
-        '../ui.gyp:run_ui_unittests',
-        '../ui.gyp:ui',
+        '../compositor/compositor.gyp:compositor_test_support',
+        '../gfx/gfx.gyp:gfx',
+        '../gfx/gfx.gyp:gfx_geometry',
+        '../resources/ui_resources.gyp:ui_test_pak',
+        '../wm/wm.gyp:wm',
         'keyboard',
       ],
       'sources': [
+        'test/run_all_unittests.cc',
         'keyboard_controller_unittest.cc',
-        'keyboard_test_suite.cc',
       ],
       'conditions': [
-        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
-          'conditions': [
-            ['linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
+        ['OS=="linux" and use_allocator!="none"', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+          'link_settings': {
+            'ldflags': ['-rdynamic'],
+          },
+        }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
           ],
         }],
       ],

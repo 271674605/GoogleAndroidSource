@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/memory/scoped_vector.h"
-#include "content/public/renderer/render_view_observer.h"
+#include "content/public/renderer/render_frame_observer.h"
 #include "url/gurl.h"
 
 class SkBitmap;
@@ -19,10 +19,10 @@ namespace content {
 class MultiResolutionImageResourceFetcher;
 
 // This class deals with image downloading.
-// One instance of ImageLoadingHelper is owned by RenderView.
-class ImageLoadingHelper : public RenderViewObserver {
+// One instance of ImageLoadingHelper is owned by RenderFrame.
+class ImageLoadingHelper : public RenderFrameObserver {
  public:
-  explicit ImageLoadingHelper(RenderView* render_view);
+  explicit ImageLoadingHelper(RenderFrame* render_frame);
 
  private:
   virtual ~ImageLoadingHelper();
@@ -31,7 +31,6 @@ class ImageLoadingHelper : public RenderViewObserver {
   void OnDownloadImage(int id,
                        const GURL& image_url,
                        bool is_favicon,
-                       uint32_t preferred_image_size,
                        uint32_t max_image_size);
 
   // Requests to download an image. When done, the ImageLoadingHelper
@@ -39,20 +38,20 @@ class ImageLoadingHelper : public RenderViewObserver {
   // request was successfully started, false otherwise. id is used to
   // uniquely identify the request and passed back to the
   // DidDownloadImage method. If the image is a favicon, cookies will not be
-  // sent nor accepted during download. If the image has multiple frames, the
-  // frame whose size is image_size is returned. If the image doesn't
-  // have a frame at the specified size, the first is returned.
+  // sent nor accepted during download. If the image has multiple frames, all
+  // the frames whose size <= |max_image_size| are returned. If all of the
+  // frames are larger than |max_image_size|, the smallest frame is resized to
+  // |max_image_size| and is the only result. |max_image_size| == 0 is
+  // interpreted as no max image size.
   bool DownloadImage(int id,
                      const GURL& image_url,
                      bool is_favicon,
-                     uint32_t preferred_image_size,
                      uint32_t max_image_size);
 
   // This callback is triggered when DownloadImage completes, either
   // succesfully or with a failure. See DownloadImage for more
   // details.
   void DidDownloadImage(
-      uint32_t preferred_image_size,
       uint32_t max_image_size,
       MultiResolutionImageResourceFetcher* fetcher,
       const std::vector<SkBitmap>& images);
@@ -60,7 +59,7 @@ class ImageLoadingHelper : public RenderViewObserver {
   // Decodes a data: URL image or returns an empty image in case of failure.
   SkBitmap ImageFromDataUrl(const GURL&) const;
 
-  // RenderViewObserver implementation.
+  // RenderFrameObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   typedef ScopedVector<MultiResolutionImageResourceFetcher>

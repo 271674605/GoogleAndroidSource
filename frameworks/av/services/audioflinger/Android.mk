@@ -13,25 +13,33 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
+LOCAL_SRC_FILES := \
+    ServiceUtilities.cpp
+
+# FIXME Move this library to frameworks/native
+LOCAL_MODULE := libserviceutility
+
+include $(BUILD_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+
 LOCAL_SRC_FILES:=               \
     AudioFlinger.cpp            \
     Threads.cpp                 \
     Tracks.cpp                  \
     Effects.cpp                 \
     AudioMixer.cpp.arm          \
-    AudioResampler.cpp.arm      \
-    AudioPolicyService.cpp      \
-    ServiceUtilities.cpp        \
-    AudioResamplerCubic.cpp.arm \
-    AudioResamplerSinc.cpp.arm
+    PatchPanel.cpp
 
 LOCAL_SRC_FILES += StateQueue.cpp
 
 LOCAL_C_INCLUDES := \
+    $(TOPDIR)frameworks/av/services/audiopolicy \
     $(call include-path-for, audio-effects) \
     $(call include-path-for, audio-utils)
 
 LOCAL_SHARED_LIBRARIES := \
+    libaudioresampler \
     libaudioutils \
     libcommon_time_client \
     libcutils \
@@ -43,17 +51,20 @@ LOCAL_SHARED_LIBRARIES := \
     libhardware \
     libhardware_legacy \
     libeffects \
-    libdl \
     libpowermanager
 
 LOCAL_STATIC_LIBRARIES := \
     libscheduling_policy \
     libcpustats \
-    libmedia_helper
+    libmedia_helper \
+    libserviceutility
 
 LOCAL_MODULE:= libaudioflinger
+LOCAL_32_BIT_ONLY := true
 
 LOCAL_SRC_FILES += FastMixer.cpp FastMixerState.cpp AudioWatchdog.cpp
+LOCAL_SRC_FILES += FastThread.cpp FastThreadState.cpp
+LOCAL_SRC_FILES += FastCapture.cpp FastCaptureState.cpp
 
 LOCAL_CFLAGS += -DSTATE_QUEUE_INSTANTIATIONS='"StateQueueInstantiations.cpp"'
 
@@ -74,12 +85,17 @@ include $(BUILD_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES:=               \
-	test-resample.cpp 			\
-    AudioResampler.cpp.arm      \
-	AudioResamplerCubic.cpp.arm \
-    AudioResamplerSinc.cpp.arm
+    test-resample.cpp           \
+
+LOCAL_C_INCLUDES := \
+    $(call include-path-for, audio-utils)
+
+LOCAL_STATIC_LIBRARIES := \
+    libsndfile
 
 LOCAL_SHARED_LIBRARIES := \
+    libaudioresampler \
+    libaudioutils \
     libdl \
     libcutils \
     libutils \
@@ -90,5 +106,25 @@ LOCAL_MODULE:= test-resample
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_EXECUTABLE)
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES:= \
+    AudioResampler.cpp.arm \
+    AudioResamplerCubic.cpp.arm \
+    AudioResamplerSinc.cpp.arm \
+    AudioResamplerDyn.cpp.arm
+
+LOCAL_C_INCLUDES := \
+    $(call include-path-for, audio-utils)
+
+LOCAL_SHARED_LIBRARIES := \
+    libcutils \
+    libdl \
+    liblog
+
+LOCAL_MODULE := libaudioresampler
+
+include $(BUILD_SHARED_LIBRARY)
 
 include $(call all-makefiles-under,$(LOCAL_PATH))

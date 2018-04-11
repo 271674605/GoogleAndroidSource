@@ -1,3 +1,0 @@
--keep class com.android.inputmethod.pinyin.PinyinDecoderService {
-  *;
-}

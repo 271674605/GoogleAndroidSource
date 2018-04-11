@@ -15,12 +15,15 @@
 #
 LOCAL_PATH := $(call my-dir)
 
-okhttp_common_src_files := $(call all-java-files-under,src/main/java)
+okhttp_common_src_files := $(call all-java-files-under,okhttp/src/main/java)
+okhttp_common_src_files += $(call all-java-files-under,okio/src/main/java)
 okhttp_system_src_files := $(filter-out %/Platform.java, $(okhttp_common_src_files))
 okhttp_system_src_files += $(call all-java-files-under, android/main/java)
 
-okhttp_test_src_files := $(call all-java-files-under,src/test/java)
-okhttp_test_src_files := $(filter-out src/test/java/com/squareup/okhttp/internal/spdy/SpdyServer.java, $(okhttp_test_src_files))
+okhttp_test_src_files := $(call all-java-files-under,okhttp-tests/src/test/java)
+okhttp_test_src_files += $(call all-java-files-under,mockwebserver/src/main/java)
+okhttp_test_src_files += $(call all-java-files-under,android/test/java)
+okhttp_test_src_files := $(filter-out mockwebserver/src/main/java/com/squareup/okhttp/internal/spdy/SpdyServer.java, $(okhttp_test_src_files))
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := okhttp
@@ -28,7 +31,7 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := $(okhttp_system_src_files)
 LOCAL_JAVACFLAGS := -encoding UTF-8
 LOCAL_JARJAR_RULES := $(LOCAL_PATH)/jarjar-rules.txt
-LOCAL_JAVA_LIBRARIES := conscrypt core
+LOCAL_JAVA_LIBRARIES := core-libart conscrypt
 LOCAL_NO_STANDARD_LIBRARIES := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_JAVA_LIBRARY)
@@ -39,8 +42,13 @@ LOCAL_MODULE := okhttp-static
 LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := $(okhttp_common_src_files)
 LOCAL_JAVACFLAGS := -encoding UTF-8
-LOCAL_JAVA_LIBRARIES := core
-LOCAL_NO_STANDARD_LIBRARIES := true
+# This is set when building apps - exclude platform targets.
+ifneq ($(TARGET_BUILD_APPS),)
+    LOCAL_SDK_VERSION := 11
+else
+    LOCAL_JAVA_LIBRARIES := core-libart
+    LOCAL_NO_STANDARD_LIBRARIES := true
+endif
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_JAVA_LIBRARY)
 
@@ -50,32 +58,27 @@ LOCAL_MODULE := okhttp-nojarjar
 LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := $(okhttp_system_src_files)
 LOCAL_JAVACFLAGS := -encoding UTF-8
-LOCAL_JAVA_LIBRARIES := conscrypt core
+LOCAL_JAVA_LIBRARIES := core-libart conscrypt
 LOCAL_NO_STANDARD_LIBRARIES := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_JAVA_LIBRARY)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := okhttp-tests
+LOCAL_MODULE := okhttp-tests-nojarjar
 LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := $(okhttp_test_src_files)
 LOCAL_JAVACFLAGS := -encoding UTF-8
-LOCAL_JARJAR_RULES := $(LOCAL_PATH)/jarjar-rules.txt
-LOCAL_JAVA_LIBRARIES := okhttp-nojarjar junit4-target mockwebserver bouncycastle-nojarjar
+LOCAL_JAVA_LIBRARIES := core-libart okhttp-nojarjar junit4-target bouncycastle-nojarjar
 LOCAL_NO_STANDARD_LIBRARIES := true
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 include $(BUILD_STATIC_JAVA_LIBRARY)
 
-ifeq ($(WITH_HOST_DALVIK),true)
-    include $(CLEAR_VARS)
-    LOCAL_MODULE := okhttp-hostdex
-    LOCAL_MODULE_TAGS := optional
-    LOCAL_SRC_FILES := $(okhttp_system_src_files)
-    LOCAL_JAVACFLAGS := -encoding UTF-8
-    LOCAL_BUILD_HOST_DEX := true
-    LOCAL_JARJAR_RULES := $(LOCAL_PATH)/jarjar-rules.txt
-    LOCAL_JAVA_LIBRARIES := conscrypt-hostdex core-hostdex
-    LOCAL_NO_STANDARD_LIBRARIES := true
-    LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-    include $(BUILD_HOST_JAVA_LIBRARY)
-endif
+include $(CLEAR_VARS)
+LOCAL_MODULE := okhttp-hostdex
+LOCAL_MODULE_TAGS := optional
+LOCAL_SRC_FILES := $(okhttp_system_src_files)
+LOCAL_JAVACFLAGS := -encoding UTF-8
+LOCAL_JARJAR_RULES := $(LOCAL_PATH)/jarjar-rules.txt
+LOCAL_JAVA_LIBRARIES := conscrypt-hostdex
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_HOST_DALVIK_JAVA_LIBRARY)

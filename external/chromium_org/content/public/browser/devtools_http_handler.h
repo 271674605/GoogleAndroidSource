@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/files/file_path.h"
 #include "content/common/content_export.h"
 
 class GURL;
@@ -18,7 +19,6 @@ class URLRequestContextGetter;
 
 namespace content {
 
-class DevToolsAgentHost;
 class DevToolsHttpHandlerDelegate;
 
 // This class is used for managing DevTools remote debugging server.
@@ -26,19 +26,6 @@ class DevToolsHttpHandlerDelegate;
 // this browser.
 class DevToolsHttpHandler {
  public:
-  // Interface responsible for mapping DevToolsAgentHost instances to/from
-  // string identifiers.
-  class DevToolsAgentHostBinding {
-   public:
-    virtual ~DevToolsAgentHostBinding() {}
-
-    // Returns the mapping of DevToolsAgentHost to identifier.
-    virtual std::string GetIdentifier(DevToolsAgentHost* agent_host) = 0;
-
-    // Returns the mapping of identifier to DevToolsAgentHost.
-    virtual DevToolsAgentHost* ForIdentifier(const std::string& identifier) = 0;
-  };
-
   // Returns true if the given protocol version is supported.
   CONTENT_EXPORT static bool IsSupportedProtocolVersion(
       const std::string& version);
@@ -48,22 +35,22 @@ class DevToolsHttpHandler {
       const std::string& name);
 
   // Takes ownership over |socket_factory| and |delegate|.
+  // If |active_port_output_directory| is non-empty, it is assumed the
+  // socket_factory was initialized with an ephemeral port (0). The
+  // port selected by the OS will be written to a well-known file in
+  // the output directory.
   CONTENT_EXPORT static DevToolsHttpHandler* Start(
       const net::StreamListenSocketFactory* socket_factory,
       const std::string& frontend_url,
-      DevToolsHttpHandlerDelegate* delegate);
+      DevToolsHttpHandlerDelegate* delegate,
+      const base::FilePath& active_port_output_directory);
 
   // Called from the main thread in order to stop protocol handler.
   // Automatically destroys the handler instance.
   virtual void Stop() = 0;
 
-  // Set the DevToolsAgentHostBinding instance. If no instance is provided the
-  // default implementation will be used.
-  virtual void SetDevToolsAgentHostBinding(
-      DevToolsAgentHostBinding* binding) = 0;
-
-  // Returns the URL for the address to debug |render_view_host|.
-  virtual GURL GetFrontendURL(DevToolsAgentHost* agent_host) = 0;
+  // Returns the URL for the address to debug |agent_host|.
+  virtual GURL GetFrontendURL() = 0;
 
  protected:
   virtual ~DevToolsHttpHandler() {}

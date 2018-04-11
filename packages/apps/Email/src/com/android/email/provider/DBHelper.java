@@ -23,7 +23,10 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.SQLException;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDoneException;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteStatement;
+import android.provider.BaseColumns;
 import android.provider.CalendarContract;
 import android.provider.ContactsContract;
 import android.text.TextUtils;
@@ -32,6 +35,7 @@ import com.android.email.R;
 import com.android.email2.ui.MailActivityEmail;
 import com.android.emailcommon.mail.Address;
 import com.android.emailcommon.provider.Account;
+import com.android.emailcommon.provider.Credential;
 import com.android.emailcommon.provider.EmailContent;
 import com.android.emailcommon.provider.EmailContent.AccountColumns;
 import com.android.emailcommon.provider.EmailContent.Attachment;
@@ -59,6 +63,9 @@ import com.android.mail.utils.LogUtils;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.Map;
 
 public final class DBHelper {
@@ -68,30 +75,40 @@ public final class DBHelper {
     private static final String LEGACY_SCHEME_POP3 = "pop3";
     private static final String LEGACY_SCHEME_EAS = "eas";
 
-    private static final String WHERE_ID = EmailContent.RECORD_ID + "=?";
+
+    private static final String WHERE_ID = BaseColumns._ID + "=?";
 
     private static final String TRIGGER_MAILBOX_DELETE =
         "create trigger mailbox_delete before delete on " + Mailbox.TABLE_NAME +
         " begin" +
         " delete from " + Message.TABLE_NAME +
-        "  where " + MessageColumns.MAILBOX_KEY + "=old." + EmailContent.RECORD_ID +
+        "  where " + MessageColumns.MAILBOX_KEY + "=old." + BaseColumns._ID +
         "; delete from " + Message.UPDATED_TABLE_NAME +
-        "  where " + MessageColumns.MAILBOX_KEY + "=old." + EmailContent.RECORD_ID +
+        "  where " + MessageColumns.MAILBOX_KEY + "=old." + BaseColumns._ID +
         "; delete from " + Message.DELETED_TABLE_NAME +
-        "  where " + MessageColumns.MAILBOX_KEY + "=old." + EmailContent.RECORD_ID +
+        "  where " + MessageColumns.MAILBOX_KEY + "=old." + BaseColumns._ID +
         "; end";
 
     private static final String TRIGGER_ACCOUNT_DELETE =
         "create trigger account_delete before delete on " + Account.TABLE_NAME +
         " begin delete from " + Mailbox.TABLE_NAME +
-        " where " + MailboxColumns.ACCOUNT_KEY + "=old." + EmailContent.RECORD_ID +
+        " where " + MailboxColumns.ACCOUNT_KEY + "=old." + BaseColumns._ID +
         "; delete from " + HostAuth.TABLE_NAME +
-        " where " + EmailContent.RECORD_ID + "=old." + AccountColumns.HOST_AUTH_KEY_RECV +
+        " where " + BaseColumns._ID + "=old." + AccountColumns.HOST_AUTH_KEY_RECV +
         "; delete from " + HostAuth.TABLE_NAME +
-        " where " + EmailContent.RECORD_ID + "=old." + AccountColumns.HOST_AUTH_KEY_SEND +
+        " where " + BaseColumns._ID + "=old." + AccountColumns.HOST_AUTH_KEY_SEND +
         "; delete from " + Policy.TABLE_NAME +
-        " where " + EmailContent.RECORD_ID + "=old." + AccountColumns.POLICY_KEY +
+        " where " + BaseColumns._ID + "=old." + AccountColumns.POLICY_KEY +
         "; end";
+
+    private static final String TRIGGER_HOST_AUTH_DELETE =
+            "create trigger host_auth_delete after delete on " + HostAuth.TABLE_NAME +
+            " begin delete from " + Credential.TABLE_NAME +
+            " where " + Credential._ID + "=old." + HostAuthColumns.CREDENTIAL_KEY +
+            " and (select count(*) from " + HostAuth.TABLE_NAME + " where " +
+            HostAuthColumns.CREDENTIAL_KEY + "=old." + HostAuthColumns.CREDENTIAL_KEY + ")=0" +
+            "; end";
+
 
     // Any changes to the database format *must* include update-in-place code.
     // Original version: 3
@@ -156,7 +173,18 @@ public final class DBHelper {
     // Version 118: Set syncInterval to 0 for all IMAP mailboxes
     // Version 119: Disable syncing of DRAFTS type folders.
     // Version 120: Changed duplicateMessage deletion trigger to ignore search mailboxes.
-    public static final int DATABASE_VERSION = 120;
+    // Version 121: Add mainMailboxKey, which will be set for messages that are in the fake
+    //              "search_results" folder to reflect the mailbox that the server considers
+    //              the message to be in. Also, wipe out any stale search_result folders.
+    // Version 122: Need to update Message_Updates and Message_Deletes to match previous.
+    // Version 123: Changed the duplicateMesage deletion trigger to ignore accounts that aren't
+    //              exchange accounts.
+    // Version 124: Added MAX_ATTACHMENT_SIZE to the account table
+    // Version 125: Add credentials table for OAuth.
+    // Version 126: Decode address lists for To, From, Cc, Bcc and Reply-To columns in Message.
+    // Version 127: Force mFlags to contain the correct flags for EAS accounts given a protocol
+    //              version above 12.0
+    public static final int DATABASE_VERSION = 127;
 
     // Any changes to the database format *must* include update-in-place code.
     // Original version: 2
@@ -166,7 +194,9 @@ public final class DBHelper {
     // Version 6: Adding Body.mIntroText column
     // Version 7/8: Adding quoted text start pos
     // Version 8 is last Email1 version
-    public static final int BODY_DATABASE_VERSION = 100;
+    // Version 100 is the first Email2 version
+    // Version 101: Move body contents to external files
+    public static final int BODY_DATABASE_VERSION = 101;
 
     /*
      * Internal helper method for index creation.
@@ -186,7 +216,7 @@ public final class DBHelper {
                 Message.TABLE_NAME +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.MESSAGE_COUNT +
                 '=' + MailboxColumns.MESSAGE_COUNT + "+1" +
-                "  where " + EmailContent.RECORD_ID + "=NEW." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=NEW." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Delete a message.
@@ -194,7 +224,7 @@ public final class DBHelper {
                 Message.TABLE_NAME +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.MESSAGE_COUNT +
                 '=' + MailboxColumns.MESSAGE_COUNT + "-1" +
-                "  where " + EmailContent.RECORD_ID + "=OLD." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=OLD." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Change a message's mailbox.
@@ -202,11 +232,22 @@ public final class DBHelper {
                 MessageColumns.MAILBOX_KEY + " on " + Message.TABLE_NAME +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.MESSAGE_COUNT +
                 '=' + MailboxColumns.MESSAGE_COUNT + "-1" +
-                "  where " + EmailContent.RECORD_ID + "=OLD." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=OLD." + MessageColumns.MAILBOX_KEY +
                 "; update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.MESSAGE_COUNT +
                 '=' + MailboxColumns.MESSAGE_COUNT + "+1" +
-                " where " + EmailContent.RECORD_ID + "=NEW." + MessageColumns.MAILBOX_KEY +
+                " where " + BaseColumns._ID + "=NEW." + MessageColumns.MAILBOX_KEY +
                 "; end");
+    }
+
+    static void createCredentialsTable(SQLiteDatabase db) {
+        String s = " (" + Credential._ID + " integer primary key autoincrement, "
+                + Credential.PROVIDER_COLUMN + " text,"
+                + Credential.ACCESS_TOKEN_COLUMN + " text,"
+                + Credential.REFRESH_TOKEN_COLUMN + " text,"
+                + Credential.EXPIRATION_COLUMN + " integer"
+                + ");";
+        db.execSQL("create table " + Credential.TABLE_NAME + s);
+        db.execSQL(TRIGGER_HOST_AUTH_DELETE);
     }
 
     static void dropDeleteDuplicateMessagesTrigger(final SQLiteDatabase db) {
@@ -215,30 +256,46 @@ public final class DBHelper {
 
     /**
      * Add a trigger to delete duplicate server side messages before insertion.
+     * This should delete any messages older messages that have the same serverId and account as
+     * the new message, if:
+     *    Neither message is in a SEARCH type mailbox, and
+     *    The new message's mailbox's account is an exchange account.
+     *
      * Here is the plain text of this sql:
      *   create trigger message_delete_duplicates_on_insert before insert on
-     *   Message for each row when new.serverId is not null and
-     *   (select Mailbox.type from Mailbox where _id=new.mailboxKey) != 8
-     *   begin delete from Message where new.serverId=severId and
+     *   Message for each row when new.syncServerId is not null and
+     *    (select type from Mailbox where _id=new.mailboxKey) != 8 and
+     *    (select HostAuth.protocol from HostAuth, Account where
+     *       new.accountKey=account._id and account.hostAuthKeyRecv=hostAuth._id) = 'gEas'
+     *   begin delete from Message where new.syncServerId=syncSeverId and
      *   new.accountKey=accountKey and
-     *   (select Mailbox.type from Mailbox where _id=mailboxKey) != 8; end
+     *    (select Mailbox.type from Mailbox where _id=mailboxKey) != 8; end
      */
-    static void createDeleteDuplicateMessagesTrigger(final SQLiteDatabase db) {
+    static void createDeleteDuplicateMessagesTrigger(final Context context,
+            final SQLiteDatabase db) {
         db.execSQL("create trigger message_delete_duplicates_on_insert before insert on "
                 + Message.TABLE_NAME + " for each row when new." + SyncColumns.SERVER_ID
                 + " is not null and "
-                + "(select " + Mailbox.TABLE_NAME + "." + MailboxColumns.TYPE + " from "
-                + Mailbox.TABLE_NAME + " where " + MailboxColumns.ID + "=new."
+                + "(select " + MailboxColumns.TYPE + " from " + Mailbox.TABLE_NAME
+                + " where " + MailboxColumns._ID + "=new."
                 + MessageColumns.MAILBOX_KEY + ")!=" + Mailbox.TYPE_SEARCH
+                + " and (select "
+                + HostAuth.TABLE_NAME + "." + HostAuthColumns.PROTOCOL + " from "
+                + HostAuth.TABLE_NAME + "," + Account.TABLE_NAME
+                + " where new." + MessageColumns.ACCOUNT_KEY
+                + "=" + Account.TABLE_NAME + "." + AccountColumns._ID
+                + " and " + Account.TABLE_NAME + "." + AccountColumns.HOST_AUTH_KEY_RECV
+                + "=" + HostAuth.TABLE_NAME + "." + HostAuthColumns._ID
+                + ")='" + context.getString(R.string.protocol_eas) + "'"
                 + " begin delete from " + Message.TABLE_NAME + " where new."
                 + SyncColumns.SERVER_ID + "=" + SyncColumns.SERVER_ID + " and new."
                 + MessageColumns.ACCOUNT_KEY + "=" + MessageColumns.ACCOUNT_KEY
                 + " and (select " + Mailbox.TABLE_NAME + "." + MailboxColumns.TYPE + " from "
-                + Mailbox.TABLE_NAME + " where " + MailboxColumns.ID + "="
+                + Mailbox.TABLE_NAME + " where " + MailboxColumns._ID + "="
                 + MessageColumns.MAILBOX_KEY + ")!=" + Mailbox.TYPE_SEARCH +"; end");
     }
 
-    static void createMessageTable(SQLiteDatabase db) {
+    static void createMessageTable(Context context, SQLiteDatabase db) {
         String messageColumns = MessageColumns.DISPLAY_NAME + " text, "
             + MessageColumns.TIMESTAMP + " integer, "
             + MessageColumns.SUBJECT + " text, "
@@ -261,12 +318,13 @@ public final class DBHelper {
             + MessageColumns.PROTOCOL_SEARCH_INFO + " text, "
             + MessageColumns.THREAD_TOPIC + " text, "
             + MessageColumns.SYNC_DATA + " text, "
-            + MessageColumns.FLAG_SEEN + " integer"
+            + MessageColumns.FLAG_SEEN + " integer, "
+            + MessageColumns.MAIN_MAILBOX_KEY + " integer"
             + ");";
 
         // This String and the following String MUST have the same columns, except for the type
         // of those columns!
-        String createString = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String createString = " (" + BaseColumns._ID + " integer primary key autoincrement, "
             + SyncColumns.SERVER_ID + " text, "
             + SyncColumns.SERVER_TIMESTAMP + " integer, "
             + messageColumns;
@@ -274,7 +332,7 @@ public final class DBHelper {
         // For the updated and deleted tables, the id is assigned, but we do want to keep track
         // of the ORDER of updates using an autoincrement primary key.  We use the DATA column
         // at this point; it has no other function
-        String altCreateString = " (" + EmailContent.RECORD_ID + " integer unique, "
+        String altCreateString = " (" + BaseColumns._ID + " integer unique, "
             + SyncColumns.SERVER_ID + " text, "
             + SyncColumns.SERVER_TIMESTAMP + " integer, "
             + messageColumns;
@@ -301,7 +359,7 @@ public final class DBHelper {
         // in a separate database, and trigger cannot operate on attached databases.
         db.execSQL("create trigger message_delete before delete on " + Message.TABLE_NAME +
                 " begin delete from " + Attachment.TABLE_NAME +
-                "  where " + AttachmentColumns.MESSAGE_KEY + "=old." + EmailContent.RECORD_ID +
+                "  where " + AttachmentColumns.MESSAGE_KEY + "=old." + BaseColumns._ID +
                 "; end");
 
         // Add triggers to keep unread count accurate per mailbox
@@ -314,7 +372,7 @@ public final class DBHelper {
                 " when NEW." + MessageColumns.FLAG_READ + "=0" +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.UNREAD_COUNT +
                 '=' + MailboxColumns.UNREAD_COUNT + "+1" +
-                "  where " + EmailContent.RECORD_ID + "=NEW." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=NEW." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Delete a message; if flagRead is zero, decrement the unread count of the msg's mailbox
@@ -322,7 +380,7 @@ public final class DBHelper {
                 " when OLD." + MessageColumns.FLAG_READ + "=0" +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.UNREAD_COUNT +
                 '=' + MailboxColumns.UNREAD_COUNT + "-1" +
-                "  where " + EmailContent.RECORD_ID + "=OLD." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=OLD." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Change a message's mailbox
@@ -331,10 +389,10 @@ public final class DBHelper {
                 " when OLD." + MessageColumns.FLAG_READ + "=0" +
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.UNREAD_COUNT +
                 '=' + MailboxColumns.UNREAD_COUNT + "-1" +
-                "  where " + EmailContent.RECORD_ID + "=OLD." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=OLD." + MessageColumns.MAILBOX_KEY +
                 "; update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.UNREAD_COUNT +
                 '=' + MailboxColumns.UNREAD_COUNT + "+1" +
-                " where " + EmailContent.RECORD_ID + "=NEW." + MessageColumns.MAILBOX_KEY +
+                " where " + BaseColumns._ID + "=NEW." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Change a message's read state
@@ -344,22 +402,23 @@ public final class DBHelper {
                 " begin update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.UNREAD_COUNT +
                 '=' + MailboxColumns.UNREAD_COUNT + "+ case OLD." + MessageColumns.FLAG_READ +
                 " when 0 then -1 else 1 end" +
-                "  where " + EmailContent.RECORD_ID + "=OLD." + MessageColumns.MAILBOX_KEY +
+                "  where " + BaseColumns._ID + "=OLD." + MessageColumns.MAILBOX_KEY +
                 "; end");
 
         // Add triggers to maintain message_count.
         createMessageCountTriggers(db);
-        createDeleteDuplicateMessagesTrigger(db);
+        createDeleteDuplicateMessagesTrigger(context, db);
     }
 
-    static void resetMessageTable(SQLiteDatabase db, int oldVersion, int newVersion) {
+    static void resetMessageTable(Context context, SQLiteDatabase db,
+            int oldVersion, int newVersion) {
         try {
             db.execSQL("drop table " + Message.TABLE_NAME);
             db.execSQL("drop table " + Message.UPDATED_TABLE_NAME);
             db.execSQL("drop table " + Message.DELETED_TABLE_NAME);
         } catch (SQLException e) {
         }
-        createMessageTable(db);
+        createMessageTable(context, db);
     }
 
     /**
@@ -393,13 +452,13 @@ public final class DBHelper {
         // Trigger to delete from the change log when a message is deleted.
         db.execSQL("create trigger " + tableName + "_delete_message before delete on "
                 + Message.TABLE_NAME + " for each row begin delete from " + tableName
-                + " where " + MessageChangeLogTable.MESSAGE_KEY + "=old." + MessageColumns.ID
+                + " where " + MessageChangeLogTable.MESSAGE_KEY + "=old." + MessageColumns._ID
                 + "; end");
 
         // Trigger to delete from the change log when an account is deleted.
         db.execSQL("create trigger " + tableName + "_delete_account before delete on "
                 + Account.TABLE_NAME + " for each row begin delete from " + tableName
-                + " where " + MessageChangeLogTable.ACCOUNT_KEY + "=old." + AccountColumns.ID
+                + " where " + MessageChangeLogTable.ACCOUNT_KEY + "=old." + AccountColumns._ID
                 + "; end");
     }
 
@@ -437,7 +496,7 @@ public final class DBHelper {
 
     @SuppressWarnings("deprecation")
     static void createAccountTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + AccountColumns._ID + " integer primary key autoincrement, "
             + AccountColumns.DISPLAY_NAME + " text, "
             + AccountColumns.EMAIL_ADDRESS + " text, "
             + AccountColumns.SYNC_KEY + " text, "
@@ -456,6 +515,7 @@ public final class DBHelper {
             + AccountColumns.SECURITY_SYNC_KEY + " text, "
             + AccountColumns.SIGNATURE + " text, "
             + AccountColumns.POLICY_KEY + " integer, "
+            + AccountColumns.MAX_ATTACHMENT_SIZE + " integer, "
             + AccountColumns.PING_DURATION + " integer"
             + ");";
         db.execSQL("create table " + Account.TABLE_NAME + s);
@@ -472,7 +532,7 @@ public final class DBHelper {
     }
 
     static void createPolicyTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + PolicyColumns._ID + " integer primary key autoincrement, "
             + PolicyColumns.PASSWORD_MODE + " integer, "
             + PolicyColumns.PASSWORD_MIN_LENGTH + " integer, "
             + PolicyColumns.PASSWORD_EXPIRATION_DAYS + " integer, "
@@ -500,7 +560,7 @@ public final class DBHelper {
     }
 
     static void createHostAuthTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + HostAuthColumns._ID + " integer primary key autoincrement, "
             + HostAuthColumns.PROTOCOL + " text, "
             + HostAuthColumns.ADDRESS + " text, "
             + HostAuthColumns.PORT + " integer, "
@@ -510,7 +570,8 @@ public final class DBHelper {
             + HostAuthColumns.DOMAIN + " text, "
             + HostAuthColumns.ACCOUNT_KEY + " integer,"
             + HostAuthColumns.CLIENT_CERT_ALIAS + " text,"
-            + HostAuthColumns.SERVER_CERT + " blob"
+            + HostAuthColumns.SERVER_CERT + " blob,"
+            + HostAuthColumns.CREDENTIAL_KEY + " integer"
             + ");";
         db.execSQL("create table " + HostAuth.TABLE_NAME + s);
     }
@@ -523,8 +584,9 @@ public final class DBHelper {
         createHostAuthTable(db);
     }
 
+    @SuppressWarnings("deprecation")
     static void createMailboxTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + MailboxColumns._ID + " integer primary key autoincrement, "
             + MailboxColumns.DISPLAY_NAME + " text, "
             + MailboxColumns.SERVER_ID + " text, "
             + MailboxColumns.PARENT_SERVER_ID + " text, "
@@ -569,7 +631,7 @@ public final class DBHelper {
     }
 
     static void createAttachmentTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + AttachmentColumns._ID + " integer primary key autoincrement, "
             + AttachmentColumns.FILENAME + " text, "
             + AttachmentColumns.MIME_TYPE + " text, "
             + AttachmentColumns.SIZE + " integer, "
@@ -600,15 +662,16 @@ public final class DBHelper {
     }
 
     static void createQuickResponseTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + QuickResponseColumns._ID + " integer primary key autoincrement, "
                 + QuickResponseColumns.TEXT + " text, "
                 + QuickResponseColumns.ACCOUNT_KEY + " integer"
                 + ");";
         db.execSQL("create table " + QuickResponse.TABLE_NAME + s);
     }
 
+    @SuppressWarnings("deprecation")
     static void createBodyTable(SQLiteDatabase db) {
-        String s = " (" + EmailContent.RECORD_ID + " integer primary key autoincrement, "
+        String s = " (" + BodyColumns._ID + " integer primary key autoincrement, "
             + BodyColumns.MESSAGE_KEY + " integer, "
             + BodyColumns.HTML_CONTENT + " text, "
             + BodyColumns.TEXT_CONTENT + " text, "
@@ -622,44 +685,115 @@ public final class DBHelper {
         db.execSQL(createIndex(Body.TABLE_NAME, BodyColumns.MESSAGE_KEY));
     }
 
-    static void upgradeBodyTable(SQLiteDatabase db, int oldVersion, int newVersion) {
-        if (oldVersion < 5) {
-            try {
-                db.execSQL("drop table " + Body.TABLE_NAME);
-                createBodyTable(db);
-                oldVersion = 5;
-            } catch (SQLException e) {
-            }
-        }
-        if (oldVersion == 5) {
-            try {
-                db.execSQL("alter table " + Body.TABLE_NAME
-                        + " add " + BodyColumns.INTRO_TEXT + " text");
-            } catch (SQLException e) {
-                // Shouldn't be needed unless we're debugging and interrupt the process
-                LogUtils.w(TAG, "Exception upgrading EmailProviderBody.db from v5 to v6", e);
-            }
-            oldVersion = 6;
-        }
-        if (oldVersion == 6 || oldVersion == 7) {
-            try {
-                db.execSQL("alter table " + Body.TABLE_NAME
-                        + " add " + BodyColumns.QUOTED_TEXT_START_POS + " integer");
-            } catch (SQLException e) {
-                // Shouldn't be needed unless we're debugging and interrupt the process
-                LogUtils.w(TAG, "Exception upgrading EmailProviderBody.db from v6 to v8", e);
-            }
-            oldVersion = 8;
-        }
-        if (oldVersion == 8) {
-            // Move to Email2 version
-            oldVersion = 100;
+    private static void upgradeBodyToVersion5(final SQLiteDatabase db) {
+        try {
+            db.execSQL("drop table " + Body.TABLE_NAME);
+            createBodyTable(db);
+        } catch (final SQLException e) {
+            // Shouldn't be needed unless we're debugging and interrupt the process
+            LogUtils.w(TAG, e, "Exception upgrading EmailProviderBody.db from <v5");
         }
     }
 
+    @SuppressWarnings("deprecation")
+    private static void upgradeBodyFromVersion5ToVersion6(final SQLiteDatabase db) {
+        try {
+            db.execSQL("alter table " + Body.TABLE_NAME
+                    + " add " + BodyColumns.INTRO_TEXT + " text");
+        } catch (final SQLException e) {
+            // Shouldn't be needed unless we're debugging and interrupt the process
+            LogUtils.w(TAG, e, "Exception upgrading EmailProviderBody.db from v5 to v6");
+        }
+    }
+
+    private static void upgradeBodyFromVersion6ToVersion8(final SQLiteDatabase db) {
+        try {
+            db.execSQL("alter table " + Body.TABLE_NAME
+                    + " add " + BodyColumns.QUOTED_TEXT_START_POS + " integer");
+        } catch (final SQLException e) {
+            // Shouldn't be needed unless we're debugging and interrupt the process
+            LogUtils.w(TAG, e, "Exception upgrading EmailProviderBody.db from v6 to v8");
+        }
+    }
+
+    /**
+     * This upgrade migrates email bodies out of the database and into individual files.
+     */
+    private static void upgradeBodyFromVersion100ToVersion101(final Context context,
+            final SQLiteDatabase db) {
+        try {
+            // We can't read the body parts through the cursor because they might be over 2MB
+            final String projection[] = { BodyColumns.MESSAGE_KEY };
+            final Cursor cursor = db.query(Body.TABLE_NAME, projection,
+                    null, null, null, null, null);
+            if (cursor == null) {
+                throw new IllegalStateException("Could not read body table for upgrade");
+            }
+
+            final SQLiteStatement htmlSql = db.compileStatement(
+                    "SELECT " + BodyColumns.HTML_CONTENT +
+                            " FROM " + Body.TABLE_NAME +
+                            " WHERE " + BodyColumns.MESSAGE_KEY + "=?"
+            );
+
+            final SQLiteStatement textSql = db.compileStatement(
+                    "SELECT " + BodyColumns.TEXT_CONTENT +
+                            " FROM " + Body.TABLE_NAME +
+                            " WHERE " + BodyColumns.MESSAGE_KEY + "=?"
+            );
+
+            while (cursor.moveToNext()) {
+                final long messageId = cursor.getLong(0);
+                htmlSql.bindLong(1, messageId);
+                try {
+                    final String htmlString = htmlSql.simpleQueryForString();
+                    if (!TextUtils.isEmpty(htmlString)) {
+                        final File htmlFile = EmailProvider.getBodyFile(context, messageId, "html");
+                        final FileWriter w = new FileWriter(htmlFile);
+                        try {
+                            w.write(htmlString);
+                        } finally {
+                            w.close();
+                        }
+                    }
+                } catch (final SQLiteDoneException e) {
+                    LogUtils.v(LogUtils.TAG, e, "Done with the HTML column");
+                }
+                textSql.bindLong(1, messageId);
+                try {
+                    final String textString = textSql.simpleQueryForString();
+                    if (!TextUtils.isEmpty(textString)) {
+                        final File textFile = EmailProvider.getBodyFile(context, messageId, "txt");
+                        final FileWriter w = new FileWriter(textFile);
+                        try {
+                            w.write(textString);
+                        } finally {
+                            w.close();
+                        }
+                    }
+                } catch (final SQLiteDoneException e) {
+                    LogUtils.v(LogUtils.TAG, e, "Done with the text column");
+                }
+            }
+
+            db.execSQL("update " + Body.TABLE_NAME +
+                    " set " + BodyColumns.HTML_CONTENT + "=NULL,"
+                    + BodyColumns.TEXT_CONTENT + "=NULL");
+        } catch (final SQLException e) {
+            // Shouldn't be needed unless we're debugging and interrupt the process
+            LogUtils.w(TAG, e, "Exception upgrading EmailProviderBody.db from v100 to v101");
+        } catch (final IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
     protected static class BodyDatabaseHelper extends SQLiteOpenHelper {
+        final Context mContext;
+
         BodyDatabaseHelper(Context context, String name) {
             super(context, name, null, BODY_DATABASE_VERSION);
+            mContext = context;
         }
 
         @Override
@@ -669,8 +803,19 @@ public final class DBHelper {
         }
 
         @Override
-        public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            upgradeBodyTable(db, oldVersion, newVersion);
+        public void onUpgrade(final SQLiteDatabase db, final int oldVersion, final int newVersion) {
+            if (oldVersion < 5) {
+                upgradeBodyToVersion5(db);
+            }
+            if (oldVersion < 6) {
+                upgradeBodyFromVersion5ToVersion6(db);
+            }
+            if (oldVersion < 8) {
+                upgradeBodyFromVersion6ToVersion8(db);
+            }
+            if (oldVersion < 101) {
+                upgradeBodyFromVersion100ToVersion101(mContext, db);
+            }
         }
 
         @Override
@@ -683,12 +828,12 @@ public final class DBHelper {
     static void recalculateMessageCount(SQLiteDatabase db) {
         db.execSQL("update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.MESSAGE_COUNT +
                 "= (select count(*) from " + Message.TABLE_NAME +
-                " where " + Message.MAILBOX_KEY + " = " +
-                    Mailbox.TABLE_NAME + "." + EmailContent.RECORD_ID + ")");
+                " where " + MessageColumns.MAILBOX_KEY + " = " +
+                    Mailbox.TABLE_NAME + "." + MailboxColumns._ID + ")");
     }
 
     protected static class DatabaseHelper extends SQLiteOpenHelper {
-        Context mContext;
+        final Context mContext;
 
         DatabaseHelper(Context context, String name) {
             super(context, name, null, DATABASE_VERSION);
@@ -699,7 +844,7 @@ public final class DBHelper {
         public void onCreate(SQLiteDatabase db) {
             LogUtils.d(TAG, "Creating EmailProvider database");
             // Create all tables here; each class has its own method
-            createMessageTable(db);
+            createMessageTable(mContext, db);
             createAttachmentTable(db);
             createMailboxTable(db);
             createHostAuthTable(db);
@@ -708,6 +853,7 @@ public final class DBHelper {
             createMessageStateChangeTable(db);
             createPolicyTable(db);
             createQuickResponseTable(db);
+            createCredentialsTable(db);
         }
 
         @Override
@@ -726,11 +872,11 @@ public final class DBHelper {
             // Versions >= 5 require that data be preserved!
             if (oldVersion < 5) {
                 android.accounts.Account[] accounts = AccountManager.get(mContext)
-                        .getAccountsByType("eas");
+                        .getAccountsByType(LEGACY_SCHEME_EAS);
                 for (android.accounts.Account account: accounts) {
                     AccountManager.get(mContext).removeAccount(account, null, null);
                 }
-                resetMessageTable(db, oldVersion, newVersion);
+                resetMessageTable(mContext, db, oldVersion, newVersion);
                 resetAttachmentTable(db, oldVersion, newVersion);
                 resetMailboxTable(db, oldVersion, newVersion);
                 resetHostAuthTable(db, oldVersion, newVersion);
@@ -829,7 +975,7 @@ public final class DBHelper {
             if (oldVersion <= 13) {
                 try {
                     db.execSQL("alter table " + Message.TABLE_NAME
-                            + " add column " + Message.SNIPPET
+                            + " add column " + MessageColumns.SNIPPET
                                     +" text" + ";");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
@@ -839,9 +985,9 @@ public final class DBHelper {
             if (oldVersion <= 14) {
                 try {
                     db.execSQL("alter table " + Message.DELETED_TABLE_NAME
-                            + " add column " + Message.SNIPPET +" text" + ";");
+                            + " add column " + MessageColumns.SNIPPET +" text" + ";");
                     db.execSQL("alter table " + Message.UPDATED_TABLE_NAME
-                            + " add column " + Message.SNIPPET +" text" + ";");
+                            + " add column " + MessageColumns.SNIPPET +" text" + ";");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
                     LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 14 to 15 " + e);
@@ -850,13 +996,13 @@ public final class DBHelper {
             if (oldVersion <= 15) {
                 try {
                     db.execSQL("alter table " + Attachment.TABLE_NAME
-                            + " add column " + Attachment.ACCOUNT_KEY +" integer" + ";");
+                            + " add column " + AttachmentColumns.ACCOUNT_KEY +" integer" + ";");
                     // Update all existing attachments to add the accountKey data
                     db.execSQL("update " + Attachment.TABLE_NAME + " set " +
-                            Attachment.ACCOUNT_KEY + "= (SELECT " + Message.TABLE_NAME + "." +
-                            Message.ACCOUNT_KEY + " from " + Message.TABLE_NAME + " where " +
-                            Message.TABLE_NAME + "." + Message.RECORD_ID + " = " +
-                            Attachment.TABLE_NAME + "." + Attachment.MESSAGE_KEY + ")");
+                            AttachmentColumns.ACCOUNT_KEY + "= (SELECT " + Message.TABLE_NAME +
+                            "." + MessageColumns.ACCOUNT_KEY + " from " + Message.TABLE_NAME +
+                            " where " + Message.TABLE_NAME + "." + MessageColumns._ID + " = " +
+                            Attachment.TABLE_NAME + "." + AttachmentColumns.MESSAGE_KEY + ")");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
                     LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 15 to 16 " + e);
@@ -877,7 +1023,7 @@ public final class DBHelper {
             if (oldVersion <= 18) {
                 try {
                     db.execSQL("alter table " + Account.TABLE_NAME
-                            + " add column " + Account.POLICY_KEY + " integer;");
+                            + " add column " + AccountColumns.POLICY_KEY + " integer;");
                     db.execSQL("drop trigger account_delete;");
                     db.execSQL(TRIGGER_ACCOUNT_DELETE);
                     createPolicyTable(db);
@@ -937,11 +1083,11 @@ public final class DBHelper {
             if (oldVersion <= 26) {
                 try {
                     db.execSQL("alter table " + Message.TABLE_NAME
-                            + " add column " + Message.PROTOCOL_SEARCH_INFO + " text;");
+                            + " add column " + MessageColumns.PROTOCOL_SEARCH_INFO + " text;");
                     db.execSQL("alter table " + Message.DELETED_TABLE_NAME
-                            + " add column " + Message.PROTOCOL_SEARCH_INFO +" text" + ";");
+                            + " add column " + MessageColumns.PROTOCOL_SEARCH_INFO +" text" + ";");
                     db.execSQL("alter table " + Message.UPDATED_TABLE_NAME
-                            + " add column " + Message.PROTOCOL_SEARCH_INFO +" text" + ";");
+                            + " add column " + MessageColumns.PROTOCOL_SEARCH_INFO +" text" + ";");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
                     LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 26 to 27 " + e);
@@ -990,16 +1136,16 @@ public final class DBHelper {
             if (oldVersion <= 32) {
                 try {
                     db.execSQL("alter table " + Attachment.TABLE_NAME
-                            + " add column " + Attachment.UI_STATE + " integer;");
+                            + " add column " + AttachmentColumns.UI_STATE + " integer;");
                     db.execSQL("alter table " + Attachment.TABLE_NAME
-                            + " add column " + Attachment.UI_DESTINATION + " integer;");
+                            + " add column " + AttachmentColumns.UI_DESTINATION + " integer;");
                     db.execSQL("alter table " + Attachment.TABLE_NAME
-                            + " add column " + Attachment.UI_DOWNLOADED_SIZE + " integer;");
+                            + " add column " + AttachmentColumns.UI_DOWNLOADED_SIZE + " integer;");
                     // If we have a contentUri then the attachment is saved
                     // uiDestination of 0 = "cache", so we don't have to set this
-                    db.execSQL("update " + Attachment.TABLE_NAME + " set " + Attachment.UI_STATE +
-                            "=" + UIProvider.AttachmentState.SAVED + " where " +
-                            AttachmentColumns.CONTENT_URI + " is not null;");
+                    db.execSQL("update " + Attachment.TABLE_NAME + " set " +
+                            AttachmentColumns.UI_STATE + "=" + UIProvider.AttachmentState.SAVED +
+                            " where " + AttachmentColumns.CONTENT_URI + " is not null;");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
                     LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 32 to 33 " + e);
@@ -1037,10 +1183,10 @@ public final class DBHelper {
                             Mailbox.FLAG_SUPPORTS_SETTINGS + " where (" +
                             MailboxColumns.FLAGS + "&" + Mailbox.FLAG_HOLDS_MAIL + ")!=0 and " +
                             MailboxColumns.ACCOUNT_KEY + " IN (SELECT " + Account.TABLE_NAME +
-                            "." + AccountColumns.ID + " from " + Account.TABLE_NAME + "," +
+                            "." + AccountColumns._ID + " from " + Account.TABLE_NAME + "," +
                             HostAuth.TABLE_NAME + " where " + Account.TABLE_NAME + "." +
                             AccountColumns.HOST_AUTH_KEY_RECV + "=" + HostAuth.TABLE_NAME + "." +
-                            HostAuthColumns.ID + " and " + HostAuthColumns.PROTOCOL + "='" +
+                            HostAuthColumns._ID + " and " + HostAuthColumns.PROTOCOL + "='" +
                             LEGACY_SCHEME_EAS + "')");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
@@ -1124,7 +1270,7 @@ public final class DBHelper {
             if (oldVersion <= 107) {
                 try {
                     db.execSQL("alter table " + Attachment.TABLE_NAME
-                            + " add column " + Attachment.CACHED_FILE +" text" + ";");
+                            + " add column " + AttachmentColumns.CACHED_FILE +" text" + ";");
                 } catch (SQLException e) {
                     // Shouldn't be needed unless we're debugging and interrupt the process
                     LogUtils.w(TAG, "Exception upgrading EmailProvider.db from v107 to v108", e);
@@ -1220,10 +1366,11 @@ public final class DBHelper {
             if (oldVersion <= 117) {
                 db.execSQL("update " + Mailbox.TABLE_NAME + " set " + MailboxColumns.SYNC_INTERVAL
                         + "=0 where " + MailboxColumns.ACCOUNT_KEY + " in (select "
-                        + Account.TABLE_NAME + "." + AccountColumns.ID + " from "
+                        + Account.TABLE_NAME + "." + AccountColumns._ID + " from "
                         + Account.TABLE_NAME + " join " + HostAuth.TABLE_NAME + " where "
-                        + HostAuth.TABLE_NAME + "." + HostAuth.ID + "=" + Account.TABLE_NAME + "."
-                        + Account.HOST_AUTH_KEY_RECV + " and (" + HostAuth.TABLE_NAME + "."
+                        + HostAuth.TABLE_NAME + "." + HostAuthColumns._ID + "="
+                        + Account.TABLE_NAME + "." + AccountColumns.HOST_AUTH_KEY_RECV
+                        + " and (" + HostAuth.TABLE_NAME + "."
                         + HostAuthColumns.PROTOCOL + "='"
                         + mContext.getString(R.string.protocol_legacy_imap) + "' or "
                         + HostAuth.TABLE_NAME + "." + HostAuthColumns.PROTOCOL + "='"
@@ -1250,22 +1397,78 @@ public final class DBHelper {
                         + "(" + SyncColumns.SERVER_ID + " not null and "
                         + SyncColumns.SERVER_ID + "!='') and "
                         + MessageColumns.MAILBOX_KEY + " in (select "
-                        + MailboxColumns.ID + " from " + Mailbox.TABLE_NAME + " where "
+                        + MailboxColumns._ID + " from " + Mailbox.TABLE_NAME + " where "
                         + MailboxColumns.TYPE + "=" + Mailbox.TYPE_DRAFTS + ")");
             }
 
-            if (oldVersion <= 119) {
-                if (oldVersion >= 116) {
+            // We originally dropped and recreated the deleteDuplicateMessagesTrigger here at
+            // version 120. We needed to update it again at version 123, so there's no reason
+            // to do it twice.
+
+            // Add the mainMailboxKey column, and get rid of any messages in the search_results
+            // folder.
+            if (oldVersion <= 120) {
+                db.execSQL("alter table " + Message.TABLE_NAME
+                        + " add " + MessageColumns.MAIN_MAILBOX_KEY + " integer");
+
+                // Delete all TYPE_SEARCH mailboxes. These will be for stale queries anyway, and
+                // the messages in them will not have the mainMailboxKey column correctly populated.
+                // We have a trigger (See TRIGGER_MAILBOX_DELETE) that will delete any messages
+                // in the deleted mailboxes.
+                db.execSQL("delete from " + Mailbox.TABLE_NAME + " where "
+                        + Mailbox.TYPE + "=" + Mailbox.TYPE_SEARCH);
+            }
+
+            if (oldVersion <= 121) {
+                // The previous update omitted making these changes to the Message_Updates and
+                // Message_Deletes tables. The app will actually crash in between these versions!
+                db.execSQL("alter table " + Message.UPDATED_TABLE_NAME
+                        + " add " + MessageColumns.MAIN_MAILBOX_KEY + " integer");
+                db.execSQL("alter table " + Message.DELETED_TABLE_NAME
+                        + " add " + MessageColumns.MAIN_MAILBOX_KEY + " integer");
+            }
+
+            if (oldVersion <= 122) {
+                if (oldVersion >= 117) {
                     /**
-                     * This trigger was originally created at version 116, but we needed to change
-                     * it for version 120. So if our oldVersion is 116 or more, we know we have that
+                     * This trigger was originally created at version 117, but we needed to change
+                     * it for version 122. So if our oldVersion is 117 or more, we know we have that
                      * trigger and must drop it before re creating it.
                      */
                     dropDeleteDuplicateMessagesTrigger(db);
                 }
-                createDeleteDuplicateMessagesTrigger(db);
+                createDeleteDuplicateMessagesTrigger(mContext, db);
             }
 
+            if (oldVersion <= 123) {
+                try {
+                    db.execSQL("alter table " + Account.TABLE_NAME
+                            + " add column " + AccountColumns.MAX_ATTACHMENT_SIZE +" integer" + ";");
+                    final ContentValues cv = new ContentValues(1);
+                    cv.put(AccountColumns.MAX_ATTACHMENT_SIZE, 0);
+                    db.update(Account.TABLE_NAME, cv, null, null);
+                } catch (final SQLException e) {
+                    // Shouldn't be needed unless we're debugging and interrupt the process
+                    LogUtils.w(TAG, "Exception upgrading EmailProvider.db from v123 to v124", e);
+                }
+            }
+
+            if (oldVersion <= 124) {
+                createCredentialsTable(db);
+                // Add the credentialKey column, and set it to -1 for all pre-existing hostAuths.
+                db.execSQL("alter table " + HostAuth.TABLE_NAME
+                        + " add " + HostAuthColumns.CREDENTIAL_KEY + " integer");
+                db.execSQL("update " + HostAuth.TABLE_NAME + " set "
+                        + HostAuthColumns.CREDENTIAL_KEY + "=-1");
+            }
+
+            if (oldVersion <= 125) {
+                upgradeFromVersion125ToVersion126(db);
+            }
+
+            if (oldVersion <= 126) {
+                upgradeFromVersion126ToVersion127(mContext, db);
+            }
         }
 
         @Override
@@ -1287,7 +1490,7 @@ public final class DBHelper {
     @SuppressWarnings("deprecation")
     static void convertPolicyFlagsToPolicyTable(SQLiteDatabase db) {
         Cursor c = db.query(Account.TABLE_NAME,
-                new String[] {EmailContent.RECORD_ID /*0*/, AccountColumns.SECURITY_FLAGS /*1*/},
+                new String[] {BaseColumns._ID /*0*/, AccountColumns.SECURITY_FLAGS /*1*/},
                 AccountColumns.SECURITY_FLAGS + ">0", null, null, null, null);
         try {
             ContentValues cv = new ContentValues();
@@ -1298,8 +1501,8 @@ public final class DBHelper {
                 long policyId = db.insert(Policy.TABLE_NAME, null, policy.toContentValues());
                 cv.put(AccountColumns.POLICY_KEY, policyId);
                 cv.putNull(AccountColumns.SECURITY_FLAGS);
-                args[0] = Long.toString(c.getLong(0 /*RECORD_ID*/));
-                db.update(Account.TABLE_NAME, cv, EmailContent.RECORD_ID + "=?", args);
+                args[0] = Long.toString(c.getLong(0 /*_ID*/));
+                db.update(Account.TABLE_NAME, cv, BaseColumns._ID + "=?", args);
             }
         } finally {
             c.close();
@@ -1325,8 +1528,8 @@ public final class DBHelper {
                     "UPDATE " + Mailbox.TABLE_NAME + " SET "
                     + MailboxColumns.SERVER_ID + "=" + MailboxColumns.DISPLAY_NAME
                     + " WHERE "
-                    + Mailbox.TABLE_NAME + "." + MailboxColumns.ID + " IN ( SELECT "
-                    + Mailbox.TABLE_NAME + "." + MailboxColumns.ID + " FROM "
+                    + Mailbox.TABLE_NAME + "." + MailboxColumns._ID + " IN ( SELECT "
+                    + Mailbox.TABLE_NAME + "." + MailboxColumns._ID + " FROM "
                     + Mailbox.TABLE_NAME + "," + Account.TABLE_NAME + ","
                     + HostAuth.TABLE_NAME + " WHERE "
                     + "("
@@ -1334,9 +1537,9 @@ public final class DBHelper {
                     + Mailbox.TABLE_NAME + "." + MailboxColumns.PARENT_KEY + "=0 "
                     + ") AND "
                     + Mailbox.TABLE_NAME + "." + MailboxColumns.ACCOUNT_KEY + "="
-                    + Account.TABLE_NAME + "." + AccountColumns.ID + " AND "
+                    + Account.TABLE_NAME + "." + AccountColumns._ID + " AND "
                     + Account.TABLE_NAME + "." + AccountColumns.HOST_AUTH_KEY_RECV + "="
-                    + HostAuth.TABLE_NAME + "." + HostAuthColumns.ID + " AND ( "
+                    + HostAuth.TABLE_NAME + "." + HostAuthColumns._ID + " AND ( "
                     + HostAuth.TABLE_NAME + "." + HostAuthColumns.PROTOCOL + "='imap' OR "
                     + HostAuth.TABLE_NAME + "." + HostAuthColumns.PROTOCOL + "='pop3' ) )");
         } catch (SQLException e) {
@@ -1415,7 +1618,7 @@ public final class DBHelper {
                     hostAuthArgs[0] = accountCursor.getString(V21_ACCOUNT_RECV);
                     // Get the "receive" HostAuth for this account
                     final Cursor hostAuthCursor = db.query(HostAuth.TABLE_NAME,
-                            V21_HOSTAUTH_PROJECTION, HostAuth.RECORD_ID + "=?", hostAuthArgs,
+                            V21_HOSTAUTH_PROJECTION, HostAuthColumns._ID + "=?", hostAuthArgs,
                             null, null, null);
                     try {
                         if (hostAuthCursor.moveToFirst()) {
@@ -1474,7 +1677,7 @@ public final class DBHelper {
     private static void upgradeFromVersion23ToVersion24(SQLiteDatabase db) {
         try {
             db.execSQL("alter table " + HostAuth.TABLE_NAME
-                    + " add column " + HostAuth.CLIENT_CERT_ALIAS + " text;");
+                    + " add column " + HostAuthColumns.CLIENT_CERT_ALIAS + " text;");
         } catch (SQLException e) {
             // Shouldn't be needed unless we're debugging and interrupt the process
             LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 23 to 24 " + e);
@@ -1492,7 +1695,7 @@ public final class DBHelper {
     }
 
     private static final String[] V25_ACCOUNT_PROJECTION =
-        new String[] {AccountColumns.ID, AccountColumns.FLAGS, AccountColumns.HOST_AUTH_KEY_RECV};
+        new String[] {AccountColumns._ID, AccountColumns.FLAGS, AccountColumns.HOST_AUTH_KEY_RECV};
     private static final int V25_ACCOUNT_ID = 0;
     private static final int V25_ACCOUNT_FLAGS = 1;
     private static final int V25_ACCOUNT_RECV = 2;
@@ -1513,7 +1716,7 @@ public final class DBHelper {
                     hostAuthArgs[0] = accountCursor.getString(V25_ACCOUNT_RECV);
                     // Get the "receive" HostAuth for this account
                     Cursor hostAuthCursor = db.query(HostAuth.TABLE_NAME,
-                            V25_HOSTAUTH_PROJECTION, HostAuth.RECORD_ID + "=?", hostAuthArgs,
+                            V25_HOSTAUTH_PROJECTION, HostAuthColumns._ID + "=?", hostAuthArgs,
                             null, null, null);
                     try {
                         if (hostAuthCursor.moveToFirst()) {
@@ -1523,7 +1726,7 @@ public final class DBHelper {
                                 String id = accountCursor.getString(V25_ACCOUNT_ID);
                                 int flags = accountCursor.getInt(V25_ACCOUNT_FLAGS);
                                 cv.put(AccountColumns.FLAGS, flags | Account.FLAGS_SUPPORTS_SEARCH);
-                                db.update(Account.TABLE_NAME, cv, Account.RECORD_ID + "=?",
+                                db.update(Account.TABLE_NAME, cv, AccountColumns._ID + "=?",
                                         new String[] {id});
                             }
                         }
@@ -1541,13 +1744,19 @@ public final class DBHelper {
     }
 
     /** Upgrades the database from v29 to v30 by updating all address fields in Message */
-    private static final int[] ADDRESS_COLUMN_INDICES = new int[] {
-        Message.CONTENT_BCC_LIST_COLUMN, Message.CONTENT_CC_LIST_COLUMN,
-        Message.CONTENT_FROM_LIST_COLUMN, Message.CONTENT_REPLY_TO_COLUMN,
-        Message.CONTENT_TO_LIST_COLUMN
+    private static final int[] ADDRESS_COLUMN_INDICES = {
+            Message.CONTENT_BCC_LIST_COLUMN,
+            Message.CONTENT_CC_LIST_COLUMN,
+            Message.CONTENT_FROM_LIST_COLUMN,
+            Message.CONTENT_REPLY_TO_COLUMN,
+            Message.CONTENT_TO_LIST_COLUMN
     };
-    private static final String[] ADDRESS_COLUMN_NAMES = new String[] {
-        Message.BCC_LIST, Message.CC_LIST, Message.FROM_LIST, Message.REPLY_TO_LIST, Message.TO_LIST
+    private static final String[] ADDRESS_COLUMN_NAMES = {
+            MessageColumns.BCC_LIST,
+            MessageColumns.CC_LIST,
+            MessageColumns.FROM_LIST,
+            MessageColumns.REPLY_TO_LIST,
+            MessageColumns.TO_LIST
     };
 
     private static void upgradeFromVersion29ToVersion30(SQLiteDatabase db) {
@@ -1561,8 +1770,8 @@ public final class DBHelper {
                 while (messageCursor.moveToNext()) {
                     for (int i = 0; i < ADDRESS_COLUMN_INDICES.length; i++) {
                         Address[] addrs =
-                                Address.unpack(messageCursor.getString(ADDRESS_COLUMN_INDICES[i]));
-                        cv.put(ADDRESS_COLUMN_NAMES[i], Address.pack(addrs));
+                                Address.fromHeader(messageCursor.getString(ADDRESS_COLUMN_INDICES[i]));
+                        cv.put(ADDRESS_COLUMN_NAMES[i], Address.toHeader(addrs));
                     }
                     whereArgs[0] = messageCursor.getString(Message.CONTENT_ID_COLUMN);
                     db.update(Message.TABLE_NAME, cv, WHERE_ID, whereArgs);
@@ -1573,6 +1782,61 @@ public final class DBHelper {
         } catch (SQLException e) {
             // Shouldn't be needed unless we're debugging and interrupt the process
             LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 29 to 30 " + e);
+        }
+    }
+
+    private static void upgradeFromVersion125ToVersion126(SQLiteDatabase db) {
+        try {
+            // Loop through all messages, updating address columns to their decoded form
+            Cursor messageCursor = db.query(Message.TABLE_NAME, Message.CONTENT_PROJECTION, null,
+                    null, null, null, null);
+            ContentValues cv = new ContentValues();
+            String[] whereArgs = new String[1];
+            try {
+                while (messageCursor.moveToNext()) {
+                    for (int i = 0; i < ADDRESS_COLUMN_INDICES.length; i++) {
+                        Address[] addrs =
+                                Address.fromHeader(messageCursor.getString(ADDRESS_COLUMN_INDICES[i]));
+                        cv.put(ADDRESS_COLUMN_NAMES[i], Address.toString(addrs));
+                    }
+                    whereArgs[0] = messageCursor.getString(Message.CONTENT_ID_COLUMN);
+                    db.update(Message.TABLE_NAME, cv, WHERE_ID, whereArgs);
+                }
+            } finally {
+                messageCursor.close();
+            }
+        } catch (SQLException e) {
+            // Shouldn't be needed unless we're debugging and interrupt the process
+            LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 125 to 126 " + e);
+        }
+    }
+
+    /**
+     * Update all accounts that are EAS v12.0 or greater with SmartForward and search flags
+     */
+    private static void upgradeFromVersion126ToVersion127(final Context context,
+            final SQLiteDatabase db) {
+        try {
+            // These are the flags that we want to add to the Account table for the
+            // appropriate rows.
+            final long newFlags = Account.FLAGS_SUPPORTS_GLOBAL_SEARCH +
+                    Account.FLAGS_SUPPORTS_SEARCH + Account.FLAGS_SUPPORTS_SMART_FORWARD;
+
+            // For posterity; this is the command we're executing:
+            // UPDATE Account SET flags=flags|[new flags] WHERE _id IN (SELECT t1._id FROM Account
+            // t1 INNER JOIN HostAuth t2 ON t1.hostAuthKeyRecv=t2._id WHERE t2.protocol='gEas' AND
+            // CAST(t1.protocolVersion AS REAL)>=12.0)
+            db.execSQL(
+                    "UPDATE " + Account.TABLE_NAME + " SET " + AccountColumns.FLAGS + "=" +
+                            AccountColumns.FLAGS + "|" + Long.toString(newFlags) + " WHERE " +
+                            AccountColumns._ID + " IN (SELECT t1." + AccountColumns._ID + " FROM " +
+                            Account.TABLE_NAME + " t1 INNER JOIN " + HostAuth.TABLE_NAME +
+                            " t2 ON t1." + AccountColumns.HOST_AUTH_KEY_RECV + "=t2._id WHERE t2." +
+                            HostAuthColumns.PROTOCOL + "='" +
+                            context.getString(R.string.protocol_eas) + "' AND CAST(t1." +
+                            AccountColumns.PROTOCOL_VERSION + " AS REAL)>=12.0)");
+        } catch (SQLException e) {
+            LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 126 to 127 " + e);
         }
     }
 
@@ -1592,7 +1856,7 @@ public final class DBHelper {
 
         // From 32->33 upgrade
         try {
-            db.execSQL("update " + Attachment.TABLE_NAME + " set " + Attachment.UI_STATE +
+            db.execSQL("update " + Attachment.TABLE_NAME + " set " + AttachmentColumns.UI_STATE +
                     "=" + UIProvider.AttachmentState.SAVED + " where " +
                     AttachmentColumns.CONTENT_URI + " is not null;");
         } catch (SQLException e) {
@@ -1620,10 +1884,10 @@ public final class DBHelper {
                     Mailbox.FLAG_SUPPORTS_SETTINGS + " where (" +
                     MailboxColumns.FLAGS + "&" + Mailbox.FLAG_HOLDS_MAIL + ")!=0 and " +
                     MailboxColumns.ACCOUNT_KEY + " IN (SELECT " + Account.TABLE_NAME +
-                    "." + AccountColumns.ID + " from " + Account.TABLE_NAME + "," +
+                    "." + AccountColumns._ID + " from " + Account.TABLE_NAME + "," +
                     HostAuth.TABLE_NAME + " where " + Account.TABLE_NAME + "." +
                     AccountColumns.HOST_AUTH_KEY_RECV + "=" + HostAuth.TABLE_NAME + "." +
-                    HostAuthColumns.ID + " and " + HostAuthColumns.PROTOCOL + "='" +
+                    HostAuthColumns._ID + " and " + HostAuthColumns.PROTOCOL + "='" +
                     LEGACY_SCHEME_EAS + "')");
         } catch (SQLException e) {
             LogUtils.w(TAG, "Exception upgrading EmailProvider.db from 35/36 to 37/100 " + e);

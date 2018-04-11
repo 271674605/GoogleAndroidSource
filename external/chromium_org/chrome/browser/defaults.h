@@ -23,18 +23,21 @@ extern const bool kCanToggleSystemTitleBar;
 // Size of the font used in the omnibox, in pixels.
 extern const int kOmniboxFontPixelSize;
 
-// Width of mini-tabs.
-extern const int kMiniTabWidth;
-
-// Should session restore restore popup windows?
-extern const bool kRestorePopups;
+// Width of mini-tabs.  Inline because other constants are computed depending
+// on this, which causes static initializers if the value isn't available in
+// all translation units that do this.
+#if defined(TOOLKIT_VIEWS)
+// Windows and Chrome OS have bigger shadows in the tab art.
+const int kMiniTabWidth = 64;
+#else
+const int kMiniTabWidth = 56;
+#endif
 
 // Can the browser be alive without any browser windows?
 extern const bool kBrowserAliveWithNoWindows;
 
 // Whether various menu items are shown.
 extern const bool kShowExitMenuItem;
-extern const bool kShowFeedbackMenuItem;
 extern const bool kShowHelpMenuItemIcon;
 extern const bool kShowUpgradeMenuItem;
 
@@ -49,10 +52,6 @@ extern const bool kAlwaysOpenIncognitoWindow;
 // tabbed browser. This is true every where except on ChromeOS
 // where we want the desktop to show through in this situation.
 extern const bool kAlwaysCreateTabbedBrowserOnSessionRestore;
-
-// Does the OS support other browsers? If not, operations such as default
-// browser check are not done.
-extern const bool kOSSupportsOtherBrowsers;
 
 // Does the download page have the show in folder option?
 extern const bool kDownloadPageHasShowInFolder;
@@ -69,17 +68,11 @@ extern const bool kSyncAutoStarts;
 // Should other browsers be shown in about:memory page?
 extern const bool kShowOtherBrowsersInAboutMemory;
 
-// Should the close button be shown in the Task Manager dialog?
-extern const bool kShowCancelButtonInTaskManager;
-
-// Preferred height of the bookmarks bar when shown on every page.
-extern const int kBookmarkBarHeight;
+// Should scroll events on the tabstrip change tabs?
+extern const bool kScrollEventChangesTab;
 
 // ChromiumOS network menu font
 extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
-
-// Preferred infobar border padding in pixels.
-extern const int kInfoBarBorderPaddingVertical;
 
 // Last character display for passwords.
 extern const bool kPasswordEchoEnabled;

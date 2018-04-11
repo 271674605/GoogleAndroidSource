@@ -14,7 +14,7 @@
 #include <mcld/Support/MsgHandling.h>
 #include <mcld/Support/TargetRegistry.h>
 #include <mcld/Support/FileHandle.h>
-#include <mcld/Support/MemoryArea.h>
+#include <mcld/Support/FileOutputBuffer.h>
 #include <mcld/Support/raw_ostream.h>
 
 #include <mcld/Object/ObjectLinker.h>
@@ -24,6 +24,7 @@
 #include <mcld/LD/LDSymbol.h>
 #include <mcld/LD/SectionData.h>
 #include <mcld/LD/RelocData.h>
+#include <mcld/LD/ObjectWriter.h>
 #include <mcld/Fragment/Relocation.h>
 #include <mcld/Fragment/FragmentRef.h>
 
@@ -67,7 +68,7 @@ bool Linker::link(Module& pModule, IRBuilder& pBuilder)
   if (!normalize(pModule, pBuilder))
     return false;
 
-  if (!resolve())
+  if (!resolve(pModule))
     return false;
 
   return layout();
@@ -82,10 +83,8 @@ bool Linker::normalize(Module& pModule, IRBuilder& pBuilder)
 
   m_pObjLinker = new ObjectLinker(*m_pConfig, *m_pBackend);
 
-  m_pObjLinker->setup(pModule, pBuilder);
-
-  // 2. - initialize FragmentLinker
-  if (!m_pObjLinker->initFragmentLinker())
+  // 2. - initialize ObjectLinker
+  if (!m_pObjLinker->initialize(pModule, pBuilder))
     return false;
 
   // 3. - initialize output's standard sections
@@ -95,7 +94,12 @@ bool Linker::normalize(Module& pModule, IRBuilder& pBuilder)
   if (!Diagnose())
     return false;
 
-  // 4. - normalize the input tree
+  // 4.a - add undefined symbols
+  //   before reading the inputs, we should add undefined symbols set by -u to
+  //   ensure that correspoding objects (e.g. in an archive) will be included
+  m_pObjLinker->addUndefinedSymbols();
+
+  // 4.b - normalize the input tree
   //   read out sections and symbol/string tables (from the files) and
   //   set them in Module. When reading out the symbol, resolve their symbols
   //   immediately and set their ResolveInfo (i.e., Symbol Resolution).
@@ -159,7 +163,7 @@ bool Linker::normalize(Module& pModule, IRBuilder& pBuilder)
   return true;
 }
 
-bool Linker::resolve()
+bool Linker::resolve(Module& pModule)
 {
   assert(NULL != m_pConfig);
   assert(m_pObjLinker != NULL);
@@ -172,7 +176,11 @@ bool Linker::resolve()
   //   To collect all edges in the reference graph.
   m_pObjLinker->readRelocations();
 
-  // 7. - merge all sections
+
+  // 7. - data stripping optimizations
+  m_pObjLinker->dataStrippingOpt();
+
+  // 8. - merge all sections
   //   Push sections into Module's SectionTable.
   //   Merge sections that have the same name.
   //   Maintain them as fragments in the section.
@@ -181,10 +189,16 @@ bool Linker::resolve()
   if (!m_pObjLinker->mergeSections())
     return false;
 
-  // 8. - allocateCommonSymbols
+  // 9.a - add symbols to output
+  //  After all input symbols have been resolved, add them to output symbol
+  //  table at once
+  m_pObjLinker->addSymbolsToOutput(pModule);
+
+  // 9.b - allocateCommonSymbols
   //   Allocate fragments for common symbols to the corresponding sections.
   if (!m_pObjLinker->allocateCommonSymbols())
     return false;
+
   return true;
 }
 
@@ -192,38 +206,37 @@ bool Linker::layout()
 {
   assert(NULL != m_pConfig && NULL != m_pObjLinker);
 
-  // 9. - add standard symbols, target-dependent symbols and script symbols
-  // m_pObjLinker->addUndefSymbols();
+  // 10. - add standard symbols, target-dependent symbols and script symbols
   if (!m_pObjLinker->addStandardSymbols() ||
       !m_pObjLinker->addTargetSymbols() ||
       !m_pObjLinker->addScriptSymbols())
     return false;
 
-  // 10. - scan all relocation entries by output symbols.
+  // 11. - scan all relocation entries by output symbols.
   //   reserve GOT space for layout.
   //   the space info is needed by pre-layout to compute the section size
   m_pObjLinker->scanRelocations();
 
-  // 11.a - init relaxation stuff.
+  // 12.a - init relaxation stuff.
   m_pObjLinker->initStubs();
 
-  // 11.b - pre-layout
+  // 12.b - pre-layout
   m_pObjLinker->prelayout();
 
-  // 11.c - linear layout
+  // 12.c - linear layout
   //   Decide which sections will be left in. Sort the sections according to
   //   a given order. Then, create program header accordingly.
   //   Finally, set the offset for sections (@ref LDSection)
   //   according to the new order.
   m_pObjLinker->layout();
 
-  // 11.d - post-layout (create segment, instruction relaxing)
+  // 12.d - post-layout (create segment, instruction relaxing)
   m_pObjLinker->postlayout();
 
-  // 12. - finalize symbol value
+  // 13. - finalize symbol value
   m_pObjLinker->finalizeSymbolValue();
 
-  // 13. - apply relocations
+  // 14. - apply relocations
   m_pObjLinker->relocation();
 
   if (!Diagnose())
@@ -231,12 +244,12 @@ bool Linker::layout()
   return true;
 }
 
-bool Linker::emit(MemoryArea& pOutput)
+bool Linker::emit(FileOutputBuffer& pOutput)
 {
-  // 13. - write out output
+  // 15. - write out output
   m_pObjLinker->emitOutput(pOutput);
 
-  // 14. - post processing
+  // 16. - post processing
   m_pObjLinker->postProcessing(pOutput);
 
   if (!Diagnose())
@@ -245,10 +258,23 @@ bool Linker::emit(MemoryArea& pOutput)
   return true;
 }
 
-bool Linker::emit(const std::string& pPath)
+bool Linker::emit(const Module& pModule, const std::string& pPath)
 {
   FileHandle file;
-  FileHandle::Permission perm = FileHandle::Permission(0x755);
+  FileHandle::Permission perm;
+  switch (m_pConfig->codeGenType()) {
+    case mcld::LinkerConfig::Unknown:
+    case mcld::LinkerConfig::Object:
+      perm = mcld::FileHandle::Permission(0x644);
+      break;
+    case mcld::LinkerConfig::DynObj:
+    case mcld::LinkerConfig::Exec:
+    case mcld::LinkerConfig::Binary:
+      perm = mcld::FileHandle::Permission(0x755);
+      break;
+    default: assert(0 && "Unknown file type");
+  }
+
   if (!file.open(pPath,
             FileHandle::ReadWrite | FileHandle::Truncate | FileHandle::Create,
             perm)) {
@@ -256,25 +282,28 @@ bool Linker::emit(const std::string& pPath)
     return false;
   }
 
-  MemoryArea* output = new MemoryArea(file);
+  std::unique_ptr<FileOutputBuffer> output;
+  FileOutputBuffer::create(file,
+                           m_pObjLinker->getWriter()->getOutputSize(pModule),
+                           output);
 
-  bool result = emit(*output);
-
-  delete output;
+  bool result = emit(*output.get());
   file.close();
   return result;
 }
 
-bool Linker::emit(int pFileDescriptor)
+bool Linker::emit(const Module& pModule, int pFileDescriptor)
 {
   FileHandle file;
   file.delegate(pFileDescriptor);
-  MemoryArea* output = new MemoryArea(file);
 
-  bool result = emit(*output);
+  std::unique_ptr<FileOutputBuffer> output;
+  FileOutputBuffer::create(file,
+                           m_pObjLinker->getWriter()->getOutputSize(pModule),
+                           output);
 
-  delete output;
-  file.close();
+  bool result = emit(*output.get());
+
   return result;
 }
 
@@ -308,9 +337,14 @@ bool Linker::initTarget()
   assert(NULL != m_pConfig);
 
   std::string error;
-  m_pTarget = mcld::TargetRegistry::lookupTarget(m_pConfig->targets().triple().str(), error);
+  llvm::Triple triple(m_pConfig->targets().triple());
+
+  m_pTarget = mcld::TargetRegistry::lookupTarget(m_pConfig->targets().getArch(),
+                                                 triple, error);
+  m_pConfig->targets().setTriple(triple);
+
   if (NULL == m_pTarget) {
-    fatal(diag::fatal_cannot_init_target) << m_pConfig->targets().triple().str() << error;
+    fatal(diag::fatal_cannot_init_target) << triple.str() << error;
     return false;
   }
   return true;

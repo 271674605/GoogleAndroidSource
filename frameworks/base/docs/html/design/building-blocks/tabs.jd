@@ -1,5 +1,5 @@
 page.title=Tabs
-page.tags="tabs","actionbar","navigation","viewpager"
+page.tags=tabs,actionbar,navigation,viewpager
 @jd:body
 
 <img src="{@docRoot}design/media/tabs_overview.png">
@@ -11,7 +11,7 @@ page.tags="tabs","actionbar","navigation","viewpager"
   </div>
 </a>
 
-<p>Tabs in the action bar make it easy to explore and switch between different views or functional
+<p itemprop="description">Tabs in the action bar make it easy to explore and switch between different views or functional
 aspects of your app, or to browse categorized data sets.</p>
 
 <p>For details on using gestures to move between tabs, see the <a href="{@docRoot}design/patterns/swipe-views.html">Swipe Views</a> pattern.</p>
@@ -35,7 +35,7 @@ to the next/previous view, swipe left or right.</p>
     </video>
     <div class="figure-caption">
       Scrolling tabs in the Play Store app.
-      <div class="video-instructions">&nbsp;</div>
+      <div class="video-instructions-image">&nbsp;</div>
     </div>
 
   </div>
@@ -55,14 +55,3 @@ to the next/previous view, swipe left or right.</p>
 <div class="figure-caption">
   Tabs in the Google Play Movies app.
 </div>
-
-
-
-<h2 id="stacked">Stacked Tabs</h2>
-
-
-<p>If view navigation is essential to your app, you can break out tabs into a separate action bar. This
-permits fast view switching even on narrower screens.</p>
-
-<img src="{@docRoot}design/media/tabs_stacked.png">
-

@@ -28,34 +28,46 @@
 ## Generate a single key and docs
 <%def name="generate_key(entry)">\
     /**
-  % if entry.description:
-${entry.description | javadoc}\
-  % endif
-  % if entry.notes:
-${entry.notes | javadoc}\
-  % endif
+<%
+    # Dedent fixes markdown not to generate code blocks. Then do the rest.
+    description = ""
+    if entry.description:
+        description = dedent(entry.description) + "\n\n"
+    details = ""
+    if entry.details:
+        details = dedent(entry.details)
+    # Unconditionally add extra information if necessary
+    extra_detail = generate_extra_javadoc_detail(entry)("")
+
+    concatenated_info = description + details + extra_detail
+%>\
+## Glue description and details together before javadoc-izing. Otherwise @see in middle of javadoc.
+${concatenated_info | javadoc(metadata)}\
   % if entry.enum and not (entry.typedef and entry.typedef.languages.get('java')):
     % for value in entry.enum.values:
+     % if not value.hidden:
      * @see #${jenum_value(entry, value)}
+     % endif
     % endfor
   % endif
-  % if entry.optional:
-     *
-     * <b>Optional</b> - This value may be null on some devices.
-  % endif
-  % if any(tag.name == 'FULL' for tag in entry.tags):
-     *
-     * <b>{@link CameraCharacteristics#INFO_SUPPORTED_HARDWARE_LEVEL_FULL HARDWARE_LEVEL_FULL}</b> -
-     * Present on all devices that report being FULL level hardware devices in the
-     * {@link CameraCharacteristics#INFO_SUPPORTED_HARDWARE_LEVEL HARDWARE_LEVEL} key.
+  % if entry.deprecated:
+     * @deprecated
   % endif
   % if entry.applied_visibility == 'hidden':
-     *
      * @hide
   % endif
      */
+  % if entry.deprecated:
+    @Deprecated
+  % endif
+  % if entry.applied_visibility == 'public':
+    @PublicKey
+  % endif
+  % if entry.synthetic:
+    @SyntheticKey
+  % endif
     public static final Key<${jtype_boxed(entry)}> ${entry.name | jkey_identifier} =
-            new Key<${jtype_boxed(entry)}>("${entry.name}", ${jclass(entry)});
+            new Key<${jtype_boxed(entry)}>("${entry.name}", ${jkey_type_token(entry)});
 </%def>\
 ##
 ## Generate a list of only Static, Controls, or Dynamic properties.

@@ -14,10 +14,13 @@ class DictionaryValue;
 }
 
 namespace sync_pb {
+class AppListSpecifics;
 class AppNotification;
 class AppNotificationSettings;
 class AppSettingSpecifics;
 class AppSpecifics;
+class ArticleSpecifics;
+class AttachmentIdProto;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
 class BookmarkSpecifics;
@@ -43,8 +46,11 @@ class FaviconTrackingSpecifics;
 class GlobalIdDirective;
 class HistoryDeleteDirectiveSpecifics;
 class KeystoreEncryptionFlagsSpecifics;
+class Media;
 class ManagedUserSettingSpecifics;
+class ManagedUserSharedSettingSpecifics;
 class ManagedUserSpecifics;
+class NavigationRedirect;
 class NigoriSpecifics;
 class PasswordSpecifics;
 class PasswordSpecificsData;
@@ -57,9 +63,18 @@ class SessionTab;
 class SessionWindow;
 class SimpleCollapsedLayout;
 class SyncCycleCompletedEventInfo;
+class SyncEntity;
+class SyncedNotification;
+class SyncedNotificationAction;
+class SyncedNotificationAppInfo;
+class SyncedNotificationAppInfoSpecifics;
+class SyncedNotificationDestination;
+class SyncedNotificationImage;
+class SyncedNotificationProfileImage;
 class SyncedNotificationRenderInfo;
 class SyncedNotificationSpecifics;
 class TabNavigation;
+class Target;
 class ThemeSpecifics;
 class TimeRangeDirective;
 class TypedUrlSpecifics;
@@ -83,6 +98,10 @@ namespace syncer {
 SYNC_EXPORT_PRIVATE base::DictionaryValue* EncryptedDataToValue(
     const sync_pb::EncryptedData& encrypted_data);
 
+// Sub-protocol of AppListSpecifics.
+SYNC_EXPORT_PRIVATE base::DictionaryValue* AppListSpecificsToValue(
+    const sync_pb::AppListSpecifics& proto);
+
 // Sub-protocol of AppSpecifics.
 SYNC_EXPORT_PRIVATE base::DictionaryValue* AppSettingsToValue(
     const sync_pb::AppNotificationSettings& app_notification_settings);
@@ -100,6 +119,9 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* SessionWindowToValue(
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* TabNavigationToValue(
     const sync_pb::TabNavigation& tab_navigation);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* NavigationRedirectToValue(
+    const sync_pb::NavigationRedirect& navigation_redirect);
 
 // Sub-protocol of PasswordSpecifics.
 
@@ -138,6 +160,28 @@ base::DictionaryValue* RenderInfoToValue(
 base::DictionaryValue* CoalescedNotificationToValue(
     const sync_pb::CoalescedSyncedNotification& proto);
 
+base::DictionaryValue* SyncedNotificationActionToValue(
+    const sync_pb::SyncedNotificationAction& action);
+
+base::DictionaryValue* SyncedNotificationDestinationToValue(
+    const sync_pb::SyncedNotificationDestination& destination);
+
+base::DictionaryValue* SyncedNotificationToValue(
+    const sync_pb::SyncedNotification& notification);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* SessionSpecificsToValue(
+    const sync_pb::SessionSpecifics& session_specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* SyncedNotificationImageToValue(
+    const sync_pb::SyncedNotificationImage& image);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue*
+    SyncedNotificationProfileImageToValue(
+        const sync_pb::SyncedNotificationProfileImage& image);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* TargetToValue(
+    const sync_pb::Target& target);
+
 // Main *SpecificsToValue functions.
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* AppNotificationToValue(
@@ -148,6 +192,9 @@ base::DictionaryValue* AppSettingSpecificsToValue(
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* AppSpecificsToValue(
     const sync_pb::AppSpecifics& app_specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* ArticleSpecificsToValue(
+    const sync_pb::ArticleSpecifics& article_specifics);
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* AutofillSpecificsToValue(
     const sync_pb::AutofillSpecifics& autofill_specifics);
@@ -192,6 +239,14 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* ManagedUserSettingSpecificsToValue(
 SYNC_EXPORT_PRIVATE base::DictionaryValue* ManagedUserSpecificsToValue(
     const sync_pb::ManagedUserSpecifics& managed_user_specifics);
 
+SYNC_EXPORT_PRIVATE base::DictionaryValue*
+    ManagedUserSharedSettingSpecificsToValue(
+        const sync_pb::ManagedUserSharedSettingSpecifics&
+            managed_user_shared_setting_specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* MediaToValue(
+    const sync_pb::Media& media);
+
 SYNC_EXPORT_PRIVATE base::DictionaryValue* NigoriSpecificsToValue(
     const sync_pb::NigoriSpecifics& nigori_specifics);
 
@@ -201,15 +256,17 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* PasswordSpecificsToValue(
 SYNC_EXPORT_PRIVATE base::DictionaryValue* PreferenceSpecificsToValue(
     const sync_pb::PreferenceSpecifics& password_specifics);
 
+SYNC_EXPORT_PRIVATE base::DictionaryValue*
+    SyncedNotificationAppInfoSpecificsToValue(
+        const sync_pb::SyncedNotificationAppInfoSpecifics&
+        synced_notification_specifics);
+
 SYNC_EXPORT_PRIVATE base::DictionaryValue* SyncedNotificationSpecificsToValue(
     const sync_pb::SyncedNotificationSpecifics&
     synced_notification_specifics);
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* SearchEngineSpecificsToValue(
     const sync_pb::SearchEngineSpecifics& search_engine_specifics);
-
-SYNC_EXPORT_PRIVATE base::DictionaryValue* SessionSpecificsToValue(
-    const sync_pb::SessionSpecifics& session_specifics);
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* ThemeSpecificsToValue(
     const sync_pb::ThemeSpecifics& theme_specifics);
@@ -221,6 +278,10 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* TypedUrlSpecificsToValue(
 // key equal to the extension name.
 SYNC_EXPORT_PRIVATE base::DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* SyncEntityToValue(
+    const sync_pb::SyncEntity& entity,
+    bool include_specifics);
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* ClientToServerMessageToValue(
     const sync_pb::ClientToServerMessage& proto,
@@ -244,6 +305,9 @@ base::DictionaryValue* SyncCycleCompletedEventInfoToValue(
 
 base::DictionaryValue* ClientConfigParamsToValue(
     const sync_pb::ClientConfigParams& proto);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* AttachmentIdProtoToValue(
+    const sync_pb::AttachmentIdProto& proto);
 
 }  // namespace syncer
 

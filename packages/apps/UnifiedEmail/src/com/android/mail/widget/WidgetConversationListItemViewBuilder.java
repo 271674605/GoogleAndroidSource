@@ -16,12 +16,6 @@
 
 package com.android.mail.widget;
 
-import com.android.mail.R;
-import com.android.mail.providers.Conversation;
-import com.android.mail.providers.Folder;
-import com.android.mail.ui.FolderDisplayer;
-import com.android.mail.utils.FolderUri;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -30,25 +24,29 @@ import android.graphics.Typeface;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.style.AbsoluteSizeSpan;
+import android.text.style.CharacterStyle;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.view.View;
 import android.widget.RemoteViews;
 
-public class WidgetConversationListItemViewBuilder {
-    // Static font sizes
-    private static int DATE_FONT_SIZE;
-    private static int SUBJECT_FONT_SIZE;
+import com.android.mail.R;
+import com.android.mail.providers.Conversation;
+import com.android.mail.providers.Folder;
+import com.android.mail.ui.FolderDisplayer;
+import com.android.mail.utils.FolderUri;
 
+public class WidgetConversationListItemViewBuilder {
     // Static colors
     private static int SUBJECT_TEXT_COLOR_READ;
     private static int SUBJECT_TEXT_COLOR_UNREAD;
-    private static int DATE_TEXT_COLOR;
+    private static int SNIPPET_TEXT_COLOR;
+    private static int DATE_TEXT_COLOR_READ;
+    private static int DATE_TEXT_COLOR_UNREAD;
 
     // Static bitmap
     private static Bitmap ATTACHMENT;
 
-    private final Context mContext;
     private WidgetFolderDisplayer mFolderDisplayer;
 
     /**
@@ -113,20 +111,17 @@ public class WidgetConversationListItemViewBuilder {
      * Get font sizes and bitmaps from Resources
      */
     public WidgetConversationListItemViewBuilder(Context context) {
-        mContext = context;
-        Resources res = context.getResources();
-
-        // Initialize font sizes
-        DATE_FONT_SIZE = res.getDimensionPixelSize(R.dimen.widget_date_font_size);
-        SUBJECT_FONT_SIZE = res.getDimensionPixelSize(R.dimen.widget_subject_font_size);
+        final Resources res = context.getResources();
 
         // Initialize colors
         SUBJECT_TEXT_COLOR_READ = res.getColor(R.color.subject_text_color_read);
         SUBJECT_TEXT_COLOR_UNREAD = res.getColor(R.color.subject_text_color_unread);
-        DATE_TEXT_COLOR = res.getColor(R.color.date_text_color);
+        SNIPPET_TEXT_COLOR = res.getColor(R.color.snippet_text_color);
+        DATE_TEXT_COLOR_READ = res.getColor(R.color.date_text_color_read);
+        DATE_TEXT_COLOR_UNREAD = res.getColor(R.color.date_text_color_unread);
 
         // Initialize Bitmap
-        ATTACHMENT = BitmapFactory.decodeResource(res, R.drawable.ic_attachment_holo_light);
+        ATTACHMENT = BitmapFactory.decodeResource(res, R.drawable.ic_attach_file_20dp);
     }
 
     /*
@@ -146,28 +141,37 @@ public class WidgetConversationListItemViewBuilder {
     /*
      * Return the full View
      */
-    public RemoteViews getStyledView(final CharSequence date, final Conversation conversation,
-            final FolderUri folderUri, final int ignoreFolderType,
-            final SpannableStringBuilder senders, final String filteredSubject) {
+    public RemoteViews getStyledView(final Context context, final CharSequence date,
+            final Conversation conversation, final FolderUri folderUri, final int ignoreFolderType,
+            final SpannableStringBuilder senders, String subject) {
 
         final boolean isUnread = !conversation.read;
         final String snippet = conversation.getSnippet();
         final boolean hasAttachments = conversation.hasAttachments;
+        final Resources res = context.getResources();
+        final int dateFontSize = res.getDimensionPixelSize(R.dimen.widget_date_font_size);
+        final int subjectFontSize = res.getDimensionPixelSize(R.dimen.widget_subject_font_size);
 
         // Add style to date
-        final CharSequence styledDate = addStyle(date, DATE_FONT_SIZE, DATE_TEXT_COLOR);
+        final int dateColor = isUnread ? DATE_TEXT_COLOR_UNREAD : DATE_TEXT_COLOR_READ;
+        final CharSequence styledDate = addStyle(date, dateFontSize, dateColor);
 
-        // Add style to subject
-        final int subjectColor = isUnread ? SUBJECT_TEXT_COLOR_UNREAD : SUBJECT_TEXT_COLOR_READ;
-        final SpannableStringBuilder subjectAndSnippet = new SpannableStringBuilder(
-                Conversation.getSubjectAndSnippetForDisplay(mContext, filteredSubject, snippet));
+        subject = Conversation.getSubjectForDisplay(context, null /* badgeText */, subject);
+        final SpannableStringBuilder subjectBuilder = new SpannableStringBuilder(subject);
         if (isUnread) {
-            subjectAndSnippet.setSpan(new StyleSpan(Typeface.BOLD), 0, filteredSubject.length(),
+            subjectBuilder.setSpan(new StyleSpan(Typeface.BOLD), 0, subject.length(),
                     Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
-        subjectAndSnippet.setSpan(new ForegroundColorSpan(subjectColor), 0, subjectAndSnippet
-                .length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        final CharSequence styledSubject = addStyle(subjectAndSnippet, SUBJECT_FONT_SIZE, 0);
+        final CharacterStyle subjectStyle = new ForegroundColorSpan(
+                isUnread ? SUBJECT_TEXT_COLOR_UNREAD : SUBJECT_TEXT_COLOR_READ);
+        subjectBuilder.setSpan(subjectStyle, 0, subjectBuilder.length(),
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        final CharSequence styledSubject = addStyle(subjectBuilder, subjectFontSize, 0);
+
+        final SpannableStringBuilder snippetBuilder = new SpannableStringBuilder(snippet);
+        snippetBuilder.setSpan(new ForegroundColorSpan(SNIPPET_TEXT_COLOR), 0,
+                snippetBuilder.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        final CharSequence styledSnippet = addStyle(snippetBuilder, subjectFontSize, 0);
 
         // Paper clip for attachment
         Bitmap paperclipBitmap = null;
@@ -177,10 +181,11 @@ public class WidgetConversationListItemViewBuilder {
 
         // Inflate and fill out the remote view
         final RemoteViews remoteViews = new RemoteViews(
-                mContext.getPackageName(), R.layout.widget_conversation_list_item);
+                context.getPackageName(), R.layout.widget_conversation_list_item);
         remoteViews.setTextViewText(R.id.widget_senders, senders);
         remoteViews.setTextViewText(R.id.widget_date, styledDate);
         remoteViews.setTextViewText(R.id.widget_subject, styledSubject);
+        remoteViews.setTextViewText(R.id.widget_snippet, styledSnippet);
         if (paperclipBitmap != null) {
             remoteViews.setViewVisibility(R.id.widget_attachment, View.VISIBLE);
             remoteViews.setImageViewBitmap(R.id.widget_attachment, paperclipBitmap);
@@ -194,8 +199,8 @@ public class WidgetConversationListItemViewBuilder {
             remoteViews.setViewVisibility(R.id.widget_unread_background, View.GONE);
             remoteViews.setViewVisibility(R.id.widget_read_background, View.VISIBLE);
         }
-        if (mContext.getResources().getBoolean(R.bool.display_folder_colors_in_widget)) {
-            mFolderDisplayer = new WidgetFolderDisplayer(mContext);
+        if (context.getResources().getBoolean(R.bool.display_folder_colors_in_widget)) {
+            mFolderDisplayer = new WidgetFolderDisplayer(context);
             mFolderDisplayer.loadConversationFolders(conversation, folderUri, ignoreFolderType);
             mFolderDisplayer.displayFolders(remoteViews);
         }

@@ -16,13 +16,13 @@
 
 package android.graphics.drawable.cts;
 
-import com.android.cts.stub.R;
-
+import com.android.cts.graphics.R;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 import android.content.res.Resources;
+import android.content.res.Resources.Theme;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.PixelFormat;
@@ -246,6 +246,26 @@ public class GradientDrawableTest extends AndroidTestCase {
         } catch (NullPointerException e) {
             // expected, test success
         }
+    }
+
+    public void testInflateGradientRadius() throws XmlPullParserException, IOException {
+        Rect parentBounds = new Rect(0, 0, 100, 100);
+        Resources resources = mContext.getResources();
+
+        GradientDrawable gradientDrawable;
+        float radius;
+
+        gradientDrawable = (GradientDrawable) resources.getDrawable(
+                R.drawable.gradientdrawable_radius_base);
+        gradientDrawable.setBounds(parentBounds);
+        radius = gradientDrawable.getGradientRadius();
+        assertEquals(25.0f, radius, 0.0f);
+
+        gradientDrawable = (GradientDrawable) resources.getDrawable(
+                R.drawable.gradientdrawable_radius_parent);
+        gradientDrawable.setBounds(parentBounds);
+        radius = gradientDrawable.getGradientRadius();
+        assertEquals(50.0f, radius, 0.0f);
     }
 
     public void testGetIntrinsicWidth() {

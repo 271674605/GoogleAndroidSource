@@ -20,39 +20,37 @@
     ],
   },
 
-  'include_dirs': [
-    '..',
-  ],
-
   'sources': [
     'ext/analysis_canvas.cc',
     'ext/analysis_canvas.h',
     'ext/benchmarking_canvas.cc',
     'ext/benchmarking_canvas.h',
     'ext/bitmap_platform_device.h',
-    'ext/bitmap_platform_device_android.cc',
-    'ext/bitmap_platform_device_android.h',
-    'ext/bitmap_platform_device_data.h',
-    'ext/bitmap_platform_device_linux.cc',
-    'ext/bitmap_platform_device_linux.h',
+    'ext/bitmap_platform_device_cairo.cc',
+    'ext/bitmap_platform_device_cairo.h',
     'ext/bitmap_platform_device_mac.cc',
     'ext/bitmap_platform_device_mac.h',
+    'ext/bitmap_platform_device_skia.cc',
+    'ext/bitmap_platform_device_skia.h',
     'ext/bitmap_platform_device_win.cc',
     'ext/bitmap_platform_device_win.h',
     'ext/convolver.cc',
     'ext/convolver.h',
+    'ext/event_tracer_impl.cc',
+    'ext/event_tracer_impl.h',
+    'ext/fontmgr_default_win.cc',
+    'ext/fontmgr_default_win.h',
     'ext/google_logging.cc',
     'ext/image_operations.cc',
     'ext/image_operations.h',
     'ext/lazy_pixel_ref.cc',
     'ext/lazy_pixel_ref.h',
-    'ext/lazy_pixel_ref_utils.cc',
-    'ext/lazy_pixel_ref_utils.h',
-    'ext/SkThread_chrome.cc',
     'ext/opacity_draw_filter.cc',
     'ext/opacity_draw_filter.h',
     'ext/paint_simplifier.cc',
     'ext/paint_simplifier.h',
+    'ext/pixel_ref_utils.cc',
+    'ext/pixel_ref_utils.h',
     'ext/platform_canvas.cc',
     'ext/platform_canvas.h',
     'ext/platform_device.cc',
@@ -63,6 +61,8 @@
     'ext/recursive_gaussian_convolution.cc',
     'ext/recursive_gaussian_convolution.h',
     'ext/refptr.h',
+    'ext/SkDiscardableMemory_chrome.h',
+    'ext/SkDiscardableMemory_chrome.cc',
     'ext/SkMemory_new_handler.cpp',
     'ext/skia_trace_shim.h',
     'ext/skia_utils_base.cc',
@@ -73,24 +73,19 @@
     'ext/skia_utils_mac.h',
     'ext/skia_utils_win.cc',
     'ext/skia_utils_win.h',
-    'ext/vector_canvas.cc',
     'ext/vector_canvas.h',
     'ext/vector_platform_device_emf_win.cc',
     'ext/vector_platform_device_emf_win.h',
     'ext/vector_platform_device_skia.cc',
     'ext/vector_platform_device_skia.h',
   ],
-  
   'conditions': [
-    # For POSIX platforms, prefer the Mutex implementation provided by Skia
-    # since it does not generate static initializers.
-    # TODO: should check if SK_USE_POSIX_THREADS is defined instead
-    [ 'OS == "android" or OS == "linux" or OS == "mac" or OS == "ios"', {
+    [ 'OS == "android" and enable_printing == 0', {
       'sources!': [
-        'ext/SkThread_chrome.cc',
+        'ext/skia_utils_base.cc',
       ],
     }],
-    [ 'OS == "android" and enable_printing == 0', {
+    [ 'enable_printing == 0', {
       'sources!': [
         'ext/vector_platform_device_skia.cc',
       ],
@@ -103,11 +98,6 @@
         'skia_chrome_opts',
       ],
     }],
-    [ 'OS == "win"', {
-      'sources!': [
-        'ext/SkThread_chrome.cc',
-      ],
-    }],
     # TODO(scottmg): http://crbug.com/177306
     ['clang==1', {
       'xcode_settings': {
@@ -118,6 +108,11 @@
       },
       'cflags!': [
         '-Wstring-conversion',
+      ],
+    }],
+    [ 'OS != "android" and (OS != "linux" or use_cairo==1)', {
+      'sources!': [
+        'ext/bitmap_platform_device_skia.cc',
       ],
     }],
   ],

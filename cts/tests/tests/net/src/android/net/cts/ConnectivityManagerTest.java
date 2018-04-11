@@ -16,7 +16,6 @@
 
 package android.net.cts;
 
-
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -30,6 +29,8 @@ import android.net.NetworkInfo.State;
 import android.net.wifi.WifiManager;
 import android.test.AndroidTestCase;
 import android.util.Log;
+
+import com.android.internal.telephony.PhoneConstants;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -66,8 +67,10 @@ public class ConnectivityManagerTest extends AndroidTestCase {
         mWifiManager = (WifiManager) getContext().getSystemService(Context.WIFI_SERVICE);
         mPackageManager = getContext().getPackageManager();
 
-        String[] naStrings = getContext().getResources().getStringArray(
-                com.android.internal.R.array.networkAttributes);
+        // Get com.android.internal.R.array.networkAttributes
+        int resId = getContext().getResources().getIdentifier("networkAttributes", "array", "android");
+        String[] naStrings = getContext().getResources().getStringArray(resId);
+
         for (String naString : naStrings) {
             try {
                 NetworkConfig n = new NetworkConfig(naString);
@@ -75,8 +78,9 @@ public class ConnectivityManagerTest extends AndroidTestCase {
             } catch (Exception e) {}
         }
 
-        int[] protectedNetworks = getContext().getResources().getIntArray(
-                com.android.internal.R.array.config_protectedNetworks);
+        // Get com.android.internal.R.array.config_protectedNetworks
+        resId = getContext().getResources().getIdentifier("config_protectedNetworks", "array", "android");
+        int[] protectedNetworks = getContext().getResources().getIntArray(resId);
         for (int p : protectedNetworks) {
             mProtectedNetworks.add(p);
         }
@@ -112,34 +116,9 @@ public class ConnectivityManagerTest extends AndroidTestCase {
     }
 
     public void testSetNetworkPreference() {
-        // verify swtiching between two default networks - need to connectable networks though
-        // could use test and whatever the current active network is
-        int originalPref = mCm.getNetworkPreference();
-        int currentPref = originalPref;
-        for (int type = -1; type <= ConnectivityManager.MAX_NETWORK_TYPE+1; type++) {
-            mCm.setNetworkPreference(type);
-            NetworkConfig c = mNetworks.get(type);
-            boolean expectWorked = (c != null && c.isDefault());
-            int totalSleep = 0;
-            int foundType = ConnectivityManager.TYPE_NONE;
-            while (totalSleep < 1000) {
-                try {
-                    Thread.currentThread().sleep(100);
-                } catch (InterruptedException e) {}
-                totalSleep += 100;
-                foundType = mCm.getNetworkPreference();
-                if (currentPref != foundType) break;
-            }
-            if (expectWorked) {
-                assertTrue("We should have been able to switch prefered type " + type,
-                        foundType == type);
-            } else {
-                assertTrue("We should not have been able to switch type " + type,
-                        foundType != type);
-            }
-            currentPref = foundType;
-        }
-        mCm.setNetworkPreference(originalPref);
+        // getNetworkPreference() and setNetworkPreference() are both deprecated so they do
+        // not preform any action.  Verify they are at least still callable.
+        mCm.setNetworkPreference(mCm.getNetworkPreference());
     }
 
     public void testGetActiveNetworkInfo() {
@@ -191,13 +170,13 @@ public class ConnectivityManagerTest extends AndroidTestCase {
         final String invalidateFeature = "invalidateFeature";
         final String mmsFeature = "enableMMS";
         final int failureCode = -1;
-        final int wifiOnlyStartFailureCode = 3;
-        final int wifiOnlyStopFailureCode = 1;
+        final int wifiOnlyStartFailureCode = PhoneConstants.APN_REQUEST_FAILED;
+        final int wifiOnlyStopFailureCode = -1;
 
         NetworkInfo ni = mCm.getNetworkInfo(TYPE_MOBILE);
         if (ni != null) {
-            assertEquals(failureCode, mCm.startUsingNetworkFeature(TYPE_MOBILE,
-                    invalidateFeature));
+            assertEquals(PhoneConstants.APN_REQUEST_FAILED,
+                    mCm.startUsingNetworkFeature(TYPE_MOBILE, invalidateFeature));
             assertEquals(failureCode, mCm.stopUsingNetworkFeature(TYPE_MOBILE,
                     invalidateFeature));
         } else {
@@ -209,8 +188,8 @@ public class ConnectivityManagerTest extends AndroidTestCase {
 
         ni = mCm.getNetworkInfo(TYPE_WIFI);
         if (ni != null) {
-            // Should return failure(-1) because MMS is not supported on WIFI.
-            assertEquals(failureCode, mCm.startUsingNetworkFeature(TYPE_WIFI,
+            // Should return failure because MMS is not supported on WIFI.
+            assertEquals(PhoneConstants.APN_REQUEST_FAILED, mCm.startUsingNetworkFeature(TYPE_WIFI,
                     mmsFeature));
             assertEquals(failureCode, mCm.stopUsingNetworkFeature(TYPE_WIFI,
                     mmsFeature));
@@ -269,9 +248,13 @@ public class ConnectivityManagerTest extends AndroidTestCase {
             return;
         }
 
-        boolean isWifiConnected = mWifiManager.isWifiEnabled()
-                && mWifiManager.getConnectionInfo().getSSID() != null;
+        boolean isWifiEnabled = mWifiManager.isWifiEnabled();
+        boolean isWifiConnected = false;
 
+        NetworkInfo nwInfo = mCm.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        if (nwInfo != null) {
+            isWifiConnected = nwInfo.isConnected();
+        }
         try {
             // Make sure WiFi is connected to an access point.
             if (!isWifiConnected) {
@@ -305,7 +288,7 @@ public class ConnectivityManagerTest extends AndroidTestCase {
             // TODO wait for HIPRI to go
             // TODO check dns selection
             // TODO check routes
-            if (!isWifiConnected) {
+            if (!isWifiEnabled) {
                 mWifiManager.setWifiEnabled(false);
             }
         }

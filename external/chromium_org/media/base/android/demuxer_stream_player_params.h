@@ -5,7 +5,6 @@
 #ifndef MEDIA_BASE_ANDROID_DEMUXER_STREAM_PLAYER_PARAMS_H_
 #define MEDIA_BASE_ANDROID_DEMUXER_STREAM_PLAYER_PARAMS_H_
 
-#include <string>
 #include <vector>
 
 #include "media/base/audio_decoder_config.h"
@@ -17,9 +16,9 @@
 
 namespace media {
 
-struct MEDIA_EXPORT MediaPlayerHostMsg_DemuxerReady_Params {
-  MediaPlayerHostMsg_DemuxerReady_Params();
-  ~MediaPlayerHostMsg_DemuxerReady_Params();
+struct MEDIA_EXPORT DemuxerConfigs {
+  DemuxerConfigs();
+  ~DemuxerConfigs();
 
   AudioCodec audio_codec;
   int audio_channels;
@@ -32,8 +31,7 @@ struct MEDIA_EXPORT MediaPlayerHostMsg_DemuxerReady_Params {
   bool is_video_encrypted;
   std::vector<uint8> video_extra_data;
 
-  int duration_ms;
-  std::string key_system;
+  base::TimeDelta duration;
 };
 
 struct MEDIA_EXPORT AccessUnit {
@@ -50,12 +48,18 @@ struct MEDIA_EXPORT AccessUnit {
   std::vector<media::SubsampleEntry> subsamples;
 };
 
-struct MEDIA_EXPORT MediaPlayerHostMsg_ReadFromDemuxerAck_Params {
-  MediaPlayerHostMsg_ReadFromDemuxerAck_Params();
-  ~MediaPlayerHostMsg_ReadFromDemuxerAck_Params();
+struct MEDIA_EXPORT DemuxerData {
+  DemuxerData();
+  ~DemuxerData();
 
   DemuxerStream::Type type;
   std::vector<AccessUnit> access_units;
+  // If the last entry in |access_units| has a status equal to |kConfigChanged|,
+  // a corresponding DemuxerConfigs is added into this vector. The
+  // DemuxerConfigs should only contain information of the stream that is
+  // specified by |type|. This solves the issue that we need multiple IPCs when
+  // demuxer configs change.
+  std::vector<DemuxerConfigs> demuxer_configs;
 };
 
 };  // namespace media

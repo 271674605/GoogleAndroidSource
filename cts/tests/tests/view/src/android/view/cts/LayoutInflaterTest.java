@@ -16,21 +16,22 @@
 
 package android.view.cts;
 
-import com.android.cts.stub.R;
+import com.android.cts.view.R;
 import com.android.internal.util.XmlUtils;
-
 
 import org.xmlpull.v1.XmlPullParser;
 
-import android.app.cts.MockActivity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
+import android.content.res.Resources.Theme;
 import android.content.res.XmlResourceParser;
 import android.test.AndroidTestCase;
+import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.TypedValue;
 import android.util.Xml;
 import android.view.Gravity;
 import android.view.InflateException;
@@ -42,20 +43,21 @@ import android.view.LayoutInflater.Filter;
 import android.widget.LinearLayout;
 
 public class LayoutInflaterTest extends AndroidTestCase {
-
     private LayoutInflater mLayoutInflater;
-    private Context mContext;
-    private final Factory mFactory = new Factory() {
-        public View onCreateView(String name, Context context,
-                AttributeSet attrs) {
 
+    @SuppressWarnings("hiding")
+    private Context mContext;
+
+    private final Factory mFactory = new Factory() {
+        @Override
+        public View onCreateView(String name, Context context, AttributeSet attrs) {
             return null;
         }
     };
     private boolean isOnLoadClass;
     private final Filter mFilter = new Filter() {
-
-        @SuppressWarnings("unchecked")
+        @SuppressWarnings({ "unchecked", "rawtypes" })
+        @Override
         public boolean onLoadClass(Class clazz) {
             isOnLoadClass = true;
             return true;
@@ -148,7 +150,8 @@ public class LayoutInflaterTest extends AndroidTestCase {
         mLayoutInflater = LayoutInflater.from(mContext);
         isOnLoadClass = false;
         mLayoutInflater.setFilter(new Filter() {
-            @SuppressWarnings("unchecked")
+            @SuppressWarnings({ "unchecked", "rawtypes" })
+            @Override
             public boolean onLoadClass(Class clazz) {
                 isOnLoadClass = true;
                 return false;
@@ -208,7 +211,7 @@ public class LayoutInflaterTest extends AndroidTestCase {
 
     public void testInflate() {
         View view = mLayoutInflater.inflate(
-                com.android.cts.stub.R.layout.inflater_layout, null);
+                com.android.cts.view.R.layout.inflater_layout, null);
         assertNotNull(view);
         view = null;
         try {
@@ -307,60 +310,99 @@ public class LayoutInflaterTest extends AndroidTestCase {
     }
 
     public void testInflate4() {
-       XmlResourceParser parser = getContext().getResources().getLayout(
-               R.layout.inflater_layout);
-       View view = mLayoutInflater.inflate(parser, null, false);
-       assertNotNull(view);
-       view = null;
-       try {
-           view = mLayoutInflater.inflate(null, null, false);
-           fail("should throw exception");
-       } catch (NullPointerException e) {
-       }
-       LinearLayout mLayout;
-       mLayout = new LinearLayout(mContext);
-       mLayout.setOrientation(LinearLayout.VERTICAL);
-       mLayout.setHorizontalGravity(Gravity.LEFT);
-       mLayout.setLayoutParams(new ViewGroup.LayoutParams(
-               ViewGroup.LayoutParams.MATCH_PARENT,
-               ViewGroup.LayoutParams.MATCH_PARENT));
-       assertEquals(0, mLayout.getChildCount());
+        XmlResourceParser parser = getContext().getResources().getLayout(
+                R.layout.inflater_layout);
+        View view = mLayoutInflater.inflate(parser, null, false);
+        assertNotNull(view);
+        view = null;
+        try {
+            view = mLayoutInflater.inflate(null, null, false);
+            fail("should throw exception");
+        } catch (NullPointerException e) {
+        }
+        LinearLayout mLayout;
+        mLayout = new LinearLayout(mContext);
+        mLayout.setOrientation(LinearLayout.VERTICAL);
+        mLayout.setHorizontalGravity(Gravity.LEFT);
+        mLayout.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        assertEquals(0, mLayout.getChildCount());
 
-       try {
-           view = mLayoutInflater.inflate(parser, mLayout, false);
-           fail("should throw exception");
-       } catch (NullPointerException e) {
-       }
-       parser = getContext().getResources().getLayout(
-               R.layout.inflater_layout);
-       view = mLayoutInflater.inflate(parser, mLayout, false);
-       assertNull(view.getParent());
-       assertNotNull(view);
-       assertEquals(0, mLayout.getChildCount());
-       parser = getContext().getResources().getLayout(
-               R.layout.inflater_layout);
-       assertEquals(0, mLayout.getChildCount());
-       view = mLayoutInflater.inflate(parser, mLayout, true);
-       assertNotNull(view);
-       assertNull(view.getParent());
-       assertEquals(1, mLayout.getChildCount());
+        try {
+            view = mLayoutInflater.inflate(parser, mLayout, false);
+            fail("should throw exception");
+        } catch (NullPointerException e) {
+        }
+        parser = getContext().getResources().getLayout(
+                R.layout.inflater_layout);
+        view = mLayoutInflater.inflate(parser, mLayout, false);
+        assertNull(view.getParent());
+        assertNotNull(view);
+        assertEquals(0, mLayout.getChildCount());
+        parser = getContext().getResources().getLayout(
+                R.layout.inflater_layout);
+        assertEquals(0, mLayout.getChildCount());
+        view = mLayoutInflater.inflate(parser, mLayout, true);
+        assertNotNull(view);
+        assertNull(view.getParent());
+        assertEquals(1, mLayout.getChildCount());
 
-       parser = null;
-       parser = getParser();
-       try {
-           view = mLayoutInflater.inflate(parser, mLayout, false);
-           fail("should throw exception");
-       } catch (InflateException e) {
-       }
+        parser = null;
+        parser = getParser();
+        try {
+            view = mLayoutInflater.inflate(parser, mLayout, false);
+            fail("should throw exception");
+        } catch (InflateException e) {
+        }
 
-       parser = null;
-       view = null;
-       parser = getParser();
+        parser = null;
+        view = null;
+        parser = getParser();
 
-       view = mLayoutInflater.inflate(parser, mLayout, true);
-       assertNotNull(view);
-       assertEquals(2, mLayout.getChildCount());
-   }
+        view = mLayoutInflater.inflate(parser, mLayout, true);
+        assertNotNull(view);
+        assertEquals(2, mLayout.getChildCount());
+    }
+
+    public void testOverrideTheme() {
+        View container = mLayoutInflater.inflate(R.layout.inflater_override_theme_layout, null);
+        verifyThemeType(container, "view_outer", R.id.view_outer, 1);
+        verifyThemeType(container, "view_inner", R.id.view_inner, 2);
+        verifyThemeType(container, "view_attr", R.id.view_attr, 3);
+    }
+
+    private void verifyThemeType(View container, String tag, int id, int type) {
+        TypedValue outValue = new TypedValue();
+        View view = container.findViewById(id);
+        assertNotNull("Found " + tag, view);
+        Theme theme = view.getContext().getTheme();
+        boolean resolved = theme.resolveAttribute(R.attr.themeType, outValue, true);
+        assertTrue("Resolved themeType for " + tag, resolved);
+        assertEquals(tag + " has themeType " + type, type, outValue.data);
+    }
+
+    public void testInflateTags() {
+        final View view = mLayoutInflater.inflate(
+                com.android.cts.view.R.layout.inflater_layout_tags, null);
+        assertNotNull(view);
+
+        checkViewTag(view, R.id.viewlayout_root, R.id.tag_viewlayout_root, R.string.tag1);
+        checkViewTag(view, R.id.mock_view, R.id.tag_mock_view, R.string.tag2);
+    }
+
+    private void checkViewTag(View parent, int viewId, int tagId, int valueResId) {
+        final View target = parent.findViewById(viewId);
+        assertNotNull("Found target view for " + viewId, target);
+
+        final Object tag = target.getTag(tagId);
+        assertNotNull("Tag is set", tag);
+        assertTrue("Tag is a character sequence", tag instanceof CharSequence);
+
+        final Context targetContext = target.getContext();
+        final CharSequence expectedValue = targetContext.getString(valueResId);
+        assertEquals(tagId + " has tag " + expectedValue, expectedValue, tag);
+    }
 
     static class MockLayoutInflater extends LayoutInflater {
 

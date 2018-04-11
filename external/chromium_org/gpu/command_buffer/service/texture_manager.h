@@ -13,7 +13,6 @@
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/observer_list.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_delegate.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
@@ -21,12 +20,11 @@
 #include "ui/gl/gl_image.h"
 
 namespace gpu {
-
-class StreamTextureManager;
-
 namespace gles2 {
 
 class GLES2Decoder;
+struct ContextState;
+struct DecoderFramebufferState;
 class Display;
 class ErrorState;
 class FeatureInfo;
@@ -75,7 +73,7 @@ class GPU_EXPORT Texture {
   }
 
   bool CanRenderTo() const {
-    return !stream_texture_ && target_ != GL_TEXTURE_EXTERNAL_OES;
+    return target_ != GL_TEXTURE_EXTERNAL_OES;
   }
 
   // The service side OpenGL id of the texture.
@@ -112,8 +110,12 @@ class GPU_EXPORT Texture {
   // does not exist.
   gfx::GLImage* GetLevelImage(GLint target, GLint level) const;
 
+  bool HasImages() const {
+    return has_images_;
+  }
+
   // Returns true of the given dimensions are inside the dimensions of the
-  // level and if the format and type match the level.
+  // level and if the type matches the level.
   bool ValidForTexture(
       GLint target,
       GLint level,
@@ -121,7 +123,6 @@ class GPU_EXPORT Texture {
       GLint yoffset,
       GLsizei width,
       GLsizei height,
-      GLenum format,
       GLenum type) const;
 
   bool IsValid() const {
@@ -141,10 +142,6 @@ class GPU_EXPORT Texture {
     --framebuffer_attachment_count_;
   }
 
-  bool IsStreamTexture() const {
-    return stream_texture_;
-  }
-
   void SetImmutable(bool immutable) {
     immutable_ = immutable;
   }
@@ -161,9 +158,16 @@ class GPU_EXPORT Texture {
     return estimated_size() > 0;
   }
 
+  // Initialize TEXTURE_MAX_ANISOTROPY to 1 if we haven't done so yet.
+  void InitTextureMaxAnisotropyIfNeeded(GLenum target);
+
+  void OnWillModifyPixels();
+  void OnDidModifyPixels();
+
  private:
   friend class MailboxManager;
   friend class MailboxManagerTest;
+  friend class TextureDefinition;
   friend class TextureManager;
   friend class TextureRef;
   friend class TextureTestHelper;
@@ -236,11 +240,6 @@ class GPU_EXPORT Texture {
     return npot_;
   }
 
-  void SetStreamTexture(bool stream_texture) {
-    stream_texture_ = stream_texture;
-    UpdateCanRenderCondition();
-  }
-
   // Marks a particular level as cleared or uncleared.
   void SetLevelCleared(GLenum target, GLint level, bool cleared);
 
@@ -256,10 +255,12 @@ class GPU_EXPORT Texture {
   bool ClearLevel(GLES2Decoder* decoder, GLenum target, GLint level);
 
   // Sets a texture parameter.
-  // TODO(gman): Expand to SetParameteri,f,iv,fv
+  // TODO(gman): Expand to SetParameteriv,fv
   // Returns GL_NO_ERROR on success. Otherwise the error to generate.
-  GLenum SetParameter(
+  GLenum SetParameteri(
       const FeatureInfo* feature_info, GLenum pname, GLint param);
+  GLenum SetParameterf(
+      const FeatureInfo* feature_info, GLenum pname, GLfloat param);
 
   // Makes each of the mip levels as though they were generated.
   bool MarkMipmapsGenerated(const FeatureInfo* feature_info);
@@ -315,6 +316,10 @@ class GPU_EXPORT Texture {
   // texture.
   void UpdateCanRenderCondition();
 
+  // Updates the images count in all the managers referencing this
+  // texture.
+  void UpdateHasImages();
+
   // Increment the framebuffer state change count in all the managers
   // referencing this texture.
   void IncAllFramebufferStateChangeCount();
@@ -369,18 +374,21 @@ class GPU_EXPORT Texture {
   // The number of framebuffers this texture is attached to.
   int framebuffer_attachment_count_;
 
-  // Whether this is a special streaming texture.
-  bool stream_texture_;
-
   // Whether the texture is immutable and no further changes to the format
   // or dimensions of the texture object can be made.
   bool immutable_;
+
+  // Whether or not this texture has images.
+  bool has_images_;
 
   // Size in bytes this texture is assumed to take in memory.
   uint32 estimated_size_;
 
   // Cache of the computed CanRenderCondition flag.
   CanRenderCondition can_render_condition_;
+
+  // Whether we have initialized TEXTURE_MAX_ANISOTROPY to 1.
+  bool texture_max_anisotropy_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(Texture);
 };
@@ -389,23 +397,21 @@ class GPU_EXPORT Texture {
 // with a client id, though it can outlive the client id if it's still bound to
 // a FBO or another context when destroyed.
 // Multiple TextureRef can point to the same texture with cross-context sharing.
-//
-// Note: for stream textures, the TextureRef that created the stream texture is
-// set as the "owner" of the stream texture, i.e. it will call
-// DestroyStreamTexture on destruction. This is because the StreamTextureManager
-// isn't generally shared between ContextGroups, so ownership can't be at the
-// Texture level. We also can't have multiple StreamTexture on the same service
-// id, so there can be only one owner.
 class GPU_EXPORT TextureRef : public base::RefCounted<TextureRef> {
  public:
   TextureRef(TextureManager* manager, GLuint client_id, Texture* texture);
   static scoped_refptr<TextureRef> Create(TextureManager* manager,
                                           GLuint client_id,
                                           GLuint service_id);
+
+  void AddObserver() { num_observers_++; }
+  void RemoveObserver() { num_observers_--; }
+
   const Texture* texture() const { return texture_; }
   Texture* texture() { return texture_; }
   GLuint client_id() const { return client_id_; }
   GLuint service_id() const { return texture_->service_id(); }
+  GLint num_observers() const { return num_observers_; }
 
  private:
   friend class base::RefCounted<TextureRef>;
@@ -416,17 +422,35 @@ class GPU_EXPORT TextureRef : public base::RefCounted<TextureRef> {
   const TextureManager* manager() const { return manager_; }
   TextureManager* manager() { return manager_; }
   void reset_client_id() { client_id_ = 0; }
-  void set_is_stream_texture_owner(bool owner) {
-    is_stream_texture_owner_ = owner;
-  }
-  bool is_stream_texture_owner() const { return is_stream_texture_owner_; }
 
   TextureManager* manager_;
   Texture* texture_;
   GLuint client_id_;
-  bool is_stream_texture_owner_;
+  GLint num_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureRef);
+};
+
+// Holds data that is per gles2_cmd_decoder, but is related to to the
+// TextureManager.
+struct DecoderTextureState {
+  // total_texture_upload_time automatically initialized to 0 in default
+  // constructor.
+  DecoderTextureState(bool texsubimage2d_faster_than_teximage2d)
+      : tex_image_2d_failed(false),
+        texture_upload_count(0),
+        texsubimage2d_faster_than_teximage2d(
+            texsubimage2d_faster_than_teximage2d) {}
+
+  // This indicates all the following texSubImage2D calls that are part of the
+  // failed texImage2D call should be ignored.
+  bool tex_image_2d_failed;
+
+  // Command buffer stats.
+  int texture_upload_count;
+  base::TimeDelta total_texture_upload_time;
+
+  bool texsubimage2d_faster_than_teximage2d;
 };
 
 // This class keeps track of the textures and their sizes so we can do NPOT and
@@ -462,15 +486,12 @@ class GPU_EXPORT TextureManager {
   TextureManager(MemoryTracker* memory_tracker,
                  FeatureInfo* feature_info,
                  GLsizei max_texture_size,
-                 GLsizei max_cube_map_texture_size);
+                 GLsizei max_cube_map_texture_size,
+                 bool use_default_textures);
   ~TextureManager();
 
   void set_framebuffer_manager(FramebufferManager* manager) {
     framebuffer_manager_ = manager;
-  }
-
-  void set_stream_texture_manager(StreamTextureManager* manager) {
-    stream_texture_manager_ = manager;
   }
 
   // Init the texture manager.
@@ -503,8 +524,10 @@ class GPU_EXPORT TextureManager {
   }
 
   // Returns the maxium number of levels a texture of the given size can have.
-  static GLsizei ComputeMipMapCount(
-    GLsizei width, GLsizei height, GLsizei depth);
+  static GLsizei ComputeMipMapCount(GLenum target,
+                                    GLsizei width,
+                                    GLsizei height,
+                                    GLsizei depth);
 
   // Checks if a dimensions are valid for a given target.
   bool ValidForTarget(
@@ -529,13 +552,6 @@ class GPU_EXPORT TextureManager {
   void SetTarget(
       TextureRef* ref,
       GLenum target);
-
-  // Marks a texture as a stream texture, and the ref as the stream texture
-  // owner.
-  void SetStreamTexture(TextureRef* ref, bool stream_texture);
-
-  // Whether the TextureRef is the stream texture owner.
-  bool IsStreamTextureOwner(TextureRef* ref);
 
   // Set the info for a particular level in a TexureInfo.
   void SetLevelInfo(
@@ -572,10 +588,13 @@ class GPU_EXPORT TextureManager {
 
   // Sets a texture parameter of a Texture
   // Returns GL_NO_ERROR on success. Otherwise the error to generate.
-  // TODO(gman): Expand to SetParameteri,f,iv,fv
-  void SetParameter(
+  // TODO(gman): Expand to SetParameteriv,fv
+  void SetParameteri(
       const char* function_name, ErrorState* error_state,
       TextureRef* ref, GLenum pname, GLint param);
+  void SetParameterf(
+      const char* function_name, ErrorState* error_state,
+      TextureRef* ref, GLenum pname, GLfloat param);
 
   // Makes each of the mip levels as though they were generated.
   // Returns false if that's not allowed for the given texture.
@@ -629,6 +648,10 @@ class GPU_EXPORT TextureManager {
     return num_uncleared_mips_ > 0;
   }
 
+  bool HaveImages() const {
+    return num_images_ > 0;
+  }
+
   GLuint black_texture_id(GLenum target) const {
     switch (target) {
       case GL_SAMPLER_2D:
@@ -664,12 +687,62 @@ class GPU_EXPORT TextureManager {
       std::string* signature) const;
 
   void AddObserver(DestructionObserver* observer) {
-    destruction_observers_.AddObserver(observer);
+    destruction_observers_.push_back(observer);
   }
 
   void RemoveObserver(DestructionObserver* observer) {
-    destruction_observers_.RemoveObserver(observer);
+    for (unsigned int i = 0; i < destruction_observers_.size(); i++) {
+      if (destruction_observers_[i] == observer) {
+        std::swap(destruction_observers_[i], destruction_observers_.back());
+        destruction_observers_.pop_back();
+        return;
+      }
+    }
+    NOTREACHED();
   }
+
+  struct DoTextImage2DArguments {
+    GLenum target;
+    GLint level;
+    GLenum internal_format;
+    GLsizei width;
+    GLsizei height;
+    GLint border;
+    GLenum format;
+    GLenum type;
+    const void* pixels;
+    uint32 pixels_size;
+  };
+
+  bool ValidateTexImage2D(
+    ContextState* state,
+    const char* function_name,
+    const DoTextImage2DArguments& args,
+    // Pointer to TextureRef filled in if validation successful.
+    // Presumes the pointer is valid.
+    TextureRef** texture_ref);
+
+  void ValidateAndDoTexImage2D(
+    DecoderTextureState* texture_state,
+    ContextState* state,
+    DecoderFramebufferState* framebuffer_state,
+    const DoTextImage2DArguments& args);
+
+  // TODO(kloveless): Make GetTexture* private once this is no longer called
+  // from gles2_cmd_decoder.
+  TextureRef* GetTextureInfoForTarget(ContextState* state, GLenum target);
+  TextureRef* GetTextureInfoForTargetUnlessDefault(
+      ContextState* state, GLenum target);
+
+  bool ValidateFormatAndTypeCombination(
+    ErrorState* error_state, const char* function_name,
+    GLenum format, GLenum type);
+
+  // Note that internal_format is only checked in relation to the format
+  // parameter, so that this function may be used to validate texSubImage2D.
+  bool ValidateTextureParameters(
+    ErrorState* error_state, const char* function_name,
+    GLenum format, GLenum type, GLenum internal_format, GLint level);
 
  private:
   friend class Texture;
@@ -680,6 +753,13 @@ class GPU_EXPORT TextureManager {
       GLenum target,
       GLuint* black_texture);
 
+  void DoTexImage2D(
+    DecoderTextureState* texture_state,
+    ErrorState* error_state,
+    DecoderFramebufferState* framebuffer_state,
+    TextureRef* texture_ref,
+    const DoTextImage2DArguments& args);
+
   void StartTracking(TextureRef* texture);
   void StopTracking(TextureRef* texture);
 
@@ -687,6 +767,7 @@ class GPU_EXPORT TextureManager {
   void UpdateUnclearedMips(int delta);
   void UpdateCanRenderCondition(Texture::CanRenderCondition old_condition,
                                 Texture::CanRenderCondition new_condition);
+  void UpdateNumImages(int delta);
   void IncFramebufferStateChangeCount();
 
   MemoryTypeTracker* GetMemTracker(GLenum texture_pool);
@@ -696,7 +777,6 @@ class GPU_EXPORT TextureManager {
   scoped_refptr<FeatureInfo> feature_info_;
 
   FramebufferManager* framebuffer_manager_;
-  StreamTextureManager* stream_texture_manager_;
 
   // Info for each texture in the system.
   typedef base::hash_map<GLuint, scoped_refptr<TextureRef> > TextureMap;
@@ -707,9 +787,12 @@ class GPU_EXPORT TextureManager {
   GLint max_levels_;
   GLint max_cube_map_levels_;
 
+  const bool use_default_textures_;
+
   int num_unrenderable_textures_;
   int num_unsafe_textures_;
   int num_uncleared_mips_;
+  int num_images_;
 
   // Counts the number of Textures allocated with 'this' as its manager.
   // Allows to check no Texture will outlive this.
@@ -725,9 +808,21 @@ class GPU_EXPORT TextureManager {
   // The default textures for each target (texture name = 0)
   scoped_refptr<TextureRef> default_textures_[kNumDefaultTextures];
 
-  ObserverList<DestructionObserver> destruction_observers_;
+  std::vector<DestructionObserver*> destruction_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureManager);
+};
+
+// This class records texture upload time when in scope.
+class ScopedTextureUploadTimer {
+ public:
+  explicit ScopedTextureUploadTimer(DecoderTextureState* texture_state);
+  ~ScopedTextureUploadTimer();
+
+ private:
+  DecoderTextureState* texture_state_;
+  base::TimeTicks begin_time_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedTextureUploadTimer);
 };
 
 }  // namespace gles2

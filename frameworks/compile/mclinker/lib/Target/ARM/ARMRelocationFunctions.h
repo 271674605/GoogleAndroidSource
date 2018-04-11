@@ -32,7 +32,9 @@ DECL_ARM_APPLY_RELOC_FUNC(thm_movt_prel)    \
 DECL_ARM_APPLY_RELOC_FUNC(prel31)           \
 DECL_ARM_APPLY_RELOC_FUNC(got_prel)         \
 DECL_ARM_APPLY_RELOC_FUNC(tls)              \
+DECL_ARM_APPLY_RELOC_FUNC(thm_jump8)        \
 DECL_ARM_APPLY_RELOC_FUNC(thm_jump11)       \
+DECL_ARM_APPLY_RELOC_FUNC(thm_jump19)       \
 DECL_ARM_APPLY_RELOC_FUNC(unsupport)
 
 
@@ -77,7 +79,7 @@ DECL_ARM_APPLY_RELOC_FUNC(unsupport)
   { &unsupport,         37, "R_ARM_ALU_SBREL_27_20_CK"},  \
   { &abs32,             38, "R_ARM_TARGET1"           },  \
   { &unsupport,         39, "R_ARM_SBREL31"           },  \
-  { &unsupport,         40, "R_ARM_V4BX"              },  \
+  { &none,              40, "R_ARM_V4BX"              },  \
   { &got_prel,          41, "R_ARM_TARGET2"           },  \
   { &prel31,            42, "R_ARM_PREL31"            },  \
   { &movw_abs_nc,       43, "R_ARM_MOVW_ABS_NC"       },  \
@@ -88,7 +90,7 @@ DECL_ARM_APPLY_RELOC_FUNC(unsupport)
   { &thm_movt_abs,      48, "R_ARM_THM_MOVT_ABS"      },  \
   { &thm_movw_prel_nc,  49, "R_ARM_THM_MOVW_PREL_NC"  },  \
   { &thm_movt_prel,     50, "R_ARM_THM_MOVT_PREL"     },  \
-  { &unsupport,         51, "R_ARM_THM_JUMP19"        },  \
+  { &thm_jump19,        51, "R_ARM_THM_JUMP19"        },  \
   { &unsupport,         52, "R_ARM_THM_JUMP6"         },  \
   { &unsupport,         53, "R_ARM_THM_ALU_PREL_11_0" },  \
   { &unsupport,         54, "R_ARM_THM_PC12"          },  \
@@ -140,7 +142,7 @@ DECL_ARM_APPLY_RELOC_FUNC(unsupport)
   { &unsupport,        100, "R_ARM_GNU_VTENTRY"       },  \
   { &unsupport,        101, "R_ARM_GNU_VTINERIT"      },  \
   { &thm_jump11,       102, "R_ARM_THM_JUMP11"        },  \
-  { &unsupport,        103, "R_ARM_THM_JUMP8"         },  \
+  { &thm_jump8,        103, "R_ARM_THM_JUMP8"         },  \
   { &tls,              104, "R_ARM_TLS_GD32"          },  \
   { &unsupport,        105, "R_ARM_TLS_LDM32"         },  \
   { &unsupport,        106, "R_ARM_TLS_LDO32"         },  \

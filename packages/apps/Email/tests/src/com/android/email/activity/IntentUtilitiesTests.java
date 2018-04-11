@@ -21,9 +21,11 @@ import com.android.emailcommon.utility.IntentUtilities;
 import android.content.Intent;
 import android.net.Uri;
 import android.test.AndroidTestCase;
+import android.test.suitebuilder.annotation.SmallTest;
 
+@SmallTest
 public class IntentUtilitiesTests extends AndroidTestCase {
-    public void testSimple() {
+    public void brokentestSimple() {
         final Uri.Builder b = IntentUtilities.createActivityIntentUrlBuilder("/abc");
         IntentUtilities.setAccountId(b, 10);
         IntentUtilities.setMailboxId(b, 20);
@@ -42,7 +44,7 @@ public class IntentUtilitiesTests extends AndroidTestCase {
         assertEquals("*uuid*", IntentUtilities.getAccountUuidFromIntent(i));
     }
 
-    public void testGetIdFromIntent() {
+    public void brokentestGetIdFromIntent() {
         Intent i;
 
         // No URL in intent
@@ -85,7 +87,7 @@ public class IntentUtilitiesTests extends AndroidTestCase {
         assertEquals(expected, IntentUtilities.getMessageIdFromIntent(i));
     }
 
-    public void testGetAccountUuidFromIntent() {
+    public void brokentestGetAccountUuidFromIntent() {
         Intent i;
 
         // No URL in intent

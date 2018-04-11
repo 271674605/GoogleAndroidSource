@@ -18,8 +18,6 @@
 package com.android.mail.ui;
 
 import android.animation.ValueAnimator;
-import android.app.ActionBar;
-import android.app.ActionBar.LayoutParams;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -41,18 +39,20 @@ import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.DataSetObservable;
 import android.database.DataSetObserver;
+import android.database.Observable;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Parcelable;
+import android.os.SystemClock;
 import android.provider.SearchRecentSuggestions;
 import android.support.v4.app.ActionBarDrawerToggle;
 import android.support.v4.widget.DrawerLayout;
+import android.support.v7.app.ActionBar;
 import android.view.DragEvent;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -65,6 +65,7 @@ import com.android.mail.ConversationListContext;
 import com.android.mail.MailLogService;
 import com.android.mail.R;
 import com.android.mail.analytics.Analytics;
+import com.android.mail.analytics.AnalyticsTimer;
 import com.android.mail.analytics.AnalyticsUtils;
 import com.android.mail.browse.ConfirmDialogFragment;
 import com.android.mail.browse.ConversationCursor;
@@ -74,6 +75,7 @@ import com.android.mail.browse.ConversationMessage;
 import com.android.mail.browse.ConversationPagerController;
 import com.android.mail.browse.SelectedConversationsActionMenu;
 import com.android.mail.browse.SyncErrorDialogFragment;
+import com.android.mail.browse.UndoCallback;
 import com.android.mail.compose.ComposeActivity;
 import com.android.mail.content.CursorCreator;
 import com.android.mail.content.ObjectCursor;
@@ -88,7 +90,6 @@ import com.android.mail.providers.Settings;
 import com.android.mail.providers.SuggestionsProvider;
 import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.AccountCapabilities;
-import com.android.mail.providers.UIProvider.AccountColumns;
 import com.android.mail.providers.UIProvider.AccountCursorExtraKeys;
 import com.android.mail.providers.UIProvider.AutoAdvance;
 import com.android.mail.providers.UIProvider.ConversationColumns;
@@ -100,8 +101,8 @@ import com.android.mail.utils.ContentProviderTask;
 import com.android.mail.utils.DrawIdler;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
+import com.android.mail.utils.MailObservable;
 import com.android.mail.utils.NotificationActionUtils;
-import com.android.mail.utils.Observable;
 import com.android.mail.utils.Utils;
 import com.android.mail.utils.VeiledAddressMatcher;
 import com.google.common.base.Objects;
@@ -113,7 +114,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
@@ -137,7 +137,7 @@ import java.util.TimerTask;
  * </p>
  */
 public abstract class AbstractActivityController implements ActivityController,
-        EmptyFolderDialogFragment.EmptyFolderDialogFragmentListener {
+        EmptyFolderDialogFragment.EmptyFolderDialogFragmentListener, View.OnClickListener {
     // Keys for serialization of various information in Bundles.
     /** Tag for {@link #mAccount} */
     private static final String SAVED_ACCOUNT = "saved-account";
@@ -165,7 +165,7 @@ public abstract class AbstractActivityController implements ActivityController,
     private static final String SAVED_CONVERSATION_LIST_SCROLL_POSITIONS =
             "saved-conversation-list-scroll-positions";
 
-    /** Tag  used when loading a wait fragment */
+    /** Tag used when loading a wait fragment */
     protected static final String TAG_WAIT = "wait-fragment";
     /** Tag used when loading a conversation list fragment. */
     public static final String TAG_CONVERSATION_LIST = "tag-conversation-list";
@@ -176,14 +176,21 @@ public abstract class AbstractActivityController implements ActivityController,
     private final String BUNDLE_ACCOUNT_KEY = "account";
     /** Key to store a folder in a bundle */
     private final String BUNDLE_FOLDER_KEY = "folder";
+    /**
+     * Key to set a flag for the ConversationCursorLoader to ignore any
+     * initial load limit that may be set by the Account. Instead,
+     * perform a full load instead of the full-stage load.
+     */
+    private final String BUNDLE_IGNORE_INITIAL_CONVERSATION_LIMIT_KEY =
+            "ignore-initial-conversation-limit";
 
     protected Account mAccount;
     protected Folder mFolder;
     protected Folder mInbox;
     /** True when {@link #mFolder} is first shown to the user. */
     private boolean mFolderChanged = false;
-    protected MailActionBarView mActionBarView;
-    protected final ControllableActivity mActivity;
+    protected ActionBarController mActionBarController;
+    protected final MailActivity mActivity;
     protected final Context mContext;
     private final FragmentManager mFragmentManager;
     protected final RecentFolderList mRecentFolderList;
@@ -230,7 +237,7 @@ public abstract class AbstractActivityController implements ActivityController,
 
     private final Set<Uri> mCurrentAccountUris = Sets.newHashSet();
     protected ConversationCursor mConversationListCursor;
-    private final DataSetObservable mConversationListObservable = new Observable("List");
+    private final DataSetObservable mConversationListObservable = new MailObservable("List");
 
     /** Runnable that checks the logging level to enable/disable the logging service. */
     private Runnable mLogServiceChecker = null;
@@ -238,6 +245,8 @@ public abstract class AbstractActivityController implements ActivityController,
     private Account[] mAllAccounts = new Account[0];
 
     private FolderWatcher mFolderWatcher;
+
+    private boolean mIgnoreInitialConversationLimit;
 
     /**
      * Interface for actions that are deferred until after a load completes. This is for handling
@@ -255,15 +264,16 @@ public abstract class AbstractActivityController implements ActivityController,
     private RefreshTimerTask mConversationListRefreshTask;
 
     /** Listeners that are interested in changes to the current account. */
-    private final DataSetObservable mAccountObservers = new Observable("Account");
+    private final DataSetObservable mAccountObservers = new MailObservable("Account");
     /** Listeners that are interested in changes to the recent folders. */
-    private final DataSetObservable mRecentFolderObservers = new Observable("RecentFolder");
+    private final DataSetObservable mRecentFolderObservers = new MailObservable("RecentFolder");
     /** Listeners that are interested in changes to the list of all accounts. */
-    private final DataSetObservable mAllAccountObservers = new Observable("AllAccounts");
+    private final DataSetObservable mAllAccountObservers = new MailObservable("AllAccounts");
     /** Listeners that are interested in changes to the current folder. */
-    private final DataSetObservable mFolderObservable = new Observable("CurrentFolder");
-    /** Listeners that are interested in changes to the drawer state. */
-    private final DataSetObservable mDrawerObservers = new Observable("Drawer");
+    private final DataSetObservable mFolderObservable = new MailObservable("CurrentFolder");
+    /** Listeners that are interested in changes to the Folder or Account selection */
+    private final DataSetObservable mFolderOrAccountObservers =
+            new MailObservable("FolderOrAccount");
 
     /**
      * Selected conversations, if any.
@@ -279,6 +289,9 @@ public abstract class AbstractActivityController implements ActivityController,
      * Action menu associated with the selected set.
      */
     SelectedConversationsActionMenu mCabActionMenu;
+
+    /** The compose button floating over the conversation/search lists */
+    protected View mFloatingComposeButton;
     protected ActionableToastBar mToastBar;
     protected ConversationPagerController mPagerController;
 
@@ -324,9 +337,36 @@ public abstract class AbstractActivityController implements ActivityController,
      * {@link #LOADER_ACCOUNT_CURSOR}. The current account is guaranteed to be in the list,
      * and would avoid two updates when a single setting on the current account changes.
      */
-    private static final int LOADER_ACCOUNT_UPDATE_CURSOR = 7;
+    private static final int LOADER_ACCOUNT_UPDATE_CURSOR = 1;
+
+    // Loader constants: Conversations
+
+    /** The conversation cursor over the current conversation list. This loader provides
+     * a cursor over conversation entries from a folder to display a conversation
+     * list.
+     * This loader is started when the user switches folders (in {@link #updateFolder(Folder)},
+     * or when the controller is told that a folder/account change is imminent
+     * (in {@link #preloadConvList(Account, Folder)}. The loader is maintained for the life of
+     * the current folder. When the user switches folders, the old loader is destroyed and a new
+     * one is created.
+     *
+     * When the conversation list changes, we notify {@link #mConversationListObservable}.
+     */
+    private static final int LOADER_CONVERSATION_LIST = 10;
+
+    // Loader constants: misc
+    /**
+     * The loader that determines whether the Warm welcome tour should be displayed for the user.
+     */
+    public static final int LOADER_WELCOME_TOUR = 20;
+
+    /**
+     * The load which loads accounts for the welcome tour.
+     */
+    public static final int LOADER_WELCOME_TOUR_ACCOUNTS = 21;
 
     // Loader constants: Folders
+
     /** The current folder. This loader watches for updates to the current folder in a manner
      * analogous to the {@link #LOADER_ACCOUNT_UPDATE_CURSOR}. Updates to the current folder
      * might be due to server-side changes (unread count), or local changes (sync window or sync
@@ -336,7 +376,8 @@ public abstract class AbstractActivityController implements ActivityController,
      * loader returns, the current folder is updated and consumers, if any, are notified.
      * When the current folder changes, we notify {@link #mFolderObservable}
      */
-    private static final int LOADER_FOLDER_CURSOR = 2;
+    private static final int LOADER_FOLDER_CURSOR = 30;
+
     /**
      * The list of recent folders. Recent folders are shown in the DrawerFragment. The recent
      * folders are tied to the current account being viewed. When the account is changed,
@@ -349,7 +390,7 @@ public abstract class AbstractActivityController implements ActivityController,
      * Recent folders are needed for the life of the current account.
      * When the recent folders change, we notify {@link #mRecentFolderObservers}.
      */
-    private static final int LOADER_RECENT_FOLDERS = 3;
+    private static final int LOADER_RECENT_FOLDERS = 31;
     /**
      * The primary inbox for the current account. The mechanism to load the default inbox for the
      * current account is (sadly) different from loading other folders. The method
@@ -359,7 +400,8 @@ public abstract class AbstractActivityController implements ActivityController,
      * over the current folder.
      * When we have a valid cursor, we destroy this loader, This convoluted flow is historical.
      */
-    private static final int LOADER_ACCOUNT_INBOX = 5;
+    private static final int LOADER_ACCOUNT_INBOX = 32;
+
     /**
      * The fake folder of search results for a term. When we search for a term,
      * a new activity is created with {@link Intent#ACTION_SEARCH}. For this new activity,
@@ -367,7 +409,7 @@ public abstract class AbstractActivityController implements ActivityController,
      * We destroy the loader when we obtain a valid cursor since subsequent searches will create
      * a new activity.
      */
-    private static final int LOADER_SEARCH = 6;
+    private static final int LOADER_SEARCH = 33;
     /**
      * The initial folder at app start. When the application is launched from an intent that
      * specifies the initial folder (notifications/widgets/shortcuts),
@@ -380,21 +422,7 @@ public abstract class AbstractActivityController implements ActivityController,
      * or tapping on a specific conversation in the widget. In these cases, the conversation is
      * saved in {@link #mConversationToShow} and is retrieved when the loader returns.
      */
-    public static final int LOADER_FIRST_FOLDER = 8;
-
-    // Loader constants: Conversations
-    /** The conversation cursor over the current conversation list. This loader provides
-     * a cursor over conversation entries from a folder to display a conversation
-     * list.
-     * This loader is started when the user switches folders (in {@link #updateFolder(Folder)},
-     * or when the controller is told that a folder/account change is imminent
-     * (in {@link #preloadConvList(Account, Folder)}. The loader is maintained for the life of
-     * the current folder. When the user switches folders, the old loader is destroyed and a new
-     * one is created.
-     *
-     * When the conversation list changes, we notify {@link #mConversationListObservable}.
-     */
-    private static final int LOADER_CONVERSATION_LIST = 4;
+    public static final int LOADER_FIRST_FOLDER = 34;
 
     /**
      * Guaranteed to be the last loader ID used by the activity. Loaders are owned by Activity or
@@ -405,11 +433,12 @@ public abstract class AbstractActivityController implements ActivityController,
      * loaders, consider consolidating the loaders in a central location: a UI-less fragment
      * perhaps.
      */
-    public static final int LAST_LOADER_ID = 100;
+    public static final int LAST_LOADER_ID = 35;
+
     /**
      * Guaranteed to be the last loader ID used by the Fragment. Loaders are owned by Activity or
      * fragments, and within an activity, loader IDs need to be unique. Currently,
-     * {@link SectionedInboxTeaserView} is the only class that uses the
+     * SectionedInboxTeaserView is the only class that uses the
      * {@link ConversationListFragment}'s LoaderManager.
      */
     public static final int LAST_FRAGMENT_LOADER_ID = 1000;
@@ -418,6 +447,12 @@ public abstract class AbstractActivityController implements ActivityController,
     private static final int ADD_ACCOUNT_REQUEST_CODE = 1;
     /** Code returned when the user has to enter the new password on an existing account. */
     private static final int REAUTHENTICATE_REQUEST_CODE = 2;
+    /** Code returned when the previous activity needs to navigate to a different folder
+     *  or account */
+    private static final int CHANGE_NAVIGATION_REQUEST_CODE = 3;
+
+    public static final String EXTRA_FOLDER = "extra-folder";
+    public static final String EXTRA_ACCOUNT = "extra-account";
 
     /** The pending destructive action to be carried out before swapping the conversation cursor.*/
     private DestructiveAction mPendingDestruction;
@@ -456,15 +491,14 @@ public abstract class AbstractActivityController implements ActivityController,
      */
     private Runnable mAutoAdvanceOp = null;
 
-    private final Deque<UpOrBackHandler> mUpOrBackHandlers = Lists.newLinkedList();
-
     protected DrawerLayout mDrawerContainer;
     protected View mDrawerPullout;
     protected ActionBarDrawerToggle mDrawerToggle;
+
     protected ListView mListViewForAnimating;
     protected boolean mHasNewAccountOrFolder;
     private boolean mConversationListLoadFinishedIgnored;
-    protected MailDrawerListener mDrawerListener;
+    private final MailDrawerListener mDrawerListener = new MailDrawerListener();
     private boolean mHideMenuItems;
 
     private final DrawIdler mDrawIdler = new DrawIdler();
@@ -481,6 +515,8 @@ public abstract class AbstractActivityController implements ActivityController,
             }
         }
     };
+
+    private final HomeButtonListener mHomeButtonListener = new HomeButtonListener();
 
     public AbstractActivityController(MailActivity activity, ViewMode viewMode) {
         mActivity = activity;
@@ -509,20 +545,6 @@ public abstract class AbstractActivityController implements ActivityController,
     @Override
     public ConversationListContext getCurrentListContext() {
         return mConvListContext;
-    }
-
-    @Override
-    public String getHelpContext() {
-        final int mode = mViewMode.getMode();
-        final int helpContextResId;
-        switch (mode) {
-            case ViewMode.WAITING_FOR_ACCOUNT_INITIALIZATION:
-                helpContextResId = R.string.wait_help_context;
-                break;
-            default:
-                helpContextResId = R.string.main_help_context;
-        }
-        return mContext.getString(helpContextResId);
     }
 
     @Override
@@ -570,7 +592,8 @@ public abstract class AbstractActivityController implements ActivityController,
      * the controller and perform the task immediately on {@link Fragment#onActivityCreated(Bundle)}
      */
     protected FolderListFragment getFolderListFragment() {
-        final Fragment fragment = mFragmentManager.findFragmentById(R.id.drawer_pullout);
+        final String drawerPulloutTag = mActivity.getString(R.string.drawer_pullout_tag);
+        final Fragment fragment = mFragmentManager.findFragmentByTag(drawerPulloutTag);
         if (isValidFragment(fragment)) {
             return (FolderListFragment) fragment;
         }
@@ -582,38 +605,34 @@ public abstract class AbstractActivityController implements ActivityController,
      * TwoPaneController so they cannot override this behavior.
      */
     private void initializeActionBar() {
-        final ActionBar actionBar = mActivity.getActionBar();
+        final ActionBar actionBar = mActivity.getSupportActionBar();
         if (actionBar == null) {
             return;
         }
 
-        // be sure to inherit from the ActionBar theme when inflating
-        final LayoutInflater inflater = LayoutInflater.from(actionBar.getThemedContext());
         final boolean isSearch = mActivity.getIntent() != null
                 && Intent.ACTION_SEARCH.equals(mActivity.getIntent().getAction());
-        mActionBarView = (MailActionBarView) inflater.inflate(
-                isSearch ? R.layout.search_actionbar_view : R.layout.actionbar_view, null);
-        mActionBarView.initialize(mActivity, this, actionBar);
+        mActionBarController = isSearch ?
+                new SearchActionBarController(mContext) :
+                new ActionBarController(mContext);
+        mActionBarController.initialize(mActivity, this, actionBar);
 
         // init the action bar to allow the 'up' affordance.
         // any configurations that disallow 'up' should do that later.
-        mActionBarView.setBackButton();
+        mActionBarController.setBackButton();
     }
 
     /**
      * Attach the action bar to the activity.
      */
     private void attachActionBar() {
-        final ActionBar actionBar = mActivity.getActionBar();
-        if (actionBar != null && mActionBarView != null) {
-            actionBar.setCustomView(mActionBarView, new ActionBar.LayoutParams(
-                    LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
-            // Show a custom view and home icon, keep the title and subttitle
-            final int mask = ActionBar.DISPLAY_SHOW_CUSTOM | ActionBar.DISPLAY_SHOW_TITLE
-                    | ActionBar.DISPLAY_SHOW_HOME;
+        final ActionBar actionBar = mActivity.getSupportActionBar();
+        if (actionBar != null) {
+            // Show a title
+            final int mask = ActionBar.DISPLAY_SHOW_TITLE | ActionBar.DISPLAY_SHOW_HOME;
             actionBar.setDisplayOptions(mask, mask);
+            mActionBarController.setViewModeController(mViewMode);
         }
-        mViewMode.addListener(mActionBarView);
     }
 
     /**
@@ -654,6 +673,16 @@ public abstract class AbstractActivityController implements ActivityController,
     @Override
     public void switchToDefaultInboxOrChangeAccount(Account account) {
         LogUtils.d(LOG_TAG, "AAC.switchToDefaultAccount(%s)", account);
+        if (mViewMode.isSearchMode()) {
+            // We are in an activity on top of the main navigation activity.
+            // We need to return to it with a result code that indicates it should navigate to
+            // a different folder.
+            final Intent intent = new Intent();
+            intent.putExtra(AbstractActivityController.EXTRA_ACCOUNT, account);
+            mActivity.setResult(Activity.RESULT_OK, intent);
+            mActivity.finish();
+            return;
+        }
         final boolean firstLoad = mAccount == null;
         final boolean switchToDefaultInbox = !firstLoad && account.uri.equals(mAccount.uri);
         // If the active account has been clicked in the drawer, go to default inbox
@@ -664,7 +693,6 @@ public abstract class AbstractActivityController implements ActivityController,
         changeAccount(account);
     }
 
-    @Override
     public void changeAccount(Account account) {
         LogUtils.d(LOG_TAG, "AAC.changeAccount(%s)", account);
         // Is the account or account settings different from the existing account?
@@ -703,7 +731,10 @@ public abstract class AbstractActivityController implements ActivityController,
         if (mAccount != null && !Uri.EMPTY.equals(mAccount.settings.setupIntentUri)) {
             // Launch the intent!
             final Intent intent = new Intent(Intent.ACTION_EDIT);
+
+            intent.setPackage(mContext.getPackageName());
             intent.setData(mAccount.settings.setupIntentUri);
+
             mActivity.startActivity(intent);
         }
     }
@@ -748,13 +779,13 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     @Override
-    public void registerDrawerClosedObserver(final DataSetObserver observer) {
-        mDrawerObservers.registerObserver(observer);
+    public void registerFolderOrAccountChangedObserver(final DataSetObserver observer) {
+        mFolderOrAccountObservers.registerObserver(observer);
     }
 
     @Override
-    public void unregisterDrawerClosedObserver(final DataSetObserver observer) {
-        mDrawerObservers.unregisterObserver(observer);
+    public void unregisterFolderOrAccountChangedObserver(final DataSetObserver observer) {
+        mFolderOrAccountObservers.unregisterObserver(observer);
     }
 
     /**
@@ -766,7 +797,9 @@ public abstract class AbstractActivityController implements ActivityController,
     public void closeDrawer(final boolean hasNewFolderOrAccount, Account nextAccount,
             Folder nextFolder) {
         if (!isDrawerEnabled()) {
-            mDrawerObservers.notifyChanged();
+            if (hasNewFolderOrAccount) {
+                mFolderOrAccountObservers.notifyChanged();
+            }
             return;
         }
         // If there are no new folders or accounts to switch to, just close the drawer
@@ -793,7 +826,9 @@ public abstract class AbstractActivityController implements ActivityController,
             mDrawerContainer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
         } else {
             // Drawer is already closed, notify observers that is the case.
-            mDrawerObservers.notifyChanged();
+            if (hasNewFolderOrAccount) {
+                mFolderOrAccountObservers.notifyChanged();
+            }
         }
     }
 
@@ -840,16 +875,17 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public void onFolderChanged(Folder folder, final boolean force) {
-        /** If the folder doesn't exist, or its parent URI is empty,
-         * this is not a child folder */
-        final boolean isTopLevel = (folder == null) || (folder.parent == Uri.EMPTY);
-        final int mode = mViewMode.getMode();
-        mDrawerToggle.setDrawerIndicatorEnabled(
-                getShouldShowDrawerIndicator(mode, isTopLevel));
-        mDrawerContainer.setDrawerLockMode(getShouldAllowDrawerPull(mode)
-                ? DrawerLayout.LOCK_MODE_UNLOCKED : DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
+        if (isDrawerEnabled()) {
+            /** If the folder doesn't exist, or its parent URI is empty,
+             * this is not a child folder */
+            final boolean isTopLevel = Folder.isRoot(folder);
+            final int mode = mViewMode.getMode();
+            mDrawerToggle.setDrawerIndicatorEnabled(
+                    getShouldShowDrawerIndicator(mode, isTopLevel));
+            mDrawerContainer.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED);
 
-        mDrawerContainer.closeDrawers();
+            mDrawerContainer.closeDrawers();
+        }
 
         if (mFolder == null || !mFolder.equals(folder)) {
             // We are actually changing the folder, so exit cab mode
@@ -943,7 +979,7 @@ public abstract class AbstractActivityController implements ActivityController,
             }
         }
         if (!handled) {
-            LogUtils.w(LOG_TAG, "Starting a LOADER_ACCOUNT_INBOX for %s", mAccount);
+            LogUtils.d(LOG_TAG, "Starting a LOADER_ACCOUNT_INBOX for %s", mAccount);
             restartOptionalLoader(LOADER_ACCOUNT_INBOX, mFolderCallbacks, Bundle.EMPTY);
         }
         final int mode = mViewMode.getMode();
@@ -1004,7 +1040,7 @@ public abstract class AbstractActivityController implements ActivityController,
         // We do not need to notify folder observers yet. Instead we start the loaders and
         // when the load finishes, we will get an updated folder. Then, we notify the
         // folderObservers in onLoadFinished.
-        mActionBarView.setFolder(mFolder);
+        mActionBarController.setFolder(mFolder);
 
         // Only when we switch from one folder to another do we want to restart the
         // folder and conversation list loaders (to trigger onCreateLoader).
@@ -1025,6 +1061,9 @@ public abstract class AbstractActivityController implements ActivityController,
         final Bundle args = new Bundle(2);
         args.putParcelable(BUNDLE_ACCOUNT_KEY, mAccount);
         args.putParcelable(BUNDLE_FOLDER_KEY, mFolder);
+        args.putBoolean(BUNDLE_IGNORE_INITIAL_CONVERSATION_LIMIT_KEY,
+                mIgnoreInitialConversationLimit);
+        mIgnoreInitialConversationLimit = false;
         lm.initLoader(LOADER_CONVERSATION_LIST, args, mListCursorCallbacks);
     }
 
@@ -1074,6 +1113,22 @@ public abstract class AbstractActivityController implements ActivityController,
                     final Uri refreshUri = mFolder != null ? mFolder.refreshUri : null;
                     if (refreshUri != null) {
                         startAsyncRefreshTask(refreshUri);
+                    }
+                }
+                break;
+            case CHANGE_NAVIGATION_REQUEST_CODE:
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    // We have have received a result that indicates we need to navigate to a
+                    // different folder or account. This happens if someone navigates using the
+                    // drawer on the search results activity.
+                    final Folder folder = data.getParcelableExtra(EXTRA_FOLDER);
+                    final Account account = data.getParcelableExtra(EXTRA_ACCOUNT);
+                    if (folder != null) {
+                        onFolderSelected(folder);
+                        mViewMode.enterConversationListMode();
+                    } else if (account != null) {
+                        switchToDefaultInboxOrChangeAccount(account);
+                        mViewMode.enterConversationListMode();
                     }
                 }
                 break;
@@ -1221,26 +1276,31 @@ public abstract class AbstractActivityController implements ActivityController,
         mRecentFolderList.initialize(mActivity);
         mVeiledMatcher.initialize(this);
 
-        // the "open drawer description" argument is for when the drawer is open
-        // so tell the user that interacting will cause the drawer to close
-        // and vice versa for the "close drawer description" argument
-        mDrawerToggle = new ActionBarDrawerToggle((Activity) mActivity, mDrawerContainer,
-                R.drawable.ic_drawer, R.string.drawer_close, R.string.drawer_open);
-        mDrawerListener = new MailDrawerListener();
-        mDrawerContainer.setDrawerListener(mDrawerListener);
-        mDrawerContainer.setDrawerShadow(
-                mContext.getResources().getDrawable(R.drawable.drawer_shadow), Gravity.START);
+        mFloatingComposeButton = mActivity.findViewById(R.id.compose_button);
+        mFloatingComposeButton.setOnClickListener(this);
 
-        mDrawerToggle.setDrawerIndicatorEnabled(isDrawerEnabled());
+        if (isDrawerEnabled()) {
+            mDrawerToggle = new ActionBarDrawerToggle(mActivity, mDrawerContainer, false,
+                    R.drawable.ic_drawer, R.string.drawer_open, R.string.drawer_close);
+            mDrawerContainer.setDrawerListener(mDrawerListener);
+            mDrawerContainer.setDrawerShadow(
+                    mContext.getResources().getDrawable(R.drawable.drawer_shadow), Gravity.START);
+
+            mDrawerToggle.setDrawerIndicatorEnabled(isDrawerEnabled());
+        } else {
+            final ActionBar ab = mActivity.getSupportActionBar();
+            ab.setHomeAsUpIndicator(R.drawable.ic_drawer);
+            ab.setHomeActionContentDescription(R.string.drawer_open);
+            ab.setDisplayHomeAsUpEnabled(true);
+        }
 
         // All the individual UI components listen for ViewMode changes. This
         // simplifies the amount of logic in the AbstractActivityController, but increases the
         // possibility of timing-related bugs.
         mViewMode.addListener(this);
         mPagerController = new ConversationPagerController(mActivity, this);
-        mToastBar = (ActionableToastBar) mActivity.findViewById(R.id.toast_bar);
+        mToastBar = findActionableToastBar(mActivity);
         attachActionBar();
-        FolderSelectionDialog.setDialogDismissed();
 
         mDrawIdler.setRootView(mActivity.getWindow().getDecorView());
 
@@ -1273,8 +1333,19 @@ public abstract class AbstractActivityController implements ActivityController,
         return true;
     }
 
+    /**
+     * @param activity the activity that has been inflated
+     * @return the Actionable Toast Bar defined within the activity
+     */
+    protected ActionableToastBar findActionableToastBar(MailActivity activity) {
+        return (ActionableToastBar) activity.findViewById(R.id.toast_bar);
+    }
+
     @Override
     public void onPostCreate(Bundle savedState) {
+        if (!isDrawerEnabled()) {
+            return;
+        }
         // Sync the toggle state after onRestoreInstanceState has occurred.
         mDrawerToggle.syncState();
 
@@ -1283,7 +1354,25 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
-        mDrawerToggle.onConfigurationChanged(newConfig);
+        if (isDrawerEnabled()) {
+            mDrawerToggle.onConfigurationChanged(newConfig);
+        }
+    }
+
+    /**
+     * This controller listens for clicks on items in the floating action bar.
+     *
+     * @param view the item that was clicked in the floating action bar
+     */
+    @Override
+    public void onClick(View view) {
+        final int viewId = view.getId();
+        if (viewId == R.id.compose_button) {
+            ComposeActivity.compose(mActivity.getActivityContext(), getAccount());
+        } else if (viewId == android.R.id.home) {
+            // TODO: b/16627877
+            onUpPressed();
+        }
     }
 
     /**
@@ -1336,8 +1425,8 @@ public abstract class AbstractActivityController implements ActivityController,
             return false;
         }
         final MenuInflater inflater = mActivity.getMenuInflater();
-        inflater.inflate(mActionBarView.getOptionsMenuId(), menu);
-        mActionBarView.onCreateOptionsMenu(menu);
+        inflater.inflate(mActionBarController.getOptionsMenuId(), menu);
+        mActionBarController.onCreateOptionsMenu(menu);
         return true;
     }
 
@@ -1348,6 +1437,53 @@ public abstract class AbstractActivityController implements ActivityController,
 
     public abstract boolean doesActionChangeConversationListVisibility(int action);
 
+    /**
+     * Helper function that determines if we should associate an undo callback with
+     * the current menu action item
+     * @param actionId the id of the action
+     * @return the appropriate callback handler, or null if not applicable
+     */
+    private UndoCallback getUndoCallbackForDestructiveActionsWithAutoAdvance(
+            int actionId, final Conversation conv) {
+        // We associated the undoCallback if the user is going to perform an action on the current
+        // conversation, causing the current conversation to be removed from view and replacing it
+        // with another (via Auto Advance). The undoCallback will bring the removed conversation
+        // back into the view if the action is undone.
+        final Collection<Conversation> convCol = Conversation.listOf(conv);
+        final boolean isApplicableForReshow = mAccount != null &&
+                mAccount.settings != null &&
+                mTracker != null &&
+                // ensure that we will show another conversation due to Auto Advance
+                mTracker.getNextConversation(
+                        mAccount.settings.getAutoAdvanceSetting(), convCol) != null &&
+                // ensure that we are performing the action from conversation view
+                isCurrentConversationInView(convCol) &&
+                // check for the appropriate destructive actions
+                doesActionRemoveCurrentConversationFromView(actionId);
+        return (isApplicableForReshow) ?
+            new UndoCallback() {
+                @Override
+                public void performUndoCallback() {
+                    showConversation(conv);
+                }
+            } : null;
+    }
+
+    /**
+     * Check if the provided action will remove the active conversation from view
+     * @param actionId the applied action
+     * @return true if it will remove the conversation from view, false otherwise
+     */
+    private boolean doesActionRemoveCurrentConversationFromView(int actionId) {
+        return actionId == R.id.archive ||
+                actionId == R.id.delete ||
+                actionId == R.id.discard_outbox ||
+                actionId == R.id.remove_folder ||
+                actionId == R.id.report_spam ||
+                actionId == R.id.report_phishing ||
+                actionId == R.id.move_to;
+    }
+
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
 
@@ -1355,14 +1491,14 @@ public abstract class AbstractActivityController implements ActivityController,
          * The action bar home/up action should open or close the drawer.
          * mDrawerToggle will take care of this.
          */
-        if (mDrawerToggle.onOptionsItemSelected(item)) {
+        if (isDrawerEnabled() && mDrawerToggle.onOptionsItemSelected(item)) {
             Analytics.getInstance().sendEvent(Analytics.EVENT_CATEGORY_MENU_ITEM, "drawer_toggle",
                     null, 0);
             return true;
         }
 
         Analytics.getInstance().sendMenuItemEvent(Analytics.EVENT_CATEGORY_MENU_ITEM,
-                item.getItemId(), "action_bar", 0);
+                item.getItemId(), "action_bar/" + mViewMode.getModeString(), 0);
 
         final int id = item.getItemId();
         LogUtils.d(LOG_TAG, "AbstractController.onOptionsItemSelected(%d) called.", id);
@@ -1374,44 +1510,53 @@ public abstract class AbstractActivityController implements ActivityController,
         // The user is choosing a new action; commit whatever they had been
         // doing before. Don't animate if we are launching a new screen.
         commitDestructiveActions(!doesActionChangeConversationListVisibility(id));
+        final UndoCallback undoCallback = getUndoCallbackForDestructiveActionsWithAutoAdvance(
+                id, mCurrentConversation);
+
         if (id == R.id.archive) {
             final boolean showDialog = (settings != null && settings.confirmArchive);
-            confirmAndDelete(id, target, showDialog, R.plurals.confirm_archive_conversation);
+            confirmAndDelete(id, target, showDialog, R.plurals.confirm_archive_conversation, undoCallback);
         } else if (id == R.id.remove_folder) {
             delete(R.id.remove_folder, target,
-                    getDeferredRemoveFolder(target, mFolder, true, isBatch, true), isBatch);
+                    getDeferredRemoveFolder(target, mFolder, true, isBatch, true, undoCallback),
+                    isBatch);
         } else if (id == R.id.delete) {
             final boolean showDialog = (settings != null && settings.confirmDelete);
-            confirmAndDelete(id, target, showDialog, R.plurals.confirm_delete_conversation);
+            confirmAndDelete(id, target, showDialog, R.plurals.confirm_delete_conversation, undoCallback);
         } else if (id == R.id.discard_drafts) {
             // drafts are lost forever, so always confirm
             confirmAndDelete(id, target, true /* showDialog */,
-                    R.plurals.confirm_discard_drafts_conversation);
+                    R.plurals.confirm_discard_drafts_conversation, undoCallback);
+        } else if (id == R.id.discard_outbox) {
+            // discard in outbox means we discard the failed message and save them in drafts
+            delete(id, target, getDeferredAction(id, target, isBatch, undoCallback), isBatch);
         } else if (id == R.id.mark_important) {
             updateConversation(Conversation.listOf(mCurrentConversation),
                     ConversationColumns.PRIORITY, UIProvider.ConversationPriority.HIGH);
         } else if (id == R.id.mark_not_important) {
             if (mFolder != null && mFolder.isImportantOnly()) {
                 delete(R.id.mark_not_important, target,
-                        getDeferredAction(R.id.mark_not_important, target, isBatch), isBatch);
+                        getDeferredAction(R.id.mark_not_important, target, isBatch, undoCallback),
+                        isBatch);
             } else {
                 updateConversation(Conversation.listOf(mCurrentConversation),
                         ConversationColumns.PRIORITY, UIProvider.ConversationPriority.LOW);
             }
         } else if (id == R.id.mute) {
-            delete(R.id.mute, target, getDeferredAction(R.id.mute, target, isBatch), isBatch);
+            delete(R.id.mute, target, getDeferredAction(R.id.mute, target, isBatch, undoCallback),
+                    isBatch);
         } else if (id == R.id.report_spam) {
             delete(R.id.report_spam, target,
-                    getDeferredAction(R.id.report_spam, target, isBatch), isBatch);
+                    getDeferredAction(R.id.report_spam, target, isBatch, undoCallback), isBatch);
         } else if (id == R.id.mark_not_spam) {
             // Currently, since spam messages are only shown in list with
             // other spam messages,
             // marking a message not as spam is a destructive action
             delete(R.id.mark_not_spam, target,
-                    getDeferredAction(R.id.mark_not_spam, target, isBatch), isBatch);
+                    getDeferredAction(R.id.mark_not_spam, target, isBatch, undoCallback), isBatch);
         } else if (id == R.id.report_phishing) {
             delete(R.id.report_phishing, target,
-                    getDeferredAction(R.id.report_phishing, target, isBatch), isBatch);
+                    getDeferredAction(R.id.report_phishing, target, isBatch, undoCallback), isBatch);
         } else if (id == android.R.id.home) {
             onUpPressed();
         } else if (id == R.id.compose) {
@@ -1420,21 +1565,14 @@ public abstract class AbstractActivityController implements ActivityController,
             requestFolderRefresh();
         } else if (id == R.id.settings) {
             Utils.showSettings(mActivity.getActivityContext(), mAccount);
-        } else if (id == R.id.folder_options) {
-            Utils.showFolderSettings(mActivity.getActivityContext(), mAccount, mFolder);
         } else if (id == R.id.help_info_menu_item) {
-            Utils.showHelp(mActivity.getActivityContext(), mAccount, getHelpContext());
-        } else if (id == R.id.feedback_menu_item) {
-            Utils.sendFeedback(mActivity, mAccount, false);
-        } else if (id == R.id.manage_folders_item) {
-            Utils.showManageFolder(mActivity.getActivityContext(), mAccount);
+            mActivity.showHelp(mAccount, mViewMode.getMode());
         } else if (id == R.id.move_to || id == R.id.change_folders) {
-            final FolderSelectionDialog dialog = FolderSelectionDialog.getInstance(
-                    mActivity.getActivityContext(), mAccount, this,
+            final FolderSelectionDialog dialog = FolderSelectionDialog.getInstance(mAccount,
                     Conversation.listOf(mCurrentConversation), isBatch, mFolder,
                     id == R.id.move_to);
             if (dialog != null) {
-                dialog.show();
+                dialog.show(mActivity.getFragmentManager(), null);
             }
         } else if (id == R.id.move_to_inbox) {
             new AsyncTask<Void, Void, Folder>() {
@@ -1519,22 +1657,11 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public final boolean onUpPressed() {
-        for (UpOrBackHandler h : mUpOrBackHandlers) {
-            if (h.onUpPressed()) {
-                return true;
-            }
-        }
         return handleUpPress();
     }
 
     @Override
     public final boolean onBackPressed() {
-        for (UpOrBackHandler h : mUpOrBackHandlers) {
-            if (h.onBackPressed()) {
-                return true;
-            }
-        }
-
         if (isDrawerEnabled() && mDrawerContainer.isDrawerVisible(mDrawerPullout)) {
             mDrawerContainer.closeDrawers();
             return true;
@@ -1544,20 +1671,8 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     protected abstract boolean handleBackPress();
+
     protected abstract boolean handleUpPress();
-
-    @Override
-    public void addUpOrBackHandler(UpOrBackHandler handler) {
-        if (mUpOrBackHandlers.contains(handler)) {
-            return;
-        }
-        mUpOrBackHandlers.addFirst(handler);
-    }
-
-    @Override
-    public void removeUpOrBackHandler(UpOrBackHandler handler) {
-        mUpOrBackHandlers.remove(handler);
-    }
 
     @Override
     public void updateConversation(Collection<Conversation> target, ContentValues values) {
@@ -1726,11 +1841,9 @@ public abstract class AbstractActivityController implements ActivityController,
                 value.put(ConversationColumns.VIEWED, true);
             }
             final ConversationInfo info = target.conversationInfo;
-            if (info != null) {
-                boolean changed = info.markRead(read);
-                if (changed) {
-                    value.put(ConversationColumns.CONVERSATION_INFO, info.toBlob());
-                }
+            final boolean changed = info.markRead(read);
+            if (changed) {
+                value.put(ConversationColumns.CONVERSATION_INFO, info.toBlob());
             }
             opList.add(mConversationListCursor.getOperationForConversation(
                     target, ConversationOperation.UPDATE, value));
@@ -1757,6 +1870,18 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     /**
+     * Helper function to determine if the provided set of conversations is in view
+     * @param target set of conversations that we are interested in
+     * @return true if they are in view, false otherwise
+     */
+    private boolean isCurrentConversationInView(final Collection<Conversation> target) {
+        final int viewMode = mViewMode.getMode();
+        return (viewMode == ViewMode.CONVERSATION
+                || viewMode == ViewMode.SEARCH_RESULTS_CONVERSATION)
+                && Conversation.contains(target, mCurrentConversation);
+    }
+
+    /**
      * Auto-advance to a different conversation if the currently visible conversation in
      * conversation mode is affected (deleted, marked unread, etc.).
      *
@@ -1780,85 +1905,23 @@ public abstract class AbstractActivityController implements ActivityController,
      */
     private boolean showNextConversation(final Collection<Conversation> target,
             final Runnable operation) {
-        final int viewMode = mViewMode.getMode();
-        final boolean currentConversationInView = (viewMode == ViewMode.CONVERSATION
-                || viewMode == ViewMode.SEARCH_RESULTS_CONVERSATION)
-                && Conversation.contains(target, mCurrentConversation);
-
-        if (currentConversationInView) {
+        if (isCurrentConversationInView(target)) {
             final int autoAdvanceSetting = mAccount.settings.getAutoAdvanceSetting();
 
-            if (autoAdvanceSetting == AutoAdvance.UNSET && mIsTablet) {
-                displayAutoAdvanceDialogAndPerformAction(operation);
-                return false;
-            } else {
-                // If we don't have one set, but we're here, just take the default
-                final int autoAdvance = (autoAdvanceSetting == AutoAdvance.UNSET) ?
-                        AutoAdvance.DEFAULT : autoAdvanceSetting;
+            // If we don't have one set, but we're here, just take the default
+            final int autoAdvance = (autoAdvanceSetting == AutoAdvance.UNSET) ?
+                    AutoAdvance.DEFAULT : autoAdvanceSetting;
 
-                final Conversation next = mTracker.getNextConversation(autoAdvance, target);
-                LogUtils.d(LOG_TAG, "showNextConversation: showing %s next.", next);
-                // Set mAutoAdvanceOp *before* showConversation() to ensure that it runs when the
-                // transition doesn't run (i.e. it "completes" immediately).
-                mAutoAdvanceOp = operation;
-                showConversation(next);
-                return (mAutoAdvanceOp == null);
-            }
+            final Conversation next = mTracker.getNextConversation(autoAdvance, target);
+            LogUtils.d(LOG_TAG, "showNextConversation: showing %s next.", next);
+            // Set mAutoAdvanceOp *before* showConversation() to ensure that it runs when the
+            // transition doesn't run (i.e. it "completes" immediately).
+            mAutoAdvanceOp = operation;
+            showConversation(next);
+            return (mAutoAdvanceOp == null);
         }
 
         return true;
-    }
-
-    /**
-     * Displays a the auto-advance dialog, and when the user makes a selection, the preference is
-     * stored, and the specified operation is run.
-     */
-    private void displayAutoAdvanceDialogAndPerformAction(final Runnable operation) {
-        final String[] autoAdvanceDisplayOptions =
-                mContext.getResources().getStringArray(R.array.prefEntries_autoAdvance);
-        final String[] autoAdvanceOptionValues =
-                mContext.getResources().getStringArray(R.array.prefValues_autoAdvance);
-
-        final String defaultValue = mContext.getString(R.string.prefDefault_autoAdvance);
-        int initialIndex = 0;
-        for (int i = 0; i < autoAdvanceOptionValues.length; i++) {
-            if (defaultValue.equals(autoAdvanceOptionValues[i])) {
-                initialIndex = i;
-                break;
-            }
-        }
-
-        final DialogInterface.OnClickListener listClickListener =
-                new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int whichItem) {
-                        final String autoAdvanceValue = autoAdvanceOptionValues[whichItem];
-                        final int autoAdvanceValueInt =
-                                UIProvider.AutoAdvance.getAutoAdvanceInt(autoAdvanceValue);
-                        mAccount.settings.setAutoAdvanceSetting(autoAdvanceValueInt);
-
-                        // Save the user's setting
-                        final ContentValues values = new ContentValues(1);
-                        values.put(AccountColumns.SettingsColumns.AUTO_ADVANCE, autoAdvanceValue);
-
-                        final ContentResolver resolver = mContext.getContentResolver();
-                        resolver.update(mAccount.updateSettingsUri, values, null, null);
-
-                        // Dismiss the dialog, as clicking the items in the list doesn't close the
-                        // dialog.
-                        dialog.dismiss();
-                        if (operation != null) {
-                            operation.run();
-                        }
-                    }
-                };
-
-        new AlertDialog.Builder(mActivity.getActivityContext()).setTitle(
-                R.string.auto_advance_help_title)
-                .setSingleChoiceItems(autoAdvanceDisplayOptions, initialIndex, listClickListener)
-                .setPositiveButton(null, null)
-                .create()
-                .show();
     }
 
     @Override
@@ -1921,16 +1984,16 @@ public abstract class AbstractActivityController implements ActivityController,
      * @param confirmResource the resource ID of the string that is shown in the confirmation dialog
      */
     private void confirmAndDelete(int actionId, final Collection<Conversation> target,
-            boolean showDialog, int confirmResource) {
+            boolean showDialog, int confirmResource, UndoCallback undoCallback) {
         final boolean isBatch = false;
         if (showDialog) {
-            makeDialogListener(actionId, isBatch);
+            makeDialogListener(actionId, isBatch, undoCallback);
             final CharSequence message = Utils.formatPlural(mContext, confirmResource,
                     target.size());
             final ConfirmDialogFragment c = ConfirmDialogFragment.newInstance(message);
             c.displayDialog(mActivity.getFragmentManager());
         } else {
-            delete(0, target, getDeferredAction(actionId, target, isBatch), isBatch);
+            delete(0, target, getDeferredAction(actionId, target, isBatch, undoCallback), isBatch);
         }
     }
 
@@ -1993,7 +2056,7 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        return mActionBarView.onPrepareOptionsMenu(menu);
+        return mActionBarController.onPrepareOptionsMenu(menu);
     }
 
     @Override
@@ -2072,13 +2135,16 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public void executeSearch(String query) {
+        AnalyticsTimer.getInstance().trackStart(AnalyticsTimer.SEARCH_TO_LIST);
         Intent intent = new Intent();
         intent.setAction(Intent.ACTION_SEARCH);
         intent.putExtra(ConversationListContext.EXTRA_SEARCH_QUERY, query);
         intent.putExtra(Utils.EXTRA_ACCOUNT, mAccount);
         intent.setComponent(mActivity.getComponentName());
-        mActionBarView.collapseSearch();
-        mActivity.startActivity(intent);
+        mActionBarController.collapseSearch();
+        // Call startActivityForResult here so we can tell if we have navigated to a different folder
+        // or account from search results.
+        mActivity.startActivityForResult(intent, CHANGE_NAVIGATION_REQUEST_CODE);
     }
 
     @Override
@@ -2096,7 +2162,7 @@ public abstract class AbstractActivityController implements ActivityController,
         mDrawIdler.setRootView(null);
         // unregister the ViewPager's observer on the conversation cursor
         mPagerController.onDestroy();
-        mActionBarView.onDestroy();
+        mActionBarController.onDestroy();
         mRecentFolderList.destroy();
         mDestroyed = true;
         mHandler.removeCallbacks(mLogServiceChecker);
@@ -2116,6 +2182,10 @@ public abstract class AbstractActivityController implements ActivityController,
      */
     @Override
     public void onViewModeChanged(int newMode) {
+        // The floating action compose button is only visible in the conversation/search lists
+        final int composeVisible = ViewMode.isListMode(newMode) ? View.VISIBLE : View.GONE;
+        mFloatingComposeButton.setVisibility(composeVisible);
+
         // When we step away from the conversation mode, we don't have a current conversation
         // anymore. Let's blank it out so clients calling getCurrentConversation are not misled.
         if (!ViewMode.isConversationMode(newMode)) {
@@ -2130,11 +2200,10 @@ public abstract class AbstractActivityController implements ActivityController,
         if (isDrawerEnabled()) {
             /** If the folder doesn't exist, or its parent URI is empty,
              * this is not a child folder */
-            final boolean isTopLevel = (mFolder == null) || (mFolder.parent == Uri.EMPTY);
+            final boolean isTopLevel = Folder.isRoot(mFolder);
             mDrawerToggle.setDrawerIndicatorEnabled(
                     getShouldShowDrawerIndicator(newMode, isTopLevel));
-            mDrawerContainer.setDrawerLockMode(getShouldAllowDrawerPull(newMode)
-                    ? DrawerLayout.LOCK_MODE_UNLOCKED : DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
+            mDrawerContainer.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED);
             closeDrawerIfOpen();
         }
     }
@@ -2151,21 +2220,6 @@ public abstract class AbstractActivityController implements ActivityController,
         // Indicator is enabled either in conversation list or folder list mode.
         return isDrawerEnabled() && !ViewMode.isSearchMode(viewMode)
             && (viewMode == ViewMode.CONVERSATION_LIST  && isTopLevel);
-    }
-
-    /**
-     * Returns true if the left-screen swipe action (or Home icon tap) should pull a drawer out.
-     * @param viewMode the current view mode.
-     * @return whether the drawer can be opened using a swipe action or action bar tap.
-     */
-    private static boolean getShouldAllowDrawerPull(final int viewMode) {
-        // if search list/conv mode, disable drawer pull
-        // allow drawer pull everywhere except conversation mode where the list is hidden
-        return !ViewMode.isSearchMode(viewMode) && !ViewMode.isConversationMode(viewMode) &&
-                !ViewMode.isAdMode(viewMode);
-
-        // TODO(ath): get this to work to allow drawer pull in 2-pane conv mode.
-    /* && !isConversationListVisible() */
     }
 
     public void disablePagerUpdates() {
@@ -2274,7 +2328,9 @@ public abstract class AbstractActivityController implements ActivityController,
         // If there has been an orientation change, and we need to recreate the listener for the
         // confirm dialog fragment (delete/archive/...), then do it here.
         if (mDialogAction != -1) {
-            makeDialogListener(mDialogAction, mDialogFromSelectedSet);
+            makeDialogListener(mDialogAction, mDialogFromSelectedSet,
+                    getUndoCallbackForDestructiveActionsWithAutoAdvance(
+                            mDialogAction, mCurrentConversation));
         }
 
         mInbox = savedState.getParcelable(SAVED_INBOX_KEY);
@@ -2298,7 +2354,7 @@ public abstract class AbstractActivityController implements ActivityController,
         LogUtils.d(LOG_TAG, "IN AAC.handleIntent. action=%s", intent.getAction());
         if (Intent.ACTION_VIEW.equals(intent.getAction())) {
             if (intent.hasExtra(Utils.EXTRA_ACCOUNT)) {
-                setAccount(Account.newinstance(intent.getStringExtra(Utils.EXTRA_ACCOUNT)));
+                setAccount(Account.newInstance(intent.getStringExtra(Utils.EXTRA_ACCOUNT)));
             }
             if (mAccount == null) {
                 return;
@@ -2322,7 +2378,7 @@ public abstract class AbstractActivityController implements ActivityController,
 
             final Uri folderUri;
             if (intent.hasExtra(Utils.EXTRA_FOLDER_URI)) {
-                folderUri = (Uri) intent.getParcelableExtra(Utils.EXTRA_FOLDER_URI);
+                folderUri = intent.getParcelableExtra(Utils.EXTRA_FOLDER_URI);
             } else if (intent.hasExtra(Utils.EXTRA_FOLDER)) {
                 final Folder folder =
                         Folder.fromString(intent.getStringExtra(Utils.EXTRA_FOLDER));
@@ -2333,6 +2389,11 @@ public abstract class AbstractActivityController implements ActivityController,
                         extras == null ? "null" : extras.toString());
                 folderUri = mAccount.settings.defaultInbox;
             }
+
+            // Check if we should load all conversations instead of using
+            // the default behavior which loads an initial subset.
+            mIgnoreInitialConversationLimit =
+                    intent.getBooleanExtra(Utils.EXTRA_IGNORE_INITIAL_CONVERSATION_LIMIT, false);
 
             args.putParcelable(Utils.EXTRA_FOLDER_URI, folderUri);
             args.putParcelable(Utils.EXTRA_CONVERSATION,
@@ -2391,20 +2452,19 @@ public abstract class AbstractActivityController implements ActivityController,
         mSelectedSet.putAll(selectedSet);
     }
 
-    private void showConversation(Conversation conversation) {
-        showConversation(conversation, false /* inLoaderCallbacks */);
-    }
-
     /**
      * Show the conversation provided in the arguments. It is safe to pass a null conversation
      * object, which is a signal to back out of conversation view mode.
      * Child classes must call super.showConversation() <b>before</b> their own implementations.
      * @param conversation the conversation to be shown, or null if we want to back out to list
      *                     mode.
-     * @param inLoaderCallbacks true if the method is called as a result of
      * onLoadFinished(Loader, Cursor) on any callback.
      */
-    protected void showConversation(Conversation conversation, boolean inLoaderCallbacks) {
+    protected void showConversation(Conversation conversation) {
+        showConversation(conversation, true /* markAsRead */);
+    }
+
+    protected void showConversation(Conversation conversation, boolean markAsRead) {
         if (conversation != null) {
             Utils.sConvLoadTimer.start();
         }
@@ -2421,7 +2481,7 @@ public abstract class AbstractActivityController implements ActivityController,
     @Override
     public void showWaitForInitialization() {
         mViewMode.enterWaitingForInitializationMode();
-        mWaitFragment = WaitFragment.newInstance(mAccount);
+        mWaitFragment = WaitFragment.newInstance(mAccount, true /* expectingMessages */);
     }
 
     private void updateWaitMode() {
@@ -2480,7 +2540,7 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     @Override
-    public final void onConversationSelected(Conversation conversation, boolean inLoaderCallbacks) {
+    public void onConversationSelected(Conversation conversation, boolean inLoaderCallbacks) {
         final ConversationListFragment convListFragment = getConversationListFragment();
         if (convListFragment != null && convListFragment.getAnimatedAdapter() != null) {
             convListFragment.getAnimatedAdapter().onConversationSelected();
@@ -2488,7 +2548,7 @@ public abstract class AbstractActivityController implements ActivityController,
         // Only animate destructive actions if we are going to be showing the
         // conversation list when we show the next conversation.
         commitDestructiveActions(mIsTablet);
-        showConversation(conversation, inLoaderCallbacks);
+        showConversation(conversation);
     }
 
     @Override
@@ -2534,7 +2594,7 @@ public abstract class AbstractActivityController implements ActivityController,
         mCurrentConversation = conversation;
 
         if (mCurrentConversation != null) {
-            mActionBarView.setCurrentConversation(mCurrentConversation);
+            mActionBarController.setCurrentConversation(mCurrentConversation);
             mActivity.invalidateOptionsMenu();
         }
     }
@@ -2758,6 +2818,8 @@ public abstract class AbstractActivityController implements ActivityController,
         /** Whether this is an action on the currently selected set. */
         private final boolean mIsSelectedSet;
 
+        private UndoCallback mCallback;
+
         /**
          * Create a listener object.
          * @param action action is one of four constants: R.id.y_button (archive),
@@ -2769,6 +2831,11 @@ public abstract class AbstractActivityController implements ActivityController,
             mAction = action;
             mTarget = ImmutableList.copyOf(target);
             mIsSelectedSet = isBatch;
+        }
+
+        @Override
+        public void setUndoCallback(UndoCallback undoCallback) {
+            mCallback = undoCallback;
         }
 
         /**
@@ -2798,10 +2865,10 @@ public abstract class AbstractActivityController implements ActivityController,
 
             if (mAction == R.id.archive) {
                 LogUtils.d(LOG_TAG, "Archiving");
-                mConversationListCursor.archive(mTarget);
+                mConversationListCursor.archive(mTarget, mCallback);
             } else if (mAction == R.id.delete) {
                 LogUtils.d(LOG_TAG, "Deleting");
-                mConversationListCursor.delete(mTarget);
+                mConversationListCursor.delete(mTarget, mCallback);
                 if (mFolder.supportsCapability(FolderCapabilities.DELETE_ACTION_FINAL)) {
                     undoEnabled = false;
                 }
@@ -2812,16 +2879,16 @@ public abstract class AbstractActivityController implements ActivityController,
                         c.localDeleteOnUpdate = true;
                     }
                 }
-                mConversationListCursor.mute(mTarget);
+                mConversationListCursor.mute(mTarget, mCallback);
             } else if (mAction == R.id.report_spam) {
                 LogUtils.d(LOG_TAG, "Reporting spam");
-                mConversationListCursor.reportSpam(mTarget);
+                mConversationListCursor.reportSpam(mTarget, mCallback);
             } else if (mAction == R.id.mark_not_spam) {
                 LogUtils.d(LOG_TAG, "Marking not spam");
-                mConversationListCursor.reportNotSpam(mTarget);
+                mConversationListCursor.reportNotSpam(mTarget, mCallback);
             } else if (mAction == R.id.report_phishing) {
                 LogUtils.d(LOG_TAG, "Reporting phishing");
-                mConversationListCursor.reportPhishing(mTarget);
+                mConversationListCursor.reportPhishing(mTarget, mCallback);
             } else if (mAction == R.id.remove_star) {
                 LogUtils.d(LOG_TAG, "Removing star");
                 // Star removal is destructive in the Starred folder.
@@ -2848,6 +2915,10 @@ public abstract class AbstractActivityController implements ActivityController,
                 }
                 mConversationListCursor.discardDrafts(mTarget);
                 // We don't support undoing discarding drafts
+                undoEnabled = false;
+            } else if (mAction == R.id.discard_outbox) {
+                LogUtils.d(LOG_TAG, "Discarding failed messages in Outbox");
+                mConversationListCursor.moveFailedIntoDrafts(mTarget);
                 undoEnabled = false;
             }
             if (undoEnabled) {
@@ -2884,11 +2955,10 @@ public abstract class AbstractActivityController implements ActivityController,
     public final void assignFolder(Collection<FolderOperation> folderOps,
             Collection<Conversation> target, boolean batch, boolean showUndo,
             final boolean isMoveTo) {
-        // Actions are destructive only when the current folder can be assigned
-        // to (which is the same as being able to un-assign a conversation from the folder) and
+        // Actions are destructive only when the current folder can be un-assigned from and
         // when the list of folders contains the current folder.
         final boolean isDestructive = mFolder
-                .supportsCapability(FolderCapabilities.CAN_ACCEPT_MOVED_MESSAGES)
+                .supportsCapability(FolderCapabilities.ALLOWS_REMOVE_CONVERSATION)
                 && FolderOperation.isDestructive(folderOps, mFolder);
         LogUtils.d(LOG_TAG, "onFolderChangesCommit: isDestructive = %b", isDestructive);
         if (isDestructive) {
@@ -2897,6 +2967,10 @@ public abstract class AbstractActivityController implements ActivityController,
             }
         }
         final DestructiveAction folderChange;
+        final UndoCallback undoCallback = isMoveTo ?
+                getUndoCallbackForDestructiveActionsWithAutoAdvance(R.id.move_to,
+                        mCurrentConversation)
+                : null;
         // Update the UI elements depending no their visibility and availability
         // TODO(viki): Consolidate this into a single method requestDelete.
         if (isDestructive) {
@@ -2929,11 +3003,11 @@ public abstract class AbstractActivityController implements ActivityController,
             }
 
             folderChange = getDeferredFolderChange(target, folderOps, isDestructive,
-                    batch, showUndo, isMoveTo, actionFolder);
+                    batch, showUndo, isMoveTo, actionFolder, undoCallback);
             delete(0, target, folderChange, batch);
         } else {
             folderChange = getFolderChange(target, folderOps, isDestructive,
-                    batch, showUndo, false /* isMoveTo */, mFolder);
+                    batch, showUndo, false /* isMoveTo */, mFolder, undoCallback);
             requestUpdate(folderChange);
         }
     }
@@ -2941,7 +3015,10 @@ public abstract class AbstractActivityController implements ActivityController,
     @Override
     public final void onRefreshRequired() {
         if (isAnimating() || isDragging()) {
-            LogUtils.i(ConversationCursor.LOG_TAG, "onRefreshRequired: delay until animating done");
+            final ConversationListFragment f = getConversationListFragment();
+            LogUtils.w(ConversationCursor.LOG_TAG,
+                    "onRefreshRequired: delay until animating done. cursor=%s adapter=%s",
+                    mConversationListCursor, (f != null) ? f.getAnimatedAdapter() : null);
             return;
         }
         // Refresh the query in the background
@@ -3001,6 +3078,11 @@ public abstract class AbstractActivityController implements ActivityController,
         if (!isAnimating()) {
             // Swap cursors
             mConversationListCursor.sync();
+        } else {
+            // (CLF guaranteed to be non-null due to check in isAnimating)
+            LogUtils.w(LOG_TAG,
+                    "AAC.onRefreshReady suppressing sync() due to animation. cursor=%s aa=%s",
+                    mConversationListCursor, getConversationListFragment().getAnimatedAdapter());
         }
         mTracker.onCursorUpdated();
         perhapsShowFirstSearchResult();
@@ -3061,6 +3143,10 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public void onAnimationEnd(AnimatedAdapter animatedAdapter) {
+        if (animatedAdapter != null) {
+            LogUtils.i(LOG_TAG, "AAC.onAnimationEnd. cursor=%s adapter=%s", mConversationListCursor,
+                    animatedAdapter);
+        }
         if (mConversationListCursor == null) {
             LogUtils.e(LOG_TAG, "null ConversationCursor in onAnimationEnd");
             return;
@@ -3151,9 +3237,8 @@ public abstract class AbstractActivityController implements ActivityController,
             LogUtils.d(LOG_TAG, "AbstractActivityController.startSearch(): null account");
             return;
         }
-        if (mAccount.supportsCapability(UIProvider.AccountCapabilities.LOCAL_SEARCH)
-                || mAccount.supportsCapability(UIProvider.AccountCapabilities.SERVER_SEARCH)) {
-            mActionBarView.expandSearch();
+        if (mAccount.supportsSearch()) {
+            mActionBarController.expandSearch();
         } else {
             Toast.makeText(mActivity.getActivityContext(), mActivity.getActivityContext()
                     .getString(R.string.search_unsupported), Toast.LENGTH_SHORT).show();
@@ -3214,7 +3299,8 @@ public abstract class AbstractActivityController implements ActivityController,
         // current folder.
         final DestructiveAction action =
                 getFolderChange(conversations, dragDropOperations, isDestructive,
-                        true /* isBatch */, true /* showUndo */, true /* isMoveTo */, folder);
+                        true /* isBatch */, true /* showUndo */, true /* isMoveTo */, folder,
+                        null /* undoCallback */);
         if (isDestructive) {
             delete(0, conversations, action, true);
         } else {
@@ -3280,6 +3366,11 @@ public abstract class AbstractActivityController implements ActivityController,
         }
 
         @Override
+        public void setUndoCallback(UndoCallback undoCallback) {
+            return;     // currently not applicable
+        }
+
+        @Override
         public void performAction() {
             ToastBarOperation undoOp = new ToastBarOperation(mConversations.size(),
                     R.id.change_folders, ToastBarOperation.UNDO, true /* batch */, mInitialFolder);
@@ -3317,12 +3408,21 @@ public abstract class AbstractActivityController implements ActivityController,
     public void onTouchEvent(MotionEvent event) {
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             if (mToastBar != null && !mToastBar.isEventInToastBar(event)) {
-                hideOrRepositionToastBar(true);
+                // if the toast bar is still animating, ignore this attempt to hide it
+                if (mToastBar.isAnimating()) {
+                    return;
+                }
+
+                // if the toast bar has not been seen long enough, ignore this attempt to hide it
+                if (mToastBar.cannotBeHidden()) {
+                    return;
+                }
+
+                // hide the toast bar
+                mToastBar.hide(true /* animated */, false /* actionClicked */);
             }
         }
     }
-
-    protected abstract void hideOrRepositionToastBar(boolean animated);
 
     @Override
     public void onConversationSeen() {
@@ -3352,11 +3452,14 @@ public abstract class AbstractActivityController implements ActivityController,
         public Loader<ConversationCursor> onCreateLoader(int id, Bundle args) {
             final Account account = args.getParcelable(BUNDLE_ACCOUNT_KEY);
             final Folder folder = args.getParcelable(BUNDLE_FOLDER_KEY);
+            final boolean ignoreInitialConversationLimit =
+                    args.getBoolean(BUNDLE_IGNORE_INITIAL_CONVERSATION_LIMIT_KEY, false);
             if (account == null || folder == null) {
                 return null;
             }
-            return new ConversationCursorLoader((Activity) mActivity, account,
-                    folder.conversationListUri, folder.name);
+            return new ConversationCursorLoader(mActivity, account,
+                    folder.conversationListUri, folder.getTypeDescription(),
+                    ignoreInitialConversationLimit);
         }
 
         @Override
@@ -3449,6 +3552,8 @@ public abstract class AbstractActivityController implements ActivityController,
                     LogUtils.d(LOG_TAG, "LOADER_SEARCH created");
                     return Folder.forSearchResults(mAccount,
                             args.getString(ConversationListContext.EXTRA_SEARCH_QUERY),
+                            // We can just use current time as a unique identifier for this search
+                            Long.toString(SystemClock.uptimeMillis()),
                             mActivity.getActivityContext());
                 case LOADER_FIRST_FOLDER:
                     LogUtils.d(LOG_TAG, "LOADER_FIRST_FOLDER created");
@@ -3480,7 +3585,7 @@ public abstract class AbstractActivityController implements ActivityController,
                         mFolderObservable.notifyChanged();
                     } else {
                         LogUtils.d(LOG_TAG, "Unable to get the folder %s",
-                                mFolder != null ? mAccount.name : "");
+                                mFolder != null ? mFolder.name : "");
                     }
                     break;
                 case LOADER_RECENT_FOLDERS:
@@ -3523,7 +3628,7 @@ public abstract class AbstractActivityController implements ActivityController,
                         mActivity.getLoaderManager().destroyLoader(LOADER_ACCOUNT_INBOX);
                     } else {
                         LogUtils.d(LOG_TAG, "Unable to get the account inbox for account %s",
-                                mAccount != null ? mAccount.name : "");
+                                mAccount != null ? mAccount.getEmailAddress() : "");
                     }
                     break;
                 case LOADER_SEARCH:
@@ -3660,6 +3765,7 @@ public abstract class AbstractActivityController implements ActivityController,
                                 mAccountObservers.notifyChanged();
                             }
                             perhapsEnterWaitMode();
+                            perhapsStartWelcomeTour();
                         } else {
                             LogUtils.e(LOG_TAG, "Got update for account: %s with current account:"
                                     + " %s", updatedAccount.uri, mAccount.uri);
@@ -3676,6 +3782,39 @@ public abstract class AbstractActivityController implements ActivityController,
         public void onLoaderReset(Loader<ObjectCursor<Account>> loader) {
             // Do nothing. In onLoadFinished() we copy the relevant data from the cursor.
         }
+    }
+
+    /**
+     * Loads the preference that tells whether the welcome tour should be displayed,
+     * and calls the callback with this value.
+     * For this to function, the account must have been synced.
+     */
+    private void perhapsStartWelcomeTour() {
+        new AsyncTask<Void, Void, Boolean>() {
+            @Override
+            protected Boolean doInBackground(Void... params) {
+                if (mActivity.wasLatestWelcomeTourShownOnDeviceForAllAccounts()) {
+                    // No need to go through the WelcomeStateLoader machinery.
+                    return false;
+                }
+                return true;
+            }
+
+            @Override
+            protected void onPostExecute(Boolean result) {
+                if (result) {
+                    if (mAccount != null && mAccount.isAccountReady()) {
+                        LoaderManager.LoaderCallbacks<?> welcomeLoaderCallbacks =
+                                mActivity.getWelcomeCallbacks();
+                        if (welcomeLoaderCallbacks != null) {
+                            // The callback is responsible for showing the tour when appropriate.
+                            mActivity.getLoaderManager().initLoader(LOADER_WELCOME_TOUR_ACCOUNTS,
+                                    Bundle.EMPTY, welcomeLoaderCallbacks);
+                        }
+                    }
+                }
+            }
+        }.execute();
     }
 
     /**
@@ -3723,15 +3862,16 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     @Override
-    public final DestructiveAction getBatchAction(int action) {
+    public final DestructiveAction getBatchAction(int action, UndoCallback undoCallback) {
         final DestructiveAction da = new ConversationAction(action, mSelectedSet.values(), true);
+        da.setUndoCallback(undoCallback);
         registerDestructiveAction(da);
         return da;
     }
 
     @Override
-    public final DestructiveAction getDeferredBatchAction(int action) {
-        return getDeferredAction(action, mSelectedSet.values(), true);
+    public final DestructiveAction getDeferredBatchAction(int action, UndoCallback undoCallback) {
+        return getDeferredAction(action, mSelectedSet.values(), true, undoCallback);
     }
 
     /**
@@ -3744,8 +3884,10 @@ public abstract class AbstractActivityController implements ActivityController,
      * @return a {@link DestructiveAction} that performs the specified action.
      */
     private DestructiveAction getDeferredAction(int action, Collection<Conversation> target,
-            boolean batch) {
-        return new ConversationAction(action, target, batch);
+            boolean batch, UndoCallback callback) {
+        ConversationAction cAction = new ConversationAction(action, target, batch);
+        cAction.setUndoCallback(callback);
+        return cAction;
     }
 
     /**
@@ -3764,6 +3906,8 @@ public abstract class AbstractActivityController implements ActivityController,
         private final int mAction;
         private final Folder mActionFolder;
 
+        private UndoCallback mUndoCallback;
+
         /**
          * Create a new folder destruction object to act on the given conversations.
          * @param target conversations to act upon.
@@ -3779,6 +3923,11 @@ public abstract class AbstractActivityController implements ActivityController,
             mShowUndo = showUndo;
             mAction = action;
             mActionFolder = actionFolder;
+        }
+
+        @Override
+        public void setUndoCallback(UndoCallback undoCallback) {
+            mUndoCallback = undoCallback;
         }
 
         @Override
@@ -3814,7 +3963,7 @@ public abstract class AbstractActivityController implements ActivityController,
                     }
                 }
                 ops.add(mConversationListCursor.getConversationFolderOperation(target,
-                        folderUris, adds, targetFolders.values()));
+                        folderUris, adds, targetFolders.values(), mUndoCallback));
             }
             if (mConversationListCursor != null) {
                 mConversationListCursor.updateBulkValues(ops);
@@ -3840,28 +3989,34 @@ public abstract class AbstractActivityController implements ActivityController,
 
     public final DestructiveAction getFolderChange(Collection<Conversation> target,
             Collection<FolderOperation> folders, boolean isDestructive, boolean isBatch,
-            boolean showUndo, final boolean isMoveTo, final Folder actionFolder) {
+            boolean showUndo, final boolean isMoveTo, final Folder actionFolder,
+            UndoCallback undoCallback) {
         final DestructiveAction da = getDeferredFolderChange(target, folders, isDestructive,
-                isBatch, showUndo, isMoveTo, actionFolder);
+                isBatch, showUndo, isMoveTo, actionFolder, undoCallback);
         registerDestructiveAction(da);
         return da;
     }
 
     public final DestructiveAction getDeferredFolderChange(Collection<Conversation> target,
             Collection<FolderOperation> folders, boolean isDestructive, boolean isBatch,
-            boolean showUndo, final boolean isMoveTo, final Folder actionFolder) {
-        return new FolderDestruction(target, folders, isDestructive, isBatch, showUndo,
-                isMoveTo ? R.id.move_folder : R.id.change_folders, actionFolder);
+            boolean showUndo, final boolean isMoveTo, final Folder actionFolder,
+            UndoCallback undoCallback) {
+        final DestructiveAction fd = new FolderDestruction(target, folders, isDestructive, isBatch,
+                showUndo, isMoveTo ? R.id.move_folder : R.id.change_folders, actionFolder);
+        fd.setUndoCallback(undoCallback);
+        return fd;
     }
 
     @Override
     public final DestructiveAction getDeferredRemoveFolder(Collection<Conversation> target,
             Folder toRemove, boolean isDestructive, boolean isBatch,
-            boolean showUndo) {
+            boolean showUndo, UndoCallback undoCallback) {
         Collection<FolderOperation> folderOps = new ArrayList<FolderOperation>();
         folderOps.add(new FolderOperation(toRemove, false));
-        return new FolderDestruction(target, folderOps, isDestructive, isBatch,
+        final DestructiveAction da = new FolderDestruction(target, folderOps, isDestructive, isBatch,
                 showUndo, R.id.remove_folder, mFolder);
+        da.setUndoCallback(undoCallback);
+        return da;
     }
 
     @Override
@@ -3942,9 +4097,7 @@ public abstract class AbstractActivityController implements ActivityController,
                 return;
         }
         mToastBar.show(listener,
-                R.drawable.ic_alert_white,
                 Utils.getSyncStatusText(mActivity.getActivityContext(), lastSyncResult),
-                false, /* showActionIcon */
                 actionTextResourceId,
                 replaceVisibleToast,
                 new ToastBarOperation(1, 0, ToastBarOperation.ERROR, false, folder));
@@ -4066,7 +4219,8 @@ public abstract class AbstractActivityController implements ActivityController,
     }
 
     @Override
-    public void makeDialogListener (final int action, final boolean isBatch) {
+    public void makeDialogListener (final int action, final boolean isBatch,
+            UndoCallback undoCallback) {
         final Collection<Conversation> target;
         if (isBatch) {
             target = mSelectedSet.values();
@@ -4074,7 +4228,8 @@ public abstract class AbstractActivityController implements ActivityController,
             LogUtils.d(LOG_TAG, "Will act upon %s", mCurrentConversation);
             target = Conversation.listOf(mCurrentConversation);
         }
-        final DestructiveAction destructiveAction = getDeferredAction(action, target, isBatch);
+        final DestructiveAction destructiveAction = getDeferredAction(action, target, isBatch,
+                undoCallback);
         mDialogAction = action;
         mDialogFromSelectedSet = isBatch;
         mDialogListener = new AlertDialog.OnClickListener() {
@@ -4134,7 +4289,13 @@ public abstract class AbstractActivityController implements ActivityController,
         mDetachedConvUri = null;
     }
 
-    private class MailDrawerListener implements DrawerLayout.DrawerListener {
+    @Override
+    public DrawerController getDrawerController() {
+        return mDrawerListener;
+    }
+
+    private class MailDrawerListener extends Observable<DrawerLayout.DrawerListener>
+            implements DrawerLayout.DrawerListener, DrawerController {
         private int mDrawerState;
         private float mOldSlideOffset;
 
@@ -4144,8 +4305,42 @@ public abstract class AbstractActivityController implements ActivityController,
         }
 
         @Override
+        public boolean isDrawerEnabled() {
+            return AbstractActivityController.this.isDrawerEnabled();
+        }
+
+        @Override
+        public void registerDrawerListener(DrawerLayout.DrawerListener l) {
+            registerObserver(l);
+        }
+
+        @Override
+        public void unregisterDrawerListener(DrawerLayout.DrawerListener l) {
+            unregisterObserver(l);
+        }
+
+        @Override
+        public boolean isDrawerOpen() {
+            return isDrawerEnabled() && mDrawerContainer.isDrawerOpen(mDrawerPullout);
+        }
+
+        @Override
+        public boolean isDrawerVisible() {
+            return isDrawerEnabled() && mDrawerContainer.isDrawerVisible(mDrawerPullout);
+        }
+
+        @Override
+        public void toggleDrawerState() {
+            AbstractActivityController.this.toggleDrawerState();
+        }
+
+        @Override
         public void onDrawerOpened(View drawerView) {
             mDrawerToggle.onDrawerOpened(drawerView);
+
+            for (DrawerLayout.DrawerListener l : mObservers) {
+                l.onDrawerOpened(drawerView);
+            }
         }
 
         @Override
@@ -4157,8 +4352,12 @@ public abstract class AbstractActivityController implements ActivityController,
 
             // When closed, we want to use either the burger, or up, based on where we are
             final int mode = mViewMode.getMode();
-            final boolean isTopLevel = (mFolder == null) || (mFolder.parent == Uri.EMPTY);
+            final boolean isTopLevel = Folder.isRoot(mFolder);
             mDrawerToggle.setDrawerIndicatorEnabled(getShouldShowDrawerIndicator(mode, isTopLevel));
+
+            for (DrawerLayout.DrawerListener l : mObservers) {
+                l.onDrawerClosed(drawerView);
+            }
         }
 
         /**
@@ -4187,30 +4386,22 @@ public abstract class AbstractActivityController implements ActivityController,
             if (mDrawerState == DrawerLayout.STATE_SETTLING) {
                 if (mHideMenuItems && slideOffset < 0.15f && mOldSlideOffset > slideOffset) {
                     mHideMenuItems = false;
-                    mActivity.invalidateOptionsMenu();
+                    mActivity.supportInvalidateOptionsMenu();
                     maybeEnableCabMode();
                 } else if (!mHideMenuItems && slideOffset > 0.f && mOldSlideOffset < slideOffset) {
                     mHideMenuItems = true;
-                    mActivity.invalidateOptionsMenu();
+                    mActivity.supportInvalidateOptionsMenu();
                     disableCabMode();
-                    final FolderListFragment folderListFragment = getFolderListFragment();
-                    if (folderListFragment != null) {
-                        folderListFragment.updateScroll();
-                    }
                 }
             } else {
                 if (mHideMenuItems && Float.compare(slideOffset, 0.f) == 0) {
                     mHideMenuItems = false;
-                    mActivity.invalidateOptionsMenu();
+                    mActivity.supportInvalidateOptionsMenu();
                     maybeEnableCabMode();
                 } else if (!mHideMenuItems && slideOffset > 0.f) {
                     mHideMenuItems = true;
-                    mActivity.invalidateOptionsMenu();
+                    mActivity.supportInvalidateOptionsMenu();
                     disableCabMode();
-                    final FolderListFragment folderListFragment = getFolderListFragment();
-                    if (folderListFragment != null) {
-                        folderListFragment.updateScroll();
-                    }
                 }
             }
 
@@ -4218,6 +4409,10 @@ public abstract class AbstractActivityController implements ActivityController,
 
             // If we're sliding, we always want to show the burger
             mDrawerToggle.setDrawerIndicatorEnabled(true /* enable */);
+
+            for (DrawerLayout.DrawerListener l : mObservers) {
+                l.onDrawerSlide(drawerView, slideOffset);
+            }
         }
 
         /**
@@ -4227,8 +4422,17 @@ public abstract class AbstractActivityController implements ActivityController,
          */
         @Override
         public void onDrawerStateChanged(int newState) {
+            LogUtils.d(LOG_TAG, "AAC onDrawerStateChanged %d", newState);
             mDrawerState = newState;
             mDrawerToggle.onDrawerStateChanged(mDrawerState);
+
+            for (DrawerLayout.DrawerListener l : mObservers) {
+                l.onDrawerStateChanged(newState);
+            }
+
+            if (mViewMode.isSearchMode()) {
+                return;
+            }
             if (mDrawerState == DrawerLayout.STATE_IDLE) {
                 if (mHasNewAccountOrFolder) {
                     refreshDrawer();
@@ -4256,7 +4460,7 @@ public abstract class AbstractActivityController implements ActivityController,
             if (conversationList != null) {
                 conversationList.clear();
             }
-            mDrawerObservers.notifyChanged();
+            mFolderOrAccountObservers.notifyChanged();
         }
 
         /**
@@ -4273,7 +4477,7 @@ public abstract class AbstractActivityController implements ActivityController,
 
     @Override
     public boolean isDrawerPullEnabled() {
-        return getShouldAllowDrawerPull(mViewMode.getMode());
+        return true;
     }
 
     @Override
@@ -4345,5 +4549,19 @@ public abstract class AbstractActivityController implements ActivityController,
     public void setConversationListScrollPosition(final String folderUri,
             final Parcelable savedPosition) {
         mConversationListScrollPositions.putParcelable(folderUri, savedPosition);
+    }
+
+    @Override
+    public View.OnClickListener getNavigationViewClickListener() {
+        return mHomeButtonListener;
+    }
+
+    // TODO: Fold this into the outer class when b/16627877 is fixed
+    private class HomeButtonListener implements View.OnClickListener {
+
+        @Override
+        public void onClick(View v) {
+            onUpPressed();
+        }
     }
 }

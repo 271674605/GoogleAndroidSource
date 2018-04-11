@@ -16,8 +16,8 @@
 
 package com.android.mail.compose;
 
-import android.app.ActionBar;
-import android.app.ActionBar.OnNavigationListener;
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
@@ -26,6 +26,7 @@ import android.app.DialogFragment;
 import android.app.Fragment;
 import android.app.FragmentTransaction;
 import android.app.LoaderManager;
+import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -36,15 +37,21 @@ import android.content.Loader;
 import android.content.pm.ActivityInfo;
 import android.content.res.Resources;
 import android.database.Cursor;
+import android.graphics.Rect;
 import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.ParcelFileDescriptor;
-import android.os.Parcelable;
 import android.provider.BaseColumns;
+import android.support.v4.app.RemoteInput;
+import android.support.v7.app.ActionBar;
+import android.support.v7.app.ActionBarActivity;
 import android.text.Editable;
 import android.text.Html;
+import android.text.SpanWatcher;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -63,13 +70,16 @@ import android.view.ViewGroup;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.common.Rfc822Validator;
 import com.android.common.contacts.DataUsageStatUpdater;
+import com.android.emailcommon.mail.Address;
+import com.android.ex.chips.BaseRecipientAdapter;
+import com.android.ex.chips.DropdownChipLayouter;
 import com.android.ex.chips.RecipientEditTextView;
 import com.android.mail.MailIntentService;
 import com.android.mail.R;
@@ -80,7 +90,6 @@ import com.android.mail.compose.AttachmentsView.AttachmentFailureException;
 import com.android.mail.compose.FromAddressSpinner.OnAccountChangedListener;
 import com.android.mail.compose.QuotedTextView.RespondInlineListener;
 import com.android.mail.providers.Account;
-import com.android.mail.providers.Address;
 import com.android.mail.providers.Attachment;
 import com.android.mail.providers.Folder;
 import com.android.mail.providers.MailAppProvider;
@@ -92,15 +101,17 @@ import com.android.mail.providers.UIProvider;
 import com.android.mail.providers.UIProvider.AccountCapabilities;
 import com.android.mail.providers.UIProvider.DraftType;
 import com.android.mail.ui.AttachmentTile.AttachmentPreview;
-import com.android.mail.ui.FeedbackEnabledActivity;
 import com.android.mail.ui.MailActivity;
 import com.android.mail.ui.WaitFragment;
 import com.android.mail.utils.AccountUtils;
 import com.android.mail.utils.AttachmentUtils;
 import com.android.mail.utils.ContentProviderTask;
+import com.android.mail.utils.HtmlUtils;
 import com.android.mail.utils.LogTag;
 import com.android.mail.utils.LogUtils;
+import com.android.mail.utils.NotificationActionUtils;
 import com.android.mail.utils.Utils;
+import com.google.android.mail.common.html.parser.HtmlTree;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -119,11 +130,19 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class ComposeActivity extends Activity implements OnClickListener, OnNavigationListener,
+public class ComposeActivity extends ActionBarActivity
+        implements OnClickListener, ActionBar.OnNavigationListener,
         RespondInlineListener, TextWatcher,
         AttachmentAddedOrDeletedListener, OnAccountChangedListener,
         LoaderManager.LoaderCallbacks<Cursor>, TextView.OnEditorActionListener,
-        FeedbackEnabledActivity {
+        RecipientEditTextView.RecipientEntryItemClickedListener, View.OnFocusChangeListener {
+    /**
+     * An {@link Intent} action that launches {@link ComposeActivity}, but is handled as if the
+     * {@link Activity} were launched with no special action.
+     */
+    private static final String ACTION_LAUNCH_COMPOSE =
+            "com.android.mail.intent.action.LAUNCH_COMPOSE";
+
     // Identifiers for which type of composition this is
     public static final int COMPOSE = -1;
     public static final int REPLY = 0;
@@ -157,7 +176,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private static final String EXTRA_ATTACHMENT_PREVIEWS = "attachmentPreviews";
 
     // Extra that we can get passed from other activities
-    private static final String EXTRA_TO = "to";
+    @VisibleForTesting
+    protected static final String EXTRA_TO = "to";
     private static final String EXTRA_CC = "cc";
     private static final String EXTRA_BCC = "bcc";
 
@@ -170,6 +190,14 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     // List of all the fields
     static final String[] ALL_EXTRAS = { EXTRA_SUBJECT, EXTRA_BODY, EXTRA_TO, EXTRA_CC, EXTRA_BCC,
             EXTRA_QUOTED_TEXT };
+
+    private static final String LEGACY_WEAR_EXTRA = "com.google.android.wearable.extras";
+
+    /**
+     * Constant value for the threshold to use for auto-complete suggestions
+     * for the to/cc/bcc fields.
+     */
+    private static final int COMPLETION_THRESHOLD = 1;
 
     private static SendOrSaveCallback sTestSendOrSaveCallback = null;
     // Map containing information about requests to create new messages, and the id of the
@@ -197,6 +225,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
     /** If set, we will clear notifications for this folder. */
     public static final String EXTRA_NOTIFICATION_FOLDER = "extra-notification-folder";
+    public static final String EXTRA_NOTIFICATION_CONVERSATION = "extra-notification-conversation";
 
     //  If this is a reply/forward then this extra will hold the original message
     private static final String EXTRA_IN_REFERENCE_TO_MESSAGE = "in-reference-to-message";
@@ -224,19 +253,27 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private static final int INIT_DRAFT_USING_REFERENCE_MESSAGE = 2;
     private static final String EXTRA_SELECTED_ACCOUNT = "selectedAccount";
     private static final String TAG_WAIT = "wait-fragment";
+    private static final String MIME_TYPE_ALL = "*/*";
     private static final String MIME_TYPE_PHOTO = "image/*";
-    private static final String MIME_TYPE_VIDEO = "video/*";
 
     private static final String KEY_INNER_SAVED_STATE = "compose_state";
 
     /**
      * A single thread for running tasks in the background.
      */
-    private Handler mSendSaveTaskHandler = null;
+    private final static Handler SEND_SAVE_TASK_HANDLER;
+    static {
+        HandlerThread handlerThread = new HandlerThread("Send Message Task Thread");
+        handlerThread.start();
+
+        SEND_SAVE_TASK_HANDLER = new Handler(handlerThread.getLooper());
+    }
+
+    private ScrollView mScrollView;
     private RecipientEditTextView mTo;
     private RecipientEditTextView mCc;
     private RecipientEditTextView mBcc;
-    private Button mCcBccButton;
+    private View mCcBccButton;
     private CcBccView mCcBccView;
     private AttachmentsView mAttachmentsView;
     protected Account mAccount;
@@ -255,20 +292,17 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private View mFromSpinnerWrapper;
     @VisibleForTesting
     protected FromAddressSpinner mFromSpinner;
-    private boolean mAddingAttachment;
+    protected boolean mAddingAttachment;
     private boolean mAttachmentsChanged;
     private boolean mTextChanged;
     private boolean mReplyFromChanged;
     private MenuItem mSave;
-    private MenuItem mSend;
     @VisibleForTesting
     protected Message mRefMessage;
     private long mDraftId = UIProvider.INVALID_MESSAGE_ID;
     private Message mDraft;
     private ReplyFromAccount mDraftAccount;
-    private Object mDraftLock = new Object();
-    private View mPhotoAttachmentsButton;
-    private View mVideoAttachmentsButton;
+    private final Object mDraftLock = new Object();
 
     /**
      * Boolean indicating whether ComposeActivity was launched from a Gmail controlled view.
@@ -286,13 +320,21 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     // with the object itself
     /* package for testing */
     @VisibleForTesting
-    public ArrayList<SendOrSaveTask> mActiveTasks = Lists.newArrayList();
+    public final ArrayList<SendOrSaveTask> mActiveTasks = Lists.newArrayList();
     // FIXME: this variable is never read. related to sRequestMessageIdMap.
     private int mRequestId;
     private String mSignature;
     private Account[] mAccounts;
     private boolean mRespondedInline;
     private boolean mPerformedSendOrDiscard = false;
+
+    private final HtmlTree.ConverterFactory mSpanConverterFactory =
+            new HtmlTree.ConverterFactory() {
+            @Override
+                public HtmlTree.Converter<Spanned> createInstance() {
+                    return getSpanConverter();
+                }
+            };
 
     /**
      * Can be called from a non-UI thread.
@@ -320,14 +362,6 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     /**
      * Can be called from a non-UI thread.
      */
-    public static void composeWithQuotedText(Context launcher, Account account,
-            String quotedText, String subject, final ContentValues extraValues) {
-        launch(launcher, account, null, COMPOSE, null, null, quotedText, subject, extraValues);
-    }
-
-    /**
-     * Can be called from a non-UI thread.
-     */
     public static void composeWithExtraValues(Context launcher, Account account,
             String subject, final ContentValues extraValues) {
         launch(launcher, account, null, COMPOSE, null, null, null, subject, extraValues);
@@ -349,9 +383,10 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         return createActionIntent(launcher, account, messageUri, FORWARD);
     }
 
-    private static Intent createActionIntent(final Context launcher, final Account account,
+    private static Intent createActionIntent(final Context context, final Account account,
             final Uri messageUri, final int action) {
-        final Intent intent = new Intent(launcher, ComposeActivity.class);
+        final Intent intent = new Intent(ACTION_LAUNCH_COMPOSE);
+        intent.setPackage(context.getPackageName());
 
         updateActionIntent(account, messageUri, action, intent);
 
@@ -396,10 +431,11 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 "android-gmail-readability@google.com", body, null, null, null /* extraValues */);
     }
 
-    private static void launch(Context launcher, Account account, Message message, int action,
+    private static void launch(Context context, Account account, Message message, int action,
             String toAddress, String body, String quotedText, String subject,
             final ContentValues extraValues) {
-        Intent intent = new Intent(launcher, ComposeActivity.class);
+        Intent intent = new Intent(ACTION_LAUNCH_COMPOSE);
+        intent.setPackage(context.getPackageName());
         intent.putExtra(EXTRA_FROM_EMAIL_TASK, true);
         intent.putExtra(EXTRA_ACTION, action);
         intent.putExtra(Utils.EXTRA_ACCOUNT, account);
@@ -424,13 +460,36 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             LogUtils.d(LOG_TAG, "Launching with extraValues: %s", extraValues.toString());
             intent.putExtra(EXTRA_VALUES, extraValues);
         }
-        launcher.startActivity(intent);
+        if (action == COMPOSE) {
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+        } else if (message != null) {
+            intent.setData(Utils.normalizeUri(message.uri));
+        }
+        context.startActivity(intent);
+    }
+
+    public static void composeMailto(Context context, Account account, Uri mailto) {
+        final Intent intent = new Intent(Intent.ACTION_VIEW, mailto);
+        intent.setPackage(context.getPackageName());
+        intent.putExtra(EXTRA_FROM_EMAIL_TASK, true);
+        intent.putExtra(Utils.EXTRA_ACCOUNT, account);
+        if (mailto != null) {
+            intent.setData(Utils.normalizeUri(mailto));
+        }
+        context.startActivity(intent);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.compose);
+        final ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            // Hide the app icon.
+            actionBar.setIcon(null);
+            actionBar.setDisplayUseLogoEnabled(false);
+        }
+
         mInnerSavedState = (savedInstanceState != null) ?
                 savedInstanceState.getBundle(KEY_INNER_SAVED_STATE) : null;
         checkValidAccounts();
@@ -439,21 +498,21 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private void finishCreate() {
         final Bundle savedState = mInnerSavedState;
         findViews();
-        Intent intent = getIntent();
-        Message message;
-        ArrayList<AttachmentPreview> previews;
+        final Intent intent = getIntent();
+        final Message message;
+        final ArrayList<AttachmentPreview> previews;
         mShowQuotedText = false;
-        CharSequence quotedText = null;
+        final CharSequence quotedText;
         int action;
         // Check for any of the possibly supplied accounts.;
-        Account account = null;
+        final Account account;
         if (hadSavedInstanceStateMessage(savedState)) {
             action = savedState.getInt(EXTRA_ACTION, COMPOSE);
             account = savedState.getParcelable(Utils.EXTRA_ACCOUNT);
-            message = (Message) savedState.getParcelable(EXTRA_MESSAGE);
+            message = savedState.getParcelable(EXTRA_MESSAGE);
 
             previews = savedState.getParcelableArrayList(EXTRA_ATTACHMENT_PREVIEWS);
-            mRefMessage = (Message) savedState.getParcelable(EXTRA_IN_REFERENCE_TO_MESSAGE);
+            mRefMessage = savedState.getParcelable(EXTRA_IN_REFERENCE_TO_MESSAGE);
             quotedText = savedState.getCharSequence(EXTRA_QUOTED_TEXT);
 
             mExtraValues = savedState.getParcelable(EXTRA_VALUES);
@@ -461,10 +520,11 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             account = obtainAccount(intent);
             action = intent.getIntExtra(EXTRA_ACTION, COMPOSE);
             // Initialize the message from the message in the intent
-            message = (Message) intent.getParcelableExtra(ORIGINAL_DRAFT_MESSAGE);
+            message = intent.getParcelableExtra(ORIGINAL_DRAFT_MESSAGE);
             previews = intent.getParcelableArrayListExtra(EXTRA_ATTACHMENT_PREVIEWS);
-            mRefMessage = (Message) intent.getParcelableExtra(EXTRA_IN_REFERENCE_TO_MESSAGE);
-            mRefMessageUri = (Uri) intent.getParcelableExtra(EXTRA_IN_REFERENCE_TO_MESSAGE_URI);
+            mRefMessage = intent.getParcelableExtra(EXTRA_IN_REFERENCE_TO_MESSAGE);
+            mRefMessageUri = intent.getParcelableExtra(EXTRA_IN_REFERENCE_TO_MESSAGE_URI);
+            quotedText = null;
 
             if (Analytics.isLoggable()) {
                 if (intent.getBooleanExtra(Utils.EXTRA_FROM_NOTIFICATION, false)) {
@@ -485,14 +545,23 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         // Clear the notification and mark the conversation as seen, if necessary
         final Folder notificationFolder =
                 intent.getParcelableExtra(EXTRA_NOTIFICATION_FOLDER);
-        if (notificationFolder != null) {
-            final Intent clearNotifIntent =
-                    new Intent(MailIntentService.ACTION_CLEAR_NEW_MAIL_NOTIFICATIONS);
-            clearNotifIntent.setPackage(getPackageName());
-            clearNotifIntent.putExtra(Utils.EXTRA_ACCOUNT, account);
-            clearNotifIntent.putExtra(Utils.EXTRA_FOLDER, notificationFolder);
 
-            startService(clearNotifIntent);
+        if (notificationFolder != null) {
+            final Uri conversationUri = intent.getParcelableExtra(EXTRA_NOTIFICATION_CONVERSATION);
+            Intent actionIntent;
+            if (conversationUri != null) {
+                actionIntent = new Intent(MailIntentService.ACTION_RESEND_NOTIFICATIONS_WEAR);
+                actionIntent.putExtra(Utils.EXTRA_CONVERSATION, conversationUri);
+            } else {
+                actionIntent = new Intent(MailIntentService.ACTION_CLEAR_NEW_MAIL_NOTIFICATIONS);
+                actionIntent.setData(Utils.appendVersionQueryParameter(this,
+                        notificationFolder.folderUri.fullUri));
+            }
+            actionIntent.setPackage(getPackageName());
+            actionIntent.putExtra(Utils.EXTRA_ACCOUNT, account);
+            actionIntent.putExtra(Utils.EXTRA_FOLDER, notificationFolder);
+
+            startService(actionIntent);
         }
 
         if (intent.getBooleanExtra(EXTRA_FROM_EMAIL_TASK, false)) {
@@ -509,12 +578,46 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         if (mRefMessageUri != null) {
             mShowQuotedText = true;
             mComposeMode = action;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                Bundle remoteInput = RemoteInput.getResultsFromIntent(intent);
+                String wearReply = null;
+                if (remoteInput != null) {
+                    LogUtils.d(LOG_TAG, "Got remote input from new api");
+                    CharSequence input = remoteInput.getCharSequence(
+                            NotificationActionUtils.WEAR_REPLY_INPUT);
+                    if (input != null) {
+                        wearReply = input.toString();
+                    }
+                } else {
+                    // TODO: remove after legacy code has been removed.
+                    LogUtils.d(LOG_TAG,
+                            "No remote input from new api, falling back to compatibility mode");
+                    ClipData clipData = intent.getClipData();
+                    if (clipData != null
+                            && LEGACY_WEAR_EXTRA.equals(clipData.getDescription().getLabel())) {
+                        Bundle extras = clipData.getItemAt(0).getIntent().getExtras();
+                        if (extras != null) {
+                            wearReply = extras.getString(NotificationActionUtils.WEAR_REPLY_INPUT);
+                        }
+                    }
+                }
+
+                if (!TextUtils.isEmpty(wearReply)) {
+                    createWearReplyTask(this, mRefMessageUri, UIProvider.MESSAGE_PROJECTION,
+                            mComposeMode, wearReply).execute();
+                    finish();
+                    return;
+                } else {
+                    LogUtils.w(LOG_TAG, "remote input string is null");
+                }
+            }
+
             getLoaderManager().initLoader(INIT_DRAFT_USING_REFERENCE_MESSAGE, null, this);
             return;
         } else if (message != null && action != EDIT_DRAFT) {
             initFromDraftMessage(message);
             initQuotedTextFromRefMessage(mRefMessage, action);
-            showCcBcc(savedState);
             mShowQuotedText = message.appendRefMessageContent;
             // if we should be showing quoted text but mRefMessage is null
             // and we have some quotedText, display that
@@ -527,10 +630,10 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 }
             }
         } else if (action == EDIT_DRAFT) {
+            if (message == null) {
+                throw new IllegalStateException("Message must not be null to edit draft");
+            }
             initFromDraftMessage(message);
-            boolean showBcc = !TextUtils.isEmpty(message.getBcc());
-            boolean showCc = showBcc || !TextUtils.isEmpty(message.getCc());
-            mCcBccView.show(false, showCc, showBcc);
             // Update the action to the draft type of the previous draft
             switch (message.draftType) {
                 case UIProvider.DraftType.REPLY:
@@ -574,6 +677,49 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         finishSetup(action, intent, savedState);
     }
 
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
+    private static AsyncTask<Void, Void, Message> createWearReplyTask(
+            final ComposeActivity composeActivity,
+            final Uri refMessageUri, final String[] projection, final int action,
+            final String wearReply) {
+        return new AsyncTask<Void, Void, Message>() {
+            private Intent mEmptyServiceIntent = new Intent(composeActivity, EmptyService.class);
+
+            @Override
+            protected void onPreExecute() {
+                // Start service so we won't be killed if this app is put in the background.
+                composeActivity.startService(mEmptyServiceIntent);
+            }
+
+            @Override
+            protected Message doInBackground(Void... params) {
+                Cursor cursor = composeActivity.getContentResolver()
+                        .query(refMessageUri, projection, null, null, null, null);
+                if (cursor != null) {
+                    try {
+                        cursor.moveToFirst();
+                        return new Message(cursor);
+                    } finally {
+                        cursor.close();
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void onPostExecute(Message message) {
+                composeActivity.stopService(mEmptyServiceIntent);
+
+                composeActivity.mRefMessage = message;
+                composeActivity.initFromRefMessage(action);
+                composeActivity.setBody(wearReply, false);
+                composeActivity.finishSetup(action, composeActivity.getIntent(), null);
+                composeActivity.sendOrSaveWithSanityChecks(false /* save */, true /* show  toast */,
+                        false /* orientationChanged */, true /* autoSend */);
+            }
+        };
+    }
+
     private void checkValidAccounts() {
         final Account[] allAccounts = AccountUtils.getAccounts(this);
         if (allAccounts == null || allAccounts.length == 0) {
@@ -611,7 +757,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 return (Account) accountExtra;
             } else if (accountExtra instanceof String) {
                 // This is the Account attached to the widget compose intent.
-                account = Account.newinstance((String)accountExtra);
+                account = Account.newInstance((String) accountExtra);
                 if (account != null) {
                     return account;
                 }
@@ -620,16 +766,16 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     intent.getStringExtra(Utils.EXTRA_ACCOUNT) :
                         intent.getStringExtra(EXTRA_SELECTED_ACCOUNT);
         }
-        if (account == null) {
-            MailAppProvider provider = MailAppProvider.getInstance();
-            String lastAccountUri = provider.getLastSentFromAccount();
-            if (TextUtils.isEmpty(lastAccountUri)) {
-                lastAccountUri = provider.getLastViewedAccount();
-            }
-            if (!TextUtils.isEmpty(lastAccountUri)) {
-                accountExtra = Uri.parse(lastAccountUri);
-            }
+
+        MailAppProvider provider = MailAppProvider.getInstance();
+        String lastAccountUri = provider.getLastSentFromAccount();
+        if (TextUtils.isEmpty(lastAccountUri)) {
+            lastAccountUri = provider.getLastViewedAccount();
         }
+        if (!TextUtils.isEmpty(lastAccountUri)) {
+            accountExtra = Uri.parse(lastAccountUri);
+        }
+
         if (mAccounts != null && mAccounts.length > 0) {
             if (accountExtra instanceof String && !TextUtils.isEmpty((String) accountExtra)) {
                 // For backwards compatibility, we need to check account
@@ -673,11 +819,18 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         }
 
         initChangeListeners();
+
+        // These two should be identical since we check CC and BCC the same way
+        boolean showCc = !TextUtils.isEmpty(mCc.getText()) || (savedInstanceState != null &&
+                savedInstanceState.getBoolean(EXTRA_SHOW_CC));
+        boolean showBcc = !TextUtils.isEmpty(mBcc.getText()) || (savedInstanceState != null &&
+                savedInstanceState.getBoolean(EXTRA_SHOW_BCC));
+        mCcBccView.show(false /* animate */, showCc, showBcc);
         updateHideOrShowCcBcc();
         updateHideOrShowQuotedText(mShowQuotedText);
 
-        mRespondedInline = mInnerSavedState != null ?
-                mInnerSavedState.getBoolean(EXTRA_RESPONDED_INLINE) : false;
+        mRespondedInline = mInnerSavedState != null &&
+                mInnerSavedState.getBoolean(EXTRA_RESPONDED_INLINE);
         if (mRespondedInline) {
             mQuotedTextView.setVisibility(View.GONE);
         }
@@ -726,10 +879,13 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     /**
      * Focus the body of the message.
      */
-    public void focusBody() {
+    private void focusBody() {
         mBodyView.requestFocus();
-        int length = mBodyView.getText().length();
+        resetBodySelection();
+    }
 
+    private void resetBodySelection() {
+        int length = mBodyView.getText().length();
         int signatureStartPos = getSignatureStartPosition(
                 mSignature, mBodyView.getText().toString());
         if (signatureStartPos > -1) {
@@ -783,10 +939,12 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     @Override
-    protected final void onActivityResult(int request, int result, Intent data) {
-        if (request == RESULT_PICK_ATTACHMENT && result == RESULT_OK) {
-            addAttachmentAndUpdateView(data);
+    protected void onActivityResult(int request, int result, Intent data) {
+        if (request == RESULT_PICK_ATTACHMENT) {
             mAddingAttachment = false;
+            if (result == RESULT_OK) {
+                addAttachmentAndUpdateView(data);
+            }
         } else if (request == RESULT_CREATE_ACCOUNT) {
             // We were waiting for the user to create an account
             if (result != RESULT_OK) {
@@ -826,7 +984,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     @Override
-    protected final void onSaveInstanceState(Bundle state) {
+    protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         final Bundle inner = new Bundle();
         saveState(inner);
@@ -872,7 +1030,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         int mode = getMode();
         state.putInt(EXTRA_ACTION, mode);
 
-        final Message message = createMessage(selectedReplyFromAccount, mode);
+        final Message message = createMessage(selectedReplyFromAccount, mRefMessage, mode,
+                removeComposingSpans(mBodyView.getText()));
         if (mDraft != null) {
             message.id = mDraft.id;
             message.serverId = mDraft.serverId;
@@ -899,7 +1058,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
     private int getMode() {
         int mode = ComposeActivity.COMPOSE;
-        ActionBar actionBar = getActionBar();
+        final ActionBar actionBar = getSupportActionBar();
         if (actionBar != null
                 && actionBar.getNavigationMode() == ActionBar.NAVIGATION_MODE_LIST) {
             mode = actionBar.getSelectedNavigationIndex();
@@ -907,7 +1066,12 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         return mode;
     }
 
-    private Message createMessage(ReplyFromAccount selectedReplyFromAccount, int mode) {
+    /**
+     * This function might be called from a background thread, so be sure to move everything that
+     * can potentially modify the UI to the main thread (e.g. removeComposingSpans for body).
+     */
+    private Message createMessage(ReplyFromAccount selectedReplyFromAccount, Message refMessage,
+            int mode, Spanned body) {
         Message message = new Message();
         message.id = UIProvider.INVALID_MESSAGE_ID;
         message.serverId = null;
@@ -920,9 +1084,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         message.setBcc(formatSenders(mBcc.getText().toString()));
         message.setReplyTo(null);
         message.dateReceivedMs = 0;
-        final String htmlBody = Html.toHtml(removeComposingSpans(mBodyView.getText()));
-        final StringBuilder fullBody = new StringBuilder(htmlBody);
-        message.bodyHtml = fullBody.toString();
+        message.bodyHtml = spannedBodyToHtml(body, true);
         message.bodyText = mBodyView.getText().toString();
         message.embedsExternalResources = false;
         message.refMessageUri = mRefMessage != null ? mRefMessage.uri : null;
@@ -934,13 +1096,31 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         message.alwaysShowImages = false;
         message.attachmentsJson = Attachment.toJSONArray(attachments);
         CharSequence quotedText = mQuotedTextView.getQuotedText();
-        message.quotedTextOffset = !TextUtils.isEmpty(quotedText) ? QuotedTextView
-                .getQuotedTextOffset(quotedText.toString()) : -1;
+        message.quotedTextOffset = -1; // Just a default value.
+        if (refMessage != null && !TextUtils.isEmpty(quotedText)) {
+            if (!TextUtils.isEmpty(refMessage.bodyHtml)) {
+                // We want the index to point to just the quoted text and not the
+                // "On December 25, 2014..." part of it.
+                message.quotedTextOffset =
+                        QuotedTextView.getQuotedTextOffset(quotedText.toString());
+            } else if (!TextUtils.isEmpty(refMessage.bodyText)) {
+                // We want to point to the entire quoted text.
+                message.quotedTextOffset = QuotedTextView.findQuotedTextIndex(quotedText);
+            }
+        }
         message.accountUri = null;
-        message.setFrom(selectedReplyFromAccount != null ? selectedReplyFromAccount.address
-                : mAccount != null ? mAccount.getEmailAddress() : null);
+        message.setFrom(computeFromForAccount(selectedReplyFromAccount));
         message.draftType = getDraftType(mode);
         return message;
+    }
+
+    protected String computeFromForAccount(ReplyFromAccount selectedReplyFromAccount) {
+        final String email = selectedReplyFromAccount != null ? selectedReplyFromAccount.address
+                : mAccount != null ? mAccount.getEmailAddress() : null;
+        final String senderName = selectedReplyFromAccount != null ? selectedReplyFromAccount.name
+                : mAccount != null ? mAccount.getSenderName() : null;
+        final Address address = new Address(email, senderName);
+        return address.toHeader();
     }
 
     private static String formatSenders(final String string) {
@@ -951,7 +1131,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     @VisibleForTesting
-    void setAccount(Account account) {
+    protected void setAccount(Account account) {
         if (account == null) {
             return;
         }
@@ -998,11 +1178,11 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             // Otherwise, give the user the ability to choose which account to
             // send mail from / save drafts to.
             mFromStatic.setVisibility(View.GONE);
-            mFromStaticText.setText(mReplyFromAccount.name);
+            mFromStaticText.setText(mReplyFromAccount.address);
             mFromSpinnerWrapper.setVisibility(View.VISIBLE);
         } else {
             mFromStatic.setVisibility(View.VISIBLE);
-            mFromStaticText.setText(mReplyFromAccount.name);
+            mFromStaticText.setText(mReplyFromAccount.address);
             mFromSpinnerWrapper.setVisibility(View.GONE);
         }
     }
@@ -1057,8 +1237,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         HashSet<String> recipientsMap = new HashSet<String>();
         for (String address : sentTo) {
             tokens = Rfc822Tokenizer.tokenize(address);
-            for (int i = 0; i < tokens.length; i++) {
-                recipientsMap.add(tokens[i].getAddress());
+            for (final Rfc822Token token : tokens) {
+                recipientsMap.add(token.getAddress());
             }
         }
 
@@ -1085,18 +1265,18 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 return from;
             }
         }
-        return new ReplyFromAccount(account, account.uri, account.getEmailAddress(), account.name,
-                account.getEmailAddress(), true, false);
+        return new ReplyFromAccount(account, account.uri, account.getEmailAddress(),
+                account.getSenderName(), account.getEmailAddress(), true, false);
     }
 
-    private ReplyFromAccount getReplyFromAccountFromDraft(Account account, Message msg) {
-        String sender = msg.getFrom();
+    private ReplyFromAccount getReplyFromAccountFromDraft(final Account account,
+            final Message msg) {
+        final Address[] draftFroms = Address.parse(msg.getFrom());
+        final String sender = draftFroms.length > 0 ? draftFroms[0].getAddress() : "";
         ReplyFromAccount replyFromAccount = null;
         List<ReplyFromAccount> replyFromAccounts = mFromSpinner.getReplyFromAccounts();
         if (TextUtils.equals(account.getEmailAddress(), sender)) {
-            replyFromAccount = new ReplyFromAccount(mAccount, mAccount.uri,
-                    mAccount.getEmailAddress(), mAccount.name, mAccount.getEmailAddress(),
-                    true, false);
+            replyFromAccount = getDefaultReplyFromAccount(account);
         } else {
             for (ReplyFromAccount fromAccount : replyFromAccounts) {
                 if (TextUtils.equals(fromAccount.address, sender)) {
@@ -1109,38 +1289,39 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     private void findViews() {
-        findViewById(R.id.compose).setVisibility(View.VISIBLE);
-        mCcBccButton = (Button) findViewById(R.id.add_cc_bcc);
+        mScrollView = (ScrollView) findViewById(R.id.compose);
+        mScrollView.setVisibility(View.VISIBLE);
+        mCcBccButton = findViewById(R.id.add_cc_bcc);
         if (mCcBccButton != null) {
             mCcBccButton.setOnClickListener(this);
         }
         mCcBccView = (CcBccView) findViewById(R.id.cc_bcc_wrapper);
         mAttachmentsView = (AttachmentsView)findViewById(R.id.attachments);
-        mPhotoAttachmentsButton = findViewById(R.id.add_photo_attachment);
-        if (mPhotoAttachmentsButton != null) {
-            mPhotoAttachmentsButton.setOnClickListener(this);
-        }
-        mVideoAttachmentsButton = findViewById(R.id.add_video_attachment);
-        if (mVideoAttachmentsButton != null) {
-            mVideoAttachmentsButton.setOnClickListener(this);
-        }
         mTo = (RecipientEditTextView) findViewById(R.id.to);
-        mTo.setTokenizer(new Rfc822Tokenizer());
+        initializeRecipientEditTextView(mTo);
+        mTo.setAlternatePopupAnchor(findViewById(R.id.compose_to_dropdown_anchor));
         mCc = (RecipientEditTextView) findViewById(R.id.cc);
-        mCc.setTokenizer(new Rfc822Tokenizer());
+        initializeRecipientEditTextView(mCc);
         mBcc = (RecipientEditTextView) findViewById(R.id.bcc);
-        mBcc.setTokenizer(new Rfc822Tokenizer());
+        initializeRecipientEditTextView(mBcc);
         // TODO: add special chips text change watchers before adding
         // this as a text changed watcher to the to, cc, bcc fields.
         mSubject = (TextView) findViewById(R.id.subject);
         mSubject.setOnEditorActionListener(this);
+        mSubject.setOnFocusChangeListener(this);
         mQuotedTextView = (QuotedTextView) findViewById(R.id.quoted_text_view);
         mQuotedTextView.setRespondInlineListener(this);
         mBodyView = (EditText) findViewById(R.id.body);
+        mBodyView.setOnFocusChangeListener(this);
         mFromStatic = findViewById(R.id.static_from_content);
         mFromStaticText = (TextView) findViewById(R.id.from_account_name);
         mFromSpinnerWrapper = findViewById(R.id.spinner_from_content);
         mFromSpinner = (FromAddressSpinner) findViewById(R.id.from_picker);
+    }
+
+    private void initializeRecipientEditTextView(RecipientEditTextView view) {
+        view.setTokenizer(new Rfc822Tokenizer());
+        view.setThreshold(COMPLETION_THRESHOLD);
     }
 
     @Override
@@ -1152,8 +1333,46 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         return false;
     }
 
+    /**
+     * Convert the body text (in {@link Spanned} form) to ready-to-send HTML format as a plain
+     * String.
+     *
+     * @param body the body text including fancy style spans
+     * @param removedComposing whether the function already removed composingSpans. Necessary
+     *   because we cannot call removeComposingSpans from a background thread.
+     * @return HTML formatted body that's suitable for sending or saving
+     */
+    private String spannedBodyToHtml(Spanned body, boolean removedComposing) {
+        if (!removedComposing) {
+            body = removeComposingSpans(body);
+        }
+        final HtmlifyBeginResult r = onHtmlifyBegin(body);
+        return onHtmlifyEnd(Html.toHtml(r.result), r.extras);
+    }
+
+    /**
+     * A hook for subclasses to convert custom spans in the body text prior to system HTML
+     * conversion. That HTML conversion is lossy, so anything above and beyond its capability
+     * has to be handled here.
+     *
+     * @param body
+     * @return a copy of the body text with custom spans replaced with HTML
+     */
+    protected HtmlifyBeginResult onHtmlifyBegin(Spanned body) {
+        return new HtmlifyBeginResult(body, null /* extras */);
+    }
+
+    protected String onHtmlifyEnd(String html, Object extras) {
+        return html;
+    }
+
     protected TextView getBody() {
         return mBodyView;
+    }
+
+    @VisibleForTesting
+    public String getBodyHtml() {
+        return spannedBodyToHtml(mBodyView.getText(), false);
     }
 
     @VisibleForTesting
@@ -1198,7 +1417,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
     private void initActionBar() {
         LogUtils.d(LOG_TAG, "initializing action bar in ComposeActivity");
-        ActionBar actionBar = getActionBar();
+        final ActionBar actionBar = getSupportActionBar();
         if (actionBar == null) {
             return;
         }
@@ -1208,7 +1427,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         } else {
             actionBar.setTitle(null);
             if (mComposeModeAdapter == null) {
-                mComposeModeAdapter = new ComposeModeAdapter(this);
+                mComposeModeAdapter = new ComposeModeAdapter(actionBar.getThemedContext());
             }
             actionBar.setNavigationMode(ActionBar.NAVIGATION_MODE_LIST);
             actionBar.setListNavigationCallbacks(mComposeModeAdapter, this);
@@ -1224,8 +1443,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     break;
             }
         }
-        actionBar.setDisplayOptions(ActionBar.DISPLAY_HOME_AS_UP | ActionBar.DISPLAY_SHOW_HOME,
-                ActionBar.DISPLAY_HOME_AS_UP | ActionBar.DISPLAY_SHOW_HOME);
+        actionBar.setDisplayOptions(ActionBar.DISPLAY_HOME_AS_UP,
+                ActionBar.DISPLAY_HOME_AS_UP);
         actionBar.setHomeButtonEnabled(true);
     }
 
@@ -1247,16 +1466,6 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 }
             }
         }
-
-        if (mRefMessage != null) {
-            // CC field only gets populated when doing REPLY_ALL.
-            // BCC never gets auto-populated, unless the user is editing
-            // a draft with one.
-            if (!TextUtils.isEmpty(mCc.getText()) && action == REPLY_ALL) {
-                mCcBccView.show(false, true, false);
-            }
-        }
-        updateHideOrShowCcBcc();
     }
 
     private void setFieldsFromRefMessage(int action) {
@@ -1270,6 +1479,10 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         if (action == ComposeActivity.FORWARD || mAttachmentsChanged) {
             initAttachments(mRefMessage);
         }
+    }
+
+    protected HtmlTree.Converter<Spanned> getSpanConverter() {
+        return new HtmlUtils.SpannedConverter();
     }
 
     private void initFromDraftMessage(Message message) {
@@ -1289,34 +1502,44 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 addAttachmentAndUpdateView(a);
             }
         }
-        int quotedTextIndex = message.appendRefMessageContent ?
-                message.quotedTextOffset : -1;
+        int quotedTextIndex = message.appendRefMessageContent ? message.quotedTextOffset : -1;
         // Set the body
         CharSequence quotedText = null;
         if (!TextUtils.isEmpty(message.bodyHtml)) {
-            CharSequence htmlText = "";
+            String body = message.bodyHtml;
             if (quotedTextIndex > -1) {
-                // Find the offset in the htmltext of the actual quoted text and strip it out.
+                // Find the offset in the html text of the actual quoted text and strip it out.
+                // Note that the actual quotedTextOffset in the message has not changed as
+                // this different offset is used only for display purposes. They point to different
+                // parts of the original message.  Please see the comments in QuoteTextView
+                // to see the differences.
                 quotedTextIndex = QuotedTextView.findQuotedTextIndex(message.bodyHtml);
                 if (quotedTextIndex > -1) {
-                    htmlText = Utils.convertHtmlToPlainText(message.bodyHtml.substring(0,
-                            quotedTextIndex));
+                    body = message.bodyHtml.substring(0, quotedTextIndex);
                     quotedText = message.bodyHtml.subSequence(quotedTextIndex,
                             message.bodyHtml.length());
                 }
-            } else {
-                htmlText = Utils.convertHtmlToPlainText(message.bodyHtml);
             }
-            mBodyView.setText(htmlText);
+            new HtmlToSpannedTask().execute(body);
         } else {
             final String body = message.bodyText;
-            final CharSequence bodyText = !TextUtils.isEmpty(body) ?
-                    (quotedTextIndex > -1 ?
-                            message.bodyText.substring(0, quotedTextIndex) : message.bodyText)
-                            : "";
-            if (quotedTextIndex > -1) {
-                quotedText = !TextUtils.isEmpty(body) ? message.bodyText.substring(quotedTextIndex)
-                        : null;
+            final CharSequence bodyText;
+            if (TextUtils.isEmpty(body)) {
+                bodyText = "";
+                quotedText = null;
+            } else {
+                if (quotedTextIndex > body.length()) {
+                    // Sanity check to guarantee that we will not over index the String.
+                    // If this happens there is a bigger problem. This should never happen hence
+                    // the wtf logging.
+                    quotedTextIndex = -1;
+                    LogUtils.wtf(LOG_TAG, "quotedTextIndex (%d) > body.length() (%d)",
+                            quotedTextIndex, body.length());
+                }
+                bodyText = quotedTextIndex > -1 ? body.substring(0, quotedTextIndex) : body;
+                if (quotedTextIndex > -1) {
+                    quotedText = body.substring(quotedTextIndex);
+                }
             }
             mBodyView.setText(bodyText);
         }
@@ -1394,9 +1617,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         Bundle extras = intent.getExtras();
         if (extras != null) {
             CharSequence text = extras.getCharSequence(Intent.EXTRA_TEXT);
-            if (text != null) {
-                setBody(text, true /* with signature */);
-            }
+            setBody((text != null) ? text : "", true /* with signature */);
 
             // TODO - support EXTRA_HTML_TEXT
         }
@@ -1448,6 +1669,31 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     /**
+     * Replaces all occurrences of '%' with "%25", to prevent URLDecode.decode from
+     * crashing on decoded '%' symbols
+     *
+     * @param toReplace Input string
+     * @return The string with all "%" characters replaced with "%25"
+     */
+    private static String replacePercent(String toReplace) {
+        return toReplace.replace("%", "%25");
+    }
+
+    /**
+     * Helper function to encapsulate encoding/decoding string from Uri.getQueryParameters
+     * @param content Input string
+     * @return The string that's properly escaped to be shown in mail subject/content
+     */
+    private static String decodeContentFromQueryParam(String content) {
+        try {
+            return URLDecoder.decode(replacePlus(replacePercent(content)), UTF8_ENCODING_NAME);
+        } catch (UnsupportedEncodingException e) {
+            LogUtils.e(LOG_TAG, "%s while decoding '%s'", e.getMessage(), content);
+            return "";  // Default to empty string so setText/setBody has same behavior as before.
+        }
+    }
+
+    /**
      * Initialize the compose view from a String representing a mailTo uri.
      * @param mailToString The uri as a string.
      */
@@ -1485,25 +1731,15 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         List<String> bcc = uri.getQueryParameters("bcc");
         addBccAddresses(Arrays.asList(bcc.toArray(new String[bcc.size()])));
 
+        // NOTE: Uri.getQueryParameters already decodes % encoded characters
         List<String> subject = uri.getQueryParameters("subject");
         if (subject.size() > 0) {
-            try {
-                mSubject.setText(URLDecoder.decode(replacePlus(subject.get(0)),
-                        UTF8_ENCODING_NAME));
-            } catch (UnsupportedEncodingException e) {
-                LogUtils.e(LOG_TAG, "%s while decoding subject '%s'",
-                        e.getMessage(), subject);
-            }
+            mSubject.setText(decodeContentFromQueryParam(subject.get(0)));
         }
 
         List<String> body = uri.getQueryParameters("body");
         if (body.size() > 0) {
-            try {
-                setBody(URLDecoder.decode(replacePlus(body.get(0)), UTF8_ENCODING_NAME),
-                        true /* with signature */);
-            } catch (UnsupportedEncodingException e) {
-                LogUtils.e(LOG_TAG, "%s while decoding body '%s'", e.getMessage(), body);
-            }
+            setBody(decodeContentFromQueryParam(body.get(0)), true /* with signature */);
         }
     }
 
@@ -1566,6 +1802,10 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     final Uri uri = Uri.parse(uriString);
                     long size = 0;
                     try {
+                        if (handleSpecialAttachmentUri(uri)) {
+                            continue;
+                        }
+
                         final Attachment a = mAttachmentsView.generateLocalAttachment(uri);
                         size = mAttachmentsView.addAttachment(mAccount, a);
 
@@ -1581,13 +1821,19 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             }
             if (extras.containsKey(Intent.EXTRA_STREAM)) {
                 if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
-                    ArrayList<Parcelable> uris = extras
+                    final ArrayList<Uri> uris = extras
                             .getParcelableArrayList(Intent.EXTRA_STREAM);
                     ArrayList<Attachment> attachments = new ArrayList<Attachment>();
-                    for (Parcelable uri : uris) {
+                    for (Uri uri : uris) {
+                        if (uri == null) {
+                            continue;
+                        }
                         try {
-                            final Attachment a = mAttachmentsView.generateLocalAttachment(
-                                    (Uri) uri);
+                            if (handleSpecialAttachmentUri(uri)) {
+                                continue;
+                            }
+
+                            final Attachment a = mAttachmentsView.generateLocalAttachment(uri);
                             attachments.add(a);
 
                             Analytics.getInstance().sendEvent("send_intent_attachment",
@@ -1604,20 +1850,24 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     }
                     totalSize += addAttachments(attachments);
                 } else {
-                    final Uri uri = (Uri) extras.getParcelable(Intent.EXTRA_STREAM);
-                    long size = 0;
-                    try {
-                        final Attachment a = mAttachmentsView.generateLocalAttachment(uri);
-                        size = mAttachmentsView.addAttachment(mAccount, a);
+                    final Uri uri = extras.getParcelable(Intent.EXTRA_STREAM);
+                    if (uri != null) {
+                        long size = 0;
+                        try {
+                            if (!handleSpecialAttachmentUri(uri)) {
+                                final Attachment a = mAttachmentsView.generateLocalAttachment(uri);
+                                size = mAttachmentsView.addAttachment(mAccount, a);
 
-                        Analytics.getInstance().sendEvent("send_intent_attachment",
-                                Utils.normalizeMimeType(a.getContentType()), null, size);
+                                Analytics.getInstance().sendEvent("send_intent_attachment",
+                                        Utils.normalizeMimeType(a.getContentType()), null, size);
+                            }
 
-                    } catch (AttachmentFailureException e) {
-                        LogUtils.e(LOG_TAG, e, "Error adding attachment");
-                        showAttachmentTooBigToast(e.getErrorRes());
+                        } catch (AttachmentFailureException e) {
+                            LogUtils.e(LOG_TAG, e, "Error adding attachment");
+                            showAttachmentTooBigToast(e.getErrorRes());
+                        }
+                        totalSize += size;
                     }
-                    totalSize += size;
                 }
             }
 
@@ -1649,37 +1899,43 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         if (mCcBccButton != null) {
             if (!ccVisible || !bccVisible) {
                 mCcBccButton.setVisibility(View.VISIBLE);
-                mCcBccButton.setText(getString(!ccVisible ? R.string.add_cc_label
-                        : R.string.add_bcc_label));
             } else {
-                mCcBccButton.setVisibility(View.INVISIBLE);
-            }
-        }
-    }
-
-    private void showCcBcc(Bundle state) {
-        if (state != null && state.containsKey(EXTRA_SHOW_CC)) {
-            boolean showCc = state.getBoolean(EXTRA_SHOW_CC);
-            boolean showBcc = state.getBoolean(EXTRA_SHOW_BCC);
-            if (showCc || showBcc) {
-                mCcBccView.show(false, showCc, showBcc);
+                mCcBccButton.setVisibility(View.GONE);
             }
         }
     }
 
     /**
      * Add attachment and update the compose area appropriately.
-     * @param data
      */
-    public void addAttachmentAndUpdateView(Intent data) {
-        addAttachmentAndUpdateView(data != null ? data.getData() : (Uri) null);
+    private void addAttachmentAndUpdateView(Intent data) {
+        if (data == null) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            final ClipData clipData = data.getClipData();
+            if (clipData != null) {
+                for (int i = 0, size = clipData.getItemCount(); i < size; i++) {
+                    addAttachmentAndUpdateView(clipData.getItemAt(i).getUri());
+                }
+                return;
+            }
+        }
+
+        addAttachmentAndUpdateView(data.getData());
     }
 
-    public void addAttachmentAndUpdateView(Uri contentUri) {
+    private void addAttachmentAndUpdateView(Uri contentUri) {
         if (contentUri == null) {
             return;
         }
         try {
+
+            if (handleSpecialAttachmentUri(contentUri)) {
+                return;
+            }
+
             addAttachmentAndUpdateView(mAttachmentsView.generateLocalAttachment(contentUri));
         } catch (AttachmentFailureException e) {
             LogUtils.e(LOG_TAG, e, "Error adding attachment");
@@ -1690,7 +1946,17 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         }
     }
 
-    public void addAttachmentAndUpdateView(Attachment attachment) {
+    /**
+     * Allow subclasses to implement custom handling of attachments.
+     *
+     * @param contentUri a passed-in URI from a pick intent
+     * @return true iff handled
+     */
+    protected boolean handleSpecialAttachmentUri(final Uri contentUri) {
+        return false;
+    }
+
+    private void addAttachmentAndUpdateView(Attachment attachment) {
         try {
             long size = mAttachmentsView.addAttachment(mAccount, attachment);
             if (size > 0) {
@@ -1717,31 +1983,37 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     void initReplyRecipients(final Message refMessage, final int action) {
         String[] sentToAddresses = refMessage.getToAddressesUnescaped();
         final Collection<String> toAddresses;
-        final String[] replyToAddresses = refMessage.getReplyToAddressesUnescaped();
-        String replyToAddress = replyToAddresses.length > 0 ? replyToAddresses[0] : null;
         final String[] fromAddresses = refMessage.getFromAddressesUnescaped();
         final String fromAddress = fromAddresses.length > 0 ? fromAddresses[0] : null;
-
-        // If there is no reply to address, the reply to address is the sender.
-        if (TextUtils.isEmpty(replyToAddress)) {
-            replyToAddress = fromAddress;
-        }
+        final String[] replyToAddresses = getReplyToAddresses(
+                refMessage.getReplyToAddressesUnescaped(), fromAddress);
 
         // If this is a reply, the Cc list is empty. If this is a reply-all, the
         // Cc list is the union of the To and Cc recipients of the original
         // message, excluding the current user's email address and any addresses
         // already on the To list.
         if (action == ComposeActivity.REPLY) {
-            toAddresses = initToRecipients(fromAddress, replyToAddress, sentToAddresses);
+            toAddresses = initToRecipients(fromAddress, replyToAddresses, sentToAddresses);
             addToAddresses(toAddresses);
         } else if (action == ComposeActivity.REPLY_ALL) {
             final Set<String> ccAddresses = Sets.newHashSet();
-            toAddresses = initToRecipients(fromAddress, replyToAddress, sentToAddresses);
+            toAddresses = initToRecipients(fromAddress, replyToAddresses, sentToAddresses);
             addToAddresses(toAddresses);
             addRecipients(ccAddresses, sentToAddresses);
             addRecipients(ccAddresses, refMessage.getCcAddressesUnescaped());
             addCcAddresses(ccAddresses, toAddresses);
         }
+    }
+
+    // If there is no reply to address, the reply to address is the sender.
+    private static String[] getReplyToAddresses(String[] replyTo, String from) {
+        boolean hasReplyTo = false;
+        for (final String replyToAddress : replyTo) {
+            if (!TextUtils.isEmpty(replyToAddress)) {
+                hasReplyTo = true;
+            }
+        }
+        return hasReplyTo ? replyTo : new String[] {from};
     }
 
     private void addToAddresses(Collection<String> addresses) {
@@ -1763,19 +2035,19 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         String address;
 
         if (compareToList == null) {
-            for (Rfc822Token[] tokens : addresses) {
-                for (int i = 0; i < tokens.length; i++) {
-                    address = tokens[i].toString();
+            for (final Rfc822Token[] tokens : addresses) {
+                for (final Rfc822Token token : tokens) {
+                    address = token.toString();
                     list.append(address + END_TOKEN);
                 }
             }
         } else {
             HashSet<String> compareTo = convertToHashSet(compareToList);
-            for (Rfc822Token[] tokens : addresses) {
-                for (int i = 0; i < tokens.length; i++) {
-                    address = tokens[i].toString();
+            for (final Rfc822Token[] tokens : addresses) {
+                for (final Rfc822Token token : tokens) {
+                    address = token.toString();
                     // Check if this is a duplicate:
-                    if (!compareTo.contains(tokens[i].getAddress())) {
+                    if (!compareTo.contains(token.getAddress())) {
                         // Get the address here
                         list.append(address + END_TOKEN);
                     }
@@ -1787,8 +2059,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private static HashSet<String> convertToHashSet(final List<Rfc822Token[]> list) {
         final HashSet<String> hash = new HashSet<String>();
         for (final Rfc822Token[] tokens : list) {
-            for (int i = 0; i < tokens.length; i++) {
-                hash.add(tokens[i].getAddress());
+            for (final Rfc822Token token : tokens) {
+                hash.add(token.getAddress());
             }
         }
         return hash;
@@ -1817,26 +2089,30 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
         final Rfc822Token[] tokens = Rfc822Tokenizer.tokenize(address);
 
-        for (int i = 0; i < tokens.length; i++) {
-            list.append(tokens[i] + END_TOKEN);
+        for (final Rfc822Token token : tokens) {
+            list.append(token + END_TOKEN);
         }
     }
 
     @VisibleForTesting
     protected Collection<String> initToRecipients(final String fullSenderAddress,
-            final String replyToAddress, final String[] inToAddresses) {
+            final String[] replyToAddresses, final String[] inToAddresses) {
         // The To recipient is the reply-to address specified in the original
         // message, unless it is:
         // the current user OR a custom from of the current user, in which case
         // it's the To recipient list of the original message.
         // OR missing, in which case use the sender of the original message
         Set<String> toAddresses = Sets.newHashSet();
-        if (!TextUtils.isEmpty(replyToAddress) && !recipientMatchesThisAccount(replyToAddress)) {
-            toAddresses.add(replyToAddress);
-        } else {
+        for (final String replyToAddress : replyToAddresses) {
+            if (!TextUtils.isEmpty(replyToAddress)
+                    && !recipientMatchesThisAccount(replyToAddress)) {
+                toAddresses.add(replyToAddress);
+            }
+        }
+        if (toAddresses.size() == 0) {
             // In this case, the user is replying to a message in which their
-            // current account or one of their custom from addresses is the only
-            // recipient and they sent the original message.
+            // current account or some of their custom from addresses are the only
+            // recipients and they sent the original message.
             if (inToAddresses.length == 1 && recipientMatchesThisAccount(fullSenderAddress)
                     && recipientMatchesThisAccount(inToAddresses[0])) {
                 toAddresses.add(inToAddresses[0]);
@@ -1871,7 +2147,6 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
      * currently selected account OR one of the custom from addresses associated
      * with the currently selected account.
      * @param recipientAddress address we are comparing with the currently selected account
-     * @return
      */
     protected boolean recipientMatchesThisAccount(String recipientAddress) {
         return ReplyFromAccount.matchesAccountOrCustomFrom(mAccount, recipientAddress,
@@ -1883,8 +2158,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
      * E.g., "FWD: " is prepended if action is {@link ComposeActivity#FORWARD}.
      */
     public static String buildFormattedSubject(Resources res, String subject, int action) {
-        String prefix;
-        String correctedSubject = null;
+        final String prefix;
+        final String correctedSubject;
         if (action == ComposeActivity.COMPOSE) {
             prefix = "";
         } else if (action == ComposeActivity.FORWARD) {
@@ -1893,13 +2168,16 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             prefix = res.getString(R.string.reply_subject_label);
         }
 
-        // Don't duplicate the prefix
-        if (!TextUtils.isEmpty(subject)
-                && subject.toLowerCase().startsWith(prefix.toLowerCase())) {
-            correctedSubject = subject;
+        if (TextUtils.isEmpty(subject)) {
+            correctedSubject = prefix;
         } else {
-            correctedSubject = String.format(
-                    res.getString(R.string.formatted_subject), prefix, subject);
+            // Don't duplicate the prefix
+            if (subject.toLowerCase().startsWith(prefix.toLowerCase())) {
+                correctedSubject = subject;
+            } else {
+                correctedSubject = String.format(
+                        res.getString(R.string.formatted_subject), prefix, subject);
+            }
         }
 
         return correctedSubject;
@@ -1916,7 +2194,12 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     private void setupRecipients(RecipientEditTextView view) {
-        view.setAdapter(new RecipientAdapter(this, mAccount));
+        final DropdownChipLayouter layouter = getDropdownChipLayouter();
+        if (layouter != null) {
+            view.setDropdownChipLayouter(layouter);
+        }
+        view.setAdapter(getRecipientAdapter());
+        view.setRecipientEntryItemClickedListener(this);
         if (mValidator == null) {
             final String accountName = mAccount.getEmailAddress();
             int offset = accountName.indexOf("@") + 1;
@@ -1929,6 +2212,22 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         view.setValidator(mValidator);
     }
 
+    /**
+     * Derived classes should override if they wish to provide their own autocomplete behavior.
+     */
+    public BaseRecipientAdapter getRecipientAdapter() {
+        return new RecipientAdapter(this, mAccount);
+    }
+
+    /**
+     * Derived classes should override this to provide their own dropdown behavior.
+     * If the result is null, the default {@link com.android.ex.chips.DropdownChipLayouter}
+     * is used.
+     */
+    public DropdownChipLayouter getDropdownChipLayouter() {
+        return null;
+    }
+
     @Override
     public void onClick(View v) {
         final int id = v.getId();
@@ -1936,19 +2235,43 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             // Verify that cc/ bcc aren't showing.
             // Animate in cc/bcc.
             showCcBccViews();
-        } else if (id == R.id.add_photo_attachment) {
-            doAttach(MIME_TYPE_PHOTO);
-        } else if (id == R.id.add_video_attachment) {
-            doAttach(MIME_TYPE_VIDEO);
+        }
+    }
+
+    @Override
+    public void onFocusChange (View v, boolean hasFocus) {
+        final int id = v.getId();
+        if (hasFocus && (id == R.id.subject || id == R.id.body)) {
+            // Collapse cc/bcc iff both are empty
+            final boolean showCcBccFields = !TextUtils.isEmpty(mCc.getText()) ||
+                    !TextUtils.isEmpty(mBcc.getText());
+            mCcBccView.show(false /* animate */, showCcBccFields, showCcBccFields);
+            mCcBccButton.setVisibility(showCcBccFields ? View.GONE : View.VISIBLE);
+
+            // On phones autoscroll down so that Cc aligns to the top if we are showing cc/bcc.
+            if (getResources().getBoolean(R.bool.auto_scroll_cc) && showCcBccFields) {
+                final int[] coords = new int[2];
+                mCc.getLocationOnScreen(coords);
+
+                // Subtract status bar and action bar height from y-coord.
+                final Rect rect = new Rect();
+                getWindow().getDecorView().getWindowVisibleDisplayFrame(rect);
+                final int deltaY = coords[1] - getSupportActionBar().getHeight() - rect.top;
+
+                // Only scroll down
+                if (deltaY > 0) {
+                    mScrollView.smoothScrollBy(0, deltaY);
+                }
+            }
         }
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        super.onCreateOptionsMenu(menu);
+        final boolean superCreated = super.onCreateOptionsMenu(menu);
         // Don't render any menu items when there are no accounts.
         if (mAccounts == null || mAccounts.length == 0) {
-            return true;
+            return superCreated;
         }
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.compose_menu, menu);
@@ -1977,9 +2300,9 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                             || Intent.ACTION_SENDTO.equals(action)
                             || shouldSave()));
 
-        mSend = menu.findItem(R.id.send);
-        MenuItem helpItem = menu.findItem(R.id.help_info_menu_item);
-        MenuItem sendFeedbackItem = menu.findItem(R.id.feedback_menu_item);
+        final MenuItem helpItem = menu.findItem(R.id.help_info_menu_item);
+        final MenuItem sendFeedbackItem = menu.findItem(R.id.feedback_menu_item);
+        final MenuItem attachFromServiceItem = menu.findItem(R.id.attach_from_service_stub1);
         if (helpItem != null) {
             helpItem.setVisible(mAccount != null
                     && mAccount.supportsCapability(AccountCapabilities.HELP_CONTENT));
@@ -1988,24 +2311,13 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             sendFeedbackItem.setVisible(mAccount != null
                     && mAccount.supportsCapability(AccountCapabilities.SEND_FEEDBACK));
         }
-        return true;
-    }
-
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        MenuItem ccBcc = menu.findItem(R.id.add_cc_bcc);
-        if (ccBcc != null && mCc != null) {
-            // Its possible there is a menu item OR a button.
-            boolean ccFieldVisible = mCc.isShown();
-            boolean bccFieldVisible = mBcc.isShown();
-            if (!ccFieldVisible || !bccFieldVisible) {
-                ccBcc.setVisible(true);
-                ccBcc.setTitle(getString(!ccFieldVisible ? R.string.add_cc_label
-                        : R.string.add_bcc_label));
-            } else {
-                ccBcc.setVisible(false);
-            }
+        if (attachFromServiceItem != null) {
+            attachFromServiceItem.setVisible(shouldEnableAttachFromServiceMenu(mAccount));
         }
+
+        // Show attach picture on pre-K devices.
+        menu.findItem(R.id.add_photo_attachment).setVisible(!Utils.isRunningKitkatOrLater());
+
         return true;
     }
 
@@ -2013,15 +2325,14 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     public boolean onOptionsItemSelected(MenuItem item) {
         final int id = item.getItemId();
 
-        Analytics.getInstance().sendMenuItemEvent(Analytics.EVENT_CATEGORY_MENU_ITEM, id, null, 0);
+        Analytics.getInstance().sendMenuItemEvent(Analytics.EVENT_CATEGORY_MENU_ITEM, id,
+                "compose", 0);
 
         boolean handled = true;
-        if (id == R.id.add_photo_attachment) {
+        if (id == R.id.add_file_attachment) {
+            doAttach(MIME_TYPE_ALL);
+        } else if (id == R.id.add_photo_attachment) {
             doAttach(MIME_TYPE_PHOTO);
-        } else if (id == R.id.add_video_attachment) {
-            doAttach(MIME_TYPE_VIDEO);
-        } else if (id == R.id.add_cc_bcc) {
-            showCcBccViews();
         } else if (id == R.id.save) {
             doSave(true);
         } else if (id == R.id.send) {
@@ -2034,12 +2345,10 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             onAppUpPressed();
         } else if (id == R.id.help_info_menu_item) {
             Utils.showHelp(this, mAccount, getString(R.string.compose_help_context));
-        } else if (id == R.id.feedback_menu_item) {
-            Utils.sendFeedback(this, mAccount, false);
         } else {
             handled = false;
         }
-        return !handled ? super.onOptionsItemSelected(item) : handled;
+        return handled || super.onOptionsItemSelected(item);
     }
 
     @Override
@@ -2083,12 +2392,20 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         sendOrSaveWithSanityChecks(true, showToast, false, false);
     }
 
+    @Override
+    public void onRecipientEntryItemClicked(int charactersTyped, int position) {
+        // Send analytics of characters typed and position in dropdown selected.
+        Analytics.getInstance().sendEvent(
+                "suggest_click", Integer.toString(charactersTyped), Integer.toString(position), 0);
+    }
+
     @VisibleForTesting
     public interface SendOrSaveCallback {
-        public void initializeSendOrSave(SendOrSaveTask sendOrSaveTask);
-        public void notifyMessageIdAllocated(SendOrSaveMessage sendOrSaveMessage, Message message);
-        public Message getMessage();
-        public void sendOrSaveFinished(SendOrSaveTask sendOrSaveTask, boolean success);
+        void initializeSendOrSave(SendOrSaveTask sendOrSaveTask);
+        void notifyMessageIdAllocated(SendOrSaveMessage sendOrSaveMessage, Message message);
+        Message getMessage();
+        void sendOrSaveFinished(SendOrSaveTask sendOrSaveTask, boolean success);
+        void incrementRecipientsTimesContacted(List<String> recipients);
     }
 
     @VisibleForTesting
@@ -2140,28 +2457,35 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             sendOrSaveMessage(messageIdToSave, sendOrSaveMessage, selectedAccount);
 
             if (!sendOrSaveMessage.mSave) {
-                incrementRecipientsTimesContacted(mContext,
-                        (String) sendOrSaveMessage.mValues.get(UIProvider.MessageColumns.TO));
-                incrementRecipientsTimesContacted(mContext,
-                        (String) sendOrSaveMessage.mValues.get(UIProvider.MessageColumns.CC));
-                incrementRecipientsTimesContacted(mContext,
+                incrementRecipientsTimesContacted(
+                        (String) sendOrSaveMessage.mValues.get(UIProvider.MessageColumns.TO),
+                        (String) sendOrSaveMessage.mValues.get(UIProvider.MessageColumns.CC),
                         (String) sendOrSaveMessage.mValues.get(UIProvider.MessageColumns.BCC));
             }
             mSendOrSaveCallback.sendOrSaveFinished(SendOrSaveTask.this, true);
         }
 
-        private static void incrementRecipientsTimesContacted(final Context context,
-                final String addressString) {
+        private void incrementRecipientsTimesContacted(
+                final String toAddresses, final String ccAddresses, final String bccAddresses) {
+            final List<String> recipients = Lists.newArrayList();
+            addAddressesToRecipientList(recipients, toAddresses);
+            addAddressesToRecipientList(recipients, ccAddresses);
+            addAddressesToRecipientList(recipients, bccAddresses);
+            mSendOrSaveCallback.incrementRecipientsTimesContacted(recipients);
+        }
+
+        private void addAddressesToRecipientList(
+                final List<String> recipients, final String addressString) {
+            if (recipients == null) {
+                throw new IllegalArgumentException("recipientList cannot be null");
+            }
             if (TextUtils.isEmpty(addressString)) {
                 return;
             }
             final Rfc822Token[] tokens = Rfc822Tokenizer.tokenize(addressString);
-            final ArrayList<String> recipients = new ArrayList<String>(tokens.length);
-            for (int i = 0; i < tokens.length;i++) {
-                recipients.add(tokens[i].getAddress());
+            for (final Rfc822Token token : tokens) {
+                recipients.add(token.getAddress());
             }
-            final DataUsageStatUpdater statsUpdater = new DataUsageStatUpdater(context);
-            statsUpdater.updateWithAddress(recipients);
         }
 
         /**
@@ -2269,6 +2593,16 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
             return resolver.call(account.uri, method, account.uri.toString(), methodExtras);
         }
+    }
+
+    /**
+     * Reports recipients that have been contacted in order to improve auto-complete
+     * suggestions. Default behavior updates usage statistics in ContactsProvider.
+     * @param recipients addresses
+     */
+    protected void incrementRecipientsTimesContacted(List<String> recipients) {
+        final DataUsageStatUpdater statsUpdater = new DataUsageStatUpdater(this);
+        statsUpdater.updateWithAddress(recipients);
     }
 
     @VisibleForTesting
@@ -2414,9 +2748,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         @Override
         public Dialog onCreateDialog(Bundle savedInstanceState) {
             final String message = getArguments().getString("message");
-            return new AlertDialog.Builder(getActivity()).setMessage(message).setTitle(
-                    R.string.recipient_error_dialog_title)
-                    .setIconAttribute(android.R.attr.alertDialogIcon)
+            return new AlertDialog.Builder(getActivity())
+                    .setMessage(message)
                     .setPositiveButton(
                             R.string.ok, new Dialog.OnClickListener() {
                         @Override
@@ -2439,7 +2772,6 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
     /**
      * Show an error because the user has entered an invalid recipient.
-     * @param message
      */
     private void showRecipientErrorDialog(final String message) {
         final DialogFragment frag = RecipientErrorDialogFragment.newInstance(message);
@@ -2469,6 +2801,13 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             return (mTextChanged || mAttachmentsChanged || mReplyFromChanged)
                     && !isBlank();
         }
+    }
+
+    /**
+     * Returns whether the "Attach from Drive" menu item should be visible.
+     */
+    protected boolean shouldEnableAttachFromServiceMenu(Account mAccount) {
+        return false;
     }
 
     /**
@@ -2527,18 +2866,17 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     /**
-     * @param save
-     * @param showToast
-     * @return Whether the send or save succeeded.
+     * @param save True to save, false to send
+     * @param showToast True to show a toast once the message is sent/saved
      */
-    protected boolean sendOrSaveWithSanityChecks(final boolean save, final boolean showToast,
+    protected void sendOrSaveWithSanityChecks(final boolean save, final boolean showToast,
             final boolean orientationChanged, final boolean autoSend) {
         if (mAccounts == null || mAccount == null) {
             Toast.makeText(this, R.string.send_failed, Toast.LENGTH_SHORT).show();
             if (autoSend) {
                 finish();
             }
-            return false;
+            return;
         }
 
         final String[] to, cc, bcc;
@@ -2550,11 +2888,15 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             bcc = getBccAddresses();
         }
 
+        final ArrayList<String> recipients = buildEmailAddressList(to);
+        recipients.addAll(buildEmailAddressList(cc));
+        recipients.addAll(buildEmailAddressList(bcc));
+
         // Don't let the user send to nobody (but it's okay to save a message
         // with no recipients)
         if (!save && (to.length == 0 && cc.length == 0 && bcc.length == 0)) {
             showRecipientErrorDialog(getString(R.string.recipient_needed));
-            return false;
+            return;
         }
 
         List<String> wrongEmails = new ArrayList<String>();
@@ -2569,11 +2911,18 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             String errorText = String.format(getString(R.string.invalid_recipient),
                     wrongEmails.get(0));
             showRecipientErrorDialog(errorText);
-            return false;
+            return;
         }
 
-        // Show a warning before sending only if there are no attachments.
         if (!save) {
+            if (autoSend) {
+                // Skip all further checks during autosend. This flow is used by Android Wear
+                // and Google Now.
+                sendOrSave(save, showToast);
+                return;
+            }
+
+            // Show a warning before sending only if there are no attachments, body, or subject.
             if (mAttachmentsView.getAttachments().isEmpty() && showEmptyTextWarnings()) {
                 boolean warnAboutEmptySubject = isSubjectEmpty();
                 boolean emptyBody = TextUtils.getTrimmedLength(mBodyView.getEditableText()) == 0;
@@ -2587,26 +2936,25 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 // assume that they accept sending the message. If they do not,
                 // the dialog listener is required to enable sending again.
                 if (warnAboutEmptySubject) {
-                    showSendConfirmDialog(R.string.confirm_send_message_with_no_subject, save,
-                            showToast);
-                    return true;
+                    showSendConfirmDialog(R.string.confirm_send_message_with_no_subject,
+                            showToast, recipients);
+                    return;
                 }
 
                 if (warnAboutEmptyBody) {
-                    showSendConfirmDialog(R.string.confirm_send_message_with_no_body, save,
-                            showToast);
-                    return true;
+                    showSendConfirmDialog(R.string.confirm_send_message_with_no_body,
+                            showToast, recipients);
+                    return;
                 }
             }
-            // Ask for confirmation to send (if always required)
+            // Ask for confirmation to send.
             if (showSendConfirmation()) {
-                showSendConfirmDialog(R.string.confirm_send_message, save, showToast);
-                return true;
+                showSendConfirmDialog(R.string.confirm_send_message, showToast, recipients);
+                return;
             }
         }
 
-        sendOrSave(save, showToast);
-        return true;
+        performAdditionalSendOrSaveSanityChecks(save, showToast, recipients);
     }
 
     /**
@@ -2625,54 +2973,72 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
      * @return True if a warning should be on each send
      */
     protected boolean showSendConfirmation() {
-        return mCachedSettings != null ? mCachedSettings.confirmSend : false;
+        return mCachedSettings != null && mCachedSettings.confirmSend;
     }
 
-    public static class SendConfirmDialogFragment extends DialogFragment {
+    public static class SendConfirmDialogFragment extends DialogFragment
+            implements DialogInterface.OnClickListener {
+
+        private static final String MESSAGE_ID = "messageId";
+        private static final String SHOW_TOAST = "showToast";
+        private static final String RECIPIENTS = "recipients";
+
+        private boolean mShowToast;
+
+        private ArrayList<String> mRecipients;
+
         // Public no-args constructor needed for fragment re-instantiation
         public SendConfirmDialogFragment() {}
 
         public static SendConfirmDialogFragment newInstance(final int messageId,
-                final boolean save, final boolean showToast) {
+                final boolean showToast, final ArrayList<String> recipients) {
             final SendConfirmDialogFragment frag = new SendConfirmDialogFragment();
             final Bundle args = new Bundle(3);
-            args.putInt("messageId", messageId);
-            args.putBoolean("save", save);
-            args.putBoolean("showToast", showToast);
+            args.putInt(MESSAGE_ID, messageId);
+            args.putBoolean(SHOW_TOAST, showToast);
+            args.putStringArrayList(RECIPIENTS, recipients);
             frag.setArguments(args);
             return frag;
         }
 
         @Override
         public Dialog onCreateDialog(Bundle savedInstanceState) {
-            final int messageId = getArguments().getInt("messageId");
-            final boolean save = getArguments().getBoolean("save");
-            final boolean showToast = getArguments().getBoolean("showToast");
+            final int messageId = getArguments().getInt(MESSAGE_ID);
+            mShowToast = getArguments().getBoolean(SHOW_TOAST);
+            mRecipients = getArguments().getStringArrayList(RECIPIENTS);
+
+            final int confirmTextId = (messageId == R.string.confirm_send_message) ?
+                    R.string.ok : R.string.send;
 
             return new AlertDialog.Builder(getActivity())
                     .setMessage(messageId)
-                    .setTitle(R.string.confirm_send_title)
-                    .setIconAttribute(android.R.attr.alertDialogIcon)
-                    .setPositiveButton(R.string.send,
-                            new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialog, int whichButton) {
-                                    ((ComposeActivity)getActivity()).finishSendConfirmDialog(save,
-                                            showToast);
-                                }
-                            })
+                    .setPositiveButton(confirmTextId, this)
+                    .setNegativeButton(R.string.cancel, null)
                     .create();
+        }
+
+        @Override
+        public void onClick(DialogInterface dialog, int which) {
+            if (which == DialogInterface.BUTTON_POSITIVE) {
+                ((ComposeActivity) getActivity()).finishSendConfirmDialog(mShowToast, mRecipients);
+            }
         }
     }
 
-    private void finishSendConfirmDialog(final boolean save, final boolean showToast) {
-        sendOrSave(save, showToast);
+    private void finishSendConfirmDialog(
+            final boolean showToast, final ArrayList<String> recipients) {
+        performAdditionalSendOrSaveSanityChecks(false /* save */, showToast, recipients);
     }
 
-    private void showSendConfirmDialog(final int messageId, final boolean save,
-            final boolean showToast) {
-        final DialogFragment frag = SendConfirmDialogFragment.newInstance(messageId, save,
-                showToast);
+    // The list of recipients are used by the additional sendOrSave checks.
+    // However, the send confirm dialog may be shown before performing
+    // the additional checks. As a result, we need to plumb the recipient
+    // list through the send confirm dialog so that
+    // performAdditionalSendOrSaveChecks can be performed properly.
+    private void showSendConfirmDialog(final int messageId,
+            final boolean showToast, final ArrayList<String> recipients) {
+        final DialogFragment frag = SendConfirmDialogFragment.newInstance(
+                messageId, showToast, recipients);
         frag.show(getFragmentManager(), "send confirm");
     }
 
@@ -2696,9 +3062,13 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         return TextUtils.getTrimmedLength(mSubject.getText()) == 0;
     }
 
-    /* package */
-    static int sendOrSaveInternal(Context context, ReplyFromAccount replyFromAccount,
-            Message message, final Message refMessage, Spanned body, final CharSequence quotedText,
+    @VisibleForTesting
+    public String getSubject() {
+        return mSubject.getText().toString();
+    }
+
+    private int sendOrSaveInternal(Context context, ReplyFromAccount replyFromAccount,
+            Message message, final Message refMessage, final CharSequence quotedText,
             SendOrSaveCallback callback, Handler handler, boolean save, int composeMode,
             ReplyFromAccount draftAccount, final ContentValues extraValues) {
         final ContentValues values = new ContentValues();
@@ -2708,47 +3078,65 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         MessageModification.putToAddresses(values, message.getToAddresses());
         MessageModification.putCcAddresses(values, message.getCcAddresses());
         MessageModification.putBccAddresses(values, message.getBccAddresses());
-
         MessageModification.putCustomFromAddress(values, message.getFrom());
 
         MessageModification.putSubject(values, message.subject);
-        // Make sure to remove only the composing spans from the Spannable before saving.
-        final String htmlBody = Html.toHtml(removeComposingSpans(body));
 
-        boolean includeQuotedText = !TextUtils.isEmpty(quotedText);
-        StringBuilder fullBody = new StringBuilder(htmlBody);
-        if (includeQuotedText) {
-            // HTML gets converted to text for now
-            final String text = quotedText.toString();
-            if (QuotedTextView.containsQuotedText(text)) {
-                int pos = QuotedTextView.getQuotedTextOffset(text);
-                final int quoteStartPos = fullBody.length() + pos;
-                fullBody.append(text);
-                MessageModification.putQuoteStartPos(values, quoteStartPos);
-                MessageModification.putForward(values, composeMode == ComposeActivity.FORWARD);
-                MessageModification.putAppendRefMessageContent(values, includeQuotedText);
-            } else {
-                LogUtils.w(LOG_TAG, "Couldn't find quoted text");
-                // This shouldn't happen, but just use what we have,
-                // and don't do server-side expansion
-                fullBody.append(text);
-            }
+        // bodyHtml already have the composing spans removed.
+        final String htmlBody = message.bodyHtml;
+        final String textBody = message.bodyText;
+        // fullbody will contain the actual body plus the quoted text.
+        final String fullBody;
+        final String quotedString;
+        final boolean hasQuotedText = !TextUtils.isEmpty(quotedText);
+        if (hasQuotedText) {
+            // The quoted text is HTML at this point.
+            quotedString = quotedText.toString();
+            fullBody = htmlBody + quotedString;
+            MessageModification.putForward(values, composeMode == ComposeActivity.FORWARD);
+            MessageModification.putAppendRefMessageContent(values, true /* include quoted */);
+        } else {
+            fullBody = htmlBody;
+            quotedString = null;
         }
-        int draftType = getDraftType(composeMode);
-        MessageModification.putDraftType(values, draftType);
-        if (refMessage != null) {
+        // Only take refMessage into account if either one of its html/text is not empty.
+        if (refMessage != null && !(TextUtils.isEmpty(refMessage.bodyHtml) &&
+                TextUtils.isEmpty(refMessage.bodyText))) {
+            // The code below might need to be revisited. The quoted text position is different
+            // between text/html and text/plain parts and they should be stored seperately and
+            // the right version should be used in the UI. text/html should have preference
+            // if both exist.  Issues like this made me file b/14256940 to make sure that we
+            // properly handle the existing of both text/html and text/plain parts and to verify
+            // that we are not making some assumptions that break if there is no text/html part.
+            int quotedTextPos = -1;
             if (!TextUtils.isEmpty(refMessage.bodyHtml)) {
                 MessageModification.putBodyHtml(values, fullBody.toString());
+                if (hasQuotedText) {
+                    quotedTextPos = htmlBody.length() +
+                            QuotedTextView.getQuotedTextOffset(quotedString);
+                }
             }
             if (!TextUtils.isEmpty(refMessage.bodyText)) {
                 MessageModification.putBody(values,
-                        Utils.convertHtmlToPlainText(fullBody.toString()).toString());
+                        Utils.convertHtmlToPlainText(fullBody.toString()));
+                if (hasQuotedText && (quotedTextPos == -1)) {
+                    quotedTextPos = textBody.length();
+                }
+            }
+            if (quotedTextPos != -1) {
+                // The quoted text pos is the text/html version first and the text/plan version
+                // if there is no text/html part. The reason for this is because preference
+                // is given to text/html in the compose window if it exists. In the future, we
+                // should calculate the index for both since the user could choose to compose
+                // explicitly in text/plain.
+                MessageModification.putQuoteStartPos(values, quotedTextPos);
             }
         } else {
             MessageModification.putBodyHtml(values, fullBody.toString());
-            MessageModification.putBody(values, Utils.convertHtmlToPlainText(fullBody.toString())
-                    .toString());
+            MessageModification.putBody(values, Utils.convertHtmlToPlainText(fullBody.toString()));
         }
+        int draftType = getDraftType(composeMode);
+        MessageModification.putDraftType(values, draftType);
         MessageModification.putAttachments(values, message.getAttachments());
         if (!TextUtils.isEmpty(refMessageId)) {
             MessageModification.putRefMessageId(values, refMessageId);
@@ -2776,7 +3164,22 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private static SpannableString removeComposingSpans(Spanned body) {
         final SpannableString messageBody = new SpannableString(body);
         BaseInputConnection.removeComposingSpans(messageBody);
+
+        // Remove watcher spans while we're at it, so any off-UI thread manipulation of these
+        // spans doesn't trigger unexpected side-effects. This copy is essentially 100% detached
+        // from the EditText.
+        //
+        // (must remove SpanWatchers first to avoid triggering them as we remove other spans)
+        removeSpansOfType(messageBody, SpanWatcher.class);
+        removeSpansOfType(messageBody, TextWatcher.class);
+
         return messageBody;
+    }
+
+    private static void removeSpansOfType(SpannableString str, Class<?> cls) {
+        for (Object span : str.getSpans(0, str.length(), cls)) {
+            str.removeSpan(span);
+        }
     }
 
     private static int getDraftType(int mode) {
@@ -2798,16 +3201,23 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         return draftType;
     }
 
-    private void sendOrSave(final boolean save, final boolean showToast) {
+    /**
+     * Derived classes should override this step to perform additional checks before
+     * send or save. The default implementation simply calls {@link #sendOrSave(boolean, boolean)}.
+     */
+    protected void performAdditionalSendOrSaveSanityChecks(
+            final boolean save, final boolean showToast, ArrayList<String> recipients) {
+        sendOrSave(save, showToast);
+    }
+
+    protected void sendOrSave(final boolean save, final boolean showToast) {
         // Check if user is a monkey. Monkeys can compose and hit send
         // button but are not allowed to send anything off the device.
         if (ActivityManager.isUserAMonkey()) {
             return;
         }
 
-        final Spanned body = mBodyView.getEditableText();
-
-        SendOrSaveCallback callback = new SendOrSaveCallback() {
+        final SendOrSaveCallback callback = new SendOrSaveCallback() {
             // FIXME: unused
             private int mRestoredRequestId;
 
@@ -2885,21 +3295,24 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     sTestSendOrSaveCallback.sendOrSaveFinished(task, success);
                 }
             }
-        };
 
+            @Override
+            public void incrementRecipientsTimesContacted(final List<String> recipients) {
+                ComposeActivity.this.incrementRecipientsTimesContacted(recipients);
+            }
+        };
         setAccount(mReplyFromAccount.account);
 
-        if (mSendSaveTaskHandler == null) {
-            HandlerThread handlerThread = new HandlerThread("Send Message Task Thread");
-            handlerThread.start();
-
-            mSendSaveTaskHandler = new Handler(handlerThread.getLooper());
-        }
-
-        Message msg = createMessage(mReplyFromAccount, getMode());
-        mRequestId = sendOrSaveInternal(this, mReplyFromAccount, msg, mRefMessage, body,
-                mQuotedTextView.getQuotedTextIfIncluded(), callback,
-                mSendSaveTaskHandler, save, mComposeMode, mDraftAccount, mExtraValues);
+        final Spanned body = removeComposingSpans(mBodyView.getText());
+        SEND_SAVE_TASK_HANDLER.post(new Runnable() {
+            @Override
+            public void run() {
+                final Message msg = createMessage(mReplyFromAccount, mRefMessage, getMode(), body);
+                mRequestId = sendOrSaveInternal(ComposeActivity.this, mReplyFromAccount, msg,
+                        mRefMessage, mQuotedTextView.getQuotedTextIfIncluded(), callback,
+                        SEND_SAVE_TASK_HANDLER, save, mComposeMode, mDraftAccount, mExtraValues);
+            }
+        });
 
         // Don't display the toast if the user is just changing the orientation,
         // but we still need to save the draft to the cursor because this is how we restore
@@ -2929,10 +3342,12 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         // TODO: store the request map in user preferences.
     }
 
+    @SuppressLint("NewApi")
     private void doAttach(String type) {
         Intent i = new Intent(Intent.ACTION_GET_CONTENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         i.setType(type);
         mAddingAttachment = true;
         startActivityForResult(Intent.createChooser(i, getText(R.string.select_attachment_type)),
@@ -2942,7 +3357,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     private void showCcBccViews() {
         mCcBccView.show(true, true, true);
         if (mCcBccButton != null) {
-            mCcBccButton.setVisibility(View.INVISIBLE);
+            mCcBccButton.setVisibility(View.GONE);
         }
     }
 
@@ -3019,7 +3434,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 showCc = !TextUtils.isEmpty(mCc.getText());
                 showBcc = !TextUtils.isEmpty(mBcc.getText());
             }
-            mCcBccView.show(false, showCc, showBcc);
+            mCcBccView.show(false /* animate */, showCc, showBcc);
         }
         updateHideOrShowCcBcc();
         initChangeListeners();
@@ -3052,16 +3467,18 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
 
     private class ComposeModeAdapter extends ArrayAdapter<String> {
 
+        private Context mContext;
         private LayoutInflater mInflater;
 
         public ComposeModeAdapter(Context context) {
             super(context, R.layout.compose_mode_item, R.id.mode, getResources()
                     .getStringArray(R.array.compose_modes));
+            mContext = context;
         }
 
         private LayoutInflater getInflater() {
             if (mInflater == null) {
-                mInflater = LayoutInflater.from(getContext());
+                mInflater = LayoutInflater.from(mContext);
             }
             return mInflater;
         }
@@ -3090,7 +3507,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
      * Append text to the body of the message. If there is no existing body
      * text, just sets the body to text.
      *
-     * @param text
+     * @param text Text to append
      * @param withSignature True to append a signature.
      */
     public void appendToBody(CharSequence text, boolean withSignature) {
@@ -3105,7 +3522,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     /**
      * Set the body of the message.
      *
-     * @param text
+     * @param text text to set
      * @param withSignature True to append a signature.
      */
     public void setBody(CharSequence text, boolean withSignature) {
@@ -3116,9 +3533,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
     }
 
     private void appendSignature() {
-        String newSignature = mCachedSettings != null ? mCachedSettings.signature : null;
-        boolean hasFocus = mBodyView.hasFocus();
-        int signaturePos = getSignatureStartPosition(mSignature, mBodyView.getText().toString());
+        final String newSignature = mCachedSettings != null ? mCachedSettings.signature : null;
+        final int signaturePos = getSignatureStartPosition(mSignature, mBodyView.getText().toString());
         if (!TextUtils.equals(newSignature, mSignature) || signaturePos < 0) {
             mSignature = newSignature;
             if (!TextUtils.isEmpty(mSignature)) {
@@ -3127,9 +3543,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                 mBodyView.append(convertToPrintableSignature(mSignature));
                 mBodyView.addTextChangedListener(this);
             }
-            if (hasFocus) {
-                focusBody();
-            }
+            resetBodySelection();
         }
     }
 
@@ -3165,6 +3579,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             }
             mReplyFromChanged = true;
             initRecipients();
+
+            invalidateOptionsMenu();
         }
     }
 
@@ -3302,8 +3718,8 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         }
 
         private boolean hasChanged() {
-            String[] currRecips = tokenizeRecips(getAddressesFromList(mView));
-            int totalCount = currRecips.length;
+            final ArrayList<String> currRecips = buildEmailAddressList(getAddressesFromList(mView));
+            int totalCount = currRecips.size();
             int totalPrevCount = 0;
             for (Entry<String, Integer> entry : mContent.entrySet()) {
                 totalPrevCount += entry.getValue();
@@ -3327,18 +3743,9 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             return false;
         }
 
-        private String[] tokenizeRecips(String[] recips) {
-            // Tokenize them all and put them in the list.
-            String[] recipAddresses = new String[recips.length];
-            for (int i = 0; i < recips.length; i++) {
-                recipAddresses[i] = Rfc822Tokenizer.tokenize(recips[i])[0].getAddress();
-            }
-            return recipAddresses;
-        }
-
         @Override
         public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            String[] recips = tokenizeRecips(getAddressesFromList(mView));
+            final ArrayList<String> recips = buildEmailAddressList(getAddressesFromList(mView));
             for (String recip : recips) {
                 if (!mContent.containsKey(recip)) {
                     mContent.put(recip, 1);
@@ -3352,6 +3759,19 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         public void onTextChanged(CharSequence s, int start, int before, int count) {
             // Do nothing.
         }
+    }
+
+    /**
+     * Returns a list of email addresses from the recipients. List only contains
+     * email addresses strips additional info like the recipient's name.
+     */
+    private static ArrayList<String> buildEmailAddressList(String[] recips) {
+        // Tokenize them all and put them in the list.
+        final ArrayList<String> recipAddresses = Lists.newArrayListWithCapacity(recips.length);
+        for (int i = 0; i < recips.length; i++) {
+            recipAddresses.add(Rfc822Tokenizer.tokenize(recips[i])[0].getAddress());
+        }
+        return recipAddresses;
     }
 
     public static void registerTestSendOrSaveCallback(SendOrSaveCallback testCallback) {
@@ -3420,7 +3840,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
                     final ArrayList<Account> accounts = new ArrayList<Account>();
                     final ArrayList<Account> initializedAccounts = new ArrayList<Account>();
                     do {
-                        account = new Account(data);
+                        account = Account.builder().buildFrom(data);
                         if (account.isAccountReady()) {
                             initializedAccounts.add(account);
                         }
@@ -3451,7 +3871,7 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
             fragment.updateAccount(account);
         } else {
             findViewById(R.id.wait).setVisibility(View.VISIBLE);
-            replaceFragment(WaitFragment.newInstance(account, true),
+            replaceFragment(WaitFragment.newInstance(account, false /* expectingMessages */),
                     FragmentTransaction.TRANSIT_FRAGMENT_OPEN, TAG_WAIT);
         }
     }
@@ -3473,8 +3893,22 @@ public class ComposeActivity extends Activity implements OnClickListener, OnNavi
         // Do nothing.
     }
 
-    @Override
-    public Context getActivityContext() {
-        return this;
+    /**
+     * Background task to convert the message's html to Spanned.
+     */
+    private class HtmlToSpannedTask extends AsyncTask<String, Void, Spanned> {
+
+        @Override
+        protected Spanned doInBackground(String... input) {
+            return HtmlUtils.htmlToSpan(input[0], mSpanConverterFactory);
+        }
+
+        @Override
+        protected void onPostExecute(Spanned spanned) {
+            mBodyView.removeTextChangedListener(ComposeActivity.this);
+            mBodyView.setText(spanned);
+            mTextChanged = false;
+            mBodyView.addTextChangedListener(ComposeActivity.this);
+        }
     }
 }

@@ -33,7 +33,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 
-#include "llvm/Support/DebugLoc.h"
+#include "llvm/IR/DebugLoc.h"
 
 #include "slang_assert.h"
 #include "slang_rs.h"
@@ -68,8 +68,7 @@ RSBackend::RSBackend(RSContext *Context,
     mExportTypeMetadata(NULL),
     mRSObjectSlotsMetadata(NULL),
     mRefCount(mContext->getASTContext()),
-    mASTChecker(mContext->getASTContext(), mContext->getTargetAPI(),
-                IsFilterscript) {
+    mASTChecker(Context, Context->getTargetAPI(), IsFilterscript) {
 }
 
 // 1) Add zero initialization of local RS object types
@@ -80,7 +79,6 @@ void RSBackend::AnnotateFunction(clang::FunctionDecl *FD) {
     mRefCount.Init();
     mRefCount.Visit(FD->getBody());
   }
-  return;
 }
 
 bool RSBackend::HandleTopLevelDecl(clang::DeclGroupRef D) {
@@ -95,12 +93,10 @@ bool RSBackend::HandleTopLevelDecl(clang::DeclGroupRef D) {
       if (!FD->getName().startswith("rs"))  // Check prefix
         continue;
       if (!SlangRS::IsLocInRSHeaderFile(FD->getLocation(), mSourceMgr))
-        mDiagEngine.Report(
-          clang::FullSourceLoc(FD->getLocation(), mSourceMgr),
-          mDiagEngine.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                      "invalid function name prefix, "
-                                      "\"rs\" is reserved: '%0'"))
-          << FD->getName();
+        mContext->ReportError(FD->getLocation(),
+                              "invalid function name prefix, "
+                              "\"rs\" is reserved: '%0'")
+            << FD->getName();
     }
   }
 
@@ -115,11 +111,10 @@ bool RSBackend::HandleTopLevelDecl(clang::DeclGroupRef D) {
         const clang::ParmVarDecl *PVD = FD->getParamDecl(i);
         clang::QualType QT = PVD->getOriginalType();
         if (QT->isArrayType()) {
-          mDiagEngine.Report(
-            clang::FullSourceLoc(PVD->getTypeSpecStartLoc(), mSourceMgr),
-            mDiagEngine.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                        "exported function parameters may "
-                                        "not have array type: %0")) << QT;
+          mContext->ReportError(
+              PVD->getTypeSpecStartLoc(),
+              "exported function parameters may not have array type: %0")
+              << QT;
         }
       }
       AnnotateFunction(FD);
@@ -182,8 +177,6 @@ void RSBackend::HandleTranslationUnitPre(clang::ASTContext &C) {
       }
     }
   }
-
-  return;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -233,7 +226,14 @@ void RSBackend::dumpExportVarInfo(llvm::Module *M) {
         ExportVarInfo.push_back(
             llvm::MDString::get(
               mLLVMContext, llvm::utostr_32(
-                RSExportPrimitiveType::DataTypeRSMatrix2x2 +
+                  /* TODO Strange value.  This pushes just a number, quite
+                   * different than the other cases.  What is this used for?
+                   * These are the metadata values that some partner drivers
+                   * want to reference (for TBAA, etc.). We may want to look
+                   * at whether these provide any reasonable value (or have
+                   * distinct enough values to actually depend on).
+                   */
+                DataTypeRSMatrix2x2 +
                 static_cast<const RSExportMatrixType*>(ET)->getDim() - 2)));
         break;
       }
@@ -293,13 +293,19 @@ void RSBackend::dumpExportFunctionInfo(llvm::Module *M) {
       // Create helper function
       {
         llvm::StructType *HelperFunctionParameterTy = NULL;
-
+        std::vector<bool> isStructInput;
         if (!F->getArgumentList().empty()) {
           std::vector<llvm::Type*> HelperFunctionParameterTys;
           for (llvm::Function::arg_iterator AI = F->arg_begin(),
-               AE = F->arg_end(); AI != AE; AI++)
-            HelperFunctionParameterTys.push_back(AI->getType());
-
+                   AE = F->arg_end(); AI != AE; AI++) {
+              if (AI->getType()->isPointerTy() && AI->getType()->getPointerElementType()->isStructTy()) {
+                  HelperFunctionParameterTys.push_back(AI->getType()->getPointerElementType());
+                  isStructInput.push_back(true);
+              } else {
+                  HelperFunctionParameterTys.push_back(AI->getType());
+                  isStructInput.push_back(false);
+              }
+          }
           HelperFunctionParameterTy =
               llvm::StructType::get(mLLVMContext, HelperFunctionParameterTys);
         }
@@ -361,12 +367,17 @@ void RSBackend::dumpExportFunctionInfo(llvm::Module *M) {
             Idx[1] = llvm::ConstantInt::get(
               llvm::Type::getInt32Ty(mLLVMContext), i);
 
-            llvm::Value *Ptr =
-              IB->CreateInBoundsGEP(HelperFunctionParameter, Idx);
+            llvm::Value *Ptr = NULL;
 
-            // load
-            llvm::Value *V = IB->CreateLoad(Ptr);
-            Params.push_back(V);
+            Ptr = IB->CreateInBoundsGEP(HelperFunctionParameter, Idx);
+
+            // Load is only required for non-struct ptrs
+            if (isStructInput[i]) {
+                Params.push_back(Ptr);
+            } else {
+                llvm::Value *V = IB->CreateLoad(Ptr);
+                Params.push_back(V);
+            }
           }
 
           // Call and pass the all elements as parameter to F
@@ -505,12 +516,9 @@ void RSBackend::HandleTranslationUnitPost(llvm::Module *M) {
 
   if (mContext->hasExportType())
     dumpExportTypeInfo(M);
-
-  return;
 }
 
 RSBackend::~RSBackend() {
-  return;
 }
 
 }  // namespace slang

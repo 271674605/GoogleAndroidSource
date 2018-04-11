@@ -12,7 +12,7 @@
 #import "ui/base/cocoa/tracking_area.h"
 
 namespace app_list {
-class AppListItemModel;
+class AppListItem;
 class ItemModelObserverBridge;
 }
 
@@ -34,10 +34,10 @@ APP_LIST_EXPORT
 - (id)initWithSize:(NSSize)tileSize;
 
 // Set the represented model, updating views. Clears if |itemModel| is NULL.
-- (void)setModel:(app_list::AppListItemModel*)itemModel;
+- (void)setModel:(app_list::AppListItem*)itemModel;
 
 // Model accessor, via the |observerBridge_|.
-- (app_list::AppListItemModel*)model;
+- (app_list::AppListItem*)model;
 
 // Return the button portion of the item, showing the icon and title.
 - (NSButton*)button;
@@ -49,10 +49,6 @@ APP_LIST_EXPORT
 // If |isRestore| is true, the snapshot includes the label and items hidden for
 // the initial snapshot are restored.
 - (NSBitmapImageRep*)dragRepresentationForRestore:(BOOL)isRestore;
-
-// Called the first time an item is added to the grid view, once the grid view
-// is consistent with items being added at the same time.
-- (void)onInitialModelBuilt;
 
 @end
 

@@ -8,8 +8,7 @@
 #include "ash/ash_export.h"
 
 namespace aura {
-class RootWindow;
-class RootWindowTransformer;
+class Window;
 }
 
 namespace gfx {
@@ -18,23 +17,21 @@ class Transform;
 }
 
 namespace ash {
-namespace internal {
 class DisplayInfo;
+class RootWindowTransformer;
 
-ASH_EXPORT aura::RootWindowTransformer* CreateRootWindowTransformerForDisplay(
-    aura::RootWindow* root,
+ASH_EXPORT RootWindowTransformer* CreateRootWindowTransformerForDisplay(
+    aura::Window* root,
     const gfx::Display& display);
 
 // Creates a RootWindowTransformers for mirror root window.
 // |source_display_info| specifies the display being mirrored,
 // and |mirror_display_info| specifies the display used to
 // mirror the content.
-ASH_EXPORT aura::RootWindowTransformer*
-CreateRootWindowTransformerForMirroredDisplay(
+ASH_EXPORT RootWindowTransformer* CreateRootWindowTransformerForMirroredDisplay(
     const DisplayInfo& source_display_info,
     const DisplayInfo& mirror_display_info);
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_DISPLAY_ROOT_WINDOW_TRANSFORMERS_H_

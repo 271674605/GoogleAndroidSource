@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@ package org.chromium.chrome.browser;
 import android.content.Context;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import java.lang.Double;
-import java.lang.Integer;
+
+import org.chromium.base.CalledByNative;
+import org.chromium.base.ThreadUtils;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
-import org.chromium.base.CalledByNative;
-import org.chromium.base.ThreadUtils;
 
 /**
  * This class is the Java counterpart to the C++ TtsPlatformImplAndroid class.
@@ -32,18 +32,45 @@ class TtsPlatformImpl {
         }
         private final String mName;
         private final String mLanguage;
-    };
+    }
 
-    private int mNativeTtsPlatformImplAndroid;
+    private static class PendingUtterance {
+        private PendingUtterance(TtsPlatformImpl impl, int utteranceId, String text,
+                String lang, float rate, float pitch, float volume) {
+            mImpl = impl;
+            mUtteranceId = utteranceId;
+            mText = text;
+            mLang = lang;
+            mRate = rate;
+            mPitch = pitch;
+            mVolume = volume;
+        }
+
+        private void speak() {
+            mImpl.speak(mUtteranceId, mText, mLang, mRate, mPitch, mVolume);
+        }
+
+        TtsPlatformImpl mImpl;
+        int mUtteranceId;
+        String mText;
+        String mLang;
+        float mRate;
+        float mPitch;
+        float mVolume;
+    }
+
+    private long mNativeTtsPlatformImplAndroid;
     private final TextToSpeech mTextToSpeech;
     private boolean mInitialized;
     private ArrayList<TtsVoice> mVoices;
     private String mCurrentLanguage;
+    private PendingUtterance mPendingUtterance;
 
-    private TtsPlatformImpl(int nativeTtsPlatformImplAndroid, Context context) {
+    private TtsPlatformImpl(long nativeTtsPlatformImplAndroid, Context context) {
         mInitialized = false;
         mNativeTtsPlatformImplAndroid = nativeTtsPlatformImplAndroid;
         mTextToSpeech = new TextToSpeech(context, new TextToSpeech.OnInitListener() {
+                @Override
                 public void onInit(int status) {
                     if (status == TextToSpeech.SUCCESS) {
                         ThreadUtils.runOnUiThread(new Runnable() {
@@ -56,6 +83,7 @@ class TtsPlatformImpl {
                 }
             });
         mTextToSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override
                 public void onDone(final String utteranceId) {
                     ThreadUtils.runOnUiThread(new Runnable() {
                         @Override
@@ -68,6 +96,7 @@ class TtsPlatformImpl {
                     });
                 }
 
+                @Override
                 public void onError(final String utteranceId) {
                     ThreadUtils.runOnUiThread(new Runnable() {
                         @Override
@@ -80,6 +109,7 @@ class TtsPlatformImpl {
                     });
                 }
 
+                @Override
                 public void onStart(final String utteranceId) {
                     ThreadUtils.runOnUiThread(new Runnable() {
                         @Override
@@ -92,7 +122,7 @@ class TtsPlatformImpl {
                     });
                 }
             });
-    };
+    }
 
     /**
      * Create a TtsPlatformImpl object, which is owned by TtsPlatformImplAndroid
@@ -102,7 +132,7 @@ class TtsPlatformImpl {
      * @param context The app context.
      */
     @CalledByNative
-    private static TtsPlatformImpl create(int nativeTtsPlatformImplAndroid,
+    private static TtsPlatformImpl create(long nativeTtsPlatformImplAndroid,
                                           Context context) {
         return new TtsPlatformImpl(nativeTtsPlatformImplAndroid, context);
     }
@@ -168,7 +198,13 @@ class TtsPlatformImpl {
     @CalledByNative
     private boolean speak(int utteranceId, String text, String lang,
                           float rate, float pitch, float volume) {
-        assert mInitialized == true;
+        if (!mInitialized) {
+            mPendingUtterance = new PendingUtterance(this, utteranceId, text, lang, rate,
+                    pitch, volume);
+            return true;
+        }
+        if (mPendingUtterance != null) mPendingUtterance = null;
+
         if (!lang.equals(mCurrentLanguage)) {
             mTextToSpeech.setLanguage(new Locale(lang));
             mCurrentLanguage = lang;
@@ -190,8 +226,8 @@ class TtsPlatformImpl {
      */
     @CalledByNative
     private void stop() {
-        assert mInitialized == true;
-        mTextToSpeech.stop();
+        if (mInitialized) mTextToSpeech.stop();
+        if (mPendingUtterance != null) mPendingUtterance = null;
     }
 
     /**
@@ -214,22 +250,28 @@ class TtsPlatformImpl {
         mVoices = new ArrayList<TtsVoice>();
         for (int i = 0; i < locales.length; ++i) {
             if (!locales[i].getVariant().isEmpty()) continue;
-            if (mTextToSpeech.isLanguageAvailable(locales[i]) > 0) {
-                String name = locales[i].getDisplayLanguage();
-                if (!locales[i].getCountry().isEmpty()) {
-                    name += " " + locales[i].getDisplayCountry();
+            try {
+                if (mTextToSpeech.isLanguageAvailable(locales[i]) > 0) {
+                    String name = locales[i].getDisplayLanguage();
+                    if (!locales[i].getCountry().isEmpty()) {
+                        name += " " + locales[i].getDisplayCountry();
+                    }
+                    TtsVoice voice = new TtsVoice(name, locales[i].toString());
+                    mVoices.add(voice);
                 }
-                TtsVoice voice = new TtsVoice(name, locales[i].toString());
-                mVoices.add(voice);
+            } catch (java.util.MissingResourceException e) {
+                // Just skip the locale if it's invalid.
             }
         }
 
         mInitialized = true;
         nativeVoicesChanged(mNativeTtsPlatformImplAndroid);
+
+        if (mPendingUtterance != null) mPendingUtterance.speak();
     }
 
-    private native void nativeVoicesChanged(int nativeTtsPlatformImplAndroid);
-    private native void nativeOnEndEvent(int nativeTtsPlatformImplAndroid, int utteranceId);
-    private native void nativeOnStartEvent(int nativeTtsPlatformImplAndroid, int utteranceId);
-    private native void nativeOnErrorEvent(int nativeTtsPlatformImplAndroid, int utteranceId);
+    private native void nativeVoicesChanged(long nativeTtsPlatformImplAndroid);
+    private native void nativeOnEndEvent(long nativeTtsPlatformImplAndroid, int utteranceId);
+    private native void nativeOnStartEvent(long nativeTtsPlatformImplAndroid, int utteranceId);
+    private native void nativeOnErrorEvent(long nativeTtsPlatformImplAndroid, int utteranceId);
 }

@@ -17,62 +17,150 @@
 #include "jni.h"
 #include "GraphicsJNI.h"
 #include <android_runtime/AndroidRuntime.h>
+#include <vector>
 
-#include "SkCanvas.h"
-#include "SkPDFDevice.h"
-#include "SkPDFDocument.h"
-#include "SkRect.h"
-#include "SkSize.h"
+#include "Canvas.h"
 #include "CreateJavaOutputStreamAdaptor.h"
-#include "JNIHelp.h"
+
+#include "SkDocument.h"
+#include "SkPicture.h"
+#include "SkPictureRecorder.h"
+#include "SkStream.h"
+#include "SkRect.h"
 
 namespace android {
 
-#define LOGD(x...) do { Log::Instance()->printf(Log::ELogD, x); } while(0)
+struct PageRecord {
 
-static jint nativeCreateDocument(JNIEnv* env, jobject clazz) {
-    return reinterpret_cast<jint>(new SkPDFDocument());
+    PageRecord(int width, int height, const SkRect& contentRect)
+            : mPictureRecorder(new SkPictureRecorder())
+            , mPicture(NULL)
+            , mWidth(width)
+            , mHeight(height) {
+        mContentRect = contentRect;
+    }
+
+    ~PageRecord() {
+        delete mPictureRecorder;
+        if (NULL != mPicture) {
+            mPicture->unref();
+        }
+    }
+
+    SkPictureRecorder* mPictureRecorder;
+    SkPicture* mPicture;
+    const int mWidth;
+    const int mHeight;
+    SkRect mContentRect;
+};
+
+class PdfDocument {
+public:
+    PdfDocument() {
+        mCurrentPage = NULL;
+    }
+
+    SkCanvas* startPage(int width, int height,
+            int contentLeft, int contentTop, int contentRight, int contentBottom) {
+        assert(mCurrentPage == NULL);
+
+        SkRect contentRect = SkRect::MakeLTRB(
+                contentLeft, contentTop, contentRight, contentBottom);
+        PageRecord* page = new PageRecord(width, height, contentRect);
+        mPages.push_back(page);
+        mCurrentPage = page;
+
+        SkCanvas* canvas = page->mPictureRecorder->beginRecording(
+                contentRect.width(), contentRect.height(), NULL, 0);
+
+        // We pass this canvas to Java where it is used to construct
+        // a Java Canvas object which dereferences the pointer when it
+        // is destroyed, so we have to bump up the reference count.
+        canvas->ref();
+
+        return canvas;
+    }
+
+    void finishPage() {
+        assert(mCurrentPage != NULL);
+        assert(mCurrentPage->mPictureRecorder != NULL);
+        assert(mCurrentPage->mPicture == NULL);
+        mCurrentPage->mPicture = mCurrentPage->mPictureRecorder->endRecording();
+        delete mCurrentPage->mPictureRecorder;
+        mCurrentPage->mPictureRecorder = NULL;
+        mCurrentPage = NULL;
+    }
+
+    void write(SkWStream* stream) {
+        SkDocument* document = SkDocument::CreatePDF(stream);
+        for (unsigned i = 0; i < mPages.size(); i++) {
+            PageRecord* page =  mPages[i];
+
+            SkCanvas* canvas = document->beginPage(page->mWidth, page->mHeight,
+                    &(page->mContentRect));
+
+            canvas->clipRect(page->mContentRect);
+            canvas->translate(page->mContentRect.left(), page->mContentRect.top());
+            canvas->drawPicture(page->mPicture);
+
+            document->endPage();
+        }
+        document->close();
+    }
+
+    void close() {
+        assert(NULL == mCurrentPage);
+        for (unsigned i = 0; i < mPages.size(); i++) {
+            delete mPages[i];
+        }
+    }
+
+private:
+    ~PdfDocument() {
+        close();
+    }
+
+    std::vector<PageRecord*> mPages;
+    PageRecord* mCurrentPage;
+};
+
+static jlong nativeCreateDocument(JNIEnv* env, jobject thiz) {
+    return reinterpret_cast<jlong>(new PdfDocument());
 }
 
-static void nativeFinalize(JNIEnv* env, jobject thiz, jint documentPtr) {
-    delete reinterpret_cast<SkPDFDocument*>(documentPtr);
-}
-
-static jint nativeCreatePage(JNIEnv* env, jobject thiz, jint pageWidth, jint pageHeight,
+static jlong nativeStartPage(JNIEnv* env, jobject thiz, jlong documentPtr,
+        jint pageWidth, jint pageHeight,
         jint contentLeft, jint contentTop, jint contentRight, jint contentBottom) {
-
-    SkMatrix transformation;
-    transformation.setTranslate(contentLeft, contentTop);
-
-    SkISize skPageSize = SkISize::Make(pageWidth, pageHeight);
-    SkISize skContentSize = SkISize::Make(contentRight - contentLeft, contentBottom - contentTop);
-
-    SkPDFDevice* skPdfDevice = new SkPDFDevice(skPageSize, skContentSize, transformation);
-    return reinterpret_cast<jint>(new SkCanvas(skPdfDevice));
+    PdfDocument* document = reinterpret_cast<PdfDocument*>(documentPtr);
+    SkCanvas* canvas = document->startPage(pageWidth, pageHeight,
+            contentLeft, contentTop, contentRight, contentBottom);
+    return reinterpret_cast<jlong>(Canvas::create_canvas(canvas));
 }
 
-static void nativeAppendPage(JNIEnv* env, jobject thiz, jint documentPtr, jint pagePtr) {
-    SkCanvas* page = reinterpret_cast<SkCanvas*>(pagePtr);
-    SkPDFDocument* document = reinterpret_cast<SkPDFDocument*>(documentPtr);
-    SkPDFDevice* device = static_cast<SkPDFDevice*>(page->getDevice());
-    document->appendPage(device);
+static void nativeFinishPage(JNIEnv* env, jobject thiz, jlong documentPtr) {
+    PdfDocument* document = reinterpret_cast<PdfDocument*>(documentPtr);
+    document->finishPage();
 }
 
-static void nativeWriteTo(JNIEnv* env, jobject clazz, jint documentPtr,
-        jobject out, jbyteArray chunk) {
+static void nativeWriteTo(JNIEnv* env, jobject thiz, jlong documentPtr, jobject out,
+        jbyteArray chunk) {
+    PdfDocument* document = reinterpret_cast<PdfDocument*>(documentPtr);
     SkWStream* skWStream = CreateJavaOutputStreamAdaptor(env, out, chunk);
-    SkPDFDocument* document = reinterpret_cast<SkPDFDocument*>(documentPtr);
-    document->emitPDF(skWStream);
+    document->write(skWStream);
     delete skWStream;
 }
 
+static void nativeClose(JNIEnv* env, jobject thiz, jlong documentPtr) {
+    PdfDocument* document = reinterpret_cast<PdfDocument*>(documentPtr);
+    document->close();
+}
+
 static JNINativeMethod gPdfDocument_Methods[] = {
-    {"nativeCreateDocument", "()I", (void*) nativeCreateDocument},
-    {"nativeFinalize", "(I)V", (void*) nativeFinalize},
-    {"nativeCreatePage", "(IIIIII)I",
-            (void*) nativeCreatePage},
-    {"nativeAppendPage", "(II)V", (void*) nativeAppendPage},
-    {"nativeWriteTo", "(ILjava/io/OutputStream;[B)V", (void*) nativeWriteTo}
+    {"nativeCreateDocument", "()J", (void*) nativeCreateDocument},
+    {"nativeStartPage", "(JIIIIII)J", (void*) nativeStartPage},
+    {"nativeFinishPage", "(J)V", (void*) nativeFinishPage},
+    {"nativeWriteTo", "(JLjava/io/OutputStream;[B)V", (void*) nativeWriteTo},
+    {"nativeClose", "(J)V", (void*) nativeClose}
 };
 
 int register_android_graphics_pdf_PdfDocument(JNIEnv* env) {

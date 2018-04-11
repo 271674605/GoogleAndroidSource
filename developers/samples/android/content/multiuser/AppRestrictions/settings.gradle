@@ -1,1 +1,1 @@
-include ':AppRestrictions'
+include 'Application'

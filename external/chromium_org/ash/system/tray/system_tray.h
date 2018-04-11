@@ -20,33 +20,12 @@
 #include <vector>
 
 namespace ash {
-
-class AccessibilityObserver;
-class AudioObserver;
-class BluetoothObserver;
-class BrightnessObserver;
-class CapsLockObserver;
-class ClockObserver;
-class DriveObserver;
-class IMEObserver;
-class LocaleObserver;
-class LogoutButtonObserver;
-class SystemTrayDelegate;
-class UpdateObserver;
-class UserObserver;
-#if defined(OS_CHROMEOS)
-class NetworkObserver;
-class SmsObserver;
-#endif
-
-class SystemTrayItem;
-
-namespace internal {
 class SystemBubbleWrapper;
-class SystemTrayContainer;
+class SystemTrayDelegate;
+class SystemTrayItem;
 class TrayAccessibility;
-class TrayGestureHandler;
-}
+class TrayDate;
+class TrayUser;
 
 // There are different methods for creating bubble views.
 enum BubbleCreationType {
@@ -54,10 +33,10 @@ enum BubbleCreationType {
   BUBBLE_USE_EXISTING,  // Uses any existing bubble, or creates a new one.
 };
 
-class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
+class ASH_EXPORT SystemTray : public TrayBackgroundView,
                               public views::TrayBubbleView::Delegate {
  public:
-  explicit SystemTray(internal::StatusAreaWidget* status_area_widget);
+  explicit SystemTray(StatusAreaWidget* status_area_widget);
   virtual ~SystemTray();
 
   // Calls TrayBackgroundView::Initialize(), creates the tray items, and
@@ -75,6 +54,9 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
 
   // Shows the default view of all items.
   void ShowDefaultView(BubbleCreationType creation_type);
+
+  // Shows default view that ingnores outside clicks and activation loss.
+  void ShowPersistentDefaultView();
 
   // Shows details of a particular item. If |close_delay_in_seconds| is
   // non-zero, then the view is automatically closed after the specified time.
@@ -105,8 +87,8 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // Temporarily hides/unhides the notification bubble.
   void SetHideNotifications(bool hidden);
 
-  // Returns true if the launcher should be forced visible when auto-hidden.
-  bool ShouldShowLauncher() const;
+  // Returns true if the shelf should be forced visible when auto-hidden.
+  bool ShouldShowShelf() const;
 
   // Returns true if there is a system bubble (already visible or in the process
   // of being created).
@@ -116,10 +98,10 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   bool HasNotificationBubble() const;
 
   // Returns true if the system_bubble_ exists and is of type |type|.
-  bool HasSystemBubbleType(internal::SystemTrayBubble::BubbleType type);
+  bool HasSystemBubbleType(SystemTrayBubble::BubbleType type);
 
   // Returns a pointer to the system bubble or NULL if none.
-  internal::SystemTrayBubble* GetSystemBubble();
+  SystemTrayBubble* GetSystemBubble();
 
   // Returns true if any bubble is visible.
   bool IsAnyBubbleVisible() const;
@@ -130,6 +112,10 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // Closes system bubble and returns true if it did exist.
   bool CloseSystemBubble() const;
 
+  // Returns view for help button if default view is shown. Returns NULL
+  // otherwise.
+  views::View* GetHelpButtonView() const;
+
   // Accessors for testing.
 
   // Returns true if the bubble exists.
@@ -139,6 +125,7 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   virtual void SetShelfAlignment(ShelfAlignment alignment) OVERRIDE;
   virtual void AnchorUpdated() OVERRIDE;
   virtual base::string16 GetAccessibleNameForTray() OVERRIDE;
+  virtual void BubbleResized(const views::TrayBubbleView* bubble_view) OVERRIDE;
   virtual void HideBubbleWithView(
       const views::TrayBubbleView* bubble_view) OVERRIDE;
   virtual bool ClickedOutsideBubble() OVERRIDE;
@@ -148,17 +135,21 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   virtual void OnMouseEnteredView() OVERRIDE;
   virtual void OnMouseExitedView() OVERRIDE;
   virtual base::string16 GetAccessibleNameForBubble() OVERRIDE;
-  virtual gfx::Rect GetAnchorRect(views::Widget* anchor_widget,
-                                  AnchorType anchor_type,
-                                  AnchorAlignment anchor_alignment) OVERRIDE;
+  virtual gfx::Rect GetAnchorRect(
+      views::Widget* anchor_widget,
+      AnchorType anchor_type,
+      AnchorAlignment anchor_alignment) const OVERRIDE;
   virtual void HideBubble(const views::TrayBubbleView* bubble_view) OVERRIDE;
 
-  internal::TrayAccessibility* GetTrayAccessibilityForTest() {
+  TrayAccessibility* GetTrayAccessibilityForTest() {
     return tray_accessibility_;
   }
 
-  // Overridden from TrayBackgroundView.
-  virtual bool IsPressed() OVERRIDE;
+  // Get the tray item view (or NULL) for a given |tray_item| in a unit test.
+  views::View* GetTrayItemViewForTest(SystemTrayItem* tray_item);
+
+  // Gets tray_date_ for browser tests.
+  TrayDate* GetTrayDateForTesting() const;
 
  private:
   // Creates the default set of items for the sytem tray.
@@ -176,7 +167,8 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
 
   // Shows the default view and its arrow position is shifted by |x_offset|.
   void ShowDefaultViewWithOffset(BubbleCreationType creation_type,
-                                 int x_offset);
+                                 int x_offset,
+                                 bool persistent);
 
   // Constructs or re-constructs |system_bubble_| and populates it with |items|.
   // Specify |change_tray_status| to true if want to change the tray background
@@ -185,7 +177,8 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
                  bool details,
                  bool activate,
                  BubbleCreationType creation_type,
-                 int x_offset);
+                 int x_offset,
+                 bool persistent);
 
   // Constructs or re-constructs |notification_bubble_| and populates it with
   // |notification_items_|, or destroys it if there are no notification items.
@@ -195,9 +188,12 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // notification tray according to the current status.
   void UpdateWebNotifications();
 
+  // Deactivate the system tray in the shelf if it was active before.
+  void CloseSystemBubbleAndDeactivateSystemTray();
+
   const ScopedVector<SystemTrayItem>& items() const { return items_; }
 
-  // Overridden from internal::ActionableView.
+  // Overridden from ActionableView.
   virtual bool PerformAction(const ui::Event& event) OVERRIDE;
 
   // Owned items.
@@ -211,10 +207,10 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   std::map<SystemTrayItem*, views::View*> tray_item_map_;
 
   // Bubble for default and detailed views.
-  scoped_ptr<internal::SystemBubbleWrapper> system_bubble_;
+  scoped_ptr<SystemBubbleWrapper> system_bubble_;
 
   // Bubble for notifications.
-  scoped_ptr<internal::SystemBubbleWrapper> notification_bubble_;
+  scoped_ptr<SystemBubbleWrapper> notification_bubble_;
 
   // Keep track of the default view height so that when we create detailed
   // views directly (e.g. from a notification) we know what height to use.
@@ -229,7 +225,8 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // Note that the value is only valid when |system_bubble_| is true.
   bool full_system_tray_menu_;
 
-  internal::TrayAccessibility* tray_accessibility_;  // not owned
+  TrayAccessibility* tray_accessibility_;  // not owned
+  TrayDate* tray_date_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemTray);
 };

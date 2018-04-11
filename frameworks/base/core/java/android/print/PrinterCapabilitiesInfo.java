@@ -24,10 +24,17 @@ import android.print.PrintAttributes.Resolution;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
- * This class represents the capabilities of a printer.
+ * This class represents the capabilities of a printer. Instances
+ * of this class are created by a print service to report the
+ * capabilities of a printer it manages. The capabilities of a
+ * printer specify how it can print content. For example, what
+ * are the media sizes supported by the printer, what are the
+ * minimal margins of the printer based on its technical design,
+ * etc.
  */
 public final class PrinterCapabilitiesInfo implements Parcelable {
     /**
@@ -112,7 +119,7 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
      * @return The media sizes.
      */
     public List<MediaSize> getMediaSizes() {
-        return mMediaSizes;
+        return Collections.unmodifiableList(mMediaSizes);
     }
 
     /**
@@ -121,7 +128,7 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
      * @return The resolutions.
      */
     public List<Resolution> getResolutions() {
-        return mResolutions;
+        return Collections.unmodifiableList(mResolutions);
     }
 
     /**
@@ -135,9 +142,9 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
     }
 
     /**
-     * Gets the supported color modes.
+     * Gets the bit mask of supported color modes.
      *
-     * @return The color modes.
+     * @return The bit mask of supported color modes.
      *
      * @see PrintAttributes#COLOR_MODE_COLOR
      * @see PrintAttributes#COLOR_MODE_MONOCHROME
@@ -355,9 +362,10 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
     }
 
     /**
-     * Builder for creating of a {@link PrinterInfo}. This class is responsible
-     * to enforce that all required attributes have at least one default value.
-     * In other words, this class creates only well-formed {@link PrinterInfo}s.
+     * Builder for creating of a {@link PrinterCapabilitiesInfo}. This class is
+     * responsible to enforce that all required attributes have at least one
+     * default value. In other words, this class creates only well-formed {@link
+     * PrinterCapabilitiesInfo}s.
      * <p>
      * Look at the individual methods for a reference whether a property is
      * required or if it is optional.
@@ -369,9 +377,9 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
         /**
          * Creates a new instance.
          *
-         * @param printerId The printer id. Cannot be null.
+         * @param printerId The printer id. Cannot be <code>null</code>.
          *
-         * @throws IllegalArgumentException If the printer id is null.
+         * @throws IllegalArgumentException If the printer id is <code>null</code>.
          */
         public Builder(PrinterId printerId) {
             if (printerId == null) {
@@ -467,6 +475,12 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
          * @param colorModes The color mode bit mask.
          * @param defaultColorMode The default color mode.
          * @return This builder.
+         * <p>
+         * <strong>Note:</strong> On platform version 19 (Kitkat) specifying
+         * only PrintAttributes#COLOR_MODE_MONOCHROME leads to a print spooler
+         * crash. Hence, you should declare either both color modes or
+         * PrintAttributes#COLOR_MODE_COLOR.
+         * </p>
          *
          * @throws IllegalArgumentException If color modes contains an invalid
          *         mode bit or if the default color mode is invalid.
@@ -492,7 +506,7 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
 
         /**
          * Crates a new {@link PrinterCapabilitiesInfo} enforcing that all
-         * required properties have need specified. See individual methods
+         * required properties have been specified. See individual methods
          * in this class for reference about required attributes.
          *
          * @return A new {@link PrinterCapabilitiesInfo}.
@@ -521,7 +535,7 @@ public final class PrinterCapabilitiesInfo implements Parcelable {
             if (mPrototype.mMinMargins == null) {
                 throw new IllegalArgumentException("margins cannot be null");
             }
-            return new PrinterCapabilitiesInfo(mPrototype);
+            return mPrototype;
         }
 
         private void throwIfDefaultAlreadySpecified(int propertyIndex) {

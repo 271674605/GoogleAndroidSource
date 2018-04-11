@@ -122,7 +122,7 @@ int SkDQuad::RootsReal(const double A, const double B, const double C, double s[
     }
     /* normal form: x^2 + px + q = 0 */
     const double p2 = p * p;
-    if (!AlmostEqualUlps(p2, q) && p2 < q) {
+    if (!AlmostDequalUlps(p2, q) && p2 < q) {
         return 0;
     }
     double sqrt_D = 0;
@@ -131,7 +131,7 @@ int SkDQuad::RootsReal(const double A, const double B, const double C, double s[
     }
     s[0] = sqrt_D - p;
     s[1] = -sqrt_D - p;
-    return 1 + !AlmostEqualUlps(s[0], s[1]);
+    return 1 + !AlmostDequalUlps(s[0], s[1]);
 }
 
 bool SkDQuad::isLinear(int startIndex, int endIndex) const {
@@ -252,10 +252,10 @@ SkDPoint SkDQuad::subDivide(const SkDPoint& a, const SkDPoint& c, double t1, dou
     SkDLine b1 = {{c, sub[1] + (c - sub[2])}};
     SkIntersections i;
     i.intersectRay(b0, b1);
-    if (i.used() == 1) {
+    if (i.used() == 1 && i[0][0] >= 0 && i[1][0] >= 0) {
         b = i.pt(0);
     } else {
-        SkASSERT(i.used() == 2 || i.used() == 0);
+        SkASSERT(i.used() <= 2);
         b = SkDPoint::Mid(b0[1], b1[1]);
     }
 #endif
@@ -265,14 +265,14 @@ SkDPoint SkDQuad::subDivide(const SkDPoint& a, const SkDPoint& c, double t1, dou
     if (t1 == 1 || t2 == 1) {
         align(2, &b);
     }
-    if (precisely_subdivide_equal(b.fX, a.fX)) {
+    if (AlmostBequalUlps(b.fX, a.fX)) {
         b.fX = a.fX;
-    } else if (precisely_subdivide_equal(b.fX, c.fX)) {
+    } else if (AlmostBequalUlps(b.fX, c.fX)) {
         b.fX = c.fX;
     }
-    if (precisely_subdivide_equal(b.fY, a.fY)) {
+    if (AlmostBequalUlps(b.fY, a.fY)) {
         b.fY = a.fY;
-    } else if (precisely_subdivide_equal(b.fY, c.fY)) {
+    } else if (AlmostBequalUlps(b.fY, c.fY)) {
         b.fY = c.fY;
     }
     return b;

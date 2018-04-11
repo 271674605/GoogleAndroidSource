@@ -9,24 +9,20 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
+#include "components/metrics/proto/omnibox_event.pb.h"
 
 class AutocompleteController;
 struct AutocompleteMatch;
 class GURL;
 class Profile;
 
-class AutocompleteClassifier : public BrowserContextKeyedService {
+class AutocompleteClassifier : public KeyedService {
  public:
   // Bitmap of AutocompleteProvider::Type values describing the default set of
   // providers queried for the omnibox.  Intended to be passed to
   // AutocompleteController().
   static const int kDefaultOmniboxProviders;
-
-  // Bitmap of AutocompleteProvider::Type values describing the set of providers
-  // that have been whitelisted as working properly with the Instant Extended
-  // API.  Intended to be passed to AutocompleteController().
-  static const int kInstantExtendedOmniboxProviders;
 
   explicit AutocompleteClassifier(Profile* profile);
   virtual ~AutocompleteClassifier();
@@ -37,21 +33,26 @@ class AutocompleteClassifier : public BrowserContextKeyedService {
   // comments on AutocompleteController::Start().
   // |allow_exact_keyword_match| should be true when treating the string as a
   // potential keyword search is valid; see
-  // AutocompleteInput::allow_exact_keyword_match(). |match| should be a
-  // non-NULL outparam that will be set to the default match for this input, if
-  // any (for invalid input, there will be no default match, and |match| will be
-  // left unchanged).  |alternate_nav_url| is a possibly-NULL outparam that, if
-  // non-NULL, will be set to the navigational URL (if any) in case of an
-  // accidental search; see comments on
+  // AutocompleteInput::allow_exact_keyword_match().
+  // |page_classification| gives information about the context (e.g., is the
+  // user on a search results page doing search term replacement); this may
+  // be useful in deciding how the input should be interpreted.
+  // |match| should be a non-NULL outparam that will be set to the default
+  // match for this input, if any (for invalid input, there will be no default
+  // match, and |match| will be left unchanged).  |alternate_nav_url| is a
+  // possibly-NULL outparam that, if non-NULL, will be set to the navigational
+  // URL (if any) in case of an accidental search; see comments on
   // AutocompleteResult::alternate_nav_url_ in autocomplete.h.
-  void Classify(const string16& text,
+  void Classify(const base::string16& text,
                 bool prefer_keyword,
                 bool allow_exact_keyword_match,
+                metrics::OmniboxEventProto::PageClassification
+                    page_classification,
                 AutocompleteMatch* match,
                 GURL* alternate_nav_url);
 
  private:
-  // BrowserContextKeyedService:
+  // KeyedService:
   virtual void Shutdown() OVERRIDE;
 
   scoped_ptr<AutocompleteController> controller_;

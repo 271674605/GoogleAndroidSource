@@ -6,21 +6,22 @@ package org.chromium.chromoting.jni;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.Point;
+import android.os.Build;
 import android.os.Looper;
-import android.text.InputType;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
-import android.view.inputmethod.EditorInfo;
 import android.widget.CheckBox;
 import android.widget.TextView;
-import android.widget.Toast;
 
+import org.chromium.base.CalledByNative;
+import org.chromium.base.JNINamespace;
+import org.chromium.chromoting.Chromoting;
 import org.chromium.chromoting.R;
 
 import java.nio.ByteBuffer;
@@ -30,199 +31,227 @@ import java.nio.ByteOrder;
  * Initializes the Chromium remoting library, and provides JNI calls into it.
  * All interaction with the native code is centralized in this class.
  */
+@JNINamespace("remoting")
 public class JniInterface {
-    /** The status code indicating successful connection. */
-    private static final int SUCCESSFUL_CONNECTION = 3;
-
-    /** The application context. */
-    private static Activity sContext = null;
-
     /*
      * Library-loading state machine.
      */
-    /** Whether we've already loaded the library. */
+    /** Whether the library has been loaded. Accessed on the UI thread. */
     private static boolean sLoaded = false;
 
-    /**
-     * To be called once from the main Activity. Any subsequent calls will update the application
-     * context, but not reload the library. This is useful e.g. when the activity is closed and the
-     * user later wants to return to the application.
-     */
-    public static void loadLibrary(Activity context) {
-        sContext = context;
+    /** The application context. Accessed on the UI thread. */
+    private static Activity sContext = null;
 
-        synchronized(JniInterface.class) {
-            if (sLoaded) return;
+    /** Interface used for connection state notifications. */
+    public interface ConnectionListener {
+        /**
+         * This enum must match the C++ enumeration remoting::protocol::ConnectionToHost::State.
+         */
+        public enum State {
+            INITIALIZING(0),
+            CONNECTING(1),
+            AUTHENTICATED(2),
+            CONNECTED(3),
+            FAILED(4),
+            CLOSED(5);
+
+            private final int mValue;
+
+            State(int value) {
+                mValue = value;
+            }
+
+            public int value() {
+                return mValue;
+            }
+
+            public static State fromValue(int value) {
+                return values()[value];
+            }
         }
 
-        System.loadLibrary("remoting_client_jni");
-        loadNative(context);
-        sLoaded = true;
+        /**
+         * This enum must match the C++ enumeration remoting::protocol::ErrorCode.
+         */
+        public enum Error {
+            OK(0, 0),
+            PEER_IS_OFFLINE(1, R.string.error_host_is_offline),
+            SESSION_REJECTED(2, R.string.error_invalid_access_code),
+            INCOMPATIBLE_PROTOCOL(3, R.string.error_incompatible_protocol),
+            AUTHENTICATION_FAILED(4, R.string.error_invalid_access_code),
+            CHANNEL_CONNECTION_ERROR(5, R.string.error_p2p_failure),
+            SIGNALING_ERROR(6, R.string.error_p2p_failure),
+            SIGNALING_TIMEOUT(7, R.string.error_p2p_failure),
+            HOST_OVERLOAD(8, R.string.error_host_overload),
+            UNKNOWN_ERROR(9, R.string.error_unexpected);
+
+            private final int mValue;
+            private final int mMessage;
+
+            Error(int value, int message) {
+                mValue = value;
+                mMessage = message;
+            }
+
+            public int value() {
+                return mValue;
+            }
+
+            public int message() {
+                return mMessage;
+            }
+
+            public static Error fromValue(int value) {
+                return values()[value];
+            }
+        }
+
+
+        /**
+         * Notified on connection state change.
+         * @param state The new connection state.
+         * @param error The error code, if state is STATE_FAILED.
+         */
+        void onConnectionState(State state, Error error);
     }
-
-    /** Performs the native portion of the initialization. */
-    private static native void loadNative(Context context);
-
-    /*
-     * API/OAuth2 keys access.
-     */
-    public static native String getApiKey();
-    public static native String getClientId();
-    public static native String getClientSecret();
 
     /*
      * Connection-initiating state machine.
      */
-    /** Whether the native code is attempting a connection. */
+    /** Whether the native code is attempting a connection. Accessed on the UI thread. */
     private static boolean sConnected = false;
 
-    /** Callback to signal upon successful connection. */
-    private static Runnable sSuccessCallback = null;
+    /** Notified upon successful connection or disconnection. Accessed on the UI thread. */
+    private static ConnectionListener sConnectionListener = null;
 
-    /** Dialog for reporting connection progress. */
-    private static ProgressDialog sProgressIndicator = null;
+    /**
+     * Callback invoked on the graphics thread to repaint the desktop. Accessed on the UI and
+     * graphics threads.
+     */
+    private static Runnable sRedrawCallback = null;
 
-    /** Attempts to form a connection to the user-selected host. */
+    /** Bitmap holding a copy of the latest video frame. Accessed on the UI and graphics threads. */
+    private static Bitmap sFrameBitmap = null;
+
+    /** Protects access to sFrameBitmap. */
+    private static final Object sFrameLock = new Object();
+
+    /** Position of cursor hot-spot. Accessed on the graphics thread. */
+    private static Point sCursorHotspot = new Point();
+
+    /** Bitmap holding the cursor shape. Accessed on the graphics thread. */
+    private static Bitmap sCursorBitmap = null;
+
+    /**
+     * To be called once from the main Activity. Any subsequent calls will update the application
+     * context, but not reload the library. This is useful e.g. when the activity is closed and the
+     * user later wants to return to the application. Called on the UI thread.
+     */
+    public static void loadLibrary(Activity context) {
+        sContext = context;
+
+        if (sLoaded) return;
+
+        System.loadLibrary("remoting_client_jni");
+
+        nativeLoadNative(context);
+        sLoaded = true;
+    }
+
+    /** Performs the native portion of the initialization. */
+    private static native void nativeLoadNative(Context context);
+
+    /*
+     * API/OAuth2 keys access.
+     */
+    public static native String nativeGetApiKey();
+    public static native String nativeGetClientId();
+    public static native String nativeGetClientSecret();
+
+    /** Attempts to form a connection to the user-selected host. Called on the UI thread. */
     public static void connectToHost(String username, String authToken,
-            String hostJid, String hostId, String hostPubkey, Runnable successCallback) {
-        synchronized(JniInterface.class) {
-            if (!sLoaded) return;
+            String hostJid, String hostId, String hostPubkey, ConnectionListener listener) {
+        disconnectFromHost();
 
-            if (sConnected) {
-                disconnectFromHost();
-            }
-        }
-
-        sSuccessCallback = successCallback;
+        sConnectionListener = listener;
         SharedPreferences prefs = sContext.getPreferences(Activity.MODE_PRIVATE);
-        connectNative(username, authToken, hostJid, hostId, hostPubkey,
+        nativeConnect(username, authToken, hostJid, hostId, hostPubkey,
                 prefs.getString(hostId + "_id", ""), prefs.getString(hostId + "_secret", ""));
         sConnected = true;
     }
 
-    /** Severs the connection and cleans up. */
-    public static void disconnectFromHost() {
-        synchronized(JniInterface.class) {
-            if (!sLoaded || !sConnected) return;
-
-            if (sProgressIndicator != null) {
-                sProgressIndicator.dismiss();
-                sProgressIndicator = null;
-            }
-        }
-
-        disconnectNative();
-        sSuccessCallback = null;
-        sConnected = false;
-    }
-
     /** Performs the native portion of the connection. */
-    private static native void connectNative(String username, String authToken, String hostJid,
+    private static native void nativeConnect(String username, String authToken, String hostJid,
             String hostId, String hostPubkey, String pairId, String pairSecret);
 
-    /** Performs the native portion of the cleanup. */
-    private static native void disconnectNative();
+    /** Severs the connection and cleans up. Called on the UI thread. */
+    public static void disconnectFromHost() {
+        if (!sConnected) return;
 
-    /*
-     * Entry points *from* the native code.
-     */
-    /** Callback to signal whenever we need to redraw. */
-    private static Runnable sRedrawCallback = null;
+        sConnectionListener.onConnectionState(ConnectionListener.State.CLOSED,
+                ConnectionListener.Error.OK);
 
-    /** Screen width of the video feed. */
-    private static int sWidth = 0;
+        nativeDisconnect();
+        sConnectionListener = null;
+        sConnected = false;
 
-    /** Screen height of the video feed. */
-    private static int sHeight = 0;
-
-    /** Buffer holding the video feed. */
-    private static ByteBuffer sBuffer = null;
-
-    /** Reports whenever the connection status changes. */
-    private static void reportConnectionStatus(int state, int error) {
-        if (state < SUCCESSFUL_CONNECTION && error == 0) {
-            // The connection is still being established, so we'll report the current progress.
-            synchronized (JniInterface.class) {
-                if (sProgressIndicator == null) {
-                    sProgressIndicator = ProgressDialog.show(sContext, sContext.
-                            getString(R.string.progress_title), sContext.getResources().
-                            getStringArray(R.array.protoc_states)[state], true, true,
-                            new DialogInterface.OnCancelListener() {
-                                @Override
-                                public void onCancel(DialogInterface dialog) {
-                                    Log.i("jniiface", "User canceled connection initiation");
-                                    disconnectFromHost();
-                                }
-                            });
-                }
-                else {
-                    sProgressIndicator.setMessage(
-                            sContext.getResources().getStringArray(R.array.protoc_states)[state]);
-                }
-            }
-        }
-        else {
-            // The connection is complete or has failed, so we can lose the progress indicator.
-            synchronized (JniInterface.class) {
-                if (sProgressIndicator != null) {
-                    sProgressIndicator.dismiss();
-                    sProgressIndicator = null;
-                }
-            }
-
-            if (state == SUCCESSFUL_CONNECTION) {
-                Toast.makeText(sContext, sContext.getResources().
-                        getStringArray(R.array.protoc_states)[state], Toast.LENGTH_SHORT).show();
-
-                // Actually display the remote desktop.
-                sSuccessCallback.run();
-            } else {
-                Toast.makeText(sContext, sContext.getResources().getStringArray(
-                        R.array.protoc_states)[state] + (error == 0 ? "" : ": " +
-                        sContext.getResources().getStringArray(R.array.protoc_errors)[error]),
-                        Toast.LENGTH_LONG).show();
-            }
+        // Drop the reference to free the Bitmap for GC.
+        synchronized (sFrameLock) {
+            sFrameBitmap = null;
         }
     }
 
-    /** Prompts the user to enter a PIN. */
-    private static void displayAuthenticationPrompt() {
+    /** Performs the native portion of the cleanup. */
+    private static native void nativeDisconnect();
+
+    /** Reports whenever the connection status changes. Called on the UI thread. */
+    @CalledByNative
+    private static void reportConnectionStatus(int state, int error) {
+        sConnectionListener.onConnectionState(ConnectionListener.State.fromValue(state),
+                ConnectionListener.Error.fromValue(error));
+    }
+
+    /** Prompts the user to enter a PIN. Called on the UI thread. */
+    @CalledByNative
+    private static void displayAuthenticationPrompt(boolean pairingSupported) {
         AlertDialog.Builder pinPrompt = new AlertDialog.Builder(sContext);
-        pinPrompt.setTitle(sContext.getString(R.string.pin_entry_title));
-        pinPrompt.setMessage(sContext.getString(R.string.pin_entry_message));
+        pinPrompt.setTitle(sContext.getString(R.string.title_authenticate));
+        pinPrompt.setMessage(sContext.getString(R.string.pin_message_android));
         pinPrompt.setIcon(android.R.drawable.ic_lock_lock);
 
         final View pinEntry = sContext.getLayoutInflater().inflate(R.layout.pin_dialog, null);
         pinPrompt.setView(pinEntry);
 
+        final TextView pinTextView = (TextView)pinEntry.findViewById(R.id.pin_dialog_text);
+        final CheckBox pinCheckBox = (CheckBox)pinEntry.findViewById(R.id.pin_dialog_check);
+
+        if (!pairingSupported) {
+            pinCheckBox.setChecked(false);
+            pinCheckBox.setVisibility(View.GONE);
+        }
+
         pinPrompt.setPositiveButton(
-                R.string.pin_entry_connect, new DialogInterface.OnClickListener() {
+                R.string.connect_button, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         Log.i("jniiface", "User provided a PIN code");
-                        authenticationResponse(String.valueOf(
-                                ((TextView)
-                                        pinEntry.findViewById(R.id.pin_dialog_text)).getText()),
-                                ((CheckBox)
-                                        pinEntry.findViewById(R.id.pin_dialog_check)).isChecked());
+                        nativeAuthenticationResponse(String.valueOf(pinTextView.getText()),
+                                pinCheckBox.isChecked(), Build.MODEL);
                     }
                 });
 
         pinPrompt.setNegativeButton(
-                R.string.pin_entry_cancel, new DialogInterface.OnClickListener() {
+                R.string.cancel, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         Log.i("jniiface", "User canceled pin entry prompt");
-                        Toast.makeText(sContext,
-                                sContext.getString(R.string.msg_pin_canceled),
-                                Toast.LENGTH_LONG).show();
                         disconnectFromHost();
                     }
                 });
 
         final AlertDialog pinDialog = pinPrompt.create();
 
-        ((TextView)pinEntry.findViewById(R.id.pin_dialog_text)).setOnEditorActionListener(
+        pinTextView.setOnEditorActionListener(
                 new TextView.OnEditorActionListener() {
                     @Override
                     public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
@@ -245,88 +274,180 @@ public class JniInterface {
         pinDialog.show();
     }
 
-    /** Saves newly-received pairing credentials to permanent storage. */
+    /**
+     * Performs the native response to the user's PIN.
+     * @param pin The entered PIN.
+     * @param createPair Whether to create a new pairing for this client.
+     * @param deviceName The device name to appear in the pairing registry. Only used if createPair
+     *                   is true.
+     */
+    private static native void nativeAuthenticationResponse(String pin, boolean createPair,
+            String deviceName);
+
+    /** Saves newly-received pairing credentials to permanent storage. Called on the UI thread. */
+    @CalledByNative
     private static void commitPairingCredentials(String host, byte[] id, byte[] secret) {
-        synchronized (sContext) {
-            sContext.getPreferences(Activity.MODE_PRIVATE).edit().
-                    putString(host + "_id", new String(id)).
-                    putString(host + "_secret", new String(secret)).
-                    apply();
-        }
+        sContext.getPreferences(Activity.MODE_PRIVATE).edit().
+                putString(host + "_id", new String(id)).
+                putString(host + "_secret", new String(secret)).
+                apply();
     }
 
     /**
+     * Moves the mouse cursor, possibly while clicking the specified (nonnegative) button. Called
+     * on the UI thread.
+     */
+    public static void sendMouseEvent(int x, int y, int whichButton, boolean buttonDown) {
+        if (!sConnected) {
+            return;
+        }
+
+        nativeSendMouseEvent(x, y, whichButton, buttonDown);
+    }
+
+    /** Passes mouse information to the native handling code. */
+    private static native void nativeSendMouseEvent(int x, int y, int whichButton,
+            boolean buttonDown);
+
+    /** Injects a mouse-wheel event with delta values. Called on the UI thread. */
+    public static void sendMouseWheelEvent(int deltaX, int deltaY) {
+        if (!sConnected) {
+            return;
+        }
+
+        nativeSendMouseWheelEvent(deltaX, deltaY);
+    }
+
+    /** Passes mouse-wheel information to the native handling code. */
+    private static native void nativeSendMouseWheelEvent(int deltaX, int deltaY);
+
+    /** Presses or releases the specified (nonnegative) key. Called on the UI thread. */
+    public static boolean sendKeyEvent(int keyCode, boolean keyDown) {
+        if (!sConnected) {
+            return false;
+        }
+
+        return nativeSendKeyEvent(keyCode, keyDown);
+    }
+
+    /** Passes key press information to the native handling code. */
+    private static native boolean nativeSendKeyEvent(int keyCode, boolean keyDown);
+
+    /** Sends TextEvent to the host. Called on the UI thread. */
+    public static void sendTextEvent(String text) {
+        if (!sConnected) {
+            return;
+        }
+
+        nativeSendTextEvent(text);
+    }
+
+    /** Passes text event information to the native handling code. */
+    private static native void nativeSendTextEvent(String text);
+
+    /**
      * Sets the redraw callback to the provided functor. Provide a value of null whenever the
-     * window is no longer visible so that we don't continue to draw onto it.
+     * window is no longer visible so that we don't continue to draw onto it. Called on the UI
+     * thread.
      */
     public static void provideRedrawCallback(Runnable redrawCallback) {
         sRedrawCallback = redrawCallback;
     }
 
-    /** Forces the native graphics thread to redraw to the canvas. */
+    /** Forces the native graphics thread to redraw to the canvas. Called on the UI thread. */
     public static boolean redrawGraphics() {
-        synchronized(JniInterface.class) {
-            if (!sConnected || sRedrawCallback == null) return false;
-        }
+        if (!sConnected || sRedrawCallback == null) return false;
 
-        scheduleRedrawNative();
+        nativeScheduleRedraw();
         return true;
     }
 
-    /** Performs the redrawing callback. This is a no-op if the window isn't visible. */
+    /** Schedules a redraw on the native graphics thread. */
+    private static native void nativeScheduleRedraw();
+
+    /**
+     * Performs the redrawing callback. This is a no-op if the window isn't visible. Called on the
+     * graphics thread.
+     */
+    @CalledByNative
     private static void redrawGraphicsInternal() {
-        if (sRedrawCallback != null)
-            sRedrawCallback.run();
+        Runnable callback = sRedrawCallback;
+        if (callback != null) {
+            callback.run();
+        }
     }
 
     /**
-     * Obtains the image buffer.
-     * This should not be called from the UI thread. (We prefer the native graphics thread.)
+     * Returns a bitmap of the latest video frame. Called on the native graphics thread when
+     * DesktopView is repainted.
      */
-    public static Bitmap retrieveVideoFrame() {
+    public static Bitmap getVideoFrame() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             Log.w("jniiface", "Canvas being redrawn on UI thread");
         }
 
-        if (!sConnected) {
-            return null;
+        synchronized (sFrameLock) {
+            return sFrameBitmap;
         }
-
-        int[] frame = new int[sWidth * sHeight];
-
-        sBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        sBuffer.asIntBuffer().get(frame, 0, frame.length);
-
-        return Bitmap.createBitmap(frame, 0, sWidth, sWidth, sHeight, Bitmap.Config.ARGB_8888);
     }
 
-    /** Moves the mouse cursor, possibly while clicking the specified (nonnegative) button. */
-    public static void mouseAction(int x, int y, int whichButton, boolean buttonDown) {
-        if (!sConnected) {
-            return;
+    /**
+     * Sets a new video frame. Called on the native graphics thread when a new frame is allocated.
+     */
+    @CalledByNative
+    private static void setVideoFrame(Bitmap bitmap) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            Log.w("jniiface", "Video frame updated on UI thread");
         }
 
-        mouseActionNative(x, y, whichButton, buttonDown);
-    }
-
-    /** Presses and releases the specified (nonnegative) key. */
-    public static void keyboardAction(int keyCode, boolean keyDown) {
-        if (!sConnected) {
-            return;
+        synchronized (sFrameLock) {
+            sFrameBitmap = bitmap;
         }
-
-        keyboardActionNative(keyCode, keyDown);
     }
 
-    /** Performs the native response to the user's PIN. */
-    private static native void authenticationResponse(String pin, boolean createPair);
+    /**
+     * Creates a new Bitmap to hold video frame pixels. Called by native code which stores a global
+     * reference to the Bitmap and writes the decoded frame pixels to it.
+     */
+    @CalledByNative
+    private static Bitmap newBitmap(int width, int height) {
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+    }
 
-    /** Schedules a redraw on the native graphics thread. */
-    private static native void scheduleRedrawNative();
+    /**
+     * Updates the cursor shape. This is called on the graphics thread when receiving a new cursor
+     * shape from the host.
+     */
+    @CalledByNative
+    public static void updateCursorShape(int width, int height, int hotspotX, int hotspotY,
+                                         ByteBuffer buffer) {
+        sCursorHotspot = new Point(hotspotX, hotspotY);
 
-    /** Passes mouse information to the native handling code. */
-    private static native void mouseActionNative(int x, int y, int whichButton, boolean buttonDown);
+        int[] data = new int[width * height];
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        buffer.asIntBuffer().get(data, 0, data.length);
+        sCursorBitmap = Bitmap.createBitmap(data, width, height, Bitmap.Config.ARGB_8888);
+    }
 
-    /** Passes key press information to the native handling code. */
-    private static native void keyboardActionNative(int keyCode, boolean keyDown);
+    /** Position of cursor hotspot within cursor image. Called on the graphics thread. */
+    public static Point getCursorHotspot() { return sCursorHotspot; }
+
+    /** Returns the current cursor shape. Called on the graphics thread. */
+    public static Bitmap getCursorBitmap() { return sCursorBitmap; }
+
+    //
+    // Third Party Authentication
+    //
+
+    /** Pops up a third party login page to fetch the token required for authentication. */
+    @CalledByNative
+    public static void fetchThirdPartyToken(String tokenUrl, String clientId, String scope) {
+        Chromoting app = (Chromoting) sContext;
+        app.fetchThirdPartyToken(tokenUrl, clientId, scope);
+    }
+
+    /**
+     * Notify the native code to continue authentication with the |token| and the |sharedSecret|.
+     */
+    public static native void nativeOnThirdPartyTokenFetched(String token, String sharedSecret);
 }

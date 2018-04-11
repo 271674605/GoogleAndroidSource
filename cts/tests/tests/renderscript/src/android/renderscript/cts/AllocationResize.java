@@ -20,7 +20,6 @@ package android.renderscript.cts;
 import android.renderscript.Allocation;
 import android.renderscript.Element;
 import android.renderscript.RSRuntimeException;
-import com.android.cts.stub.R;
 import java.util.Random;
 
 public class AllocationResize extends RSBaseCompute {
@@ -34,7 +33,11 @@ public class AllocationResize extends RSBaseCompute {
     }
 
     public void testResize() {
-        mScript = new ScriptC_allocation_resize(mRS, mRes, R.raw.allocation_resize);
+        if (mRS.getApplicationContext().getApplicationInfo().targetSdkVersion >= 21) {
+            return;
+        }
+
+        mScript = new ScriptC_allocation_resize(mRS);
         mIn = Allocation.createSized(mRS, Element.I32(mRS), INPUTSIZE/2);
         mOut = Allocation.createSized(mRS, Element.I32(mRS), INPUTSIZE*2);
         mIn.resize(INPUTSIZE);
@@ -49,7 +52,7 @@ public class AllocationResize extends RSBaseCompute {
         mIn.copy1DRangeFrom(0, INPUTSIZE, inArray);
 
         try {
-            RSUtils.forEach(this, 0, mIn, mOut);
+            forEach(0, mIn, mOut);
         } catch (RSRuntimeException e) {
         }
 

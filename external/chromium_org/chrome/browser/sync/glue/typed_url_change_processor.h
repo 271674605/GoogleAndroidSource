@@ -5,14 +5,14 @@
 #ifndef CHROME_BROWSER_SYNC_GLUE_TYPED_URL_CHANGE_PROCESSOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_TYPED_URL_CHANGE_PROCESSOR_H_
 
-#include "chrome/browser/sync/glue/change_processor.h"
+#include "components/sync_driver/change_processor.h"
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
+#include "components/sync_driver/data_type_error_handler.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
@@ -71,7 +71,7 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   void Disconnect();
 
  protected:
-  virtual void StartImpl(Profile* profile) OVERRIDE;
+  virtual void StartImpl() OVERRIDE;
 
  private:
   friend class ScopedStopObserving<TypedUrlChangeProcessor>;

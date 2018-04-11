@@ -20,6 +20,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.test.ActivityInstrumentationTestCase2;
 import android.test.suitebuilder.annotation.MediumTest;
+import android.test.suitebuilder.annotation.Suppress;
 import android.view.View;
 import android.widget.CheckBox;
 import android.widget.Spinner;
@@ -36,22 +37,23 @@ import java.net.URISyntaxException;
  * You can run this entire test case with:
  *   runtest -c com.android.email.activity.setup.AccountSetupOptionsTests email
  */
+@Suppress
 @MediumTest
 public class AccountSetupOptionsTests
-        extends ActivityInstrumentationTestCase2<AccountSetupOptions> {
+        extends ActivityInstrumentationTestCase2<AccountSetupFinal> {
 
-    private AccountSetupOptions mActivity;
+    private AccountSetupFinal mActivity;
     private Spinner mCheckFrequencyView;
     private CheckBox mBackgroundAttachmentsView;
 
     public AccountSetupOptionsTests() {
-        super(AccountSetupOptions.class);
+        super(AccountSetupFinal.class);
     }
 
     /**
      * Test that POP accounts aren't displayed with a push option
      */
-    public void testPushOptionPOP() 
+    public void testPushOptionPOP()
             throws URISyntaxException {
         Intent i = getTestIntent("Name", "pop3://user:password@server.com");
         this.setActivityIntent(i);
@@ -152,7 +154,7 @@ public class AccountSetupOptionsTests
 
         for (int i = 0; i < sa.getCount(); ++i) {
             SpinnerOption so = (SpinnerOption) sa.getItem(i);
-            if (so != null && ((Integer)so.value).intValue() == value) {
+            if (so != null && ((Integer)so.value) == value) {
                 return true;
             }
         }
@@ -164,13 +166,18 @@ public class AccountSetupOptionsTests
      */
     private Intent getTestIntent(String name, String storeUri)
             throws URISyntaxException {
-        Account account = new Account();
+        final Account account = new Account();
         account.setSenderName(name);
-        Context context = getInstrumentation().getTargetContext();
-        HostAuth auth = account.getOrCreateHostAuthRecv(context);
-        HostAuth.setHostAuthFromString(auth, storeUri);
-        SetupData.init(SetupData.FLOW_MODE_NORMAL, account);
-        return new Intent(Intent.ACTION_MAIN);
+        final Context context = getInstrumentation().getTargetContext();
+        final HostAuth auth = account.getOrCreateHostAuthRecv(context);
+        auth.setHostAuthFromString(storeUri);
+        final SetupDataFragment setupDataFragment =
+                new SetupDataFragment();
+        setupDataFragment.setFlowMode(SetupDataFragment.FLOW_MODE_NORMAL);
+        setupDataFragment.setAccount(account);
+        final Intent i = new Intent(AccountSetupFinal.ACTION_JUMP_TO_OPTIONS);
+        i.putExtra(SetupDataFragment.EXTRA_SETUP_DATA, setupDataFragment);
+        return i;
     }
 
 }

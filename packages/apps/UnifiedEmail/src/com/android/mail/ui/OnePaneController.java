@@ -17,12 +17,18 @@
 
 package com.android.mail.ui;
 
+import android.app.Activity;
 import android.app.Fragment;
 import android.app.FragmentManager;
 import android.app.FragmentTransaction;
-import android.net.Uri;
+import android.content.Intent;
 import android.os.Bundle;
+import android.support.annotation.IdRes;
+import android.support.annotation.LayoutRes;
 import android.support.v4.widget.DrawerLayout;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.View;
 import android.widget.ListView;
 
 import com.android.mail.ConversationListContext;
@@ -124,14 +130,34 @@ public final class OnePaneController extends AbstractActivityController {
     }
 
     @Override
+    public @LayoutRes int getContentViewResource() {
+        return R.layout.one_pane_activity;
+    }
+
+    @Override
     public boolean onCreate(Bundle savedInstanceState) {
-        mActivity.setContentView(R.layout.one_pane_activity);
         mDrawerContainer = (DrawerLayout) mActivity.findViewById(R.id.drawer_container);
-        mDrawerPullout = mDrawerContainer.findViewById(R.id.drawer_pullout);
+        mDrawerContainer.setDrawerTitle(Gravity.START,
+                mActivity.getActivityContext().getString(R.string.drawer_title));
+        final String drawerPulloutTag = mActivity.getString(R.string.drawer_pullout_tag);
+        mDrawerPullout = mDrawerContainer.findViewWithTag(drawerPulloutTag);
         mDrawerPullout.setBackgroundResource(R.color.list_background_color);
+
+        // CV is initially GONE on 1-pane (mode changes trigger visibility changes)
+        mActivity.findViewById(R.id.conversation_pager).setVisibility(View.GONE);
 
         // The parent class sets the correct viewmode and starts the application off.
         return super.onCreate(savedInstanceState);
+    }
+
+    @Override
+    protected ActionableToastBar findActionableToastBar(MailActivity activity) {
+        final ActionableToastBar tb = super.findActionableToastBar(activity);
+
+        // notify the toast bar of its sibling floating action button so it can move them together
+        // as they animate
+        tb.setFloatingActionButton(activity.findViewById(R.id.compose_button));
+        return tb;
     }
 
     @Override
@@ -204,8 +230,8 @@ public final class OnePaneController extends AbstractActivityController {
     }
 
     @Override
-    protected void showConversation(Conversation conversation, boolean inLoaderCallbacks) {
-        super.showConversation(conversation, inLoaderCallbacks);
+    protected void showConversation(Conversation conversation) {
+        super.showConversation(conversation);
         mConversationListVisible = false;
         if (conversation == null) {
             transitionBackToConversationListMode();
@@ -241,6 +267,11 @@ public final class OnePaneController extends AbstractActivityController {
     }
 
     @Override
+    public void onConversationFocused(Conversation conversation) {
+        // Do nothing
+    }
+
+    @Override
     public void showWaitForInitialization() {
         super.showWaitForInitialization();
         replaceFragment(getWaitFragment(), FragmentTransaction.TRANSIT_FRAGMENT_OPEN, TAG_WAIT,
@@ -253,12 +284,25 @@ public final class OnePaneController extends AbstractActivityController {
         super.hideWaitForInitialization();
     }
 
+    /**
+     * Switch to the Inbox by creating a new conversation list context that loads the inbox.
+     */
+    private void transitionToInbox() {
+        // The inbox could have changed, in which case we should load it again.
+        if (mInbox == null || !isDefaultInbox(mInbox.folderUri, mAccount)) {
+            loadAccountInbox();
+        } else {
+            onFolderChanged(mInbox, false /* force */);
+        }
+    }
+
     @Override
     public boolean doesActionChangeConversationListVisibility(final int action) {
         if (action == R.id.archive
                 || action == R.id.remove_folder
                 || action == R.id.delete
                 || action == R.id.discard_drafts
+                || action == R.id.discard_outbox
                 || action == R.id.mark_important
                 || action == R.id.mark_not_important
                 || action == R.id.mute
@@ -324,20 +368,18 @@ public final class OnePaneController extends AbstractActivityController {
         return true;
     }
 
-    /**
-     * Switch to the Inbox by creating a new conversation list context that loads the inbox.
-     */
-    private void transitionToInbox() {
-        // The inbox could have changed, in which case we should load it again.
-        if (mInbox == null || !isDefaultInbox(mInbox.folderUri, mAccount)) {
-            loadAccountInbox();
-        } else {
-            onFolderChanged(mInbox, false /* force */);
-        }
-    }
-
     @Override
     public void onFolderSelected(Folder folder) {
+        if (mViewMode.isSearchMode()) {
+            // We are in an activity on top of the main navigation activity.
+            // We need to return to it with a result code that indicates it should navigate to
+            // a different folder.
+            final Intent intent = new Intent();
+            intent.putExtra(AbstractActivityController.EXTRA_FOLDER, folder);
+            mActivity.setResult(Activity.RESULT_OK, intent);
+            mActivity.finish();
+            return;
+        }
         setHierarchyFolder(folder);
         super.onFolderSelected(folder);
     }
@@ -358,7 +400,7 @@ public final class OnePaneController extends AbstractActivityController {
             // Not needed, the activity is going away anyway.
         } else if (mode == ViewMode.CONVERSATION_LIST
                 || mode == ViewMode.WAITING_FOR_ACCOUNT_INITIALIZATION) {
-            final boolean isTopLevel = (mFolder == null) || (mFolder.parent == Uri.EMPTY);
+            final boolean isTopLevel = Folder.isRoot(mFolder);
 
             if (isTopLevel) {
                 // Show the drawer.
@@ -406,10 +448,8 @@ public final class OnePaneController extends AbstractActivityController {
                 case ViewMode.CONVERSATION:
                     mToastBar.show(getUndoClickedListener(
                             convList != null ? convList.getAnimatedAdapter() : null),
-                            0,
                             Utils.convertHtmlToPlainText
                                 (op.getDescription(mActivity.getActivityContext())),
-                            true, /* showActionIcon */
                             R.string.undo,
                             true,  /* replaceVisibleToast */
                             op);
@@ -419,10 +459,8 @@ public final class OnePaneController extends AbstractActivityController {
                     if (convList != null) {
                         mToastBar.show(
                                 getUndoClickedListener(convList.getAnimatedAdapter()),
-                                0,
                                 Utils.convertHtmlToPlainText
                                     (op.getDescription(mActivity.getActivityContext())),
-                                true, /* showActionIcon */
                                 R.string.undo,
                                 true,  /* replaceVisibleToast */
                                 op);
@@ -432,11 +470,6 @@ public final class OnePaneController extends AbstractActivityController {
                     break;
             }
         }
-    }
-
-    @Override
-    protected void hideOrRepositionToastBar(boolean animated) {
-        mToastBar.hide(animated, false /* actionClicked */);
     }
 
     @Override
@@ -468,5 +501,16 @@ public final class OnePaneController extends AbstractActivityController {
     public void launchFragment(final Fragment fragment, final int selectPosition) {
         replaceFragment(fragment, FragmentTransaction.TRANSIT_FRAGMENT_OPEN,
                 TAG_CUSTOM_FRAGMENT, R.id.content_pane);
+    }
+
+    @Override
+    public boolean onInterceptKeyFromCV(int keyCode, KeyEvent keyEvent, boolean navigateAway) {
+        // Not applicable
+        return false;
+    }
+
+    @Override
+    public boolean isTwoPaneLandscape() {
+        return false;
     }
 }

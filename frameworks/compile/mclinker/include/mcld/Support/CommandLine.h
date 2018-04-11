@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_COMMANDLINE_H
-#define MCLD_COMMANDLINE_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_COMMANDLINE_H
+#define MCLD_SUPPORT_COMMANDLINE_H
 #include <mcld/Support/FileSystem.h>
 #include <mcld/MC/ZOption.h>
 

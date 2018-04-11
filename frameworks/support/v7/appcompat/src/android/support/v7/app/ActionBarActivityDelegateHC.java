@@ -16,32 +16,56 @@
 
 package android.support.v7.app;
 
-import android.os.Bundle;
-import android.view.Window;
+import android.annotation.TargetApi;
+import android.content.Context;
+import android.os.Build;
+import android.support.v7.internal.view.SupportActionModeWrapper;
+import android.support.v7.internal.widget.NativeActionModeAwareLayout;
+import android.view.ActionMode;
+import android.view.KeyEvent;
+import android.view.View;
 
-class ActionBarActivityDelegateHC extends ActionBarActivityDelegateBase {
+@TargetApi(Build.VERSION_CODES.HONEYCOMB)
+class ActionBarActivityDelegateHC extends ActionBarActivityDelegateBase
+        implements NativeActionModeAwareLayout.OnActionModeForChildListener {
+
+    private NativeActionModeAwareLayout mNativeActionModeAwareLayout;
 
     ActionBarActivityDelegateHC(ActionBarActivity activity) {
         super(activity);
     }
 
     @Override
-    void onCreate(Bundle savedInstanceState) {
-        /**
-         * A native Action Mode could be displayed (text selection, etc) so we need to make sure it
-         * is positioned correctly. Here we request the ACTION_MODE_OVERLAY feature so that it
-         * displays over the compat Action Bar.
-         * {@link android.support.v7.internal.widget.NativeActionModeAwareLayout} is responsible for
-         * making sure that the compat Action Bar is visible when an Action Mode is started
-         * (for positioning).
-         */
-        mActivity.getWindow().requestFeature(Window.FEATURE_ACTION_MODE_OVERLAY);
-        super.onCreate(savedInstanceState);
+    void onSubDecorInstalled() {
+        // NativeActionModeAwareLayout is used to notify us when a native Action Mode is started
+        mNativeActionModeAwareLayout = (NativeActionModeAwareLayout) mActivity
+                .findViewById(android.R.id.content);
+
+        // Can be null when using FEATURE_ACTION_BAR_OVERLAY
+        if (mNativeActionModeAwareLayout != null) {
+            mNativeActionModeAwareLayout.setActionModeForChildListener(this);
+        }
     }
 
     @Override
-    public ActionBar createSupportActionBar() {
-        ensureSubDecor();
-        return new ActionBarImplHC(mActivity, mActivity);
+    boolean onKeyDown(int keyCode, KeyEvent event) {
+        // On HC+ we do not need to do anything from onKeyDown
+        return false;
+    }
+
+    // From NativeActionModeAwareLayout.OnActionModeForChildListener
+    @Override
+    public ActionMode startActionModeForChild(View originalView, ActionMode.Callback callback) {
+        Context context = originalView.getContext();
+
+        // Try and start a support action mode, wrapping the callback
+        final android.support.v7.view.ActionMode supportActionMode = startSupportActionMode(
+                new SupportActionModeWrapper.CallbackWrapper(context, callback));
+
+        if (supportActionMode != null) {
+            // If we received a support action mode, wrap and return it
+            return new SupportActionModeWrapper(mActivity, supportActionMode);
+        }
+        return null;
     }
 }

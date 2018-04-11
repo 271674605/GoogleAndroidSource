@@ -7,9 +7,11 @@
 
 
 #include "GrGLUtil.h"
+#include "SkMatrix.h"
+#include <stdio.h>
 
 void GrGLClearErr(const GrGLInterface* gl) {
-    while (GR_GL_NO_ERROR != gl->fGetError()) {}
+    while (GR_GL_NO_ERROR != gl->fFunctions.fGetError()) {}
 }
 
 namespace {
@@ -73,6 +75,10 @@ bool get_gl_version_for_mesa(int mesaMajorVersion, int* major, int* minor) {
             *major = 3;
             *minor = 1;
             return true;
+        case 10:
+            *major = 3;
+            *minor = 3;
+            return true;
         default:
             return false;
     }
@@ -91,10 +97,10 @@ bool get_gl_version_for_mesa(int mesaMajorVersion, int* major, int* minor) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-GrGLBinding GrGLGetBindingInUseFromString(const char* versionString) {
+GrGLStandard GrGLGetStandardInUseFromString(const char* versionString) {
     if (NULL == versionString) {
-        GrAssert(!"NULL GL version string.");
-        return kNone_GrGLBinding;
+        SkDebugf("NULL GL version string.");
+        return kNone_GrGLStandard;
     }
 
     int major, minor;
@@ -102,7 +108,7 @@ GrGLBinding GrGLGetBindingInUseFromString(const char* versionString) {
     // check for desktop
     int n = sscanf(versionString, "%d.%d", &major, &minor);
     if (2 == n) {
-        return kDesktop_GrGLBinding;
+        return kGL_GrGLStandard;
     }
 
     // check for ES 1
@@ -110,15 +116,15 @@ GrGLBinding GrGLGetBindingInUseFromString(const char* versionString) {
     n = sscanf(versionString, "OpenGL ES-%c%c %d.%d", profile, profile+1, &major, &minor);
     if (4 == n) {
         // we no longer support ES1.
-        return kNone_GrGLBinding;
+        return kNone_GrGLStandard;
     }
 
     // check for ES2
     n = sscanf(versionString, "OpenGL ES %d.%d", &major, &minor);
     if (2 == n) {
-        return kES2_GrGLBinding;
+        return kGLES_GrGLStandard;
     }
-    return kNone_GrGLBinding;
+    return kNone_GrGLStandard;
 }
 
 bool GrGLIsMesaFromVersionString(const char* versionString) {
@@ -127,10 +133,14 @@ bool GrGLIsMesaFromVersionString(const char* versionString) {
     return 4 == n;
 }
 
+bool GrGLIsChromiumFromRendererString(const char* rendererString) {
+    return 0 == strcmp(rendererString, "Chromium");
+}
+
 GrGLVersion GrGLGetVersionFromString(const char* versionString) {
     if (NULL == versionString) {
-        GrAssert(!"NULL GL version string.");
-        return 0;
+        SkDebugf("NULL GL version string.");
+        return GR_GL_INVALID_VER;
     }
 
     int major, minor;
@@ -142,7 +152,7 @@ GrGLVersion GrGLGetVersionFromString(const char* versionString) {
         if (get_gl_version_for_mesa(mesaMajor, &major, &minor)) {
             return GR_GL_VER(major, minor);
         } else {
-            return 0;
+            return GR_GL_INVALID_VER;
         }
     }
 
@@ -163,13 +173,13 @@ GrGLVersion GrGLGetVersionFromString(const char* versionString) {
         return GR_GL_VER(major, minor);
     }
 
-    return 0;
+    return GR_GL_INVALID_VER;
 }
 
 GrGLSLVersion GrGLGetGLSLVersionFromString(const char* versionString) {
     if (NULL == versionString) {
-        GrAssert(!"NULL GLSL version string.");
-        return 0;
+        SkDebugf("NULL GLSL version string.");
+        return GR_GLSL_INVALID_VER;
     }
 
     int major, minor;
@@ -192,7 +202,7 @@ GrGLSLVersion GrGLGetGLSLVersionFromString(const char* versionString) {
     }
 #endif
 
-    return 0;
+    return GR_GLSL_INVALID_VER;
 }
 
 GrGLVendor GrGLGetVendorFromString(const char* vendorString) {
@@ -203,17 +213,25 @@ GrGLVendor GrGLGetVendorFromString(const char* vendorString) {
         if (0 == strcmp(vendorString, "Imagination Technologies")) {
             return kImagination_GrGLVendor;
         }
-        if (0 == strcmp(vendorString, "Intel")) {
+        if (0 == strncmp(vendorString, "Intel ", 6) || 0 == strcmp(vendorString, "Intel")) {
             return kIntel_GrGLVendor;
+        }
+        if (0 == strcmp(vendorString, "Qualcomm")) {
+            return kQualcomm_GrGLVendor;
         }
     }
     return kOther_GrGLVendor;
 }
 
-GrGLBinding GrGLGetBindingInUse(const GrGLInterface* gl) {
-    const GrGLubyte* v;
-    GR_GL_CALL_RET(gl, v, GetString(GR_GL_VERSION));
-    return GrGLGetBindingInUseFromString((const char*) v);
+GrGLRenderer GrGLGetRendererFromString(const char* rendererString) {
+    if (NULL != rendererString) {
+        if (0 == strcmp(rendererString, "NVIDIA Tegra 3")) {
+            return kTegra3_GrGLRenderer;
+        } else if (0 == strcmp(rendererString, "NVIDIA Tegra")) {
+            return kTegra2_GrGLRenderer;
+        }
+    }
+    return kOther_GrGLRenderer;
 }
 
 GrGLVersion GrGLGetVersion(const GrGLInterface* gl) {
@@ -232,4 +250,53 @@ GrGLVendor GrGLGetVendor(const GrGLInterface* gl) {
     const GrGLubyte* v;
     GR_GL_CALL_RET(gl, v, GetString(GR_GL_VENDOR));
     return GrGLGetVendorFromString((const char*) v);
+}
+
+GrGLRenderer GrGLGetRenderer(const GrGLInterface* gl) {
+    const GrGLubyte* v;
+    GR_GL_CALL_RET(gl, v, GetString(GR_GL_RENDERER));
+    return GrGLGetRendererFromString((const char*) v);
+}
+
+template<> void GrGLGetMatrix<3>(GrGLfloat* dest, const SkMatrix& src) {
+    // Col 0
+    dest[0] = SkScalarToFloat(src[SkMatrix::kMScaleX]);
+    dest[1] = SkScalarToFloat(src[SkMatrix::kMSkewY]);
+    dest[2] = SkScalarToFloat(src[SkMatrix::kMPersp0]);
+
+    // Col 1
+    dest[3] = SkScalarToFloat(src[SkMatrix::kMSkewX]);
+    dest[4] = SkScalarToFloat(src[SkMatrix::kMScaleY]);
+    dest[5] = SkScalarToFloat(src[SkMatrix::kMPersp1]);
+
+    // Col 2
+    dest[6] = SkScalarToFloat(src[SkMatrix::kMTransX]);
+    dest[7] = SkScalarToFloat(src[SkMatrix::kMTransY]);
+    dest[8] = SkScalarToFloat(src[SkMatrix::kMPersp2]);
+}
+
+template<> void GrGLGetMatrix<4>(GrGLfloat* dest, const SkMatrix& src) {
+    // Col 0
+    dest[0]  = SkScalarToFloat(src[SkMatrix::kMScaleX]);
+    dest[1]  = SkScalarToFloat(src[SkMatrix::kMSkewY]);
+    dest[2]  = 0;
+    dest[3]  = SkScalarToFloat(src[SkMatrix::kMPersp0]);
+
+    // Col 1
+    dest[4]  = SkScalarToFloat(src[SkMatrix::kMSkewX]);
+    dest[5]  = SkScalarToFloat(src[SkMatrix::kMScaleY]);
+    dest[6]  = 0;
+    dest[7]  = SkScalarToFloat(src[SkMatrix::kMPersp1]);
+
+    // Col 2
+    dest[8]  = 0;
+    dest[9]  = 0;
+    dest[10] = 1;
+    dest[11] = 0;
+
+    // Col 3
+    dest[12] = SkScalarToFloat(src[SkMatrix::kMTransX]);
+    dest[13] = SkScalarToFloat(src[SkMatrix::kMTransY]);
+    dest[14] = 0;
+    dest[15] = SkScalarToFloat(src[SkMatrix::kMPersp2]);
 }

@@ -6,12 +6,13 @@
  */
 
 #include "SkAdvancedTypefaceMetrics.h"
+#include "SkEndian.h"
 #include "SkFontDescriptor.h"
 #include "SkFontHost.h"
+#include "SkLazyPtr.h"
+#include "SkOTTable_OS_2.h"
 #include "SkStream.h"
 #include "SkTypeface.h"
-
-SK_DEFINE_INST_COUNT(SkTypeface)
 
 //#define TRACE_LIFECYCLE
 
@@ -36,22 +37,69 @@ SkTypeface::~SkTypeface() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-SkTypeface* SkTypeface::GetDefaultTypeface(Style style) {
-    // we keep a reference to this guy for all time, since if we return its
-    // fontID, the font cache may later on ask to resolve that back into a
-    // typeface object.
-    static const uint32_t FONT_STYLE_COUNT = 4;
-    static SkTypeface* gDefaultTypefaces[FONT_STYLE_COUNT];
-    SkASSERT((unsigned)style < FONT_STYLE_COUNT);
-
-    // mask off any other bits to avoid a crash in SK_RELEASE
-    style = (Style)(style & 0x03);
-
-    if (NULL == gDefaultTypefaces[style]) {
-        gDefaultTypefaces[style] =
-        SkFontHost::CreateTypeface(NULL, NULL, style);
+class SkEmptyTypeface : public SkTypeface {
+public:
+    static SkEmptyTypeface* Create() {
+        return SkNEW(SkEmptyTypeface);
     }
-    return gDefaultTypefaces[style];
+protected:
+    SkEmptyTypeface() : SkTypeface(SkTypeface::kNormal, 0, true) { }
+
+    virtual SkStream* onOpenStream(int* ttcIndex) const SK_OVERRIDE { return NULL; }
+    virtual SkScalerContext* onCreateScalerContext(const SkDescriptor*) const SK_OVERRIDE {
+        return NULL;
+    }
+    virtual void onFilterRec(SkScalerContextRec*) const SK_OVERRIDE { }
+    virtual SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
+                                SkAdvancedTypefaceMetrics::PerGlyphInfo,
+                                const uint32_t*, uint32_t) const SK_OVERRIDE { return NULL; }
+    virtual void onGetFontDescriptor(SkFontDescriptor*, bool*) const SK_OVERRIDE { }
+    virtual int onCharsToGlyphs(const void* chars, Encoding encoding,
+                                uint16_t glyphs[], int glyphCount) const SK_OVERRIDE {
+        if (glyphs && glyphCount > 0) {
+            sk_bzero(glyphs, glyphCount * sizeof(glyphs[0]));
+        }
+        return 0;
+    }
+    virtual int onCountGlyphs() const SK_OVERRIDE { return 0; };
+    virtual int onGetUPEM() const SK_OVERRIDE { return 0; };
+    class EmptyLocalizedStrings : public SkTypeface::LocalizedStrings {
+    public:
+        virtual bool next(SkTypeface::LocalizedString*) SK_OVERRIDE { return false; }
+    };
+    virtual SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const SK_OVERRIDE {
+        return SkNEW(EmptyLocalizedStrings);
+    };
+    virtual int onGetTableTags(SkFontTableTag tags[]) const SK_OVERRIDE { return 0; }
+    virtual size_t onGetTableData(SkFontTableTag, size_t, size_t, void*) const SK_OVERRIDE {
+        return 0;
+    }
+};
+
+SkTypeface* SkTypeface::CreateDefault(int style) {
+    // If backed by fontconfig, it's not safe to call SkFontHost::CreateTypeface concurrently.
+    // To be safe, we serialize here with a mutex so only one call to
+    // CreateTypeface is happening at any given time.
+    // TODO(bungeman, mtklein): This is sad.  Make our fontconfig code safe?
+    SK_DECLARE_STATIC_MUTEX(mutex);
+    SkAutoMutexAcquire lock(&mutex);
+
+    SkTypeface* t = SkFontHost::CreateTypeface(NULL, NULL, (Style)style);
+    return t ? t : SkEmptyTypeface::Create();
+}
+
+void SkTypeface::DeleteDefault(SkTypeface* t) {
+    // The SkTypeface returned by SkFontHost::CreateTypeface may _itself_ be a
+    // cleverly-shared singleton.  This is less than ideal.  This means we
+    // cannot just assert our ownership and SkDELETE(t) like we'd want to.
+    SkSafeUnref(t);
+}
+
+SkTypeface* SkTypeface::GetDefaultTypeface(Style style) {
+    SK_DECLARE_STATIC_LAZY_PTR_ARRAY(SkTypeface, defaults, 4, CreateDefault, DeleteDefault);
+
+    SkASSERT((int)style < 4);
+    return defaults[style];
 }
 
 SkTypeface* SkTypeface::RefDefault(Style style) {
@@ -194,6 +242,20 @@ int SkTypeface::getUnitsPerEm() const {
     return this->onGetUPEM();
 }
 
+bool SkTypeface::getKerningPairAdjustments(const uint16_t glyphs[], int count,
+                                           int32_t adjustments[]) const {
+    SkASSERT(count >= 0);
+    // check for the only legal way to pass a NULL.. everything is 0
+    // in which case they just want to know if this face can possibly support
+    // kerning (true) or never (false).
+    if (NULL == glyphs || NULL == adjustments) {
+        SkASSERT(NULL == glyphs);
+        SkASSERT(0 == count);
+        SkASSERT(NULL == adjustments);
+    }
+    return this->onGetKerningPairAdjustments(glyphs, count, adjustments);
+}
+
 SkTypeface::LocalizedStrings* SkTypeface::createFamilyNameIterator() const {
     return this->onCreateFamilyNameIterator();
 }
@@ -209,21 +271,33 @@ SkAdvancedTypefaceMetrics* SkTypeface::getAdvancedTypefaceMetrics(
                                 SkAdvancedTypefaceMetrics::PerGlyphInfo info,
                                 const uint32_t* glyphIDs,
                                 uint32_t glyphIDsCount) const {
-    return this->onGetAdvancedTypefaceMetrics(info, glyphIDs, glyphIDsCount);
-}
-
-SkTypeface* SkTypeface::refMatchingStyle(Style style) const {
-    return this->onRefMatchingStyle(style);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////
-
-int SkTypeface::onCharsToGlyphs(const void* chars, Encoding encoding,
-                                uint16_t glyphs[], int glyphCount) const {
-    SkDebugf("onCharsToGlyphs unimplemented\n");
-    if (glyphs && glyphCount > 0) {
-        sk_bzero(glyphs, glyphCount * sizeof(glyphs[0]));
+    SkAdvancedTypefaceMetrics* result =
+            this->onGetAdvancedTypefaceMetrics(info, glyphIDs, glyphIDsCount);
+    if (result && result->fType == SkAdvancedTypefaceMetrics::kTrueType_Font) {
+        struct SkOTTableOS2 os2table;
+        if (this->getTableData(SkTEndian_SwapBE32(SkOTTableOS2::TAG), 0,
+                               sizeof(os2table), &os2table) > 0) {
+            if (os2table.version.v2.fsType.field.Bitmap ||
+                (os2table.version.v2.fsType.field.Restricted &&
+                 !(os2table.version.v2.fsType.field.PreviewPrint ||
+                   os2table.version.v2.fsType.field.Editable))) {
+                result->fFlags = SkTBitOr<SkAdvancedTypefaceMetrics::FontFlags>(
+                        result->fFlags,
+                        SkAdvancedTypefaceMetrics::kNotEmbeddable_FontFlag);
+            }
+            if (os2table.version.v2.fsType.field.NoSubsetting) {
+                result->fFlags = SkTBitOr<SkAdvancedTypefaceMetrics::FontFlags>(
+                        result->fFlags,
+                        SkAdvancedTypefaceMetrics::kNotSubsettable_FontFlag);
+            }
+        }
     }
-    return 0;
+    return result;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool SkTypeface::onGetKerningPairAdjustments(const uint16_t glyphs[], int count,
+                                             int32_t adjustments[]) const {
+    return false;
 }

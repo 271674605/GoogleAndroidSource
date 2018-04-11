@@ -7,11 +7,16 @@
 
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/slide_animation.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/slide_animation.h"
 
 namespace ash {
-namespace internal {
+
+// How the background can be changed.
+enum BackgroundAnimatorChangeType {
+  BACKGROUND_CHANGE_ANIMATE,
+  BACKGROUND_CHANGE_IMMEDIATE
+};
 
 // Delegate is notified any time the background changes.
 class ASH_EXPORT BackgroundAnimatorDelegate {
@@ -23,14 +28,8 @@ class ASH_EXPORT BackgroundAnimatorDelegate {
 };
 
 // BackgroundAnimator is used by the shelf to animate the background (alpha).
-class ASH_EXPORT BackgroundAnimator : public ui::AnimationDelegate {
+class ASH_EXPORT BackgroundAnimator : public gfx::AnimationDelegate {
  public:
-  // How the background can be changed.
-  enum ChangeType {
-    CHANGE_ANIMATE,
-    CHANGE_IMMEDIATE
-  };
-
   BackgroundAnimator(BackgroundAnimatorDelegate* delegate,
                      int min_alpha,
                      int max_alpha);
@@ -42,14 +41,14 @@ class ASH_EXPORT BackgroundAnimator : public ui::AnimationDelegate {
   // Sets whether a background is rendered. Initial value is false. If |type|
   // is |CHANGE_IMMEDIATE| and an animation is not in progress this notifies
   // the delegate immediately (synchronously from this method).
-  void SetPaintsBackground(bool value, ChangeType type);
+  void SetPaintsBackground(bool value, BackgroundAnimatorChangeType type);
   bool paints_background() const { return paints_background_; }
 
   // Current alpha.
   int alpha() const { return alpha_; }
 
-  // ui::AnimationDelegate overrides:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  // gfx::AnimationDelegate overrides:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
 
  private:
   BackgroundAnimatorDelegate* delegate_;
@@ -57,7 +56,7 @@ class ASH_EXPORT BackgroundAnimator : public ui::AnimationDelegate {
   const int min_alpha_;
   const int max_alpha_;
 
-  ui::SlideAnimation animation_;
+  gfx::SlideAnimation animation_;
 
   // Whether the background is painted.
   bool paints_background_;
@@ -68,7 +67,6 @@ class ASH_EXPORT BackgroundAnimator : public ui::AnimationDelegate {
   DISALLOW_COPY_AND_ASSIGN(BackgroundAnimator);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SHELF_BACKGROUND_ANIMATOR_H_

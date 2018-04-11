@@ -58,6 +58,12 @@ class Params {
   NameMap java_outer_classnames_;
   NameSet java_multiple_files_;
   bool generate_has_;
+  bool java_enum_style_;
+  bool optional_field_accessors_;
+  bool use_reference_types_for_primitives_;
+  bool generate_equals_;
+  bool ignore_services_;
+  bool parcelable_messages_;
 
  public:
   Params(const string & base_name) :
@@ -65,7 +71,13 @@ class Params {
     base_name_(base_name),
     override_java_multiple_files_(JAVANANO_MUL_UNSET),
     store_unknown_fields_(false),
-    generate_has_(false) {
+    generate_has_(false),
+    java_enum_style_(false),
+    optional_field_accessors_(false),
+    use_reference_types_for_primitives_(false),
+    generate_equals_(false),
+    ignore_services_(false),
+    parcelable_messages_(false) {
   }
 
   const string& base_name() const {
@@ -160,6 +172,47 @@ class Params {
     return generate_has_;
   }
 
+  void set_java_enum_style(bool value) {
+    java_enum_style_ = value;
+  }
+  bool java_enum_style() const {
+    return java_enum_style_;
+  }
+
+  void set_optional_field_accessors(bool value) {
+    optional_field_accessors_ = value;
+  }
+  bool optional_field_accessors() const {
+    return optional_field_accessors_;
+  }
+
+  void set_use_reference_types_for_primitives(bool value) {
+    use_reference_types_for_primitives_ = value;
+  }
+  bool use_reference_types_for_primitives() const {
+    return use_reference_types_for_primitives_;
+  }
+
+  void set_generate_equals(bool value) {
+    generate_equals_ = value;
+  }
+  bool generate_equals() const {
+    return generate_equals_;
+  }
+
+  void set_ignore_services(bool value) {
+    ignore_services_ = value;
+  }
+  bool ignore_services() const {
+    return ignore_services_;
+  }
+
+  void set_parcelable_messages(bool value) {
+    parcelable_messages_ = value;
+  }
+  bool parcelable_messages() const {
+    return parcelable_messages_;
+  }
 };
 
 }  // namespace javanano

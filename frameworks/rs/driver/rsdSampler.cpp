@@ -40,3 +40,20 @@ bool rsdSamplerInit(const Context *, const Sampler *s) {
 void rsdSamplerDestroy(const android::renderscript::Context *rsc,
                        const android::renderscript::Sampler *s) {
 }
+
+void rsdSamplerUpdateCachedObject(const Context *rsc,
+                                  const Sampler *alloc,
+                                  rs_sampler *obj)
+{
+    obj->p = alloc;
+#ifdef __LP64__
+    obj->r = NULL;
+    if (alloc != NULL) {
+        obj->v1 = alloc->mHal.drv;
+    } else {
+        obj->v1 = NULL;
+    }
+    obj->v2 = NULL;
+#endif
+}
+

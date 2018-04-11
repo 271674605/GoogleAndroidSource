@@ -4,16 +4,15 @@
 
 """Dispatches tests, either sharding or replicating them.
 
-To dispatch, performs the following steps:
+Performs the following steps:
 * Create a test collection factory, using the given tests
   - If sharding: test collection factory returns the same shared test collection
     to all test runners
   - If replciating: test collection factory returns a unique test collection to
     each test runner, with the same set of tests in each.
-* Get the list of devices to run on
-* Create test runners
-* Run each test runner in its own thread, pulling tests from the test collection
-  generated from the test collection factory until there are no tests left.
+* Create a test runner for each device.
+* Run each test runner in its own thread, grabbing tests from the test
+  collection until there are no tests left.
 """
 
 import logging
@@ -21,10 +20,10 @@ import threading
 
 from pylib import android_commands
 from pylib import constants
+from pylib.base import base_test_result
+from pylib.device import device_errors
 from pylib.utils import reraiser_thread
 from pylib.utils import watchdog_timer
-
-import base_test_result
 
 
 DEFAULT_TIMEOUT = 7 * 60  # seven minutes
@@ -70,26 +69,28 @@ class _TestCollection(object):
     tests: List of tests to put in the collection.
   """
 
-  def __init__(self, tests=[]):
+  def __init__(self, tests=None):
+    if not tests:
+      tests = []
     self._lock = threading.Lock()
     self._tests = []
     self._tests_in_progress = 0
-    # Used to signal that an item is avaliable or all items have been handled.
-    self._item_avaliable_or_all_done = threading.Event()
+    # Used to signal that an item is available or all items have been handled.
+    self._item_available_or_all_done = threading.Event()
     for t in tests:
       self.add(t)
 
   def _pop(self):
     """Pop a test from the collection.
 
-    Waits until a test is avaliable or all tests have been handled.
+    Waits until a test is available or all tests have been handled.
 
     Returns:
       A test or None if all tests have been handled.
     """
     while True:
-      # Wait for a test to be avaliable or all tests to have been handled.
-      self._item_avaliable_or_all_done.wait()
+      # Wait for a test to be available or all tests to have been handled.
+      self._item_available_or_all_done.wait()
       with self._lock:
         # Check which of the two conditions triggered the signal.
         if self._tests_in_progress == 0:
@@ -97,8 +98,8 @@ class _TestCollection(object):
         try:
           return self._tests.pop(0)
         except IndexError:
-          # Another thread beat us to the avaliable test, wait again.
-          self._item_avaliable_or_all_done.clear()
+          # Another thread beat us to the available test, wait again.
+          self._item_available_or_all_done.clear()
 
   def add(self, test):
     """Add an test to the collection.
@@ -108,7 +109,7 @@ class _TestCollection(object):
     """
     with self._lock:
       self._tests.append(test)
-      self._item_avaliable_or_all_done.set()
+      self._item_available_or_all_done.set()
       self._tests_in_progress += 1
 
   def test_completed(self):
@@ -117,7 +118,7 @@ class _TestCollection(object):
       self._tests_in_progress -= 1
       if self._tests_in_progress == 0:
         # All tests have been handled, signal all waiting threads.
-        self._item_avaliable_or_all_done.set()
+        self._item_available_or_all_done.set()
 
   def __iter__(self):
     """Iterate through tests in the collection until all have been handled."""
@@ -126,6 +127,15 @@ class _TestCollection(object):
       if r is None:
         break
       yield r
+
+  def __len__(self):
+    """Return the number of tests currently in the collection."""
+    return len(self._tests)
+
+  def test_names(self):
+    """Return a list of the names of the tests currently in the collection."""
+    with self._lock:
+      return list(t.test for t in self._tests)
 
 
 def _RunTestsFromQueue(runner, test_collection, out_results, watcher,
@@ -156,18 +166,19 @@ def _RunTestsFromQueue(runner, test_collection, out_results, watcher,
     """
     new_test_run_results = base_test_result.TestRunResults()
     for test_result in test_run_results.GetAll():
-      test_result.SetName('%s_%s' % (runner.device[-4:], test_result.GetName()))
+      test_result.SetName('%s_%s' % (runner.device_serial[-4:],
+                                     test_result.GetName()))
       new_test_run_results.AddResult(test_result)
     return new_test_run_results
 
   for test in test_collection:
     watcher.Reset()
     try:
-      if not android_commands.IsDeviceAttached(runner.device):
+      if runner.device_serial not in android_commands.GetAttachedDevices():
         # Device is unresponsive, stop handling tests on this device.
-        msg = 'Device %s is unresponsive.' % runner.device
+        msg = 'Device %s is unresponsive.' % runner.device_serial
         logging.warning(msg)
-        raise android_commands.errors.DeviceUnresponsiveError(msg)
+        raise device_errors.DeviceUnreachableError(msg)
       result, retry = runner.RunTest(test.test)
       if tag_results_with_device:
         result = TagTestRunResults(result)
@@ -211,7 +222,10 @@ def _SetUp(runner_factory, device, out_runners, threadsafe_counter):
     runner = runner_factory(device, index)
     runner.SetUp()
     out_runners.append(runner)
-  except android_commands.errors.DeviceUnresponsiveError as e:
+  except (device_errors.DeviceUnreachableError,
+          # TODO(jbudorick) Remove this once the underlying implementations
+          #                 for the above are switched or wrapped.
+          android_commands.errors.DeviceUnresponsiveError) as e:
     logging.warning('Failed to create shard for %s: [%s]', device, e)
 
 
@@ -236,24 +250,36 @@ def _RunAllTests(runners, test_collection_factory, num_retries, timeout=None,
   logging.warning('Running tests with %s test runners.' % (len(runners)))
   results = []
   exit_code = 0
-  watcher = watchdog_timer.WatchdogTimer(timeout)
-
-  workers = reraiser_thread.ReraiserThreadGroup(
-      [reraiser_thread.ReraiserThread(
-          _RunTestsFromQueue,
-          [r, test_collection_factory(), results, watcher, num_retries,
-           tag_results_with_device],
-          name=r.device[-4:])
-       for r in runners])
   run_results = base_test_result.TestRunResults()
+  watcher = watchdog_timer.WatchdogTimer(timeout)
+  test_collections = [test_collection_factory() for _ in runners]
+
+  threads = [
+      reraiser_thread.ReraiserThread(
+          _RunTestsFromQueue,
+          [r, tc, results, watcher, num_retries, tag_results_with_device],
+          name=r.device_serial[-4:])
+      for r, tc in zip(runners, test_collections)]
+
+  workers = reraiser_thread.ReraiserThreadGroup(threads)
   workers.StartAll()
 
-  # Catch DeviceUnresponsiveErrors and set a warning exit code
+  # Catch DeviceUnreachableErrors and set a warning exit code
   try:
     workers.JoinAll(watcher)
-  except android_commands.errors.DeviceUnresponsiveError as e:
+  except (device_errors.DeviceUnreachableError,
+          # TODO(jbudorick) Remove this once the underlying implementations
+          #                 for the above are switched or wrapped.
+          android_commands.errors.DeviceUnresponsiveError) as e:
     logging.error(e)
     exit_code = constants.WARNING_EXIT_CODE
+
+  if not all((len(tc) == 0 for tc in test_collections)):
+    logging.error('Only ran %d tests (all devices are likely offline).' %
+                  len(results))
+    for tc in test_collections:
+      run_results.AddResults(base_test_result.BaseTestResult(
+          t, base_test_result.ResultType.UNKNOWN) for t in tc.test_names())
 
   for r in results:
     run_results.AddTestRunResults(r)
@@ -298,46 +324,14 @@ def _TearDownRunners(runners, timeout=None):
     timeout: Watchdog timeout in seconds, defaults to the default timeout.
   """
   threads = reraiser_thread.ReraiserThreadGroup(
-      [reraiser_thread.ReraiserThread(r.TearDown, name=r.device[-4:])
+      [reraiser_thread.ReraiserThread(r.TearDown, name=r.device_serial[-4:])
        for r in runners])
   threads.StartAll()
   threads.JoinAll(watchdog_timer.WatchdogTimer(timeout))
 
 
-
-def _GetAttachedDevices(wait_for_debugger=False, test_device=None):
-  """Get all attached devices.
-
-  If we are using a debugger, limit to only one device.
-
-  Args:
-    wait_for_debugger: True if this run will use a debugger.
-    test_device: Name of a specific device to use.
-
-  Returns:
-    A list of attached devices.
-  """
-  attached_devices = []
-
-  attached_devices = android_commands.GetAttachedDevices()
-  if test_device:
-    assert test_device in attached_devices, (
-        'Did not find device %s among attached device. Attached devices: %s'
-        % (test_device, ', '.join(attached_devices)))
-    attached_devices = [test_device]
-
-  if len(attached_devices) > 1 and wait_for_debugger:
-    logging.warning('Debugger can not be sharded, using first available device')
-    attached_devices = attached_devices[:1]
-
-  return attached_devices
-
-
-def RunTests(tests, runner_factory, wait_for_debugger, test_device,
-             shard=True,
-             build_type='Debug',
-             test_timeout=DEFAULT_TIMEOUT,
-             setup_timeout=DEFAULT_TIMEOUT,
+def RunTests(tests, runner_factory, devices, shard=True,
+             test_timeout=DEFAULT_TIMEOUT, setup_timeout=DEFAULT_TIMEOUT,
              num_retries=2):
   """Run all tests on attached devices, retrying tests that don't pass.
 
@@ -345,14 +339,12 @@ def RunTests(tests, runner_factory, wait_for_debugger, test_device,
     tests: List of tests to run.
     runner_factory: Callable that takes a device and index and returns a
         TestRunner object.
-    wait_for_debugger: True if this test is using a debugger.
-    test_device: A specific device to run tests on, or None.
+    devices: List of attached devices.
     shard: True if we should shard, False if we should replicate tests.
       - Sharding tests will distribute tests across all test runners through a
         shared test collection.
       - Replicating tests will copy all tests to each test runner through a
         unique test collection for each test runner.
-    build_type: Either 'Debug' or 'Release'.
     test_timeout: Watchdog timeout in seconds for running tests.
     setup_timeout: Watchdog timeout in seconds for creating and cleaning up
         test runners.
@@ -362,7 +354,7 @@ def RunTests(tests, runner_factory, wait_for_debugger, test_device,
     A tuple of (base_test_result.TestRunResults object, exit code).
   """
   if not tests:
-    logging.error('No tests to run.')
+    logging.critical('No tests to run.')
     return (base_test_result.TestRunResults(), constants.ERROR_EXIT_CODE)
 
   if shard:
@@ -379,8 +371,6 @@ def RunTests(tests, runner_factory, wait_for_debugger, test_device,
     tag_results_with_device = True
     log_string = 'replicated on each device'
 
-  devices = _GetAttachedDevices(wait_for_debugger, test_device)
-
   logging.info('Will run %d tests (%s): %s', len(tests), log_string, str(tests))
   runners = _CreateRunners(runner_factory, devices, setup_timeout)
   try:
@@ -389,5 +379,10 @@ def RunTests(tests, runner_factory, wait_for_debugger, test_device,
   finally:
     try:
       _TearDownRunners(runners, setup_timeout)
-    except android_commands.errors.DeviceUnresponsiveError as e:
+    except (device_errors.DeviceUnreachableError,
+            # TODO(jbudorick) Remove this once the underlying implementations
+            #                 for the above are switched or wrapped.
+            android_commands.errors.DeviceUnresponsiveError) as e:
       logging.warning('Device unresponsive during TearDown: [%s]', e)
+    except Exception as e:
+      logging.error('Unexpected exception caught during TearDown: %s' % str(e))

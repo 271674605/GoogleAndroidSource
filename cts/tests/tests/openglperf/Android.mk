@@ -21,9 +21,10 @@ LOCAL_MODULE_TAGS := optional
 # and when built explicitly put it in the data partition
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_JAVA_LIBRARIES := android.test.runner
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner ctsutil
+LOCAL_STATIC_JAVA_LIBRARIES := ctstestrunner ctsdeviceutil
 
 LOCAL_JNI_SHARED_LIBRARIES := libctsopenglperf_jni
 

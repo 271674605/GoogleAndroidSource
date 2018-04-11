@@ -9,7 +9,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_job.h"
@@ -18,7 +17,6 @@
 
 namespace base {
 class MessageLoopProxy;
-struct PlatformFileInfo;
 }
 
 namespace fileapi {
@@ -97,8 +95,6 @@ class WEBKIT_STORAGE_BROWSER_EXPORT BlobURLRequestJob
   // Creates a FileStreamReader for the item at |index| with additional_offset.
   void CreateFileStreamReader(size_t index, int64 additional_offset);
 
-  base::WeakPtrFactory<BlobURLRequestJob> weak_factory_;
-
   scoped_refptr<BlobData> blob_data_;
 
   // Variables for controlling read from |blob_data_|.
@@ -122,6 +118,8 @@ class WEBKIT_STORAGE_BROWSER_EXPORT BlobURLRequestJob
   net::HttpByteRange byte_range_;
 
   scoped_ptr<net::HttpResponseInfo> response_info_;
+
+  base::WeakPtrFactory<BlobURLRequestJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BlobURLRequestJob);
 };

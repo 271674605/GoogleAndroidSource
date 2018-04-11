@@ -25,9 +25,10 @@ import com.android.ddmlib.testrunner.TestIdentifier;
 import com.android.tradefed.build.IBuildInfo;
 import com.android.tradefed.build.IFolderBuildInfo;
 import com.android.tradefed.config.Option;
+import com.android.tradefed.config.Option.Importance;
 import com.android.tradefed.log.LogUtil.CLog;
-import com.android.tradefed.result.ILogFileSaver;
 import com.android.tradefed.result.ITestInvocationListener;
+import com.android.tradefed.result.ITestSummaryListener;
 import com.android.tradefed.result.InputStreamSource;
 import com.android.tradefed.result.LogDataType;
 import com.android.tradefed.result.LogFileSaver;
@@ -43,9 +44,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Writes results to an XML files in the CTS format.
@@ -54,11 +54,11 @@ import java.util.regex.Pattern;
  * <p/>
  * Outputs xml in format governed by the cts_result.xsd
  */
-public class CtsXmlResultReporter implements ITestInvocationListener {
+public class CtsXmlResultReporter implements ITestInvocationListener, ITestSummaryListener {
     private static final String LOG_TAG = "CtsXmlResultReporter";
 
     static final String TEST_RESULT_FILE_NAME = "testResult.xml";
-    private static final String CTS_RESULT_FILE_VERSION = "1.14";
+    static final String CTS_RESULT_FILE_VERSION = "4.4";
     private static final String[] CTS_RESULT_RESOURCES = {"cts_result.xsl", "cts_result.css",
         "logo.gif", "newrule-green.png"};
 
@@ -68,6 +68,9 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
     static final String RESULT_TAG = "TestResult";
     static final String PLAN_ATTR = "testPlan";
     static final String STARTTIME_ATTR = "starttime";
+
+    @Option(name = "quiet-output", description = "Mute display of test results.")
+    private boolean mQuietOutput = false;
 
     private static final String REPORT_DIR_NAME = "output-file-path";
     @Option(name=REPORT_DIR_NAME, description="root file system path to directory to store xml " +
@@ -83,9 +86,6 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
     @Option(name = CtsTest.CONTINUE_OPTION, description = "the test result session to continue.")
     private Integer mContinueSessionId = null;
 
-    @Option(name = "quiet-output", description = "Mute display of test results.")
-    private boolean mQuietOutput = false;
-
     @Option(name = "result-server", description = "Server to publish test results.")
     private String mResultServer;
 
@@ -98,8 +98,7 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
     private ResultReporter mReporter;
     private File mLogDir;
     private String mSuiteName;
-
-    private static final Pattern mPtsLogPattern = Pattern.compile("(.*)\\+\\+\\+\\+(.*)");
+    private String mReferenceUrl;
 
     public void setReportDir(File reportDir) {
         mReportDir = reportDir;
@@ -212,35 +211,22 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
     }
 
     /**
-     * Return the {@link ILogFileSaver} to use.
+     * Return the {@link LogFileSaver} to use.
      * <p/>
      * Exposed for unit testing.
      */
-    ILogFileSaver getLogFileSaver() {
+    LogFileSaver getLogFileSaver() {
         return new LogFileSaver(mLogDir);
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void testRunStarted(String name, int numTests) {
-        if (mCurrentPkgResult != null && !name.equals(mCurrentPkgResult.getAppPackageName())) {
-            // display results from previous run
-            logCompleteRun(mCurrentPkgResult);
-        }
-        mIsDeviceInfoRun = name.equals(DeviceInfoCollector.APP_PACKAGE_NAME);
-        if (mIsDeviceInfoRun) {
-            logResult("Collecting device info");
-        } else  {
-            if (mCurrentPkgResult == null || !name.equals(mCurrentPkgResult.getAppPackageName())) {
-                logResult("-----------------------------------------");
-                logResult("Test package %s started", name);
-                logResult("-----------------------------------------");
-            }
-            mCurrentPkgResult = mResults.getOrCreatePackage(name);
-        }
 
+    @Override
+    public void testRunStarted(String id, int numTests) {
+        mIsDeviceInfoRun = DeviceInfoCollector.IDS.contains(id);
+        if (!mIsDeviceInfoRun) {
+            mCurrentPkgResult = mResults.getOrCreatePackage(id);
+            mCurrentPkgResult.setDeviceSerial(mDeviceSerial);
+        }
     }
 
     /**
@@ -248,15 +234,38 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
      */
     @Override
     public void testStarted(TestIdentifier test) {
-        mCurrentPkgResult.insertTest(test);
+        if (!mIsDeviceInfoRun) {
+            mCurrentPkgResult.insertTest(test);
+        }
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void testFailed(TestFailure status, TestIdentifier test, String trace) {
-        mCurrentPkgResult.reportTestFailure(test, CtsTestStatus.FAIL, trace);
+    public void testFailed(TestIdentifier test, String trace) {
+        if (!mIsDeviceInfoRun) {
+            mCurrentPkgResult.reportTestFailure(test, CtsTestStatus.FAIL, trace);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void testAssumptionFailure(TestIdentifier test, String trace) {
+        // TODO: do something different here?
+        if (!mIsDeviceInfoRun) {
+            mCurrentPkgResult.reportTestFailure(test, CtsTestStatus.FAIL, trace);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void testIgnored(TestIdentifier test) {
+        // TODO: ??
     }
 
     /**
@@ -264,36 +273,8 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
      */
     @Override
     public void testEnded(TestIdentifier test, Map<String, String> testMetrics) {
-        collectPtsResults(test, testMetrics);
-        mCurrentPkgResult.reportTestEnded(test);
-        Test result = mCurrentPkgResult.findTest(test);
-        String stack = result.getStackTrace() == null ? "" : "\n" + result.getStackTrace();
-        logResult("%s#%s %s %s", test.getClassName(), test.getTestName(), result.getResult(),
-                stack);
-    }
-
-    /**
-     * Collect Pts results for both device and host tests to the package result.
-     * @param test test ran
-     * @param testMetrics test metrics which can contain performance result for device tests
-     */
-    private void collectPtsResults(TestIdentifier test, Map<String, String> testMetrics) {
-        // device test can have performance results in testMetrics
-        String perfResult = PtsReportUtil.getPtsResultFromMetrics(testMetrics);
-        // host test should be checked in PtsHostStore.
-        if (perfResult == null) {
-            perfResult = PtsHostStore.removePtsResult(mDeviceSerial, test);
-        }
-        if (perfResult != null) {
-            // PTS result is passed in Summary++++Details format.
-            // Extract Summary and Details, and pass them.
-            Matcher m = mPtsLogPattern.matcher(perfResult);
-            if (m.find()) {
-                mCurrentPkgResult.reportPerformanceResult(test, CtsTestStatus.PASS, m.group(1),
-                        m.group(2));
-            } else {
-                logResult("PTS Result unrecognizable:" + perfResult);
-            }
+        if (!mIsDeviceInfoRun) {
+            mCurrentPkgResult.reportTestEnded(test, testMetrics);
         }
     }
 
@@ -314,10 +295,6 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
      */
     @Override
     public void invocationEnded(long elapsedTime) {
-        // display the results of the last completed run
-        if (mCurrentPkgResult != null) {
-            logCompleteRun(mCurrentPkgResult);
-        }
         if (mReportDir == null || mStartTime == null) {
             // invocationStarted must have failed, abort
             CLog.w("Unable to create XML report");
@@ -330,7 +307,7 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
         zipResults(mReportDir);
 
         try {
-            mReporter.reportResult(reportFile);
+            mReporter.reportResult(reportFile, mReferenceUrl);
         } catch (IOException e) {
             CLog.e(e);
         }
@@ -342,17 +319,6 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
         } else {
             Log.logAndDisplay(LogLevel.INFO, mDeviceSerial, String.format(format, args));
         }
-    }
-
-    private void logCompleteRun(TestPackageResult pkgResult) {
-        if (pkgResult.getAppPackageName().equals(DeviceInfoCollector.APP_PACKAGE_NAME)) {
-            logResult("Device info collection complete");
-            return;
-        }
-        logResult("%s package complete: Passed %d, Failed %d, Not Executed %d",
-                pkgResult.getAppPackageName(), pkgResult.countTests(CtsTestStatus.PASS),
-                pkgResult.countTests(CtsTestStatus.FAIL),
-                pkgResult.countTests(CtsTestStatus.NOT_EXECUTED));
     }
 
     /**
@@ -382,7 +348,7 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
         } catch (IOException e) {
             Log.e(LOG_TAG, "Failed to generate report data");
         } finally {
-            StreamUtil.closeStream(stream);
+            StreamUtil.close(stream);
         }
     }
 
@@ -402,7 +368,6 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
         serializer.attribute(ns, "endtime", endTime);
         serializer.attribute(ns, "version", CTS_RESULT_FILE_VERSION);
         serializer.attribute(ns, "suite", mSuiteName);
-
         mResults.serialize(serializer);
         // TODO: not sure why, but the serializer doesn't like this statement
         //serializer.endTag(ns, RESULT_TAG);
@@ -498,4 +463,17 @@ public class CtsXmlResultReporter implements ITestInvocationListener {
     public TestSummary getSummary() {
         return null;
     }
+
+    /**
+     * {@inheritDoc}
+     */
+     @Override
+     public void putSummary(List<TestSummary> summaries) {
+         // By convention, only store the first summary that we see as the summary URL.
+         if (summaries.isEmpty()) {
+             return;
+         }
+
+         mReferenceUrl = summaries.get(0).getSummary().getString();
+     }
 }

@@ -1,6 +1,9 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
+LOCAL_CLANG := true
+
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SRC_FILES:= \
     Client.cpp \
     DisplayDevice.cpp \
@@ -11,9 +14,9 @@ LOCAL_SRC_FILES:= \
     Layer.cpp \
     LayerDim.cpp \
     MessageQueue.cpp \
+    MonitoredProducer.cpp \
     SurfaceFlinger.cpp \
     SurfaceFlingerConsumer.cpp \
-    SurfaceTextureLayer.cpp \
     Transform.cpp \
     DisplayHardware/FramebufferSurface.cpp \
     DisplayHardware/HWComposer.cpp \
@@ -37,9 +40,6 @@ LOCAL_SRC_FILES:= \
 LOCAL_CFLAGS:= -DLOG_TAG=\"SurfaceFlinger\"
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
 
-ifeq ($(TARGET_BOARD_PLATFORM),omap3)
-	LOCAL_CFLAGS += -DNO_RGBX_8888
-endif
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
 	LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY
 endif
@@ -49,6 +49,10 @@ endif
 
 ifeq ($(TARGET_DISABLE_TRIPLE_BUFFERING),true)
 	LOCAL_CFLAGS += -DTARGET_DISABLE_TRIPLE_BUFFERING
+endif
+
+ifeq ($(TARGET_FORCE_HWC_FOR_VIRTUAL_DISPLAYS),true)
+    LOCAL_CFLAGS += -DFORCE_HWC_COPY_FOR_VIRTUAL_DISPLAYS
 endif
 
 ifneq ($(NUM_FRAMEBUFFER_SURFACE_BUFFERS),)
@@ -79,7 +83,8 @@ else
     LOCAL_CFLAGS += -DPRESENT_TIME_OFFSET_FROM_VSYNC_NS=0
 endif
 
-LOCAL_CFLAGS += -fvisibility=hidden
+LOCAL_CFLAGS += -fvisibility=hidden -Werror=format
+LOCAL_CFLAGS += -std=c++11
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils \
@@ -92,7 +97,8 @@ LOCAL_SHARED_LIBRARIES := \
 	libGLESv2 \
 	libbinder \
 	libui \
-	libgui
+	libgui \
+	libpowermanager
 
 LOCAL_MODULE:= libsurfaceflinger
 
@@ -115,6 +121,10 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils
 
 LOCAL_MODULE:= surfaceflinger
+
+ifdef TARGET_32_BIT_SURFACEFLINGER
+LOCAL_32_BIT_ONLY := true
+endif
 
 include $(BUILD_EXECUTABLE)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import logging
@@ -16,10 +16,13 @@ from telemetry.page import page_measurement
 from telemetry.page import page_runner
 from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.page import profile_creator
 from telemetry.page import test_expectations
+from telemetry.page.actions import action_runner as action_runner_module
+from telemetry.results import page_measurement_results
 
 
-class RecordPage(page_test.PageTest):
+class RecordPage(page_test.PageTest):  # pylint: disable=W0223
   def __init__(self, measurements):
     # This class overwrites PageTest.Run, so that the test method name is not
     # really used (except for throwing an exception if it doesn't exist).
@@ -28,67 +31,94 @@ class RecordPage(page_test.PageTest):
         [measurement().action_name_to_run
          for measurement in measurements.values()
          if measurement().action_name_to_run])
+    self.test = None
 
   def CanRunForPage(self, page):
     return page.url.startswith('http')
 
-  def CustomizeBrowserOptionsForPage(self, page, options):
-    for compound_action in self._CompoundActionsForPage(page):
-      for action in compound_action:
-        action.CustomizeBrowserOptions(options)
+  def WillNavigateToPage(self, page, tab):
+    """Override to ensure all resources are fetched from network."""
+    tab.ClearCache(force=False)
+    if self.test:
+      self.test.options = self.options
+      self.test.WillNavigateToPage(page, tab)
 
-  def Run(self, options, page, tab, results):
-    # When recording, sleep to catch any resources that load post-onload.
+  def DidNavigateToPage(self, page, tab):
+    """Forward the call to the test."""
+    if self.test:
+      self.test.DidNavigateToPage(page, tab)
+
+  def RunPage(self, page, tab, results):
     tab.WaitForDocumentReadyStateToBeComplete()
+
+    # When recording, sleep to catch any resources that load post-onload.
+    # TODO(tonyg): This should probably monitor resource timing for activity
+    # and sleep until 2s since the last network event with some timeout like
+    # 20s. We could wrap this up as WaitForNetworkIdle() and share with the
+    # speed index metric.
     time.sleep(3)
 
     # Run the actions for all measurements. Reload the page between
     # actions.
     should_reload = False
-    for compound_action in self._CompoundActionsForPage(page):
-      if should_reload:
-        tab.Navigate(page.url)
-        tab.WaitForDocumentReadyStateToBeComplete()
-      self._RunCompoundAction(page, tab, compound_action)
-      should_reload = True
-
-  def _CompoundActionsForPage(self, page):
-    actions = []
+    interactive = self.options and self.options.interactive
     for action_name in self._action_names:
       if not hasattr(page, action_name):
         continue
-      actions.append(page_test.GetCompoundActionFromPage(page, action_name))
-    return actions
+      if should_reload:
+        self.RunNavigateSteps(page, tab)
+      action_runner = action_runner_module.ActionRunner(tab)
+      if interactive:
+        action_runner.PauseInteractive()
+      else:
+        self._RunMethod(page, action_name, action_runner)
+      should_reload = True
+
+    # Run the PageTest's validator, so that we capture any additional resources
+    # that are loaded by the test.
+    if self.test:
+      dummy_results = page_measurement_results.PageMeasurementResults()
+      self.test.ValidatePage(page, tab, dummy_results)
 
 
 def Main(base_dir):
-  measurements = discover.DiscoverClasses(base_dir, base_dir,
-                                          page_measurement.PageMeasurement)
+  measurements = {
+      n: cls for n, cls in discover.DiscoverClasses(
+          base_dir, base_dir, page_measurement.PageMeasurement).items()
+      # Filter out unneeded ProfileCreators (crbug.com/319573).
+      if not issubclass(cls, profile_creator.ProfileCreator)
+      }
   tests = discover.DiscoverClasses(base_dir, base_dir, test.Test,
                                    index_by_class_name=True)
-  options = browser_options.BrowserOptions()
-  parser = options.CreateParser('%prog <PageSet|Measurement|Test>')
-  page_runner.AddCommandLineOptions(parser)
+
+  options = browser_options.BrowserFinderOptions()
+  parser = options.CreateParser('%prog <PageSet|Test|URL>')
+  page_runner.AddCommandLineArgs(parser)
 
   recorder = RecordPage(measurements)
-  recorder.AddCommandLineOptions(parser)
-  recorder.AddOutputOptions(parser)
+  recorder.AddCommandLineArgs(parser)
 
-  _, args = parser.parse_args()
-
-  if len(args) != 1:
+  quick_args = [a for a in sys.argv[1:] if not a.startswith('-')]
+  if len(quick_args) != 1:
     parser.print_usage()
     sys.exit(1)
-
-  if args[0].endswith('.json'):
-    ps = page_set.PageSet.FromFile(args[0])
-  elif args[0] in tests:
-    ps = tests[args[0]]().CreatePageSet(options)
-  elif args[0] in measurements:
-    ps = measurements[args[0]]().CreatePageSet(args, options)
+  target = quick_args[0]
+  if target in tests:
+    recorder.test = tests[target]().test()
+    recorder.test.AddCommandLineArgs(parser)
+    recorder.test.SetArgumentDefaults(parser)
+    parser.parse_args()
+    recorder.test.ProcessCommandLineArgs(parser, options)
+    ps = tests[target]().CreatePageSet(options)
+  elif discover.IsPageSetFile(target):
+    parser.parse_args()
+    ps = page_set.PageSet.FromFile(target)
   else:
     parser.print_usage()
     sys.exit(1)
+
+  page_runner.ProcessCommandLineArgs(parser, options)
+  recorder.ProcessCommandLineArgs(parser, options)
 
   expectations = test_expectations.TestExpectations()
 
@@ -97,8 +127,8 @@ def Main(base_dir):
   ps.wpr_archive_info.AddNewTemporaryRecording(temp_target_wpr_file_path)
 
   # Do the actual recording.
-  options.wpr_mode = wpr_modes.WPR_RECORD
-  options.no_proxy_server = True
+  options.browser_options.wpr_mode = wpr_modes.WPR_RECORD
+  options.browser_options.no_proxy_server = True
   recorder.CustomizeBrowserOptions(options)
   results = page_runner.Run(recorder, ps, expectations, options)
 

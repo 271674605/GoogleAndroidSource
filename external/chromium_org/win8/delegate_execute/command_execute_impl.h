@@ -23,13 +23,12 @@ EXTERN_C const GUID CLSID_CommandExecuteImpl;
 // This class implements the IExecuteCommand and related interfaces for
 // handling ShellExecute launches of the Chrome browser, i.e. whether to
 // launch Chrome in metro mode or desktop mode.
-#if defined(GOOGLE_CHROME_BUILD)
-class ATL_NO_VTABLE DECLSPEC_UUID("5C65F4B0-3651-4514-B207-D10CB699B14B")
+// The CLSID here is a dummy CLSID not used for anything, since we register
+// the class with a dynamic CLSID.  However, a static CLSID is necessary
+// so that we can force at least one entry into ATL's object map (it will
+// treat a 0-element object map as an initialization failure case).
+class ATL_NO_VTABLE DECLSPEC_UUID("071BB5F2-85A4-424F-BFE7-5F1609BE4C2C")
     CommandExecuteImpl
-#else  // GOOGLE_CHROME_BUILD
-class ATL_NO_VTABLE DECLSPEC_UUID("A2DF06F9-A21A-44A8-8A99-8B9C84F29160")
-    CommandExecuteImpl
-#endif  // GOOGLE_CHROME_BUILD
     : public CComObjectRootEx<CComSingleThreadModel>,
       public CComCoClass<CommandExecuteImpl, &CLSID_CommandExecuteImpl>,
       public IExecuteCommand,
@@ -89,21 +88,22 @@ class ATL_NO_VTABLE DECLSPEC_UUID("A2DF06F9-A21A-44A8-8A99-8B9C84F29160")
 
   static bool path_provider_initialized_;
 
-  bool GetLaunchScheme(string16* display_name, INTERNET_SCHEME* scheme);
+  void SetHighDPIRegistryKey(bool enable);
+
+  bool GetLaunchScheme(base::string16* display_name, INTERNET_SCHEME* scheme);
   HRESULT LaunchDesktopChrome();
   // Returns the launch mode, i.e. desktop launch/metro launch, etc.
   EC_HOST_UI_MODE GetLaunchMode();
 
   CComPtr<IShellItemArray> item_array_;
-  CommandLine parameters_;
+  base::CommandLine parameters_;
   base::FilePath chrome_exe_;
   STARTUPINFO start_info_;
-  string16 verb_;
-  string16 display_name_;
+  base::string16 verb_;
+  base::string16 display_name_;
   INTERNET_SCHEME launch_scheme_;
 
   base::IntegrityLevel integrity_level_;
-  EC_HOST_UI_MODE chrome_mode_;
 };
 
 OBJECT_ENTRY_AUTO(__uuidof(CommandExecuteImpl), CommandExecuteImpl)

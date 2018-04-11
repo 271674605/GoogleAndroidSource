@@ -40,4 +40,9 @@ endef
 
 $(foreach s,$(TARGET_AVAILABLE_SDK_VERSIONS),$(eval $(call _copy_prebuilt_sdk_to_the_right_place,$(s))))
 
+# Make sure we install the prebuilt current sdk when you do a checkbuild
+# so later users can run tapas and mm/mmm on an Android.mk with "LOCAL_SDK_VERSION := current".
+# That Android.mk may not be visible to platform build.
+checkbuild : $(call intermediates-dir-for,JAVA_LIBRARIES,sdk_vcurrent,,COMMON)/classes.jar
+
 include $(call all-makefiles-under,$(LOCAL_PATH))

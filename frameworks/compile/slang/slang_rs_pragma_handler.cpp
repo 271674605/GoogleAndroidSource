@@ -41,7 +41,7 @@ class RSExportTypePragmaHandler : public RSPragmaHandler {
 
  public:
   RSExportTypePragmaHandler(llvm::StringRef Name, RSContext *Context)
-      : RSPragmaHandler(Name, Context) { return; }
+      : RSPragmaHandler(Name, Context) { }
 
   void HandlePragma(clang::Preprocessor &PP,
                     clang::PragmaIntroducerKind Introducer,
@@ -53,7 +53,7 @@ class RSExportTypePragmaHandler : public RSPragmaHandler {
 class RSJavaPackageNamePragmaHandler : public RSPragmaHandler {
  public:
   RSJavaPackageNamePragmaHandler(llvm::StringRef Name, RSContext *Context)
-      : RSPragmaHandler(Name, Context) { return; }
+      : RSPragmaHandler(Name, Context) { }
 
   void HandlePragma(clang::Preprocessor &PP,
                     clang::PragmaIntroducerKind Introducer,
@@ -116,7 +116,6 @@ class RSJavaPackageNamePragmaHandler : public RSPragmaHandler {
         }
       }
     }
-    return;
   }
 };
 
@@ -129,7 +128,7 @@ class RSReflectLicensePragmaHandler : public RSPragmaHandler {
 
  public:
   RSReflectLicensePragmaHandler(llvm::StringRef Name, RSContext *Context)
-      : RSPragmaHandler(Name, Context) { return; }
+      : RSPragmaHandler(Name, Context) { }
 
   void HandlePragma(clang::Preprocessor &PP,
                     clang::PragmaIntroducerKind Introducer,
@@ -159,7 +158,7 @@ class RSVersionPragmaHandler : public RSPragmaHandler {
 
  public:
   RSVersionPragmaHandler(llvm::StringRef Name, RSContext *Context)
-      : RSPragmaHandler(Name, Context) { return; }
+      : RSPragmaHandler(Name, Context) { }
 
   void HandlePragma(clang::Preprocessor &PP,
                     clang::PragmaIntroducerKind Introducer,
@@ -168,27 +167,47 @@ class RSVersionPragmaHandler : public RSPragmaHandler {
   }
 };
 
+// Handles the pragmas rs_fp_full, rs_fp_relaxed, and rs_fp_imprecise.
+// There's one instance of this handler for each of the above values.
+// Only getName() differs between the instances.
+class RSPrecisionPragmaHandler : public RSPragmaHandler {
+public:
+  RSPrecisionPragmaHandler(llvm::StringRef Name, RSContext *Context)
+      : RSPragmaHandler(Name, Context) {}
+
+  void HandlePragma(clang::Preprocessor &PP,
+                    clang::PragmaIntroducerKind Introducer,
+                    clang::Token &Token) {
+    std::string Precision = getName();
+    // We are deprecating rs_fp_imprecise.
+    if (Precision == "rs_fp_imprecise") {
+      PP.Diag(Token, PP.getDiagnostics().getCustomDiagID(
+                         clang::DiagnosticsEngine::Warning,
+                         "rs_fp_imprecise is deprecated.  Assuming "
+                         "rs_fp_relaxed instead."));
+      Precision = "rs_fp_relaxed";
+    }
+    // Check if we have already encountered a precision pragma already.
+    std::string PreviousPrecision = mContext->getPrecision();
+    if (!PreviousPrecision.empty()) {
+      // If the previous specified a different value, it's an error.
+      if (PreviousPrecision != Precision) {
+        PP.Diag(Token, PP.getDiagnostics().getCustomDiagID(
+                           clang::DiagnosticsEngine::Error,
+                           "Multiple float precisions specified.  Encountered "
+                           "%0 previously."))
+            << PreviousPrecision;
+      }
+      // Otherwise we ignore redundant entries.
+      return;
+    }
+
+    mContext->addPragma(Precision, "");
+    mContext->setPrecision(Precision);
+  }
+};
+
 }  // namespace
-
-RSPragmaHandler *
-RSPragmaHandler::CreatePragmaExportTypeHandler(RSContext *Context) {
-  return new RSExportTypePragmaHandler("export_type", Context);
-}
-
-RSPragmaHandler *
-RSPragmaHandler::CreatePragmaJavaPackageNameHandler(RSContext *Context) {
-  return new RSJavaPackageNamePragmaHandler("java_package_name", Context);
-}
-
-RSPragmaHandler *
-RSPragmaHandler::CreatePragmaReflectLicenseHandler(RSContext *Context) {
-  return new RSReflectLicensePragmaHandler("set_reflect_license", Context);
-}
-
-RSPragmaHandler *
-RSPragmaHandler::CreatePragmaVersionHandler(RSContext *Context) {
-  return new RSVersionPragmaHandler("version", Context);
-}
 
 void RSPragmaHandler::handleItemListPragma(clang::Preprocessor &PP,
                                            clang::Token &FirstToken) {
@@ -216,7 +235,6 @@ void RSPragmaHandler::handleItemListPragma(clang::Preprocessor &PP,
     if (PragmaToken.isNot(clang::tok::comma))
       break;
   }
-  return;
 }
 
 void RSPragmaHandler::handleNonParamPragma(clang::Preprocessor &PP,
@@ -235,7 +253,6 @@ void RSPragmaHandler::handleNonParamPragma(clang::Preprocessor &PP,
                   "expected a ')'"));
       return;
     }
-  return;
 }
 
 void RSPragmaHandler::handleOptionalStringLiteralParamPragma(
@@ -253,7 +270,7 @@ void RSPragmaHandler::handleOptionalStringLiteralParamPragma(
   PP.LexUnexpandedToken(PragmaToken);
   if (PragmaToken.isNot(clang::tok::r_paren)) {
     // Eat the whole string literal
-    clang::StringLiteralParser StringLiteral(&PragmaToken, 1, PP);
+    clang::StringLiteralParser StringLiteral(PragmaToken, PP);
     if (StringLiteral.hadError) {
       // Diagnostics will be generated automatically
       return;
@@ -323,5 +340,28 @@ void RSPragmaHandler::handleIntegerParamPragma(
     PP.LexUnexpandedToken(PragmaToken);
   } while (PragmaToken.isNot(clang::tok::eod));
 }
+
+void AddPragmaHandlers(clang::Preprocessor &PP, RSContext *RsContext) {
+  // For #pragma rs export_type
+  PP.AddPragmaHandler("rs",
+                      new RSExportTypePragmaHandler("export_type", RsContext));
+
+  // For #pragma rs java_package_name
+  PP.AddPragmaHandler(
+      "rs", new RSJavaPackageNamePragmaHandler("java_package_name", RsContext));
+
+  // For #pragma rs set_reflect_license
+  PP.AddPragmaHandler(
+      "rs", new RSReflectLicensePragmaHandler("set_reflect_license", RsContext));
+
+  // For #pragma version
+  PP.AddPragmaHandler(new RSVersionPragmaHandler("version", RsContext));
+
+  // For #pragma rs_fp*
+  PP.AddPragmaHandler(new RSPrecisionPragmaHandler("rs_fp_full", RsContext));
+  PP.AddPragmaHandler(new RSPrecisionPragmaHandler("rs_fp_relaxed", RsContext));
+  PP.AddPragmaHandler(new RSPrecisionPragmaHandler("rs_fp_imprecise", RsContext));
+}
+
 
 }  // namespace slang

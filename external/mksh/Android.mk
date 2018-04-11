@@ -10,19 +10,17 @@ LOCAL_PATH:=		$(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE:=		mkshrc
-LOCAL_MODULE_TAGS:=	shell_mksh
 LOCAL_MODULE_CLASS:=	ETC
 LOCAL_MODULE_PATH:=	$(TARGET_OUT)/etc
 LOCAL_SRC_FILES:=	$(LOCAL_MODULE)
 include $(BUILD_PREBUILT)
 
 
-# /system/bin/mksh
+# /system/bin/sh
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE:=		mksh
-LOCAL_MODULE_TAGS:=	shell_mksh
+LOCAL_MODULE:=		sh
 
 # mksh source files
 LOCAL_SRC_FILES:=	src/lalloc.c src/edit.c src/eval.c src/exec.c \
@@ -37,6 +35,7 @@ LOCAL_C_INCLUDES:=	$(LOCAL_PATH)/src
 LOCAL_CFLAGS:=		-DMKSHRC_PATH=\"/system/etc/mkshrc\" \
 			-DMKSH_DEFAULT_EXECSHELL=\"/system/bin/sh\" \
 			-DMKSH_DEFAULT_TMPDIR=\"/data/local\" \
+		-Wno-deprecated-declarations \
 		-fno-asynchronous-unwind-tables -fwrapv \
 		-DDEBUG_LEAKS -DMKSH_ASSUME_UTF8 -DMKSH_CONSERVATIVE_FDS \
 		-DMKSH_DONT_EMIT_IDSTRING -DMKSH_NOPWNAM -DMKSH_BUILDSH \
@@ -62,9 +61,8 @@ LOCAL_CFLAGS:=		-DMKSHRC_PATH=\"/system/etc/mkshrc\" \
 		-DHAVE_SETGROUPS=1 -DHAVE_STRERROR=1 -DHAVE_STRSIGNAL=0 \
 		-DHAVE_STRLCPY=1 -DHAVE_FLOCK_DECL=1 -DHAVE_REVOKE_DECL=1 \
 		-DHAVE_SYS_ERRLIST_DECL=0 -DHAVE_SYS_SIGLIST_DECL=1 \
-		-DHAVE_PERSISTENT_HISTORY=0 -DHAVE_SILENT_IDIVWRAPV=0 \
-		-DMKSH_BUILD_R=431
+		-DHAVE_PERSISTENT_HISTORY=0 -DMKSH_BUILD_R=481
 
-# check categories: shell:legacy-no int:32 android convfds no-histfile
+# check_categories= shell:legacy-no int:32 android convfds no-histfile
 
 include $(BUILD_EXECUTABLE)

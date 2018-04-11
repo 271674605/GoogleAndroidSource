@@ -16,15 +16,16 @@
 #include "GrTBackendEffectFactory.h"
 #include "SkString.h"
 #include "SkStrokeRec.h"
-#include "SkTrace.h"
+#include "SkTraceEvent.h"
 
 #include "gl/GrGLEffect.h"
 #include "gl/GrGLSL.h"
+#include "gl/GrGLVertexEffect.h"
+
+#include "effects/GrVertexEffect.h"
 
 GrAAConvexPathRenderer::GrAAConvexPathRenderer() {
 }
-
-namespace {
 
 struct Segment {
     enum {
@@ -34,12 +35,12 @@ struct Segment {
     } fType;
 
     // line uses one pt, quad uses 2 pts
-    GrPoint fPts[2];
+    SkPoint fPts[2];
     // normal to edge ending at each pt
-    GrVec fNorms[2];
+    SkVector fNorms[2];
     // is the corner where the previous segment meets this segment
     // sharp. If so, fMid is a normalized bisector facing outward.
-    GrVec fMid;
+    SkVector fMid;
 
     int countPoints() {
         GR_STATIC_ASSERT(0 == kLine && 1 == kQuad);
@@ -57,7 +58,7 @@ struct Segment {
 
 typedef SkTArray<Segment, true> SegmentArray;
 
-void center_of_mass(const SegmentArray& segments, SkPoint* c) {
+static void center_of_mass(const SegmentArray& segments, SkPoint* c) {
     SkScalar area = 0;
     SkPoint center = {0, 0};
     int count = segments.count();
@@ -105,23 +106,23 @@ void center_of_mass(const SegmentArray& segments, SkPoint* c) {
         // undo the translate of p0 to the origin.
         *c = center + p0;
     }
-    GrAssert(!SkScalarIsNaN(c->fX) && !SkScalarIsNaN(c->fY));
+    SkASSERT(!SkScalarIsNaN(c->fX) && !SkScalarIsNaN(c->fY));
 }
 
-void compute_vectors(SegmentArray* segments,
-                     SkPoint* fanPt,
-                     SkPath::Direction dir,
-                     int* vCount,
-                     int* iCount) {
+static void compute_vectors(SegmentArray* segments,
+                            SkPoint* fanPt,
+                            SkPath::Direction dir,
+                            int* vCount,
+                            int* iCount) {
     center_of_mass(*segments, fanPt);
     int count = segments->count();
 
     // Make the normals point towards the outside
-    GrPoint::Side normSide;
+    SkPoint::Side normSide;
     if (dir == SkPath::kCCW_Direction) {
-        normSide = GrPoint::kRight_Side;
+        normSide = SkPoint::kRight_Side;
     } else {
-        normSide = GrPoint::kLeft_Side;
+        normSide = SkPoint::kLeft_Side;
     }
 
     *vCount = 0;
@@ -132,7 +133,7 @@ void compute_vectors(SegmentArray* segments,
         int b = (a + 1) % count;
         Segment& segb = (*segments)[b];
 
-        const GrPoint* prevPt = &sega.endPt();
+        const SkPoint* prevPt = &sega.endPt();
         int n = segb.countPoints();
         for (int p = 0; p < n; ++p) {
             segb.fNorms[p] = segb.fPts[p] - *prevPt;
@@ -172,22 +173,22 @@ struct DegenerateTestData {
         kLine,
         kNonDegenerate
     }           fStage;
-    GrPoint     fFirstPoint;
-    GrVec       fLineNormal;
+    SkPoint     fFirstPoint;
+    SkVector    fLineNormal;
     SkScalar    fLineC;
 };
 
-void update_degenerate_test(DegenerateTestData* data, const GrPoint& pt) {
-    static const SkScalar TOL = (SK_Scalar1 / 16);
-    static const SkScalar TOL_SQD = SkScalarMul(TOL, TOL);
+static const SkScalar kClose = (SK_Scalar1 / 16);
+static const SkScalar kCloseSqd = SkScalarMul(kClose, kClose);
 
+static void update_degenerate_test(DegenerateTestData* data, const SkPoint& pt) {
     switch (data->fStage) {
         case DegenerateTestData::kInitial:
             data->fFirstPoint = pt;
             data->fStage = DegenerateTestData::kPoint;
             break;
         case DegenerateTestData::kPoint:
-            if (pt.distanceToSqd(data->fFirstPoint) > TOL_SQD) {
+            if (pt.distanceToSqd(data->fFirstPoint) > kCloseSqd) {
                 data->fLineNormal = pt - data->fFirstPoint;
                 data->fLineNormal.normalize();
                 data->fLineNormal.setOrthog(data->fLineNormal);
@@ -196,22 +197,22 @@ void update_degenerate_test(DegenerateTestData* data, const GrPoint& pt) {
             }
             break;
         case DegenerateTestData::kLine:
-            if (SkScalarAbs(data->fLineNormal.dot(pt) + data->fLineC) > TOL) {
+            if (SkScalarAbs(data->fLineNormal.dot(pt) + data->fLineC) > kClose) {
                 data->fStage = DegenerateTestData::kNonDegenerate;
             }
         case DegenerateTestData::kNonDegenerate:
             break;
         default:
-            GrCrash("Unexpected degenerate test stage.");
+            SkFAIL("Unexpected degenerate test stage.");
     }
 }
 
-inline bool get_direction(const SkPath& path, const SkMatrix& m, SkPath::Direction* dir) {
+static inline bool get_direction(const SkPath& path, const SkMatrix& m, SkPath::Direction* dir) {
     if (!path.cheapComputeDirection(dir)) {
         return false;
     }
     // check whether m reverses the orientation
-    GrAssert(!m.hasPerspective());
+    SkASSERT(!m.hasPerspective());
     SkScalar det2x2 = SkScalarMul(m.get(SkMatrix::kMScaleX), m.get(SkMatrix::kMScaleY)) -
                       SkScalarMul(m.get(SkMatrix::kMSkewX), m.get(SkMatrix::kMSkewY));
     if (det2x2 < 0) {
@@ -220,12 +221,57 @@ inline bool get_direction(const SkPath& path, const SkMatrix& m, SkPath::Directi
     return true;
 }
 
-bool get_segments(const SkPath& path,
-                  const SkMatrix& m,
-                  SegmentArray* segments,
-                  SkPoint* fanPt,
-                  int* vCount,
-                  int* iCount) {
+static inline void add_line_to_segment(const SkPoint& pt,
+                                       SegmentArray* segments,
+                                       SkRect* devBounds) {
+    segments->push_back();
+    segments->back().fType = Segment::kLine;
+    segments->back().fPts[0] = pt;
+    devBounds->growToInclude(pt.fX, pt.fY);
+}
+
+#ifdef SK_DEBUG
+static inline bool contains_inclusive(const SkRect& rect, const SkPoint& p) {
+    return p.fX >= rect.fLeft && p.fX <= rect.fRight && p.fY >= rect.fTop && p.fY <= rect.fBottom;
+}
+#endif
+
+static inline void add_quad_segment(const SkPoint pts[3],
+                                    SegmentArray* segments,
+                                    SkRect* devBounds) {
+    if (pts[0].distanceToSqd(pts[1]) < kCloseSqd || pts[1].distanceToSqd(pts[2]) < kCloseSqd) {
+        if (pts[0] != pts[2]) {
+            add_line_to_segment(pts[2], segments, devBounds);
+        }
+    } else {
+        segments->push_back();
+        segments->back().fType = Segment::kQuad;
+        segments->back().fPts[0] = pts[1];
+        segments->back().fPts[1] = pts[2];
+        SkASSERT(contains_inclusive(*devBounds, pts[0]));
+        devBounds->growToInclude(pts + 1, 2);
+    }
+}
+
+static inline void add_cubic_segments(const SkPoint pts[4],
+                                      SkPath::Direction dir,
+                                      SegmentArray* segments,
+                                      SkRect* devBounds) {
+    SkSTArray<15, SkPoint, true> quads;
+    GrPathUtils::convertCubicToQuads(pts, SK_Scalar1, true, dir, &quads);
+    int count = quads.count();
+    for (int q = 0; q < count; q += 3) {
+        add_quad_segment(&quads[q], segments, devBounds);
+    }
+}
+
+static bool get_segments(const SkPath& path,
+                         const SkMatrix& m,
+                         SegmentArray* segments,
+                         SkPoint* fanPt,
+                         int* vCount,
+                         int* iCount,
+                         SkRect* devBounds) {
     SkPath::Iter iter(path, true);
     // This renderer over-emphasizes very thin path regions. We use the distance
     // to the path from the sample to compute coverage. Every pixel intersected
@@ -242,46 +288,32 @@ bool get_segments(const SkPath& path,
     }
 
     for (;;) {
-        GrPoint pts[4];
+        SkPoint pts[4];
         SkPath::Verb verb = iter.next(pts);
         switch (verb) {
             case SkPath::kMove_Verb:
                 m.mapPoints(pts, 1);
                 update_degenerate_test(&degenerateData, pts[0]);
+                devBounds->set(pts->fX, pts->fY, pts->fX, pts->fY);
                 break;
             case SkPath::kLine_Verb: {
-                m.mapPoints(pts + 1, 1);
+                m.mapPoints(&pts[1], 1);
                 update_degenerate_test(&degenerateData, pts[1]);
-                segments->push_back();
-                segments->back().fType = Segment::kLine;
-                segments->back().fPts[0] = pts[1];
+                add_line_to_segment(pts[1], segments, devBounds);
                 break;
             }
             case SkPath::kQuad_Verb:
-                m.mapPoints(pts + 1, 2);
+                m.mapPoints(pts, 3);
                 update_degenerate_test(&degenerateData, pts[1]);
                 update_degenerate_test(&degenerateData, pts[2]);
-                segments->push_back();
-                segments->back().fType = Segment::kQuad;
-                segments->back().fPts[0] = pts[1];
-                segments->back().fPts[1] = pts[2];
+                add_quad_segment(pts, segments, devBounds);
                 break;
             case SkPath::kCubic_Verb: {
                 m.mapPoints(pts, 4);
                 update_degenerate_test(&degenerateData, pts[1]);
                 update_degenerate_test(&degenerateData, pts[2]);
                 update_degenerate_test(&degenerateData, pts[3]);
-                // unlike quads and lines, the pts[0] will also be read (in
-                // convertCubicToQuads).
-                SkSTArray<15, SkPoint, true> quads;
-                GrPathUtils::convertCubicToQuads(pts, SK_Scalar1, true, dir, &quads);
-                int count = quads.count();
-                for (int q = 0; q < count; q += 3) {
-                    segments->push_back();
-                    segments->back().fType = Segment::kQuad;
-                    segments->back().fPts[0] = quads[q + 1];
-                    segments->back().fPts[1] = quads[q + 2];
-                }
+                add_cubic_segments(pts, dir, segments, devBounds);
                 break;
             };
             case SkPath::kDone_Verb:
@@ -298,8 +330,8 @@ bool get_segments(const SkPath& path,
 }
 
 struct QuadVertex {
-    GrPoint  fPos;
-    GrPoint  fUV;
+    SkPoint  fPos;
+    SkPoint  fUV;
     SkScalar fD0;
     SkScalar fD1;
 };
@@ -312,11 +344,11 @@ struct Draw {
 
 typedef SkTArray<Draw, true> DrawArray;
 
-void create_vertices(const SegmentArray&  segments,
-                     const SkPoint& fanPt,
-                     DrawArray*     draws,
-                     QuadVertex*    verts,
-                     uint16_t*      idxs) {
+static void create_vertices(const SegmentArray&  segments,
+                            const SkPoint& fanPt,
+                            DrawArray*     draws,
+                            QuadVertex*    verts,
+                            uint16_t*      idxs) {
     Draw* draw = &draws->push_back();
     // alias just to make vert/index assignments easier to read.
     int* v = &draw->fVertexCnt;
@@ -407,9 +439,9 @@ void create_vertices(const SegmentArray&  segments,
             *v += 5;
             *i += 9;
         } else {
-            GrPoint qpts[] = {sega.endPt(), segb.fPts[0], segb.fPts[1]};
+            SkPoint qpts[] = {sega.endPt(), segb.fPts[0], segb.fPts[1]};
 
-            GrVec midVec = segb.fNorms[0] + segb.fNorms[1];
+            SkVector midVec = segb.fNorms[0] + segb.fNorms[1];
             midVec.normalize();
 
             verts[*v + 0].fPos = fanPt;
@@ -436,7 +468,7 @@ void create_vertices(const SegmentArray&  segments,
             verts[*v + 5].fD1 = -SK_ScalarMax/100;
 
             GrPathUtils::QuadUVMatrix toUV(qpts);
-            toUV.apply<6, sizeof(QuadVertex), sizeof(GrPoint)>(verts + *v);
+            toUV.apply<6, sizeof(QuadVertex), sizeof(SkPoint)>(verts + *v);
 
             idxs[*i + 0] = *v + 3;
             idxs[*i + 1] = *v + 1;
@@ -459,8 +491,6 @@ void create_vertices(const SegmentArray&  segments,
     }
 }
 
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -473,7 +503,7 @@ void create_vertices(const SegmentArray&  segments,
  * Requires shader derivative instruction support.
  */
 
-class QuadEdgeEffect : public GrEffect {
+class QuadEdgeEffect : public GrVertexEffect {
 public:
 
     static GrEffectRef* Create() {
@@ -495,16 +525,17 @@ public:
         return GrTBackendEffectFactory<QuadEdgeEffect>::getInstance();
     }
 
-    class GLEffect : public GrGLEffect {
+    class GLEffect : public GrGLVertexEffect {
     public:
         GLEffect(const GrBackendEffectFactory& factory, const GrDrawEffect&)
             : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLShaderBuilder* builder,
+        virtual void emitCode(GrGLFullShaderBuilder* builder,
                               const GrDrawEffect& drawEffect,
                               EffectKey key,
                               const char* outputColor,
                               const char* inputColor,
+                              const TransformedCoordsArray&,
                               const TextureSamplerArray& samplers) SK_OVERRIDE {
             const char *vsName, *fsName;
             const SkString* attrName =
@@ -531,9 +562,9 @@ public:
             builder->fsCodeAppendf("\t\t\tedgeAlpha = "
                                    "clamp(0.5 - edgeAlpha / length(gF), 0.0, 1.0);\n\t\t}\n");
 
-            SkString modulate;
-            GrGLSLModulatef<4>(&modulate, inputColor, "edgeAlpha");
-            builder->fsCodeAppendf("\t%s = %s;\n", outputColor, modulate.c_str());
+
+            builder->fsCodeAppendf("\t%s = %s;\n", outputColor,
+                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("edgeAlpha")).c_str());
 
             builder->vsCodeAppendf("\t%s = %s;\n", vsName, attrName->c_str());
         }
@@ -545,7 +576,7 @@ public:
         virtual void setData(const GrGLUniformManager&, const GrDrawEffect&) SK_OVERRIDE {}
 
     private:
-        typedef GrGLEffect INHERITED;
+        typedef GrGLVertexEffect INHERITED;
     };
 
 private:
@@ -559,12 +590,12 @@ private:
 
     GR_DECLARE_EFFECT_TEST;
 
-    typedef GrEffect INHERITED;
+    typedef GrVertexEffect INHERITED;
 };
 
 GR_DEFINE_EFFECT_TEST(QuadEdgeEffect);
 
-GrEffectRef* QuadEdgeEffect::TestCreate(SkMWCRandom* random,
+GrEffectRef* QuadEdgeEffect::TestCreate(SkRandom* random,
                                         GrContext*,
                                         const GrDrawTargetCaps& caps,
                                         GrTexture*[]) {
@@ -587,7 +618,7 @@ namespace {
 // position + edge
 extern const GrVertexAttrib gPathAttribs[] = {
     {kVec2f_GrVertexAttribType, 0,               kPosition_GrVertexAttribBinding},
-    {kVec4f_GrVertexAttribType, sizeof(GrPoint), kEffect_GrVertexAttribBinding}
+    {kVec4f_GrVertexAttribType, sizeof(SkPoint), kEffect_GrVertexAttribBinding}
 };
 
 };
@@ -631,9 +662,15 @@ bool GrAAConvexPathRenderer::onDrawPath(const SkPath& origPath,
     SkSTArray<kPreallocSegmentCnt, Segment, true> segments;
     SkPoint fanPt;
 
-    if (!get_segments(*path, viewMatrix, &segments, &fanPt, &vCount, &iCount)) {
+    // We can't simply use the path bounds because we may degenerate cubics to quads which produces
+    // new control points outside the original convex hull.
+    SkRect devBounds;
+    if (!get_segments(*path, viewMatrix, &segments, &fanPt, &vCount, &iCount, &devBounds)) {
         return false;
     }
+
+    // Our computed verts should all be within one pixel of the segment control points.
+    devBounds.outset(SK_Scalar1, SK_Scalar1);
 
     drawState->setVertexAttribs<gPathAttribs>(SK_ARRAY_COUNT(gPathAttribs));
 
@@ -645,21 +682,15 @@ bool GrAAConvexPathRenderer::onDrawPath(const SkPath& origPath,
     if (!arg.succeeded()) {
         return false;
     }
-    GrAssert(sizeof(QuadVertex) == drawState->getVertexSize());
+    SkASSERT(sizeof(QuadVertex) == drawState->getVertexSize());
     verts = reinterpret_cast<QuadVertex*>(arg.vertices());
     idxs = reinterpret_cast<uint16_t*>(arg.indices());
 
     SkSTArray<kPreallocDrawCnt, Draw, true> draws;
     create_vertices(segments, fanPt, &draws, verts, idxs);
 
-    // This is valid because all the computed verts are within 1 pixel of the path control points.
-    SkRect devBounds;
-    devBounds = path->getBounds();
-    viewMatrix.mapRect(&devBounds);
-    devBounds.outset(SK_Scalar1, SK_Scalar1);
-
     // Check devBounds
-#if GR_DEBUG
+#ifdef SK_DEBUG
     SkRect tolDevBounds = devBounds;
     tolDevBounds.outset(SK_Scalar1 / 10000, SK_Scalar1 / 10000);
     SkRect actualBounds;
@@ -667,7 +698,7 @@ bool GrAAConvexPathRenderer::onDrawPath(const SkPath& origPath,
     for (int i = 2; i < vCount; ++i) {
         actualBounds.growToInclude(verts[i].fPos.fX, verts[i].fPos.fY);
     }
-    GrAssert(tolDevBounds.contains(actualBounds));
+    SkASSERT(tolDevBounds.contains(actualBounds));
 #endif
 
     int vOffset = 0;

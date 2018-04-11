@@ -1,10 +1,11 @@
 <h2 id="manifest">Manifest</h2>
 
 <p>You must declare the "management" permission
-in the <a href="manifest.html">extension manifest</a>
+in the <a href="manifest">extension manifest</a>
 to use the management API.
 For example:</p>
-<pre>{
+<pre data-filename="manifest.json">
+{
   "name": "My extension",
   ...
   <b>"permissions": [
@@ -14,6 +15,6 @@ For example:</p>
 }</pre>
 
 <p>
-$ref:management.getPermissionWarningsByManifest and
-$ref:management.uninstallSelf do not require the management permission
+$(ref:management.getPermissionWarningsByManifest) and
+$(ref:management.uninstallSelf) do not require the management permission
 </p>

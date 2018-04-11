@@ -7,8 +7,8 @@ libsqlite3_android_local_src_files := \
 
 libsqlite3_android_c_includes := \
         external/sqlite/dist \
-        external/icu4c/i18n \
-        external/icu4c/common
+        external/icu/icu4c/source/i18n \
+        external/icu/icu4c/source/common
 
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES:= $(libsqlite3_android_local_src_files)
@@ -17,14 +17,12 @@ LOCAL_STATIC_LIBRARIES := liblog
 LOCAL_MODULE:= libsqlite3_android
 include $(BUILD_STATIC_LIBRARY)
 
-ifeq ($(WITH_HOST_DALVIK),true)
-    include $(CLEAR_VARS)
-    LOCAL_SRC_FILES:= $(libsqlite3_android_local_src_files)
-    LOCAL_C_INCLUDES := $(libsqlite3_android_c_includes)
-    LOCAL_STATIC_LIBRARIES := liblog
-    LOCAL_MODULE:= libsqlite3_android
-    include $(BUILD_HOST_STATIC_LIBRARY)
-endif
+include $(CLEAR_VARS)
+LOCAL_SRC_FILES:= $(libsqlite3_android_local_src_files)
+LOCAL_C_INCLUDES := $(libsqlite3_android_c_includes)
+LOCAL_STATIC_LIBRARIES := liblog
+LOCAL_MODULE:= libsqlite3_android
+include $(BUILD_HOST_STATIC_LIBRARY)
 
 # Test for PhoneNumberUtils
 #

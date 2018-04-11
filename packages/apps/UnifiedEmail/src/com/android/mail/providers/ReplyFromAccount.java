@@ -71,7 +71,7 @@ public class ReplyFromAccount implements Serializable {
             json.put(IS_DEFAULT, isDefault);
             json.put(IS_CUSTOM_FROM, isCustomFrom);
         } catch (JSONException e) {
-            LogUtils.wtf(LOG_TAG, e, "Could not serialize account with name " + name);
+            LogUtils.wtf(LOG_TAG, e, "Could not serialize account with address " + address);
         }
         return json;
     }
@@ -81,7 +81,7 @@ public class ReplyFromAccount implements Serializable {
         try {
             Uri uri = Utils.getValidUri(json.getString(BASE_ACCOUNT_URI));
             String addressString = json.getString(ADDRESS_STRING);
-            String nameString = json.getString(NAME_STRING);
+            String nameString = json.optString(NAME_STRING, null);
             String replyTo = json.getString(REPLY_TO);
             boolean isDefault = json.getBoolean(IS_DEFAULT);
             boolean isCustomFrom = json.getBoolean(IS_CUSTOM_FROM);
@@ -109,15 +109,19 @@ public class ReplyFromAccount implements Serializable {
      */
     public static boolean matchesAccountOrCustomFrom(Account account, String possibleCustomFrom,
             List<ReplyFromAccount> replyFromAccounts) {
+        if (TextUtils.isEmpty(possibleCustomFrom)) {
+            return false;
+        }
         Rfc822Token[] tokens = Rfc822Tokenizer.tokenize(possibleCustomFrom);
         if (tokens != null && tokens.length > 0) {
-            String parsedFromAddress = tokens[0].getAddress();
-            if (TextUtils.equals(account.getEmailAddress(), parsedFromAddress)) {
+            String parsedFromAddress = Utils.normalizeEmailAddress(tokens[0].getAddress());
+            if (TextUtils.equals(Utils.normalizeEmailAddress(account.getEmailAddress()),
+                    parsedFromAddress)) {
                 return true;
             }
             for (ReplyFromAccount replyFromAccount : replyFromAccounts) {
-                if (TextUtils.equals(replyFromAccount.address, parsedFromAddress)
-                        && replyFromAccount.isCustomFrom) {
+                if (TextUtils.equals(Utils.normalizeEmailAddress(replyFromAccount.address),
+                        parsedFromAddress) && replyFromAccount.isCustomFrom) {
                     return true;
                 }
             }

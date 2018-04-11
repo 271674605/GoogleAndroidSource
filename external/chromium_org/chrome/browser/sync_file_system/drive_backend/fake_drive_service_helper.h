@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "chrome/browser/drive/drive_uploader.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
 
 namespace base {
 class FilePath;
@@ -22,7 +22,8 @@ namespace drive_backend {
 class FakeDriveServiceHelper {
  public:
   FakeDriveServiceHelper(drive::FakeDriveService* fake_drive_service,
-                         drive::DriveUploaderInterface* drive_uploader);
+                         drive::DriveUploaderInterface* drive_uploader,
+                         const std::string& sync_root_folder_title);
   virtual ~FakeDriveServiceHelper();
 
   google_apis::GDataErrorCode AddOrphanedFolder(
@@ -40,7 +41,21 @@ class FakeDriveServiceHelper {
   google_apis::GDataErrorCode UpdateFile(
       const std::string& file_id,
       const std::string& content);
-  google_apis::GDataErrorCode RemoveResource(
+  google_apis::GDataErrorCode DeleteResource(
+      const std::string& file_id);
+  google_apis::GDataErrorCode TrashResource(
+      const std::string& file_id);
+  google_apis::GDataErrorCode UpdateModificationTime(
+      const std::string& file_id,
+      const base::Time& modification_time);
+  google_apis::GDataErrorCode RenameResource(
+      const std::string& file_id,
+      const std::string& new_title);
+  google_apis::GDataErrorCode AddResourceToDirectory(
+      const std::string& parent_folder_id,
+      const std::string& file_id);
+  google_apis::GDataErrorCode RemoveResourceFromDirectory(
+      const std::string& parent_folder_id,
       const std::string& file_id);
   google_apis::GDataErrorCode GetSyncRootFolderID(
       std::string* sync_root_folder_id);
@@ -51,24 +66,25 @@ class FakeDriveServiceHelper {
       const std::string& folder_id,
       const std::string& title,
       ScopedVector<google_apis::ResourceEntry>* entries);
-  google_apis::GDataErrorCode GetResourceEntry(
+  google_apis::GDataErrorCode GetFileResource(
       const std::string& file_id,
-      scoped_ptr<google_apis::ResourceEntry>* entry);
+      scoped_ptr<google_apis::FileResource>* entry);
   google_apis::GDataErrorCode ReadFile(
       const std::string& file_id,
       std::string* file_content);
+  google_apis::GDataErrorCode GetAboutResource(
+      scoped_ptr<google_apis::AboutResource>* about_resource);
 
   base::FilePath base_dir_path() { return base_dir_.path(); }
 
  private:
   google_apis::GDataErrorCode CompleteListing(
-      scoped_ptr<google_apis::ResourceList> list,
-      ScopedVector<google_apis::ResourceEntry> * entries);
+      scoped_ptr<google_apis::FileList> list,
+      ScopedVector<google_apis::ResourceEntry>* entries);
 
   void Initialize();
 
   base::FilePath WriteToTempFile(const std::string& content);
-  void FlushMessageLoop();
 
   base::ScopedTempDir base_dir_;
   base::FilePath temp_dir_;
@@ -76,6 +92,8 @@ class FakeDriveServiceHelper {
   // Not own.
   drive::FakeDriveService* fake_drive_service_;
   drive::DriveUploaderInterface* drive_uploader_;
+
+  std::string sync_root_folder_title_;
 };
 
 }  // namespace drive_backend

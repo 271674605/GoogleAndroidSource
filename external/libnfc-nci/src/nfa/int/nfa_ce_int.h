@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2011-2013 Broadcom Corporation
+ *  Copyright (C) 2011-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -179,6 +179,7 @@ typedef struct
     /* listen_info table (table of listen paramters and app callbacks) */
     tNFA_CE_LISTEN_INFO listen_info[NFA_CE_LISTEN_INFO_MAX];/* listen info table                            */
     UINT8               idx_cur_active;                     /* listen_info index for currently activated CE */
+    UINT8               idx_wild_card;                      /* listen_info index for T4T wild card CE */
 
     tNFA_DM_DISC_TECH_PROTO_MASK isodep_disc_mask;          /* the technology/protocol mask for ISO-DEP */
 
@@ -210,6 +211,6 @@ tNFA_STATUS nfa_ce_start_listening (void);
 void nfa_ce_remove_listen_info_entry (UINT8 listen_info_idx, BOOLEAN notify_app);
 void nfa_ce_sys_disable (void);
 void nfa_ce_free_scratch_buf (void);
-
+BOOLEAN nfa_ce_restart_listen_check (void);
 #endif /* NFA_DM_INT_H */
 

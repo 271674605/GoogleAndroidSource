@@ -11,9 +11,11 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "url/url_canon.h"
+#include "url/url_export.h"
 
-namespace url_canon {
+namespace url {
 
 // Write into a std::string given in the constructor. This object does not own
 // the string itself, and the user must ensure that the string stays alive
@@ -31,31 +33,15 @@ namespace url_canon {
 //
 // Therefore, the user should call Complete() before using the string that
 // this class wrote into.
-class StdStringCanonOutput : public CanonOutput {
+class URL_EXPORT StdStringCanonOutput : public CanonOutput {
  public:
-  StdStringCanonOutput(std::string* str)
-      : CanonOutput(),
-        str_(str) {
-    cur_len_ = static_cast<int>(str_->size());  // Append to existing data.
-    str_->resize(str_->capacity());
-    buffer_ = str_->empty() ? NULL : &(*str_)[0];
-    buffer_len_ = static_cast<int>(str_->size());
-  }
-  virtual ~StdStringCanonOutput() {
-    // Nothing to do, we don't own the string.
-  }
+  StdStringCanonOutput(std::string* str);
+  virtual ~StdStringCanonOutput();
 
   // Must be called after writing has completed but before the string is used.
-  void Complete() {
-    str_->resize(cur_len_);
-    buffer_len_ = cur_len_;
-  }
+  void Complete();
 
-  virtual void Resize(int sz) {
-    str_->resize(sz);
-    buffer_ = str_->empty() ? NULL : &(*str_)[0];
-    buffer_len_ = sz;
-  }
+  virtual void Resize(int sz) OVERRIDE;
 
  protected:
   std::string* str_;
@@ -67,43 +53,34 @@ class StdStringCanonOutput : public CanonOutput {
 // The strings passed as arguments are not copied and must remain valid until
 // this class goes out of scope.
 template<typename STR>
-class StdStringReplacements :
-    public url_canon::Replacements<typename STR::value_type> {
+class StdStringReplacements : public Replacements<typename STR::value_type> {
  public:
   void SetSchemeStr(const STR& s) {
-    this->SetScheme(s.data(),
-                    url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetScheme(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetUsernameStr(const STR& s) {
-    this->SetUsername(s.data(),
-                      url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetUsername(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetPasswordStr(const STR& s) {
-    this->SetPassword(s.data(),
-                      url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetPassword(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetHostStr(const STR& s) {
-    this->SetHost(s.data(),
-                  url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetHost(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetPortStr(const STR& s) {
-    this->SetPort(s.data(),
-                  url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetPort(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetPathStr(const STR& s) {
-    this->SetPath(s.data(),
-                  url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetPath(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetQueryStr(const STR& s) {
-    this->SetQuery(s.data(),
-                   url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetQuery(s.data(), Component(0, static_cast<int>(s.length())));
   }
   void SetRefStr(const STR& s) {
-    this->SetRef(s.data(),
-                 url_parse::Component(0, static_cast<int>(s.length())));
+    this->SetRef(s.data(), Component(0, static_cast<int>(s.length())));
   }
 };
 
-}  // namespace url_canon
+}  // namespace url
 
 #endif  // URL_URL_CANON_STDSTRING_H_

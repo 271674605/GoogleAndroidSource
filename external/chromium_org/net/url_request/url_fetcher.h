@@ -10,15 +10,18 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/supports_user_data.h"
-#include "base/task_runner.h"
 #include "net/base/net_export.h"
+#include "net/url_request/url_request.h"
 
 class GURL;
 
 namespace base {
 class FilePath;
 class MessageLoopProxy;
+class SequencedTaskRunner;
+class TaskRunner;
 class TimeDelta;
 }
 
@@ -27,14 +30,16 @@ class HostPortPair;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class URLFetcherDelegate;
+class URLFetcherResponseWriter;
 class URLRequestContextGetter;
 class URLRequestStatus;
 typedef std::vector<std::string> ResponseCookies;
 
 // To use this class, create an instance with the desired URL and a pointer to
 // the object to be notified when the URL has been loaded:
-//   URLFetcher* fetcher = URLFetcher::Create("http://www.google.com",
-//                                            URLFetcher::GET, this);
+//   scoped_ptr<URLFetcher> fetcher(URLFetcher::Create("http://www.google.com",
+//                                                     URLFetcher::GET,
+//                                                     this));
 //
 // You must also set a request context getter:
 //
@@ -47,6 +52,8 @@ typedef std::vector<std::string> ResponseCookies;
 // Finally, start the request:
 //   fetcher->Start();
 //
+// You may cancel the request by destroying the URLFetcher:
+//   fetcher.reset();
 //
 // The object you supply as a delegate must inherit from
 // URLFetcherDelegate; when the fetch is completed,
@@ -90,6 +97,7 @@ class NET_EXPORT URLFetcher {
   // |url| is the URL to send the request to.
   // |request_type| is the type of request to make.
   // |d| the object that will receive the callback on fetch completion.
+  // Caller is responsible for destroying the returned URLFetcher.
   static URLFetcher* Create(const GURL& url,
                             URLFetcher::RequestType request_type,
                             URLFetcherDelegate* d);
@@ -97,6 +105,7 @@ class NET_EXPORT URLFetcher {
   // Like above, but if there's a URLFetcherFactory registered with the
   // implementation it will be used. |id| may be used during testing to identify
   // who is creating the URLFetcher.
+  // Caller is responsible for destroying the returned URLFetcher.
   static URLFetcher* Create(int id,
                             const GURL& url,
                             URLFetcher::RequestType request_type,
@@ -167,6 +176,11 @@ class NET_EXPORT URLFetcher {
   // started.
   virtual void SetReferrer(const std::string& referrer) = 0;
 
+  // The referrer policy to apply when updating the referrer during redirects.
+  // The referrer policy may only be changed before Start() is called.
+  virtual void SetReferrerPolicy(
+      URLRequest::ReferrerPolicy referrer_policy) = 0;
+
   // Set extra headers on the request.  Must be called before the request
   // is started.
   // This replaces the entire extra request headers.
@@ -177,9 +191,6 @@ class NET_EXPORT URLFetcher {
   // headers.  Must be called before the request is started.
   // This appends the header to the current extra request headers.
   virtual void AddExtraRequestHeader(const std::string& header_line) = 0;
-
-  virtual void GetExtraRequestHeaders(
-      HttpRequestHeaders* headers) const = 0;
 
   // Set the URLRequestContext on the request.  Must be called before the
   // request is started.
@@ -229,7 +240,7 @@ class NET_EXPORT URLFetcher {
   // take ownership by calling GetResponseAsFilePath().
   virtual void SaveResponseToFileAtPath(
       const base::FilePath& file_path,
-      scoped_refptr<base::TaskRunner> file_task_runner) = 0;
+      scoped_refptr<base::SequencedTaskRunner> file_task_runner) = 0;
 
   // By default, the response is saved in a string. Call this method to save the
   // response to a temporary file instead. Must be called before Start().
@@ -237,7 +248,12 @@ class NET_EXPORT URLFetcher {
   // The created file is removed when the URLFetcher is deleted unless you
   // take ownership by calling GetResponseAsFilePath().
   virtual void SaveResponseToTemporaryFile(
-      scoped_refptr<base::TaskRunner> file_task_runner) = 0;
+      scoped_refptr<base::SequencedTaskRunner> file_task_runner) = 0;
+
+  // By default, the response is saved in a string. Call this method to use the
+  // specified writer to save the response. Must be called before Start().
+  virtual void SaveResponseWithWriter(
+      scoped_ptr<URLFetcherResponseWriter> response_writer) = 0;
 
   // Retrieve the response headers from the request.  Must only be called after
   // the OnURLFetchComplete callback has run.
@@ -270,13 +286,8 @@ class NET_EXPORT URLFetcher {
   // if an error prevented any response from being received.
   virtual int GetResponseCode() const = 0;
 
-  // Cookies recieved.
+  // Cookies received.
   virtual const ResponseCookies& GetCookies() const = 0;
-
-  // Return true if any file system operation failed.  If so, set |error_code|
-  // to the net error code. File system errors are only possible if user called
-  // SaveResponseToTemporaryFile().
-  virtual bool FileErrorOccurred(int* out_error_code) const = 0;
 
   // Reports that the received content was malformed.
   virtual void ReceivedContentWasMalformed() = 0;

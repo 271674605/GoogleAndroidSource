@@ -42,12 +42,8 @@ import java.util.List;
 /**
  * Tests for {@link com.android.contacts.common.interactions.PhoneNumberInteraction}.
  *
- * Running all tests:
- *
- *   runtest contacts
- * or
  *   adb shell am instrument \
- *     -w com.android.contacts.tests/android.test.InstrumentationTestRunner
+ *     -w com.android.dialer.tests/android.test.InstrumentationTestRunner
  */
 @SmallTest
 public class PhoneNumberInteractionTest extends InstrumentationTestCase {
@@ -91,7 +87,7 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
         Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI, 13);
         expectQuery(contactUri)
                 .returnRow(1, "123", 0, null, null, Phone.TYPE_HOME, null,
-                        Phone.CONTENT_ITEM_TYPE);
+                        Phone.CONTENT_ITEM_TYPE, 13);
 
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_SMS, null);
@@ -110,7 +106,7 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
         Uri dataUri = ContentUris.withAppendedId(Data.CONTENT_URI, 1);
         expectQuery(dataUri, true /* isDataUri */ )
                 .returnRow(1, "987", 0, null, null, Phone.TYPE_HOME, null,
-                        Phone.CONTENT_ITEM_TYPE);
+                        Phone.CONTENT_ITEM_TYPE, 1);
 
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_SMS, null);
@@ -128,10 +124,10 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
     public void testSendSmsWhenThereIsPrimaryNumber() {
         Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI, 13);
         expectQuery(contactUri)
-                .returnRow(
-                        1, "123", 0, null, null, Phone.TYPE_HOME, null, Phone.CONTENT_ITEM_TYPE)
-                .returnRow(
-                        2, "456", 1, null, null, Phone.TYPE_HOME, null, Phone.CONTENT_ITEM_TYPE);
+                .returnRow(1, "123", 0, null, null, Phone.TYPE_HOME, null,
+                        Phone.CONTENT_ITEM_TYPE, 13)
+                .returnRow(2, "456", 1, null, null, Phone.TYPE_HOME, null,
+                        Phone.CONTENT_ITEM_TYPE, 13);
 
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_SMS, null);
@@ -153,26 +149,26 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
         phoneItem1.phoneNumber = "123";
         phoneItem2.phoneNumber = "123";
 
-        assertTrue(phoneItem1.shouldCollapseWith(phoneItem2));
+        assertTrue(phoneItem1.shouldCollapseWith(phoneItem2, mContext));
 
         phoneItem1.phoneNumber = "123";
         phoneItem2.phoneNumber = "456";
 
-        assertFalse(phoneItem1.shouldCollapseWith(phoneItem2));
+        assertFalse(phoneItem1.shouldCollapseWith(phoneItem2, mContext));
 
         phoneItem1.phoneNumber = "123#,123";
         phoneItem2.phoneNumber = "123#,456";
 
-        assertFalse(phoneItem1.shouldCollapseWith(phoneItem2));
+        assertFalse(phoneItem1.shouldCollapseWith(phoneItem2, mContext));
     }
 
     public void testCallNumberWhenThereAreDuplicates() {
         Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI, 13);
         expectQuery(contactUri)
                 .returnRow(1, "123", 0, null, null, Phone.TYPE_HOME, null,
-                        Phone.CONTENT_ITEM_TYPE)
+                        Phone.CONTENT_ITEM_TYPE, 13)
                 .returnRow(2, "123", 0, null, null, Phone.TYPE_WORK, null,
-                        Phone.CONTENT_ITEM_TYPE);
+                        Phone.CONTENT_ITEM_TYPE, 13);
 
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_CALL, null);
@@ -191,7 +187,7 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
         Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI, 13);
         expectQuery(contactUri)
                 .returnRow(1, "example@example.com", 0, null, null, Phone.TYPE_HOME, null,
-                        SipAddress.CONTENT_ITEM_TYPE);
+                        SipAddress.CONTENT_ITEM_TYPE, 13);
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_CALL, null);
 
@@ -209,9 +205,9 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
         Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI, 13);
         expectQuery(contactUri)
                 .returnRow(1, "123", 0, "account", null, Phone.TYPE_HOME, "label",
-                        Phone.CONTENT_ITEM_TYPE)
+                        Phone.CONTENT_ITEM_TYPE, 13)
                 .returnRow(2, "456", 0, null, null, Phone.TYPE_WORK, null,
-                        Phone.CONTENT_ITEM_TYPE);
+                        Phone.CONTENT_ITEM_TYPE, 13);
 
         TestPhoneNumberInteraction interaction = new TestPhoneNumberInteraction(
                 mContext, ContactDisplayUtils.INTERACTION_CALL, null);
@@ -252,7 +248,8 @@ public class PhoneNumberInteractionTest extends InstrumentationTestCase {
                         RawContacts.DATA_SET,
                         Phone.TYPE,
                         Phone.LABEL,
-                        Phone.MIMETYPE)
+                        Phone.MIMETYPE,
+                        Phone.CONTACT_ID)
                 .withSelection("mimetype IN ('vnd.android.cursor.item/phone_v2',"
                         + " 'vnd.android.cursor.item/sip_address') AND data1 NOT NULL");
     }

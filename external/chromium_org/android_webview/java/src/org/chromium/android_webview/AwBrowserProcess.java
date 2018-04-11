@@ -1,23 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview;
 
 import android.content.Context;
-import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.content.app.LibraryLoader;
-import org.chromium.content.browser.AndroidBrowserProcess;
-import org.chromium.content.common.ProcessInitException;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.content.browser.BrowserStartupController;
+import org.chromium.media.MediaDrmBridge;
+
+import java.util.UUID;
 
 /**
  * Wrapper for the steps needed to initialize the java and native sides of webview chromium.
  */
 public abstract class AwBrowserProcess {
     private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
+    private static final String TAG = "AwBrowserProcess";
 
     /**
      * Loads the native library, and performs basic static construction of objects needed
@@ -47,13 +51,27 @@ public abstract class AwBrowserProcess {
             @Override
             public void run() {
                 try {
-                    LibraryLoader.ensureInitialized();
-                    AndroidBrowserProcess.init(context,
-                            AndroidBrowserProcess.MAX_RENDERERS_SINGLE_PROCESS);
+                    BrowserStartupController.get(context).startBrowserProcessesSync(
+                                BrowserStartupController.MAX_RENDERERS_SINGLE_PROCESS);
+                    initializePlatformKeySystem();
                 } catch (ProcessInitException e) {
                     throw new RuntimeException("Cannot initialize WebView", e);
                 }
             }
         });
+    }
+
+    private static void initializePlatformKeySystem() {
+        String[] mappings = AwResource.getConfigKeySystemUuidMapping();
+        for (String mapping : mappings) {
+            try {
+                String fragments[] = mapping.split(",");
+                String keySystem = fragments[0].trim();
+                UUID uuid = UUID.fromString(fragments[1]);
+                MediaDrmBridge.addKeySystemUuidMapping(keySystem, uuid);
+            } catch (java.lang.RuntimeException e) {
+                Log.e(TAG, "Can't parse key-system mapping: " + mapping);
+            }
+        }
     }
 }

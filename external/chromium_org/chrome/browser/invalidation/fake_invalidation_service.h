@@ -9,10 +9,20 @@
 #include <utility>
 
 #include "base/basictypes.h"
-#include "chrome/browser/invalidation/invalidation_service.h"
-#include "sync/notifier/invalidator_registrar.h"
+#include "base/callback_forward.h"
+#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
+#include "components/invalidation/invalidation_service.h"
+#include "components/invalidation/invalidator_registrar.h"
+#include "google_apis/gaia/fake_identity_provider.h"
+#include "sync/notifier/mock_ack_handler.h"
+
+namespace syncer {
+class Invalidation;
+}
 
 namespace invalidation {
+
+class InvalidationLogger;
 
 // An InvalidationService that emits invalidations only when
 // its EmitInvalidationForTest method is called.
@@ -29,40 +39,31 @@ class FakeInvalidationService : public InvalidationService {
   virtual void UnregisterInvalidationHandler(
       syncer::InvalidationHandler* handler) OVERRIDE;
 
-  virtual void AcknowledgeInvalidation(
-      const invalidation::ObjectId& id,
-      const syncer::AckHandle& ack_handle) OVERRIDE;
-
   virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
   virtual std::string GetInvalidatorClientId() const OVERRIDE;
+  virtual InvalidationLogger* GetInvalidationLogger() OVERRIDE;
+  virtual void RequestDetailedStatus(
+      base::Callback<void(const base::DictionaryValue&)> caller) const OVERRIDE;
+  virtual IdentityProvider* GetIdentityProvider() OVERRIDE;
 
   void SetInvalidatorState(syncer::InvalidatorState state);
 
   const syncer::InvalidatorRegistrar& invalidator_registrar() const {
     return invalidator_registrar_;
   }
-  syncer::AckHandle EmitInvalidationForTest(
-      const invalidation::ObjectId& object_id,
-      int64 version,
-      const std::string& payload);
 
-  // Determines if the given AckHandle has been acknowledged.
-  bool IsInvalidationAcknowledged(const syncer::AckHandle& ack_handle) const;
+  void EmitInvalidationForTest(const syncer::Invalidation& invalidation);
 
-  // Determines if AcknowledgeInvalidation was ever called with an invalid
-  // ObjectId/AckHandle pair.
-  bool ReceivedInvalidAcknowledgement() {
-    return received_invalid_acknowledgement_;
-  }
+  // Emitted invalidations will be hooked up to this AckHandler.  Clients can
+  // query it to assert the invalidaitons are being acked properly.
+  syncer::MockAckHandler* GetMockAckHandler();
 
  private:
   std::string client_id_;
   syncer::InvalidatorRegistrar invalidator_registrar_;
-  typedef std::list<std::pair<syncer::AckHandle, invalidation::ObjectId> >
-      AckHandleList;
-  AckHandleList unacknowledged_handles_;
-  AckHandleList acknowledged_handles_;
-  bool received_invalid_acknowledgement_;
+  syncer::MockAckHandler mock_ack_handler_;
+  FakeProfileOAuth2TokenService token_service_;
+  FakeIdentityProvider identity_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeInvalidationService);
 };

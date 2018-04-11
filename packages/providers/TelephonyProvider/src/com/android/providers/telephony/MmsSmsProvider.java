@@ -32,7 +32,9 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
+import android.os.UserHandle;
 import android.provider.BaseColumns;
+import android.provider.Telephony;
 import android.provider.Telephony.CanonicalAddressesColumns;
 import android.provider.Telephony.Mms;
 import android.provider.Telephony.MmsSms;
@@ -117,7 +119,8 @@ public class MmsSmsProvider extends ContentProvider {
     // These are the columns that appear in both the MMS ("pdu") and
     // SMS ("sms") message tables.
     private static final String[] MMS_SMS_COLUMNS =
-            { BaseColumns._ID, Mms.DATE, Mms.DATE_SENT, Mms.READ, Mms.THREAD_ID, Mms.LOCKED };
+            { BaseColumns._ID, Mms.DATE, Mms.DATE_SENT, Mms.READ, Mms.THREAD_ID, Mms.LOCKED,
+                    Mms.SUB_ID };
 
     // These are the columns that appear only in the MMS message
     // table.
@@ -609,7 +612,8 @@ public class MmsSmsProvider extends ContentProvider {
         Log.d(LOG_TAG, "insertThread: created new thread_id " + result +
                 " for recipientIds " + /*recipientIds*/ "xxxxxxx");
 
-        getContext().getContentResolver().notifyChange(MmsSms.CONTENT_URI, null);
+        getContext().getContentResolver().notifyChange(MmsSms.CONTENT_URI, null, true,
+                UserHandle.USER_ALL);
     }
 
     private static final String THREAD_QUERY =
@@ -1204,7 +1208,8 @@ public class MmsSmsProvider extends ContentProvider {
         }
 
         if (affectedRows > 0) {
-            context.getContentResolver().notifyChange(MmsSms.CONTENT_URI, null);
+            context.getContentResolver().notifyChange(MmsSms.CONTENT_URI, null, true,
+                    UserHandle.USER_ALL);
         }
         return affectedRows;
     }
@@ -1257,6 +1262,16 @@ public class MmsSmsProvider extends ContentProvider {
                 break;
             }
 
+            case URI_CONVERSATIONS: {
+                final ContentValues finalValues = new ContentValues(1);
+                if (values.containsKey(Threads.ARCHIVED)) {
+                    // Only allow update archived
+                    finalValues.put(Threads.ARCHIVED, values.getAsBoolean(Threads.ARCHIVED));
+                }
+                affectedRows = db.update(TABLE_THREADS, finalValues, selection, selectionArgs);
+                break;
+            }
+
             default:
                 throw new UnsupportedOperationException(
                         NO_DELETES_INSERTS_OR_UPDATES + uri);
@@ -1264,7 +1279,7 @@ public class MmsSmsProvider extends ContentProvider {
 
         if (affectedRows > 0) {
             getContext().getContentResolver().notifyChange(
-                    MmsSms.CONTENT_URI, null);
+                    MmsSms.CONTENT_URI, null, true, UserHandle.USER_ALL);
         }
         return affectedRows;
     }

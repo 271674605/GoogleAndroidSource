@@ -32,17 +32,16 @@
 
 namespace slang {
 
-clang::FunctionDecl *RSObjectRefCount::
-    RSSetObjectFD[RSExportPrimitiveType::LastRSObjectType -
-                  RSExportPrimitiveType::FirstRSObjectType + 1];
-clang::FunctionDecl *RSObjectRefCount::
-    RSClearObjectFD[RSExportPrimitiveType::LastRSObjectType -
-                    RSExportPrimitiveType::FirstRSObjectType + 1];
+/* Even though those two arrays are of size DataTypeMax, only entries that
+ * correspond to object types will be set.
+ */
+clang::FunctionDecl *
+RSObjectRefCount::RSSetObjectFD[DataTypeMax];
+clang::FunctionDecl *
+RSObjectRefCount::RSClearObjectFD[DataTypeMax];
 
 void RSObjectRefCount::GetRSRefCountingFunctions(clang::ASTContext &C) {
-  for (unsigned i = 0;
-       i < (sizeof(RSClearObjectFD) / sizeof(clang::FunctionDecl*));
-       i++) {
+  for (unsigned i = 0; i < DataTypeMax; i++) {
     RSSetObjectFD[i] = NULL;
     RSClearObjectFD[i] = NULL;
   }
@@ -78,12 +77,15 @@ void RSObjectRefCount::GetRSRefCountingFunctions(clang::ASTContext &C) {
 
       // The rs object type passed to the FD
       clang::QualType RST = PVT->getPointeeType();
-      RSExportPrimitiveType::DataType DT =
-          RSExportPrimitiveType::GetRSSpecificType(RST.getTypePtr());
+      DataType DT = RSExportPrimitiveType::GetRSSpecificType(RST.getTypePtr());
       slangAssert(RSExportPrimitiveType::IsRSObjectType(DT)
              && "must be RS object type");
 
-      RSObjectFD[(DT - RSExportPrimitiveType::FirstRSObjectType)] = FD;
+      if (DT >= 0 && DT < DataTypeMax) {
+          RSObjectFD[DT] = FD;
+      } else {
+          slangAssert(false && "incorrect type");
+      }
     }
   }
 }
@@ -162,8 +164,6 @@ static void AppendAfterStmt(clang::ASTContext &C,
   CS->setStmts(C, UpdatedStmtList, UpdatedStmtCount);
 
   delete [] UpdatedStmtList;
-
-  return;
 }
 
 // This class visits a compound statement and inserts DtorStmt
@@ -273,7 +273,6 @@ DestructorVisitor::DestructorVisitor(clang::ASTContext &C,
     mOuterStmt(OuterStmt),
     mDtorStmt(DtorStmt),
     mVarLoc(VarLoc) {
-  return;
 }
 
 void DestructorVisitor::VisitStmt(clang::Stmt *S) {
@@ -284,12 +283,10 @@ void DestructorVisitor::VisitStmt(clang::Stmt *S) {
       Visit(Child);
     }
   }
-  return;
 }
 
 void DestructorVisitor::VisitCompoundStmt(clang::CompoundStmt *CS) {
   VisitStmt(CS);
-  return;
 }
 
 void DestructorVisitor::VisitBreakStmt(clang::BreakStmt *BS) {
@@ -297,12 +294,10 @@ void DestructorVisitor::VisitBreakStmt(clang::BreakStmt *BS) {
   if ((mLoopDepth == 0) && (mSwitchDepth == 0)) {
     mReplaceStmtStack.push(BS);
   }
-  return;
 }
 
 void DestructorVisitor::VisitCaseStmt(clang::CaseStmt *CS) {
   VisitStmt(CS);
-  return;
 }
 
 void DestructorVisitor::VisitContinueStmt(clang::ContinueStmt *CS) {
@@ -311,56 +306,47 @@ void DestructorVisitor::VisitContinueStmt(clang::ContinueStmt *CS) {
     // Switch statements can have nested continues.
     mReplaceStmtStack.push(CS);
   }
-  return;
 }
 
 void DestructorVisitor::VisitDefaultStmt(clang::DefaultStmt *DS) {
   VisitStmt(DS);
-  return;
 }
 
 void DestructorVisitor::VisitDoStmt(clang::DoStmt *DS) {
   mLoopDepth++;
   VisitStmt(DS);
   mLoopDepth--;
-  return;
 }
 
 void DestructorVisitor::VisitForStmt(clang::ForStmt *FS) {
   mLoopDepth++;
   VisitStmt(FS);
   mLoopDepth--;
-  return;
 }
 
 void DestructorVisitor::VisitIfStmt(clang::IfStmt *IS) {
   VisitStmt(IS);
-  return;
 }
 
 void DestructorVisitor::VisitReturnStmt(clang::ReturnStmt *RS) {
   mReplaceStmtStack.push(RS);
-  return;
 }
 
 void DestructorVisitor::VisitSwitchCase(clang::SwitchCase *SC) {
   slangAssert(false && "Both case and default have specialized handlers");
   VisitStmt(SC);
-  return;
 }
 
 void DestructorVisitor::VisitSwitchStmt(clang::SwitchStmt *SS) {
   mSwitchDepth++;
   VisitStmt(SS);
   mSwitchDepth--;
-  return;
 }
 
 void DestructorVisitor::VisitWhileStmt(clang::WhileStmt *WS) {
   mLoopDepth++;
   VisitStmt(WS);
   mLoopDepth--;
-  return;
 }
 
 clang::Expr *ClearSingleRSObject(clang::ASTContext &C,
@@ -576,14 +562,13 @@ static clang::Stmt *ClearArrayRSObject(
                                        clang::OK_Ordinary,
                                        Loc);
 
-  RSExportPrimitiveType::DataType DT =
-      RSExportPrimitiveType::GetRSSpecificType(BaseType);
+  DataType DT = RSExportPrimitiveType::GetRSSpecificType(BaseType);
 
   clang::Stmt *RSClearObjectCall = NULL;
   if (BaseType->isArrayType()) {
     RSClearObjectCall =
         ClearArrayRSObject(C, DC, RefRSArrPtrSubscript, StartLoc, Loc);
-  } else if (DT == RSExportPrimitiveType::DataTypeUnknown) {
+  } else if (DT == DataTypeUnknown) {
     RSClearObjectCall =
         ClearStructRSObject(C, DC, RefRSArrPtrSubscript, StartLoc, Loc);
   } else {
@@ -620,9 +605,8 @@ static unsigned CountRSObjectTypes(clang::ASTContext &C,
     return CountRSObjectTypes(C, T->getArrayElementTypeNoTypeQual(), Loc);
   }
 
-  RSExportPrimitiveType::DataType DT =
-      RSExportPrimitiveType::GetRSSpecificType(T);
-  if (DT != RSExportPrimitiveType::DataTypeUnknown) {
+  DataType DT = RSExportPrimitiveType::GetRSSpecificType(T);
+  if (DT != DataTypeUnknown) {
     return (RSExportPrimitiveType::IsRSObjectType(DT) ? 1 : 0);
   }
 
@@ -675,7 +659,7 @@ static clang::Stmt *ClearStructRSObject(
 
   // Structs should show up as unknown primitive types
   slangAssert(RSExportPrimitiveType::GetRSSpecificType(BaseType) ==
-              RSExportPrimitiveType::DataTypeUnknown);
+              DataTypeUnknown);
 
   unsigned FieldsToDestroy = CountRSObjectTypes(C, BaseType, Loc);
   slangAssert(FieldsToDestroy != 0);
@@ -959,15 +943,14 @@ static clang::Stmt *CreateStructRSSetObject(clang::ASTContext &C,
                                        clang::OK_Ordinary,
                                        Loc);
 
-  RSExportPrimitiveType::DataType DT =
-      RSExportPrimitiveType::GetRSSpecificType(BaseType);
+  DataType DT = RSExportPrimitiveType::GetRSSpecificType(BaseType);
 
   clang::Stmt *RSSetObjectCall = NULL;
   if (BaseType->isArrayType()) {
     RSSetObjectCall = CreateArrayRSSetObject(C, DstArrPtrSubscript,
                                              SrcArrPtrSubscript,
                                              StartLoc, Loc);
-  } else if (DT == RSExportPrimitiveType::DataTypeUnknown) {
+  } else if (DT == DataTypeUnknown) {
     RSSetObjectCall = CreateStructRSSetObject(C, DstArrPtrSubscript,
                                               SrcArrPtrSubscript,
                                               StartLoc, Loc);
@@ -1067,8 +1050,7 @@ static clang::Stmt *CreateStructRSSetObject(clang::ASTContext &C,
       IsArrayType = true;
     }
 
-    RSExportPrimitiveType::DataType DT =
-        RSExportPrimitiveType::GetRSSpecificType(FT);
+    DataType DT = RSExportPrimitiveType::GetRSSpecificType(FT);
 
     if (IsArrayType) {
       clang::DiagnosticsEngine &DiagEngine = C.getDiagnostics();
@@ -1080,7 +1062,7 @@ static clang::Stmt *CreateStructRSSetObject(clang::ASTContext &C,
       // TODO(srhines): Support setting arrays of RS objects
       // StmtArray[StmtCount++] =
       //    CreateArrayRSSetObject(C, DstMember, SrcMember, StartLoc, Loc);
-    } else if (DT == RSExportPrimitiveType::DataTypeUnknown) {
+    } else if (DT == DataTypeUnknown) {
       StmtArray[StmtCount++] =
           CreateStructRSSetObject(C, DstMember, SrcMember, StartLoc, Loc);
     } else if (RSExportPrimitiveType::IsRSObjectType(DT)) {
@@ -1118,7 +1100,7 @@ void RSObjectRefCount::Scope::ReplaceRSObjectAssignment(
   clang::QualType QT = AS->getType();
 
   clang::ASTContext &C = RSObjectRefCount::GetRSSetObjectFD(
-      RSExportPrimitiveType::DataTypeRSFont)->getASTContext();
+      DataTypeRSAllocation)->getASTContext();
 
   clang::SourceLocation Loc = AS->getExprLoc();
   clang::SourceLocation StartLoc = AS->getLHS()->getExprLoc();
@@ -1135,13 +1117,12 @@ void RSObjectRefCount::Scope::ReplaceRSObjectAssignment(
 
   RSASTReplace R(C);
   R.ReplaceStmt(mCS, AS, UpdatedStmt);
-  return;
 }
 
 void RSObjectRefCount::Scope::AppendRSObjectInit(
     clang::VarDecl *VD,
     clang::DeclStmt *DS,
-    RSExportPrimitiveType::DataType DT,
+    DataType DT,
     clang::Expr *InitExpr) {
   slangAssert(VD);
 
@@ -1150,13 +1131,13 @@ void RSObjectRefCount::Scope::AppendRSObjectInit(
   }
 
   clang::ASTContext &C = RSObjectRefCount::GetRSSetObjectFD(
-      RSExportPrimitiveType::DataTypeRSFont)->getASTContext();
+      DataTypeRSAllocation)->getASTContext();
   clang::SourceLocation Loc = RSObjectRefCount::GetRSSetObjectFD(
-      RSExportPrimitiveType::DataTypeRSFont)->getLocation();
+      DataTypeRSAllocation)->getLocation();
   clang::SourceLocation StartLoc = RSObjectRefCount::GetRSSetObjectFD(
-      RSExportPrimitiveType::DataTypeRSFont)->getInnerLocStart();
+      DataTypeRSAllocation)->getInnerLocStart();
 
-  if (DT == RSExportPrimitiveType::DataTypeIsStruct) {
+  if (DT == DataTypeIsStruct) {
     const clang::Type *T = RSExportType::GetTypeOfDecl(VD);
     clang::DeclRefExpr *RefRSVar =
         clang::DeclRefExpr::Create(C,
@@ -1238,8 +1219,6 @@ void RSObjectRefCount::Scope::AppendRSObjectInit(
   std::list<clang::Stmt*> StmtList;
   StmtList.push_back(RSSetObjectCall);
   AppendAfterStmt(C, mCS, DS, StmtList);
-
-  return;
 }
 
 void RSObjectRefCount::Scope::InsertLocalVarDestructors() {
@@ -1258,7 +1237,6 @@ void RSObjectRefCount::Scope::InsertLocalVarDestructors() {
       DV.InsertDestructors();
     }
   }
-  return;
 }
 
 clang::Stmt *RSObjectRefCount::Scope::ClearRSObject(
@@ -1286,11 +1264,10 @@ clang::Stmt *RSObjectRefCount::Scope::ClearRSObject(
     return ClearArrayRSObject(C, DC, RefRSVar, StartLoc, Loc);
   }
 
-  RSExportPrimitiveType::DataType DT =
-      RSExportPrimitiveType::GetRSSpecificType(T);
+  DataType DT = RSExportPrimitiveType::GetRSSpecificType(T);
 
-  if (DT == RSExportPrimitiveType::DataTypeUnknown ||
-      DT == RSExportPrimitiveType::DataTypeIsStruct) {
+  if (DT == DataTypeUnknown ||
+      DT == DataTypeIsStruct) {
     return ClearStructRSObject(C, DC, RefRSVar, StartLoc, Loc);
   }
 
@@ -1301,7 +1278,7 @@ clang::Stmt *RSObjectRefCount::Scope::ClearRSObject(
 }
 
 bool RSObjectRefCount::InitializeRSObject(clang::VarDecl *VD,
-                                          RSExportPrimitiveType::DataType *DT,
+                                          DataType *DT,
                                           clang::Expr **InitExpr) {
   slangAssert(VD && DT && InitExpr);
   const clang::Type *T = RSExportType::GetTypeOfDecl(VD);
@@ -1314,9 +1291,9 @@ bool RSObjectRefCount::InitializeRSObject(clang::VarDecl *VD,
   bool DataTypeIsStructWithRSObject = false;
   *DT = RSExportPrimitiveType::GetRSSpecificType(T);
 
-  if (*DT == RSExportPrimitiveType::DataTypeUnknown) {
+  if (*DT == DataTypeUnknown) {
     if (RSExportPrimitiveType::IsStructureTypeWithRSObject(T)) {
-      *DT = RSExportPrimitiveType::DataTypeIsStruct;
+      *DT = DataTypeIsStruct;
       DataTypeIsStructWithRSObject = true;
     } else {
       return false;
@@ -1350,24 +1327,24 @@ bool RSObjectRefCount::InitializeRSObject(clang::VarDecl *VD,
 }
 
 clang::Expr *RSObjectRefCount::CreateZeroInitializerForRSSpecificType(
-    RSExportPrimitiveType::DataType DT,
+    DataType DT,
     clang::ASTContext &C,
     const clang::SourceLocation &Loc) {
   clang::Expr *Res = NULL;
   switch (DT) {
-    case RSExportPrimitiveType::DataTypeIsStruct:
-    case RSExportPrimitiveType::DataTypeRSElement:
-    case RSExportPrimitiveType::DataTypeRSType:
-    case RSExportPrimitiveType::DataTypeRSAllocation:
-    case RSExportPrimitiveType::DataTypeRSSampler:
-    case RSExportPrimitiveType::DataTypeRSScript:
-    case RSExportPrimitiveType::DataTypeRSMesh:
-    case RSExportPrimitiveType::DataTypeRSPath:
-    case RSExportPrimitiveType::DataTypeRSProgramFragment:
-    case RSExportPrimitiveType::DataTypeRSProgramVertex:
-    case RSExportPrimitiveType::DataTypeRSProgramRaster:
-    case RSExportPrimitiveType::DataTypeRSProgramStore:
-    case RSExportPrimitiveType::DataTypeRSFont: {
+    case DataTypeIsStruct:
+    case DataTypeRSElement:
+    case DataTypeRSType:
+    case DataTypeRSAllocation:
+    case DataTypeRSSampler:
+    case DataTypeRSScript:
+    case DataTypeRSMesh:
+    case DataTypeRSPath:
+    case DataTypeRSProgramFragment:
+    case DataTypeRSProgramVertex:
+    case DataTypeRSProgramRaster:
+    case DataTypeRSProgramStore:
+    case DataTypeRSFont: {
       //    (ImplicitCastExpr 'nullptr_t'
       //      (IntegerLiteral 0)))
       llvm::APInt Zero(C.getTypeSize(C.IntTy), 0);
@@ -1386,9 +1363,9 @@ clang::Expr *RSObjectRefCount::CreateZeroInitializerForRSSpecificType(
       Res = new(C) clang::InitListExpr(C, Loc, InitList, Loc);
       break;
     }
-    case RSExportPrimitiveType::DataTypeRSMatrix2x2:
-    case RSExportPrimitiveType::DataTypeRSMatrix3x3:
-    case RSExportPrimitiveType::DataTypeRSMatrix4x4: {
+    case DataTypeRSMatrix2x2:
+    case DataTypeRSMatrix3x3:
+    case DataTypeRSMatrix4x4: {
       // RS matrix is not completely an RS object. They hold data by themselves.
       // (InitListExpr rs_matrix2x2
       //   (InitListExpr float[4]
@@ -1407,11 +1384,11 @@ clang::Expr *RSObjectRefCount::CreateZeroInitializerForRSSpecificType(
                                          Loc);
 
       unsigned N = 0;
-      if (DT == RSExportPrimitiveType::DataTypeRSMatrix2x2)
+      if (DT == DataTypeRSMatrix2x2)
         N = 2;
-      else if (DT == RSExportPrimitiveType::DataTypeRSMatrix3x3)
+      else if (DT == DataTypeRSMatrix3x3)
         N = 3;
-      else if (DT == RSExportPrimitiveType::DataTypeRSMatrix4x4)
+      else if (DT == DataTypeRSMatrix4x4)
         N = 4;
       unsigned N_2 = N * N;
 
@@ -1431,23 +1408,23 @@ clang::Expr *RSObjectRefCount::CreateZeroInitializerForRSSpecificType(
       Res = new(C) clang::InitListExpr(C, Loc, InitExprVec, Loc);
       break;
     }
-    case RSExportPrimitiveType::DataTypeUnknown:
-    case RSExportPrimitiveType::DataTypeFloat16:
-    case RSExportPrimitiveType::DataTypeFloat32:
-    case RSExportPrimitiveType::DataTypeFloat64:
-    case RSExportPrimitiveType::DataTypeSigned8:
-    case RSExportPrimitiveType::DataTypeSigned16:
-    case RSExportPrimitiveType::DataTypeSigned32:
-    case RSExportPrimitiveType::DataTypeSigned64:
-    case RSExportPrimitiveType::DataTypeUnsigned8:
-    case RSExportPrimitiveType::DataTypeUnsigned16:
-    case RSExportPrimitiveType::DataTypeUnsigned32:
-    case RSExportPrimitiveType::DataTypeUnsigned64:
-    case RSExportPrimitiveType::DataTypeBoolean:
-    case RSExportPrimitiveType::DataTypeUnsigned565:
-    case RSExportPrimitiveType::DataTypeUnsigned5551:
-    case RSExportPrimitiveType::DataTypeUnsigned4444:
-    case RSExportPrimitiveType::DataTypeMax: {
+    case DataTypeUnknown:
+    case DataTypeFloat16:
+    case DataTypeFloat32:
+    case DataTypeFloat64:
+    case DataTypeSigned8:
+    case DataTypeSigned16:
+    case DataTypeSigned32:
+    case DataTypeSigned64:
+    case DataTypeUnsigned8:
+    case DataTypeUnsigned16:
+    case DataTypeUnsigned32:
+    case DataTypeUnsigned64:
+    case DataTypeBoolean:
+    case DataTypeUnsigned565:
+    case DataTypeUnsigned5551:
+    case DataTypeUnsigned4444:
+    case DataTypeMax: {
       slangAssert(false && "Not RS object type!");
     }
     // No default case will enable compiler detecting the missing cases
@@ -1463,8 +1440,7 @@ void RSObjectRefCount::VisitDeclStmt(clang::DeclStmt *DS) {
     clang::Decl *D = *I;
     if (D->getKind() == clang::Decl::Var) {
       clang::VarDecl *VD = static_cast<clang::VarDecl*>(D);
-      RSExportPrimitiveType::DataType DT =
-          RSExportPrimitiveType::DataTypeUnknown;
+      DataType DT = DataTypeUnknown;
       clang::Expr *InitExpr = NULL;
       if (InitializeRSObject(VD, &DT, &InitExpr)) {
         // We need to zero-init all RS object types (including matrices), ...
@@ -1478,7 +1454,6 @@ void RSObjectRefCount::VisitDeclStmt(clang::DeclStmt *DS) {
       }
     }
   }
-  return;
 }
 
 void RSObjectRefCount::VisitCompoundStmt(clang::CompoundStmt *CS) {
@@ -1495,7 +1470,6 @@ void RSObjectRefCount::VisitCompoundStmt(clang::CompoundStmt *CS) {
     mScopeStack.pop();
     delete S;
   }
-  return;
 }
 
 void RSObjectRefCount::VisitBinAssign(clang::BinaryOperator *AS) {
@@ -1504,8 +1478,6 @@ void RSObjectRefCount::VisitBinAssign(clang::BinaryOperator *AS) {
   if (CountRSObjectTypes(mCtx, QT.getTypePtr(), AS->getExprLoc())) {
     getCurrentScope()->ReplaceRSObjectAssignment(AS);
   }
-
-  return;
 }
 
 void RSObjectRefCount::VisitStmt(clang::Stmt *S) {
@@ -1516,7 +1488,6 @@ void RSObjectRefCount::VisitStmt(clang::Stmt *S) {
       Visit(Child);
     }
   }
-  return;
 }
 
 // This function walks the list of global variables and (potentially) creates

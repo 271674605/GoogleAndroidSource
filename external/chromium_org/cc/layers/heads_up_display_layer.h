@@ -5,6 +5,8 @@
 #ifndef CC_LAYERS_HEADS_UP_DISPLAY_LAYER_H_
 #define CC_LAYERS_HEADS_UP_DISPLAY_LAYER_H_
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "cc/base/cc_export.h"
 #include "cc/layers/contents_scaling_layer.h"
@@ -16,7 +18,7 @@ class CC_EXPORT HeadsUpDisplayLayer : public ContentsScalingLayer {
   static scoped_refptr<HeadsUpDisplayLayer> Create();
 
   void PrepareForCalculateDrawProperties(
-      gfx::Size device_viewport, float device_scale_factor);
+      const gfx::Size& device_viewport, float device_scale_factor);
 
   virtual bool DrawsContent() const OVERRIDE;
 

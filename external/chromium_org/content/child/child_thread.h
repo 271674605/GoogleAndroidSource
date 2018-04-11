@@ -5,6 +5,8 @@
 #ifndef CONTENT_CHILD_CHILD_THREAD_H_
 #define CONTENT_CHILD_CHILD_THREAD_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/shared_memory.h"
@@ -14,7 +16,7 @@
 #include "content/common/content_export.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
-#include "webkit/child/resource_loader_bridge.h"
+#include "mojo/public/interfaces/service_provider/service_provider.mojom.h"
 
 namespace base {
 class MessageLoop;
@@ -29,26 +31,39 @@ class SyncChannel;
 class SyncMessageFilter;
 }  // namespace IPC
 
-namespace WebKit {
+namespace blink {
 class WebFrame;
-}  // namespace WebKit
+}  // namespace blink
+
+namespace webkit_glue {
+class ResourceLoaderBridge;
+}  // namespace webkit_glue
 
 namespace content {
 class ChildHistogramMessageFilter;
 class ChildResourceMessageFilter;
+class ChildSharedBitmapManager;
 class FileSystemDispatcher;
+class MojoApplication;
+class ServiceWorkerDispatcher;
+class ServiceWorkerMessageFilter;
 class QuotaDispatcher;
 class QuotaMessageFilter;
 class ResourceDispatcher;
 class SocketStreamDispatcher;
 class ThreadSafeSender;
+class WebSocketDispatcher;
+struct RequestInfo;
 
 // The main thread of a child process derives from this class.
-class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
+class CONTENT_EXPORT ChildThread
+    : public IPC::Listener,
+      public IPC::Sender,
+      public NON_EXPORTED_BASE(mojo::ServiceProvider) {
  public:
   // Creates the thread.
   ChildThread();
-  // Used for single-process mode.
+  // Used for single-process mode and for in process gpu mode.
   explicit ChildThread(const std::string& channel_name);
   // ChildProcess::main_thread() is reset after Shutdown(), and before the
   // destructor, so any subsystem that relies on ChildProcess::main_thread()
@@ -61,16 +76,9 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  // See documentation on MessageRouter for AddRoute and RemoveRoute
-  void AddRoute(int32 routing_id, IPC::Listener* listener);
-  void RemoveRoute(int32 routing_id);
-
   IPC::SyncChannel* channel() { return channel_.get(); }
 
-  // Creates a ResourceLoaderBridge.
-  // Tests can override this method if they want a custom loading behavior.
-  virtual webkit_glue::ResourceLoaderBridge* CreateBridge(
-      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info);
+  MessageRouter* GetRouter();
 
   // Allocates a block of shared memory of the given size and
   // maps in into the address space. Returns NULL of failure.
@@ -83,6 +91,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   static base::SharedMemory* AllocateSharedMemory(size_t buf_size,
                                                   IPC::Sender* sender);
 
+  ChildSharedBitmapManager* shared_bitmap_manager() const {
+    return shared_bitmap_manager_.get();
+  }
+
   ResourceDispatcher* resource_dispatcher() const {
     return resource_dispatcher_.get();
   }
@@ -91,8 +103,16 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
     return socket_stream_dispatcher_.get();
   }
 
+  WebSocketDispatcher* websocket_dispatcher() const {
+    return websocket_dispatcher_.get();
+  }
+
   FileSystemDispatcher* file_system_dispatcher() const {
     return file_system_dispatcher_.get();
+  }
+
+  ServiceWorkerDispatcher* service_worker_dispatcher() const {
+    return service_worker_dispatcher_.get();
   }
 
   QuotaDispatcher* quota_dispatcher() const {
@@ -112,6 +132,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   ChildHistogramMessageFilter* child_histogram_message_filter() const {
     return histogram_message_filter_.get();
+  }
+
+  ServiceWorkerMessageFilter* service_worker_message_filter() const {
+    return service_worker_message_filter_.get();
   }
 
   QuotaMessageFilter* quota_message_filter() const {
@@ -146,7 +170,24 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
+  // mojo::ServiceProvider implementation:
+  virtual void ConnectToService(
+      const mojo::String& service_url,
+      const mojo::String& service_name,
+      mojo::ScopedMessagePipeHandle message_pipe,
+      const mojo::String& requestor_url) OVERRIDE;
+
  private:
+  class ChildThreadMessageRouter : public MessageRouter {
+   public:
+    // |sender| must outlive this object.
+    explicit ChildThreadMessageRouter(IPC::Sender* sender);
+    virtual bool Send(IPC::Message* msg) OVERRIDE;
+
+   private:
+    IPC::Sender* const sender_;
+  };
+
   void Init();
 
   // IPC message handlers.
@@ -154,6 +195,7 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   void OnSetProfilerStatus(tracked_objects::ThreadData::Status status);
   void OnGetChildProfilerData(int sequence_number);
   void OnDumpHandles();
+  void OnProcessBackgrounded(bool background);
 #ifdef IPC_MESSAGE_LOG_ENABLED
   void OnSetIPCLoggingEnabled(bool enable);
 #endif
@@ -162,6 +204,8 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 #endif
 
   void EnsureConnected();
+
+  scoped_ptr<MojoApplication> mojo_application_;
 
   std::string channel_name_;
   scoped_ptr<IPC::SyncChannel> channel_;
@@ -172,13 +216,15 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
 
   // Implements message routing functionality to the consumers of ChildThread.
-  MessageRouter router_;
+  ChildThreadMessageRouter router_;
 
   // Handles resource loads for this process.
   scoped_ptr<ResourceDispatcher> resource_dispatcher_;
 
   // Handles SocketStream for this process.
   scoped_ptr<SocketStreamDispatcher> socket_stream_dispatcher_;
+
+  scoped_ptr<WebSocketDispatcher> websocket_dispatcher_;
 
   // The OnChannelError() callback was invoked - the channel is dead, don't
   // attempt to communicate.
@@ -188,13 +234,19 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   scoped_ptr<FileSystemDispatcher> file_system_dispatcher_;
 
+  scoped_ptr<ServiceWorkerDispatcher> service_worker_dispatcher_;
+
   scoped_ptr<QuotaDispatcher> quota_dispatcher_;
 
   scoped_refptr<ChildHistogramMessageFilter> histogram_message_filter_;
 
   scoped_refptr<ChildResourceMessageFilter> resource_message_filter_;
 
+  scoped_refptr<ServiceWorkerMessageFilter> service_worker_message_filter_;
+
   scoped_refptr<QuotaMessageFilter> quota_message_filter_;
+
+  scoped_ptr<ChildSharedBitmapManager> shared_bitmap_manager_;
 
   base::WeakPtrFactory<ChildThread> channel_connected_factory_;
 
@@ -203,6 +255,8 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   scoped_ptr<base::debug::TraceMemoryController> trace_memory_controller_;
 
   scoped_ptr<base::PowerMonitor> power_monitor_;
+
+  bool in_browser_process_;
 
   DISALLOW_COPY_AND_ASSIGN(ChildThread);
 };

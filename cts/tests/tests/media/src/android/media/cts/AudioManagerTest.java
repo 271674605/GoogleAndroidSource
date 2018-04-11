@@ -40,6 +40,7 @@ import com.android.cts.media.R;
 
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Vibrator;
@@ -63,7 +64,7 @@ public class AudioManagerTest extends AndroidTestCase {
         Vibrator vibrator = (Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE);
         mHasVibrator = (vibrator != null) && vibrator.hasVibrator();
         mUseFixedVolume = mContext.getResources().getBoolean(
-                                            com.android.internal.R.bool.config_useFixedVolume);
+                Resources.getSystem().getIdentifier("config_useFixedVolume", "bool", "android"));
     }
 
     public void testMicrophoneMute() throws Exception {
@@ -109,6 +110,7 @@ public class AudioManagerTest extends AndroidTestCase {
 
     public void testMusicActive() throws Exception {
         MediaPlayer mp = MediaPlayer.create(mContext, MP3_TO_PLAY);
+        assertNotNull(mp);
         mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
         mp.start();
         Thread.sleep(TIME_TO_PLAY);
@@ -123,8 +125,6 @@ public class AudioManagerTest extends AndroidTestCase {
     public void testAccessMode() throws Exception {
         mAudioManager.setMode(MODE_RINGTONE);
         assertEquals(MODE_RINGTONE, mAudioManager.getMode());
-        mAudioManager.setMode(MODE_IN_CALL);
-        assertEquals(MODE_IN_CALL, mAudioManager.getMode());
         mAudioManager.setMode(MODE_IN_COMMUNICATION);
         assertEquals(MODE_IN_COMMUNICATION, mAudioManager.getMode());
         mAudioManager.setMode(MODE_NORMAL);
@@ -392,6 +392,7 @@ public class AudioManagerTest extends AndroidTestCase {
         mAudioManager.adjustVolume(ADJUST_RAISE, 0);
 
         MediaPlayer mp = MediaPlayer.create(mContext, MP3_TO_PLAY);
+        assertNotNull(mp);
         mp.setAudioStreamType(STREAM_MUSIC);
         mp.setLooping(true);
         mp.start();

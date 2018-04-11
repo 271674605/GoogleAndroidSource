@@ -13,11 +13,16 @@ import subprocess
 import sys
 import tempfile
 
-from proc_maps import ProcMaps
-
 
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 REDUCE_DEBUGLINE_PATH = os.path.join(BASE_PATH, 'reduce_debugline.py')
+_TOOLS_LINUX_PATH = os.path.join(BASE_PATH, os.pardir, 'linux')
+sys.path.insert(0, _TOOLS_LINUX_PATH)
+
+
+from procfs import ProcMaps  # pylint: disable=F0401
+
+
 LOGGER = logging.getLogger('prepare_symbol_info')
 
 
@@ -138,7 +143,7 @@ def prepare_symbol_info(maps_path,
   shutil.copyfile(maps_path, os.path.join(output_dir_path, 'maps'))
 
   with open(maps_path, mode='r') as f:
-    maps = ProcMaps.load(f)
+    maps = ProcMaps.load_file(f)
 
   LOGGER.debug('Listing up symbols.')
   files = {}
@@ -149,6 +154,9 @@ def prepare_symbol_info(maps_path,
     for target_path, host_path in alternative_dirs.iteritems():
       if entry.name.startswith(target_path):
         binary_path = entry.name.replace(target_path, host_path, 1)
+    if not (ProcMaps.EXECUTABLE_PATTERN.match(binary_path) or
+            (os.path.isfile(binary_path) and os.access(binary_path, os.X_OK))):
+      continue
     nm_filename = _dump_command_result(
         'nm -n --format bsd %s | c++filt' % binary_path,
         output_dir_path, os.path.basename(binary_path), '.nm')

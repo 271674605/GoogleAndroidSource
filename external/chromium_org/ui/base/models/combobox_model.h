@@ -6,12 +6,14 @@
 #define UI_BASE_MODELS_COMBOBOX_MODEL_H_
 
 #include "base/strings/string16.h"
-#include "ui/base/ui_export.h"
+#include "ui/base/ui_base_export.h"
 
 namespace ui {
 
+class ComboboxModelObserver;
+
 // A data model for a combo box.
-class UI_EXPORT ComboboxModel {
+class UI_BASE_EXPORT ComboboxModel {
  public:
   // Returns the number of items in the combo box.
   virtual int GetItemCount() const = 0;
@@ -26,6 +28,13 @@ class UI_EXPORT ComboboxModel {
   // The index of the item that is selected by default (before user
   // interaction).
   virtual int GetDefaultIndex() const;
+
+  // Returns true if the item at |index| is enabled.
+  virtual bool IsItemEnabledAt(int index) const;
+
+  // Adds/removes an observer. Override if model supports mutation.
+  virtual void AddObserver(ComboboxModelObserver* observer) {}
+  virtual void RemoveObserver(ComboboxModelObserver* observer) {}
 
  protected:
   virtual ~ComboboxModel() {}

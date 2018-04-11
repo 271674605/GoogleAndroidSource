@@ -8,9 +8,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/views/message_center/web_notification_tray.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/slide_animation.h"
+#include "base/strings/string16.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/message_center/message_center.h"
@@ -19,11 +17,6 @@
 #include "ui/message_center/views/message_center_view.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
-
-namespace ui {
-class SlideAnimation;
-class AnimationDelegate;
-}
 
 namespace message_center {
 
@@ -62,7 +55,8 @@ class MessageCenterWidgetDelegate : public views::WidgetDelegate,
   MessageCenterWidgetDelegate(WebNotificationTray* tray,
                               MessageCenterTray* mc_tray,
                               bool initially_settings_visible,
-                              const PositionInfo& pos_info);
+                              const PositionInfo& pos_info,
+                              const base::string16& title);
   virtual ~MessageCenterWidgetDelegate();
 
   // WidgetDelegate overrides:
@@ -80,9 +74,9 @@ class MessageCenterWidgetDelegate : public views::WidgetDelegate,
 
   // View overrides:
   virtual void PreferredSizeChanged() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
-  virtual int GetHeightForWidth(int width) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  virtual gfx::Size GetMaximumSize() const OVERRIDE;
+  virtual int GetHeightForWidth(int width) const OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
  private:

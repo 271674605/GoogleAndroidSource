@@ -3,15 +3,17 @@ LOCAL_PATH := $(call my-dir)
 x86_disassembler_TBLGEN_TABLES := \
   X86GenDisassemblerTables.inc \
   X86GenInstrInfo.inc \
-  X86GenRegisterInfo.inc
+  X86GenRegisterInfo.inc \
+  X86GenSubtargetInfo.inc
 
 x86_disassembler_SRC_FILES := \
   X86Disassembler.cpp \
-  X86DisassemblerDecoder.c
+  X86DisassemblerDecoder.cpp
+
 
 # For the device
 # =====================================================
-ifeq ($(TARGET_ARCH),x86)
+ifneq (true,$(DISABLE_LLVM_DEVICE_BUILDS))
 include $(CLEAR_VARS)
 include $(CLEAR_TBLGEN_VARS)
 

@@ -7,17 +7,23 @@
 import logging
 import os
 import re
+import sys
 import time
 
 from pylib import android_commands
 from pylib import constants
-from pylib import json_perf_parser
-from pylib import perf_tests_helper
+from pylib import flag_changer
 from pylib import valgrind_tools
 from pylib.base import base_test_result
 from pylib.base import base_test_runner
+from pylib.device import device_errors
+from pylib.instrumentation import json_perf_parser
+from pylib.instrumentation import test_result
 
-import test_result
+sys.path.append(os.path.join(sys.path[0],
+                             os.pardir, os.pardir, 'build', 'util', 'lib',
+                             'common'))
+import perf_tests_results_helper # pylint: disable=F0401
 
 
 _PERF_TEST_ANNOTATION = 'PerfTest'
@@ -44,13 +50,14 @@ class TestRunner(base_test_runner.BaseTestRunner):
   """Responsible for running a series of tests connected to a single device."""
 
   _DEVICE_DATA_DIR = 'chrome/test/data'
+  _DEVICE_COVERAGE_DIR = 'chrome/test/coverage'
   _HOSTMACHINE_PERF_OUTPUT_FILE = '/tmp/chrome-profile'
   _DEVICE_PERF_OUTPUT_SEARCH_PREFIX = (constants.DEVICE_PERF_OUTPUT_DIR +
                                        '/chrome-profile*')
   _DEVICE_HAS_TEST_FILES = {}
 
   def __init__(self, test_options, device, shard_index, test_pkg,
-               ports_to_forward):
+               additional_flags=None):
     """Create a new TestRunner.
 
     Args:
@@ -58,22 +65,32 @@ class TestRunner(base_test_runner.BaseTestRunner):
       device: Attached android device.
       shard_index: Shard index.
       test_pkg: A TestPackage object.
-      ports_to_forward: A list of port numbers for which to set up forwarders.
-          Can be optionally requested by a test case.
+      additional_flags: A list of additional flags to add to the command line.
     """
     super(TestRunner, self).__init__(device, test_options.tool,
-                                     test_options.build_type,
                                      test_options.push_deps,
                                      test_options.cleanup_test_files)
     self._lighttp_port = constants.LIGHTTPD_RANDOM_PORT_FIRST + shard_index
 
+    self.coverage_device_file = None
+    self.coverage_dir = test_options.coverage_dir
+    self.coverage_host_file = None
     self.options = test_options
     self.test_pkg = test_pkg
-    self.ports_to_forward = ports_to_forward
+    # Use the correct command line file for the package under test.
+    cmdline_file = [a.cmdline_file for a in constants.PACKAGE_INFO.itervalues()
+                    if a.test_package == self.test_pkg.GetPackageName()]
+    assert len(cmdline_file) < 2, 'Multiple packages have the same test package'
+    if len(cmdline_file) and cmdline_file[0]:
+      self.flags = flag_changer.FlagChanger(self.device, cmdline_file[0])
+      if additional_flags:
+        self.flags.AddFlags(additional_flags)
+    else:
+      self.flags = None
 
   #override
   def InstallTestPackage(self):
-    self.test_pkg.Install(self.adb)
+    self.test_pkg.Install(self.device)
 
   #override
   def PushDataDeps(self):
@@ -81,67 +98,77 @@ class TestRunner(base_test_runner.BaseTestRunner):
     # once across test runners.
     if TestRunner._DEVICE_HAS_TEST_FILES.get(self.device, False):
       logging.warning('Already copied test files to device %s, skipping.',
-                      self.device)
+                      self.device.old_interface.GetDevice())
       return
 
     test_data = _GetDataFilesForTestSuite(self.test_pkg.GetApkName())
     if test_data:
       # Make sure SD card is ready.
-      self.adb.WaitForSdCardReady(20)
+      self.device.WaitUntilFullyBooted(timeout=20)
       for p in test_data:
-        self.adb.PushIfNeeded(
+        self.device.old_interface.PushIfNeeded(
             os.path.join(constants.DIR_SOURCE_ROOT, p),
-            os.path.join(self.adb.GetExternalStorage(), p))
+            os.path.join(self.device.GetExternalStoragePath(), p))
 
     # TODO(frankf): Specify test data in this file as opposed to passing
     # as command-line.
     for dest_host_pair in self.options.test_data:
-      dst_src = dest_host_pair.split(':',1)
+      dst_src = dest_host_pair.split(':', 1)
       dst_layer = dst_src[0]
       host_src = dst_src[1]
-      host_test_files_path = constants.DIR_SOURCE_ROOT + '/' + host_src
+      host_test_files_path = '%s/%s' % (constants.DIR_SOURCE_ROOT, host_src)
       if os.path.exists(host_test_files_path):
-        self.adb.PushIfNeeded(host_test_files_path,
-                              self.adb.GetExternalStorage() + '/' +
-                              TestRunner._DEVICE_DATA_DIR + '/' + dst_layer)
+        self.device.old_interface.PushIfNeeded(
+            host_test_files_path,
+            '%s/%s/%s' % (
+                self.device.GetExternalStoragePath(),
+                TestRunner._DEVICE_DATA_DIR,
+                dst_layer))
     self.tool.CopyFiles()
-    TestRunner._DEVICE_HAS_TEST_FILES[self.device] = True
+    TestRunner._DEVICE_HAS_TEST_FILES[
+        self.device.old_interface.GetDevice()] = True
 
   def _GetInstrumentationArgs(self):
     ret = {}
     if self.options.wait_for_debugger:
       ret['debug'] = 'true'
+    if self.coverage_dir:
+      ret['coverage'] = 'true'
+      ret['coverageFile'] = self.coverage_device_file
+
     return ret
 
   def _TakeScreenshot(self, test):
     """Takes a screenshot from the device."""
-    screenshot_name = os.path.join(constants.SCREENSHOTS_DIR, test + '.png')
+    screenshot_name = os.path.join(constants.SCREENSHOTS_DIR, '%s.png' % test)
     logging.info('Taking screenshot named %s', screenshot_name)
-    self.adb.TakeScreenshot(screenshot_name)
+    self.device.old_interface.TakeScreenshot(screenshot_name)
 
   def SetUp(self):
     """Sets up the test harness and device before all tests are run."""
     super(TestRunner, self).SetUp()
-    if not self.adb.IsRootEnabled():
+    if not self.device.HasRoot():
       logging.warning('Unable to enable java asserts for %s, non rooted device',
-                      self.device)
+                      str(self.device))
     else:
-      if self.adb.SetJavaAssertsEnabled(True):
-        self.adb.Reboot(full_reboot=False)
+      if self.device.old_interface.SetJavaAssertsEnabled(True):
+        # TODO(jbudorick) How to best do shell restart after the
+        #                 android_commands refactor?
+        self.device.RunShellCommand('stop')
+        self.device.RunShellCommand('start')
 
     # We give different default value to launch HTTP server based on shard index
     # because it may have race condition when multiple processes are trying to
     # launch lighttpd with same port at same time.
-    http_server_ports = self.LaunchTestHttpServer(
+    self.LaunchTestHttpServer(
         os.path.join(constants.DIR_SOURCE_ROOT), self._lighttp_port)
-    if self.ports_to_forward:
-      self._ForwardPorts([(port, port) for port in self.ports_to_forward])
-    self.flags.AddFlags(['--enable-test-intents'])
+    if self.flags:
+      self.flags.AddFlags(['--disable-fre', '--enable-test-intents'])
 
   def TearDown(self):
     """Cleans up the test harness and saves outstanding data from test run."""
-    if self.ports_to_forward:
-      self._UnmapPorts([(port, port) for port in self.ports_to_forward])
+    if self.flags:
+      self.flags.Restore()
     super(TestRunner, self).TearDown()
 
   def TestSetup(self, test):
@@ -156,6 +183,14 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
     # Make sure the forwarder is still running.
     self._RestartHttpServerForwarderIfNecessary()
+
+    if self.coverage_dir:
+      coverage_basename = '%s.ec' % test
+      self.coverage_device_file = '%s/%s/%s' % (
+          self.device.GetExternalStoragePath(),
+          TestRunner._DEVICE_COVERAGE_DIR, coverage_basename)
+      self.coverage_host_file = os.path.join(
+          self.coverage_dir, coverage_basename)
 
   def _IsPerfTest(self, test):
     """Determines whether a test is a performance test.
@@ -176,9 +211,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
     """
     if not self._IsPerfTest(test):
       return
-    self.adb.Adb().SendCommand('shell rm ' +
-                               TestRunner._DEVICE_PERF_OUTPUT_SEARCH_PREFIX)
-    self.adb.StartMonitoringLogcat()
+    self.device.old_interface.Adb().SendCommand(
+        'shell rm ' + TestRunner._DEVICE_PERF_OUTPUT_SEARCH_PREFIX)
+    self.device.old_interface.StartMonitoringLogcat()
 
   def TestTeardown(self, test, raw_result):
     """Cleans up the test harness after running a particular test.
@@ -199,6 +234,12 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
     self.TearDownPerfMonitoring(test)
 
+    if self.coverage_dir:
+      self.device.old_interface.Adb().Pull(
+          self.coverage_device_file, self.coverage_host_file)
+      self.device.RunShellCommand(
+          'rm -f %s' % self.coverage_device_file)
+
   def TearDownPerfMonitoring(self, test):
     """Cleans up performance monitoring if the specified test required it.
 
@@ -212,9 +253,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
     raw_test_name = test.split('#')[1]
 
     # Wait and grab annotation data so we can figure out which traces to parse
-    regex = self.adb.WaitForLogMatch(re.compile('\*\*PERFANNOTATION\(' +
-                                                raw_test_name +
-                                                '\)\:(.*)'), None)
+    regex = self.device.old_interface.WaitForLogMatch(
+        re.compile('\*\*PERFANNOTATION\(' + raw_test_name + '\)\:(.*)'), None)
 
     # If the test is set to run on a specific device type only (IE: only
     # tablet or phone) and it is being run on the wrong device, the test
@@ -226,7 +266,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
       # Obtain the relevant perf data.  The data is dumped to a
       # JSON formatted file.
-      json_string = self.adb.GetProtectedFileContents(
+      json_string = self.device.old_interface.GetProtectedFileContents(
           '/data/data/com.google.android.apps.chrome/files/PerfTestData.txt')
 
       if json_string:
@@ -253,13 +293,13 @@ class TestRunner(base_test_runner.BaseTestRunner):
           # Process the performance data
           result = json_perf_parser.GetAverageRunInfoFromJSONString(json_string,
                                                                     perf_set[0])
-          perf_tests_helper.PrintPerfResult(perf_set[1], perf_set[2],
-                                            [result['average']],
-                                            result['units'])
+          perf_tests_results_helper.PrintPerfResult(perf_set[1], perf_set[2],
+                                                    [result['average']],
+                                                    result['units'])
 
   def _SetupIndividualTestTimeoutScale(self, test):
     timeout_scale = self._GetIndividualTestTimeoutScale(test)
-    valgrind_tools.SetChromeTimeoutScale(self.adb, timeout_scale)
+    valgrind_tools.SetChromeTimeoutScale(self.device, timeout_scale)
 
   def _GetIndividualTestTimeoutScale(self, test):
     """Returns the timeout scale for the given |test|."""
@@ -289,10 +329,13 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
   def _RunTest(self, test, timeout):
     try:
-      return self.adb.RunInstrumentationTest(
+      return self.device.old_interface.RunInstrumentationTest(
           test, self.test_pkg.GetPackageName(),
           self._GetInstrumentationArgs(), timeout)
-    except android_commands.errors.WaitForResponseTimedOutError:
+    except (device_errors.CommandTimeoutError,
+            # TODO(jbudorick) Remove this once the underlying implementations
+            #                 for the above are switched or wrapped.
+            android_commands.errors.WaitForResponseTimedOutError):
       logging.info('Ran the test with timeout of %ds.' % timeout)
       raise
 
@@ -301,9 +344,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
     raw_result = None
     start_date_ms = None
     results = base_test_result.TestRunResults()
-    timeout=(self._GetIndividualTestTimeoutSecs(test) *
-             self._GetIndividualTestTimeoutScale(test) *
-             self.tool.GetTimeoutScale())
+    timeout = (self._GetIndividualTestTimeoutSecs(test) *
+               self._GetIndividualTestTimeoutScale(test) *
+               self.tool.GetTimeoutScale())
     try:
       self.TestSetup(test)
       start_date_ms = int(time.time()) * 1000
@@ -311,22 +354,29 @@ class TestRunner(base_test_runner.BaseTestRunner):
       duration_ms = int(time.time()) * 1000 - start_date_ms
       status_code = raw_result.GetStatusCode()
       if status_code:
+        if self.options.screenshot_failures:
+          self._TakeScreenshot(test)
         log = raw_result.GetFailureReason()
         if not log:
           log = 'No information.'
-        if (self.options.screenshot_failures or
-            log.find('INJECT_EVENTS perm') >= 0):
-          self._TakeScreenshot(test)
+        result_type = base_test_result.ResultType.FAIL
+        package = self.device.old_interface.DismissCrashDialogIfNeeded()
+        # Assume test package convention of ".test" suffix
+        if package and package in self.test_pkg.GetPackageName():
+          result_type = base_test_result.ResultType.CRASH
         result = test_result.InstrumentationTestResult(
-            test, base_test_result.ResultType.FAIL, start_date_ms, duration_ms,
-            log=log)
+            test, result_type, start_date_ms, duration_ms, log=log)
       else:
         result = test_result.InstrumentationTestResult(
             test, base_test_result.ResultType.PASS, start_date_ms, duration_ms)
       results.AddResult(result)
     # Catch exceptions thrown by StartInstrumentation().
     # See ../../third_party/android/testrunner/adb_interface.py
-    except (android_commands.errors.WaitForResponseTimedOutError,
+    except (device_errors.CommandTimeoutError,
+            device_errors.DeviceUnreachableError,
+            # TODO(jbudorick) Remove these once the underlying implementations
+            #                 for the above are switched or wrapped.
+            android_commands.errors.WaitForResponseTimedOutError,
             android_commands.errors.DeviceUnresponsiveError,
             android_commands.errors.InstrumentationError), e:
       if start_date_ms:

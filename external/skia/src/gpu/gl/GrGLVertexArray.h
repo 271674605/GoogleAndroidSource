@@ -8,7 +8,7 @@
 #ifndef GrGLVertexArray_DEFINED
 #define GrGLVertexArray_DEFINED
 
-#include "GrResource.h"
+#include "GrGpuObject.h"
 #include "GrTypesPriv.h"
 #include "gl/GrGLDefines.h"
 #include "gl/GrGLFunctions.h"
@@ -26,7 +26,7 @@ struct GrGLAttribLayout {
 };
 
 static inline const GrGLAttribLayout& GrGLAttribTypeToLayout(GrVertexAttribType type) {
-    GrAssert(type >= 0 && type < kGrVertexAttribTypeCount);
+    SkASSERT(type >= 0 && type < kGrVertexAttribTypeCount);
     static const GrGLAttribLayout kLayouts[kGrVertexAttribTypeCount] = {
         {1, GR_GL_FLOAT, false},         // kFloat_GrVertexAttribType
         {2, GR_GL_FLOAT, false},         // kVec2f_GrVertexAttribType
@@ -49,7 +49,9 @@ static inline const GrGLAttribLayout& GrGLAttribTypeToLayout(GrVertexAttribType 
  */
 class GrGLAttribArrayState {
 public:
-    explicit GrGLAttribArrayState(int arrayCount = 0) { this->resize(arrayCount); }
+    explicit GrGLAttribArrayState(int arrayCount = 0) {
+        this->resize(arrayCount);
+    }
 
     void resize(int newCount) {
         fAttribArrayStates.resize_back(newCount);
@@ -76,7 +78,7 @@ public:
      * This function disables vertex attribs not present in the mask. It is assumed that the
      * GrGLAttribArrayState is tracking the state of the currently bound vertex array object.
      */
-    void disableUnusedAttribArrays(const GrGpuGL*, uint64_t usedAttribArrayMask);
+    void disableUnusedArrays(const GrGpuGL*, uint64_t usedAttribArrayMask);
 
     void invalidate() {
         int count = fAttribArrayStates.count();
@@ -128,7 +130,7 @@ private:
  * This class represents an OpenGL vertex array object. It manages the lifetime of the vertex array
  * and is used to track the state of the vertex array to avoid redundant GL calls.
  */
-class GrGLVertexArray : public GrResource {
+class GrGLVertexArray : public GrGpuObject {
 public:
     GrGLVertexArray(GrGpuGL* gpu, GrGLint id, int attribCount);
 
@@ -155,7 +157,7 @@ public:
 
     void invalidateCachedState();
 
-    virtual size_t sizeInBytes() const SK_OVERRIDE { return 0; }
+    virtual size_t gpuMemorySize() const SK_OVERRIDE { return 0; }
 
 protected:
     virtual void onAbandon() SK_OVERRIDE;
@@ -168,7 +170,7 @@ private:
     GrGLuint                fIndexBufferID;
     bool                    fIndexBufferIDIsValid;
 
-    typedef GrResource INHERITED;
+    typedef GrGpuObject INHERITED;
 };
 
 #endif

@@ -25,17 +25,17 @@ import android.os.Bundle;
 import android.test.InstrumentationTestCase;
 import android.test.MoreAsserts;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.test.suitebuilder.annotation.Suppress;
 
 import com.android.email.DBTestHelper;
 import com.android.email.MockSharedPreferences;
 import com.android.email.MockVendorPolicy;
-import com.android.email.VendorPolicyLoader;
-import com.android.email.mail.Transport;
 import com.android.email.mail.store.ImapStore.ImapMessage;
 import com.android.email.mail.store.imap.ImapResponse;
 import com.android.email.mail.store.imap.ImapTestUtils;
 import com.android.email.mail.transport.MockTransport;
 import com.android.emailcommon.TempDirectory;
+import com.android.emailcommon.VendorPolicyLoader;
 import com.android.emailcommon.internet.MimeBodyPart;
 import com.android.emailcommon.internet.MimeMultipart;
 import com.android.emailcommon.internet.MimeUtility;
@@ -74,6 +74,7 @@ import java.util.regex.Pattern;
  * TODO test for BAD response in various places?
  * TODO test for BYE response in various places?
  */
+@Suppress
 @SmallTest
 public class ImapStoreUnitTests extends InstrumentationTestCase {
     private final static String[] NO_REPLY = new String[0];
@@ -95,6 +96,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
     private ImapStore mStore = null;
     private ImapFolder mFolder = null;
     private Context mTestContext;
+    private HostAuth mHostAuth;
 
     /** The tag for the current IMAP command; used for mock transport responses */
     private int mTag;
@@ -204,7 +206,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
      */
     public void testTlsOpen() throws MessagingException {
 
-        MockTransport mockTransport = openAndInjectMockTransport(Transport.CONNECTION_SECURITY_TLS,
+        MockTransport mockTransport = openAndInjectMockTransport(HostAuth.FLAG_TLS,
                 false);
 
         // try to open it, with STARTTLS
@@ -544,7 +546,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
      * Set up a basic MockTransport. open it, and inject it into mStore
      */
     private MockTransport openAndInjectMockTransport() {
-        return openAndInjectMockTransport(Transport.CONNECTION_SECURITY_NONE, false);
+        return openAndInjectMockTransport(HostAuth.FLAG_NONE, false);
     }
 
     /**
@@ -553,7 +555,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
     private MockTransport openAndInjectMockTransport(int connectionSecurity,
             boolean trustAllCertificates) {
         // Create mock transport and inject it into the ImapStore that's already set up
-        MockTransport mockTransport = new MockTransport();
+        MockTransport mockTransport = MockTransport.createMockTransport(mTestContext);
         mockTransport.setSecurity(connectionSecurity, trustAllCertificates);
         mockTransport.setHost("mock.server.com");
         mStore.setTransportForTest(mockTransport);
@@ -1183,7 +1185,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
 
         ImapMessage message = prepareForAppendTest(mock, "oK [aPPENDUID 1234567 13] (Success)");
 
-        mFolder.appendMessages(new Message[] {message});
+        mFolder.appendMessage(getInstrumentation().getTargetContext(), message, false);
 
         assertEquals("13", message.getUid());
         assertEquals(7, mFolder.getMessageCount());
@@ -1214,7 +1216,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
                     getNextTag(true) + " oK success"
                 });
 
-        mFolder.appendMessages(new Message[] {message});
+        mFolder.appendMessage(getInstrumentation().getTargetContext(), message, false);
 
         assertEquals("321", message.getUid());
     }
@@ -1248,7 +1250,7 @@ public class ImapStoreUnitTests extends InstrumentationTestCase {
                     getNextTag(true) + " oK Search completed."
                 });
 
-        mFolder.appendMessages(new Message[] {message});
+        mFolder.appendMessage(getInstrumentation().getTargetContext(), message, false);
 
         // Shouldn't have changed
         assertEquals("initial uid", message.getUid());

@@ -13,31 +13,27 @@
 
 #include "GrConfig.h"
 #include "GrTypes.h"
-#include "GrTHashCache.h"
+#include "GrTMultiMap.h"
 #include "GrBinHashKey.h"
+#include "SkMessageBus.h"
 #include "SkTInternalLList.h"
 
-class GrResource;
-class GrResourceEntry;
+class GrCacheable;
+class GrResourceCache;
+class GrResourceCacheEntry;
 
 class GrResourceKey {
 public:
-    enum {
-        kHashBits   = 7,
-        kHashCount  = 1 << kHashBits,
-        kHashMask   = kHashCount - 1
-    };
-
     static GrCacheID::Domain ScratchDomain() {
         static const GrCacheID::Domain gDomain = GrCacheID::GenerateDomain();
         return gDomain;
     }
 
-    /** Uniquely identifies the GrResource subclass in the key to avoid collisions
+    /** Uniquely identifies the GrCacheable subclass in the key to avoid collisions
         across resource types. */
     typedef uint8_t ResourceType;
 
-    /** Flags set by the GrResource subclass. */
+    /** Flags set by the GrCacheable subclass. */
     typedef uint8_t ResourceFlags;
 
     /** Generate a unique ResourceType */
@@ -53,50 +49,34 @@ public:
     }
 
     GrResourceKey() {
-        fKey.fHashedKey.reset();
+        fKey.reset();
     }
 
     void reset(const GrCacheID& id, ResourceType type, ResourceFlags flags) {
         this->init(id.getDomain(), id.getKey(), type, flags);
     }
 
-    //!< returns hash value [0..kHashMask] for the key
-    int getHash() const {
-        return fKey.fHashedKey.getHash() & kHashMask;
+    uint32_t getHash() const {
+        return fKey.getHash();
     }
 
     bool isScratch() const {
         return ScratchDomain() ==
-            *reinterpret_cast<const GrCacheID::Domain*>(fKey.fHashedKey.getData() +
+            *reinterpret_cast<const GrCacheID::Domain*>(fKey.getData() +
                                                         kCacheIDDomainOffset);
     }
 
     ResourceType getResourceType() const {
-        return *reinterpret_cast<const ResourceType*>(fKey.fHashedKey.getData() +
+        return *reinterpret_cast<const ResourceType*>(fKey.getData() +
                                                       kResourceTypeOffset);
     }
 
     ResourceFlags getResourceFlags() const {
-        return *reinterpret_cast<const ResourceFlags*>(fKey.fHashedKey.getData() +
+        return *reinterpret_cast<const ResourceFlags*>(fKey.getData() +
                                                        kResourceFlagsOffset);
     }
 
-    int compare(const GrResourceKey& other) const {
-        return fKey.fHashedKey.compare(other.fKey.fHashedKey);
-    }
-
-    static bool LT(const GrResourceKey& a, const GrResourceKey& b) {
-        return a.compare(b) < 0;
-    }
-
-    static bool EQ(const GrResourceKey& a, const GrResourceKey& b) {
-        return 0 == a.compare(b);
-    }
-
-    inline static bool LT(const GrResourceEntry& entry, const GrResourceKey& key);
-    inline static bool EQ(const GrResourceEntry& entry, const GrResourceKey& key);
-    inline static bool LT(const GrResourceEntry& a, const GrResourceEntry& b);
-    inline static bool EQ(const GrResourceEntry& a, const GrResourceEntry& b);
+    bool operator==(const GrResourceKey& other) const { return fKey == other.fKey; }
 
 private:
     enum {
@@ -124,91 +104,73 @@ private:
         memcpy(k + kResourceTypeOffset, &type, sizeof(ResourceType));
         memcpy(k + kResourceFlagsOffset, &flags, sizeof(ResourceFlags));
         memset(k + kPadOffset, 0, kPadSize);
-        fKey.fHashedKey.setKeyData(keyData.fKey32);
+        fKey.setKeyData(keyData.fKey32);
     }
+    GrBinHashKey<kKeySize> fKey;
+};
 
-    struct Key;
-    typedef GrTBinHashKey<Key, kKeySize> HashedKey;
-
-    struct Key {
-        int compare(const HashedKey& hashedKey) const {
-            return fHashedKey.compare(hashedKey);
-        }
-
-        HashedKey fHashedKey;
-    };
-
-    Key fKey;
+// The cache listens for these messages to purge junk resources proactively.
+struct GrResourceInvalidatedMessage {
+    GrResourceKey key;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class GrResourceEntry {
+class GrResourceCacheEntry {
 public:
-    GrResource* resource() const { return fResource; }
+    GrCacheable* resource() const { return fResource; }
     const GrResourceKey& key() const { return fKey; }
 
-#if GR_DEBUG
+    static const GrResourceKey& GetKey(const GrResourceCacheEntry& e) { return e.key(); }
+    static uint32_t Hash(const GrResourceKey& key) { return key.getHash(); }
+#ifdef SK_DEBUG
     void validate() const;
 #else
     void validate() const {}
 #endif
 
+    /**
+     *  Update the cached size for this entry and inform the resource cache that
+     *  it has changed. Usually invoked from GrCacheable::didChangeGpuMemorySize,
+     *  not directly from here.
+     */
+    void didChangeResourceSize();
+
 private:
-    GrResourceEntry(const GrResourceKey& key, GrResource* resource);
-    ~GrResourceEntry();
+    GrResourceCacheEntry(GrResourceCache* resourceCache,
+                         const GrResourceKey& key,
+                         GrCacheable* resource);
+    ~GrResourceCacheEntry();
 
+    GrResourceCache* fResourceCache;
     GrResourceKey    fKey;
-    GrResource*      fResource;
+    GrCacheable*     fResource;
+    size_t           fCachedSize;
+    bool             fIsExclusive;
 
-    // we're a linked list
-    SK_DECLARE_INTERNAL_LLIST_INTERFACE(GrResourceEntry);
+    // Linked list for the LRU ordering.
+    SK_DECLARE_INTERNAL_LLIST_INTERFACE(GrResourceCacheEntry);
 
     friend class GrResourceCache;
-    friend class GrDLinkedList;
 };
-
-bool GrResourceKey::LT(const GrResourceEntry& entry, const GrResourceKey& key) {
-    return LT(entry.key(), key);
-}
-
-bool GrResourceKey::EQ(const GrResourceEntry& entry, const GrResourceKey& key) {
-    return EQ(entry.key(), key);
-}
-
-bool GrResourceKey::LT(const GrResourceEntry& a, const GrResourceEntry& b) {
-    return LT(a.key(), b.key());
-}
-
-bool GrResourceKey::EQ(const GrResourceEntry& a, const GrResourceEntry& b) {
-    return EQ(a.key(), b.key());
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "GrTHashCache.h"
-
 /**
- *  Cache of GrResource objects.
+ *  Cache of GrCacheable objects.
  *
  *  These have a corresponding GrResourceKey, built from 128bits identifying the
- *  resource.
+ *  resource. Multiple resources can map to same GrResourceKey.
  *
  *  The cache stores the entries in a double-linked list, which is its LRU.
  *  When an entry is "locked" (i.e. given to the caller), it is moved to the
  *  head of the list. If/when we must purge some of the entries, we walk the
  *  list backwards from the tail, since those are the least recently used.
  *
- *  For fast searches, we maintain a sorted array (based on the GrResourceKey)
- *  which we can bsearch. When a new entry is added, it is inserted into this
- *  array.
- *
- *  For even faster searches, a hash is computed from the Key. If there is
- *  a collision between two keys with the same hash, we fall back on the
- *  bsearch, and update the hash to reflect the most recent Key requested.
+ *  For fast searches, we maintain a hash map based on the GrResourceKey.
  *
  *  It is a goal to make the GrResourceCache the central repository and bookkeeper
- *  of all resources. It should replace the linked list of GrResources that
+ *  of all resources. It should replace the linked list of GrGpuObjects that
  *  GrGpu uses to call abandon/release.
  */
 class GrResourceCache {
@@ -261,6 +223,11 @@ public:
      */
     size_t getCachedResourceBytes() const { return fEntryBytes; }
 
+    /**
+     * Returns the number of cached resources.
+     */
+    int getCachedResourceCount() const { return fEntryCount; }
+
     // For a found or added resource to be completely exclusive to the caller
     // both the kNoOtherOwners and kHide flags need to be specified
     enum OwnershipFlags {
@@ -279,8 +246,8 @@ public:
      *  For a resource to be completely exclusive to a caller both kNoOtherOwners
      *  and kHide must be specified.
      */
-    GrResource* find(const GrResourceKey& key,
-                     uint32_t ownershipFlags = 0);
+    GrCacheable* find(const GrResourceKey& key,
+                      uint32_t ownershipFlags = 0);
 
     /**
      *  Add the new resource to the cache (by creating a new cache entry based
@@ -294,7 +261,7 @@ public:
      *  is called.
      */
     void addResource(const GrResourceKey& key,
-                     GrResource* resource,
+                     GrCacheable* resource,
                      uint32_t ownershipFlags = 0);
 
     /**
@@ -309,18 +276,24 @@ public:
      * the cache's budget and should be made non-exclusive when exclusive access
      * is no longer needed.
      */
-    void makeExclusive(GrResourceEntry* entry);
+    void makeExclusive(GrResourceCacheEntry* entry);
 
     /**
      * Restore 'entry' so that it can be found by future searches. 'entry'
      * will also be purgeable (provided its lock count is now 0.)
      */
-    void makeNonExclusive(GrResourceEntry* entry);
+    void makeNonExclusive(GrResourceCacheEntry* entry);
+
+    /**
+     * Notify the cache that the size of a resource has changed.
+     */
+    void didIncreaseResourceSize(const GrResourceCacheEntry*, size_t amountInc);
+    void didDecreaseResourceSize(const GrResourceCacheEntry*, size_t amountDec);
 
     /**
      * Remove a resource from the cache and delete it!
      */
-    void deleteResource(GrResourceEntry* entry);
+    void deleteResource(GrResourceCacheEntry* entry);
 
     /**
      * Removes every resource in the cache that isn't locked.
@@ -340,7 +313,7 @@ public:
      */
     void purgeAsNeeded(int extraCount = 0, size_t extraBytes = 0);
 
-#if GR_DEBUG
+#ifdef SK_DEBUG
     void validate() const;
 #else
     void validate() const {}
@@ -356,18 +329,18 @@ private:
         kIgnore_BudgetBehavior
     };
 
-    void internalDetach(GrResourceEntry*, BudgetBehaviors behavior = kAccountFor_BudgetBehavior);
-    void attachToHead(GrResourceEntry*, BudgetBehaviors behavior = kAccountFor_BudgetBehavior);
+    void internalDetach(GrResourceCacheEntry*, BudgetBehaviors behavior = kAccountFor_BudgetBehavior);
+    void attachToHead(GrResourceCacheEntry*, BudgetBehaviors behavior = kAccountFor_BudgetBehavior);
 
-    void removeInvalidResource(GrResourceEntry* entry);
+    void removeInvalidResource(GrResourceCacheEntry* entry);
 
-    GrTHashTable<GrResourceEntry, GrResourceKey, 8> fCache;
+    GrTMultiMap<GrResourceCacheEntry, GrResourceKey> fCache;
 
     // We're an internal doubly linked list
-    typedef SkTInternalLList<GrResourceEntry> EntryList;
+    typedef SkTInternalLList<GrResourceCacheEntry> EntryList;
     EntryList      fList;
 
-#if GR_DEBUG
+#ifdef SK_DEBUG
     // These objects cannot be returned by a search
     EntryList      fExclusiveList;
 #endif
@@ -397,14 +370,18 @@ private:
 
     void internalPurge(int extraCount, size_t extraBytes);
 
-#if GR_DEBUG
-    static size_t countBytes(const SkTInternalLList<GrResourceEntry>& list);
+    // Listen for messages that a resource has been invalidated and purge cached junk proactively.
+    SkMessageBus<GrResourceInvalidatedMessage>::Inbox fInvalidationInbox;
+    void purgeInvalidated();
+
+#ifdef SK_DEBUG
+    static size_t countBytes(const SkTInternalLList<GrResourceCacheEntry>& list);
 #endif
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#if GR_DEBUG
+#ifdef SK_DEBUG
     class GrAutoResourceCacheValidate {
     public:
         GrAutoResourceCacheValidate(GrResourceCache* cache) : fCache(cache) {

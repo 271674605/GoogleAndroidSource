@@ -8,8 +8,10 @@
 #include <string>
 
 #include "ui/message_center/message_center_export.h"
+#include "ui/message_center/message_center_types.h"
 
 namespace message_center {
+class NotificationBlocker;
 
 // An observer class for the change of notifications in the MessageCenter.
 class MESSAGE_CENTER_EXPORT MessageCenterObserver {
@@ -40,11 +42,19 @@ class MESSAGE_CENTER_EXPORT MessageCenterObserver {
 
   // Called when the notification associated with |notification_id| is actually
   // displayed.
-  virtual void OnNotificationDisplayed(const std::string& notification_id) {}
+  virtual void OnNotificationDisplayed(
+      const std::string& notification_id,
+      const DisplaySource source) {}
 
-  // Called when the notification list is no longer being displayed as a
-  // notification center.
-  virtual void OnNotificationCenterClosed() {}
+  // Called when the notification center is shown or hidden.
+  virtual void OnCenterVisibilityChanged(Visibility visibility) {}
+
+  // Called whenever the quiet mode changes as a result of user action or when
+  // quiet mode expires.
+  virtual void OnQuietModeChanged(bool in_quiet_mode) {}
+
+  // Called when the blocking state of |blocker| is changed.
+  virtual void OnBlockingStateChanged(NotificationBlocker* blocker) {}
 };
 
 }  // namespace message_center

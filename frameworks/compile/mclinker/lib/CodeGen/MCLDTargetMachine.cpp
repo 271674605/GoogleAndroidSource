@@ -6,27 +6,24 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#include <mcld/Target/TargetMachine.h>
+#include <mcld/CodeGen/TargetMachine.h>
 
 #include <mcld/Module.h>
 #include <mcld/LinkerConfig.h>
 #include <mcld/CodeGen/MCLinker.h>
-#include <mcld/Support/raw_mem_ostream.h>
 #include <mcld/Support/TargetRegistry.h>
 #include <mcld/Support/ToolOutputFile.h>
-#include <mcld/Support/MemoryArea.h>
 #include <mcld/Target/TargetLDBackend.h>
 
-#include <llvm/ADT/OwningPtr.h>
 #include <llvm/Analysis/Passes.h>
-#include <llvm/Analysis/Verifier.h>
-#include <llvm/Assembly/PrintModulePass.h>
 #include <llvm/CodeGen/AsmPrinter.h>
 #include <llvm/CodeGen/MachineFunctionAnalysis.h>
 #include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/CodeGen/GCStrategy.h>
 #include <llvm/CodeGen/Passes.h>
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/IRPrintingPasses.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/MC/MCAsmInfo.h>
 #include <llvm/MC/MCStreamer.h>
 #include <llvm/MC/MCInstrInfo.h>
@@ -59,7 +56,6 @@ using namespace llvm;
 // Enable or disable FastISel. Both options are needed, because
 // FastISel is enabled by default with -fast, and we wish to be
 // able to enable or disable fast-isel independently from -O0.
-
 static cl::opt<cl::boolOrDefault>
 ArgEnableFastISelOption("lfast-isel", cl::Hidden,
   cl::desc("Enable the \"fast\" instruction selector"));
@@ -80,38 +76,44 @@ ArgAsmVerbose("fverbose-asm",
                        generated assembly code to make it more readable."),
               cl::init(cl::BOU_UNSET));
 
-static bool getVerboseAsm() {
+static bool getVerboseAsm(TargetMachine &TM) {
   switch (ArgAsmVerbose) {
   default:
-  case cl::BOU_UNSET: return TargetMachine::getAsmVerbosityDefault();
+  case cl::BOU_UNSET: return TM.getAsmVerbosityDefault();
   case cl::BOU_TRUE:  return true;
   case cl::BOU_FALSE: return false;
   }
 }
 
 
-//===---------------------------------------------------------------------===//
-/// MCLDTargetMachine
+//===----------------------------------------------------------------------===//
+// MCLDTargetMachine
 //===----------------------------------------------------------------------===//
 mcld::MCLDTargetMachine::MCLDTargetMachine(llvm::TargetMachine &pTM,
-                                           const mcld::Target& pTarget,
+                                           const llvm::Target& pLLVMTarget,
+                                           const mcld::Target& pMCLDTarget,
                                            const std::string& pTriple)
-  : m_TM(pTM), m_pTarget(&pTarget), m_Triple(pTriple) {
+  : m_TM(pTM),
+    m_pLLVMTarget(&pLLVMTarget),
+    m_pMCLDTarget(&pMCLDTarget),
+    m_Triple(pTriple) {
 }
 
-mcld::MCLDTargetMachine::~MCLDTargetMachine() {
-  m_pTarget = 0;
+mcld::MCLDTargetMachine::~MCLDTargetMachine()
+{
+  m_pLLVMTarget = NULL;
+  m_pMCLDTarget = NULL;
 }
 
 const mcld::Target& mcld::MCLDTargetMachine::getTarget() const
 {
-  return *m_pTarget;
+  return *m_pMCLDTarget;
 }
 
 /// Turn exception handling constructs into something the code generators can
 /// handle.
 static void addPassesToHandleExceptions(llvm::TargetMachine *TM,
-                                        PassManagerBase &PM) {
+                                        llvm::legacy::PassManagerBase &PM) {
   switch (TM->getMCAsmInfo()->getExceptionHandlingType()) {
   case llvm::ExceptionHandling::SjLj:
     // SjLj piggy-backs on dwarf for this bit. The cleanups done apply to both
@@ -120,15 +122,15 @@ static void addPassesToHandleExceptions(llvm::TargetMachine *TM,
     // removed from the parent invoke(s). This could happen when a landing
     // pad is shared by multiple invokes and is also a target of a normal
     // edge from elsewhere.
-    PM.add(createSjLjEHPreparePass(TM->getTargetLowering()));
+    PM.add(createSjLjEHPreparePass(TM));
     // FALLTHROUGH
   case llvm::ExceptionHandling::DwarfCFI:
   case llvm::ExceptionHandling::ARM:
-  case llvm::ExceptionHandling::Win64:
-    PM.add(createDwarfEHPass(TM->getTargetLowering()));
+  case llvm::ExceptionHandling::WinEH:
+    PM.add(createDwarfEHPass(TM));
     break;
   case llvm::ExceptionHandling::None:
-    PM.add(createLowerInvokePass(TM->getTargetLowering()));
+    PM.add(createLowerInvokePass());
 
     // The lower invoke pass may create unreachable code. Remove it.
     PM.add(createUnreachableBlockEliminationPass());
@@ -137,9 +139,10 @@ static void addPassesToHandleExceptions(llvm::TargetMachine *TM,
 }
 
 
-static llvm::MCContext *addPassesToGenerateCode(llvm::LLVMTargetMachine *TM,
-                                                PassManagerBase &PM,
-                                                bool DisableVerify)
+static llvm::MCContext *
+addPassesToGenerateCode(llvm::LLVMTargetMachine *TM,
+                        llvm::legacy::PassManagerBase &PM,
+                        bool DisableVerify)
 {
   // Targets may override createPassConfig to provide a target-specific sublass.
   TargetPassConfig *PassConfig = TM->createPassConfig(PM);
@@ -184,7 +187,8 @@ static llvm::MCContext *addPassesToGenerateCode(llvm::LLVMTargetMachine *TM,
 
 }
 
-bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
+bool
+mcld::MCLDTargetMachine::addPassesToEmitFile(llvm::legacy::PassManagerBase &pPM,
                                              mcld::ToolOutputFile& pOutput,
                                              mcld::CodeGenFileType pFileType,
                                              CodeGenOpt::Level pOptLvl,
@@ -207,7 +211,7 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
   case CGFT_ASMFile: {
     assert(Context != 0 && "Failed to get MCContext");
 
-    if (getTM().hasMCSaveTempLabels())
+    if (getTM().Options.MCOptions.MCSaveTempLabels)
       Context->setAllowTemporaryLabels(false);
 
     if (addCompilerPasses(pPM,
@@ -219,10 +223,10 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
   case CGFT_OBJFile: {
     assert(Context != 0 && "Failed to get MCContext");
 
-    if (getTM().hasMCSaveTempLabels())
+    if (getTM().Options.MCOptions.MCSaveTempLabels)
       Context->setAllowTemporaryLabels(false);
     if (addAssemblerPasses(pPM,
-                           pOutput.mem_os(),
+                           pOutput.formatted_os(),
                            Context))
       return true;
     break;
@@ -232,7 +236,7 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
     if (addLinkerPasses(pPM,
                         pConfig,
                         pModule,
-                        pOutput.memory(),
+                        pOutput.fd(),
                         Context))
       return true;
     break;
@@ -242,7 +246,7 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
     if (addLinkerPasses(pPM,
                         pConfig,
                         pModule,
-                        pOutput.memory(),
+                        pOutput.fd(),
                         Context))
       return true;
     break;
@@ -252,7 +256,7 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
     if (addLinkerPasses(pPM,
                         pConfig,
                         pModule,
-                        pOutput.memory(),
+                        pOutput.fd(),
                         Context))
       return true;
     break;
@@ -262,7 +266,7 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
     if (addLinkerPasses(pPM,
                         pConfig,
                         pModule,
-                        pOutput.memory(),
+                        pOutput.fd(),
                         Context))
       return true;
     break;
@@ -271,9 +275,10 @@ bool mcld::MCLDTargetMachine::addPassesToEmitFile(PassManagerBase &pPM,
   return false;
 }
 
-bool mcld::MCLDTargetMachine::addCompilerPasses(PassManagerBase &pPM,
-                                                llvm::formatted_raw_ostream &pOutput,
-                                                llvm::MCContext *&Context)
+bool
+mcld::MCLDTargetMachine::addCompilerPasses(llvm::legacy::PassManagerBase &pPM,
+                                           llvm::formatted_raw_ostream &pOutput,
+                                           llvm::MCContext *&Context)
 {
   const MCAsmInfo &MAI = *getTM().getMCAsmInfo();
   const MCInstrInfo &MII = *getTM().getInstrInfo();
@@ -281,101 +286,93 @@ bool mcld::MCLDTargetMachine::addCompilerPasses(PassManagerBase &pPM,
   const MCSubtargetInfo &STI = getTM().getSubtarget<MCSubtargetInfo>();
 
   MCInstPrinter *InstPrinter =
-    getTarget().get()->createMCInstPrinter(MAI.getAssemblerDialect(), MAI,
-                                           MII,
-                                           Context->getRegisterInfo(), STI);
+    m_pLLVMTarget->createMCInstPrinter(MAI.getAssemblerDialect(), MAI,
+                                       MII, *Context->getRegisterInfo(), STI);
 
   MCCodeEmitter* MCE = 0;
   MCAsmBackend *MAB = 0;
   if (ArgShowMCEncoding) {
-    MCE = getTarget().get()->createMCCodeEmitter(MII, MRI, STI, *Context);
-    MAB = getTarget().get()->createMCAsmBackend(m_Triple,
-                                                getTM().getTargetCPU());
+    MCE = m_pLLVMTarget->createMCCodeEmitter(MII, MRI, STI, *Context);
+    MAB = m_pLLVMTarget->createMCAsmBackend(MRI, m_Triple,
+                                            getTM().getTargetCPU());
   }
 
 
   // now, we have MCCodeEmitter and MCAsmBackend, we can create AsmStreamer.
-  OwningPtr<MCStreamer> AsmStreamer(
-    getTarget().get()->createAsmStreamer(*Context, pOutput,
-                                         getVerboseAsm(),
-                                         getTM().hasMCUseLoc(),
-                                         getTM().hasMCUseCFI(),
-                                         getTM().hasMCUseDwarfDirectory(),
-                                         InstPrinter,
-                                         MCE, MAB,
-                                         ArgShowMCInst));
+  std::unique_ptr<MCStreamer> AsmStreamer(
+    m_pLLVMTarget->createAsmStreamer(*Context, pOutput,
+                                     getVerboseAsm(getTM()),
+                                     getTM().Options.MCOptions.MCUseDwarfDirectory,
+                                     InstPrinter,
+                                     MCE, MAB,
+                                     ArgShowMCInst));
 
   llvm::MachineFunctionPass* funcPass =
-    getTarget().get()->createAsmPrinter(getTM(), *AsmStreamer.get());
+    m_pLLVMTarget->createAsmPrinter(getTM(), *AsmStreamer.get());
 
   if (funcPass == 0)
     return true;
   // If successful, createAsmPrinter took ownership of AsmStreamer
-  AsmStreamer.take();
+  AsmStreamer.release();
   pPM.add(funcPass);
   return false;
 }
 
-bool mcld::MCLDTargetMachine::addAssemblerPasses(PassManagerBase &pPM,
-                                                 llvm::raw_ostream &pOutput,
-                                                 llvm::MCContext *&Context)
+bool
+mcld::MCLDTargetMachine::addAssemblerPasses(llvm::legacy::PassManagerBase &pPM,
+                                            llvm::raw_ostream &pOutput,
+                                            llvm::MCContext *&Context)
 {
   // MCCodeEmitter
   const MCInstrInfo &MII = *getTM().getInstrInfo();
   const MCRegisterInfo &MRI = *getTM().getRegisterInfo();
   const MCSubtargetInfo &STI = getTM().getSubtarget<MCSubtargetInfo>();
   MCCodeEmitter* MCE =
-    getTarget().get()->createMCCodeEmitter(MII, MRI, STI, *Context);
+    m_pLLVMTarget->createMCCodeEmitter(MII, MRI, STI, *Context);
 
   // MCAsmBackend
   MCAsmBackend* MAB =
-    getTarget().get()->createMCAsmBackend(m_Triple,getTM().getTargetCPU());
+    m_pLLVMTarget->createMCAsmBackend(MRI, m_Triple, getTM().getTargetCPU());
   if (MCE == 0 || MAB == 0)
     return true;
 
   // now, we have MCCodeEmitter and MCAsmBackend, we can create AsmStreamer.
-  OwningPtr<MCStreamer> AsmStreamer(getTarget().get()->createMCObjectStreamer(
-                                                              m_Triple,
-                                                              *Context,
-                                                              *MAB,
-                                                              pOutput,
-                                                              MCE,
-                                                              getTM().hasMCRelaxAll(),
-                                                              getTM().hasMCNoExecStack()));
+  std::unique_ptr<MCStreamer> AsmStreamer(m_pLLVMTarget->createMCObjectStreamer(
+    m_Triple, *Context, *MAB, pOutput, MCE, STI,
+    getTM().Options.MCOptions.MCRelaxAll, getTM().Options.MCOptions.MCNoExecStack));
+
   AsmStreamer.get()->InitSections();
-  MachineFunctionPass *funcPass = getTarget().get()->createAsmPrinter(getTM(),
-                                                                      *AsmStreamer.get());
+  MachineFunctionPass *funcPass =
+    m_pLLVMTarget->createAsmPrinter(getTM(), *AsmStreamer.get());
   if (funcPass == 0)
     return true;
   // If successful, createAsmPrinter took ownership of AsmStreamer
-  AsmStreamer.take();
+  AsmStreamer.release();
   pPM.add(funcPass);
   return false;
 }
 
-bool mcld::MCLDTargetMachine::addLinkerPasses(PassManagerBase &pPM,
-                                              LinkerConfig& pConfig,
-                                              mcld::Module& pModule,
-                                              mcld::MemoryArea& pOutput,
-                                              llvm::MCContext *&Context)
+bool
+mcld::MCLDTargetMachine::addLinkerPasses(llvm::legacy::PassManagerBase &pPM,
+                                         LinkerConfig& pConfig,
+                                         mcld::Module& pModule,
+                                         mcld::FileHandle& pFileHandle,
+                                         llvm::MCContext *&Context)
 {
-  if (NULL == pOutput.handler())
-    return true;
-
   // set up output's SOName
   if (pConfig.options().soname().empty()) {
     // if the output is a shared object, and the option -soname was not
     // enable, set soname as the output file name. soname must be UTF-8 string.
-    pModule.setName(pOutput.handler()->path().filename().native());
-  }
-  else {
-    pModule.setName(pConfig.options().soname());
+    pConfig.options().setSOName(pFileHandle.path().filename().native());
   }
 
-  MachineFunctionPass* funcPass = getTarget().createMCLinker(m_Triple,
-                                                             pConfig,
-                                                             pModule,
-                                                             pOutput);
+  // set up output module name
+  pModule.setName(pFileHandle.path().filename().native());
+
+  MachineFunctionPass* funcPass = m_pMCLDTarget->createMCLinker(m_Triple,
+                                                                pConfig,
+                                                                pModule,
+                                                                pFileHandle);
   if (NULL == funcPass)
     return true;
 

@@ -218,3 +218,23 @@ namespace deleted_copy {
 
   std::initializer_list<X> x{1}; // expected-error {{invokes deleted constructor}}
 }
+
+namespace RefVersusInitList {
+  struct S {};
+  void f(const S &) = delete;
+  void f(std::initializer_list<S>);
+  void g(S s) { f({S()}); }
+}
+
+namespace PR18013 {
+  int f();
+  std::initializer_list<long (*)()> x = {f}; // expected-error {{cannot initialize an array element of type 'long (*const)()' with an lvalue of type 'int ()': different return type ('long' vs 'int')}}
+}
+
+namespace DR1070 {
+  struct S {
+    S(std::initializer_list<int>);
+  };
+  S s[3] = { {1, 2, 3}, {4, 5} }; // ok
+  S *p = new S[3] { {1, 2, 3}, {4, 5} }; // ok
+}

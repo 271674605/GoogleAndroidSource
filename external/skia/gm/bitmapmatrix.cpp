@@ -7,6 +7,7 @@
  */
 #include "gm.h"
 #include "SkBitmap.h"
+#include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
 #include "SkCanvas.h"
 #include "SkColor.h"
@@ -23,11 +24,15 @@ public:
     DrawBitmapMatrixGM() {}
 
 protected:
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kSkipTiled_Flag;
+    }
+
     virtual SkString onShortName() SK_OVERRIDE {
         return SkString("drawbitmapmatrix");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return make_isize(1024, 256); }
+    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(1024, 256); }
 
     virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
         SkBitmap bm;
@@ -80,11 +85,11 @@ protected:
             // SkGpuDevice::drawPath() -> SkGpuDevice::drawWithMaskFilter()
             SkPaint paint;
 
-            paint.setFilterBitmap(true);
+            paint.setFilterLevel(SkPaint::kLow_FilterLevel);
 
             SkMaskFilter* mf = SkBlurMaskFilter::Create(
-                5,
-                SkBlurMaskFilter::kNormal_BlurStyle,
+                kNormal_SkBlurStyle,
+                SkBlurMask::ConvertRadiusToSigma(5),
                 SkBlurMaskFilter::kHighQuality_BlurFlag |
                 SkBlurMaskFilter::kIgnoreTransform_BlurFlag);
             paint.setMaskFilter(mf)->unref();
@@ -106,8 +111,7 @@ private:
     void setupBitmap(SkBitmap* bm) {
         SkASSERT(bm);
         static const int SIZE = 64;
-        bm->setConfig(SkBitmap::kARGB_8888_Config, SIZE, SIZE);
-        bm->allocPixels();
+        bm->allocN32Pixels(SIZE, SIZE);
         SkCanvas canvas(*bm);
 
         SkPaint paint;

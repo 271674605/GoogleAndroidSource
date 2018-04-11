@@ -21,6 +21,7 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.RemoteViews;
 
@@ -30,11 +31,15 @@ import com.android.launcher3.DragLayer.TouchCompleteListener;
  * {@inheritDoc}
  */
 public class LauncherAppWidgetHostView extends AppWidgetHostView implements TouchCompleteListener {
+
+    LayoutInflater mInflater;
+
     private CheckLongPressHelper mLongPressHelper;
-    private LayoutInflater mInflater;
     private Context mContext;
     private int mPreviousOrientation;
     private DragLayer mDragLayer;
+
+    private float mSlop;
 
     public LauncherAppWidgetHostView(Context context) {
         super(context);
@@ -56,7 +61,8 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView implements Touc
         super.updateAppWidget(remoteViews);
     }
 
-    public boolean orientationChangedSincedInflation() {
+    public boolean isReinflateRequired() {
+        // Re-inflate is required if the orientation has changed since last inflated.
         int orientation = mContext.getResources().getConfiguration().orientation;
         if (mPreviousOrientation != orientation) {
            return true;
@@ -65,6 +71,12 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView implements Touc
     }
 
     public boolean onInterceptTouchEvent(MotionEvent ev) {
+        // Just in case the previous long press hasn't been cleared, we make sure to start fresh
+        // on touch down.
+        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+            mLongPressHelper.cancelLongPress();
+        }
+
         // Consume any touch events for ourselves after longpress is triggered
         if (mLongPressHelper.hasPerformedLongPress()) {
             mLongPressHelper.cancelLongPress();
@@ -84,6 +96,11 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView implements Touc
             case MotionEvent.ACTION_CANCEL:
                 mLongPressHelper.cancelLongPress();
                 break;
+            case MotionEvent.ACTION_MOVE:
+                if (!Utilities.pointInView(this, ev.getX(), ev.getY(), mSlop)) {
+                    mLongPressHelper.cancelLongPress();
+                }
+                break;
         }
 
         // Otherwise continue letting touch events fall through to children
@@ -98,8 +115,19 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView implements Touc
             case MotionEvent.ACTION_CANCEL:
                 mLongPressHelper.cancelLongPress();
                 break;
+            case MotionEvent.ACTION_MOVE:
+                if (!Utilities.pointInView(this, ev.getX(), ev.getY(), mSlop)) {
+                    mLongPressHelper.cancelLongPress();
+                }
+                break;
         }
         return false;
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        mSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
     }
 
     @Override
@@ -110,13 +138,15 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView implements Touc
 
     @Override
     public void onTouchComplete() {
-        mLongPressHelper.cancelLongPress();
+        if (!mLongPressHelper.hasPerformedLongPress()) {
+            // If a long press has been performed, we don't want to clear the record of that since
+            // we still may be receiving a touch up which we want to intercept
+            mLongPressHelper.cancelLongPress();
+        }
     }
 
     @Override
     public int getDescendantFocusability() {
         return ViewGroup.FOCUS_BLOCK_DESCENDANTS;
     }
-
-
 }

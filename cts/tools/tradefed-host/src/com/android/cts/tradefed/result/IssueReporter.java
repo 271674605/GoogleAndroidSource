@@ -58,10 +58,22 @@ public class IssueReporter implements ITestInvocationListener {
     private String mProductName;
 
     @Override
-    public void testFailed(TestFailure status, TestIdentifier test, String trace) {
+    public void testFailed(TestIdentifier test, String trace) {
         mCurrentIssue = new Issue();
         mCurrentIssue.mTestName = test.toString();
         mCurrentIssue.mStackTrace = trace;
+    }
+
+    @Override
+    public void testAssumptionFailure(TestIdentifier test, String trace) {
+        mCurrentIssue = new Issue();
+        mCurrentIssue.mTestName = test.toString();
+        mCurrentIssue.mStackTrace = trace;
+    }
+
+    @Override
+    public void testIgnored(TestIdentifier test) {
+        // TODO: ??
     }
 
     @Override
@@ -194,7 +206,7 @@ public class IssueReporter implements ITestInvocationListener {
     }
 
     @Override
-    public void testRunStarted(String name, int numTests) {
+    public void testRunStarted(String id, int numTests) {
     }
 
     @Override

@@ -39,14 +39,14 @@ class ProfileSigninConfirmationDialogViews : public views::DialogDelegateView,
  private:
   ProfileSigninConfirmationDialogViews(
       Browser* browser,
-      Profile* profile,
       const std::string& username,
       ui::ProfileSigninConfirmationDelegate* delegate);
   virtual ~ProfileSigninConfirmationDialogViews();
 
   // views::DialogDelegateView:
-  virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetDialogButtonLabel(
+      ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual views::View* CreateExtraView() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -57,7 +57,7 @@ class ProfileSigninConfirmationDialogViews : public views::DialogDelegateView,
       const ViewHierarchyChangedDetails& details) OVERRIDE;
 
   // views::StyledLabelListener:
-  virtual void StyledLabelLinkClicked(const ui::Range& range,
+  virtual void StyledLabelLinkClicked(const gfx::Range& range,
                                       int event_flags) OVERRIDE;
 
   // views::ButtonListener:
@@ -73,9 +73,6 @@ class ProfileSigninConfirmationDialogViews : public views::DialogDelegateView,
 
   // Weak ptr to parent view.
   Browser* browser_;
-
-  // The profile being signed in.
-  Profile* profile_;
 
   // The GAIA username being signed in.
   std::string username_;

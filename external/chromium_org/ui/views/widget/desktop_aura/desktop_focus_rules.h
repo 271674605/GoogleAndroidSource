@@ -5,18 +5,28 @@
 #ifndef UI_VIEWS_WIDGET_DESKTOP_FOCUS_RULES_H_
 #define UI_VIEWS_WIDGET_DESKTOP_FOCUS_RULES_H_
 
-#include "ui/views/corewm/base_focus_rules.h"
+#include "ui/wm/core/base_focus_rules.h"
 
 namespace views {
 
-class DesktopFocusRules : public corewm::BaseFocusRules {
+class DesktopFocusRules : public wm::BaseFocusRules {
  public:
-  DesktopFocusRules();
+  explicit DesktopFocusRules(aura::Window* content_window);
   virtual ~DesktopFocusRules();
 
  private:
-  // Overridden from corewm::BaseFocusRules:
+  // Overridden from wm::BaseFocusRules:
+  virtual bool CanActivateWindow(aura::Window* window) const OVERRIDE;
   virtual bool SupportsChildActivation(aura::Window* window) const OVERRIDE;
+  virtual bool IsWindowConsideredVisibleForActivation(
+      aura::Window* window) const OVERRIDE;
+  virtual aura::Window* GetToplevelWindow(aura::Window* window) const OVERRIDE;
+  virtual aura::Window* GetNextActivatableWindow(
+      aura::Window* window) const OVERRIDE;
+
+  // The content window. This is an activatable window even though it is a
+  // child.
+  aura::Window* content_window_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopFocusRules);
 };

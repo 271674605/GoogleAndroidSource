@@ -40,7 +40,6 @@ import android.os.storage.StorageEventListener;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.preference.Preference;
-import android.preference.PreferenceActivity;
 import android.preference.PreferenceScreen;
 import android.util.Log;
 import android.view.Menu;
@@ -49,8 +48,12 @@ import android.view.MenuItem;
 import android.widget.Toast;
 
 import com.android.settings.R;
+import com.android.settings.SettingsActivity;
 import com.android.settings.SettingsPreferenceFragment;
 import com.android.settings.Utils;
+import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settings.search.Indexable;
+import com.android.settings.search.SearchIndexableRaw;
 import com.google.android.collect.Lists;
 
 import java.util.ArrayList;
@@ -60,7 +63,7 @@ import java.util.List;
  * Panel showing storage usage on disk for known {@link StorageVolume} returned
  * by {@link StorageManager}. Calculates and displays usage of data types.
  */
-public class Memory extends SettingsPreferenceFragment {
+public class Memory extends SettingsPreferenceFragment implements Indexable {
     private static final String TAG = "MemorySettings";
 
     private static final String TAG_CONFIRM_CLEAR_CACHE = "confirmClearCache";
@@ -186,14 +189,13 @@ public class Memory extends SettingsPreferenceFragment {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.storage_usb:
-                if (getActivity() instanceof PreferenceActivity) {
-                    ((PreferenceActivity) getActivity()).startPreferencePanel(
+                if (getActivity() instanceof SettingsActivity) {
+                    ((SettingsActivity) getActivity()).startPreferencePanel(
                             UsbSettings.class.getCanonicalName(),
-                            null,
-                            R.string.storage_title_usb, null,
-                            this, 0);
+                            null, R.string.storage_title_usb, null, this, 0);
                 } else {
-                    startFragment(this, UsbSettings.class.getCanonicalName(), -1, null);
+                    startFragment(this, UsbSettings.class.getCanonicalName(),
+                            R.string.storage_title_usb, -1, null);
                 }
                 return true;
         }
@@ -424,4 +426,78 @@ public class Memory extends SettingsPreferenceFragment {
             return builder.create();
         }
     }
+
+    /**
+     * Enable indexing of searchable data
+     */
+    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
+        new BaseSearchIndexProvider() {
+            @Override
+            public List<SearchIndexableRaw> getRawDataToIndex(Context context, boolean enabled) {
+                final List<SearchIndexableRaw> result = new ArrayList<SearchIndexableRaw>();
+
+                SearchIndexableRaw data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.storage_settings);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.internal_storage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                final StorageVolume[] storageVolumes = StorageManager.from(context).getVolumeList();
+                for (StorageVolume volume : storageVolumes) {
+                    if (!volume.isEmulated()) {
+                        data.title = volume.getDescription(context);
+                        data.screenTitle = context.getString(R.string.storage_settings);
+                        result.add(data);
+                    }
+                }
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_size);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_available);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_apps_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_dcim_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_music_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_downloads_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_media_cache_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                data = new SearchIndexableRaw(context);
+                data.title = context.getString(R.string.memory_media_misc_usage);
+                data.screenTitle = context.getString(R.string.storage_settings);
+                result.add(data);
+
+                return result;
+            }
+        };
+
 }

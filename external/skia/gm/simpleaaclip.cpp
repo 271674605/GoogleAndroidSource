@@ -21,14 +21,12 @@ static void paint_rgn(SkCanvas* canvas, const SkAAClip& clip,
 
     SkAutoMaskFreeImage amfi(mask.fImage);
 
-    bm.setConfig(SkBitmap::kA8_Config, mask.fBounds.width(),
-                 mask.fBounds.height(), mask.fRowBytes);
-    bm.setPixels(mask.fImage);
+    bm.installMaskPixels(mask);
 
     // need to copy for deferred drawing test to work
     SkBitmap bm2;
 
-    bm.deepCopyTo(&bm2, SkBitmap::kA8_Config);
+    bm.deepCopyTo(&bm2);
 
     canvas->drawBitmap(bm2,
                        SK_Scalar1 * mask.fBounds.fLeft,
@@ -53,10 +51,10 @@ public:
     : fGeomType(geomType) {
 
         // offset the rects a bit so we get anti-aliasing in the rect case
-        fBase.set(SkFloatToScalar(100.65f),
-                  SkFloatToScalar(100.65f),
-                  SkFloatToScalar(150.65f),
-                  SkFloatToScalar(150.65f));
+        fBase.set(100.65f,
+                  100.65f,
+                  150.65f,
+                  150.65f);
         fRect = fBase;
         fRect.inset(5, 5);
         fRect.offset(25, 25);
@@ -126,6 +124,10 @@ protected:
         canvas->restore();
     }
 
+    virtual uint32_t onGetFlags() const SK_OVERRIDE {
+        return kPath_GeomType == fGeomType ? kSkipTiled_Flag : 0;
+    }
+
     virtual SkString onShortName() {
         SkString str;
         str.printf("simpleaaclip_%s",
@@ -136,7 +138,7 @@ protected:
     }
 
     virtual SkISize onISize() {
-        return make_isize(640, 480);
+        return SkISize::Make(640, 480);
     }
 
     virtual void onDraw(SkCanvas* canvas) {

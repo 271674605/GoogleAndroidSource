@@ -5,30 +5,27 @@
  * found in the LICENSE file.
  */
 
-#include "SkBenchmark.h"
+#include "Benchmark.h"
 #include "SkScaledImageCache.h"
 
-class ImageCacheBench : public SkBenchmark {
+class ImageCacheBench : public Benchmark {
     SkScaledImageCache  fCache;
     SkBitmap            fBM;
 
     enum {
-        N = SkBENCHLOOP(1000),
         DIM = 1,
         CACHE_COUNT = 500
     };
 public:
-    ImageCacheBench(void* param) : INHERITED(param) , fCache(CACHE_COUNT * 100) {
-        fBM.setConfig(SkBitmap::kARGB_8888_Config, DIM, DIM);
-        fBM.allocPixels();
+    ImageCacheBench()  : fCache(CACHE_COUNT * 100) {
+        fBM.allocN32Pixels(DIM, DIM);
     }
 
     void populateCache() {
         SkScalar scale = 1;
         for (int i = 0; i < CACHE_COUNT; ++i) {
             SkBitmap tmp;
-            tmp.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
-            tmp.allocPixels();
+            tmp.allocN32Pixels(1, 1);
             fCache.unlock(fCache.addAndLock(fBM, scale, scale, tmp));
             scale += 1;
         }
@@ -39,22 +36,22 @@ protected:
         return "imagecache";
     }
 
-    virtual void onDraw(SkCanvas*) SK_OVERRIDE {
-        if (fCache.getBytesUsed() == 0) {
+    virtual void onDraw(const int loops, SkCanvas*) SK_OVERRIDE {
+        if (fCache.getTotalBytesUsed() == 0) {
             this->populateCache();
         }
 
         SkBitmap tmp;
         // search for a miss (-1 scale)
-        for (int i = 0; i < N; ++i) {
+        for (int i = 0; i < loops; ++i) {
             (void)fCache.findAndLock(fBM, -1, -1, &tmp);
         }
     }
 
 private:
-    typedef SkBenchmark INHERITED;
+    typedef Benchmark INHERITED;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-DEF_BENCH( return new ImageCacheBench(p); )
+DEF_BENCH( return new ImageCacheBench(); )

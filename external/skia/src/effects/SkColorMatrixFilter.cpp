@@ -8,7 +8,8 @@
 #include "SkColorMatrixFilter.h"
 #include "SkColorMatrix.h"
 #include "SkColorPriv.h"
-#include "SkFlattenableBuffers.h"
+#include "SkReadBuffer.h"
+#include "SkWriteBuffer.h"
 #include "SkUnPreMultiply.h"
 #include "SkString.h"
 
@@ -75,9 +76,9 @@ static void ScaleAdd(const SkColorMatrixFilter::State& state,
     const int shift = state.fShift;
 
     // cast to (int) to keep the expression signed for the shift
-    result[0] = (array[0] * (int)r + array[4]) >> shift;
-    result[1] = (array[6] * (int)g + array[9]) >> shift;
-    result[2] = (array[12] * (int)b + array[14]) >> shift;
+    result[0] = (array[SkColorMatrix::kR_Scale] * (int)r + array[4]) >> shift;
+    result[1] = (array[SkColorMatrix::kG_Scale] * (int)g + array[9]) >> shift;
+    result[2] = (array[SkColorMatrix::kB_Scale] * (int)b + array[14]) >> shift;
     result[3] = a;
 }
 
@@ -87,9 +88,9 @@ static void ScaleAdd16(const SkColorMatrixFilter::State& state,
     const int32_t* SK_RESTRICT array = state.fArray;
 
     // cast to (int) to keep the expression signed for the shift
-    result[0] = (array[0] * (int)r + array[4]) >> 16;
-    result[1] = (array[6] * (int)g + array[9]) >> 16;
-    result[2] = (array[12] * (int)b + array[14]) >> 16;
+    result[0] = (array[SkColorMatrix::kR_Scale] * (int)r + array[4]) >> 16;
+    result[1] = (array[SkColorMatrix::kG_Scale] * (int)g + array[9]) >> 16;
+    result[2] = (array[SkColorMatrix::kB_Scale] * (int)b + array[14]) >> 16;
     result[3] = a;
 }
 
@@ -99,9 +100,9 @@ static void Add(const SkColorMatrixFilter::State& state,
     const int32_t* SK_RESTRICT array = state.fArray;
     const int shift = state.fShift;
 
-    result[0] = r + (array[4] >> shift);
-    result[1] = g + (array[9] >> shift);
-    result[2] = b + (array[14] >> shift);
+    result[0] = r + (array[SkColorMatrix::kR_Trans] >> shift);
+    result[1] = g + (array[SkColorMatrix::kG_Trans] >> shift);
+    result[2] = b + (array[SkColorMatrix::kB_Trans] >> shift);
     result[3] = a;
 }
 
@@ -110,9 +111,9 @@ static void Add16(const SkColorMatrixFilter::State& state,
                   int32_t* SK_RESTRICT result) {
     const int32_t* SK_RESTRICT array = state.fArray;
 
-    result[0] = r + (array[4] >> 16);
-    result[1] = g + (array[9] >> 16);
-    result[2] = b + (array[14] >> 16);
+    result[0] = r + (array[SkColorMatrix::kR_Trans] >> 16);
+    result[1] = g + (array[SkColorMatrix::kG_Trans] >> 16);
+    result[2] = b + (array[SkColorMatrix::kB_Trans] >> 16);
     result[3] = a;
 }
 
@@ -160,9 +161,9 @@ void SkColorMatrixFilter::initState(const SkScalar* SK_RESTRICT src) {
     } else {
         fFlags = kNO_ALPHA_FLAGS;
 
-        int32_t needsScale = (array[0] - one) |       // red axis
-                             (array[6] - one) |       // green axis
-                             (array[12] - one);       // blue axis
+        int32_t needsScale = (array[SkColorMatrix::kR_Scale] - one) |
+                             (array[SkColorMatrix::kG_Scale] - one) |
+                             (array[SkColorMatrix::kB_Scale] - one);
 
         int32_t needs3x3 =  array[1] | array[2] |     // red off-axis
                             array[5] | array[7] |     // green off-axis
@@ -172,7 +173,9 @@ void SkColorMatrixFilter::initState(const SkScalar* SK_RESTRICT src) {
             fProc = shiftIs16 ? AffineAdd16 : AffineAdd;
         } else if (needsScale) {
             fProc = shiftIs16 ? ScaleAdd16 : ScaleAdd;
-        } else if (array[4] | array[9] | array[14]) {   // needs add
+        } else if (array[SkColorMatrix::kR_Trans] |
+                   array[SkColorMatrix::kG_Trans] |
+                   array[SkColorMatrix::kB_Trans]) {
             fProc = shiftIs16 ? Add16 : Add;
         } else {
             fProc = NULL;   // identity
@@ -299,17 +302,18 @@ void SkColorMatrixFilter::filterSpan16(const uint16_t src[], int count,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void SkColorMatrixFilter::flatten(SkFlattenableWriteBuffer& buffer) const {
+void SkColorMatrixFilter::flatten(SkWriteBuffer& buffer) const {
     this->INHERITED::flatten(buffer);
     SkASSERT(sizeof(fMatrix.fMat)/sizeof(SkScalar) == 20);
     buffer.writeScalarArray(fMatrix.fMat, 20);
 }
 
-SkColorMatrixFilter::SkColorMatrixFilter(SkFlattenableReadBuffer& buffer)
+SkColorMatrixFilter::SkColorMatrixFilter(SkReadBuffer& buffer)
         : INHERITED(buffer) {
     SkASSERT(buffer.getArrayCount() == 20);
-    buffer.readScalarArray(fMatrix.fMat);
-    this->initState(fMatrix.fMat);
+    if (buffer.readScalarArray(fMatrix.fMat, 20)) {
+        this->initState(fMatrix.fMat);
+    }
 }
 
 bool SkColorMatrixFilter::asColorMatrix(SkScalar matrix[20]) const {
@@ -391,26 +395,26 @@ public:
 
         GLEffect(const GrBackendEffectFactory& factory,
                  const GrDrawEffect&)
-        : INHERITED(factory)
-        , fMatrixHandle(GrGLUniformManager::kInvalidUniformHandle)
-        , fVectorHandle(GrGLUniformManager::kInvalidUniformHandle) {}
+        : INHERITED(factory) {
+        }
 
         virtual void emitCode(GrGLShaderBuilder* builder,
                               const GrDrawEffect&,
                               EffectKey,
                               const char* outputColor,
                               const char* inputColor,
+                              const TransformedCoordsArray&,
                               const TextureSamplerArray&) SK_OVERRIDE {
-            fMatrixHandle = builder->addUniform(GrGLShaderBuilder::kFragment_ShaderType,
+            fMatrixHandle = builder->addUniform(GrGLShaderBuilder::kFragment_Visibility,
                                                 kMat44f_GrSLType,
                                                 "ColorMatrix");
-            fVectorHandle = builder->addUniform(GrGLShaderBuilder::kFragment_ShaderType,
+            fVectorHandle = builder->addUniform(GrGLShaderBuilder::kFragment_Visibility,
                                                 kVec4f_GrSLType,
                                                 "ColorMatrixVector");
 
             if (NULL == inputColor) {
                 // could optimize this case, but we aren't for now.
-                inputColor = GrGLSLOnesVecf(4);
+                inputColor = "vec4(1)";
             }
             // The max() is to guard against 0 / 0 during unpremul when the incoming color is
             // transparent black.
@@ -420,6 +424,7 @@ public:
                                    builder->getUniformCStr(fMatrixHandle),
                                    inputColor,
                                    builder->getUniformCStr(fVectorHandle));
+            builder->fsCodeAppendf("\t%s = clamp(%s, 0.0, 1.0);\n", outputColor, outputColor);
             builder->fsCodeAppendf("\t%s.rgb *= %s.a;\n", outputColor, outputColor);
         }
 
@@ -438,13 +443,15 @@ public:
             GrGLfloat vec[] = {
                 m[4] * kScale, m[9] * kScale, m[14] * kScale, m[19] * kScale,
             };
-            uniManager.setMatrix4fv(fMatrixHandle, 0, 1, mt);
-            uniManager.set4fv(fVectorHandle, 0, 1, vec);
+            uniManager.setMatrix4fv(fMatrixHandle, 1, mt);
+            uniManager.set4fv(fVectorHandle, 1, vec);
         }
 
     private:
         GrGLUniformManager::UniformHandle fMatrixHandle;
         GrGLUniformManager::UniformHandle fVectorHandle;
+
+        typedef GrGLEffect INHERITED;
     };
 
 private:
@@ -457,12 +464,12 @@ private:
 
     SkColorMatrix fMatrix;
 
-    typedef GrGLEffect INHERITED;
+    typedef GrEffect INHERITED;
 };
 
 GR_DEFINE_EFFECT_TEST(ColorMatrixEffect);
 
-GrEffectRef* ColorMatrixEffect::TestCreate(SkMWCRandom* random,
+GrEffectRef* ColorMatrixEffect::TestCreate(SkRandom* random,
                                            GrContext*,
                                            const GrDrawTargetCaps&,
                                            GrTexture* dummyTextures[2]) {
@@ -479,7 +486,7 @@ GrEffectRef* SkColorMatrixFilter::asNewEffect(GrContext*) const {
 
 #endif
 
-#ifdef SK_DEVELOPER
+#ifndef SK_IGNORE_TO_STRING
 void SkColorMatrixFilter::toString(SkString* str) const {
     str->append("SkColorMatrixFilter: ");
 

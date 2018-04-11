@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_DIRECTORY_H
-#define MCLD_DIRECTORY_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_DIRECTORY_H
+#define MCLD_SUPPORT_DIRECTORY_H
 
 #include <mcld/ADT/TypeTraits.h>
 #include <mcld/Support/FileSystem.h>

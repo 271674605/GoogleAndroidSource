@@ -72,8 +72,9 @@
 // is FocusTraversable.
 
 namespace ui {
-class AcceleratorTarget;
 class AcceleratorManager;
+class AcceleratorTarget;
+class EventHandler;
 class KeyEvent;
 }
 
@@ -212,6 +213,15 @@ class VIEWS_EXPORT FocusManager {
   // Returns true if in the process of changing the focused view.
   bool is_changing_focus() const { return is_changing_focus_; }
 
+  // Changes the text input focus to |view->GetTextInputClient()| iff |view|
+  // is focused.  Views must call this method when their internal
+  // TextInputClient instance changes.
+  void OnTextInputClientChanged(View* view);
+
+  // Moves the text input focus into/out from |view|.
+  void FocusTextInputClient(View* view);
+  void BlurTextInputClient(View* view);
+
   // Disable shortcut handling.
   static void set_shortcut_handling_suspended(bool suspended) {
     shortcut_handling_suspended_ = suspended;
@@ -307,10 +317,18 @@ class VIEWS_EXPORT FocusManager {
     return arrow_key_traversal_enabled_;
   }
 
- private:
-  // Returns the next focusable view.
-  View* GetNextFocusableView(View* starting_view, bool reverse, bool dont_loop);
+  // Returns the next focusable view. Traversal starts at |starting_view|. If
+  // |starting_view| is NULL |starting_widget| is consuled to determine which
+  // Widget to start from. See
+  // WidgetDelegate::ShouldAdvanceFocusToTopLevelWidget() for details. If both
+  // |starting_view| and |starting_widget| are NULL, traversal starts at
+  // |widget_|.
+  View* GetNextFocusableView(View* starting_view,
+                             Widget* starting_widget,
+                             bool reverse,
+                             bool dont_loop);
 
+ private:
   // Returns the focusable view found in the FocusTraversable specified starting
   // at the specified view. This traverses down along the FocusTraversable
   // hierarchy.

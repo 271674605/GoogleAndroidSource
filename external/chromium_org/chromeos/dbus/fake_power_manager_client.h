@@ -7,7 +7,10 @@
 
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/observer_list.h"
 #include "chromeos/dbus/power_manager/policy.pb.h"
+#include "chromeos/dbus/power_manager/suspend.pb.h"
 #include "chromeos/dbus/power_manager_client.h"
 
 namespace chromeos {
@@ -20,7 +23,22 @@ class FakePowerManagerClient : public PowerManagerClient {
   FakePowerManagerClient();
   virtual ~FakePowerManagerClient();
 
-  // PowerManagerClient overrides.
+  power_manager::PowerManagementPolicy& policy() { return policy_; }
+  int num_request_restart_calls() const {
+    return num_request_restart_calls_;
+  }
+  int num_set_policy_calls() const {
+    return num_set_policy_calls_;
+  }
+  int num_set_is_projecting_calls() const {
+    return num_set_is_projecting_calls_;
+  }
+  bool is_projecting() const {
+    return is_projecting_;
+  }
+
+  // PowerManagerClient overrides
+  virtual void Init(dbus::Bus* bus) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual bool HasObserver(Observer* observer) OVERRIDE;
@@ -35,7 +53,6 @@ class FakePowerManagerClient : public PowerManagerClient {
   virtual void RequestStatusUpdate() OVERRIDE;
   virtual void RequestRestart() OVERRIDE;
   virtual void RequestShutdown() OVERRIDE;
-  virtual void RequestIdleNotification(int64 threshold_secs) OVERRIDE;
   virtual void NotifyUserActivity(
       power_manager::UserActivityType type) OVERRIDE;
   virtual void NotifyVideoActivity(bool is_fullscreen) OVERRIDE;
@@ -43,18 +60,30 @@ class FakePowerManagerClient : public PowerManagerClient {
       const power_manager::PowerManagementPolicy& policy) OVERRIDE;
   virtual void SetIsProjecting(bool is_projecting) OVERRIDE;
   virtual base::Closure GetSuspendReadinessCallback() OVERRIDE;
+  virtual int GetNumPendingSuspendReadinessCallbacks() OVERRIDE;
 
-  power_manager::PowerManagementPolicy& get_policy() { return policy_; }
-
-  // Returns how many times RequestRestart() was called.
-  int request_restart_call_count() const {
-    return request_restart_call_count_;
-  }
+  // Emulates the power manager announcing that the system is starting or
+  // completing a suspend attempt.
+  void SendSuspendImminent();
+  void SendSuspendDone();
 
  private:
+  ObserverList<Observer> observers_;
+
+  // Last policy passed to SetPolicy().
   power_manager::PowerManagementPolicy policy_;
 
-  int request_restart_call_count_;
+  // Number of times that RequestRestart() has been called.
+  int num_request_restart_calls_;
+
+  // Number of times that SetPolicy() has been called.
+  int num_set_policy_calls_;
+
+  // Count the number of times SetIsProjecting() has been called.
+  int num_set_is_projecting_calls_;
+
+  // Last projecting state set in SetIsProjecting().
+  bool is_projecting_;
 
   DISALLOW_COPY_AND_ASSIGN(FakePowerManagerClient);
 };

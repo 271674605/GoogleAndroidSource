@@ -9,6 +9,11 @@
 #include "net/base/completion_callback.h"
 #include "webkit/browser/webkit_storage_browser_export.h"
 
+namespace base {
+class FilePath;
+class TaskRunner;
+}
+
 namespace net {
 class IOBuffer;
 }
@@ -16,8 +21,18 @@ class IOBuffer;
 namespace fileapi {
 
 // A generic interface for writing to a file-like object.
-class WEBKIT_STORAGE_BROWSER_EXPORT_PRIVATE FileStreamWriter {
+class FileStreamWriter {
  public:
+  enum OpenOrCreate { OPEN_EXISTING_FILE, CREATE_NEW_FILE };
+
+  // Creates a writer for the existing file in the path |file_path| starting
+  // from |initial_offset|. Uses |task_runner| for async file operations.
+  WEBKIT_STORAGE_BROWSER_EXPORT static FileStreamWriter* CreateForLocalFile(
+      base::TaskRunner* task_runner,
+      const base::FilePath& file_path,
+      int64 initial_offset,
+      OpenOrCreate open_or_create);
+
   // Closes the file. If there's an in-flight operation, it is canceled (i.e.,
   // the callback function associated with the operation is not called).
   virtual ~FileStreamWriter() {}

@@ -15,7 +15,6 @@
 #include "ui/gfx/image/image_skia.h"
 
 namespace ash {
-namespace internal {
 
 // PowerStatus is a singleton that receives updates about the system's
 // power status from chromeos::PowerManagerClient and makes the information
@@ -62,6 +61,9 @@ class ASH_EXPORT PowerStatus : public chromeos::PowerManagerClient::Observer {
   static bool ShouldDisplayBatteryTime(const base::TimeDelta& time);
 
   // Copies the hour and minute components of |time| to |hours| and |minutes|.
+  // The minute component is rounded rather than truncated: a |time| value
+  // corresponding to 92 seconds will produce a |minutes| value of 2, for
+  // example.
   static void SplitTimeIntoHoursAndMinutes(const base::TimeDelta& time,
                                            int* hours,
                                            int* minutes);
@@ -120,6 +122,9 @@ class ASH_EXPORT PowerStatus : public chromeos::PowerManagerClient::Observer {
   // charging rate) is connected.
   bool IsUsbChargerConnected() const;
 
+  // Returns true if an original spring charger is connected.
+  bool IsOriginalSpringChargerConnected() const;
+
   // Returns the image that should be shown for the battery's current state.
   gfx::ImageSkia GetBatteryImage(IconSet icon_set) const;
 
@@ -146,7 +151,6 @@ class ASH_EXPORT PowerStatus : public chromeos::PowerManagerClient::Observer {
   DISALLOW_COPY_AND_ASSIGN(PowerStatus);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_CHROMEOS_POWER_POWER_STATUS_H_

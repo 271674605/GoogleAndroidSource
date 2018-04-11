@@ -9,6 +9,7 @@ TBLGEN_TABLES := \
   AttrList.inc \
   Attrs.inc \
   AttrParsedAttrList.inc \
+  AttrVisitor.inc \
   CC1Options.inc \
   CommentCommandList.inc \
   CommentNodes.inc \
@@ -43,13 +44,13 @@ clang_frontend_SRC_FILES := \
   LangStandards.cpp \
   LayoutOverrideSource.cpp \
   LogDiagnosticPrinter.cpp \
+  ModuleDependencyCollector.cpp \
   MultiplexConsumer.cpp \
   PrintPreprocessedOutput.cpp \
   SerializedDiagnosticPrinter.cpp \
   TextDiagnostic.cpp \
   TextDiagnosticBuffer.cpp \
   TextDiagnosticPrinter.cpp \
-  Warnings.cpp \
   VerifyDiagnosticConsumer.cpp
 
 LOCAL_SRC_FILES := $(clang_frontend_SRC_FILES)

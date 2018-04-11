@@ -11,9 +11,7 @@
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/view.h"
 
-namespace chrome {
 class BookmarkBarInstructionsDelegate;
-}
 
 namespace views {
 class Label;
@@ -30,15 +28,15 @@ class BookmarkBarInstructionsView : public views::View,
                                     public views::ContextMenuController {
  public:
   explicit BookmarkBarInstructionsView(
-      chrome::BookmarkBarInstructionsDelegate* delegate);
+      BookmarkBarInstructionsDelegate* delegate);
 
   // views::View overrides.
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
   virtual void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
 
   // views::LinkListener overrides.
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
@@ -50,7 +48,7 @@ class BookmarkBarInstructionsView : public views::View,
 
   void UpdateColors();
 
-  chrome::BookmarkBarInstructionsDelegate* delegate_;
+  BookmarkBarInstructionsDelegate* delegate_;
 
   views::Label* instructions_;
   views::Link* import_link_;

@@ -23,11 +23,14 @@ package android.tests.getinfo;
  */
 public interface DeviceInfoConstants {
 
+    public static final String OPEN_GL_EXTENSIONS = "openGlExtensions";
     public static final String OPEN_GL_COMPRESSED_TEXTURE_FORMATS =
             "openGlCompressedTextureFormats";
     public static final String SYS_LIBRARIES = "systemlibraries";
     public static final String PARTITIONS = "partitions";
     public static final String OPEN_GL_ES_VERSION = "openGlEsVersion";
+    public static final String GRAPHICS_VENDOR = "graphicsVendor";
+    public static final String GRAPHICS_RENDERER = "graphicsRenderer";
     public static final String PROCESSES = "processes";
     public static final String FEATURES = "features";
     public static final String PHONE_NUMBER = "subscriberId";
@@ -48,6 +51,9 @@ public interface DeviceInfoConstants {
     public static final String VERSION_RELEASE = "buildVersion";
     public static final String BUILD_ABI = "build_abi";
     public static final String BUILD_ABI2 = "build_abi2";
+    public static final String BUILD_ABIS = "build_abis";
+    public static final String BUILD_ABIS_32 = "build_abis_32";
+    public static final String BUILD_ABIS_64 = "build_abis_64";
     public static final String BUILD_FINGERPRINT = "build_fingerprint";
     public static final String BUILD_TYPE = "build_type";
     public static final String BUILD_MODEL = "build_model";

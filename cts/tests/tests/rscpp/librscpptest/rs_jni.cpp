@@ -29,31 +29,58 @@
 
 using namespace android::RSC;
 
+/*returns an addr aligned to the byte boundary specified by align*/
+#define align_addr(addr,align) (void *)(((size_t)(addr) + ((align) - 1)) & (size_t) - (align))
+#define ADDRESS_STORAGE_SIZE sizeof(size_t)
+
+void * aligned_alloc(size_t align, size_t size) {
+    void * addr, * x = NULL;
+    addr = malloc(size + align - 1 + ADDRESS_STORAGE_SIZE);
+    if (addr) {
+        x = align_addr((unsigned char *) addr + ADDRESS_STORAGE_SIZE, (int) align);
+        /* save the actual malloc address */
+        ((size_t *) x)[-1] = (size_t) addr;
+    }
+    return x;
+}
+
+void aligned_free(void * memblk) {
+    if (memblk) {
+        void * addr = (void *) (((size_t *) memblk)[-1]);
+        free(addr);
+    }
+}
+
 extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RSInitTest_initTest(JNIEnv * env,
-                                                                               jclass obj)
+                                                                                 jclass obj,
+                                                                                 jstring pathObj)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     bool r = true;
     for (int i = 0; i < 1000; i++) {
         sp<RS> rs = new RS();
-        r &= rs->init();
+        r &= rs->init(path);
         LOGE("Native iteration %i, returned %i", i, (int)r);
     }
+    env->ReleaseStringUTFChars(pathObj, path);
     return r;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RSBlurTest_blurTest(JNIEnv * env,
                                                                                  jclass obj,
+                                                                                 jstring pathObj,
                                                                                  jint X,
                                                                                  jint Y,
                                                                                  jbyteArray inputByteArray,
                                                                                  jbyteArray outputByteArray,
                                                                                  jboolean singleChannel)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e;
     if (singleChannel) {
@@ -75,24 +102,26 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RSBlurTest_blurTest
 
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_android_cts_rscpp_RSConvolveTest_convolveTest(JNIEnv * env, jclass obj, jint X,
-                                                   jint Y, jbyteArray inputByteArray,
+Java_android_cts_rscpp_RSConvolveTest_convolveTest(JNIEnv * env, jclass obj, jstring pathObj,
+                                                   jint X, jint Y, jbyteArray inputByteArray,
                                                    jbyteArray outputByteArray,
                                                    jfloatArray coeffArray,
                                                    jboolean is3x3)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jfloat * coeffs = env->GetFloatArrayElements(coeffArray, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e = Element::A_8(rs);
 
@@ -119,22 +148,25 @@ Java_android_cts_rscpp_RSConvolveTest_convolveTest(JNIEnv * env, jclass obj, jin
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
     env->ReleaseFloatArrayElements(coeffArray, coeffs, JNI_ABORT);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RSLUTTest_lutTest(JNIEnv * env,
                                                                                jclass obj,
+                                                                               jstring pathObj,
                                                                                jint X,
                                                                                jint Y,
                                                                                jbyteArray inputByteArray,
                                                                                jbyteArray outputByteArray)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e = Element::RGBA_8888(rs);
 
@@ -156,12 +188,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RSLUTTest_lutTest(J
 
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RS3DLUTTest_lutTest(JNIEnv * env,
                                                                                  jclass obj,
+                                                                                 jstring pathObj,
                                                                                  jint X,
                                                                                  jint Y,
                                                                                  jint lutSize,
@@ -169,12 +203,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RS3DLUTTest_lutTest
                                                                                  jbyteArray inputByteArray2,
                                                                                  jbyteArray outputByteArray)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * input2 = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray2, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e = Element::RGBA_8888(rs);
 
@@ -200,23 +235,25 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_cts_rscpp_RS3DLUTTest_lutTest
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(inputByteArray2, input2, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_android_cts_rscpp_RSColorMatrixTest_colorMatrixTest(JNIEnv * env, jclass obj, jint X,
-                                                         jint Y, jbyteArray inputByteArray,
+Java_android_cts_rscpp_RSColorMatrixTest_colorMatrixTest(JNIEnv * env, jclass obj, jstring pathObj,
+                                                         jint X, jint Y, jbyteArray inputByteArray,
                                                          jbyteArray outputByteArray,
                                                          jfloatArray coeffArray,
                                                          jint optionFlag)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jfloat * coeffs = env->GetFloatArrayElements(coeffArray, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e = Element::RGBA_8888(rs);
 
@@ -248,21 +285,23 @@ Java_android_cts_rscpp_RSColorMatrixTest_colorMatrixTest(JNIEnv * env, jclass ob
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
     env->ReleaseFloatArrayElements(coeffArray, coeffs, JNI_ABORT);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_android_cts_rscpp_RSBlendTest_blendTest(JNIEnv * env, jclass obj, jint X,
-                                             jint Y, jbyteArray inputByteArray,
+Java_android_cts_rscpp_RSBlendTest_blendTest(JNIEnv * env, jclass obj, jstring pathObj,
+                                             jint X, jint Y, jbyteArray inputByteArray,
                                              jbyteArray outputByteArray,
                                              jint optionFlag)
 {
+    const char * path = env->GetStringUTFChars(pathObj, NULL);
     jbyte * input = (jbyte *) env->GetPrimitiveArrayCritical(inputByteArray, 0);
     jbyte * output = (jbyte *) env->GetPrimitiveArrayCritical(outputByteArray, 0);
 
     sp<RS> rs = new RS();
-    rs->init();
+    rs->init(path);
 
     sp<const Element> e = Element::RGBA_8888(rs);
 
@@ -327,7 +366,9 @@ Java_android_cts_rscpp_RSBlendTest_blendTest(JNIEnv * env, jclass obj, jint X,
 
     env->ReleasePrimitiveArrayCritical(inputByteArray, input, 0);
     env->ReleasePrimitiveArrayCritical(outputByteArray, output, 0);
+    env->ReleaseStringUTFChars(pathObj, path);
     return (rs->getError() == RS_SUCCESS);
 
 }
+
 

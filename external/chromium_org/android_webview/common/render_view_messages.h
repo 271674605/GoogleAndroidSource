@@ -52,10 +52,10 @@ IPC_MESSAGE_ROUTED2(AwViewMsg_DoHitTest,
                     int /* view_x */,
                     int /* view_y */)
 
-// Sets the zoom level for text only. Used in layout modes other than
+// Sets the zoom factor for text only. Used in layout modes other than
 // Text Autosizing.
-IPC_MESSAGE_ROUTED1(AwViewMsg_SetTextZoomLevel,
-                    double /* zoom_level */)
+IPC_MESSAGE_ROUTED1(AwViewMsg_SetTextZoomFactor,
+                    float /* zoom_factor */)
 
 // Resets WebKit WebView scrolling and scale state. We need to send this
 // message whenever we want to guarantee that page's scale will be
@@ -66,11 +66,6 @@ IPC_MESSAGE_ROUTED0(AwViewMsg_ResetScrollAndScaleState)
 // the meta viewport tag.
 IPC_MESSAGE_ROUTED1(AwViewMsg_SetInitialPageScale,
                     double /* page_scale_factor */)
-
-// Makes the WebKit::WebView use the given size for layout regardless of what
-// the size of the RenderWidget or viewport settings are.
-IPC_MESSAGE_ROUTED1(AwViewMsg_SetFixedLayoutSize,
-                    gfx::Size /* size */)
 
 // Sets the base background color for this view.
 IPC_MESSAGE_ROUTED1(AwViewMsg_SetBackgroundColor,
@@ -100,12 +95,18 @@ IPC_MESSAGE_ROUTED1(AwViewHostMsg_PageScaleFactorChanged,
 IPC_MESSAGE_ROUTED1(AwViewHostMsg_OnContentsSizeChanged,
                     gfx::Size /* contents_size */)
 
-// Sent when there is a top level navigation. Returning true means
-// the application will handle this request and so will cancel the
-// navigation within Blink. The view id is used to identify the correct
-// WebContents. When a pop up is involved, the view id indicates the
-// id of the opener view and not the opened one.
+// Sent immediately before a top level navigation is initiated within Blink.
+// There are some exlusions, the most important ones are it is not sent
+// when creating a popup window, and not sent for application initiated
+// navigations. See AwContentRendererClient::HandleNavigation for all
+// cornercases. This is sent before updating the NavigationController state
+// or creating a URLRequest for the main frame resource.
 IPC_SYNC_MESSAGE_CONTROL2_1(AwViewHostMsg_ShouldOverrideUrlLoading,
-                            int /* view id */,
-                            string16 /* in - url */,
+                            int /* render_frame_id id */,
+                            base::string16 /* in - url */,
                             bool /* out - result */)
+
+// Sent when a subframe is created.
+IPC_MESSAGE_CONTROL2(AwViewHostMsg_SubFrameCreated,
+                     int /* parent_render_frame_id */,
+                     int /* child_render_frame_id */)

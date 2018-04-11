@@ -16,13 +16,11 @@
 
 package com.android.camera.data;
 
-import android.app.Activity;
-import android.content.ContentResolver;
 import android.content.Context;
-import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.view.View;
-
-import com.android.camera.ui.FilmStripView;
+import com.android.camera.debug.Log;
+import com.android.camera.filmstrip.ImageData;
 
 import java.util.Comparator;
 
@@ -33,14 +31,17 @@ import java.util.Comparator;
  * all the members need to be final, and there is no setter. In this way, we
  * can guarantee thread safety for LocalData.
  */
-public interface LocalData extends FilmStripView.ImageData {
-    static final String TAG = "CAM_LocalData";
+public interface LocalData extends ImageData {
+    static final Log.Tag TAG = new Log.Tag("LocalData");
 
     public static final String MIME_TYPE_JPEG = "image/jpeg";
 
-    public static final int ACTION_NONE = 0;
-    public static final int ACTION_PLAY = 1;
-    public static final int ACTION_DELETE = (1 << 1);
+    // Data actions.
+    public static final int DATA_ACTION_NONE = 0;
+    public static final int DATA_ACTION_PLAY = 1;
+    public static final int DATA_ACTION_DELETE = (1 << 1);
+    public static final int DATA_ACTION_EDIT = (1 << 2);
+    public static final int DATA_ACTION_SHARE = (1 << 3);
 
     // Local data types. Returned by getLocalDataType().
     /**
@@ -60,26 +61,48 @@ public interface LocalData extends FilmStripView.ImageData {
      */
     public static final int LOCAL_VIDEO            = 4;
     /**
-     * Constant for denoting a still image, with valid PhotoSphere metadata.
-     */
-    public static final int LOCAL_PHOTO_SPHERE     = 5;
-    /**
-     * Constant for denoting a still image, with valid 360 PhotoSphere metadata.
-     */
-    public static final int LOCAL_360_PHOTO_SPHERE = 6;
-    /**
      * Constant for denoting an in-progress item which should not be touched
      * before the related task is done. Data of this type should not support
      * any actions like sharing, editing, etc.
      */
-    public static final int LOCAL_IN_PROGRESS_DATA = 7;
+    public static final int LOCAL_IN_PROGRESS_DATA = 5;
 
-    View getView(Activity a, int width, int height, Drawable placeHolder,
-            LocalDataAdapter adapter);
+    // TODO: Re-think how the in-progress logic works. We shouldn't need to pass
+    // in the information about whether this session is in progress.
+
+    /**
+     * Creates View to represent media.
+     *
+     * @param context The {@link android.content.Context} to create the view.
+     * @param thumbWidth Width in pixels of the suggested zoomed out view/image size.
+     * @param thumbHeight Height in pixels of the suggested zoomed out view/image size.
+     * @param adapter Data adapter for this data item.
+     */
+    View getView(Context context, View recycled, int thumbWidth, int thumbHeight,
+        int placeHolderResourceId, LocalDataAdapter adapter, boolean isInProgress);
+
+    /** Returns a unique identifier for the view created by this data so that the view
+     * can be reused.
+     *
+     * @see android.widget.BaseAdapter#getItemViewType(int)
+     */
+    LocalDataViewType getItemViewType();
+
+   /**
+     * Request resize of View created by getView().
+     *
+     * @param context The {@link android.content.Context} to create the view.
+     * @param thumbWidth Width in pixels of the suggested zoomed out view/image size.
+     * @param thumbHeight Height in pixels of the suggested zoomed out view/image size.
+     * @param view View created by getView();
+     * @param adapter Data adapter for this data item.
+     */
+    public void loadFullImage(Context context, int thumbWidth, int thumbHeight, View view,
+        LocalDataAdapter adapter);
 
     /**
      * Gets the date when this data is created. The returned date is also used
-     * for sorting data.
+     * for sorting data. Value is epoch milliseconds.
      *
      * @return The date when this data is created.
      * @see {@link NewestFirstComparator}
@@ -88,7 +111,7 @@ public interface LocalData extends FilmStripView.ImageData {
 
     /**
      * Gets the date when this data is modified. The returned date is also used
-     * for sorting data.
+     * for sorting data. Value is epoch seconds.
      *
      * @return The date when this data is modified.
      * @see {@link NewestFirstComparator}
@@ -109,19 +132,6 @@ public interface LocalData extends FilmStripView.ImageData {
     /** Removes the data from the storage if possible. */
     boolean delete(Context c);
 
-    /**
-     * Rotate the image in 90 degrees. This is a no-op for non-image.
-     *
-     * @param context Used to update the content provider when rotation is done.
-     * @param adapter Used to update the view.
-     * @param currentDataId Used to update the view.
-     * @param clockwise True if the rotation goes clockwise.
-     *
-     * @return Whether the rotation is supported.
-     */
-    boolean rotate90Degrees(Context context, LocalDataAdapter adapter,
-            int currentDataId, boolean clockwise);
-
     void onFullScreen(boolean fullScreen);
 
     /** Returns {@code true} if it allows swipe to filmstrip in full screen. */
@@ -141,7 +151,8 @@ public interface LocalData extends FilmStripView.ImageData {
     String getMimeType();
 
     /**
-     * Return media data (such as EXIF) for the item.
+     * @return The media details (such as EXIF) for the data. {@code null} if
+     * not available for the data.
      */
     MediaDetails getMediaDetails(Context context);
 
@@ -150,7 +161,8 @@ public interface LocalData extends FilmStripView.ImageData {
      *
      * @return The local data type. Could be one of the following:
      * {@code LOCAL_CAMERA_PREVIEW}, {@code LOCAL_VIEW}, {@code LOCAL_IMAGE},
-     * {@code LOCAL_VIDEO}, {@code LOCAL_PHOTO_SPHERE}, and {@code LOCAL_360_PHOTO_SPHERE}
+     * {@code LOCAL_VIDEO}, {@code LOCAL_PHOTO_SPHERE},
+     * {@code LOCAL_360_PHOTO_SPHERE}, and {@code LOCAL_RGBZ}
      */
     int getLocalDataType();
 
@@ -162,10 +174,34 @@ public interface LocalData extends FilmStripView.ImageData {
     /**
      * Refresh the data content.
      *
-     * @param resolver {@link ContentResolver} to refresh the data.
+     * @param context The Android {@link android.content.Context}.
      * @return A new LocalData object if success, null otherwise.
      */
-    LocalData refresh(ContentResolver resolver);
+    LocalData refresh(Context context);
+
+    /**
+     * @return the {@link android.content.ContentResolver} Id of the data.
+     */
+    long getContentId();
+
+    /**
+     * @return the metadata. Should never be {@code null}.
+     */
+    Bundle getMetadata();
+
+    /**
+     * Any media store attribute that can potentially change the local data
+     * should be included in this signature, primarily oriented at detecting
+     * edits.
+     *
+     * @return A string identifying the set of changeable attributes.
+     */
+    String getSignature();
+
+    /**
+     * @return whether the metadata is updated.
+     */
+    public boolean isMetadataUpdated();
 
     static class NewestFirstComparator implements Comparator<LocalData> {
 
@@ -193,10 +229,4 @@ public interface LocalData extends FilmStripView.ImageData {
             return cmp;
         }
     }
-
-    /**
-     * @return the {@link android.content.ContentResolver} Id of the data.
-     */
-    long getContentId();
 }
-

@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_EXTENSIONS_API_TOP_SITES_TOP_SITES_API_H_
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/history/history_types.h"
 
 namespace extensions {
 
-class TopSitesGetFunction : public AsyncExtensionFunction {
+class TopSitesGetFunction : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("topSites.get", TOPSITES_GET)
 
@@ -21,7 +21,7 @@ class TopSitesGetFunction : public AsyncExtensionFunction {
   virtual ~TopSitesGetFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void OnMostVisitedURLsAvailable(const history::MostVisitedURLList& data);

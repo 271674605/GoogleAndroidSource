@@ -8,28 +8,28 @@
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-namespace chrome {
-
 class MediaGalleriesDialogControllerMock
     : public MediaGalleriesDialogController {
  public:
-  explicit MediaGalleriesDialogControllerMock(
-      const extensions::Extension& extension);
+  explicit MediaGalleriesDialogControllerMock();
   virtual ~MediaGalleriesDialogControllerMock();
 
-  MOCK_CONST_METHOD0(GetHeader, string16());
-  MOCK_CONST_METHOD0(GetSubtext, string16());
-  MOCK_CONST_METHOD0(HasPermittedGalleries, bool());
-  MOCK_CONST_METHOD0(AttachedPermissions, GalleryPermissionsVector());
-  MOCK_CONST_METHOD0(UnattachedPermissions, GalleryPermissionsVector());
-  MOCK_METHOD0(web_contents, content::WebContents*());
+  MOCK_CONST_METHOD0(GetHeader, base::string16());
+  MOCK_CONST_METHOD0(GetSubtext, base::string16());
+  MOCK_CONST_METHOD0(IsAcceptAllowed, bool());
+  MOCK_CONST_METHOD1(ShouldShowFolderViewer, bool(const Entry&));
+  MOCK_CONST_METHOD0(GetSectionHeaders, std::vector<base::string16>());
+  MOCK_CONST_METHOD1(GetSectionEntries, Entries(size_t));
+  MOCK_CONST_METHOD0(GetAuxiliaryButtonText, base::string16());
+  MOCK_METHOD0(DidClickAuxiliaryButton, void());
 
-  MOCK_METHOD0(OnAddFolderClicked, void());
-  MOCK_METHOD2(DidToggleGalleryId, void(MediaGalleryPrefId pref_id,
-                                        bool enabled));
+  MOCK_METHOD2(DidToggleEntry, void(MediaGalleryPrefId id, bool selected));
+  MOCK_METHOD1(DidClickOpenFolderViewer, void(MediaGalleryPrefId id));
+  MOCK_METHOD1(DidForgetEntry, void(MediaGalleryPrefId id));
+  MOCK_CONST_METHOD0(GetAcceptButtonText, base::string16());
   MOCK_METHOD1(DialogFinished, void(bool));
+  MOCK_METHOD1(GetContextMenu, ui::MenuModel*(MediaGalleryPrefId id));
+  MOCK_METHOD0(WebContents, content::WebContents*());
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_MEDIA_GALLERIES_DIALOG_CONTROLLER_MOCK_H_

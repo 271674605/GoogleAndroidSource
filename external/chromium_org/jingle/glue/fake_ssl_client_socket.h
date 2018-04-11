@@ -36,8 +36,7 @@ namespace jingle_glue {
 
 class FakeSSLClientSocket : public net::StreamSocket {
  public:
-  // Takes ownership of |transport_socket|.
-  explicit FakeSSLClientSocket(net::StreamSocket* transport_socket);
+  explicit FakeSSLClientSocket(scoped_ptr<net::StreamSocket> transport_socket);
 
   virtual ~FakeSSLClientSocket();
 
@@ -50,8 +49,8 @@ class FakeSSLClientSocket : public net::StreamSocket {
                    const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
                     const net::CompletionCallback& callback) OVERRIDE;
-  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
-  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+  virtual int SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual int SetSendBufferSize(int32 size) OVERRIDE;
   virtual int Connect(const net::CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;

@@ -60,7 +60,7 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
 
     static final int DEFAULT_DISCOVERABLE_TIMEOUT = DISCOVERABLE_TIMEOUT_TWO_MINUTES;
 
-    private final Context mContext;
+    private Context mContext;
     private final Handler mUiHandler;
     private final Preference mDiscoveryPreference;
 
@@ -92,9 +92,8 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
         }
     };
 
-    BluetoothDiscoverableEnabler(Context context, LocalBluetoothAdapter adapter,
+    BluetoothDiscoverableEnabler(LocalBluetoothAdapter adapter,
             Preference discoveryPreference) {
-        mContext = context;
         mUiHandler = new Handler();
         mLocalAdapter = adapter;
         mDiscoveryPreference = discoveryPreference;
@@ -102,9 +101,13 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
         discoveryPreference.setPersistent(false);
     }
 
-    public void resume() {
+    public void resume(Context context) {
         if (mLocalAdapter == null) {
             return;
+        }
+
+        if (mContext != context) {
+            mContext = context;
         }
 
         IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
@@ -143,7 +146,10 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
 
             if (timeout > 0) {
                 BluetoothDiscoverableTimeoutReceiver.setDiscoverableAlarm(mContext, endTimestamp);
+            } else {
+                BluetoothDiscoverableTimeoutReceiver.cancelDiscoverableAlarm(mContext);
             }
+
         } else {
             mLocalAdapter.setScanMode(BluetoothAdapter.SCAN_MODE_CONNECTABLE);
             BluetoothDiscoverableTimeoutReceiver.cancelDiscoverableAlarm(mContext);

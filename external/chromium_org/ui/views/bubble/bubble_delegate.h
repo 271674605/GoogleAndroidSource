@@ -6,17 +6,14 @@
 #define UI_VIEWS_BUBBLE_BUBBLE_DELEGATE_H_
 
 #include "base/gtest_prod_util.h"
-#include "ui/base/animation/animation_delegate.h"
 #include "ui/views/bubble/bubble_border.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace gfx {
+class FontList;
 class Rect;
-}
-
-namespace ui {
-class SlideAnimation;
 }
 
 namespace views {
@@ -25,10 +22,7 @@ class BubbleFrameView;
 
 // BubbleDelegateView creates frame and client views for bubble Widgets.
 // BubbleDelegateView itself is the client's contents view.
-//
-///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
-                                        public ui::AnimationDelegate,
                                         public WidgetObserver {
  public:
   BubbleDelegateView();
@@ -38,16 +32,20 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Create and initialize the bubble Widget(s) with proper bounds.
   static Widget* CreateBubble(BubbleDelegateView* bubble_delegate);
 
-  // WidgetDelegate overrides:
+  // WidgetDelegateView overrides:
   virtual BubbleDelegateView* AsBubbleDelegate() OVERRIDE;
   virtual bool CanActivate() const OVERRIDE;
   virtual bool ShouldShowCloseButton() const OVERRIDE;
   virtual View* GetContentsView() OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
 
   // WidgetObserver overrides:
   virtual void OnWidgetDestroying(Widget* widget) OVERRIDE;
-  virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) OVERRIDE;
+  virtual void OnWidgetVisibilityChanging(Widget* widget, bool visible)
+      OVERRIDE;
+  virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible)
+      OVERRIDE;
   virtual void OnWidgetActivationChanged(Widget* widget, bool active) OVERRIDE;
   virtual void OnWidgetBoundsChanged(Widget* widget,
                                      const gfx::Rect& new_bounds) OVERRIDE;
@@ -58,10 +56,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool close_on_deactivate() const { return close_on_deactivate_; }
   void set_close_on_deactivate(bool close) { close_on_deactivate_ = close; }
 
-  View* anchor_view() const { return anchor_view_; }
+  View* GetAnchorView() const;
   Widget* anchor_widget() const { return anchor_widget_; }
 
-  // The anchor rect is used in the absence of an anchor view.
+  // The anchor rect is used in the absence of an assigned anchor view.
   const gfx::Rect& anchor_rect() const { return anchor_rect_; }
 
   BubbleBorder::Arrow arrow() const { return arrow_; }
@@ -97,18 +95,12 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool adjust_if_offscreen() const { return adjust_if_offscreen_; }
   void set_adjust_if_offscreen(bool adjust) { adjust_if_offscreen_ = adjust; }
 
-  bool move_with_anchor() const { return move_with_anchor_; }
-  void set_move_with_anchor(bool move) { move_with_anchor_ = move; }
-
   // Get the arrow's anchor rect in screen space.
-  virtual gfx::Rect GetAnchorRect();
+  virtual gfx::Rect GetAnchorRect() const;
 
-  // Fade the bubble in or out by animation Widget transparency.
-  // Fade-in calls Widget::Show; fade-out calls Widget::Close upon completion.
-  void StartFade(bool fade_in);
-
-  // Restores bubble opacity to its value before StartFade() was called.
-  void ResetFade();
+  // Allows delegates to provide custom parameters before widget initialization.
+  virtual void OnBeforeBubbleWidgetInit(Widget::InitParams* params,
+                                        Widget* widget) const;
 
   // Sets the bubble alignment relative to the anchor. This may only be called
   // after calling CreateBubble.
@@ -117,32 +109,32 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Sets the bubble arrow paint type.
   void SetArrowPaintType(BubbleBorder::ArrowPaintType paint_type);
 
-  // Call this method when the anchor view bounds have changed to reposition
-  // the bubble. The bubble is automatically repositioned when the anchor view
+  // Call this method when the anchor bounds have changed to reposition the
+  // bubble. The bubble is automatically repositioned when the anchor view
   // bounds change as a result of the widget's bounds changing.
-  void OnAnchorViewBoundsChanged();
+  void OnAnchorBoundsChanged();
 
  protected:
   // Get bubble bounds from the anchor rect and client view's preferred size.
   virtual gfx::Rect GetBubbleBounds();
 
-  // Returns the duration in milliseconds for the fade animation.
-  virtual int GetFadeDuration();
+  // Return a FontList to use for the title of the bubble.
+  // (The default is MediumFont).
+  virtual const gfx::FontList& GetTitleFontList() const;
 
   // View overrides:
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
 
-  // ui::AnimationDelegate overrides:
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
-
   // Perform view initialization on the contents for bubble sizing.
   virtual void Init();
 
-  // Set the anchor view or rect; set these before CreateBubble or Show.
-  void set_anchor_view(View* anchor_view) { anchor_view_ = anchor_view; }
-  void set_anchor_rect(const gfx::Rect& rect) { anchor_rect_ = rect; }
+  // Sets the anchor view or rect and repositions the bubble. Note that if a
+  // valid view gets passed, the anchor rect will get ignored. If the view gets
+  // deleted, but no new view gets set, the last known anchor postion will get
+  // returned.
+  void SetAnchorView(View* anchor_view);
+  void SetAnchorRect(const gfx::Rect& rect);
 
   // Resize and potentially move the bubble to fit the content's preferred size.
   void SizeToContents();
@@ -150,33 +142,30 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   BubbleFrameView* GetBubbleFrameView() const;
 
  private:
+  friend class BubbleBorderDelegate;
+  friend class BubbleWindowTargeter;
+
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, NonClientHitTest);
 
   // Update the bubble color from |theme|, unless it was explicitly set.
   void UpdateColorsFromTheme(const ui::NativeTheme* theme);
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // Get bounds for the Windows-only widget that hosts the bubble's contents.
-  gfx::Rect GetBubbleClientBounds() const;
-#endif
-
-  // Fade animation for bubble.
-  scoped_ptr<ui::SlideAnimation> fade_animation_;
+  // Handles widget visibility changes.
+  void HandleVisibilityChanged(Widget* widget, bool visible);
 
   // Flags controlling bubble closure on the escape key and deactivation.
   bool close_on_esc_;
   bool close_on_deactivate_;
 
-  // The view and widget to which this bubble is anchored.
-  View* anchor_view_;
+  // The view and widget to which this bubble is anchored. Since an anchor view
+  // can be deleted without notice, we store it in the ViewStorage and retrieve
+  // it from there. It will make sure that the view is still valid.
+  const int anchor_view_storage_id_;
   Widget* anchor_widget_;
 
   // The anchor rect used in the absence of an anchor view.
-  gfx::Rect anchor_rect_;
-
-  // If true, the bubble will re-anchor (and may resize) with |anchor_widget_|.
-  bool move_with_anchor_;
+  mutable gfx::Rect anchor_rect_;
 
   // The arrow's location on the bubble.
   BubbleBorder::Arrow arrow_;
@@ -193,12 +182,6 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
 
   // Insets applied to the |anchor_view_| bounds.
   gfx::Insets anchor_view_insets_;
-
-  // Original opacity of the bubble.
-  int original_opacity_;
-
-  // The widget hosting the border for this bubble (non-Aura Windows only).
-  Widget* border_widget_;
 
   // If true, the bubble does not take focus on display; default is false.
   bool use_focusless_;

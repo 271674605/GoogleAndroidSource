@@ -20,20 +20,17 @@ package com.android.mail.browse;
 import android.animation.Animator;
 import android.animation.Animator.AnimatorListener;
 import android.content.Context;
-import android.widget.AbsListView.OnScrollListener;
-import android.widget.AbsListView;
 import android.widget.FrameLayout;
 import android.widget.ListView;
 
 import com.android.mail.providers.Conversation;
 import com.android.mail.providers.Folder;
+import com.android.mail.providers.UIProvider;
 import com.android.mail.ui.AnimatedAdapter;
-import com.android.mail.ui.AnimatedAdapter.ConversationListListener;
 import com.android.mail.ui.ControllableActivity;
 import com.android.mail.ui.ConversationSelectionSet;
 
-public class SwipeableConversationItemView extends FrameLayout
-        implements ToggleableItem, OnScrollListener {
+public class SwipeableConversationItemView extends FrameLayout implements ToggleableItem {
 
     private final ConversationItemView mConversationItemView;
 
@@ -56,15 +53,20 @@ public class SwipeableConversationItemView extends FrameLayout
     }
 
     public void bind(final Conversation conversation, final ControllableActivity activity,
-            final ConversationListListener conversationListListener,
             final ConversationSelectionSet set, final Folder folder,
-            final int checkboxOrSenderImage, final boolean showAttachmentPreviews,
-            final boolean parallaxSpeedAlternative, final boolean parallaxDirectionAlternative,
-            final boolean swipeEnabled, final boolean priorityArrowsEnabled,
+            final int checkboxOrSenderImage, boolean swipeEnabled,
+            final boolean importanceMarkersEnabled, final boolean showChevronsEnabled,
             final AnimatedAdapter animatedAdapter) {
-        mConversationItemView.bind(conversation, activity, conversationListListener, set, folder,
-                checkboxOrSenderImage, showAttachmentPreviews, parallaxSpeedAlternative,
-                parallaxDirectionAlternative, swipeEnabled, priorityArrowsEnabled, animatedAdapter);
+        // Only enable delete for failed items in the Outbox.
+        // Necessary to do it here because Outbox is the only place where we selectively enable
+        // swipe on a item-by-item basis.
+        if (folder.isType(UIProvider.FolderType.OUTBOX)) {
+            swipeEnabled &=
+                    conversation.sendingState != UIProvider.ConversationSendingState.SENDING &&
+                    conversation.sendingState != UIProvider.ConversationSendingState.RETRYING;
+        }
+        mConversationItemView.bind(conversation, activity, set, folder, checkboxOrSenderImage,
+                swipeEnabled, importanceMarkersEnabled, showChevronsEnabled, animatedAdapter);
     }
 
     public void startUndoAnimation(AnimatorListener listener, boolean swipe) {
@@ -83,33 +85,11 @@ public class SwipeableConversationItemView extends FrameLayout
 
     @Override
     public boolean toggleSelectedStateOrBeginDrag() {
-        if (mConversationItemView != null) {
-            return mConversationItemView.toggleSelectedStateOrBeginDrag();
-        }
-
-        return false;
+        return mConversationItemView.toggleSelectedStateOrBeginDrag();
     }
 
     @Override
     public boolean toggleSelectedState() {
-        if (mConversationItemView != null) {
-            return mConversationItemView.toggleSelectedState();
-        }
-
-        return false;
+        return mConversationItemView.toggleSelectedState();
     }
-
-    @Override
-    public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount,
-            int totalItemCount) {
-        if (mConversationItemView != null) {
-            mConversationItemView.onScroll(view, firstVisibleItem, visibleItemCount,
-                    totalItemCount);
-        }
-    }
-
-    @Override
-    public void onScrollStateChanged(AbsListView view, int scrollState) {
-    }
-
 }

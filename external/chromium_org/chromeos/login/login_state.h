@@ -15,9 +15,10 @@ namespace chromeos {
 class CHROMEOS_EXPORT LoginState {
  public:
   enum LoggedInState {
-    LOGGED_IN_OOBE,    // Out of box experience not completed
-    LOGGED_IN_NONE,    // Not logged in
-    LOGGED_IN_ACTIVE   // A user has logged in
+    LOGGED_IN_OOBE,       // Out of box experience not completed
+    LOGGED_IN_NONE,       // Not logged in
+    LOGGED_IN_SAFE_MODE,  // Not logged in and login not allowed for non-owners
+    LOGGED_IN_ACTIVE      // A user has logged in
   };
 
   enum LoggedInUserType {
@@ -34,7 +35,7 @@ class CHROMEOS_EXPORT LoginState {
   class Observer {
    public:
     // Called when either the login state or the logged in user type changes.
-    virtual void LoggedInStateChanged(LoggedInState state) = 0;
+    virtual void LoggedInStateChanged() = 0;
 
    protected:
     virtual ~Observer() {}
@@ -50,18 +51,36 @@ class CHROMEOS_EXPORT LoginState {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Set the logged in state and user type.
+  // Sets the logged in state, user type, and primary user hash when the
+  // primary user initialy logs in. Also notifies observers.
+  void SetLoggedInStateAndPrimaryUser(
+      LoggedInState state,
+      LoggedInUserType type,
+      const std::string& primary_user_hash);
+
+  // Sets the logged in state and user type. Also notifies observers. Used
+  // in tests or situations where there is no primary user (e.g. from the
+  // login screen).
   void SetLoggedInState(LoggedInState state, LoggedInUserType type);
 
-  // Get the logged in state / user type.
-  LoggedInState GetLoggedInState() const;
+  // Gets the logged in user type.
   LoggedInUserType GetLoggedInUserType() const;
 
-  // Returns true if |logged_in_state_| is active.
+  // Returns true if a user is considered to be logged in.
   bool IsUserLoggedIn() const;
 
-  // Returns true if logged in and is a guest, retail, public, or kiosk user.
+  // Returns true if |logged_in_state_| is safe mode (i.e. the user is not yet
+  // logged in, and only the owner will be allowed to log in).
+  bool IsInSafeMode() const;
+
+  // Returns true if logged in and is a guest, retail, or public user.
   bool IsGuestUser() const;
+
+  // Returns true if logged in as a kiosk app.
+  bool IsKioskApp() const;
+
+  // Whether a network profile is created for the user.
+  bool UserHasNetworkProfile() const;
 
   // Returns true if the user is an authenticated user (i.e. non public account)
   bool IsUserAuthenticated() const;
@@ -69,6 +88,12 @@ class CHROMEOS_EXPORT LoginState {
   // Returns true if the user is authenticated by logging into Google account
   // (i.e., non public nor locally managed account).
   bool IsUserGaiaAuthenticated() const;
+
+  void set_always_logged_in(bool always_logged_in) {
+    always_logged_in_ = always_logged_in;
+  }
+
+  const std::string& primary_user_hash() const { return primary_user_hash_; }
 
  private:
   LoginState();
@@ -78,7 +103,13 @@ class CHROMEOS_EXPORT LoginState {
 
   LoggedInState logged_in_state_;
   LoggedInUserType logged_in_user_type_;
+  std::string primary_user_hash_;
   ObserverList<Observer> observer_list_;
+
+  // If true, it always thinks the current status as logged in. Set to true by
+  // default running on a Linux desktop without flags and test cases. To test
+  // behaviors with a specific login state, call set_always_logged_in(false).
+  bool always_logged_in_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginState);
 };

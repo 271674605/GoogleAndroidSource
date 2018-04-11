@@ -61,7 +61,7 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
     private CharSequence mQuotedText;
     private WebView mQuotedTextWebView;
     private ShowHideQuotedTextListener mShowHideListener;
-    private CheckBox mShowHideCheckBox;
+    private CheckBox mQuotedTextCheckBox;
     private boolean mIncludeText = true;
     private Button mRespondInlineButton;
     private RespondInlineListener mRespondInlineListener;
@@ -85,11 +85,10 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
         WebSettings settings = mQuotedTextWebView.getSettings();
         settings.setBlockNetworkLoads(true);
 
-        mShowHideCheckBox = (CheckBox) findViewById(R.id.hide_quoted_text);
-        mShowHideCheckBox.setChecked(true);
-        mShowHideCheckBox.setOnClickListener(this);
+        mQuotedTextCheckBox = (CheckBox) findViewById(R.id.hide_quoted_text);
+        mQuotedTextCheckBox.setChecked(true);
+        mQuotedTextCheckBox.setOnClickListener(this);
         sQuoteBegin = context.getResources().getString(R.string.quote_begin);
-        findViewById(R.id.hide_quoted_text_label).setOnClickListener(this);
 
 
         mRespondInlineButton = (Button) findViewById(R.id.respond_inline_button);
@@ -109,9 +108,8 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
      * @param allow
      */
     public void allowQuotedText(boolean allow) {
-        View quotedTextRow = findViewById(R.id.quoted_text_row);
-        if (quotedTextRow != null) {
-            quotedTextRow.setVisibility(allow? View.VISIBLE: View.INVISIBLE);
+        if (mQuotedTextCheckBox != null) {
+            mQuotedTextCheckBox.setVisibility(allow ? View.VISIBLE : View.INVISIBLE);
         }
     }
 
@@ -166,9 +164,7 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
         if (id == R.id.respond_inline_button) {
             respondInline();
         } else if (id == R.id.hide_quoted_text) {
-            updateCheckedState(mShowHideCheckBox.isChecked());
-        } else if (id == R.id.hide_quoted_text_label) {
-            updateCheckedState(!mShowHideCheckBox.isChecked());
+            updateCheckedState(mQuotedTextCheckBox.isChecked());
         }
     }
 
@@ -178,7 +174,7 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
      * @param checked Either true or false.
      */
     public void updateCheckedState(boolean checked) {
-        mShowHideCheckBox.setChecked(checked);
+        mQuotedTextCheckBox.setChecked(checked);
         updateQuotedTextVisibility(checked);
         if (mShowHideListener != null) {
             mShowHideListener.onShowHideQuotedText(checked);
@@ -191,13 +187,10 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
     }
 
     private void populateData() {
-        String backgroundColor = getContext().getResources().getString(
-                R.string.quoted_text_background_color_string);
         String fontColor = getContext().getResources().getString(
                 R.string.quoted_text_font_color_string);
-        String html = "<head><style type=\"text/css\">* body { background-color: "
-                + backgroundColor + "; color: " + fontColor + "; }</style></head>"
-                + mQuotedText.toString();
+        String html = "<head><style type=\"text/css\">* body { color: " +
+                fontColor + "; }</style></head>" + mQuotedText.toString();
         mQuotedTextWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
     }
 
@@ -344,6 +337,13 @@ class QuotedTextView extends LinearLayout implements OnClickListener {
         return pos >= 0;
     }
 
+    /**
+     * Returns the index of the actual quoted text and NOT the meta information such as:
+     * "On April 4, 2013 Joe Smith <jsmith@example.com> wrote:" that is part of the original
+     * message when replying and including the original text.
+     * @param text HTML text that includes quoted text.
+     * @return The offset found.
+     */
     public static int getQuotedTextOffset(String text) {
         return text.indexOf(QuotedTextView.HEADER_SEPARATOR)
                 + QuotedTextView.HEADER_SEPARATOR_LENGTH;

@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_PASSWORD_GENERATION_BUBBLE_VIEW_H_
 
 #include "base/basictypes.h"
+#include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_generation_util.h"
-#include "content/public/common/password_form.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
@@ -19,7 +19,6 @@ class PasswordGenerator;
 }
 
 namespace content {
-class PageNavigator;
 class RenderViewHost;
 }
 
@@ -29,7 +28,9 @@ class Label;
 class LabelButton;
 }
 
+namespace password_manager {
 class PasswordManager;
+}
 
 // PasswordGenerationBubbleView is a bubble used to show possible generated
 // passwords to users. It is set in the page content, anchored at |anchor_rect|.
@@ -39,24 +40,24 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
                                      public views::ButtonListener,
                                      public views::TextfieldController {
  public:
-  PasswordGenerationBubbleView(const content::PasswordForm& form,
-                               const gfx::Rect& anchor_rect,
-                               views::View* anchor_view,
-                               content::RenderViewHost* render_view_host,
-                               PasswordManager* password_manager,
-                               autofill::PasswordGenerator* password_generator,
-                               content::PageNavigator* navigator,
-                               ui::ThemeProvider* theme_provider);
+  PasswordGenerationBubbleView(
+      const autofill::PasswordForm& form,
+      const gfx::Rect& anchor_rect,
+      views::View* anchor_view,
+      content::RenderViewHost* render_view_host,
+      password_manager::PasswordManager* password_manager,
+      autofill::PasswordGenerator* password_generator,
+      ui::ThemeProvider* theme_provider);
   virtual ~PasswordGenerationBubbleView();
 
   // views::View
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
 
  private:
   // views::BubbleDelegateView
   virtual void Init() OVERRIDE;
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  virtual gfx::Rect GetAnchorRect() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
 
   // views::ButtonListener
@@ -65,7 +66,7 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
 
   // views::TextfieldController
   virtual void ContentsChanged(views::Textfield* sender,
-                               const string16& new_contents) OVERRIDE;
+                               const base::string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
                               const ui::KeyEvent& key_event) OVERRIDE;
 
@@ -80,7 +81,7 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
   views::View* textfield_wrapper_;
 
   // The form associated with the password field(s) that we are generated.
-  content::PasswordForm form_;
+  autofill::PasswordForm form_;
 
   // Location that the bubble points to
   gfx::Rect anchor_rect_;
@@ -89,14 +90,10 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
   content::RenderViewHost* render_view_host_;
 
   // PasswordManager associated with this tab.
-  PasswordManager* password_manager_;
+  password_manager::PasswordManager* password_manager_;
 
   // Object to generate passwords. The class won't take the ownership of it.
   autofill::PasswordGenerator* password_generator_;
-
-  // An object used to handle page loads that originate from link clicks
-  // within this UI.
-  content::PageNavigator* navigator_;
 
   // Theme provider used to draw the regenerate button.
   ui::ThemeProvider* theme_provider_;

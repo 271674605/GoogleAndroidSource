@@ -46,16 +46,19 @@ import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewStub;
-import android.webkit.BrowserDownloadListener;
+import android.webkit.ClientCertRequest;
 import android.webkit.ConsoleMessage;
+import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.GeolocationPermissions.Callback;
 import android.webkit.HttpAuthHandler;
+import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebBackForwardList;
-import android.webkit.WebBackForwardListClient;
 import android.webkit.WebChromeClient;
+import android.webkit.WebChromeClient.FileChooserParams;
 import android.webkit.WebHistoryItem;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebStorage;
@@ -69,11 +72,13 @@ import com.android.browser.TabControl.OnThumbnailUpdatedListener;
 import com.android.browser.homepages.HomeProvider;
 import com.android.browser.provider.SnapshotProvider.Snapshots;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.security.Principal;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.UUID;
@@ -97,6 +102,8 @@ class Tab implements PictureListener {
     private static final int MSG_CAPTURE = 42;
     private static final int CAPTURE_DELAY = 100;
     private static final int INITIAL_PROGRESS = 5;
+
+    private static final String RESTRICTED = "<html><body>not allowed</body></html>";
 
     private static Bitmap sDefaultFavicon;
 
@@ -130,6 +137,8 @@ class Tab implements PictureListener {
 
     // The Geolocation permissions prompt
     private GeolocationPermissionsPrompt mGeolocationPermissionsPrompt;
+    // The permissions prompt
+    private PermissionsPrompt mPermissionsPrompt;
     // Main WebView wrapper
     private View mContainer;
     // Main WebView
@@ -557,6 +566,29 @@ class Tab implements PictureListener {
             }
         }
 
+        /**
+         * Displays client certificate request to the user.
+         */
+        @Override
+        public void onReceivedClientCertRequest(final WebView view,
+                final ClientCertRequest request) {
+            if (!mInForeground) {
+                request.ignore();
+                return;
+            }
+            KeyChain.choosePrivateKeyAlias(
+                    mWebViewController.getActivity(), new KeyChainAliasCallback() {
+                @Override public void alias(String alias) {
+                    if (alias == null) {
+                        request.cancel();
+                        return;
+                    }
+                    new KeyChainLookup(mContext, request, alias).execute();
+                }
+            }, request.getKeyTypes(), request.getPrincipals(), request.getHost(),
+                request.getPort(), null);
+        }
+
        /**
          * Handles an HTTP authentication request.
          *
@@ -574,6 +606,24 @@ class Tab implements PictureListener {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view,
                 String url) {
+            Uri uri = Uri.parse(url);
+            if (uri.getScheme().toLowerCase().equals("file")) {
+                File file = new File(uri.getPath());
+                try {
+                    if (file.getCanonicalPath().startsWith(
+                            mContext.getApplicationContext().getApplicationInfo().dataDir)) {
+                        return new WebResourceResponse("text/html","UTF-8",
+                                new ByteArrayInputStream(RESTRICTED.getBytes("UTF-8")));
+                    }
+                } catch (Exception ex) {
+                    Log.e(LOGTAG, "Bad canonical path" + ex.toString());
+                    try {
+                        return new WebResourceResponse("text/html","UTF-8",
+                                new ByteArrayInputStream(RESTRICTED.getBytes("UTF-8")));
+                    } catch (java.io.UnsupportedEncodingException e) {
+                    }
+                }
+            }
             WebResourceResponse res = HomeProvider.shouldInterceptRequest(
                     mContext, url);
             return res;
@@ -866,6 +916,19 @@ class Tab implements PictureListener {
             }
         }
 
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            if (!mInForeground) return;
+            getPermissionsPrompt().show(request);
+        }
+
+        @Override
+        public void onPermissionRequestCanceled(PermissionRequest request) {
+            if (mInForeground && mPermissionsPrompt != null) {
+                mPermissionsPrompt.hide();
+            }
+        }
+
         /* Adds a JavaScript error message to the system log and if the JS
          * console is enabled in the about:debug options, to that console
          * also.
@@ -939,11 +1002,13 @@ class Tab implements PictureListener {
         }
 
         @Override
-        public void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType, String capture) {
+        public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback,
+            FileChooserParams params) {
             if (mInForeground) {
-                mWebViewController.openFileChooser(uploadMsg, acceptType, capture);
+                mWebViewController.showFileChooser(callback, params);
+                return true;
             } else {
-                uploadMsg.onReceiveValue(null);
+                return false;
             }
         }
 
@@ -992,6 +1057,10 @@ class Tab implements PictureListener {
         public void onReceivedSslError(WebView view, SslErrorHandler handler,
                 SslError error) {
             mClient.onReceivedSslError(view, handler, error);
+        }
+        @Override
+        public void onReceivedClientCertRequest(WebView view, ClientCertRequest request) {
+            mClient.onReceivedClientCertRequest(view, request);
         }
         @Override
         public void onReceivedHttpAuthRequest(WebView view,
@@ -1180,6 +1249,10 @@ class Tab implements PictureListener {
         // Geolocation permission requests are void.
         if (mGeolocationPermissionsPrompt != null) {
             mGeolocationPermissionsPrompt.hide();
+        }
+
+        if (mPermissionsPrompt != null) {
+            mPermissionsPrompt.hide();
         }
 
         mWebViewController.onSetWebView(this, w);
@@ -1486,6 +1559,18 @@ class Tab implements PictureListener {
                     .inflate();
         }
         return mGeolocationPermissionsPrompt;
+    }
+
+    /**
+     * @return The permissions prompt for this tab.
+     */
+    PermissionsPrompt getPermissionsPrompt() {
+        if (mPermissionsPrompt == null) {
+            ViewStub stub = (ViewStub) mContainer
+                    .findViewById(R.id.permissions_prompt);
+            mPermissionsPrompt = (PermissionsPrompt) stub.inflate();
+        }
+        return mPermissionsPrompt;
     }
 
     /**
@@ -1890,5 +1975,13 @@ class Tab implements PictureListener {
             // sub-resource.
             setSecurityState(SecurityState.SECURITY_STATE_MIXED);
         }
+    }
+
+    public void setAcceptThirdPartyCookies(boolean accept) {
+        CookieManager cookieManager = CookieManager.getInstance();
+        if (mMainView != null)
+            cookieManager.setAcceptThirdPartyCookies(mMainView, accept);
+        if (mSubView != null)
+            cookieManager.setAcceptThirdPartyCookies(mSubView, accept);
     }
 }

@@ -24,12 +24,19 @@ import static com.android.xml.AndroidManifest.ATTRIBUTE_LABEL;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_MIN_SDK_VERSION;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_NAME;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_PACKAGE;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_PARENT_ACTIVITY_NAME;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_SUPPORTS_RTL;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_TARGET_SDK_VERSION;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_THEME;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_UI_OPTIONS;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_VALUE;
 import static com.android.xml.AndroidManifest.NODE_ACTIVITY;
+import static com.android.xml.AndroidManifest.NODE_METADATA;
 import static com.android.xml.AndroidManifest.NODE_USES_SDK;
+import static com.android.xml.AndroidManifest.VALUE_PARENT_ACTIVITY;
 import static org.eclipse.jdt.core.search.IJavaSearchConstants.REFERENCES;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.eclipse.adt.AdtPlugin;
@@ -97,6 +104,123 @@ import javax.xml.xpath.XPathExpressionException;
  * @see AndroidManifest
  */
 public class ManifestInfo {
+
+    public static class ActivityAttributes {
+        @Nullable
+        private final String mIcon;
+        @Nullable
+        private final String mLabel;
+        @NonNull
+        private final String mName;
+        @Nullable
+        private final String mParentActivity;
+        @Nullable
+        private final String mTheme;
+        @Nullable
+        private final String mUiOptions;
+
+        public ActivityAttributes(Element activity, String packageName) {
+
+            // Get activity name.
+            String name = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_NAME);
+            if (name == null || name.length() == 0) {
+                throw new RuntimeException("Activity name cannot be empty");
+            }
+            int index = name.indexOf('.');
+            if (index <= 0 && packageName != null && !packageName.isEmpty()) {
+              name =  packageName + (index == -1 ? "." : "") + name;
+            }
+            mName = name;
+
+            // Get activity icon.
+            String value = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_ICON);
+            if (value != null && value.length() > 0) {
+                mIcon = value;
+            } else {
+                mIcon = null;
+            }
+
+            // Get activity label.
+            value = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_LABEL);
+            if (value != null && value.length() > 0) {
+                mLabel = value;
+            } else {
+                mLabel = null;
+            }
+
+            // Get activity parent. Also search the meta-data for parent info.
+            value = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_PARENT_ACTIVITY_NAME);
+            if (value == null || value.length() == 0) {
+                // TODO: Not sure if meta data can be used for API Level > 16
+                NodeList metaData = activity.getElementsByTagName(NODE_METADATA);
+                for (int j = 0, m = metaData.getLength(); j < m; j++) {
+                    Element data = (Element) metaData.item(j);
+                    String metadataName = data.getAttributeNS(NS_RESOURCES, ATTRIBUTE_NAME);
+                    if (VALUE_PARENT_ACTIVITY.equals(metadataName)) {
+                        value = data.getAttributeNS(NS_RESOURCES, ATTRIBUTE_VALUE);
+                        if (value != null) {
+                            index = value.indexOf('.');
+                            if (index <= 0 && packageName != null && !packageName.isEmpty()) {
+                                value = packageName + (index == -1 ? "." : "") + value;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (value != null && value.length() > 0) {
+                mParentActivity = value;
+            } else {
+                mParentActivity = null;
+            }
+
+            // Get activity theme.
+            value = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_THEME);
+            if (value != null && value.length() > 0) {
+                mTheme = value;
+            } else {
+                mTheme = null;
+            }
+
+            // Get UI options.
+            value = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_UI_OPTIONS);
+            if (value != null && value.length() > 0) {
+                mUiOptions = value;
+            } else {
+                mUiOptions = null;
+            }
+        }
+
+        @Nullable
+        public String getIcon() {
+            return mIcon;
+        }
+
+        @Nullable
+        public String getLabel() {
+            return mLabel;
+        }
+
+        public String getName() {
+            return mName;
+        }
+
+        @Nullable
+        public String getParentActivity() {
+            return mParentActivity;
+        }
+
+        @Nullable
+        public String getTheme() {
+            return mTheme;
+        }
+
+        @Nullable
+        public String getUiOptions() {
+            return mUiOptions;
+        }
+    }
+
     /**
      * The maximum number of milliseconds to search for an activity in the codebase when
      * attempting to associate layouts with activities in
@@ -107,7 +231,7 @@ public class ManifestInfo {
     private final IProject mProject;
     private String mPackage;
     private String mManifestTheme;
-    private Map<String, String> mActivityThemes;
+    private Map<String, ActivityAttributes> mActivityAttributes;
     private IAbstractFile mManifestFile;
     private long mLastModified;
     private long mLastChecked;
@@ -116,6 +240,7 @@ public class ManifestInfo {
     private int mTargetSdk;
     private String mApplicationIcon;
     private String mApplicationLabel;
+    private boolean mApplicationSupportsRtl;
 
     /**
      * Qualified name for the per-project non-persistent property storing the
@@ -198,7 +323,7 @@ public class ManifestInfo {
         }
         mLastModified = fileModified;
 
-        mActivityThemes = new HashMap<String, String>();
+        mActivityAttributes = new HashMap<String, ActivityAttributes>();
         mManifestTheme = null;
         mTargetSdk = 1; // Default when not specified
         mMinSdk = 1; // Default when not specified
@@ -206,6 +331,7 @@ public class ManifestInfo {
         mPackage = ""; //$NON-NLS-1$
         mApplicationIcon = null;
         mApplicationLabel = null;
+        mApplicationSupportsRtl = false;
 
         Document document = null;
         try {
@@ -222,15 +348,8 @@ public class ManifestInfo {
             NodeList activities = document.getElementsByTagName(NODE_ACTIVITY);
             for (int i = 0, n = activities.getLength(); i < n; i++) {
                 Element activity = (Element) activities.item(i);
-                String theme = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_THEME);
-                if (theme != null && theme.length() > 0) {
-                    String name = activity.getAttributeNS(NS_RESOURCES, ATTRIBUTE_NAME);
-                    int index = name.indexOf('.');
-                    if (index <= 0 && mPackage != null && !mPackage.isEmpty()) {
-                      name =  mPackage + (index == -1 ? "." : "") + name;
-                    }
-                    mActivityThemes.put(name, theme);
-                }
+                ActivityAttributes info = new ActivityAttributes(activity, mPackage);
+                mActivityAttributes.put(info.getName(), info);
             }
 
             NodeList applications = root.getElementsByTagName(AndroidManifest.NODE_APPLICATION);
@@ -242,6 +361,10 @@ public class ManifestInfo {
                 }
                 if (application.hasAttributeNS(NS_RESOURCES, ATTRIBUTE_LABEL)) {
                     mApplicationLabel = application.getAttributeNS(NS_RESOURCES, ATTRIBUTE_LABEL);
+                }
+                if (SdkConstants.VALUE_TRUE.equals(application.getAttributeNS(NS_RESOURCES,
+                        ATTRIBUTE_SUPPORTS_RTL))) {
+                    mApplicationSupportsRtl = true;
                 }
 
                 String defaultTheme = application.getAttributeNS(NS_RESOURCES, ATTRIBUTE_THEME);
@@ -310,15 +433,22 @@ public class ManifestInfo {
     }
 
     /**
-     * Returns a map from activity full class names to the corresponding theme style to be
-     * used
+     * Returns a map from activity full class names to the corresponding {@link ActivityAttributes}.
      *
-     * @return a map from activity fqcn to theme style
+     * @return a map from activity fqcn to ActivityAttributes
      */
     @NonNull
-    public Map<String, String> getActivityThemes() {
+    public Map<String, ActivityAttributes> getActivityAttributesMap() {
         sync();
-        return mActivityThemes;
+        return mActivityAttributes;
+    }
+
+    /**
+     * Returns the attributes of an activity given its full class name.
+     */
+    @Nullable
+    public ActivityAttributes getActivityAttributes(String activity) {
+        return getActivityAttributesMap().get(activity);
     }
 
     /**
@@ -383,6 +513,16 @@ public class ManifestInfo {
     public String getApplicationLabel() {
         sync();
         return mApplicationLabel;
+    }
+
+    /**
+     * Returns true if the application has RTL support.
+     *
+     * @return true if the application has RTL support.
+     */
+    public boolean isRtlSupported() {
+        sync();
+        return mApplicationSupportsRtl;
     }
 
     /**
@@ -791,11 +931,19 @@ public class ManifestInfo {
                     }
                 }
 
-                Integer i = AndroidManifest.getTargetSdkVersion(manifestFile);
-                if (i == null) {
+                value = AndroidManifest.getTargetSdkVersion(manifestFile);
+                if (value == null) {
                     mTargetSdkVersion = mMinSdkVersion;
-                } else {
-                    mTargetSdkVersion = i.intValue();
+                } else if (value instanceof String) {
+                    // handle codename, only if we can resolve it.
+                    if (Sdk.getCurrent() != null) {
+                        IAndroidTarget target = Sdk.getCurrent().getTargetFromHashString(
+                                "android-" + value); //$NON-NLS-1$
+                        if (target != null) {
+                            // codename future API level is current api + 1
+                        	mTargetSdkVersion = target.getVersion().getApiLevel() + 1;
+                        }
+                    }
                 }
             } catch (XPathExpressionException e) {
                 // do nothing we'll use 1 below.

@@ -6,11 +6,8 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#ifndef MCLD_TARGET_SELECT_H
-#define MCLD_TARGET_SELECT_H
-#ifdef ENABLE_UNITTEST
-#include <gtest.h>
-#endif
+#ifndef MCLD_SUPPORT_TARGETSELECT_H
+#define MCLD_SUPPORT_TARGETSELECT_H
 
 extern "C" {
   // Declare all of the target-initialization functions that are available.

@@ -24,8 +24,7 @@ class SpellCheckMessageFilter : public content::BrowserMessageFilter {
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
       content::BrowserThread::ID* thread) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   friend class TestingSpellCheckMessageFilter;
@@ -33,12 +32,12 @@ class SpellCheckMessageFilter : public content::BrowserMessageFilter {
   virtual ~SpellCheckMessageFilter();
 
   void OnSpellCheckerRequestDictionary();
-  void OnNotifyChecked(const string16& word, bool misspelled);
+  void OnNotifyChecked(const base::string16& word, bool misspelled);
   void OnRespondDocumentMarkers(const std::vector<uint32>& markers);
 #if !defined(OS_MACOSX)
   void OnCallSpellingService(int route_id,
                              int identifier,
-                             const string16& text,
+                             const base::string16& text,
                              std::vector<SpellCheckMarker> markers);
 
   // A callback function called when the Spelling service finishes checking
@@ -48,7 +47,7 @@ class SpellCheckMessageFilter : public content::BrowserMessageFilter {
       int identifier,
       const std::vector<SpellCheckMarker>& markers,
       bool success,
-      const string16& text,
+      const base::string16& text,
       const std::vector<SpellCheckResult>& results);
 
   // Checks the user profile and sends a JSON-RPC request to the Spelling
@@ -58,7 +57,7 @@ class SpellCheckMessageFilter : public content::BrowserMessageFilter {
   // response for the previous request, this function cancels the previous
   // request and sends a new one.
   void CallSpellingService(
-      const string16& text,
+      const base::string16& text,
       int route_id,
       int identifier,
       const std::vector<SpellCheckMarker>& markers);

@@ -20,44 +20,50 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_height="wrap_content"
     android:layout_width="match_parent"
+    android:padding="8dp"
     android:minHeight="@dimen/account_item_minimum_height"
-    android:background="@drawable/account_item">
+    android:background="@drawable/nonfolder_item">
 
     <ImageView
-        android:id="@+id/account_graphic"
-        style="@style/AccountItemIcon"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentTop="true" />
+        android:id="@+id/avatar"
+        android:layout_width="@dimen/account_avatar_dimension"
+        android:layout_height="@dimen/account_avatar_dimension"
+        android:layout_gravity="center_vertical" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_gravity="center_vertical"
+        android:orientation="vertical"
+        style="@style/AccountItemNameStyle" >
+
+        <TextView
+            android:id="@+id/account_display_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textAlignment="viewStart"
+            android:textAppearance="?android:attr/textAppearanceMedium"/>
+
+        <TextView
+            android:id="@+id/account_address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textAlignment="viewStart"
+            android:textAppearance="?android:attr/textAppearanceSmall"/>
+
+    </LinearLayout>
 
     <ImageView
-        android:id="@+id/account_radio_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginLeft="@dimen/account_item_left_margin"
-        android:src="@drawable/account_radio_button"
-        android:layout_centerVertical="true"/>
-
-    <TextView
-        android:id="@+id/unread"
-        style="@style/UnreadCount"
-        android:layout_marginRight="@dimen/account_item_right_margin"
-        android:layout_alignParentRight="true"
-        android:textColor="@color/account_item_text_color" />
-
-    <TextView
-        android:id="@+id/name"
-        android:layout_height="wrap_content"
-        android:layout_width="wrap_content"
-        android:layout_toRightOf="@id/account_radio_button"
-        android:layout_toLeftOf="@id/unread"
-        android:layout_alignWithParentIfMissing="true"
-        android:layout_marginLeft="@dimen/account_item_left_margin"
-        android:layout_marginRight="@dimen/account_item_right_margin"
-        android:layout_centerVertical="true"
-        android:includeFontPadding="false"
-        android:singleLine="true"
-        android:ellipsize="end"
-        android:textColor="@color/account_item_text_color"
-        android:textAppearance="?android:attr/textAppearanceMedium" />
+        android:id="@+id/checkmark"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@drawable/ic_menu_check_holo_light"
+        android:layout_gravity="center_vertical" />
 
 </com.android.mail.ui.AccountItemView>

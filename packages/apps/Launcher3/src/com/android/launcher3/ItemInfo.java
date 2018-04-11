@@ -17,24 +17,34 @@
 package com.android.launcher3;
 
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.util.Log;
 
+import com.android.launcher3.compat.UserHandleCompat;
+import com.android.launcher3.compat.UserManagerCompat;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * Represents an item in the launcher.
  */
-class ItemInfo {
+public class ItemInfo {
+
+    /**
+     * Intent extra to store the profile. Format: UserHandle
+     */
+    static final String EXTRA_PROFILE = "profile";
     
     static final int NO_ID = -1;
     
     /**
      * The id in the settings database for this item
      */
-    long id = NO_ID;
+    public long id = NO_ID;
     
     /**
      * One of {@link LauncherSettings.Favorites#ITEM_TYPE_APPLICATION},
@@ -42,7 +52,7 @@ class ItemInfo {
      * {@link LauncherSettings.Favorites#ITEM_TYPE_FOLDER}, or
      * {@link LauncherSettings.Favorites#ITEM_TYPE_APPWIDGET}.
      */
-    int itemType;
+    public int itemType;
     
     /**
      * The id of the container that holds this item. For the desktop, this will be 
@@ -50,27 +60,27 @@ class ItemInfo {
      * will be {@link #NO_ID} (since it is not stored in the settings DB). For user folders
      * it will be the id of the folder.
      */
-    long container = NO_ID;
+    public long container = NO_ID;
     
     /**
      * Iindicates the screen in which the shortcut appears.
      */
-    long screenId = -1;
+    public long screenId = -1;
     
     /**
      * Indicates the X position of the associated cell.
      */
-    int cellX = -1;
+    public int cellX = -1;
 
     /**
      * Indicates the Y position of the associated cell.
      */
-    int cellY = -1;
+    public int cellY = -1;
 
     /**
      * Indicates the X cell span.
      */
-    int spanX = 1;
+    public int spanX = 1;
 
     /**
      * Indicates the Y cell span.
@@ -80,17 +90,17 @@ class ItemInfo {
     /**
      * Indicates the minimum X cell span.
      */
-    int minSpanX = 1;
+    public int minSpanX = 1;
 
     /**
      * Indicates the minimum Y cell span.
      */
-    int minSpanY = 1;
+    public int minSpanY = 1;
 
     /**
      * Indicates that this item needs to be updated in the db
      */
-    boolean requiresDbUpdate = false;
+    public boolean requiresDbUpdate = false;
 
     /**
      * Title of the item
@@ -98,14 +108,28 @@ class ItemInfo {
     CharSequence title;
 
     /**
+     * Content description of the item.
+     */
+    CharSequence contentDescription;
+
+    /**
      * The position of the item in a drag-and-drop operation.
      */
     int[] dropPos = null;
 
+    UserHandleCompat user;
+
     ItemInfo() {
+        user = UserHandleCompat.myUserHandle();
     }
 
     ItemInfo(ItemInfo info) {
+        copyFrom(info);
+        // tempdebug:
+        LauncherModel.checkItemInfo(this);
+    }
+
+    public void copyFrom(ItemInfo info) {
         id = info.id;
         cellX = info.cellX;
         cellY = info.cellY;
@@ -114,20 +138,22 @@ class ItemInfo {
         screenId = info.screenId;
         itemType = info.itemType;
         container = info.container;
-        // tempdebug:
-        LauncherModel.checkItemInfo(this);
+        user = info.user;
+        contentDescription = info.contentDescription;
     }
 
-    protected Intent getIntent() {
+    public Intent getIntent() {
         throw new RuntimeException("Unexpected Intent");
     }
 
     /**
      * Write the fields of this item to the DB
      * 
+     * @param context A context object to use for getting UserManagerCompat
      * @param values
      */
-    void onAddToDatabase(ContentValues values) { 
+
+    void onAddToDatabase(Context context, ContentValues values) {
         values.put(LauncherSettings.BaseLauncherColumns.ITEM_TYPE, itemType);
         values.put(LauncherSettings.Favorites.CONTAINER, container);
         values.put(LauncherSettings.Favorites.SCREEN, screenId);
@@ -135,6 +161,13 @@ class ItemInfo {
         values.put(LauncherSettings.Favorites.CELLY, cellY);
         values.put(LauncherSettings.Favorites.SPANX, spanX);
         values.put(LauncherSettings.Favorites.SPANY, spanY);
+        long serialNumber = UserManagerCompat.getInstance(context).getSerialNumberForUser(user);
+        values.put(LauncherSettings.Favorites.PROFILE_ID, serialNumber);
+
+        if (screenId == Workspace.EXTRA_EMPTY_SCREEN_ID) {
+            // We should never persist an item on the extra empty screen.
+            throw new RuntimeException("Screen id should not be EXTRA_EMPTY_SCREEN_ID");
+        }
     }
 
     void updateValuesWithCoordinates(ContentValues values, int cellX, int cellY) {
@@ -178,6 +211,7 @@ class ItemInfo {
     public String toString() {
         return "Item(id=" + this.id + " type=" + this.itemType + " container=" + this.container
             + " screen=" + screenId + " cellX=" + cellX + " cellY=" + cellY + " spanX=" + spanX
-            + " spanY=" + spanY + " dropPos=" + dropPos + ")";
+            + " spanY=" + spanY + " dropPos=" + Arrays.toString(dropPos)
+            + " user=" + user + ")";
     }
 }

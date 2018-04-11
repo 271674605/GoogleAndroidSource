@@ -21,7 +21,10 @@ LOCAL_MODULE_TAGS := optional
 # and when built explicitly put it in the data partition
 LOCAL_MODULE_PATH := $(TARGET_OUT_DATA_APPS)
 
-LOCAL_JAVA_LIBRARIES := android.test.runner voip-common
+# Include both the 32 and 64 bit versions
+LOCAL_MULTILIB := both
+
+LOCAL_JAVA_LIBRARIES := voip-common conscrypt
 
 LOCAL_JNI_SHARED_LIBRARIES := libnativedns_jni
 
@@ -30,9 +33,10 @@ LOCAL_SRC_FILES := $(call all-java-files-under, src)
 
 LOCAL_PACKAGE_NAME := CtsNetTestCases
 
-LOCAL_STATIC_JAVA_LIBRARIES := ctstestserver ctsutil ctstestrunner
+LOCAL_STATIC_JAVA_LIBRARIES := ctstestserver ctsdeviceutil ctstestrunner \
+                               core-tests-support
 
-# uncomment when dalvik.annotation.Test* are removed or part of SDK
+# uncomment when b/13249961 is fixed
 #LOCAL_SDK_VERSION := current
 
 include $(BUILD_CTS_PACKAGE)

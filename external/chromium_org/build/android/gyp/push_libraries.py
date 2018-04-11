@@ -8,10 +8,14 @@
 
 """
 
-import json
 import optparse
 import os
 import sys
+
+BUILD_ANDROID_DIR = os.path.join(os.path.dirname(__file__), os.pardir)
+sys.path.append(BUILD_ANDROID_DIR)
+
+from pylib import constants
 
 from util import build_device
 from util import build_utils
@@ -46,7 +50,7 @@ def DoPush(options):
         input_strings=[device_path])
 
 
-def main(argv):
+def main():
   parser = optparse.OptionParser()
   parser.add_option('--libraries-dir',
       help='Directory that contains stripped libraries.')
@@ -57,10 +61,13 @@ def main(argv):
   parser.add_option('--stamp', help='Path to touch on success.')
   parser.add_option('--build-device-configuration',
       help='Path to build device configuration.')
+  parser.add_option('--configuration-name',
+      help='The build CONFIGURATION_NAME')
   options, _ = parser.parse_args()
 
   required_options = ['libraries_dir', 'device_dir', 'libraries_json']
   build_utils.CheckOptions(options, parser, required=required_options)
+  constants.SetBuildType(options.configuration_name)
 
   DoPush(options)
 
@@ -69,4 +76,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  sys.exit(main())

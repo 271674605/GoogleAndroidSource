@@ -1,6 +1,7 @@
 #include <string.h>
 #include <wchar.h>
 #include <wctype.h>
+#include <assert.h>
 
 // Returns 1 if 'wc' is in the 'delim' string, 0 otherwise.
 static int _wc_indelim(wchar_t wc, const wchar_t* delim) {
@@ -200,7 +201,6 @@ wchar_t *wcspbrk(const wchar_t *s, const wchar_t *set) {
 }
 
 wchar_t *wcschr(const wchar_t *s, wchar_t c) {
-  char dummy[1 - 2*(sizeof(wchar_t) != 4)];
   size_t n = 0;
   for (;;) {
     wchar_t wc = s[n];
@@ -347,29 +347,4 @@ wchar_t* wmemset(wchar_t* s, wchar_t c, size_t n) {
     for (i = 0; i < n; ++i)
         s[i] = c;
     return s;
-}
-
-float wcstof(const wchar_t* nptr, wchar_t** endptr) {
-#warning Not implemented
-  return 0;
-}
-
-long wcstol(const wchar_t* nptr, wchar_t** endptr, int base) {
-#warning Not implemented
-  return 0;
-}
-
-long double wcstold(const wchar_t* nptr, wchar_t** endptr) {
-#warning Not implemented
-  return 0;
-}
-
-long long wcstoll(const wchar_t* nptr, wchar_t** endptr, int base) {
-#warning Not implemented
-  return 0;
-}
-
-unsigned long long wcstoull(const wchar_t* nptr, wchar_t** endptr, int base) {
-#warning Not implemented
-  return 0;
 }

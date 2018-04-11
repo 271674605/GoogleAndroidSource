@@ -10,8 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/media_stream_request.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
@@ -21,10 +20,6 @@
 class ContentSettingBubbleModel;
 class ContentSettingMediaMenuModel;
 class Profile;
-
-namespace content {
-class WebContents;
-}
 
 namespace ui {
 class SimpleMenuModel;
@@ -46,7 +41,7 @@ class RadioButton;
 // the blocking settings for the current site, a close button, and a link to
 // get to a more comprehensive settings management dialog.  A few types have
 // more or fewer controls than this.
-class ContentSettingBubbleContents : public content::NotificationObserver,
+class ContentSettingBubbleContents : public content::WebContentsObserver,
                                      public views::BubbleDelegateView,
                                      public views::ButtonListener,
                                      public views::LinkListener,
@@ -59,7 +54,7 @@ class ContentSettingBubbleContents : public content::NotificationObserver,
       views::BubbleBorder::Arrow arrow);
   virtual ~ContentSettingBubbleContents();
 
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
 
   // Callback to allow ContentSettingMediaMenuModel to update the menu label.
   void UpdateMenuLabel(content::MediaStreamType type,
@@ -76,6 +71,11 @@ class ContentSettingBubbleContents : public content::NotificationObserver,
   typedef std::map<views::Link*, int> PopupLinks;
   typedef std::map<views::MenuButton*, MediaMenuParts*> MediaMenuPartsMap;
 
+  // content::WebContentsObserver:
+  virtual void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE;
+
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
@@ -87,23 +87,12 @@ class ContentSettingBubbleContents : public content::NotificationObserver,
   virtual void OnMenuButtonClicked(views::View* source,
                                    const gfx::Point& point) OVERRIDE;
 
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // Helper to get the preferred width of the media menu.
   int GetPreferredMediaMenuWidth(views::MenuButton* button,
                                  ui::SimpleMenuModel* menu_model);
 
   // Provides data for this bubble.
   scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model_;
-
-  // The active web contents.
-  content::WebContents* web_contents_;
-
-  // A registrar for listening for WEB_CONTENTS_DESTROYED notifications.
-  content::NotificationRegistrar registrar_;
 
   // Some of our controls, so we can tell what's been clicked when we get a
   // message.
@@ -112,6 +101,7 @@ class ContentSettingBubbleContents : public content::NotificationObserver,
   RadioGroup radio_group_;
   views::Link* custom_link_;
   views::Link* manage_link_;
+  views::Link* learn_more_link_;
   views::LabelButton* close_button_;
   scoped_ptr<views::MenuRunner> menu_runner_;
   MediaMenuPartsMap media_menus_;

@@ -19,8 +19,8 @@ static void standardTestCases(skiatest::Reporter* reporter) {
         const SkDQuad& quad2 = quadraticTests[index][1];
         SkASSERT(ValidQuad(quad2));
         SkReduceOrder reduce1, reduce2;
-        int order1 = reduce1.reduce(quad1, SkReduceOrder::kFill_Style);
-        int order2 = reduce2.reduce(quad2, SkReduceOrder::kFill_Style);
+        int order1 = reduce1.reduce(quad1);
+        int order2 = reduce2.reduce(quad2);
         if (order1 < 3) {
             if (showSkipped) {
                 SkDebugf("[%d] quad1 order=%d\n", static_cast<int>(index), order1);
@@ -53,6 +53,20 @@ static void standardTestCases(skiatest::Reporter* reporter) {
 }
 
 static const SkDQuad testSet[] = {
+{{{-708.00779269310044, -154.36998607290101}, {-707.90560262312511, -154.36998607290101}, {-707.8333433370193, -154.44224536635932}}},
+{{{-708.00779269310044, -154.61669472244046}, {-701.04513225634582, -128.85970734043804}, {505.58447265625, -504.9130859375}}},
+
+{{{164, -40}, {231.51681518554687, -40}, {279.25839233398438, 7.7416000366210938}}},
+{{{279.25839233398438, 7.7416000366210938}, {275.2164306640625, 3.6996400356292725}, {271.03286743164062, -5.3290705182007514e-015}}},
+
+{{{2.9999997378517067, 1.9737872594345709}, {2.9999997432230918, 1.9739647181863822}, {1.2414155459263587e-163, 5.2957833941332142e-315}}},
+{{{2.9999047485265304, 1.9739164225694723}, {3.0000947268526112, 1.9738379076623633}, {0.61149411077591886, 0.0028382324376270418}}},
+
+    {{{2.9999996843656502, 1.9721416019045801}, {2.9999997725237835, 1.9749798343422071},
+            {5.3039068214821359e-315, 8.9546185262775165e-307}}},
+    {{{2.9984791443874976, 1.974505741312242}, {2.9999992702127476, 1.9738772171479178},
+            {3.0015187977319759, 1.9732495027303418}}},
+
     {{{0.647069409,2.97691634}, {0.946860918,3.17625612}, {1.46875407,2.65105457}}},
     {{{0,1}, {0.723699095,2.82756208}, {1.08907197,2.97497449}}},
 
@@ -272,7 +286,7 @@ static void oneOffTest1(skiatest::Reporter* reporter, size_t outer, size_t inner
     }
 }
 
-static void PathOpsQuadIntersectionOneOffTest(skiatest::Reporter* reporter) {
+DEF_TEST(PathOpsQuadIntersectionOneOff, reporter) {
     oneOffTest1(reporter, 0, 1);
 }
 
@@ -285,15 +299,17 @@ static void oneOffTests(skiatest::Reporter* reporter) {
 }
 
 static const SkDQuad coincidentTestSet[] = {
+#if 0
     {{{97.9337615966796875,100}, {88,112.94264984130859375}, {88,130}}},
     {{{88,130}, {88,124.80951690673828125}, {88.91983795166015625,120}}},
+#endif
     {{{369.850525, 145.675964}, {382.362915, 121.29287}, {406.211273, 121.29287}}},
     {{{369.850525, 145.675964}, {382.362915, 121.29287}, {406.211273, 121.29287}}},
     {{{8, 8}, {10, 10}, {8, -10}}},
     {{{8, -10}, {10, 10}, {8, 8}}},
 };
 
-const size_t coincidentTestSetCount = SK_ARRAY_COUNT(coincidentTestSet);
+static const int coincidentTestSetCount = (int) SK_ARRAY_COUNT(coincidentTestSet);
 
 static void coincidentTestOne(skiatest::Reporter* reporter, int test1, int test2) {
     const SkDQuad& quad1 = coincidentTestSet[test1];
@@ -314,12 +330,12 @@ static void coincidentTestOne(skiatest::Reporter* reporter, int test1, int test2
 }
 
 static void coincidentTest(skiatest::Reporter* reporter) {
-    for (size_t testIndex = 0; testIndex < coincidentTestSetCount - 1; testIndex += 2) {
+    for (int testIndex = 0; testIndex < coincidentTestSetCount - 1; testIndex += 2) {
         coincidentTestOne(reporter, testIndex, testIndex + 1);
     }
 }
 
-static void PathOpsQuadIntersectionCoincidenceOneOffTest(skiatest::Reporter* reporter) {
+DEF_TEST(PathOpsQuadIntersectionCoincidenceOneOff, reporter) {
     coincidentTestOne(reporter, 0, 1);
 }
 
@@ -486,18 +502,10 @@ static void QuadraticIntersection_IntersectionFinder() {
     intersectionFinder(0, 1);
 }
 
-static void PathOpsQuadIntersectionTest(skiatest::Reporter* reporter) {
+DEF_TEST(PathOpsQuadIntersection, reporter) {
     oneOffTests(reporter);
     coincidentTest(reporter);
     standardTestCases(reporter);
     if (false) QuadraticIntersection_IntersectionFinder();
     if (false) QuadraticIntersection_PointFinder();
 }
-
-
-#include "TestClassDef.h"
-DEFINE_TESTCLASS_SHORT(PathOpsQuadIntersectionTest)
-
-DEFINE_TESTCLASS_SHORT(PathOpsQuadIntersectionOneOffTest)
-
-DEFINE_TESTCLASS_SHORT(PathOpsQuadIntersectionCoincidenceOneOffTest)

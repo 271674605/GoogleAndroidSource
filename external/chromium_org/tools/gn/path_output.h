@@ -16,6 +16,10 @@
 class OutputFile;
 class SourceFile;
 
+namespace base {
+class FilePath;
+}
+
 // Writes file names to streams assuming a certain input directory and
 // escaping rules. This gives us a central place for managing this state.
 class PathOutput {
@@ -29,30 +33,22 @@ class PathOutput {
     DIR_NO_LAST_SLASH,
   };
 
-  PathOutput(const SourceDir& current_dir,
-             EscapingMode escaping,
-             bool convert_slashes);
+  PathOutput(const SourceDir& current_dir, EscapingMode escaping);
   ~PathOutput();
 
   // Read-only since inverse_current_dir_ is computed depending on this.
   EscapingMode escaping_mode() const { return options_.mode; }
 
-  // When true, converts slashes to the system-type path separators (on
-  // Windows, this is a backslash, this is a NOP otherwise).
-  //
-  // Read-only since inverse_current_dir_ is computed depending on this.
-  bool convert_slashes_to_system() const { return options_.convert_slashes; }
+  const SourceDir& current_dir() const { return current_dir_; }
 
-  // When the output escaping is ESCAPE_SHELL, the escaper will normally put
-  // quotes around suspect things. If this value is set to true, we'll disable
-  // the quoting feature. This means that in ESCAPE_SHELL mode, strings with
-  // spaces in them qon't be quoted. This mode is for when quoting is done at
-  // some higher-level. Defaults to false.
+  // Getter/setters for flags inside the escape options.
   bool inhibit_quoting() const { return options_.inhibit_quoting; }
   void set_inhibit_quoting(bool iq) { options_.inhibit_quoting = iq; }
+  void set_escape_platform(EscapingPlatform p) { options_.platform = p; }
 
   void WriteFile(std::ostream& out, const SourceFile& file) const;
   void WriteFile(std::ostream& out, const OutputFile& file) const;
+  void WriteFile(std::ostream& out, const base::FilePath& file) const;
   void WriteDir(std::ostream& out,
                 const SourceDir& dir,
                 DirSlashEnding slash_ending) const;

@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 #include <mcld/LD/StaticResolver.h>
 #include <mcld/LD/LDSymbol.h>
+#include <mcld/Support/Demangle.h>
 #include <mcld/Support/MsgHandling.h>
 
 using namespace mcld;
@@ -20,14 +21,14 @@ StaticResolver::~StaticResolver()
 
 bool StaticResolver::resolve(ResolveInfo& __restrict__ pOld,
                              const ResolveInfo& __restrict__ pNew,
-                             bool &pOverride) const
+                             bool &pOverride, LDSymbol::ValueType pValue) const
 {
 
   /* The state table itself.
    * The first index is a link_row and the second index is a bfd_link_hash_type.
    *
    * Cs -> all rest kind of common (d_C, wd_C)
-   * Is -> all kind of indeirect
+   * Is -> all kind of indirect
    */
   static const enum LinkAction link_action[LAST_ORD][LAST_ORD] =
   {
@@ -118,7 +119,7 @@ bool StaticResolver::resolve(ResolveInfo& __restrict__ pOld,
         // We've seen a common symbol and now we see a definition.  The
         // definition overrides.
         //
-	// NOTE: m_Mesg uses 'name' instead of `name' for being compatible to GNU ld.
+        // NOTE: m_Mesg uses 'name' instead of `name' for being compatible to GNU ld.
         ignore(diag::redefine_common) << old->name();
         old->override(pNew);
         pOverride = true;
@@ -169,7 +170,24 @@ bool StaticResolver::resolve(ResolveInfo& __restrict__ pOld,
       }
       /* Fall through */
       case MDEF: {       /* multiple definition error.  */
-        error(diag::multiple_definitions) << pNew.name();
+        if (pOld.isDefine() && pNew.isDefine() &&
+            pOld.isAbsolute() && pNew.isAbsolute() &&
+            (pOld.desc() == pNew.desc() || pOld.desc() == ResolveInfo::NoType ||
+             pNew.desc() == ResolveInfo::NoType)) {
+          if (pOld.outSymbol()->value() == pValue) {
+            pOverride = true;
+            old->override(pNew);
+            break;
+          } else {
+            error(diag::multiple_absolute_definitions)
+                << demangleName(pNew.name())
+                << pOld.outSymbol()->value()
+                << pValue;
+            break;
+          }
+        }
+
+        error(diag::multiple_definitions) << demangleName(pNew.name());
         break;
       }
       case REFC: {       /* Mark indirect symbol referenced and then CYCLE.  */

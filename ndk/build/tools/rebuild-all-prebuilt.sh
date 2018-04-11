@@ -27,8 +27,18 @@ register_var_option "--ndk-dir=<path>" NDK_DIR "Put binaries into NDK install di
 BUILD_DIR=/tmp/ndk-$USER/build
 register_var_option "--build-dir=<path>" BUILD_DIR "Specify temporary build directory"
 
-ARCHS=$DEFAULT_ARCHS
+ARCHS=$(find_ndk_unknown_archs)
+ARCHS="$DEFAULT_ARCHS $ARCHS"
 register_var_option "--arch=<arch>" ARCHS "Specify target architectures"
+
+NO_GEN_PLATFORMS=
+register_var_option "--no-gen-platforms" NO_GEN_PLATFORMS "Don't generate platforms/ directory, use existing one"
+
+GCC_VERSION_LIST="default" # it's arch defined by default so use default keyword
+register_var_option "--gcc-version-list=<vers>" GCC_VERSION_LIST "List of GCC release versions"
+
+LLVM_VERSION_LIST=$DEFAULT_LLVM_VERSION_LIST
+register_var_option "--llvm-version-list=<vers>" LLVM_VERSION_LIST "List of LLVM release versions"
 
 SYSTEMS=$HOST_TAG32
 if [ "$HOST_TAG32" = "linux-x86" ]; then
@@ -94,7 +104,16 @@ FLAGS=$FLAGS" --ndk-dir=$NDK_DIR"
 FLAGS=$FLAGS" --package-dir=$PACKAGE_DIR"
 FLAGS=$FLAGS" --arch=$(spaces_to_commas $ARCHS)"
 
+if [ ! -z "$NO_GEN_PLATFORMS" ]; then
+    FLAGS=$FLAGS" --no-gen-platforms"
+fi
+
 HOST_FLAGS=$FLAGS" --systems=$(spaces_to_commas $SYSTEMS)"
+if [ "$GCC_VERSION_LIST" != "default" ]; then
+    HOST_FLAGS=$HOST_FLAGS" --gcc-version-list=$(spaces_to_commas $GCC_VERSION_LIST)"
+fi
+HOST_FLAGS=$HOST_FLAGS" --llvm-version-list=$(spaces_to_commas $LLVM_VERSION_LIST)"
+
 if [ "$TRY64" = "yes" ]; then
     HOST_FLAGS=$HOST_FLAGS" --try-64"
 fi

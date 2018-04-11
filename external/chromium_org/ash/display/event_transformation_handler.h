@@ -7,11 +7,9 @@
 
 #include "ash/ash_export.h"
 #include "base/compiler_specific.h"
-#include "ui/base/events/event_handler.h"
+#include "ui/events/event_handler.h"
 
 namespace ash {
-
-namespace internal {
 
 // An event filter that transforms input event properties in extended desktop
 // environment.
@@ -43,7 +41,6 @@ class ASH_EXPORT EventTransformationHandler : public ui::EventHandler {
   DISALLOW_COPY_AND_ASSIGN(EventTransformationHandler);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_DISPLAY_EVENT_TRANSFORMATION_HANDLER_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@ package org.chromium.content.browser;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.ThreadUtils;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * This class receives callbacks that act as hooks for various a native web contents events related
@@ -13,10 +15,20 @@ import org.chromium.base.JNINamespace;
  */
 @JNINamespace("content")
 public abstract class WebContentsObserverAndroid {
-    private int mNativeWebContentsObserverAndroid;
+    private long mNativeWebContentsObserverAndroid;
 
+    // TODO(yfriedman): Switch everyone to use the WebContents constructor.
     public WebContentsObserverAndroid(ContentViewCore contentViewCore) {
-        mNativeWebContentsObserverAndroid = nativeInit(contentViewCore.getNativeContentViewCore());
+        this(contentViewCore.getWebContents());
+    }
+
+    public WebContentsObserverAndroid(WebContents webContents) {
+        ThreadUtils.assertOnUiThread();
+        mNativeWebContentsObserverAndroid = nativeInit(webContents);
+    }
+
+    @CalledByNative
+    public void renderProcessGone(boolean wasOomProtected) {
     }
 
     /**
@@ -51,10 +63,19 @@ public abstract class WebContentsObserverAndroid {
      * @param url The validated url for the page.
      * @param baseUrl The validated base url for the page.
      * @param isNavigationToDifferentPage Whether the main frame navigated to a different page.
+     * @param isFragmentNavigation Whether the main frame navigation did not cause changes to the
+     *                             document (for example scrolling to a named anchor or PopState).
      */
     @CalledByNative
     public void didNavigateMainFrame(String url, String baseUrl,
-            boolean isNavigationToDifferentPage) {
+            boolean isNavigationToDifferentPage, boolean isFragmentNavigation) {
+    }
+
+    /**
+     * Called when the page had painted something non-empty.
+     */
+    @CalledByNative
+    public void didFirstVisuallyNonEmptyPaint() {
     }
 
     /**
@@ -113,10 +134,40 @@ public abstract class WebContentsObserverAndroid {
     }
 
     /**
-     * Invoked when visible SSL state changes.
+     * Notifies that the document has finished loading for the given frame.
+     * @param frameId A positive, non-zero integer identifying the navigating frame.
      */
     @CalledByNative
-    public void didChangeVisibleSSLState() {
+    public void documentLoadedInFrame(long frameId) {
+    }
+
+    /**
+     * Notifies that a navigation entry has been committed.
+     */
+    @CalledByNative
+    public void navigationEntryCommitted() {
+    }
+
+    /**
+     * Called when an interstitial page gets attached to the tab content.
+     */
+    @CalledByNative
+    public void didAttachInterstitialPage() {
+    }
+
+    /**
+     * Called when an interstitial page gets detached from the tab content.
+     */
+    @CalledByNative
+    public void didDetachInterstitialPage() {
+    }
+
+    /**
+     * Called when the theme color was changed.
+     * @param color the new color in ARGB format
+     */
+    @CalledByNative
+    public void didChangeThemeColor(int color) {
     }
 
     /**
@@ -130,6 +181,6 @@ public abstract class WebContentsObserverAndroid {
         }
     }
 
-    private native int nativeInit(int contentViewCorePtr);
-    private native void nativeDestroy(int nativeWebContentsObserverAndroid);
+    private native long nativeInit(WebContents webContents);
+    private native void nativeDestroy(long nativeWebContentsObserverAndroid);
 }

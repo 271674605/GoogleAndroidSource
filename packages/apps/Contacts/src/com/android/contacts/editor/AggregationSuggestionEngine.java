@@ -300,6 +300,9 @@ public class AggregationSuggestionEngine extends HandlerThread {
     private void loadAggregationSuggestions(Uri uri) {
         ContentResolver contentResolver = mContext.getContentResolver();
         Cursor cursor = contentResolver.query(uri, new String[]{Contacts._ID}, null, null, null);
+        if (cursor == null) {
+            return;
+        }
         try {
             // If a new request is pending, chuck the result of the previous request
             if (getHandler().hasMessages(MESSAGE_NAME_CHANGE)) {
@@ -324,31 +327,32 @@ public class AggregationSuggestionEngine extends HandlerThread {
 
             Cursor dataCursor = contentResolver.query(Data.CONTENT_URI,
                     DataQuery.COLUMNS, sb.toString(), null, Data.CONTACT_ID);
-            mMainHandler.sendMessage(mMainHandler.obtainMessage(MESSAGE_DATA_CURSOR, dataCursor));
+            if (dataCursor != null) {
+                mMainHandler.sendMessage(mMainHandler.obtainMessage(MESSAGE_DATA_CURSOR, dataCursor));
+            }
         } finally {
             cursor.close();
         }
     }
 
-    private boolean updateSuggestedContactIds(Cursor cursor) {
-        int count = cursor.getCount();
+    private boolean updateSuggestedContactIds(final Cursor cursor) {
+        final int count = cursor.getCount();
         boolean changed = count != mSuggestedContactIds.length;
-        if (!changed) {
-            while (cursor.moveToNext()) {
-                long contactId = cursor.getLong(0);
-                if (Arrays.binarySearch(mSuggestedContactIds, contactId) < 0) {
-                    changed = true;
-                    break;
-                }
+        final ArrayList<Long> newIds = new ArrayList<Long>(count);
+        while (cursor.moveToNext()) {
+            final long contactId = cursor.getLong(0);
+            if (!changed &&
+                    Arrays.binarySearch(mSuggestedContactIds, contactId) < 0) {
+                changed = true;
             }
+            newIds.add(contactId);
         }
 
         if (changed) {
-            mSuggestedContactIds = new long[count];
-            cursor.moveToPosition(-1);
-            for (int i = 0; i < count; i++) {
-                cursor.moveToNext();
-                mSuggestedContactIds[i] = cursor.getLong(0);
+            mSuggestedContactIds = new long[newIds.size()];
+            int i = 0;
+            for (final Long newId : newIds) {
+                mSuggestedContactIds[i++] = newId;
             }
             Arrays.sort(mSuggestedContactIds);
         }
