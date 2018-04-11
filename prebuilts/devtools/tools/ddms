@@ -105,7 +105,7 @@ if [ -x $progdir/monitor ]; then
     echo "Please use Android Device Monitor (tools/monitor) instead."
 fi
 exec "$javaCmd" \
-    -Xmx256M $os_opts $java_debug \
+    -Xmx512M $os_opts $java_debug \
     -Dcom.android.ddms.bindir="$progdir" \
     -classpath "$jarpath:$swtpath/swt.jar" \
     com.android.ddms.Main "$@"

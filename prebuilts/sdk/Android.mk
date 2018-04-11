@@ -15,34 +15,14 @@
 #
 
 LOCAL_PATH:= $(call my-dir)
+
 include $(CLEAR_VARS)
 
-# $(1): sdk version
-define _copy_prebuilt_sdk_to_the_right_place
-_cpsttrp_src_jar := $(LOCAL_PATH)/$(1)/android.jar
-_cpsttrp_sdk_intermediates := $(call intermediates-dir-for,JAVA_LIBRARIES,sdk_v$(1),,COMMON)
-$$(_cpsttrp_sdk_intermediates)/classes.jar : $$(_cpsttrp_src_jar) | $(ACP)
-	$$(call copy-file-to-target)
+LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES := \
+  $(foreach s,$(TARGET_AVAILABLE_SDK_VERSIONS),\
+    sdk_v$(s):$(s)/android.jar \
+    uiautomator_sdk_v$(s):$(s)/uiautomator.jar)
 
-$$(_cpsttrp_sdk_intermediates)/javalib.jar : $$(_cpsttrp_sdk_intermediates)/classes.jar | $(ACP)
-	$$(call copy-file-to-target)
-
-# The uiautomator.jar
-_cpsttrp_src_jar := $(LOCAL_PATH)/$(1)/uiautomator.jar
-# The uiautomator library should be referenced as "LOCAL_JAVA_LIBRARIES += uiautomator_sdk_v<version>".
-_cpsttrp_sdk_intermediates := $(call intermediates-dir-for,JAVA_LIBRARIES,uiautomator_sdk_v$(1),,COMMON)
-$$(_cpsttrp_sdk_intermediates)/classes.jar : $$(_cpsttrp_src_jar) | $(ACP)
-	$$(call copy-file-to-target)
-
-$$(_cpsttrp_sdk_intermediates)/javalib.jar : $$(_cpsttrp_sdk_intermediates)/classes.jar | $(ACP)
-	$$(call copy-file-to-target)
-endef
-
-$(foreach s,$(TARGET_AVAILABLE_SDK_VERSIONS),$(eval $(call _copy_prebuilt_sdk_to_the_right_place,$(s))))
-
-# Make sure we install the prebuilt current sdk when you do a checkbuild
-# so later users can run tapas and mm/mmm on an Android.mk with "LOCAL_SDK_VERSION := current".
-# That Android.mk may not be visible to platform build.
-checkbuild : $(call intermediates-dir-for,JAVA_LIBRARIES,sdk_vcurrent,,COMMON)/classes.jar
+include $(BUILD_MULTI_PREBUILT)
 
 include $(call all-makefiles-under,$(LOCAL_PATH))

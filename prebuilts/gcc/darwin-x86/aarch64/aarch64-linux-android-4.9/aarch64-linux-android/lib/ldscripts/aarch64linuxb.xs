@@ -1,4 +1,8 @@
 /* Script for ld --shared: link shared library */
+/* Copyright (C) 2014 Free Software Foundation, Inc.
+   Copying and distribution of this script, with or without modification,
+   are permitted in any medium without royalty provided the copyright
+   notice and this notice are preserved.  */
 OUTPUT_FORMAT("elf64-bigaarch64", "elf64-bigaarch64",
 	      "elf64-littleaarch64")
 OUTPUT_ARCH(aarch64)
@@ -78,7 +82,7 @@ SECTIONS
      could instead move the label definition inside the section, but
      the linker would then create the section even if it turns out to
      be empty, which isn't pretty.  */
-  . = ALIGN(32 / 8);
+  . = ALIGN(64 / 8);
   .preinit_array     :
   {
     KEEP (*(.preinit_array))

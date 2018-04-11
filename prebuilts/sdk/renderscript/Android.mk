@@ -43,6 +43,17 @@ include $(BUILD_PREBUILT)
 ##################################
 include $(CLEAR_VARS)
 
+LOCAL_MODULE := libRSSupportIO
+LOCAL_SRC_FILES := lib/$(TARGET_ARCH)/$(LOCAL_MODULE).so
+LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_SUFFIX := .so
+
+include $(BUILD_PREBUILT)
+
+##################################
+include $(CLEAR_VARS)
+
 LOCAL_MODULE := android-support-v8-renderscript
 LOCAL_SRC_FILES := lib/javalib.jar
 LOCAL_MODULE_CLASS := JAVA_LIBRARIES

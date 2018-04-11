@@ -2,9 +2,10 @@
 <metadata>
   <groupId>junit</groupId>
   <artifactId>junit</artifactId>
+  <version>4.12</version>
   <versioning>
-    <latest>4.11</latest>
-    <release>4.11</release>
+    <latest>4.12</latest>
+    <release>4.12</release>
     <versions>
       <version>3.7</version>
       <version>3.8</version>
@@ -26,7 +27,11 @@
       <version>4.10</version>
       <version>4.11-beta-1</version>
       <version>4.11</version>
+      <version>4.12-beta-1</version>
+      <version>4.12-beta-2</version>
+      <version>4.12-beta-3</version>
+      <version>4.12</version>
     </versions>
-    <lastUpdated>20121114192416</lastUpdated>
+    <lastUpdated>20141204184830</lastUpdated>
   </versioning>
 </metadata>

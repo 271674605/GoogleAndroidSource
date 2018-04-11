@@ -86,6 +86,7 @@ parcelable android.view.inputmethod.InputBinding;
 parcelable android.view.inputmethod.ExtractedTextRequest;
 parcelable android.view.DragEvent;
 parcelable android.view.KeyEvent;
+parcelable android.view.WindowManager.LayoutParams;
 parcelable android.view.WindowAnimationFrameStats;
 parcelable android.view.MotionEvent;
 parcelable android.view.accessibility.AccessibilityNodeInfo;
