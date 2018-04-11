@@ -3,8 +3,8 @@
 # Copy binaries
 for b in bin/*; do
   file=`basename $b`
-  # Don't copy symlinks like clang++
-  if test -h $b; then
+  # Don't copy symlinks like clang++ or directories
+  if test -h $b || test -d $b; then
     echo Skipping $file
   else
     echo Copying $file
@@ -12,6 +12,13 @@ for b in bin/*; do
     strip $b
   fi
 done
+
+# Copy static analyzer scripts.
+echo Copying static analyzer tools
+rm -rf tools/*
+mkdir -p tools
+cp -ar ${ANDROID_BUILD_TOP}/external/clang/tools/scan-build tools
+cp -ar ${ANDROID_BUILD_TOP}/external/clang/tools/scan-view tools
 
 # Copy libraries
 echo Copying libc++.so

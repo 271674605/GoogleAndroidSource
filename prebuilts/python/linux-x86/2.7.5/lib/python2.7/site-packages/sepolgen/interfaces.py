@@ -21,15 +21,15 @@
 Classes for representing and manipulating interfaces.
 """
 
-import access
-import refpolicy
-import itertools
-import objectmodel
-import matching
-
-from sepolgeni18n import _
-
 import copy
+import itertools
+
+from . import access
+from . import refpolicy
+from . import objectmodel
+from . import matching
+from .sepolgeni18n import _
+
 
 class Param:
     """
@@ -276,7 +276,7 @@ class InterfaceVector:
         if attributes:
             for typeattribute in interface.typeattributes():
                 for attr in typeattribute.attributes:
-                    if not attributes.attributes.has_key(attr):
+                    if attr not in attributes.attributes:
                         # print "missing attribute " + attr
                         continue
                     attr_vec = attributes.attributes[attr]
@@ -341,12 +341,12 @@ class InterfaceSet:
             self.output.write(str + "\n")
 
     def to_file(self, fd):
-        for iv in self.interfaces.values():
+        for iv in sorted(self.interfaces.values(), key=lambda x: x.name):
             fd.write("[InterfaceVector %s " % iv.name)
-            for param in iv.params.values():
+            for param in sorted(iv.params.values(), key=lambda x: x.name):
                 fd.write("%s:%s " % (param.name, refpolicy.field_to_str[param.type]))
             fd.write("]\n")
-            avl = iv.access.to_list()
+            avl = sorted(iv.access.to_list())
             for av in avl:
                 fd.write(",".join(av))
                 fd.write("\n")

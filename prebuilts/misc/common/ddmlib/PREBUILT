@@ -1,7 +1,9 @@
-The object in this prebuilt directory is a copy of the jar from
+The object in this prebuilt directory can be built from
 	platform/tools/base
 
-From the commit 4614694b99a80f2c5498c2304762406389b2e852
+From the commit bae96632d7243c46f7408645ed31e7b8bed6368b
+
+Jar is obtained from git_studio-master-dev@2218860
 
 Note: Before dropping the ddmlib-prebuilt.jar, please run
 the following command to strip the jar manifest file,

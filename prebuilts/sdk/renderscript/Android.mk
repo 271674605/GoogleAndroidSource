@@ -58,7 +58,8 @@ LOCAL_MODULE := android-support-v8-renderscript
 LOCAL_SRC_FILES := lib/javalib.jar
 LOCAL_MODULE_CLASS := JAVA_LIBRARIES
 LOCAL_MODULE_TAGS := optional
-#LOCAL_MODULE_SUFFIX := .jar
+LOCAL_MODULE_SUFFIX := .jar
+LOCAL_UNINSTALLABLE_MODULE := true
 
 include $(BUILD_PREBUILT)
 

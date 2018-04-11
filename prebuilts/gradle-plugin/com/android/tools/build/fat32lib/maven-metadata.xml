@@ -2,11 +2,11 @@
 <metadata>
   <groupId>com.android.tools.build</groupId>
   <artifactId>fat32lib</artifactId>
-  <version>unspecified</version>
   <versioning>
+    <release>unspecified</release>
     <versions>
       <version>unspecified</version>
     </versions>
-    <lastUpdated>20141022200955</lastUpdated>
+    <lastUpdated>20160609042719</lastUpdated>
   </versioning>
 </metadata>

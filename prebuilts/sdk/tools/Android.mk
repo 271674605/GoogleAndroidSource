@@ -19,20 +19,6 @@ LOCAL_PATH:= $(call my-dir)
 ##################################
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := jack
-LOCAL_SRC_FILES := jack
-LOCAL_MODULE_CLASS := EXECUTABLES
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(HOST_EXECUTABLE_SUFFIX)
-LOCAL_BUILT_MODULE_STEM := jack$(HOST_EXECUTABLE_SUFFIX)
-LOCAL_IS_HOST_MODULE := true
-
-include $(BUILD_PREBUILT)
-jack_script := $(LOCAL_INSTALLED_MODULE)
-
-##################################
-include $(CLEAR_VARS)
-
 LOCAL_MODULE := jack-admin
 LOCAL_SRC_FILES := jack-admin
 LOCAL_MODULE_CLASS := EXECUTABLES
@@ -42,57 +28,26 @@ LOCAL_BUILT_MODULE_STEM := jack-admin$(HOST_EXECUTABLE_SUFFIX)
 LOCAL_IS_HOST_MODULE := true
 
 include $(BUILD_PREBUILT)
-jack_admin_script := $(LOCAL_INSTALLED_MODULE)
 
 ##################################
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := jack
-LOCAL_SRC_FILES := jack.jar
-LOCAL_MODULE_CLASS := JAVA_LIBRARIES
+LOCAL_SRC_FILES := jack
+LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
-LOCAL_BUILT_MODULE_STEM := jack$(COMMON_JAVA_PACKAGE_SUFFIX)
+LOCAL_MODULE_SUFFIX := $(HOST_EXECUTABLE_SUFFIX)
+LOCAL_BUILT_MODULE_STEM := jack$(HOST_EXECUTABLE_SUFFIX)
 LOCAL_IS_HOST_MODULE := true
-LOCAL_ADDITIONAL_DEPENDENCIES := $(JACK_LAUNCHER_JAR)
-LOCAL_POST_INSTALL_CMD := $(hide) $(JACK_SERVER_LOG_COMMAND) JACK_VM_COMMAND="$(JACK_VM) $(JAVA_TMPDIR_ARG) $(DEFAULT_JACK_VM_ARGS) -jar $(JACK_LAUNCHER_JAR) " JACK_JAR="$(JACK_JAR)" $(jack_admin_script) start-server
-
-include $(BUILD_PREBUILT)
-$(LOCAL_INSTALLED_MODULE): $(jack_script)
-# kill if stop failed, but ignore kill errors since jack-admin is reporting "no server running" as
-# an error.
-kill_server := $(intermediates)/kill_server.stamp
-$(kill_server) : $(LOCAL_BUILT_MODULE) $(jack_admin_script)
-	$(hide) $(jack_admin_script) stop-server || $(jack_admin_script) kill-server || exit 0
-	touch $@
-
-$(LOCAL_INSTALLED_MODULE): $(kill_server)
-
-##################################
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := jack-launcher
-LOCAL_SRC_FILES := jack-launcher.jar
-LOCAL_MODULE_CLASS := JAVA_LIBRARIES
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
-LOCAL_BUILT_MODULE_STEM := jack-launcher$(COMMON_JAVA_PACKAGE_SUFFIX)
-LOCAL_IS_HOST_MODULE := true
+LOCAL_REQUIRED_MODULES := jack-admin
 
 include $(BUILD_PREBUILT)
 
-##################################
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := jill
-LOCAL_SRC_FILES := jill.jar
-LOCAL_MODULE_CLASS := JAVA_LIBRARIES
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
-LOCAL_BUILT_MODULE_STEM := jill$(COMMON_JAVA_PACKAGE_SUFFIX)
-LOCAL_IS_HOST_MODULE := true
-
-include $(BUILD_PREBUILT)
+# New versions of the build/ project reference these tools directly without
+# needing to install them, but some unbundled branches use a master version of
+# prebuilts/sdk/ with an old version of build/ and look for these tools in the
+# installed directories.
+ifneq ($(USE_PREBUILT_SDK_TOOLS_IN_PLACE),true)
 
 ifneq (,$(TARGET_BUILD_APPS)$(filter true,$(TARGET_BUILD_PDK)))
 
@@ -138,7 +93,7 @@ LOCAL_MODULE_SUFFIX := $(HOST_EXECUTABLE_SUFFIX)
 LOCAL_BUILT_MODULE_STEM := aapt$(HOST_EXECUTABLE_SUFFIX)
 LOCAL_IS_HOST_MODULE := true
 LOCAL_SHARED_LIBRARIES := libc++
-LOCAL_MULTILIB := 32
+LOCAL_MULTILIB := 64
 
 include $(BUILD_PREBUILT)
 
@@ -334,6 +289,8 @@ include $(BUILD_PREBUILT)
 ##################################
 
 endif # TARGET_BUILD_APPS only
+
+endif # old version of build/ project.
 
 # Only build Clang/LLVM components when forced to.
 ifneq (true,$(FORCE_BUILD_LLVM_COMPONENTS))

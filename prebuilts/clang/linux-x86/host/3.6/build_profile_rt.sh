@@ -1,5 +1,7 @@
 #!/bin/bash -e
 
+export SKIP_LLVM_TESTS=true
+
 build_profile_rt() {
   echo Building for target $1
   cd $ANDROID_BUILD_TOP

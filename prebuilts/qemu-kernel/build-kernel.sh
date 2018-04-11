@@ -14,7 +14,7 @@ VARIANT=goldfish
 OUTPUT=/tmp/kernel-qemu
 CROSSPREFIX=arm-linux-androideabi-
 CONFIG=goldfish
-GCC_VERSION=4.8
+GCC_VERSION=4.9
 
 VALID_ARCHS="arm x86 x86_64 mips arm64 mips64"
 
@@ -171,6 +171,9 @@ else
     if [ "$ARCH" = "mips64" ]; then
         GCC_VERSION=4.9
     fi
+    if [ "$ARCH" = "mips" ]; then
+        GCC_VERSION=4.9
+    fi
     echo "Autoconfig: --gcc-version=$GCC_VERSION"
 fi
 
@@ -251,7 +254,7 @@ else
             CROSSPREFIX=x86_64-linux-android-
             ;;
         mips)
-            CROSSPREFIX=mipsel-linux-android-
+            CROSSPREFIX=mips64el-linux-android-
             ;;
         mips64)
             CROSSPREFIX=mips64el-linux-android-

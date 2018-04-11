@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-ifneq (,$(TARGET_BUILD_APPS))
+ifneq (,$(TARGET_BUILD_APPS)$(filter true,$(TARGET_BUILD_PDK)))
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
@@ -22,6 +22,7 @@ LOCAL_SRC_FILES := $(LOCAL_MODULE).jar
 LOCAL_MODULE_CLASS := JAVA_LIBRARIES
 LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
 LOCAL_BUILT_MODULE_STEM := javalib.jar
+LOCAL_UNINSTALLABLE_MODULE := true
 
 include $(BUILD_PREBUILT)
 endif
