@@ -27,6 +27,9 @@ import java.security.Permission;
 import java.util.Arrays;
 import java.util.Vector;
 import tests.support.resource.Support_Resources;
+import dalvik.system.VMRuntime;
+import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 
 public class OldRuntimeTest extends junit.framework.TestCase {
 
@@ -436,18 +439,11 @@ public class OldRuntimeTest extends junit.framework.TestCase {
     }
 
     public void test_traceMethodCalls() {
+        Runtime.getRuntime().traceMethodCalls(false);
         try {
-            Runtime.getRuntime().traceMethodCalls(false);
             Runtime.getRuntime().traceMethodCalls(true);
-            Runtime.getRuntime().traceMethodCalls(false);
-        } catch (RuntimeException ex) {
-            // Slightly ugly: we default to the SD card, which may or may not
-            // be there. So we also accept the error case as a success, since
-            // it means we actually did enable tracing (or tried to).
-            if (!"file open failed".equals(ex.getMessage())) {
-                throw ex;
-            }
-        }
+            fail();
+        } catch (UnsupportedOperationException expected) {}
     }
 
     @SuppressWarnings("deprecation")
@@ -517,6 +513,75 @@ public class OldRuntimeTest extends junit.framework.TestCase {
             fail("NullPointerException was not thrown.");
         } catch(NullPointerException npe) {
             //expected
+        }
+    }
+
+    // b/25859957
+    public void test_loadDeprecated() throws Exception {
+        final int savedTargetSdkVersion = VMRuntime.getRuntime().getTargetSdkVersion();
+        try {
+            try {
+                // Call Runtime#load(String, ClassLoader) at API level 24 (N). It will fail
+                // with a UnsatisfiedLinkError because requested library doesn't exits.
+                VMRuntime.getRuntime().setTargetSdkVersion(24);
+                Method loadMethod =
+                        Runtime.class.getDeclaredMethod("load", String.class, ClassLoader.class);
+                loadMethod.setAccessible(true);
+                loadMethod.invoke(Runtime.getRuntime(), "nonExistentLibrary", null);
+                fail();
+            } catch(InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof UnsatisfiedLinkError);
+            }
+
+            try {
+                // Call Runtime#load(String, ClassLoader) at API level 25. It will fail
+                // with a IllegalStateException because it's deprecated.
+                VMRuntime.getRuntime().setTargetSdkVersion(25);
+                Method loadMethod =
+                        Runtime.class.getDeclaredMethod("load", String.class, ClassLoader.class);
+                loadMethod.setAccessible(true);
+                loadMethod.invoke(Runtime.getRuntime(), "nonExistentLibrary", null);
+                fail();
+            } catch(InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof UnsupportedOperationException);
+            }
+        } finally {
+            VMRuntime.getRuntime().setTargetSdkVersion(savedTargetSdkVersion);
+        }
+    }
+
+    // b/25859957
+    public void test_loadLibraryDeprecated() throws Exception {
+        final int savedTargetSdkVersion = VMRuntime.getRuntime().getTargetSdkVersion();
+        try {
+            try {
+                // Call Runtime#loadLibrary(String, ClassLoader) at API level 24 (N). It will fail
+                // with a UnsatisfiedLinkError because requested library doesn't exits.
+                VMRuntime.getRuntime().setTargetSdkVersion(24);
+                Method loadMethod =
+                        Runtime.class.getDeclaredMethod("loadLibrary", String.class, ClassLoader.class);
+                loadMethod.setAccessible(true);
+                loadMethod.invoke(Runtime.getRuntime(), "nonExistentLibrary", null);
+                fail();
+            } catch(InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof UnsatisfiedLinkError);
+            }
+
+            try {
+                // Call Runtime#load(String, ClassLoader) at API level 25. It will fail
+                // with a IllegalStateException because it's deprecated.
+
+                VMRuntime.getRuntime().setTargetSdkVersion(25);
+                Method loadMethod =
+                        Runtime.class.getDeclaredMethod("loadLibrary", String.class, ClassLoader.class);
+                loadMethod.setAccessible(true);
+                loadMethod.invoke(Runtime.getRuntime(), "nonExistentLibrary", null);
+                fail();
+            } catch(InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof UnsupportedOperationException);
+            }
+        } finally {
+            VMRuntime.getRuntime().setTargetSdkVersion(savedTargetSdkVersion);
         }
     }
 }

@@ -22,7 +22,7 @@ This sample demonstrates using the support library APIs.
 
 Using an ActionBar with the support library requires the following steps:
 
-1. Create your activity by extending ActionBarActivity.
+1. Create your activity by extending AppCompatActivity.
 2. Use (or extend) one of the Theme.AppCompat themes for your activity.
 
 Once this is done, action items will be created for any options menu items that
@@ -35,8 +35,8 @@ would otherwise be created during when `[onCreateOptionsMenu()][3]` is called.
 Pre-requisites
 --------------
 
-- Android SDK v23
-- Android Build Tools v23.0.0
+- Android SDK 24
+- Android Build Tools v24.0.2
 - Android Support Repository
 
 Screenshots
@@ -65,7 +65,7 @@ submitting a pull request through GitHub. Please see CONTRIBUTING.md for more de
 License
 -------
 
-Copyright 2014 The Android Open Source Project, Inc.
+Copyright 2016 The Android Open Source Project, Inc.
 
 Licensed to the Apache Software Foundation (ASF) under one or more contributor
 license agreements.  See the NOTICE file distributed with this work for

@@ -34,13 +34,10 @@
 #include "ServiceUtilities.h"
 #include <hardware_legacy/power.h>
 #include <media/AudioEffect.h>
-#include <media/EffectsFactoryApi.h>
 #include <media/AudioParameter.h>
 
-#include <hardware/hardware.h>
 #include <system/audio.h>
 #include <system/audio_policy.h>
-#include <hardware/audio_policy.h>
 
 namespace android {
 
@@ -52,9 +49,6 @@ static const int kDumpLockSleepUs = 20000;
 
 static const nsecs_t kAudioCommandTimeoutNs = seconds(3); // 3 seconds
 
-namespace {
-    extern struct audio_policy_service_ops aps_ops;
-};
 
 // ----------------------------------------------------------------------------
 
@@ -66,11 +60,6 @@ AudioPolicyService::AudioPolicyService()
 
 void AudioPolicyService::onFirstRef()
 {
-    char value[PROPERTY_VALUE_MAX];
-    const struct hw_module_t *module;
-    int forced_val;
-    int rc;
-
     {
         Mutex::Autolock _l(mLock);
 
@@ -81,39 +70,8 @@ void AudioPolicyService::onFirstRef()
         // start output activity command thread
         mOutputCommandThread = new AudioCommandThread(String8("ApmOutput"), this);
 
-#ifdef USE_LEGACY_AUDIO_POLICY
-        ALOGI("AudioPolicyService CSTOR in legacy mode");
-
-        /* instantiate the audio policy manager */
-        rc = hw_get_module(AUDIO_POLICY_HARDWARE_MODULE_ID, &module);
-        if (rc) {
-            return;
-        }
-        rc = audio_policy_dev_open(module, &mpAudioPolicyDev);
-        ALOGE_IF(rc, "couldn't open audio policy device (%s)", strerror(-rc));
-        if (rc) {
-            return;
-        }
-
-        rc = mpAudioPolicyDev->create_audio_policy(mpAudioPolicyDev, &aps_ops, this,
-                                                   &mpAudioPolicy);
-        ALOGE_IF(rc, "couldn't create audio policy (%s)", strerror(-rc));
-        if (rc) {
-            return;
-        }
-
-        rc = mpAudioPolicy->init_check(mpAudioPolicy);
-        ALOGE_IF(rc, "couldn't init_check the audio policy (%s)", strerror(-rc));
-        if (rc) {
-            return;
-        }
-        ALOGI("Loaded audio policy from %s (%s)", module->name, module->id);
-#else
-        ALOGI("AudioPolicyService CSTOR in new mode");
-
         mAudioPolicyClient = new AudioPolicyClient(this);
         mAudioPolicyManager = createAudioPolicyManager(mAudioPolicyClient);
-#endif
     }
     // load audio processing modules
     sp<AudioPolicyEffects>audioPolicyEffects = new AudioPolicyEffects();
@@ -129,17 +87,8 @@ AudioPolicyService::~AudioPolicyService()
     mAudioCommandThread->exit();
     mOutputCommandThread->exit();
 
-#ifdef USE_LEGACY_AUDIO_POLICY
-    if (mpAudioPolicy != NULL && mpAudioPolicyDev != NULL) {
-        mpAudioPolicyDev->destroy_audio_policy(mpAudioPolicyDev, mpAudioPolicy);
-    }
-    if (mpAudioPolicyDev != NULL) {
-        audio_policy_dev_close(mpAudioPolicyDev);
-    }
-#else
     destroyAudioPolicyManager(mAudioPolicyManager);
     delete mAudioPolicyClient;
-#endif
 
     mNotificationClients.clear();
     mAudioPolicyEffects.clear();
@@ -187,14 +136,12 @@ void AudioPolicyService::removeNotificationClient(uid_t uid)
         Mutex::Autolock _l(mNotificationClientsLock);
         mNotificationClients.removeItem(uid);
     }
-#ifndef USE_LEGACY_AUDIO_POLICY
     {
         Mutex::Autolock _l(mLock);
         if (mAudioPolicyManager) {
             mAudioPolicyManager->releaseResourcesForUid(uid);
         }
     }
-#endif
 }
 
 void AudioPolicyService::onAudioPortListUpdate()
@@ -223,14 +170,14 @@ void AudioPolicyService::doOnAudioPatchListUpdate()
     }
 }
 
-void AudioPolicyService::onDynamicPolicyMixStateUpdate(String8 regId, int32_t state)
+void AudioPolicyService::onDynamicPolicyMixStateUpdate(const String8& regId, int32_t state)
 {
     ALOGV("AudioPolicyService::onDynamicPolicyMixStateUpdate(%s, %d)",
             regId.string(), state);
     mOutputCommandThread->dynamicPolicyMixStateUpdateCommand(regId, state);
 }
 
-void AudioPolicyService::doOnDynamicPolicyMixStateUpdate(String8 regId, int32_t state)
+void AudioPolicyService::doOnDynamicPolicyMixStateUpdate(const String8& regId, int32_t state)
 {
     Mutex::Autolock _l(mNotificationClientsLock);
     for (size_t i = 0; i < mNotificationClients.size(); i++) {
@@ -312,7 +259,7 @@ void AudioPolicyService::NotificationClient::onAudioPatchListUpdate()
 }
 
 void AudioPolicyService::NotificationClient::onDynamicPolicyMixStateUpdate(
-        String8 regId, int32_t state)
+        const String8& regId, int32_t state)
 {
     if (mAudioPolicyServiceClient != 0) {
         mAudioPolicyServiceClient->onDynamicPolicyMixStateUpdate(regId, state);
@@ -360,11 +307,7 @@ status_t AudioPolicyService::dumpInternals(int fd)
     char buffer[SIZE];
     String8 result;
 
-#ifdef USE_LEGACY_AUDIO_POLICY
-    snprintf(buffer, SIZE, "PolicyManager Interface: %p\n", mpAudioPolicy);
-#else
     snprintf(buffer, SIZE, "AudioPolicyManager: %p\n", mAudioPolicyManager);
-#endif
     result.append(buffer);
     snprintf(buffer, SIZE, "Command Thread: %p\n", mAudioCommandThread.get());
     result.append(buffer);
@@ -394,15 +337,9 @@ status_t AudioPolicyService::dump(int fd, const Vector<String16>& args __unused)
             mTonePlaybackThread->dump(fd);
         }
 
-#ifdef USE_LEGACY_AUDIO_POLICY
-        if (mpAudioPolicy) {
-            mpAudioPolicy->dump(mpAudioPolicy, fd);
-        }
-#else
         if (mAudioPolicyManager) {
             mAudioPolicyManager->dump(fd);
         }
-#endif
 
         if (locked) mLock.unlock();
     }
@@ -859,7 +796,7 @@ status_t AudioPolicyService::AudioCommandThread::setAudioPortConfigCommand(
 }
 
 void AudioPolicyService::AudioCommandThread::dynamicPolicyMixStateUpdateCommand(
-        String8 regId, int32_t state)
+        const String8& regId, int32_t state)
 {
     sp<AudioCommand> command = new AudioCommand();
     command->mCommand = DYN_POLICY_MIX_STATE_UPDATE;
@@ -982,6 +919,18 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
             if (data->mStream != data2->mStream) break;
             ALOGV("Filtering out volume command on output %d for stream %d",
                     data->mIO, data->mStream);
+            removedCommands.add(command2);
+            command->mTime = command2->mTime;
+            // force delayMs to non 0 so that code below does not request to wait for
+            // command status as the command is now delayed
+            delayMs = 1;
+        } break;
+
+        case SET_VOICE_VOLUME: {
+            VoiceVolumeData *data = (VoiceVolumeData *)command->mParam.get();
+            VoiceVolumeData *data2 = (VoiceVolumeData *)command2->mParam.get();
+            ALOGV("Filtering out voice volume command value %f replaced by %f",
+                  data2->mVolume, data->mVolume);
             removedCommands.add(command2);
             command->mTime = command2->mTime;
             // force delayMs to non 0 so that code below does not request to wait for
@@ -1197,28 +1146,5 @@ int aps_start_tone(void *service, audio_policy_tone_t tone,
 int aps_stop_tone(void *service);
 int aps_set_voice_volume(void *service, float volume, int delay_ms);
 };
-
-namespace {
-    struct audio_policy_service_ops aps_ops = {
-        .open_output           = aps_open_output,
-        .open_duplicate_output = aps_open_dup_output,
-        .close_output          = aps_close_output,
-        .suspend_output        = aps_suspend_output,
-        .restore_output        = aps_restore_output,
-        .open_input            = aps_open_input,
-        .close_input           = aps_close_input,
-        .set_stream_volume     = aps_set_stream_volume,
-        .invalidate_stream     = aps_invalidate_stream,
-        .set_parameters        = aps_set_parameters,
-        .get_parameters        = aps_get_parameters,
-        .start_tone            = aps_start_tone,
-        .stop_tone             = aps_stop_tone,
-        .set_voice_volume      = aps_set_voice_volume,
-        .move_effects          = aps_move_effects,
-        .load_hw_module        = aps_load_hw_module,
-        .open_output_on_module = aps_open_output_on_module,
-        .open_input_on_module  = aps_open_input_on_module,
-    };
-}; // namespace <unnamed>
 
 }; // namespace android

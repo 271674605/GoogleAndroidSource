@@ -21,8 +21,7 @@ import android.support.v13.view.DragAndDropPermissionsCompat;
 import android.view.DragEvent;
 
 /**
- * Helper for accessing features in {@link android.app.Activity}
- * introduced after API level 13 in a backwards compatible fashion.
+ * Helper for accessing features in {@link android.app.Activity} in a backwards compatible fashion.
  */
 public class ActivityCompat extends android.support.v4.app.ActivityCompat {
 
@@ -39,5 +38,11 @@ public class ActivityCompat extends android.support.v4.app.ActivityCompat {
         return DragAndDropPermissionsCompat.request(activity, dragEvent);
     }
 
-    private ActivityCompat() {}
+    /**
+     * This class should not be instantiated, but the constructor must be
+     * visible for the class to be extended.
+     */
+    protected ActivityCompat() {
+        // Not publicly instantiable, but may be extended.
+    }
 }

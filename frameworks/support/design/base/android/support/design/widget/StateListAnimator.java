@@ -16,11 +16,11 @@
 
 package android.support.design.widget;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.util.StateSet;
-import android.view.View;
-import android.view.animation.Animation;
 
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 
 final class StateListAnimator {
@@ -28,81 +28,29 @@ final class StateListAnimator {
     private final ArrayList<Tuple> mTuples = new ArrayList<>();
 
     private Tuple mLastMatch = null;
-    private Animation mRunningAnimation = null;
-    private WeakReference<View> mViewRef;
+    ValueAnimator mRunningAnimator = null;
 
-    private Animation.AnimationListener mAnimationListener = new Animation.AnimationListener() {
-        @Override
-        public void onAnimationEnd(Animation animation) {
-            if (mRunningAnimation == animation) {
-                mRunningAnimation = null;
-            }
-        }
-
-        @Override
-        public void onAnimationStart(Animation animation) {
-            // no-op
-        }
-
-        @Override
-        public void onAnimationRepeat(Animation animation) {
-            // no-op
-        }
-    };
+    private final ValueAnimator.AnimatorListener mAnimationListener =
+            new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animator) {
+                    if (mRunningAnimator == animator) {
+                        mRunningAnimator = null;
+                    }
+                }
+            };
 
     /**
      * Associates the given Animation with the provided drawable state specs so that it will be run
      * when the View's drawable state matches the specs.
      *
      * @param specs    The drawable state specs to match against
-     * @param animation The Animation to run when the specs match
+     * @param animator The animator to run when the specs match
      */
-    public void addState(int[] specs, Animation animation) {
-        Tuple tuple = new Tuple(specs, animation);
-        animation.setAnimationListener(mAnimationListener);
+    public void addState(int[] specs, ValueAnimator animator) {
+        Tuple tuple = new Tuple(specs, animator);
+        animator.addListener(mAnimationListener);
         mTuples.add(tuple);
-    }
-
-    /**
-     * Returns the current {@link Animation} which is started because of a state
-     * change.
-     *
-     * @return The currently running Animation or null if no Animation is running
-     */
-    Animation getRunningAnimation() {
-        return mRunningAnimation;
-    }
-
-
-    View getTarget() {
-        return mViewRef == null ? null : mViewRef.get();
-    }
-
-    void setTarget(View view) {
-        final View current = getTarget();
-        if (current == view) {
-            return;
-        }
-        if (current != null) {
-            clearTarget();
-        }
-        if (view != null) {
-            mViewRef = new WeakReference<>(view);
-        }
-    }
-
-    private void clearTarget() {
-        final View view = getTarget();
-        final int size = mTuples.size();
-        for (int i = 0; i < size; i++) {
-            Animation anim = mTuples.get(i).mAnimation;
-            if (view.getAnimation() == anim) {
-                view.clearAnimation();
-            }
-        }
-        mViewRef = null;
-        mLastMatch = null;
-        mRunningAnimation = null;
     }
 
     /**
@@ -127,66 +75,42 @@ final class StateListAnimator {
 
         mLastMatch = match;
 
-        View view = mViewRef.get();
-        if (match != null && view != null && view.getVisibility() == View.VISIBLE ) {
+        if (match != null) {
             start(match);
         }
     }
 
     private void start(Tuple match) {
-        mRunningAnimation = match.mAnimation;
-
-        View view = getTarget();
-        if (view != null) {
-            view.startAnimation(mRunningAnimation);
-        }
+        mRunningAnimator = match.mAnimator;
+        mRunningAnimator.start();
     }
 
     private void cancel() {
-        if (mRunningAnimation != null) {
-            final View view = getTarget();
-            if (view != null && view.getAnimation() == mRunningAnimation) {
-                view.clearAnimation();
-            }
-            mRunningAnimation = null;
+        if (mRunningAnimator != null) {
+            mRunningAnimator.cancel();
+            mRunningAnimator = null;
         }
     }
 
     /**
-     * @hide
-     */
-    ArrayList<Tuple> getTuples() {
-        return mTuples;
-    }
-
-    /**
-     * If there is an animation running for a recent state change, ends it. <p> This causes the
-     * animation to assign the end value(s) to the View.
+     * If there is an animation running for a recent state change, ends it.
+     *
+     * <p>This causes the animation to assign the end value(s) to the View.</p>
      */
     public void jumpToCurrentState() {
-        if (mRunningAnimation != null) {
-            final View view = getTarget();
-            if (view != null && view.getAnimation() == mRunningAnimation) {
-                view.clearAnimation();
-            }
+        if (mRunningAnimator != null) {
+            mRunningAnimator.end();
+            mRunningAnimator = null;
         }
     }
 
     static class Tuple {
         final int[] mSpecs;
-        final Animation mAnimation;
+        final ValueAnimator mAnimator;
 
-        private Tuple(int[] specs, Animation Animation) {
+        Tuple(int[] specs, ValueAnimator animator) {
             mSpecs = specs;
-            mAnimation = Animation;
-        }
-
-        int[] getSpecs() {
-            return mSpecs;
-        }
-
-        Animation getAnimation() {
-            return mAnimation;
+            mAnimator = animator;
         }
     }
 }

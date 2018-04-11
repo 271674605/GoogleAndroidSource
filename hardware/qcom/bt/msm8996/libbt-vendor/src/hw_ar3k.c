@@ -48,6 +48,7 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
+#include <string.h>
 
 #include "bt_hci_bdroid.h"
 #include "hci_uart.h"
@@ -95,6 +96,8 @@ struct ps_cfg_entry ps_list[MAX_TAGS];
 #ifdef __cplusplus
 }
 #endif
+
+#define RESERVED(p)  if(p) ALOGI( "%s: reserved param", __FUNCTION__);
 
 /*****************************************************************************
 **   Functions
@@ -434,19 +437,19 @@ static int set_cntrlr_baud(int fd, int speed)
 static int get_ps_type(char *ptr, int index, char *type, char *sub_type)
 {
     int i;
-    int delim = FALSE;
+    int delim = false;
 
     if (index > MAX_PREAMBLE_LEN)
         return -EILSEQ;
 
     for (i = 1; i < index; i++) {
         if (__is_delim(ptr[i])) {
-            delim = TRUE;
+            delim = true;
             continue;
         }
 
         if (isalpha(ptr[i])) {
-            if (delim == FALSE)
+            if (delim == false)
                 (*type) = toupper(ptr[i]);
             else
                 (*sub_type)	= toupper(ptr[i]);
@@ -471,7 +474,7 @@ static int get_input_format(char *buf, struct ps_entry_type *format)
     char sub_type = '\0';
 
     format->type = PS_HEX;
-    format->array = TRUE;
+    format->array = true;
 
     if (strstr(buf, "[") != buf)
         return 0;
@@ -485,10 +488,10 @@ static int get_input_format(char *buf, struct ps_entry_type *format)
 
     /* Check is data type is of array */
     if (type == ARRAY || sub_type == ARRAY)
-        format->array = TRUE;
+        format->array = true;
 
     if (type == STRING || sub_type == STRING)
-        format->array = FALSE;
+        format->array = false;
 
     if (type == DECIMAL || type == BINARY)
         format->type = PS_DEC;
@@ -517,7 +520,7 @@ static unsigned int read_data_in_section(char *buf, struct ps_entry_type type)
         ptr++;
     }
 
-    if (type.type == PS_HEX && type.array != TRUE)
+    if (type.type == PS_HEX && type.array != true)
         return strtol(ptr, NULL, 16);
 
     return UNDEFINED;
@@ -630,7 +633,7 @@ static int ath_parse_ps(FILE *stream)
             read_count = (byte_count > ENTRY_PER_LINE) ?
             ENTRY_PER_LINE : byte_count;
 
-            if (format.type == PS_HEX && format.array == TRUE) {
+            if (format.type == PS_HEX && format.array == true) {
                 while (read_count > 0) {
                     update_tag_data(tag, &status, ptr);
                     read_count -= 2;
@@ -873,6 +876,8 @@ static int set_patch_ram(int dev, char *patch_loc, int len)
     char loc_byte[3];
     uint8_t *event;
     uint8_t *loc_ptr = &cmd[7];
+
+    RESERVED(len);
 
     if (!patch_loc)
         return -1;
@@ -1386,6 +1391,8 @@ void lpm_set_ar3k(uint8_t pio, uint8_t action, uint8_t polarity)
     char buffer;
 
     ALOGI("lpm mode: %d  action: %d", pio, action);
+
+    RESERVED(polarity);
 
     switch (pio)
     {

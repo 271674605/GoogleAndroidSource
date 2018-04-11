@@ -22,21 +22,17 @@
 #include <bcinfo/BitcodeWrapper.h>
 #endif
 
-#if !defined(RS_SERVER) && !defined(RS_COMPATIBILITY_LIB)
-#include "utils/Timers.h"
-#include "cutils/trace.h"
-#endif
-
 #include <sys/stat.h>
 
+#include <sstream>
 #include <string>
 
-#ifdef USE_MINGW
+#ifdef _WIN32
 /* Define the default path separator for the platform. */
 #define OS_PATH_SEPARATOR     '\\'
 #define OS_PATH_SEPARATOR_STR "\\"
 
-#else /* not USE_MINGW */
+#else /* not _WIN32 */
 
 /* Define the default path separator for the platform. */
 #define OS_PATH_SEPARATOR     '/'
@@ -44,8 +40,7 @@
 
 #endif
 
-using namespace android;
-using namespace android::renderscript;
+using android::renderscript::ScriptC;
 
 #define GET_TLS()  Context::ScriptTLSStruct * tls = \
     (Context::ScriptTLSStruct *)pthread_getspecific(Context::gThreadTLSKey); \
@@ -117,10 +112,8 @@ bool ScriptC::createCacheDir(const char *cacheDir) {
 #endif
 
 void ScriptC::setupScript(Context *rsc) {
-#ifndef RS_SERVER
     mEnviroment.mStartTimeMillis
                 = nanoseconds_to_milliseconds(systemTime(SYSTEM_TIME_MONOTONIC));
-#endif
 
     for (uint32_t ct=0; ct < mHal.info.exportedVariableCount; ct++) {
         if (mSlots[ct].get() && !mTypes[ct].get()) {
@@ -134,7 +127,7 @@ void ScriptC::setupScript(Context *rsc) {
 }
 
 void ScriptC::setupGLState(Context *rsc) {
-#ifndef RS_COMPATIBILITY_LIB
+#if !defined(RS_VENDOR_LIB) && !defined(RS_COMPATIBILITY_LIB)
     if (mEnviroment.mFragmentStore.get()) {
         rsc->setProgramStore(mEnviroment.mFragmentStore.get());
     }
@@ -183,15 +176,6 @@ void ScriptC::runForEach(Context *rsc,
                          const void * usr,
                          size_t usrBytes,
                          const RsScriptCall *sc) {
-    // Make a copy of RsScriptCall and zero out extra fields that are absent
-    // in API levels below 23.
-    RsScriptCall sc_copy;
-    if (sc != nullptr && getApiLevel() < 23) {
-        memset(&sc_copy, 0, sizeof(sc_copy));
-        memcpy(&sc_copy, sc, 7*4);
-        sc = &sc_copy;
-    }
-
     if (slot >= mHal.info.exportedForEachCount) {
         rsc->setError(RS_ERROR_BAD_SCRIPT,
                       "The forEach kernel index is out of bounds");
@@ -201,15 +185,13 @@ void ScriptC::runForEach(Context *rsc,
     // Trace this function call.
     // To avoid overhead we only build the string if tracing is actually
     // enabled.
-    String8 *AString = NULL;
-    const char *String = "";
+    std::stringstream ss;
     if (ATRACE_ENABLED()) {
-        AString = new String8("runForEach_");
-        AString->append(mHal.info.exportedForeachFuncList[slot].first);
-        String = AString->string();
+        ss << "runForEach slot[" << slot << "]";
     }
-    ATRACE_NAME(String);
-    (void)String;
+    std::string msgStr(ss.str());
+    ATRACE_NAME(msgStr.c_str());
+
     if (mRSC->hadFatalError()) return;
 
     Context::PushState ps(rsc);
@@ -232,10 +214,6 @@ void ScriptC::runForEach(Context *rsc,
     } else {
         rsc->setError(RS_ERROR_FATAL_DRIVER,
                       "Driver support for multi-input not present");
-    }
-
-    if (AString) {
-        delete AString;
     }
 }
 
@@ -280,7 +258,6 @@ void ScriptC::Invoke(Context *rsc, uint32_t slot, const void *data, size_t len) 
 static const bool kDebugBitcode = false;
 
 #ifndef RS_COMPATIBILITY_LIB
-#ifndef ANDROID_RS_SERIALIZE
 
 static bool dumpBitcodeFile(const char *cacheDir, const char *resName,
                             const char *suffix, const uint8_t *bitcode,
@@ -311,7 +288,6 @@ static bool dumpBitcodeFile(const char *cacheDir, const char *resName,
     return true;
 }
 
-#endif  // !ANDROID_RS_SERIALIZE
 #endif  // !RS_COMPATIBILITY_LIB
 
 
@@ -323,7 +299,6 @@ bool ScriptC::runCompiler(Context *rsc,
     ATRACE_CALL();
     //ALOGE("runCompiler %p %p %p %p %p %i", rsc, this, resName, cacheDir, bitcode, bitcodeLen);
 #ifndef RS_COMPATIBILITY_LIB
-#ifndef ANDROID_RS_SERIALIZE
     uint32_t sdkVersion = 0;
     bcinfo::BitcodeWrapper bcWrapper((const char *)bitcode, bitcodeLen);
     if (!bcWrapper.unwrap()) {
@@ -365,7 +340,6 @@ bool ScriptC::runCompiler(Context *rsc,
     // optimization level used to compile the bitcode.
     rsc->setOptLevel(bcWrapper.getOptimizationLevel());
 
-#endif
     if (!cacheDir) {
         // MUST BE FIXED BEFORE ANYTHING USING C++ API IS RELEASED
         cacheDir = getenv("EXTERNAL_STORAGE");
@@ -383,7 +357,7 @@ bool ScriptC::runCompiler(Context *rsc,
     }
 
     mInitialized = true;
-#ifndef RS_COMPATIBILITY_LIB
+#if !defined(RS_VENDOR_LIB) && !defined(RS_COMPATIBILITY_LIB)
     mEnviroment.mFragment.set(rsc->getDefaultProgramFragment());
     mEnviroment.mVertex.set(rsc->getDefaultProgramVertex());
     mEnviroment.mFragmentStore.set(rsc->getDefaultProgramStore());
@@ -404,7 +378,7 @@ bool ScriptC::runCompiler(Context *rsc,
             return false;
         }
 
-#ifndef RS_COMPATIBILITY_LIB
+#if !defined(RS_VENDOR_LIB) && !defined(RS_COMPATIBILITY_LIB)
         if (!strcmp(key, "stateVertex")) {
             if (!strcmp(value, "default")) {
                 continue;
@@ -482,5 +456,5 @@ RsScript rsi_ScriptCCreate(Context *rsc,
     return s;
 }
 
-}
-}
+} // namespace renderscript
+} // namespace android

@@ -140,7 +140,7 @@ class DeltaPerformer : public FileWriter {
   // Returns true if a previous update attempt can be continued based on the
   // persistent preferences and the new update check response hash.
   static bool CanResumeUpdate(PrefsInterface* prefs,
-                              std::string update_check_response_hash);
+                              const std::string& update_check_response_hash);
 
   // Resets the persistent update progress state to indicate that an update
   // can't be resumed. Performs a quick update-in-progress reset if |quick| is
@@ -217,12 +217,6 @@ class DeltaPerformer : public FileWriter {
   // Update overall progress metrics, log as necessary.
   void UpdateOverallProgress(bool force_log, const char* message_prefix);
 
-  // Verifies that the expected source partition hashes (if present) match the
-  // hashes for the current partitions. Returns true if there are no expected
-  // hashes in the payload (e.g., if it's a new-style full update) or if the
-  // hashes match; returns false otherwise.
-  bool VerifySourcePartitions();
-
   // Returns true if enough of the delta file has been passed via Write()
   // to be able to perform a given install operation.
   bool CanPerformInstallOperation(const InstallOperation& operation);
@@ -250,12 +244,18 @@ class DeltaPerformer : public FileWriter {
   bool PerformInstallOperation(const InstallOperation& operation);
 
   // These perform a specific type of operation and return true on success.
+  // |error| will be set if source hash mismatch, otherwise |error| might not be
+  // set even if it fails.
   bool PerformReplaceOperation(const InstallOperation& operation);
   bool PerformZeroOrDiscardOperation(const InstallOperation& operation);
   bool PerformMoveOperation(const InstallOperation& operation);
   bool PerformBsdiffOperation(const InstallOperation& operation);
-  bool PerformSourceCopyOperation(const InstallOperation& operation);
-  bool PerformSourceBsdiffOperation(const InstallOperation& operation);
+  bool PerformSourceCopyOperation(const InstallOperation& operation,
+                                  ErrorCode* error);
+  bool PerformSourceBsdiffOperation(const InstallOperation& operation,
+                                    ErrorCode* error);
+  bool PerformImgdiffOperation(const InstallOperation& operation,
+                               ErrorCode* error);
 
   // Extracts the payload signature message from the blob on the |operation| if
   // the offset matches the one specified by the manifest. Returns whether the

@@ -19,12 +19,26 @@ include $(BUILD_PREBUILT)
 ###########################################
 
 # com.squareup.haha prebuilt.
+# com.google.truth prebuilt.
 
 include $(CLEAR_VARS)
 
 LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES := \
-    squareup-haha-prebuilt:repository/com/squareup/haha/haha/2.0.2/haha-2.0.2.jar
+    squareup-haha-prebuilt:repository/com/squareup/haha/haha/2.0.2/haha-2.0.2.jar \
+    truth-prebuilt-jar:repository/com/google/truth/truth/0.28/truth-0.28.jar
 
 include $(BUILD_MULTI_PREBUILT)
 
 ###########################################
+# com.google.truth prebuilt
+###########################################
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := truth-prebuilt
+
+LOCAL_STATIC_JAVA_LIBRARIES := \
+    truth-prebuilt-jar \
+    guava
+
+include $(BUILD_STATIC_JAVA_LIBRARY)

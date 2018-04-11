@@ -25,7 +25,7 @@
     <string name="sip_call_options_wifi_only_title" msgid="5112579243580893890">"Anvend SIP-opkald (kun Wi-Fi)"</string>
     <string name="sip_call_options_entry_1" msgid="7217659161237099900">"Gælder alle opkald ved tilgængeligt datanetværk"</string>
     <string name="sip_call_options_entry_2" msgid="1815335903940609729">"Kun for SIP-opkald"</string>
-    <string name="sip_call_options_wifi_only_entry_1" msgid="1358513095551847314">"Gælder alle opkald"</string>
+    <string name="sip_call_options_wifi_only_entry_1" msgid="1358513095551847314">"For alle opkald"</string>
     <string name="add_sip_account" msgid="800843669753980091">"Tilføj konto"</string>
     <string name="remove_sip_account" msgid="1367664438506503690">"Fjern konto"</string>
     <string name="sip_account_list" msgid="5610858485304821480">"SIP-konti"</string>
@@ -61,7 +61,9 @@
     <string name="advanced_settings" msgid="6622996380747040711">"Valgfri indstillinger"</string>
     <string name="auth_username_title" msgid="8262491689004708265">"Brugernavn til godkendelse"</string>
     <string name="auth_username_summary" msgid="941160241371436473">"Brugernavn ved godkendelse"</string>
-    <string name="default_preference_summary" msgid="1979249643719483249">"&lt;Ikke angivet&gt;"</string>
+    <string name="default_preference_summary_username" msgid="8404717434312826082">"&lt;Ikke angivet&gt;"</string>
+    <string name="default_preference_summary_password" msgid="4464464672997027904">"&lt;Ikke angivet&gt;"</string>
+    <string name="default_preference_summary_domain_address" msgid="4871971710197441673">"&lt;Ikke angivet&gt;"</string>
     <string name="display_name_summary" msgid="7155076491675565407">"&lt;Samme som brugernavn&gt;"</string>
     <string name="optional_summary" msgid="2363105560396317624">"&lt;Valgfrit&gt;"</string>
     <string name="advanced_settings_show" msgid="7838761602853998622">"▷ Tryk for at vise alle"</string>

@@ -31,6 +31,7 @@ import static android.net.NetworkStats.IFACE_ALL;
 import static android.net.NetworkStats.SET_ALL;
 import static android.net.NetworkStats.SET_DEFAULT;
 import static android.net.NetworkStats.SET_FOREGROUND;
+import static android.net.NetworkStats.TAG_ALL;
 import static android.net.NetworkStats.TAG_NONE;
 import static android.net.NetworkStats.UID_ALL;
 import static android.net.NetworkTemplate.buildTemplateMobileWildcard;
@@ -79,6 +80,7 @@ import android.net.INetworkManagementEventObserver;
 import android.net.INetworkStatsService;
 import android.net.INetworkStatsSession;
 import android.net.LinkProperties;
+import android.net.NetworkCapabilities;
 import android.net.NetworkIdentity;
 import android.net.NetworkInfo;
 import android.net.NetworkState;
@@ -102,6 +104,8 @@ import android.os.SystemClock;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.provider.Settings.Global;
+import android.service.NetworkInterfaceProto;
+import android.service.NetworkStatsServiceDumpProto;
 import android.telephony.TelephonyManager;
 import android.text.format.DateUtils;
 import android.util.ArrayMap;
@@ -113,10 +117,12 @@ import android.util.NtpTrustedTime;
 import android.util.Slog;
 import android.util.SparseIntArray;
 import android.util.TrustedTime;
+import android.util.proto.ProtoOutputStream;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.net.VpnInfo;
 import com.android.internal.util.ArrayUtils;
+import com.android.internal.util.DumpUtils;
 import com.android.internal.util.FileRotator;
 import com.android.internal.util.IndentingPrintWriter;
 import com.android.server.EventLogTags;
@@ -177,6 +183,11 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
     private static final String PREFIX_XT = "xt";
     private static final String PREFIX_UID = "uid";
     private static final String PREFIX_UID_TAG = "uid_tag";
+
+    /**
+     * Virtual network interface for video telephony. This is for VT data usage counting purpose.
+     */
+    public static final String VT_INTERFACE = "vt_data0";
 
     /**
      * Settings that can be changed externally.
@@ -374,6 +385,7 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
         mContext.unregisterReceiver(mTetherReceiver);
         mContext.unregisterReceiver(mPollReceiver);
         mContext.unregisterReceiver(mRemovedReceiver);
+        mContext.unregisterReceiver(mUserReceiver);
         mContext.unregisterReceiver(mShutdownReceiver);
 
         final long currentTime = mTime.hasCache() ? mTime.currentTimeMillis()
@@ -546,15 +558,21 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
             @Override
             public NetworkStats getSummaryForAllUid(
                     NetworkTemplate template, long start, long end, boolean includeTags) {
-                @NetworkStatsAccess.Level int accessLevel = checkAccessLevel(mCallingPackage);
-                final NetworkStats stats =
-                        getUidComplete().getSummary(template, start, end, accessLevel);
-                if (includeTags) {
-                    final NetworkStats tagStats = getUidTagComplete()
-                            .getSummary(template, start, end, accessLevel);
-                    stats.combineAllValues(tagStats);
+                try {
+                    @NetworkStatsAccess.Level int accessLevel = checkAccessLevel(mCallingPackage);
+                    final NetworkStats stats =
+                            getUidComplete().getSummary(template, start, end, accessLevel);
+                    if (includeTags) {
+                        final NetworkStats tagStats = getUidTagComplete()
+                                .getSummary(template, start, end, accessLevel);
+                        stats.combineAllValues(tagStats);
+                    }
+                    return stats;
+                } catch (NullPointerException e) {
+                    // TODO: Track down and fix the cause of this crash and remove this catch block.
+                    Slog.wtf(TAG, "NullPointerException in getSummaryForAllUid", e);
+                    throw e;
                 }
-                return stats;
             }
 
             @Override
@@ -967,6 +985,23 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
                 if (baseIface != null) {
                     findOrCreateNetworkIdentitySet(mActiveIfaces, baseIface).add(ident);
                     findOrCreateNetworkIdentitySet(mActiveUidIfaces, baseIface).add(ident);
+
+                    // Build a separate virtual interface for VT (Video Telephony) data usage.
+                    // Only do this when IMS is not metered, but VT is metered.
+                    // If IMS is metered, then the IMS network usage has already included VT usage.
+                    // VT is considered always metered in framework's layer. If VT is not metered
+                    // per carrier's policy, modem will report 0 usage for VT calls.
+                    if (state.networkCapabilities.hasCapability(
+                            NetworkCapabilities.NET_CAPABILITY_IMS) && !ident.getMetered()) {
+
+                        // Copy the identify from IMS one but mark it as metered.
+                        NetworkIdentity vtIdent = new NetworkIdentity(ident.getType(),
+                                ident.getSubType(), ident.getSubscriberId(), ident.getNetworkId(),
+                                ident.getRoaming(), true);
+                        findOrCreateNetworkIdentitySet(mActiveIfaces, VT_INTERFACE).add(vtIdent);
+                        findOrCreateNetworkIdentitySet(mActiveUidIfaces, VT_INTERFACE).add(vtIdent);
+                    }
+
                     if (isMobile) {
                         mobileIfaces.add(baseIface);
                     }
@@ -1004,9 +1039,9 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
 
     private void recordSnapshotLocked(long currentTime) throws RemoteException {
         // snapshot and record current counters; read UID stats first to
-        // avoid overcounting dev stats.
+        // avoid over counting dev stats.
         final NetworkStats uidSnapshot = getNetworkStatsUidDetail();
-        final NetworkStats xtSnapshot = mNetworkManager.getNetworkStatsSummaryXt();
+        final NetworkStats xtSnapshot = getNetworkStatsXtAndVt();
         final NetworkStats devSnapshot = mNetworkManager.getNetworkStatsSummaryDev();
 
 
@@ -1188,7 +1223,8 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
         // Build list of UIDs that we should clean up
         int[] uids = new int[0];
         final List<ApplicationInfo> apps = mContext.getPackageManager().getInstalledApplications(
-                PackageManager.GET_UNINSTALLED_PACKAGES | PackageManager.GET_DISABLED_COMPONENTS);
+                PackageManager.MATCH_ANY_USER
+                | PackageManager.MATCH_DISABLED_COMPONENTS);
         for (ApplicationInfo app : apps) {
             final int uid = UserHandle.getUid(userId, app.uid);
             uids = ArrayUtils.appendInt(uids, uid);
@@ -1199,7 +1235,7 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
 
     @Override
     protected void dump(FileDescriptor fd, PrintWriter rawWriter, String[] args) {
-        mContext.enforceCallingOrSelfPermission(DUMP, TAG);
+        if (!DumpUtils.checkDumpPermission(mContext, TAG, rawWriter)) return;
 
         long duration = DateUtils.DAY_IN_MILLIS;
         final HashSet<String> argSet = new HashSet<String>();
@@ -1224,6 +1260,12 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
         final IndentingPrintWriter pw = new IndentingPrintWriter(rawWriter, "  ");
 
         synchronized (mStatsLock) {
+            if (args.length > 0 && "--proto".equals(args[0])) {
+                // In this case ignore all other arguments.
+                dumpProto(fd);
+                return;
+            }
+
             if (poll) {
                 performPollLocked(FLAG_PERSIST_ALL | FLAG_PERSIST_FORCE);
                 pw.println("Forced poll");
@@ -1296,6 +1338,33 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
         }
     }
 
+    private void dumpProto(FileDescriptor fd) {
+        final ProtoOutputStream proto = new ProtoOutputStream(fd);
+
+        // TODO Right now it writes all history.  Should it limit to the "since-boot" log?
+
+        dumpInterfaces(proto, NetworkStatsServiceDumpProto.ACTIVE_INTERFACES, mActiveIfaces);
+        dumpInterfaces(proto, NetworkStatsServiceDumpProto.ACTIVE_UID_INTERFACES, mActiveUidIfaces);
+        mDevRecorder.writeToProtoLocked(proto, NetworkStatsServiceDumpProto.DEV_STATS);
+        mXtRecorder.writeToProtoLocked(proto, NetworkStatsServiceDumpProto.XT_STATS);
+        mUidRecorder.writeToProtoLocked(proto, NetworkStatsServiceDumpProto.UID_STATS);
+        mUidTagRecorder.writeToProtoLocked(proto, NetworkStatsServiceDumpProto.UID_TAG_STATS);
+
+        proto.flush();
+    }
+
+    private static void dumpInterfaces(ProtoOutputStream proto, long tag,
+            ArrayMap<String, NetworkIdentitySet> ifaces) {
+        for (int i = 0; i < ifaces.size(); i++) {
+            final long start = proto.start(tag);
+
+            proto.write(NetworkInterfaceProto.INTERFACE, ifaces.keyAt(i));
+            ifaces.valueAt(i).writeToProto(proto, NetworkInterfaceProto.IDENTITIES);
+
+            proto.end(start);
+        }
+    }
+
     /**
      * Return snapshot of current UID statistics, including any
      * {@link TrafficStats#UID_TETHERING} and {@link #mUidOperations} values.
@@ -1309,6 +1378,42 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
         uidSnapshot.combineAllValues(mUidOperations);
 
         return uidSnapshot;
+    }
+
+    /**
+     * Return snapshot of current XT plus VT statistics.
+     */
+    private NetworkStats getNetworkStatsXtAndVt() throws RemoteException {
+        final NetworkStats xtSnapshot = mNetworkManager.getNetworkStatsSummaryXt();
+
+        TelephonyManager tm = (TelephonyManager) mContext.getSystemService(
+                Context.TELEPHONY_SERVICE);
+
+        long usage = tm.getVtDataUsage();
+
+        if (LOGV) Slog.d(TAG, "VT call data usage = " + usage);
+
+        final NetworkStats vtSnapshot = new NetworkStats(SystemClock.elapsedRealtime(), 1);
+
+        final NetworkStats.Entry entry = new NetworkStats.Entry();
+        entry.iface = VT_INTERFACE;
+        entry.uid = -1;
+        entry.set = TAG_ALL;
+        entry.tag = TAG_NONE;
+
+        // Since modem only tell us the total usage instead of each usage for RX and TX,
+        // we need to split it up (though it might not quite accurate). At
+        // least we can make sure the data usage report to the user will still be accurate.
+        entry.rxBytes = usage / 2;
+        entry.rxPackets = 0;
+        entry.txBytes = usage - entry.rxBytes;
+        entry.txPackets = 0;
+        vtSnapshot.combineValues(entry);
+
+        // Merge VT int XT
+        xtSnapshot.combineAllValues(vtSnapshot);
+
+        return xtSnapshot;
     }
 
     /**

@@ -35,17 +35,19 @@
 #include "Fwmark.h"
 #include "NetdConstants.h"
 #include "Permission.h"
+#include "InterfaceController.h"
+#include "NetworkController.h"
 #include "TetherController.h"
 
 namespace {
 
-static const char BP_TOOLS_MODE[] = "bp-tools";
-static const char IPV4_FORWARDING_PROC_FILE[] = "/proc/sys/net/ipv4/ip_forward";
-static const char IPV6_FORWARDING_PROC_FILE[] = "/proc/sys/net/ipv6/conf/all/forwarding";
-static const char SEPARATOR[] = "|";
+const char BP_TOOLS_MODE[] = "bp-tools";
+const char IPV4_FORWARDING_PROC_FILE[] = "/proc/sys/net/ipv4/ip_forward";
+const char IPV6_FORWARDING_PROC_FILE[] = "/proc/sys/net/ipv6/conf/all/forwarding";
+const char SEPARATOR[] = "|";
 
 bool writeToFile(const char* filename, const char* value) {
-    int fd = open(filename, O_WRONLY);
+    int fd = open(filename, O_WRONLY | O_CLOEXEC);
     if (fd < 0) {
         ALOGE("Failed to open %s: %s", filename, strerror(errno));
         return false;
@@ -61,6 +63,21 @@ bool writeToFile(const char* filename, const char* value) {
     return true;
 }
 
+bool configureForIPv6Router(const char *interface) {
+    return (InterfaceController::setEnableIPv6(interface, 0) == 0)
+            && (InterfaceController::setAcceptIPv6Ra(interface, 0) == 0)
+            && (InterfaceController::setAcceptIPv6Dad(interface, 0) == 0)
+            && (InterfaceController::setIPv6DadTransmits(interface, "0") == 0)
+            && (InterfaceController::setEnableIPv6(interface, 1) == 0);
+}
+
+void configureForIPv6Client(const char *interface) {
+    InterfaceController::setAcceptIPv6Ra(interface, 1);
+    InterfaceController::setAcceptIPv6Dad(interface, 1);
+    InterfaceController::setIPv6DadTransmits(interface, "1");
+    InterfaceController::setEnableIPv6(interface, 0);
+}
+
 bool inBpToolsMode() {
     // In BP tools mode, do not disable IP forwarding
     char bootmode[PROPERTY_VALUE_MAX] = {0};
@@ -70,10 +87,11 @@ bool inBpToolsMode() {
 
 }  // namespace
 
+namespace android {
+namespace net {
+
 TetherController::TetherController() {
-    mInterfaces = new InterfaceCollection();
     mDnsNetId = 0;
-    mDnsForwarders = new NetAddressCollection();
     mDaemonFd = -1;
     mDaemonPid = 0;
     if (inBpToolsMode()) {
@@ -84,14 +102,8 @@ TetherController::TetherController() {
 }
 
 TetherController::~TetherController() {
-    InterfaceCollection::iterator it;
-
-    for (it = mInterfaces->begin(); it != mInterfaces->end(); ++it) {
-        free(*it);
-    }
-    mInterfaces->clear();
-
-    mDnsForwarders->clear();
+    mInterfaces.clear();
+    mDnsForwarders.clear();
     mForwardingRequests.clear();
 }
 
@@ -121,7 +133,7 @@ size_t TetherController::forwardingRequestCount() {
     return mForwardingRequests.size();
 }
 
-#define TETHER_START_CONST_ARG        8
+#define TETHER_START_CONST_ARG        10
 
 int TetherController::startTethering(int num_addrs, char **dhcp_ranges) {
     if (mDaemonPid != 0) {
@@ -161,6 +173,14 @@ int TetherController::startTethering(int num_addrs, char **dhcp_ranges) {
             close(pipefd[0]);
         }
 
+        Fwmark fwmark;
+        fwmark.netId = NetworkController::LOCAL_NET_ID;
+        fwmark.explicitlySelected = true;
+        fwmark.protectedFromVpn = true;
+        fwmark.permission = PERMISSION_SYSTEM;
+        char markStr[UINT32_HEX_STRLEN];
+        snprintf(markStr, sizeof(markStr), "0x%x", fwmark.intValue);
+
         int num_processed_args = TETHER_START_CONST_ARG + (num_addrs/2) + 1;
         char **args = (char **)malloc(sizeof(char *) * num_processed_args);
         args[num_processed_args - 1] = NULL;
@@ -172,7 +192,9 @@ int TetherController::startTethering(int num_addrs, char **dhcp_ranges) {
         // TODO: pipe through metered status from ConnService
         args[5] = (char *)"--dhcp-option-force=43,ANDROID_METERED";
         args[6] = (char *)"--pid-file";
-        args[7] = (char *)"";
+        args[7] = (char *)"--listen-mark";
+        args[8] = (char *)markStr;
+        args[9] = (char *)"";
 
         int nextArg = TETHER_START_CONST_ARG;
         for (int addrIndex = 0; addrIndex < num_addrs; addrIndex += 2) {
@@ -233,7 +255,7 @@ int TetherController::setDnsForwarders(unsigned netId, char **servers, int numSe
     snprintf(daemonCmd, sizeof(daemonCmd), "update_dns%s0x%x", SEPARATOR, fwmark.intValue);
     int cmdLen = strlen(daemonCmd);
 
-    mDnsForwarders->clear();
+    mDnsForwarders.clear();
     for (i = 0; i < numServers; i++) {
         ALOGD("setDnsForwarders(0x%x %d = '%s')", fwmark.intValue, i, servers[i]);
 
@@ -242,7 +264,7 @@ int TetherController::setDnsForwarders(unsigned netId, char **servers, int numSe
         freeaddrinfo(res);
         if (ret) {
             ALOGE("Failed to parse DNS server '%s'", servers[i]);
-            mDnsForwarders->clear();
+            mDnsForwarders.clear();
             errno = EINVAL;
             return -1;
         }
@@ -255,7 +277,7 @@ int TetherController::setDnsForwarders(unsigned netId, char **servers, int numSe
 
         strcat(daemonCmd, SEPARATOR);
         strcat(daemonCmd, servers[i]);
-        mDnsForwarders->push_back(servers[i]);
+        mDnsForwarders.push_back(servers[i]);
     }
 
     mDnsNetId = netId;
@@ -263,7 +285,7 @@ int TetherController::setDnsForwarders(unsigned netId, char **servers, int numSe
         ALOGD("Sending update msg to dnsmasq [%s]", daemonCmd);
         if (write(mDaemonFd, daemonCmd, strlen(daemonCmd) +1) < 0) {
             ALOGE("Failed to send update command to dnsmasq (%s)", strerror(errno));
-            mDnsForwarders->clear();
+            mDnsForwarders.clear();
             errno = EREMOTEIO;
             return -1;
         }
@@ -275,27 +297,26 @@ unsigned TetherController::getDnsNetId() {
     return mDnsNetId;
 }
 
-NetAddressCollection *TetherController::getDnsForwarders() {
+const std::list<std::string> &TetherController::getDnsForwarders() const {
     return mDnsForwarders;
 }
 
-int TetherController::applyDnsInterfaces() {
+bool TetherController::applyDnsInterfaces() {
     char daemonCmd[MAX_CMD_SIZE];
 
     strcpy(daemonCmd, "update_ifaces");
     int cmdLen = strlen(daemonCmd);
-    InterfaceCollection::iterator it;
     bool haveInterfaces = false;
 
-    for (it = mInterfaces->begin(); it != mInterfaces->end(); ++it) {
-        cmdLen += (strlen(*it) + 1);
+    for (const auto &ifname : mInterfaces) {
+        cmdLen += (ifname.size() + 1);
         if (cmdLen + 1 >= MAX_CMD_SIZE) {
             ALOGD("Too many DNS ifaces listed");
             break;
         }
 
         strcat(daemonCmd, SEPARATOR);
-        strcat(daemonCmd, *it);
+        strcat(daemonCmd, ifname.c_str());
         haveInterfaces = true;
     }
 
@@ -303,10 +324,10 @@ int TetherController::applyDnsInterfaces() {
         ALOGD("Sending update msg to dnsmasq [%s]", daemonCmd);
         if (write(mDaemonFd, daemonCmd, strlen(daemonCmd) +1) < 0) {
             ALOGE("Failed to send update command to dnsmasq (%s)", strerror(errno));
-            return -1;
+            return false;
         }
     }
-    return 0;
+    return true;
 }
 
 int TetherController::tetherInterface(const char *interface) {
@@ -315,17 +336,16 @@ int TetherController::tetherInterface(const char *interface) {
         errno = ENOENT;
         return -1;
     }
-    mInterfaces->push_back(strdup(interface));
 
-    if (applyDnsInterfaces()) {
-        InterfaceCollection::iterator it;
-        for (it = mInterfaces->begin(); it != mInterfaces->end(); ++it) {
-            if (!strcmp(interface, *it)) {
-                free(*it);
-                mInterfaces->erase(it);
-                break;
-            }
-        }
+    if (!configureForIPv6Router(interface)) {
+        configureForIPv6Client(interface);
+        return -1;
+    }
+    mInterfaces.push_back(interface);
+
+    if (!applyDnsInterfaces()) {
+        mInterfaces.pop_back();
+        configureForIPv6Client(interface);
         return -1;
     } else {
         return 0;
@@ -333,22 +353,23 @@ int TetherController::tetherInterface(const char *interface) {
 }
 
 int TetherController::untetherInterface(const char *interface) {
-    InterfaceCollection::iterator it;
-
     ALOGD("untetherInterface(%s)", interface);
 
-    for (it = mInterfaces->begin(); it != mInterfaces->end(); ++it) {
-        if (!strcmp(interface, *it)) {
-            free(*it);
-            mInterfaces->erase(it);
+    for (auto it = mInterfaces.cbegin(); it != mInterfaces.cend(); ++it) {
+        if (!strcmp(interface, it->c_str())) {
+            mInterfaces.erase(it);
 
-            return applyDnsInterfaces();
+            configureForIPv6Client(interface);
+            return applyDnsInterfaces() ? 0 : -1;
         }
     }
     errno = ENOENT;
     return -1;
 }
 
-InterfaceCollection *TetherController::getTetheredInterfaceList() {
+const std::list<std::string> &TetherController::getTetheredInterfaceList() const {
     return mInterfaces;
 }
+
+}  // namespace net
+}  // namespace android

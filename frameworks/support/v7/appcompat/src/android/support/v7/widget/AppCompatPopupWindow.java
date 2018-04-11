@@ -16,12 +16,14 @@
 
 package android.support.v7.widget;
 
-import android.annotation.TargetApi;
+import static android.support.annotation.RestrictTo.Scope.LIBRARY_GROUP;
+
 import android.content.Context;
 import android.os.Build;
 import android.support.annotation.AttrRes;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.support.annotation.StyleRes;
 import android.support.v4.widget.PopupWindowCompat;
 import android.support.v7.appcompat.R;
@@ -47,7 +49,6 @@ class AppCompatPopupWindow extends PopupWindow {
         init(context, attrs, defStyleAttr, 0);
     }
 
-    @TargetApi(11)
     public AppCompatPopupWindow(@NonNull Context context, @Nullable AttributeSet attrs,
             @AttrRes int defStyleAttr, @StyleRes int defStyleRes) {
         super(context, attrs, defStyleAttr, defStyleRes);
@@ -67,12 +68,10 @@ class AppCompatPopupWindow extends PopupWindow {
         if (defStyleRes != 0 && sdk < 11) {
             // If we have a defStyleRes, but we're on < API 11, we need to manually set attributes
             // from the style
-            if (sdk >= 9) {
-                // android:popupAnimationStyle was added in API 9
-                if (a.hasValue(R.styleable.PopupWindow_android_popupAnimationStyle)) {
-                    setAnimationStyle(a.getResourceId(
-                            R.styleable.PopupWindow_android_popupAnimationStyle, -1));
-                }
+            // android:popupAnimationStyle was added in API 9
+            if (a.hasValue(R.styleable.PopupWindow_android_popupAnimationStyle)) {
+                setAnimationStyle(a.getResourceId(
+                        R.styleable.PopupWindow_android_popupAnimationStyle, -1));
             }
         }
 
@@ -94,7 +93,6 @@ class AppCompatPopupWindow extends PopupWindow {
         super.showAsDropDown(anchor, xoff, yoff);
     }
 
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     @Override
     public void showAsDropDown(View anchor, int xoff, int yoff, int gravity) {
         if (COMPAT_OVERLAP_ANCHOR && mOverlapAnchor) {
@@ -150,6 +148,7 @@ class AppCompatPopupWindow extends PopupWindow {
     /**
      * @hide
      */
+    @RestrictTo(LIBRARY_GROUP)
     public void setSupportOverlapAnchor(boolean overlapAnchor) {
         if (COMPAT_OVERLAP_ANCHOR) {
             mOverlapAnchor = overlapAnchor;
@@ -161,6 +160,7 @@ class AppCompatPopupWindow extends PopupWindow {
     /**
      * @hide
      */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean getSupportOverlapAnchor() {
         if (COMPAT_OVERLAP_ANCHOR) {
             return mOverlapAnchor;

@@ -1,12 +1,9 @@
 package android.support.v17.leanback.widget;
 
 import android.support.v17.leanback.R;
-
-import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.ImageView;
 
 /**
@@ -96,8 +93,8 @@ public class DetailsOverviewLogoPresenter extends Presenter {
         View view = onCreateView(parent);
         ViewHolder vh = new ViewHolder(view);
         ViewGroup.LayoutParams lp = view.getLayoutParams();
-        vh.setSizeFromDrawableIntrinsic(lp.width == ViewGroup.LayoutParams.WRAP_CONTENT &&
-                lp.width == ViewGroup.LayoutParams.WRAP_CONTENT);
+        vh.setSizeFromDrawableIntrinsic(lp.width == ViewGroup.LayoutParams.WRAP_CONTENT
+                && lp.height == ViewGroup.LayoutParams.WRAP_CONTENT);
         return vh;
     }
 
@@ -128,7 +125,7 @@ public class DetailsOverviewLogoPresenter extends Presenter {
     }
 
     /**
-     * Bind logo View to drawble of DetailsOverviewRow and call notifyOnBindLogo().  The
+     * Bind logo View to drawable of DetailsOverviewRow and call notifyOnBindLogo().  The
      * default implementation assumes the Logo View is an ImageView and change layout size to
      * intrinsic size of ImageDrawable if {@link ViewHolder#isSizeFromDrawableIntrinsic()} is true.
      * @param viewHolder ViewHolder to bind.

@@ -17,6 +17,7 @@
 package com.android.server.telecom;
 
 import com.android.internal.annotations.VisibleForTesting;
+import android.telecom.Log;
 
 /**
  * Handles acquisition and release of wake locks relating to call state.
@@ -37,16 +38,25 @@ public class InCallWakeLockController extends CallsManagerListenerBase {
 
     @Override
     public void onCallAdded(Call call) {
+        if (call.isExternalCall()) {
+            return;
+        }
         handleWakeLock();
     }
 
     @Override
     public void onCallRemoved(Call call) {
+        if (call.isExternalCall()) {
+            return;
+        }
         handleWakeLock();
     }
 
     @Override
     public void onCallStateChanged(Call call, int oldState, int newState) {
+        if (call.isExternalCall()) {
+            return;
+        }
         handleWakeLock();
     }
 

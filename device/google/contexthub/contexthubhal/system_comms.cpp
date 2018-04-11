@@ -1,30 +1,17 @@
 /*
- * Copyright (c) 2016, Google. All rights reserved.
+ * Copyright (C) 2016 The Android Open Source Project
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of The Linux Foundation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #define LOG_TAG "NanohubHAL"
@@ -50,15 +37,18 @@ namespace android {
 
 namespace nanohub {
 
-static void readAppName(MessageBuf &buf, hub_app_name_t &name) {
+static void readAppName(MessageBuf &buf, hub_app_name_t &name)
+{
     name.id = buf.readU64();
 }
 
-static void writeAppName(MessageBuf &buf, const hub_app_name_t &name) {
+static void writeAppName(MessageBuf &buf, const hub_app_name_t &name)
+{
     buf.writeU64(name.id);
 }
 
-static void readNanohubAppInfo(MessageBuf &buf, NanohubAppInfo &info) {
+static void readNanohubAppInfo(MessageBuf &buf, NanohubAppInfo &info)
+{
     size_t pos = buf.getPos();
     readAppName(buf, info.name);
     info.version = buf.readU32();
@@ -69,7 +59,8 @@ static void readNanohubAppInfo(MessageBuf &buf, NanohubAppInfo &info) {
     }
 }
 
-static void readNanohubMemInfo(MessageBuf &buf,  NanohubMemInfo &mi) {
+static void readNanohubMemInfo(MessageBuf &buf,  NanohubMemInfo &mi)
+{
     size_t pos = buf.getPos();
     mi.flashSz = buf.readU32();
     mi.blSz = buf.readU32();
@@ -88,9 +79,11 @@ static void readNanohubMemInfo(MessageBuf &buf,  NanohubMemInfo &mi) {
     }
 }
 
-NanohubRsp::NanohubRsp(MessageBuf &buf, bool no_status) {
+NanohubRsp::NanohubRsp(MessageBuf &buf, bool no_status)
+{
     // all responses start with command
     // most of them have 4-byte status (result code)
+    buf.reset();
     cmd = buf.readU8();
     if (!buf.getSize()) {
         status = -EINVAL;
@@ -101,15 +94,17 @@ NanohubRsp::NanohubRsp(MessageBuf &buf, bool no_status) {
     }
 }
 
-int SystemComm::sendToSystem(const void *data, size_t len) {
+int SystemComm::sendToSystem(const void *data, size_t len)
+{
     if (NanoHub::messageTracingEnabled()) {
         dumpBuffer("HAL -> SYS", getSystem()->mHostIfAppName, 0, data, len);
     }
     return NanoHub::sendToDevice(&getSystem()->mHostIfAppName, data, len);
 }
 
-int SystemComm::AppInfoSession::setup(const hub_message_t *) {
-    Mutex::Autolock _l(mLock);
+int SystemComm::AppInfoSession::setup(const hub_message_t *)
+{
+    std::lock_guard<std::mutex> _l(mLock);
     int suggestedSize = mAppInfo.size() ? mAppInfo.size() : 20;
 
     mAppInfo.clear();
@@ -119,19 +114,21 @@ int SystemComm::AppInfoSession::setup(const hub_message_t *) {
     return requestNext();
 }
 
-inline hub_app_name_t deviceAppNameToHost(const hub_app_name_t src) {
+inline hub_app_name_t deviceAppNameToHost(const hub_app_name_t src)
+{
     hub_app_name_t res = { .id = le64toh(src.id) };
     return res;
 }
 
-inline hub_app_name_t hostAppNameToDevice(const hub_app_name_t src) {
+inline hub_app_name_t hostAppNameToDevice(const hub_app_name_t src)
+{
     hub_app_name_t res = { .id = htole64(src.id) };
     return res;
 }
 
 int SystemComm::AppInfoSession::handleRx(MessageBuf &buf)
 {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
 
     NanohubRsp rsp(buf, true);
     if (rsp.cmd != NANOHUB_QUERY_APPS) {
@@ -189,7 +186,7 @@ int SystemComm::AppInfoSession::requestNext()
 
 int SystemComm::MemInfoSession::setup(const hub_message_t *)
 {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     char data[MAX_RX_PACKET];
     MessageBuf buf(data, sizeof(data));
     buf.writeU8(NANOHUB_QUERY_MEMINFO);
@@ -200,7 +197,7 @@ int SystemComm::MemInfoSession::setup(const hub_message_t *)
 
 int SystemComm::MemInfoSession::handleRx(MessageBuf &buf)
 {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     NanohubRsp rsp(buf, true);
 
     if (rsp.cmd != NANOHUB_QUERY_MEMINFO)
@@ -267,7 +264,11 @@ int SystemComm::MemInfoSession::handleRx(MessageBuf &buf)
 
 int SystemComm::AppMgmtSession::setup(const hub_message_t *appMsg)
 {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
+
+    char data[MAX_RX_PACKET];
+    MessageBuf buf(data, sizeof(data));
+    const uint8_t *msgData = static_cast<const uint8_t*>(appMsg->message);
 
     mCmd = appMsg->message_type;
     mLen = appMsg->message_len;
@@ -280,21 +281,28 @@ int SystemComm::AppMgmtSession::setup(const hub_message_t *appMsg)
         return setupMgmt(appMsg, NANOHUB_EXT_APPS_OFF);
     case  CONTEXT_HUB_UNLOAD_APP:
         return setupMgmt(appMsg, NANOHUB_EXT_APP_DELETE);
-    case  CONTEXT_HUB_LOAD_OS:
     case  CONTEXT_HUB_LOAD_APP:
-        const uint8_t *p = static_cast<const uint8_t*>(appMsg->message);
+    {
         mData.clear();
-        mData = std::vector<uint8_t>(p, p + mLen);
+        mData = std::vector<uint8_t>(msgData, msgData + mLen);
+        const load_app_request_t *appReq = static_cast<const load_app_request_t*>(appMsg->message);
+        if (appReq == nullptr || mLen <= sizeof(*appReq)) {
+            ALOGE("%s: Invalid app header: too short\n", __func__);
+            return -EINVAL;
+        }
+        mAppName = appReq->app_binary.app_id;
         setState(TRANSFER);
 
-        char data[MAX_RX_PACKET];
-        MessageBuf buf(data, sizeof(data));
         buf.writeU8(NANOHUB_START_UPLOAD);
-        buf.writeU8(mCmd == CONTEXT_HUB_LOAD_OS ? 1 : 0);
+        buf.writeU8(0);
         buf.writeU32(mLen);
-
         return sendToSystem(buf.getData(), buf.getPos());
-    break;
+    }
+
+    case  CONTEXT_HUB_OS_REBOOT:
+        setState(REBOOT);
+        buf.writeU8(NANOHUB_REBOOT);
+        return sendToSystem(buf.getData(), buf.getPos());
     }
 
     return -EINVAL;
@@ -319,7 +327,7 @@ int SystemComm::AppMgmtSession::setupMgmt(const hub_message_t *appMsg, uint32_t 
 int SystemComm::AppMgmtSession::handleRx(MessageBuf &buf)
 {
     int ret = 0;
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     NanohubRsp rsp(buf);
 
     switch (getState()) {
@@ -329,8 +337,14 @@ int SystemComm::AppMgmtSession::handleRx(MessageBuf &buf)
     case FINISH:
         ret = handleFinish(rsp);
         break;
-    case RELOAD:
-        ret = handleReload(rsp);
+    case RUN:
+        ret = handleRun(rsp);
+        break;
+    case RUN_FAILED:
+        ret = handleRunFailed(rsp);
+        break;
+    case REBOOT:
+        ret = handleReboot(rsp);
         break;
     case MGMT:
         ret = handleMgmt(rsp);
@@ -382,9 +396,9 @@ int SystemComm::AppMgmtSession::handleFinish(NanohubRsp &rsp)
     if (success) {
         char data[MAX_RX_PACKET];
         MessageBuf buf(data, sizeof(data));
-        // until app header is passed, we don't know who to start, so we reboot
-        buf.writeU8(NANOHUB_REBOOT);
-        setState(RELOAD);
+        buf.writeU8(NANOHUB_EXT_APPS_ON);
+        writeAppName(buf, mAppName);
+        setState(RUN);
         ret = sendToSystem(buf.getData(), buf.getPos());
     } else {
         int32_t result = NANOHUB_APP_NOT_LOADED;
@@ -396,12 +410,46 @@ int SystemComm::AppMgmtSession::handleFinish(NanohubRsp &rsp)
     return ret;
 }
 
-/* reboot notification is not yet supported in FW; this code is for (near) future */
-int SystemComm::AppMgmtSession::handleReload(NanohubRsp &rsp)
+int SystemComm::AppMgmtSession::handleRun(NanohubRsp &rsp)
 {
-    int32_t result = NANOHUB_APP_LOADED;
+    if (rsp.cmd != NANOHUB_EXT_APPS_ON)
+        return 1;
 
-    ALOGI("Nanohub reboot status: %08" PRIX32, rsp.status);
+    MgmtStatus sts = { .value = (uint32_t)rsp.status };
+
+    // op counter returns number of nanoapps that were started as result of the command
+    // for successful start command it must be > 0
+    int32_t result = sts.value > 0 && sts.op > 0 && sts.op <= 0x7F ? 0 : -1;
+
+    ALOGI("Nanohub NEW APP START: %08" PRIX32 "\n", rsp.status);
+    if (result != 0) {
+        // if nanoapp failed to start we have to unload it
+        char data[MAX_RX_PACKET];
+        MessageBuf buf(data, sizeof(data));
+        buf.writeU8(NANOHUB_EXT_APP_DELETE);
+        writeAppName(buf, mAppName);
+        if (sendToSystem(buf.getData(), buf.getPos()) == 0) {
+            setState(RUN_FAILED);
+            return 0;
+        }
+        ALOGE("%s: failed to send DELETE for failed app\n", __func__);
+    }
+
+    // it is either success, and we report it, or
+    // it is a failure to load, and also failure to send erase command
+    sendToApp(mCmd, &result, sizeof(result));
+    complete();
+    return 0;
+}
+
+int SystemComm::AppMgmtSession::handleRunFailed(NanohubRsp &rsp)
+{
+    if (rsp.cmd != NANOHUB_EXT_APP_DELETE)
+        return 1;
+
+    int32_t result = -1;
+
+    ALOGI("%s: APP DELETE [because it failed]: %08" PRIX32 "\n", __func__, rsp.status);
 
     sendToApp(mCmd, &result, sizeof(result));
     complete();
@@ -409,12 +457,33 @@ int SystemComm::AppMgmtSession::handleReload(NanohubRsp &rsp)
     return 0;
 }
 
+/* reboot notification, when triggered by App request */
+int SystemComm::AppMgmtSession::handleReboot(NanohubRsp &rsp)
+{
+    if (rsp.cmd != NANOHUB_REBOOT)
+        return 1;
+    ALOGI("Nanohub reboot status [USER REQ]: %08" PRIX32 "\n", rsp.status);
+
+    // reboot notification is sent by SessionManager
+    complete();
+
+    return 0;
+}
+
 int SystemComm::AppMgmtSession::handleMgmt(NanohubRsp &rsp)
 {
-    Mutex::Autolock _l(mLock);
     bool valid = false;
 
-    ALOGI("Nanohub MGMT response: CMD=%02X; STATUS=%08" PRIX32, rsp.cmd, rsp.status);
+    int32_t result = rsp.status;
+
+    // TODO: remove this when context hub service can handle non-zero success status
+    if (result > 0) {
+        // something happened; assume it worked
+        result = 0;
+    } else if (result == 0) {
+        // nothing happened; this is provably an error
+        result = -1;
+    }
 
     switch (rsp.cmd) {
     case NANOHUB_EXT_APPS_OFF:
@@ -430,19 +499,20 @@ int SystemComm::AppMgmtSession::handleMgmt(NanohubRsp &rsp)
         return 1;
     }
 
+    ALOGI("Nanohub MGMT response: CMD=%02X; STATUS=%08" PRIX32, rsp.cmd, rsp.status);
     if (!valid) {
         ALOGE("Invalid response for this state: APP CMD=%02X", mCmd);
         return -EINVAL;
     }
 
-    sendToApp(mCmd, &rsp.status, sizeof(rsp.status));
+    sendToApp(mCmd, &result, sizeof(result));
     complete();
 
     return 0;
 }
 
 int SystemComm::KeyInfoSession::setup(const hub_message_t *) {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     mRsaKeyData.clear();
     setState(SESSION_USER);
     mStatus = -EBUSY;
@@ -451,7 +521,7 @@ int SystemComm::KeyInfoSession::setup(const hub_message_t *) {
 
 int SystemComm::KeyInfoSession::handleRx(MessageBuf &buf)
 {
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     NanohubRsp rsp(buf, true);
 
     if (getState() != SESSION_USER) {
@@ -486,7 +556,7 @@ int SystemComm::KeyInfoSession::requestRsaKeys(void)
 int SystemComm::doHandleRx(const nano_message *msg)
 {
     //we only care for messages from HostIF
-    if (msg->hdr.app_name != mHostIfAppName)
+    if (msg->hdr.appId != mHostIfAppName.id)
         return 1;
 
     //they must all be at least 1 byte long
@@ -511,11 +581,14 @@ int SystemComm::doHandleRx(const nano_message *msg)
 int SystemComm::SessionManager::handleRx(MessageBuf &buf)
 {
     int status = 1;
+    std::unique_lock<std::mutex> lk(lock);
 
     // pass message to all active sessions, in arbitrary order
     // 1st session that handles the message terminates the loop
-    for (auto pos = sessions_.begin();
-         pos != sessions_.end() && status > 0; next(pos)) {
+    for (auto pos = sessions_.begin(); pos != sessions_.end() && status > 0; next(pos)) {
+        if (!isActive(pos)) {
+            continue;
+        }
         Session *session = pos->second;
         status = session->handleRx(buf);
         if (status < 0) {
@@ -523,7 +596,47 @@ int SystemComm::SessionManager::handleRx(MessageBuf &buf)
         }
     }
 
+    NanohubRsp rsp(buf);
+    if (rsp.cmd == NANOHUB_REBOOT) {
+        // if this is reboot notification, kill all sessions
+        for (auto pos = sessions_.begin(); pos != sessions_.end(); next(pos)) {
+            if (!isActive(pos)) {
+                continue;
+            }
+            Session *session = pos->second;
+            session->abort(-EINTR);
+        }
+        lk.unlock();
+        // log the reboot event, if not handled
+        if (status > 0) {
+            ALOGW("Nanohub reboot status [UNSOLICITED]: %08" PRIX32, rsp.status);
+            status = 0;
+        }
+        // report to java apps
+        sendToApp(CONTEXT_HUB_OS_REBOOT, &rsp.status, sizeof(rsp.status));
+    }
+
     return status;
+}
+
+int SystemComm::SessionManager::setup_and_add(int id, Session *session, const hub_message_t *appMsg)
+{
+    std::lock_guard<std::mutex> _l(lock);
+
+    // scan sessions to release those that are already done
+    for (auto pos = sessions_.begin(); pos != sessions_.end(); next(pos)) {
+        continue;
+    }
+
+    if (sessions_.count(id) == 0 && !session->isRunning()) {
+        sessions_[id] = session;
+        int ret = session->setup(appMsg);
+        if (ret < 0) {
+            session->complete();
+        }
+        return ret;
+    }
+    return -EBUSY;
 }
 
 int SystemComm::doHandleTx(const hub_message_t *appMsg)

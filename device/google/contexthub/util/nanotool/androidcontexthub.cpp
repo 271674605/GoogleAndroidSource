@@ -37,8 +37,8 @@ namespace android {
 
 constexpr char kSensorDeviceFile[] = "/dev/nanohub";
 constexpr char kCommsDeviceFile[] = "/dev/nanohub_comms";
-constexpr char kLockDirectory[] = "/data/system/nanohub_lock";
-constexpr char kLockFile[] = "/data/system/nanohub_lock/lock";
+constexpr char kLockDirectory[] = "/data/vendor/sensor/nanohub_lock";
+constexpr char kLockFile[] = "/data/vendor/sensor/nanohub_lock/lock";
 
 constexpr mode_t kLockDirPermissions = (S_IRUSR | S_IWUSR | S_IXUSR);
 
@@ -80,7 +80,11 @@ static bool CopyInt32Array(const char *key,
 static bool GetCalibrationBytes(const char *key, SensorType sensor_type,
         std::vector<uint8_t>& bytes) {
     bool success = true;
-    auto json = CalibrationFile::Instance()->GetJSONObject();
+    std::shared_ptr<CalibrationFile> cal_file = CalibrationFile::Instance();
+    if (!cal_file) {
+        return false;
+    }
+    auto json = cal_file->GetJSONObject();
 
     switch (sensor_type) {
       case SensorType::Accel:

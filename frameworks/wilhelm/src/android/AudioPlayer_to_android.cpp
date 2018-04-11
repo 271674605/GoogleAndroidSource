@@ -23,9 +23,14 @@
 #include "android/channels.h"
 
 #include <android_runtime/AndroidRuntime.h>
+#include <binder/IServiceManager.h>
+#include <utils/StrongPointer.h>
+#include <audiomanager/AudioManager.h>
+#include <audiomanager/IAudioManager.h>
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <system/audio.h>
 #include <SLES/OpenSLES_Android.h>
@@ -34,12 +39,46 @@ template class android::KeyedVector<SLuint32,
                                     android::sp<android::AudioEffect> > ;
 
 #define KEY_STREAM_TYPE_PARAMSIZE  sizeof(SLint32)
+#define KEY_PERFORMANCE_MODE_PARAMSIZE  sizeof(SLint32)
 
 #define AUDIOTRACK_MIN_PLAYBACKRATE_PERMILLE  500
 #define AUDIOTRACK_MAX_PLAYBACKRATE_PERMILLE 2000
 
 #define MEDIAPLAYER_MIN_PLAYBACKRATE_PERMILLE AUDIOTRACK_MIN_PLAYBACKRATE_PERMILLE
 #define MEDIAPLAYER_MAX_PLAYBACKRATE_PERMILLE AUDIOTRACK_MAX_PLAYBACKRATE_PERMILLE
+
+//-----------------------------------------------------------------------------
+// Inline functions to communicate with AudioService through the native AudioManager interface
+inline void audioManagerPlayerEvent(CAudioPlayer* ap, android::player_state_t event) {
+    if (ap->mObject.mEngine->mAudioManager != 0) {
+        ap->mObject.mEngine->mAudioManager->playerEvent(ap->mPIId, event);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// get an audio attributes usage for a stream type, but only consider stream types
+// that can successfully be set through SLAndroidConfigurationItf. It is invalid to call
+// this function with other stream types.
+audio_usage_t usageForStreamType(audio_stream_type_t streamType) {
+    switch (streamType) {
+    case AUDIO_STREAM_MUSIC:
+        return AUDIO_USAGE_MEDIA;
+    case AUDIO_STREAM_VOICE_CALL:
+        return AUDIO_USAGE_VOICE_COMMUNICATION;
+    case AUDIO_STREAM_SYSTEM:
+        return AUDIO_USAGE_ASSISTANCE_SONIFICATION;
+    case AUDIO_STREAM_RING:
+        return AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE;
+    case AUDIO_STREAM_ALARM:
+        return AUDIO_USAGE_ALARM;
+    case AUDIO_STREAM_NOTIFICATION:
+        return AUDIO_USAGE_NOTIFICATION;
+    default:
+        // shouldn't happen, stream types on AudioPlayer have been sanitized by now.
+        SL_LOGE("invalid stream type %d when converting to usage", streamType);
+        return usageForStreamType(ANDROID_DEFAULT_OUTPUT_STREAM_TYPE);
+    }
+}
 
 //-----------------------------------------------------------------------------
 // FIXME this method will be absorbed into android_audioPlayer_setPlayState() once
@@ -241,8 +280,8 @@ void android_audioPlayer_volumeUpdate(CAudioPlayer* ap)
     // set volume on the underlying media player or audio track
     if (ap->mAPlayer != 0) {
         ap->mAPlayer->setVolume(leftVol, rightVol);
-    } else if (ap->mAudioTrack != 0) {
-        ap->mAudioTrack->setVolume(leftVol, rightVol);
+    } else if (ap->mTrackPlayer != 0) {
+        ap->mTrackPlayer->setPlayerVolume(leftVol, rightVol);
     }
 
     // changes in the AudioPlayer volume must be reflected in the send level:
@@ -473,7 +512,7 @@ SLresult audioPlayer_setStreamType(CAudioPlayer* ap, SLint32 type) {
     }
 
     // stream type needs to be set before the object is realized
-    // (ap->mAudioTrack is supposed to be NULL until then)
+    // (ap->mTrackPlayer->mAudioTrack is supposed to be NULL until then)
     if (SL_OBJECT_STATE_UNREALIZED != ap->mObject.mState) {
         SL_LOGE(ERROR_PLAYERSTREAMTYPE_REALIZED);
         result = SL_RESULT_PRECONDITIONS_VIOLATED;
@@ -484,6 +523,42 @@ SLresult audioPlayer_setStreamType(CAudioPlayer* ap, SLint32 type) {
     return result;
 }
 
+//-----------------------------------------------------------------------------
+SLresult audioPlayer_setPerformanceMode(CAudioPlayer* ap, SLuint32 mode) {
+    SLresult result = SL_RESULT_SUCCESS;
+    SL_LOGV("performance mode set to %d", mode);
+
+    SLuint32 perfMode = ANDROID_PERFORMANCE_MODE_DEFAULT;
+    switch (mode) {
+    case SL_ANDROID_PERFORMANCE_LATENCY:
+        perfMode = ANDROID_PERFORMANCE_MODE_LATENCY;
+        break;
+    case SL_ANDROID_PERFORMANCE_LATENCY_EFFECTS:
+        perfMode = ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS;
+        break;
+    case SL_ANDROID_PERFORMANCE_NONE:
+        perfMode = ANDROID_PERFORMANCE_MODE_NONE;
+        break;
+    case SL_ANDROID_PERFORMANCE_POWER_SAVING:
+        perfMode = ANDROID_PERFORMANCE_MODE_POWER_SAVING;
+        break;
+    default:
+        SL_LOGE(ERROR_CONFIG_PERF_MODE_UNKNOWN);
+        result = SL_RESULT_PARAMETER_INVALID;
+        break;
+    }
+
+    // performance mode needs to be set before the object is realized
+    // (ap->mTrackPlayer->mAudioTrack is supposed to be NULL until then)
+    if (SL_OBJECT_STATE_UNREALIZED != ap->mObject.mState) {
+        SL_LOGE(ERROR_CONFIG_PERF_MODE_REALIZED);
+        result = SL_RESULT_PRECONDITIONS_VIOLATED;
+    } else {
+        ap->mPerformanceMode = perfMode;
+    }
+
+    return result;
+}
 
 //-----------------------------------------------------------------------------
 SLresult audioPlayer_getStreamType(CAudioPlayer* ap, SLint32 *pType) {
@@ -518,10 +593,35 @@ SLresult audioPlayer_getStreamType(CAudioPlayer* ap, SLint32 *pType) {
     return result;
 }
 
+//-----------------------------------------------------------------------------
+SLresult audioPlayer_getPerformanceMode(CAudioPlayer* ap, SLuint32 *pMode) {
+    SLresult result = SL_RESULT_SUCCESS;
+
+    switch (ap->mPerformanceMode) {
+    case ANDROID_PERFORMANCE_MODE_LATENCY:
+        *pMode = SL_ANDROID_PERFORMANCE_LATENCY;
+        break;
+    case ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS:
+        *pMode = SL_ANDROID_PERFORMANCE_LATENCY_EFFECTS;
+        break;
+    case ANDROID_PERFORMANCE_MODE_NONE:
+        *pMode = SL_ANDROID_PERFORMANCE_NONE;
+        break;
+    case ANDROID_PERFORMANCE_MODE_POWER_SAVING:
+        *pMode = SL_ANDROID_PERFORMANCE_POWER_SAVING;
+        break;
+    default:
+        result = SL_RESULT_INTERNAL_ERROR;
+        *pMode = SL_ANDROID_PERFORMANCE_LATENCY;
+        break;
+    }
+
+    return result;
+}
 
 //-----------------------------------------------------------------------------
 void audioPlayer_auxEffectUpdate(CAudioPlayer* ap) {
-    if ((ap->mAudioTrack != 0) && (ap->mAuxEffect != 0)) {
+    if ((ap->mTrackPlayer->mAudioTrack != 0) && (ap->mAuxEffect != 0)) {
         android_fxSend_attach(ap, true, ap->mAuxEffect, ap->mVolume.mLevel + ap->mAuxSendLevel);
     }
 }
@@ -775,9 +875,10 @@ static void sfplayer_handlePrefetchEvent(int event, int data1, int data2, void* 
 
     case android::GenericPlayer::kEventEndOfStream: {
         audioPlayer_dispatch_headAtEnd_lockPlay(ap, true /*set state to paused?*/, true);
-        if ((ap->mAudioTrack != 0) && (!ap->mSeek.mLoopEnabled)) {
-            ap->mAudioTrack->stop();
+        if ((ap->mTrackPlayer->mAudioTrack != 0) && (!ap->mSeek.mLoopEnabled)) {
+            ap->mTrackPlayer->mAudioTrack->stop();
         }
+        ap->mTrackPlayer->reportEvent(android::PLAYER_STATE_STOPPED);
         }
         break;
 
@@ -1216,7 +1317,7 @@ static void audioTrack_callBack_pullFromBuffQueue(int event, void* user, void *i
             }
 
             // stop the track so it restarts playing faster when new data is enqueued
-            ap->mAudioTrack->stop();
+            ap->mTrackPlayer->stop();
         }
         interface_unlock_exclusive(&ap->mBufferQueue);
 
@@ -1284,13 +1385,17 @@ void android_audioPlayer_create(CAudioPlayer *pAudioPlayer) {
     pAudioPlayer->mAndroidObjState = ANDROID_UNINITIALIZED;
     pAudioPlayer->mSessionId = (audio_session_t) android::AudioSystem::newAudioUniqueId(
             AUDIO_UNIQUE_ID_USE_SESSION);
+    pAudioPlayer->mPIId = PLAYER_PIID_INVALID;
 
     // placeholder: not necessary yet as session ID lifetime doesn't extend beyond player
     // android::AudioSystem::acquireAudioSessionId(pAudioPlayer->mSessionId);
 
     pAudioPlayer->mStreamType = ANDROID_DEFAULT_OUTPUT_STREAM_TYPE;
+    pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_DEFAULT;
 
-    // mAudioTrack
+    // mAudioTrack lifecycle is handled through mTrackPlayer
+    pAudioPlayer->mTrackPlayer = new android::TrackPlayerBase();
+    assert(pAudioPlayer->mTrackPlayer != 0);
     pAudioPlayer->mCallbackProtector = new android::CallbackProtector();
     // mAPLayer
     // mAuxEffect
@@ -1336,6 +1441,15 @@ SLresult android_audioPlayer_setConfig(CAudioPlayer *ap, const SLchar *configKey
         } else {
             result = audioPlayer_setStreamType(ap, *(SLuint32*)pConfigValue);
         }
+    } else if (strcmp((const char*)configKey, (const char*)SL_ANDROID_KEY_PERFORMANCE_MODE) == 0) {
+
+        // performance mode
+        if (KEY_PERFORMANCE_MODE_PARAMSIZE > valueSize) {
+            SL_LOGE(ERROR_CONFIG_VALUESIZE_TOO_LOW);
+            result = SL_RESULT_BUFFER_INSUFFICIENT;
+        } else {
+            result = audioPlayer_setPerformanceMode(ap, *(SLuint32*)pConfigValue);
+        }
 
     } else {
         SL_LOGE(ERROR_CONFIG_UNKNOWN_KEY);
@@ -1366,6 +1480,19 @@ SLresult android_audioPlayer_getConfig(CAudioPlayer* ap, const SLchar *configKey
         }
         *pValueSize = KEY_STREAM_TYPE_PARAMSIZE;
 
+    } else if (strcmp((const char*)configKey, (const char*)SL_ANDROID_KEY_PERFORMANCE_MODE) == 0) {
+
+        // performance mode
+        if (NULL == pConfigValue) {
+            result = SL_RESULT_SUCCESS;
+        } else if (KEY_PERFORMANCE_MODE_PARAMSIZE > *pValueSize) {
+            SL_LOGE(ERROR_CONFIG_VALUESIZE_TOO_LOW);
+            result = SL_RESULT_BUFFER_INSUFFICIENT;
+        } else {
+            result = audioPlayer_getPerformanceMode(ap, (SLuint32*)pConfigValue);
+        }
+        *pValueSize = KEY_PERFORMANCE_MODE_PARAMSIZE;
+
     } else {
         SL_LOGE(ERROR_CONFIG_UNKNOWN_KEY);
         result = SL_RESULT_PARAMETER_INVALID;
@@ -1375,10 +1502,11 @@ SLresult android_audioPlayer_getConfig(CAudioPlayer* ap, const SLchar *configKey
 }
 
 
-// Called from android_audioPlayer_realize for a PCM buffer queue player
-// to determine if it can use a fast track.
-static bool canUseFastTrack(CAudioPlayer *pAudioPlayer)
+// Called from android_audioPlayer_realize for a PCM buffer queue player before creating the
+// AudioTrack to determine which performance modes are allowed based on effect interfaces present
+static void checkAndSetPerformanceModePre(CAudioPlayer *pAudioPlayer)
 {
+    SLuint32 allowedModes = ANDROID_PERFORMANCE_MODE_ALL;
     assert(pAudioPlayer->mAndroidObjType == AUDIOPLAYER_FROM_PCM_BUFFERQUEUE);
 
     // no need to check the buffer queue size, application side
@@ -1392,7 +1520,6 @@ static bool canUseFastTrack(CAudioPlayer *pAudioPlayer)
     // If a blacklisted interface is added after realization using
     // DynamicInterfaceManagement::AddInterface,
     // then this won't be detected but the interface will be ineffective.
-    bool blacklistResult = true;
     static const unsigned blacklist[] = {
         MPH_BASSBOOST,
         MPH_EFFECTSEND,
@@ -1407,11 +1534,16 @@ static bool canUseFastTrack(CAudioPlayer *pAudioPlayer)
     };
     for (unsigned i = 0; i < sizeof(blacklist)/sizeof(blacklist[0]); ++i) {
         if (IsInterfaceInitialized(&pAudioPlayer->mObject, blacklist[i])) {
-            blacklistResult = false;
+            //TODO: query effect for EFFECT_FLAG_HW_ACC_xx flag to refine mode
+            allowedModes &=
+                    ~(ANDROID_PERFORMANCE_MODE_LATENCY|ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS);
             break;
         }
     }
 #if LOG_NDEBUG == 0
+    bool blacklistResult = (
+            (allowedModes &
+                (ANDROID_PERFORMANCE_MODE_LATENCY|ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS)) != 0);
     bool whitelistResult = true;
     static const unsigned whitelist[] = {
         MPH_BUFFERQUEUE,
@@ -1440,20 +1572,54 @@ compatible: ;
     }
     if (whitelistResult != blacklistResult) {
         SL_LOGW("whitelistResult != blacklistResult");
-        // and use blacklistResult below
     }
 #endif
-    return blacklistResult;
+    if (pAudioPlayer->mPerformanceMode == ANDROID_PERFORMANCE_MODE_LATENCY) {
+        if ((allowedModes & ANDROID_PERFORMANCE_MODE_LATENCY) == 0) {
+            pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS;
+        }
+    }
+    if (pAudioPlayer->mPerformanceMode == ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS) {
+        if ((allowedModes & ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS) == 0) {
+            pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_NONE;
+        }
+    }
 }
 
-
+// Called from android_audioPlayer_realize for a PCM buffer queue player after creating the
+// AudioTrack to adjust performance mode based on actual output flags
+static void checkAndSetPerformanceModePost(CAudioPlayer *pAudioPlayer)
+{
+    audio_output_flags_t flags = pAudioPlayer->mTrackPlayer->mAudioTrack->getFlags();
+    switch (pAudioPlayer->mPerformanceMode) {
+    case ANDROID_PERFORMANCE_MODE_LATENCY:
+        if ((flags & (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_RAW)) ==
+                (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_RAW)) {
+            break;
+        }
+        pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS;
+        /* FALL THROUGH */
+    case ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS:
+        if ((flags & AUDIO_OUTPUT_FLAG_FAST) == 0) {
+            pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_NONE;
+        }
+        break;
+    case ANDROID_PERFORMANCE_MODE_POWER_SAVING:
+        if ((flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) == 0) {
+            pAudioPlayer->mPerformanceMode = ANDROID_PERFORMANCE_MODE_NONE;
+        }
+        break;
+    case ANDROID_PERFORMANCE_MODE_NONE:
+    default:
+        break;
+    }
+}
 //-----------------------------------------------------------------------------
 // FIXME abstract out the diff between CMediaPlayer and CAudioPlayer
 SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async) {
 
     SLresult result = SL_RESULT_SUCCESS;
     SL_LOGV("Realize pAudioPlayer=%p", pAudioPlayer);
-
     AudioPlayback_Parameters app;
     app.sessionId = pAudioPlayer->mSessionId;
     app.streamType = pAudioPlayer->mStreamType;
@@ -1488,20 +1654,35 @@ SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async
             df_pcm->channelMask,
             channelMask);
 
+        checkAndSetPerformanceModePre(pAudioPlayer);
+
         audio_output_flags_t policy;
-        int32_t notificationFrames;
-        if (canUseFastTrack(pAudioPlayer)) {
+        switch (pAudioPlayer->mPerformanceMode) {
+        case ANDROID_PERFORMANCE_MODE_POWER_SAVING:
+            policy = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
+            break;
+        case ANDROID_PERFORMANCE_MODE_NONE:
+            policy = AUDIO_OUTPUT_FLAG_NONE;
+            break;
+        case ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS:
+            policy = AUDIO_OUTPUT_FLAG_FAST;
+            break;
+        case ANDROID_PERFORMANCE_MODE_LATENCY:
+        default:
             policy = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_RAW);
+            break;
+        }
+
+        int32_t notificationFrames;
+        if ((policy & AUDIO_OUTPUT_FLAG_FAST) != 0) {
             // negative notificationFrames is the number of notifications (sub-buffers) per track buffer
             // for details see the explanation at frameworks/av/include/media/AudioTrack.h
             notificationFrames = -pAudioPlayer->mBufferQueue.mNumBuffers;
         } else {
-            policy = AUDIO_OUTPUT_FLAG_NONE;
-            // use default notifications
             notificationFrames = 0;
         }
 
-        pAudioPlayer->mAudioTrack = new android::AudioTrack(
+        android::AudioTrack* pat = new android::AudioTrack(
                 pAudioPlayer->mStreamType,                           // streamType
                 sampleRate,                                          // sampleRate
                 sles_to_android_sampleFormat(df_pcm),                // format
@@ -1512,14 +1693,19 @@ SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async
                 (void *) pAudioPlayer,                               // user
                 notificationFrames,                                  // see comment above
                 pAudioPlayer->mSessionId);
-        android::status_t status = pAudioPlayer->mAudioTrack->initCheck();
+        android::status_t status = pat->initCheck();
         if (status != android::NO_ERROR) {
             SL_LOGE("AudioTrack::initCheck status %u", status);
             // FIXME should return a more specific result depending on status
             result = SL_RESULT_CONTENT_UNSUPPORTED;
-            pAudioPlayer->mAudioTrack.clear();
             return result;
         }
+
+        pAudioPlayer->mTrackPlayer->init(pat, android::PLAYER_TYPE_SLES_AUDIOPLAYER_BUFFERQUEUE,
+                usageForStreamType(pAudioPlayer->mStreamType));
+
+        // update performance mode according to actual flags granted to AudioTrack
+        checkAndSetPerformanceModePost(pAudioPlayer);
 
         // initialize platform-independent CAudioPlayer fields
 
@@ -1541,10 +1727,12 @@ SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async
             j_env->ExceptionClear();
             j_env->CallVoidMethod(pAudioPlayer->mAndroidConfiguration.mRoutingProxy,
                                   midRoutingProxy_connect,
-                                  pAudioPlayer->mAudioTrack.get());
+                                  (jlong)pAudioPlayer->mTrackPlayer->mAudioTrack.get());
             if (j_env->ExceptionCheck()) {
-                SL_LOGE("Java exception releasing recorder routing object.");
+                SL_LOGE("Java exception releasing player routing object.");
                 result = SL_RESULT_INTERNAL_ERROR;
+                pAudioPlayer->mTrackPlayer->mAudioTrack.clear();
+                return result;
             }
         }
     }
@@ -1608,6 +1796,14 @@ SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async
                 break;
         }
 
+        if (pAudioPlayer->mObject.mEngine->mAudioManager == 0) {
+            SL_LOGE("AudioPlayer realize: no audio service, player will not be registered");
+            pAudioPlayer->mPIId = 0;
+        } else {
+            pAudioPlayer->mPIId = pAudioPlayer->mObject.mEngine->mAudioManager->trackPlayer(
+                    android::PLAYER_TYPE_SLES_AUDIOPLAYER_URI_FD,
+                    usageForStreamType(pAudioPlayer->mStreamType), AUDIO_CONTENT_TYPE_UNKNOWN, 0);
+        }
         }
         break;
 
@@ -1674,25 +1870,34 @@ SLresult android_audioPlayer_realize(CAudioPlayer *pAudioPlayer, SLboolean async
         break;
     }
 
-    // proceed with effect initialization
-    // initialize EQ
-    // FIXME use a table of effect descriptors when adding support for more effects
-    if (memcmp(SL_IID_EQUALIZER, &pAudioPlayer->mEqualizer.mEqDescriptor.type,
-            sizeof(effect_uuid_t)) == 0) {
-        SL_LOGV("Need to initialize EQ for AudioPlayer=%p", pAudioPlayer);
-        android_eq_init(pAudioPlayer->mSessionId, &pAudioPlayer->mEqualizer);
-    }
-    // initialize BassBoost
-    if (memcmp(SL_IID_BASSBOOST, &pAudioPlayer->mBassBoost.mBassBoostDescriptor.type,
-            sizeof(effect_uuid_t)) == 0) {
-        SL_LOGV("Need to initialize BassBoost for AudioPlayer=%p", pAudioPlayer);
-        android_bb_init(pAudioPlayer->mSessionId, &pAudioPlayer->mBassBoost);
-    }
-    // initialize Virtualizer
-    if (memcmp(SL_IID_VIRTUALIZER, &pAudioPlayer->mVirtualizer.mVirtualizerDescriptor.type,
-               sizeof(effect_uuid_t)) == 0) {
-        SL_LOGV("Need to initialize Virtualizer for AudioPlayer=%p", pAudioPlayer);
-        android_virt_init(pAudioPlayer->mSessionId, &pAudioPlayer->mVirtualizer);
+    if (result == SL_RESULT_SUCCESS) {
+        // proceed with effect initialization
+        // initialize EQ
+        // FIXME use a table of effect descriptors when adding support for more effects
+
+        // No session effects allowed even in latency with effects performance mode because HW
+        // accelerated effects are only tolerated as post processing in this mode
+        if ((pAudioPlayer->mAndroidObjType != AUDIOPLAYER_FROM_PCM_BUFFERQUEUE) ||
+                ((pAudioPlayer->mPerformanceMode != ANDROID_PERFORMANCE_MODE_LATENCY) &&
+                 (pAudioPlayer->mPerformanceMode != ANDROID_PERFORMANCE_MODE_LATENCY_EFFECTS))) {
+            if (memcmp(SL_IID_EQUALIZER, &pAudioPlayer->mEqualizer.mEqDescriptor.type,
+                    sizeof(effect_uuid_t)) == 0) {
+                SL_LOGV("Need to initialize EQ for AudioPlayer=%p", pAudioPlayer);
+                android_eq_init(pAudioPlayer->mSessionId, &pAudioPlayer->mEqualizer);
+            }
+            // initialize BassBoost
+            if (memcmp(SL_IID_BASSBOOST, &pAudioPlayer->mBassBoost.mBassBoostDescriptor.type,
+                    sizeof(effect_uuid_t)) == 0) {
+                SL_LOGV("Need to initialize BassBoost for AudioPlayer=%p", pAudioPlayer);
+                android_bb_init(pAudioPlayer->mSessionId, &pAudioPlayer->mBassBoost);
+            }
+            // initialize Virtualizer
+            if (memcmp(SL_IID_VIRTUALIZER, &pAudioPlayer->mVirtualizer.mVirtualizerDescriptor.type,
+                       sizeof(effect_uuid_t)) == 0) {
+                SL_LOGV("Need to initialize Virtualizer for AudioPlayer=%p", pAudioPlayer);
+                android_virt_init(pAudioPlayer->mSessionId, &pAudioPlayer->mVirtualizer);
+            }
+        }
     }
 
     // initialize EffectSend
@@ -1754,16 +1959,14 @@ SLresult android_audioPlayer_destroy(CAudioPlayer *pAudioPlayer) {
     SL_LOGV("android_audioPlayer_destroy(%p)", pAudioPlayer);
     switch (pAudioPlayer->mAndroidObjType) {
 
-    case AUDIOPLAYER_FROM_PCM_BUFFERQUEUE:
-        // We own the audio track for PCM buffer queue players
-        if (pAudioPlayer->mAudioTrack != 0) {
-            pAudioPlayer->mAudioTrack->stop();
-            // Note that there may still be another reference in post-unlock phase of SetPlayState
-            pAudioPlayer->mAudioTrack.clear();
+    case AUDIOPLAYER_FROM_PCM_BUFFERQUEUE: // intended fall-throughk, both types of players
+                                           //   use the TrackPlayerBase for playback
+    case AUDIOPLAYER_FROM_URIFD:
+        if (pAudioPlayer->mTrackPlayer != 0) {
+            pAudioPlayer->mTrackPlayer->destroy();
         }
-        break;
 
-    case AUDIOPLAYER_FROM_URIFD:     // intended fall-through
+        // intended fall-through
     case AUDIOPLAYER_FROM_TS_ANDROIDBUFFERQUEUE:    // intended fall-through
     case AUDIOPLAYER_FROM_URIFD_TO_PCM_BUFFERQUEUE: // intended fall-through
     case AUDIOPLAYER_FROM_ADTS_ABQ_TO_PCM_BUFFERQUEUE:
@@ -1779,10 +1982,12 @@ SLresult android_audioPlayer_destroy(CAudioPlayer *pAudioPlayer) {
     // placeholder: not necessary yet as session ID lifetime doesn't extend beyond player
     // android::AudioSystem::releaseAudioSessionId(pAudioPlayer->mSessionId);
 
+    pAudioPlayer->mTrackPlayer.clear();
+
     pAudioPlayer->mCallbackProtector.clear();
 
     // explicit destructor
-    pAudioPlayer->mAudioTrack.~sp();
+    pAudioPlayer->mTrackPlayer.~sp();
     // note that SetPlayState(PLAYING) may still hold a reference
     pAudioPlayer->mCallbackProtector.~sp();
     pAudioPlayer->mAuxEffect.~sp();
@@ -1805,8 +2010,8 @@ SLresult android_audioPlayer_setPlaybackRateAndConstraints(CAudioPlayer *ap, SLp
         // get the content sample rate
         uint32_t contentRate = sles_to_android_sampleRate(ap->mSampleRateMilliHz);
         // apply the SL ES playback rate on the AudioTrack as a factor of its content sample rate
-        if (ap->mAudioTrack != 0) {
-            ap->mAudioTrack->setSampleRate(contentRate * (rate/1000.0f));
+        if (ap->mTrackPlayer->mAudioTrack != 0) {
+            ap->mTrackPlayer->mAudioTrack->setSampleRate(contentRate * (rate/1000.0f));
         }
         }
         break;
@@ -2016,20 +2221,20 @@ void android_audioPlayer_setPlayState(CAudioPlayer *ap) {
         switch (playState) {
         case SL_PLAYSTATE_STOPPED:
             SL_LOGV("setting AudioPlayer to SL_PLAYSTATE_STOPPED");
-            if (ap->mAudioTrack != 0) {
-                ap->mAudioTrack->stop();
-            }
+            ap->mTrackPlayer->stop();
             break;
         case SL_PLAYSTATE_PAUSED:
             SL_LOGV("setting AudioPlayer to SL_PLAYSTATE_PAUSED");
-            if (ap->mAudioTrack != 0) {
-                ap->mAudioTrack->pause();
-            }
+            ap->mTrackPlayer->pause();
             break;
         case SL_PLAYSTATE_PLAYING:
             SL_LOGV("setting AudioPlayer to SL_PLAYSTATE_PLAYING");
-            if (ap->mAudioTrack != 0) {
-                // instead of ap->mAudioTrack->start();
+            if (ap->mTrackPlayer->mAudioTrack != 0) {
+                // instead of ap->mTrackPlayer->mAudioTrack->start();
+                if (!ap->mDeferredStart) {
+                    // state change
+                    ap->mTrackPlayer->reportEvent(android::PLAYER_STATE_STARTED);
+                }
                 ap->mDeferredStart = true;
             }
             break;
@@ -2039,7 +2244,23 @@ void android_audioPlayer_setPlayState(CAudioPlayer *ap) {
         }
         break;
 
-    case AUDIOPLAYER_FROM_URIFD:      // intended fall-through
+    case AUDIOPLAYER_FROM_URIFD:
+        switch (playState) {
+        case SL_PLAYSTATE_STOPPED:
+            aplayer_setPlayState(ap->mAPlayer, playState, &ap->mAndroidObjState);
+            audioManagerPlayerEvent(ap, android::PLAYER_STATE_STOPPED);
+            break;
+        case SL_PLAYSTATE_PAUSED:
+            aplayer_setPlayState(ap->mAPlayer, playState, &ap->mAndroidObjState);
+            audioManagerPlayerEvent(ap, android::PLAYER_STATE_PAUSED);
+            break;
+        case SL_PLAYSTATE_PLAYING:
+            audioManagerPlayerEvent(ap, android::PLAYER_STATE_STARTED);
+            aplayer_setPlayState(ap->mAPlayer, playState, &ap->mAndroidObjState);
+            break;
+        }
+        break;
+
     case AUDIOPLAYER_FROM_TS_ANDROIDBUFFERQUEUE:     // intended fall-through
     case AUDIOPLAYER_FROM_URIFD_TO_PCM_BUFFERQUEUE:  // intended fall-through
     case AUDIOPLAYER_FROM_ADTS_ABQ_TO_PCM_BUFFERQUEUE:
@@ -2063,31 +2284,31 @@ void android_audioPlayer_usePlayEventMask(CAudioPlayer *ap) {
     case AUDIOPLAYER_FROM_PCM_BUFFERQUEUE:*/
 
     if (ap->mAPlayer != 0) {
-        assert(ap->mAudioTrack == 0);
+        assert(ap->mTrackPlayer->mAudioTrack == 0);
         ap->mAPlayer->setPlayEvents((int32_t) eventFlags, (int32_t) pPlayItf->mMarkerPosition,
                 (int32_t) pPlayItf->mPositionUpdatePeriod);
         return;
     }
 
-    if (ap->mAudioTrack == 0) {
+    if (ap->mTrackPlayer->mAudioTrack == 0) {
         return;
     }
 
     if (eventFlags & SL_PLAYEVENT_HEADATMARKER) {
-        ap->mAudioTrack->setMarkerPosition((uint32_t)((((int64_t)pPlayItf->mMarkerPosition
+        ap->mTrackPlayer->mAudioTrack->setMarkerPosition((uint32_t)((((int64_t)pPlayItf->mMarkerPosition
                 * sles_to_android_sampleRate(ap->mSampleRateMilliHz)))/1000));
     } else {
         // clear marker
-        ap->mAudioTrack->setMarkerPosition(0);
+        ap->mTrackPlayer->mAudioTrack->setMarkerPosition(0);
     }
 
     if (eventFlags & SL_PLAYEVENT_HEADATNEWPOS) {
-         ap->mAudioTrack->setPositionUpdatePeriod(
+         ap->mTrackPlayer->mAudioTrack->setPositionUpdatePeriod(
                 (uint32_t)((((int64_t)pPlayItf->mPositionUpdatePeriod
                 * sles_to_android_sampleRate(ap->mSampleRateMilliHz)))/1000));
     } else {
         // clear periodic update
-        ap->mAudioTrack->setPositionUpdatePeriod(0);
+        ap->mTrackPlayer->mAudioTrack->setPositionUpdatePeriod(0);
     }
 
     if (eventFlags & SL_PLAYEVENT_HEADATEND) {
@@ -2138,11 +2359,11 @@ void android_audioPlayer_getPosition(IPlay *pPlayItf, SLmillisecond *pPosMsec) {
     switch (ap->mAndroidObjType) {
 
       case AUDIOPLAYER_FROM_PCM_BUFFERQUEUE:
-        if ((ap->mSampleRateMilliHz == UNKNOWN_SAMPLERATE) || (ap->mAudioTrack == 0)) {
+        if ((ap->mSampleRateMilliHz == UNKNOWN_SAMPLERATE) || (ap->mTrackPlayer->mAudioTrack == 0)) {
             *pPosMsec = 0;
         } else {
             uint32_t positionInFrames;
-            ap->mAudioTrack->getPosition(&positionInFrames);
+            ap->mTrackPlayer->mAudioTrack->getPosition(&positionInFrames);
             *pPosMsec = ((int64_t)positionInFrames * 1000) /
                     sles_to_android_sampleRate(ap->mSampleRateMilliHz);
         }
@@ -2236,8 +2457,9 @@ void android_audioPlayer_bufferQueue_onRefilled_l(CAudioPlayer *ap) {
     // the AudioTrack associated with the AudioPlayer receiving audio from a PCM buffer
     // queue was stopped when the queue become empty, we restart as soon as a new buffer
     // has been enqueued since we're in playing state
-    if (ap->mAudioTrack != 0) {
-        // instead of ap->mAudioTrack->start();
+    if (ap->mTrackPlayer->mAudioTrack != 0) {
+        ap->mTrackPlayer->reportEvent(android::PLAYER_STATE_STARTED);
+        // instead of ap->mTrackPlayer->mAudioTrack->start();
         ap->mDeferredStart = true;
     }
 
@@ -2272,8 +2494,8 @@ SLresult android_audioPlayer_bufferQueue_onClear(CAudioPlayer *ap) {
     //-----------------------------------
     // AudioTrack
     case AUDIOPLAYER_FROM_PCM_BUFFERQUEUE:
-        if (ap->mAudioTrack != 0) {
-            ap->mAudioTrack->flush();
+        if (ap->mTrackPlayer->mAudioTrack != 0) {
+            ap->mTrackPlayer->mAudioTrack->flush();
         }
         break;
     default:

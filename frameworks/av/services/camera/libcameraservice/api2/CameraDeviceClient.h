@@ -42,7 +42,7 @@ protected:
     CameraDeviceClientBase(const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
             const String16& clientPackageName,
-            int cameraId,
+            const String8& cameraId,
             int cameraFacing,
             int clientPid,
             uid_t clientUid,
@@ -70,66 +70,70 @@ public:
             const hardware::camera2::CaptureRequest& request,
             bool streaming = false,
             /*out*/
-            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr);
+            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr) override;
     // List of requests are copied.
     virtual binder::Status submitRequestList(
             const std::vector<hardware::camera2::CaptureRequest>& requests,
             bool streaming = false,
             /*out*/
-            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr);
+            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr) override;
     virtual binder::Status cancelRequest(int requestId,
             /*out*/
-            int64_t* lastFrameNumber = NULL);
+            int64_t* lastFrameNumber = NULL) override;
 
-    virtual binder::Status beginConfigure();
+    virtual binder::Status beginConfigure() override;
 
-    virtual binder::Status endConfigure(bool isConstrainedHighSpeed = false);
+    virtual binder::Status endConfigure(int operatingMode) override;
 
     // Returns -EBUSY if device is not idle
-    virtual binder::Status deleteStream(int streamId);
+    virtual binder::Status deleteStream(int streamId) override;
 
     virtual binder::Status createStream(
             const hardware::camera2::params::OutputConfiguration &outputConfiguration,
             /*out*/
-            int32_t* newStreamId = NULL);
+            int32_t* newStreamId = NULL) override;
 
     // Create an input stream of width, height, and format.
     virtual binder::Status createInputStream(int width, int height, int format,
             /*out*/
-            int32_t* newStreamId = NULL);
+            int32_t* newStreamId = NULL) override;
 
     // Get the buffer producer of the input stream
     virtual binder::Status getInputSurface(
             /*out*/
-            view::Surface *inputSurface);
+            view::Surface *inputSurface) override;
 
     // Create a request object from a template.
     virtual binder::Status createDefaultRequest(int templateId,
             /*out*/
-            hardware::camera2::impl::CameraMetadataNative* request);
+            hardware::camera2::impl::CameraMetadataNative* request) override;
 
     // Get the static metadata for the camera
     // -- Caller owns the newly allocated metadata
     virtual binder::Status getCameraInfo(
             /*out*/
-            hardware::camera2::impl::CameraMetadataNative* cameraCharacteristics);
+            hardware::camera2::impl::CameraMetadataNative* cameraCharacteristics) override;
 
     // Wait until all the submitted requests have finished processing
-    virtual binder::Status waitUntilIdle();
+    virtual binder::Status waitUntilIdle() override;
 
     // Flush all active and pending requests as fast as possible
     virtual binder::Status flush(
             /*out*/
-            int64_t* lastFrameNumber = NULL);
+            int64_t* lastFrameNumber = NULL) override;
 
     // Prepare stream by preallocating its buffers
-    virtual binder::Status prepare(int32_t streamId);
+    virtual binder::Status prepare(int32_t streamId) override;
 
     // Tear down stream resources by freeing its unused buffers
-    virtual binder::Status tearDown(int32_t streamId);
+    virtual binder::Status tearDown(int32_t streamId) override;
 
     // Prepare stream by preallocating up to maxCount of its buffers
-    virtual binder::Status prepare2(int32_t maxCount, int32_t streamId);
+    virtual binder::Status prepare2(int32_t maxCount, int32_t streamId) override;
+
+    // Finalize the output configurations with surfaces not added before.
+    virtual binder::Status finalizeOutputConfigurations(int32_t streamId,
+            const hardware::camera2::params::OutputConfiguration &outputConfiguration) override;
 
     /**
      * Interface used by CameraService
@@ -138,14 +142,14 @@ public:
     CameraDeviceClient(const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
             const String16& clientPackageName,
-            int cameraId,
+            const String8& cameraId,
             int cameraFacing,
             int clientPid,
             uid_t clientUid,
             int servicePid);
     virtual ~CameraDeviceClient();
 
-    virtual status_t      initialize(CameraModule *module);
+    virtual status_t      initialize(sp<CameraProviderManager> manager) override;
 
     virtual status_t      dump(int fd, const Vector<String16>& args);
 
@@ -160,6 +164,7 @@ public:
                              const CaptureResultExtras& resultExtras);
     virtual void notifyShutter(const CaptureResultExtras& resultExtras, nsecs_t timestamp);
     virtual void notifyPrepared(int streamId);
+    virtual void notifyRequestQueueEmpty();
     virtual void notifyRepeatingRequestError(long lastFrameNumber);
 
     /**
@@ -174,12 +179,61 @@ protected:
     status_t              getRotationTransformLocked(/*out*/int32_t* transform);
 
 private:
+    // StreamSurfaceId encapsulates streamId + surfaceId for a particular surface.
+    // streamId specifies the index of the stream the surface belongs to, and the
+    // surfaceId specifies the index of the surface within the stream. (one stream
+    // could contain multiple surfaces.)
+    class StreamSurfaceId final {
+    public:
+        StreamSurfaceId() {
+            mStreamId = -1;
+            mSurfaceId = -1;
+        }
+        StreamSurfaceId(int32_t streamId, int32_t surfaceId) {
+            mStreamId = streamId;
+            mSurfaceId = surfaceId;
+        }
+        int32_t streamId() const {
+            return mStreamId;
+        }
+        int32_t surfaceId() const {
+            return mSurfaceId;
+        }
+
+    private:
+        int32_t mStreamId;
+        int32_t mSurfaceId;
+
+    }; // class StreamSurfaceId
+
+    // OutputStreamInfo describes the property of a camera stream.
+    class OutputStreamInfo {
+    public:
+        int width;
+        int height;
+        int format;
+        android_dataspace dataSpace;
+        int32_t consumerUsage;
+        bool finalized = false;
+        OutputStreamInfo() :
+                width(-1), height(-1), format(-1), dataSpace(HAL_DATASPACE_UNKNOWN),
+                consumerUsage(0) {}
+        OutputStreamInfo(int _width, int _height, int _format, android_dataspace _dataSpace,
+                int32_t _consumerUsage) :
+                    width(_width), height(_height), format(_format),
+                    dataSpace(_dataSpace), consumerUsage(_consumerUsage) {}
+    };
+
+private:
     /** ICameraDeviceUser interface-related private members */
 
     /** Preview callback related members */
     sp<camera2::FrameProcessorBase> mFrameProcessor;
     static const int32_t FRAME_PROCESSOR_LISTENER_MIN_ID = 0;
     static const int32_t FRAME_PROCESSOR_LISTENER_MAX_ID = 0x7fffffffL;
+
+    template<typename TProviderPtr>
+    status_t      initializeImpl(TProviderPtr providerPtr);
 
     /** Utility members */
     binder::Status checkPidStatus(const char* checkLocation);
@@ -188,6 +242,16 @@ private:
     // Find the square of the euclidean distance between two points
     static int64_t euclidDistSquare(int32_t x0, int32_t y0, int32_t x1, int32_t y1);
 
+    // Create an output stream with surface deferred for future.
+    binder::Status createDeferredSurfaceStreamLocked(
+            const hardware::camera2::params::OutputConfiguration &outputConfiguration,
+            bool isShared,
+            int* newStreamId = NULL);
+
+    // Set the stream transform flags to automatically rotate the camera stream for preview use
+    // cases.
+    binder::Status setStreamTransformLocked(int streamId);
+
     // Find the closest dimensions for a given format in available stream configurations with
     // a width <= ROUNDING_WIDTH_CAP
     static const int32_t ROUNDING_WIDTH_CAP = 1920;
@@ -195,8 +259,16 @@ private:
             android_dataspace dataSpace, const CameraMetadata& info,
             /*out*/int32_t* outWidth, /*out*/int32_t* outHeight);
 
-    // IGraphicsBufferProducer binder -> Stream ID for output streams
-    KeyedVector<sp<IBinder>, int> mStreamMap;
+    //check if format is not custom format
+    static bool isPublicFormat(int32_t format);
+
+    // Create a Surface from an IGraphicBufferProducer. Returns error if
+    // IGraphicBufferProducer's property doesn't match with streamInfo
+    binder::Status createSurfaceFromGbp(OutputStreamInfo& streamInfo, bool isStreamInfoValid,
+            sp<Surface>& surface, const sp<IGraphicBufferProducer>& gbp);
+
+    // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
+    KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
 
     struct InputStreamConfiguration {
         bool configured;
@@ -213,6 +285,15 @@ private:
 
     int32_t mRequestIdCounter;
 
+    // The list of output streams whose surfaces are deferred. We have to track them separately
+    // as there are no surfaces available and can not be put into mStreamMap. Once the deferred
+    // Surface is configured, the stream id will be moved to mStreamMap.
+    Vector<int32_t> mDeferredStreams;
+
+    // stream ID -> outputStreamInfo mapping
+    std::unordered_map<int32_t, OutputStreamInfo> mStreamInfoMap;
+
+    static const int32_t MAX_SURFACES_PER_STREAM = 2;
 };
 
 }; // namespace android

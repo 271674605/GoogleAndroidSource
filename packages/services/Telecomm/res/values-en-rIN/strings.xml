@@ -45,9 +45,10 @@
     <string name="no_vm_number" msgid="4164780423805688336">"Missing voicemail number"</string>
     <string name="no_vm_number_msg" msgid="1300729501030053828">"No voicemail number is stored on the SIM card."</string>
     <string name="add_vm_number_str" msgid="4676479471644687453">"Add number"</string>
-    <string name="change_default_dialer_dialog_title" msgid="4430590714918044425">"Change default Dialer app?"</string>
-    <string name="change_default_dialer_with_previous_app_set_text" msgid="3213396537499337949">"Use <xliff:g id="NEW_APP">%1$s</xliff:g> instead of <xliff:g id="CURRENT_APP">%2$s</xliff:g> as your default dialler app?"</string>
-    <string name="change_default_dialer_no_previous_app_set_text" msgid="7608426684114545221">"Use <xliff:g id="NEW_APP">%s</xliff:g> as your default dialler app?"</string>
+    <string name="change_default_dialer_dialog_title" msgid="9101655962941740507">"Make <xliff:g id="NEW_APP">%s</xliff:g> your default Phone app?"</string>
+    <string name="change_default_dialer_dialog_affirmative" msgid="8606546663509166276">"Set Default"</string>
+    <string name="change_default_dialer_dialog_negative" msgid="9078144617060173845">"Cancel"</string>
+    <string name="change_default_dialer_warning_message" msgid="1417671460801684999">"<xliff:g id="NEW_APP">%s</xliff:g> will be able to place and control all aspects of calls. Only apps that you trust should be set as the default Phone app."</string>
     <string name="blocked_numbers" msgid="2751843139572970579">"Blocked numbers"</string>
     <string name="blocked_numbers_msg" msgid="1045015186124965643">"You won\'t receive calls or texts from blocked numbers."</string>
     <string name="block_number" msgid="1101252256321306179">"Add a number"</string>
@@ -66,4 +67,20 @@
     <string name="blocked_numbers_block_emergency_number_message" msgid="917851876780698387">"Unable to block emergency number."</string>
     <string name="blocked_numbers_number_already_blocked_message" msgid="4392247814500811798">"<xliff:g id="BLOCKED_NUMBER">%1$s</xliff:g> is already blocked."</string>
     <string name="toast_personal_call_msg" msgid="5115361633476779723">"Using the personal dialler to make the call"</string>
+    <string name="notification_incoming_call" msgid="7713197997773986670">"<xliff:g id="CALL_VIA">%1$s</xliff:g> call from <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="notification_incoming_video_call" msgid="6638486071698373893">"<xliff:g id="CALL_VIA">%1$s</xliff:g> video call from <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="answering_ends_other_call" msgid="8282145910153766401">"Answering will end your <xliff:g id="CALL_VIA">%1$s</xliff:g> call"</string>
+    <string name="answering_ends_other_calls" msgid="1198589551399049197">"Answering will end your <xliff:g id="CALL_VIA">%1$s</xliff:g> calls"</string>
+    <string name="answering_ends_other_video_call" msgid="8510410917384186360">"Answering will end your <xliff:g id="CALL_VIA">%1$s</xliff:g> video call"</string>
+    <string name="answering_ends_other_managed_call" msgid="5186137550267947785">"Answering will end your ongoing call"</string>
+    <string name="answering_ends_other_managed_calls" msgid="6429838309560397988">"Answering will end your ongoing calls"</string>
+    <string name="answering_ends_other_managed_video_call" msgid="1585423762458248435">"Answering will end your ongoing video call"</string>
+    <string name="answer_incoming_call" msgid="4140530013111794587">"Answer"</string>
+    <string name="decline_incoming_call" msgid="806026168661598368">"Decline"</string>
+    <string name="cant_call_due_to_ongoing_call" msgid="4952615196237854748">"Call cannot be placed due to your <xliff:g id="OTHER_CALL">%1$s</xliff:g> call."</string>
+    <string name="cant_call_due_to_ongoing_calls" msgid="1380804892363503856">"Call cannot be placed due to your <xliff:g id="OTHER_CALL">%1$s</xliff:g> calls."</string>
+    <string name="cant_call_due_to_ongoing_unknown_call" msgid="149091978697302211">"Call cannot be placed due to a call in another app."</string>
+    <string name="notification_channel_incoming_call" msgid="3513761697082968084">"Incoming calls"</string>
+    <string name="notification_channel_missed_call" msgid="8727062678632713146">"Missed calls"</string>
+    <string name="alert_outgoing_call" msgid="982908156825958001">"Placing this call will end your <xliff:g id="OTHER_APP">%1$s</xliff:g> call."</string>
 </resources>

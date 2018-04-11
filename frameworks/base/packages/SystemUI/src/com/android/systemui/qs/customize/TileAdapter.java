@@ -19,6 +19,7 @@ import android.app.AlertDialog.Builder;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Handler;
@@ -39,14 +40,14 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import com.android.internal.logging.MetricsLogger;
-import com.android.internal.logging.MetricsProto;
+import com.android.internal.logging.nano.MetricsProto;
 import com.android.systemui.R;
-import com.android.systemui.qs.QSIconView;
+import com.android.systemui.qs.tileimpl.QSIconViewImpl;
 import com.android.systemui.qs.customize.TileAdapter.Holder;
 import com.android.systemui.qs.customize.TileQueryHelper.TileInfo;
 import com.android.systemui.qs.customize.TileQueryHelper.TileStateListener;
 import com.android.systemui.qs.external.CustomTile;
-import com.android.systemui.statusbar.phone.QSTileHost;
+import com.android.systemui.qs.QSTileHost;
 import com.android.systemui.statusbar.phone.SystemUIDialog;
 
 import java.util.ArrayList;
@@ -71,6 +72,7 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
     private final Handler mHandler = new Handler();
     private final List<TileInfo> mTiles = new ArrayList<>();
     private final ItemTouchHelper mItemTouchHelper;
+    private final ItemDecoration mDecoration;
     private final AccessibilityManager mAccessibilityManager;
     private int mEditIndex;
     private int mTileDividerIndex;
@@ -88,6 +90,7 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
         mContext = context;
         mAccessibilityManager = context.getSystemService(AccessibilityManager.class);
         mItemTouchHelper = new ItemTouchHelper(mCallbacks);
+        mDecoration = new TileItemDecoration(context);
     }
 
     public void setHost(QSTileHost host) {
@@ -109,6 +112,12 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
         }
         host.changeTiles(mCurrentSpecs, newSpecs);
         mCurrentSpecs = newSpecs;
+    }
+
+    public void resetTileSpecs(QSTileHost host, List<String> specs) {
+        // Notify the host so the tiles get removed callbacks.
+        host.changeTiles(mCurrentSpecs, specs);
+        setTileSpecs(specs);
     }
 
     public void setTileSpecs(List<String> currentSpecs) {
@@ -187,7 +196,7 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
         }
         FrameLayout frame = (FrameLayout) inflater.inflate(R.layout.qs_customize_tile_frame, parent,
                 false);
-        frame.addView(new CustomizeTileView(context, new QSIconView(context)));
+        frame.addView(new CustomizeTileView(context, new QSIconViewImpl(context)));
         return new Holder(frame);
     }
 
@@ -294,7 +303,11 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
         mAccessibilityMoving = false;
         mTiles.remove(mEditIndex--);
         notifyItemRemoved(mEditIndex - 1);
+        // Don't remove items when the last position is selected.
+        if (position == mEditIndex) position--;
+
         move(mAccessibilityFromIndex, position, v);
+
         notifyDataSetChanged();
     }
 
@@ -459,9 +472,16 @@ public class TileAdapter extends RecyclerView.Adapter<Holder> implements TileSta
         }
     };
 
-    private final ItemDecoration mDecoration = new ItemDecoration() {
-        // TODO: Move this to resource.
-        private final ColorDrawable mDrawable = new ColorDrawable(0xff384248);
+    private class TileItemDecoration extends ItemDecoration {
+        private final ColorDrawable mDrawable;
+
+        private TileItemDecoration(Context context) {
+            TypedArray ta =
+                    context.obtainStyledAttributes(new int[]{android.R.attr.colorSecondary});
+            mDrawable = new ColorDrawable(ta.getColor(0, 0));
+            ta.recycle();
+        }
+
 
         @Override
         public void onDraw(Canvas c, RecyclerView parent, State state) {

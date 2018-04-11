@@ -42,6 +42,7 @@ typedef struct  {
 
     enum pcm_format formats[MAX_PROFILE_FORMATS];
 
+    /* note that this list is sorted highest rate to lowest */
     unsigned sample_rates[MAX_PROFILE_SAMPLE_RATES];
 
     unsigned channel_counts[MAX_PROFILE_CHANNEL_COUNTS];
@@ -81,10 +82,14 @@ bool profile_is_format_valid(alsa_device_profile* profile, enum pcm_format fmt);
 
 /* Channel Methods */
 unsigned profile_get_default_channel_count(alsa_device_profile* profile);
+unsigned profile_get_closest_channel_count(alsa_device_profile* profile, unsigned count);
 bool profile_is_channel_count_valid(alsa_device_profile* profile, unsigned count);
 
 /* Utility */
 unsigned profile_calc_min_period_size(alsa_device_profile* profile, unsigned sample_rate);
 unsigned int profile_get_period_size(alsa_device_profile* profile, unsigned sample_rate);
+
+/* Debugging */
+void profile_dump(const alsa_device_profile* profile, int fd);
 
 #endif /* ANDROID_SYSTEM_MEDIA_ALSA_UTILS_ALSA_DEVICE_PROFILE_H */

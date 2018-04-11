@@ -16,12 +16,18 @@ LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := guava-15.0-prebuilt
+LOCAL_MODULE := guava-18.0-prebuilt
 LOCAL_MODULE_TAGS := optional
-LOCAL_SRC_FILES := guava-15.0.jar
+LOCAL_SRC_FILES := guava-18.0.jar
 LOCAL_IS_HOST_MODULE := true
 LOCAL_MODULE_CLASS := JAVA_LIBRARIES
 LOCAL_BUILT_MODULE_STEM := javalib.jar
 LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
 
 include $(BUILD_PREBUILT)
+
+include $(CLEAR_VARS)
+LOCAL_PREBUILT_JAVA_LIBRARIES := \
+    guava-20.0.jar
+
+include $(BUILD_HOST_PREBUILT)

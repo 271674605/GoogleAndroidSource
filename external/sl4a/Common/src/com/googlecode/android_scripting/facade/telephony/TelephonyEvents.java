@@ -1,17 +1,17 @@
 /*
- * Copyright (C) 2016 Google Inc.
+ * Copyright (C) 2017 The Android Open Source Project
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not
- * use this file except in compliance with the License. You may obtain a copy of
- * the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations under
- * the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.googlecode.android_scripting.facade.telephony;
@@ -22,8 +22,6 @@ import android.telephony.DataConnectionRealTimeInfo;
 import android.telephony.PreciseCallState;
 import android.telephony.ServiceState;
 import com.googlecode.android_scripting.jsonrpc.JsonSerializable;
-import com.googlecode.android_scripting.facade.telephony.TelephonyConstants;
-import com.googlecode.android_scripting.facade.telephony.TelephonyUtils;
 
 public class TelephonyEvents {
 
@@ -301,62 +299,4 @@ public class TelephonyEvents {
             return messageWaitingIndicator;
         }
     }
-
-    public static class PacketKeepaliveEvent implements JsonSerializable {
-        private String mId;
-        private String mPacketKeepaliveEvent;
-
-        public PacketKeepaliveEvent(String id, String event) {
-            mId = id;
-            mPacketKeepaliveEvent = event;
-        }
-
-        public JSONObject toJSON() throws JSONException {
-            JSONObject packetKeepalive = new JSONObject();
-
-            packetKeepalive.put(
-                    TelephonyConstants.PacketKeepaliveContainer.ID,
-                    mId);
-            packetKeepalive.put(
-                    TelephonyConstants.PacketKeepaliveContainer.PACKET_KEEPALIVE_EVENT,
-                    mPacketKeepaliveEvent);
-
-            return packetKeepalive;
-        }
-    }
-
-    public static class NetworkCallbackEvent implements JsonSerializable {
-        public static final Integer INVALID_VALUE = null;
-        private String mId;
-        private String mNetworkCallbackEvent;
-        private Integer mRssi;
-        private Integer mMaxMsToLive;
-
-        public NetworkCallbackEvent(String id, String event, Integer rssi, Integer maxMsToLive) {
-            mId = id;
-            mNetworkCallbackEvent = event;
-            mRssi = rssi;
-            mMaxMsToLive = maxMsToLive;
-        }
-
-        public JSONObject toJSON() throws JSONException {
-            JSONObject networkCallback = new JSONObject();
-
-            networkCallback.put(
-                    TelephonyConstants.NetworkCallbackContainer.ID,
-                    mId);
-            networkCallback.put(
-                    TelephonyConstants.NetworkCallbackContainer.NETWORK_CALLBACK_EVENT,
-                    mNetworkCallbackEvent);
-            networkCallback.put(
-                    TelephonyConstants.NetworkCallbackContainer.MAX_MS_TO_LIVE,
-                    mMaxMsToLive);
-            networkCallback.put(
-                    TelephonyConstants.NetworkCallbackContainer.RSSI,
-                    mRssi);
-
-            return networkCallback;
-        }
-    }
-
 }

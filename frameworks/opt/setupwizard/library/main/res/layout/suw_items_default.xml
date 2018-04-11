@@ -20,6 +20,7 @@
     style="@style/SuwItemContainer"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:baselineAligned="false"
     android:orientation="horizontal">
 
     <FrameLayout
@@ -44,7 +45,7 @@
         android:gravity="center_vertical"
         android:orientation="vertical">
 
-        <TextView
+        <com.android.setupwizardlib.view.RichTextView
             android:id="@+id/suw_items_title"
             style="@style/SuwItemTitle"
             android:layout_width="match_parent"
@@ -53,7 +54,7 @@
             android:textAlignment="viewStart"
             tools:ignore="UnusedAttribute" />
 
-        <TextView
+        <com.android.setupwizardlib.view.RichTextView
             android:id="@+id/suw_items_summary"
             style="@style/SuwItemSummary"
             android:layout_width="match_parent"

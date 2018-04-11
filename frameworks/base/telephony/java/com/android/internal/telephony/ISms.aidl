@@ -184,7 +184,7 @@ interface ISms {
      */
     void sendTextForSubscriberWithSelfPermissions(in int subId, String callingPkg,
             in String destAddr, in String scAddr, in String text, in PendingIntent sentIntent,
-            in PendingIntent deliveryIntent);
+            in PendingIntent deliveryIntent, in boolean persistMessage);
 
     /**
      * Inject an SMS PDU into the android platform.
@@ -447,4 +447,16 @@ interface ISms {
     void sendStoredMultipartText(int subId, String callingPkg, in Uri messageUri,
                 String scAddress, in List<PendingIntent> sentIntents,
                 in List<PendingIntent> deliveryIntents);
+
+    /**
+     * Create an app-only incoming SMS request for the calling package.
+     *
+     * If an incoming text contains the token returned by this method the provided
+     * <code>PendingIntent</code> will be sent containing the SMS data.
+     *
+     * @param subId the SIM id.
+     * @param callingPkg the package name of the calling app.
+     * @param intent PendingIntent to be sent when an SMS is received containing the token.
+     */
+    String createAppSpecificSmsToken(int subId, String callingPkg, in PendingIntent intent);
 }

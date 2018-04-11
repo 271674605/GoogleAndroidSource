@@ -18,10 +18,11 @@ package com.android.server.telecom.callfiltering;
 
 import android.content.Context;
 import android.os.AsyncTask;
+import android.telecom.Log;
+import android.telecom.Logging.Session;
 
 import com.android.server.telecom.Call;
-import com.android.server.telecom.Log;
-import com.android.server.telecom.Session;
+import com.android.server.telecom.LogUtils;
 
 /**
  * An {@link AsyncTask} that checks if a call needs to be blocked.
@@ -33,7 +34,8 @@ public class AsyncBlockCheckFilter extends AsyncTask<String, Void, Boolean>
     private final Context mContext;
     private final BlockCheckerAdapter mBlockCheckerAdapter;
     private Call mIncomingCall;
-    private Session mLogSubsession;
+    private Session mBackgroundTaskSubsession;
+    private Session mPostExecuteSubsession;
     private CallFilterResultCallback mCallback;
 
     public AsyncBlockCheckFilter(Context context, BlockCheckerAdapter blockCheckerAdapter) {
@@ -52,14 +54,15 @@ public class AsyncBlockCheckFilter extends AsyncTask<String, Void, Boolean>
 
     @Override
     protected void onPreExecute() {
-        mLogSubsession = Log.createSubsession();
+        mBackgroundTaskSubsession = Log.createSubsession();
+        mPostExecuteSubsession = Log.createSubsession();
     }
 
     @Override
     protected Boolean doInBackground(String... params) {
         try {
-            Log.continueSession(mLogSubsession, "ABCF.dIB");
-            Log.event(mIncomingCall, Log.Events.BLOCK_CHECK_INITIATED);
+            Log.continueSession(mBackgroundTaskSubsession, "ABCF.dIB");
+            Log.addEvent(mIncomingCall, LogUtils.Events.BLOCK_CHECK_INITIATED);
             return mBlockCheckerAdapter.isBlocked(mContext, params[0]);
         } finally {
             Log.endSession();
@@ -68,23 +71,28 @@ public class AsyncBlockCheckFilter extends AsyncTask<String, Void, Boolean>
 
     @Override
     protected void onPostExecute(Boolean isBlocked) {
-        CallFilteringResult result;
-        if (isBlocked) {
-            result = new CallFilteringResult(
-                    false, // shouldAllowCall
-                    true, //shouldReject
-                    false, //shouldAddToCallLog
-                    false // shouldShowNotification
-            );
-        } else {
-            result = new CallFilteringResult(
-                    true, // shouldAllowCall
-                    false, // shouldReject
-                    true, // shouldAddToCallLog
-                    true // shouldShowNotification
-            );
+        Log.continueSession(mPostExecuteSubsession, "ABCF.oPE");
+        try {
+            CallFilteringResult result;
+            if (isBlocked) {
+                result = new CallFilteringResult(
+                        false, // shouldAllowCall
+                        true, //shouldReject
+                        false, //shouldAddToCallLog
+                        false // shouldShowNotification
+                );
+            } else {
+                result = new CallFilteringResult(
+                        true, // shouldAllowCall
+                        false, // shouldReject
+                        true, // shouldAddToCallLog
+                        true // shouldShowNotification
+                );
+            }
+            Log.addEvent(mIncomingCall, LogUtils.Events.BLOCK_CHECK_FINISHED, result);
+            mCallback.onCallFilteringComplete(mIncomingCall, result);
+        } finally {
+            Log.endSession();
         }
-        Log.event(mIncomingCall, Log.Events.BLOCK_CHECK_FINISHED, result);
-        mCallback.onCallFilteringComplete(mIncomingCall, result);
     }
 }

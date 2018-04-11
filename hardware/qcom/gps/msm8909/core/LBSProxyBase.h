@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -40,22 +40,22 @@ class ContextBase;
 class LBSProxyBase {
     friend class ContextBase;
     inline virtual LocApiBase*
-        getLocApi(const MsgTask* msgTask,
-                  LOC_API_ADAPTER_EVENT_MASK_T exMask,
-                  ContextBase* context) const {
+        getLocApi(const MsgTask* /* msgTask */,
+                  LOC_API_ADAPTER_EVENT_MASK_T /* exMask */,
+                  ContextBase* /* context */) const {
         return NULL;
     }
 protected:
     inline LBSProxyBase() {}
 public:
     inline virtual ~LBSProxyBase() {}
-    inline virtual void requestUlp(LocAdapterBase* adapter,
-                                   unsigned long capabilities) const {}
+    inline virtual void requestUlp(LocAdapterBase* /* adapter */,
+                                   unsigned long /* capabilities */) const {}
     inline virtual bool hasAgpsExtendedCapabilities() const { return false; }
     inline virtual bool hasCPIExtendedCapabilities() const { return false; }
     inline virtual void modemPowerVote(bool power) const {}
-    virtual void injectFeatureConfig(ContextBase* context) const {}
-    inline virtual IzatDevId_t getIzatDevId() const { return 0; }
+    virtual void injectFeatureConfig(ContextBase* /* context */) const {}
+    inline virtual bool hasNativeXtraClient() const { return false; }
 };
 
 typedef LBSProxyBase* (getLBSProxy_t)();

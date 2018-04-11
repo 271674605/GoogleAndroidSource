@@ -19,7 +19,6 @@ package android.support.v7.preference;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.XmlResourceParser;
-import android.os.Build;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
@@ -63,12 +62,8 @@ class PreferenceInflater {
 
     private void init(PreferenceManager preferenceManager) {
         mPreferenceManager = preferenceManager;
-        if (Build.VERSION.SDK_INT >= 14) {
-            setDefaultPackages(new String[] {"android.support.v14.preference.",
-                    "android.support.v7.preference."});
-        } else {
-            setDefaultPackages(new String[] {"android.support.v7.preference."});
-        }
+        setDefaultPackages(new String[] {"android.support.v14.preference.",
+                "android.support.v7.preference."});
     }
 
     /**
@@ -211,7 +206,7 @@ class PreferenceInflater {
      * @param name The full name of the class to be instantiated.
      * @param attrs The XML attributes supplied for this instance.
      *
-     * @return The newly instantied item, or null.
+     * @return The newly instantiated item, or null.
      */
     private Preference createItem(@NonNull String name, @Nullable String[] prefixes,
             AttributeSet attrs)

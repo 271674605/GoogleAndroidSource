@@ -41,6 +41,16 @@ class Camera3OutputStreamInterface : public virtual Camera3StreamInterface {
     virtual bool isVideoStream() const = 0;
 
     /**
+     * Return if the consumer configuration of this stream is deferred.
+     */
+    virtual bool isConsumerConfigurationDeferred(size_t surface_id = 0) const = 0;
+
+    /**
+     * Set the consumer surfaces to the output stream.
+     */
+    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers) = 0;
+
+    /**
      * Detach an unused buffer from the stream.
      *
      * buffer must be non-null; fenceFd may null, and if it is non-null, but
@@ -49,7 +59,6 @@ class Camera3OutputStreamInterface : public virtual Camera3StreamInterface {
      *
      */
     virtual status_t detachBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) = 0;
-
 };
 
 } // namespace camera3

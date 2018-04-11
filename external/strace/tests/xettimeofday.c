@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Dmitry V. Levin <ldv@altlinux.org>
+ * Copyright (c) 2015-2016 Dmitry V. Levin <ldv@altlinux.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,11 +25,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "tests.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include <sys/syscall.h>
+#include <asm/unistd.h>
 
 int
 main(void)
@@ -45,24 +47,23 @@ main(void)
 	};
 
 	if (syscall(__NR_gettimeofday, &t.tv, NULL))
-		return 77;
-	printf("gettimeofday({%jd, %jd}, NULL) = 0\n",
+		perror_msg_and_skip("gettimeofday");
+	printf("gettimeofday({tv_sec=%jd, tv_usec=%jd}, NULL) = 0\n",
 	       (intmax_t) t.tv.tv_sec, (intmax_t) t.tv.tv_usec);
 
 	if (syscall(__NR_gettimeofday, &t.tv, &t.tz))
-		return 77;
-	printf("gettimeofday({%jd, %jd}"
+		perror_msg_and_skip("gettimeofday");
+	printf("gettimeofday({tv_sec=%jd, tv_usec=%jd}"
 	       ", {tz_minuteswest=%d, tz_dsttime=%d}) = 0\n",
 	       (intmax_t) t.tv.tv_sec, (intmax_t) t.tv.tv_usec,
 	       t.tz.tz_minuteswest, t.tz.tz_dsttime);
 
 	t.tv.tv_sec = -1;
 	t.tv.tv_usec = 1000000000;
-	if (!settimeofday(&t.tv, &t.tz))
-		return 77;
-	printf("settimeofday({%jd, %jd}"
+	assert(syscall(__NR_settimeofday, &t.tv, &t.tz) == -1);
+	printf("settimeofday({tv_sec=%jd, tv_usec=%jd}"
 	       ", {tz_minuteswest=%d, tz_dsttime=%d})"
-	       " = -1 EINVAL (Invalid argument)\n",
+	       " = -1 EINVAL (%m)\n",
 	       (intmax_t) t.tv.tv_sec, (intmax_t) t.tv.tv_usec,
 	       t.tz.tz_minuteswest, t.tz.tz_dsttime);
 

@@ -23,6 +23,7 @@ import android.os.Message;
 import android.os.Registrant;
 import android.os.RegistrantList;
 import android.os.SystemProperties;
+import android.os.storage.StorageManager;
 import android.telephony.TelephonyManager;
 import android.telephony.Rlog;
 import android.text.format.Time;
@@ -100,6 +101,8 @@ public class UiccController extends Handler {
 
     protected RegistrantList mIccChangedRegistrants = new RegistrantList();
 
+    private UiccStateChangedLauncher mLauncher;
+
     // Logging for dumpsys. Useful in cases when the cards run into errors.
     private static final int MAX_PROACTIVE_COMMANDS_TO_LOG = 20;
     private LinkedList<String> mCardLogs = new LinkedList<String>();
@@ -122,7 +125,12 @@ public class UiccController extends Handler {
             Integer index = new Integer(i);
             mCis[i].registerForIccStatusChanged(this, EVENT_ICC_STATUS_CHANGED, index);
             // TODO remove this once modem correctly notifies the unsols
-            if (DECRYPT_STATE.equals(SystemProperties.get("vold.decrypt"))) {
+            // If the device has been decrypted or FBE is supported, read SIM when radio state is
+            // available.
+            // Else wait for radio to be on. This is needed for the scenario when SIM is locked --
+            // to avoid overlap of CryptKeeper and SIM unlock screen.
+            if (DECRYPT_STATE.equals(SystemProperties.get("vold.decrypt")) ||
+                    StorageManager.isFileEncryptedNativeOrEmulated()) {
                 mCis[i].registerForAvailable(this, EVENT_ICC_STATUS_CHANGED, index);
             } else {
                 mCis[i].registerForOn(this, EVENT_ICC_STATUS_CHANGED, index);
@@ -130,6 +138,8 @@ public class UiccController extends Handler {
             mCis[i].registerForNotAvailable(this, EVENT_RADIO_UNAVAILABLE, index);
             mCis[i].registerForIccRefresh(this, EVENT_SIM_REFRESH, index);
         }
+
+        mLauncher = new UiccStateChangedLauncher(c, this);
     }
 
     public static UiccController getInstance() {

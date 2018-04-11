@@ -16,7 +16,6 @@
 
 package android.net.metrics;
 
-import android.annotation.SystemApi;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.util.SparseArray;
@@ -24,38 +23,45 @@ import android.util.SparseArray;
 import com.android.internal.util.MessageUtils;
 
 /**
+ * An event recorded when IpReachabilityMonitor sends a neighbor probe or receives
+ * a neighbor probe result.
  * {@hide}
  */
-@SystemApi
-public final class IpReachabilityEvent extends IpConnectivityEvent implements Parcelable {
+public final class IpReachabilityEvent implements Parcelable {
 
-    public static final int PROBE             = 1 << 8;
-    public static final int NUD_FAILED        = 2 << 8;
-    public static final int PROVISIONING_LOST = 3 << 8;
+    // Event types.
+    /** A probe forced by IpReachabilityMonitor. */
+    public static final int PROBE                     = 1 << 8;
+    /** Neighbor unreachable after a forced probe. */
+    public static final int NUD_FAILED                = 2 << 8;
+    /** Neighbor unreachable after a forced probe, IP provisioning is also lost. */
+    public static final int PROVISIONING_LOST         = 3 << 8;
+    /** Neighbor unreachable notification from kernel. */
+    public static final int NUD_FAILED_ORGANIC        = 4 << 8;
+    /** Neighbor unreachable notification from kernel, IP provisioning is also lost. */
+    public static final int PROVISIONING_LOST_ORGANIC = 5 << 8;
 
-    public final String ifName;
     // eventType byte format (MSB to LSB):
     // byte 0: unused
     // byte 1: unused
     // byte 2: type of event: PROBE, NUD_FAILED, PROVISIONING_LOST
-    // byte 3: kernel errno from RTNetlink or IpReachabilityMonitor
+    // byte 3: when byte 2 == PROBE, errno code from RTNetlink or IpReachabilityMonitor.
     public final int eventType;
 
-    private IpReachabilityEvent(String ifName, int eventType) {
-        this.ifName = ifName;
+    public IpReachabilityEvent(int eventType) {
         this.eventType = eventType;
     }
 
     private IpReachabilityEvent(Parcel in) {
-        this.ifName = in.readString();
         this.eventType = in.readInt();
     }
 
+    @Override
     public void writeToParcel(Parcel out, int flags) {
-        out.writeString(ifName);
         out.writeInt(eventType);
     }
 
+    @Override
     public int describeContents() {
         return 0;
     }
@@ -71,22 +77,23 @@ public final class IpReachabilityEvent extends IpConnectivityEvent implements Pa
         }
     };
 
-    public static void logProbeEvent(String ifName, int nlErrorCode) {
-        logEvent(new IpReachabilityEvent(ifName, PROBE | (nlErrorCode & 0xFF)));
-    }
-
-    public static void logNudFailed(String ifName) {
-        logEvent(new IpReachabilityEvent(ifName, NUD_FAILED));
-    }
-
-    public static void logProvisioningLost(String ifName) {
-        logEvent(new IpReachabilityEvent(ifName, PROVISIONING_LOST));
+    /**
+     * Returns the NUD failure event type code corresponding to the given conditions.
+     */
+    public static int nudFailureEventType(boolean isFromProbe, boolean isProvisioningLost) {
+        if (isFromProbe) {
+            return isProvisioningLost ? PROVISIONING_LOST : NUD_FAILED;
+        } else {
+            return isProvisioningLost ? PROVISIONING_LOST_ORGANIC : NUD_FAILED_ORGANIC;
+        }
     }
 
     @Override
     public String toString() {
-        return String.format("IpReachabilityEvent(%s, %s)", ifName,
-                Decoder.constants.get(eventType));
+        int hi = eventType & 0xff00;
+        int lo = eventType & 0x00ff;
+        String eventName = Decoder.constants.get(hi);
+        return String.format("IpReachabilityEvent(%s:%02x)", eventName, lo);
     }
 
     final static class Decoder {
@@ -94,4 +101,4 @@ public final class IpReachabilityEvent extends IpConnectivityEvent implements Pa
                 MessageUtils.findMessageNames(new Class[]{IpReachabilityEvent.class},
                 new String[]{"PROBE", "PROVISIONING_", "NUD_"});
     }
-};
+}

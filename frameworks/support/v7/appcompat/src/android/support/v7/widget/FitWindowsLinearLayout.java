@@ -16,14 +16,18 @@
 
 package android.support.v7.widget;
 
+import static android.support.annotation.RestrictTo.Scope.LIBRARY_GROUP;
+
 import android.content.Context;
 import android.graphics.Rect;
+import android.support.annotation.RestrictTo;
 import android.util.AttributeSet;
 import android.widget.LinearLayout;
 
 /**
  * @hide
  */
+@RestrictTo(LIBRARY_GROUP)
 public class FitWindowsLinearLayout extends LinearLayout implements FitWindowsViewGroup {
 
     private OnFitSystemWindowsListener mListener;
@@ -36,6 +40,7 @@ public class FitWindowsLinearLayout extends LinearLayout implements FitWindowsVi
         super(context, attrs);
     }
 
+    @Override
     public void setOnFitSystemWindowsListener(OnFitSystemWindowsListener listener) {
         mListener = listener;
     }

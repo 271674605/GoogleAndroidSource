@@ -20,17 +20,24 @@
 #include <utils/Errors.h>
 #include <utils/NativeHandle.h>
 #include <utils/RefBase.h>
+#include <utils/String8.h>
 #include <utils/Timers.h>
 #include <utils/Vector.h>
 
 #include <binder/Parcel.h>
 #include <binder/IInterface.h>
 
+#include <gui/BufferQueueDefs.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/IProducerListener.h>
 
+#include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
+
 namespace android {
 // ----------------------------------------------------------------------------
+
+using ::android::hardware::graphics::bufferqueue::V1_0::utils::
+        H2BGraphicBufferProducer;
 
 enum {
     REQUEST_BUFFER = IBinder::FIRST_CALL_TRANSACTION,
@@ -50,18 +57,18 @@ enum {
     GET_CONSUMER_NAME,
     SET_MAX_DEQUEUED_BUFFER_COUNT,
     SET_ASYNC_MODE,
-    GET_NEXT_FRAME_NUMBER,
     SET_SHARED_BUFFER_MODE,
     SET_AUTO_REFRESH,
     SET_DEQUEUE_TIMEOUT,
     GET_LAST_QUEUED_BUFFER,
-    GET_UNIQUE_ID,
+    GET_FRAME_TIMESTAMPS,
+    GET_UNIQUE_ID
 };
 
 class BpGraphicBufferProducer : public BpInterface<IGraphicBufferProducer>
 {
 public:
-    BpGraphicBufferProducer(const sp<IBinder>& impl)
+    explicit BpGraphicBufferProducer(const sp<IBinder>& impl)
         : BpInterface<IGraphicBufferProducer>(impl)
     {
     }
@@ -118,22 +125,37 @@ public:
     }
 
     virtual status_t dequeueBuffer(int *buf, sp<Fence>* fence, uint32_t width,
-            uint32_t height, PixelFormat format, uint32_t usage) {
+            uint32_t height, PixelFormat format, uint32_t usage,
+            FrameEventHistoryDelta* outTimestamps) {
         Parcel data, reply;
+        bool getFrameTimestamps = (outTimestamps != nullptr);
+
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
         data.writeUint32(width);
         data.writeUint32(height);
         data.writeInt32(static_cast<int32_t>(format));
         data.writeUint32(usage);
+        data.writeBool(getFrameTimestamps);
+
         status_t result = remote()->transact(DEQUEUE_BUFFER, data, &reply);
         if (result != NO_ERROR) {
             return result;
         }
+
         *buf = reply.readInt32();
-        bool nonNull = reply.readInt32();
-        if (nonNull) {
-            *fence = new Fence();
-            reply.read(**fence);
+        *fence = new Fence();
+        result = reply.read(**fence);
+        if (result != NO_ERROR) {
+            fence->clear();
+            return result;
+        }
+        if (getFrameTimestamps) {
+            result = reply.read(*outTimestamps);
+            if (result != NO_ERROR) {
+                ALOGE("IGBP::dequeueBuffer failed to read timestamps: %d",
+                        result);
+                return result;
+            }
         }
         result = reply.readInt32();
         return result;
@@ -171,12 +193,21 @@ public:
             bool nonNull = reply.readInt32();
             if (nonNull) {
                 *outBuffer = new GraphicBuffer;
-                reply.read(**outBuffer);
+                result = reply.read(**outBuffer);
+                if (result != NO_ERROR) {
+                    outBuffer->clear();
+                    return result;
+                }
             }
             nonNull = reply.readInt32();
             if (nonNull) {
                 *outFence = new Fence;
-                reply.read(**outFence);
+                result = reply.read(**outFence);
+                if (result != NO_ERROR) {
+                    outBuffer->clear();
+                    outFence->clear();
+                    return result;
+                }
             }
         }
         return result;
@@ -190,22 +221,37 @@ public:
         if (result != NO_ERROR) {
             return result;
         }
+
         *slot = reply.readInt32();
         result = reply.readInt32();
+        if (result == NO_ERROR &&
+                (*slot < 0 || *slot >= BufferQueueDefs::NUM_BUFFER_SLOTS)) {
+            ALOGE("attachBuffer returned invalid slot %d", *slot);
+            android_errorWriteLog(0x534e4554, "37478824");
+            return UNKNOWN_ERROR;
+        }
+
         return result;
     }
 
     virtual status_t queueBuffer(int buf,
             const QueueBufferInput& input, QueueBufferOutput* output) {
         Parcel data, reply;
+
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
         data.writeInt32(buf);
         data.write(input);
+
         status_t result = remote()->transact(QUEUE_BUFFER, data, &reply);
         if (result != NO_ERROR) {
             return result;
         }
-        memcpy(output, reply.readInplace(sizeof(*output)), sizeof(*output));
+
+        result = reply.read(*output);
+        if (result != NO_ERROR) {
+            return result;
+        }
+
         result = reply.readInt32();
         return result;
     }
@@ -252,15 +298,16 @@ public:
         if (result != NO_ERROR) {
             return result;
         }
-        memcpy(output, reply.readInplace(sizeof(*output)), sizeof(*output));
+        reply.read(*output);
         result = reply.readInt32();
         return result;
     }
 
-    virtual status_t disconnect(int api) {
+    virtual status_t disconnect(int api, DisconnectMode mode) {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
         data.writeInt32(api);
+        data.writeInt32(static_cast<int32_t>(mode));
         status_t result =remote()->transact(DISCONNECT, data, &reply);
         if (result != NO_ERROR) {
             return result;
@@ -331,18 +378,6 @@ public:
             return String8("TransactFailed");
         }
         return reply.readString8();
-    }
-
-    virtual uint64_t getNextFrameNumber() const {
-        Parcel data, reply;
-        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
-        status_t result = remote()->transact(GET_NEXT_FRAME_NUMBER, data, &reply);
-        if (result != NO_ERROR) {
-            ALOGE("getNextFrameNumber failed to transact: %d", result);
-            return 0;
-        }
-        uint64_t frameNumber = reply.readUint64();
-        return frameNumber;
     }
 
     virtual status_t setSharedBufferMode(bool sharedBufferMode) {
@@ -420,6 +455,26 @@ public:
         return result;
     }
 
+    virtual void getFrameTimestamps(FrameEventHistoryDelta* outDelta) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(
+                IGraphicBufferProducer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("IGBP::getFrameTimestamps failed to write token: %d", result);
+            return;
+        }
+        result = remote()->transact(GET_FRAME_TIMESTAMPS, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("IGBP::getFrameTimestamps failed to transact: %d", result);
+            return;
+        }
+        result = reply.read(*outDelta);
+        if (result != NO_ERROR) {
+            ALOGE("IGBP::getFrameTimestamps failed to read timestamps: %d",
+                    result);
+        }
+    }
+
     virtual status_t getUniqueId(uint64_t* outId) const {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
@@ -444,7 +499,123 @@ public:
 // translation unit (see clang warning -Wweak-vtables)
 BpGraphicBufferProducer::~BpGraphicBufferProducer() {}
 
-IMPLEMENT_META_INTERFACE(GraphicBufferProducer, "android.gui.IGraphicBufferProducer");
+class HpGraphicBufferProducer : public HpInterface<
+        BpGraphicBufferProducer, H2BGraphicBufferProducer> {
+public:
+    HpGraphicBufferProducer(const sp<IBinder>& base) : PBase(base) {}
+
+    status_t requestBuffer(int slot, sp<GraphicBuffer>* buf) override {
+        return mBase->requestBuffer(slot, buf);
+    }
+
+    status_t setMaxDequeuedBufferCount(int maxDequeuedBuffers) override {
+        return mBase->setMaxDequeuedBufferCount(maxDequeuedBuffers);
+    }
+
+    status_t setAsyncMode(bool async) override {
+        return mBase->setAsyncMode(async);
+    }
+
+    status_t dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t w, uint32_t h,
+            PixelFormat format, uint32_t usage,
+            FrameEventHistoryDelta* outTimestamps) override {
+        return mBase->dequeueBuffer(
+                slot, fence, w, h, format, usage, outTimestamps);
+    }
+
+    status_t detachBuffer(int slot) override {
+        return mBase->detachBuffer(slot);
+    }
+
+    status_t detachNextBuffer(
+            sp<GraphicBuffer>* outBuffer, sp<Fence>* outFence) override {
+        return mBase->detachNextBuffer(outBuffer, outFence);
+    }
+
+    status_t attachBuffer(
+            int* outSlot, const sp<GraphicBuffer>& buffer) override {
+        return mBase->attachBuffer(outSlot, buffer);
+    }
+
+    status_t queueBuffer(
+            int slot,
+            const QueueBufferInput& input,
+            QueueBufferOutput* output) override {
+        return mBase->queueBuffer(slot, input, output);
+    }
+
+    status_t cancelBuffer(int slot, const sp<Fence>& fence) override {
+        return mBase->cancelBuffer(slot, fence);
+    }
+
+    int query(int what, int* value) override {
+        return mBase->query(what, value);
+    }
+
+    status_t connect(
+            const sp<IProducerListener>& listener,
+            int api, bool producerControlledByApp,
+            QueueBufferOutput* output) override {
+        return mBase->connect(listener, api, producerControlledByApp, output);
+    }
+
+    status_t disconnect(
+            int api, DisconnectMode mode = DisconnectMode::Api) override {
+        return mBase->disconnect(api, mode);
+    }
+
+    status_t setSidebandStream(const sp<NativeHandle>& stream) override {
+        return mBase->setSidebandStream(stream);
+    }
+
+    void allocateBuffers(uint32_t width, uint32_t height,
+            PixelFormat format, uint32_t usage) override {
+        return mBase->allocateBuffers(width, height, format, usage);
+    }
+
+    status_t allowAllocation(bool allow) override {
+        return mBase->allowAllocation(allow);
+    }
+
+    status_t setGenerationNumber(uint32_t generationNumber) override {
+        return mBase->setGenerationNumber(generationNumber);
+    }
+
+    String8 getConsumerName() const override {
+        return mBase->getConsumerName();
+    }
+
+    status_t setSharedBufferMode(bool sharedBufferMode) override {
+        return mBase->setSharedBufferMode(sharedBufferMode);
+    }
+
+    status_t setAutoRefresh(bool autoRefresh) override {
+        return mBase->setAutoRefresh(autoRefresh);
+    }
+
+    status_t setDequeueTimeout(nsecs_t timeout) override {
+        return mBase->setDequeueTimeout(timeout);
+    }
+
+    status_t getLastQueuedBuffer(
+            sp<GraphicBuffer>* outBuffer,
+            sp<Fence>* outFence,
+            float outTransformMatrix[16]) override {
+        return mBase->getLastQueuedBuffer(
+                outBuffer, outFence, outTransformMatrix);
+    }
+
+    void getFrameTimestamps(FrameEventHistoryDelta* outDelta) override {
+        return mBase->getFrameTimestamps(outDelta);
+    }
+
+    status_t getUniqueId(uint64_t* outId) const override {
+        return mBase->getUniqueId(outId);
+    }
+};
+
+IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer, HGraphicBufferProducer,
+        "android.gui.IGraphicBufferProducer");
 
 // ----------------------------------------------------------------------
 
@@ -484,14 +655,18 @@ status_t BnGraphicBufferProducer::onTransact(
             uint32_t height = data.readUint32();
             PixelFormat format = static_cast<PixelFormat>(data.readInt32());
             uint32_t usage = data.readUint32();
+            bool getTimestamps = data.readBool();
+
             int buf = 0;
-            sp<Fence> fence;
+            sp<Fence> fence = Fence::NO_FENCE;
+            FrameEventHistoryDelta frameTimestamps;
             int result = dequeueBuffer(&buf, &fence, width, height, format,
-                    usage);
+                    usage, getTimestamps ? &frameTimestamps : nullptr);
+
             reply->writeInt32(buf);
-            reply->writeInt32(fence != NULL);
-            if (fence != NULL) {
-                reply->write(*fence);
+            reply->write(*fence);
+            if (getTimestamps) {
+                reply->write(frameTimestamps);
             }
             reply->writeInt32(result);
             return NO_ERROR;
@@ -524,31 +699,35 @@ status_t BnGraphicBufferProducer::onTransact(
         case ATTACH_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             sp<GraphicBuffer> buffer = new GraphicBuffer();
-            data.read(*buffer.get());
+            status_t result = data.read(*buffer.get());
             int slot = 0;
-            int result = attachBuffer(&slot, buffer);
+            if (result == NO_ERROR) {
+                result = attachBuffer(&slot, buffer);
+            }
             reply->writeInt32(slot);
             reply->writeInt32(result);
             return NO_ERROR;
         }
         case QUEUE_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+
             int buf = data.readInt32();
             QueueBufferInput input(data);
-            QueueBufferOutput* const output =
-                    reinterpret_cast<QueueBufferOutput *>(
-                            reply->writeInplace(sizeof(QueueBufferOutput)));
-            memset(output, 0, sizeof(QueueBufferOutput));
-            status_t result = queueBuffer(buf, input, output);
+            QueueBufferOutput output;
+            status_t result = queueBuffer(buf, input, &output);
+            reply->write(output);
             reply->writeInt32(result);
+
             return NO_ERROR;
         }
         case CANCEL_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             int buf = data.readInt32();
             sp<Fence> fence = new Fence();
-            data.read(*fence.get());
-            status_t result = cancelBuffer(buf, fence);
+            status_t result = data.read(*fence.get());
+            if (result == NO_ERROR) {
+                result = cancelBuffer(buf, fence);
+            }
             reply->writeInt32(result);
             return NO_ERROR;
         }
@@ -569,18 +748,17 @@ status_t BnGraphicBufferProducer::onTransact(
             }
             int api = data.readInt32();
             bool producerControlledByApp = data.readInt32();
-            QueueBufferOutput* const output =
-                    reinterpret_cast<QueueBufferOutput *>(
-                            reply->writeInplace(sizeof(QueueBufferOutput)));
-            memset(output, 0, sizeof(QueueBufferOutput));
-            status_t res = connect(listener, api, producerControlledByApp, output);
+            QueueBufferOutput output;
+            status_t res = connect(listener, api, producerControlledByApp, &output);
+            reply->write(output);
             reply->writeInt32(res);
             return NO_ERROR;
         }
         case DISCONNECT: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             int api = data.readInt32();
-            status_t res = disconnect(api);
+            DisconnectMode mode = static_cast<DisconnectMode>(data.readInt32());
+            status_t res = disconnect(api, mode);
             reply->writeInt32(res);
             return NO_ERROR;
         }
@@ -620,12 +798,6 @@ status_t BnGraphicBufferProducer::onTransact(
         case GET_CONSUMER_NAME: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             reply->writeString8(getConsumerName());
-            return NO_ERROR;
-        }
-        case GET_NEXT_FRAME_NUMBER: {
-            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
-            uint64_t frameNumber = getNextFrameNumber();
-            reply->writeUint64(frameNumber);
             return NO_ERROR;
         }
         case SET_SHARED_BUFFER_MODE: {
@@ -679,6 +851,18 @@ status_t BnGraphicBufferProducer::onTransact(
             }
             return NO_ERROR;
         }
+        case GET_FRAME_TIMESTAMPS: {
+            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+            FrameEventHistoryDelta frameTimestamps;
+            getFrameTimestamps(&frameTimestamps);
+            status_t result = reply->write(frameTimestamps);
+            if (result != NO_ERROR) {
+                ALOGE("BnGBP::GET_FRAME_TIMESTAMPS failed to write buffer: %d",
+                        result);
+                return result;
+            }
+            return NO_ERROR;
+        }
         case GET_UNIQUE_ID: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             uint64_t outId = 0;
@@ -703,16 +887,21 @@ IGraphicBufferProducer::QueueBufferInput::QueueBufferInput(const Parcel& parcel)
     parcel.read(*this);
 }
 
+constexpr size_t IGraphicBufferProducer::QueueBufferInput::minFlattenedSize() {
+    return sizeof(timestamp) +
+            sizeof(isAutoTimestamp) +
+            sizeof(dataSpace) +
+            sizeof(crop) +
+            sizeof(scalingMode) +
+            sizeof(transform) +
+            sizeof(stickyTransform) +
+            sizeof(getFrameTimestamps);
+}
+
 size_t IGraphicBufferProducer::QueueBufferInput::getFlattenedSize() const {
-    return sizeof(timestamp)
-         + sizeof(isAutoTimestamp)
-         + sizeof(dataSpace)
-         + sizeof(crop)
-         + sizeof(scalingMode)
-         + sizeof(transform)
-         + sizeof(stickyTransform)
-         + fence->getFlattenedSize()
-         + surfaceDamage.getFlattenedSize();
+    return minFlattenedSize() +
+            fence->getFlattenedSize() +
+            surfaceDamage.getFlattenedSize();
 }
 
 size_t IGraphicBufferProducer::QueueBufferInput::getFdCount() const {
@@ -725,6 +914,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::flatten(
     if (size < getFlattenedSize()) {
         return NO_MEMORY;
     }
+
     FlattenableUtils::write(buffer, size, timestamp);
     FlattenableUtils::write(buffer, size, isAutoTimestamp);
     FlattenableUtils::write(buffer, size, dataSpace);
@@ -732,6 +922,8 @@ status_t IGraphicBufferProducer::QueueBufferInput::flatten(
     FlattenableUtils::write(buffer, size, scalingMode);
     FlattenableUtils::write(buffer, size, transform);
     FlattenableUtils::write(buffer, size, stickyTransform);
+    FlattenableUtils::write(buffer, size, getFrameTimestamps);
+
     status_t result = fence->flatten(buffer, size, fds, count);
     if (result != NO_ERROR) {
         return result;
@@ -742,16 +934,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::flatten(
 status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
         void const*& buffer, size_t& size, int const*& fds, size_t& count)
 {
-    size_t minNeeded =
-              sizeof(timestamp)
-            + sizeof(isAutoTimestamp)
-            + sizeof(dataSpace)
-            + sizeof(crop)
-            + sizeof(scalingMode)
-            + sizeof(transform)
-            + sizeof(stickyTransform);
-
-    if (size < minNeeded) {
+    if (size < minFlattenedSize()) {
         return NO_MEMORY;
     }
 
@@ -762,6 +945,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
     FlattenableUtils::read(buffer, size, scalingMode);
     FlattenableUtils::read(buffer, size, transform);
     FlattenableUtils::read(buffer, size, stickyTransform);
+    FlattenableUtils::read(buffer, size, getFrameTimestamps);
 
     fence = new Fence();
     status_t result = fence->unflatten(buffer, size, fds, count);
@@ -769,6 +953,58 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
         return result;
     }
     return surfaceDamage.unflatten(buffer, size);
+}
+
+// ----------------------------------------------------------------------------
+constexpr size_t IGraphicBufferProducer::QueueBufferOutput::minFlattenedSize() {
+    return sizeof(width) +
+            sizeof(height) +
+            sizeof(transformHint) +
+            sizeof(numPendingBuffers) +
+            sizeof(nextFrameNumber) +
+            sizeof(bufferReplaced);
+}
+
+size_t IGraphicBufferProducer::QueueBufferOutput::getFlattenedSize() const {
+    return minFlattenedSize() + frameTimestamps.getFlattenedSize();
+}
+
+size_t IGraphicBufferProducer::QueueBufferOutput::getFdCount() const {
+    return frameTimestamps.getFdCount();
+}
+
+status_t IGraphicBufferProducer::QueueBufferOutput::flatten(
+        void*& buffer, size_t& size, int*& fds, size_t& count) const
+{
+    if (size < getFlattenedSize()) {
+        return NO_MEMORY;
+    }
+
+    FlattenableUtils::write(buffer, size, width);
+    FlattenableUtils::write(buffer, size, height);
+    FlattenableUtils::write(buffer, size, transformHint);
+    FlattenableUtils::write(buffer, size, numPendingBuffers);
+    FlattenableUtils::write(buffer, size, nextFrameNumber);
+    FlattenableUtils::write(buffer, size, bufferReplaced);
+
+    return frameTimestamps.flatten(buffer, size, fds, count);
+}
+
+status_t IGraphicBufferProducer::QueueBufferOutput::unflatten(
+        void const*& buffer, size_t& size, int const*& fds, size_t& count)
+{
+    if (size < minFlattenedSize()) {
+        return NO_MEMORY;
+    }
+
+    FlattenableUtils::read(buffer, size, width);
+    FlattenableUtils::read(buffer, size, height);
+    FlattenableUtils::read(buffer, size, transformHint);
+    FlattenableUtils::read(buffer, size, numPendingBuffers);
+    FlattenableUtils::read(buffer, size, nextFrameNumber);
+    FlattenableUtils::read(buffer, size, bufferReplaced);
+
+    return frameTimestamps.unflatten(buffer, size, fds, count);
 }
 
 }; // namespace android

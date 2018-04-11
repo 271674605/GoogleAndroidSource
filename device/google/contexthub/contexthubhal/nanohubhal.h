@@ -1,46 +1,34 @@
 /*
- * Copyright (c) 2016, Google. All rights reserved.
+ * Copyright (C) 2016 The Android Open Source Project
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of The Linux Foundation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 
 #ifndef _NANOHUB_HAL_H_
 #define _NANOHUB_HAL_H_
 
-#include <pthread.h>
+#include <mutex>
+#include <thread>
+#include <list>
 
 #include <hardware/context_hub.h>
-#include <utils/Mutex.h>
 
-#define NANOAPP_VENDOR_GOOGLE NANOAPP_VENDOR("Googl")
+#include <nanohub/nanohub.h>
 
 //as per protocol
-#define MAX_RX_PACKET           128
-#define APP_FROM_HOST_EVENT_ID  0x000000F8
+#define MAX_RX_PACKET               128
+#define APP_FROM_HOST_EVENT_ID      0x000000F8
+#define APP_FROM_HOST_CHRE_EVENT_ID 0x000000F9
 
 namespace android {
 
@@ -48,28 +36,62 @@ namespace nanohub {
 
 void dumpBuffer(const char *pfx, const hub_app_name_t &appId, uint32_t evtId, const void *data, size_t len, int status = 0);
 
-struct nano_message_hdr {
-    uint32_t event_id;
-    hub_app_name_t app_name;
-    uint8_t len;
-} __attribute__((packed));
-
-struct nano_message {
-    nano_message_hdr hdr;
+struct nano_message_chre {
+    HostMsgHdrChre hdr;
     uint8_t data[MAX_RX_PACKET];
 } __attribute__((packed));
 
+struct nano_message {
+    HostMsgHdr hdr;
+    uint8_t data[MAX_RX_PACKET];
+} __attribute__((packed));
+
+class HubMessage : public hub_message_t {
+    std::unique_ptr<uint8_t> data_;
+public:
+    HubMessage(const HubMessage &other) = delete;
+    HubMessage &operator = (const HubMessage &other) = delete;
+
+    HubMessage(const hub_app_name_t *name, uint32_t typ, const void *data, uint32_t len) {
+        app_name = *name;
+        message_type = typ;
+        message_len = len;
+        message = data;
+        if (len > 0 && data != nullptr) {
+            data_ = std::unique_ptr<uint8_t>(new uint8_t[len]);
+            memcpy(data_.get(), data, len);
+            message = data_.get();
+        }
+    }
+
+    HubMessage(HubMessage &&other) {
+        *this = (HubMessage &&)other;
+    }
+
+    HubMessage &operator = (HubMessage &&other) {
+        *static_cast<hub_message_t *>(this) = static_cast<hub_message_t>(other);
+        data_ = std::move(other.data_);
+        other.message = nullptr;
+        other.message_len = 0;
+        return *this;
+    }
+};
+
 class NanoHub {
-    Mutex mLock;
+    std::mutex mLock;
+    bool mAppQuit;
+    std::mutex mAppTxLock;
+    std::condition_variable mAppTxCond;
+    std::list<HubMessage> mAppTxQueue;
+    std::thread mPollThread;
+    std::thread mAppThread;
     context_hub_callback *mMsgCbkFunc;
     int mThreadClosingPipe[2];
     int mFd; // [0] is read end
     void * mMsgCbkData;
-    pthread_t mWorkerThread;
 
-    NanoHub() {
-        reset();
-    }
+    NanoHub();
+    ~NanoHub();
 
     void reset() {
         mThreadClosingPipe[0] = -1;
@@ -77,11 +99,11 @@ class NanoHub {
         mFd = -1;
         mMsgCbkData = nullptr;
         mMsgCbkFunc = nullptr;
-        mWorkerThread = 0;
+        mAppQuit = false;
     }
 
-    static void* run(void *);
-    void* doRun();
+    void* runAppTx();
+    void* runDeviceRx();
 
     int openHub();
     int closeHub();
@@ -93,8 +115,8 @@ class NanoHub {
 
     int doSubscribeMessages(uint32_t hub_id, context_hub_callback *cbk, void *cookie);
     int doSendToNanohub(uint32_t hub_id, const hub_message_t *msg);
-    int doSendToDevice(const hub_app_name_t *name, const void *data, uint32_t len);
-    void doSendToApp(const hub_app_name_t *name, uint32_t typ, const void *data, uint32_t len);
+    int doSendToDevice(const hub_app_name_t name, const void *data, uint32_t len, uint32_t messageType);
+    void doSendToApp(HubMessage &&msg);
 
     static constexpr unsigned int FL_MESSAGE_TRACING = 1;
 
@@ -126,11 +148,11 @@ public:
     }
     // passes message to kernel driver directly
     static int sendToDevice(const hub_app_name_t *name, const void *data, uint32_t len) {
-        return hubInstance()->doSendToDevice(name, data, len);
+        return hubInstance()->doSendToDevice(*name, data, len, 0);
     }
     // passes message to APP via callback
-    static void sendToApp(const hub_app_name_t *name, uint32_t typ, const void *data, uint32_t len) {
-        hubInstance()->doSendToApp(name, typ, data, len);
+    static void sendToApp(HubMessage &&msg) {
+        hubInstance()->doSendToApp((HubMessage &&)msg);
     }
 };
 

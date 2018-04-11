@@ -15,11 +15,26 @@
  */
 package android.support.v7.widget;
 
+import static android.support.v7.widget.LinearLayoutManager.HORIZONTAL;
+import static android.support.v7.widget.LinearLayoutManager.VERTICAL;
+import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 import android.content.Context;
 import android.graphics.Rect;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+
+import org.hamcrest.CoreMatchers;
+import org.hamcrest.MatcherAssert;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -28,17 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
-import static android.support.v7.widget.LinearLayoutManager.HORIZONTAL;
-import static android.support.v7.widget.LinearLayoutManager.VERTICAL;
-import static android.view.ViewGroup.LayoutParams.FILL_PARENT;
-import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-import static org.junit.Assert.*;
-
-import static java.util.concurrent.TimeUnit.SECONDS;
-
-import org.hamcrest.CoreMatchers;
-import org.hamcrest.MatcherAssert;
 
 public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentationTest {
 
@@ -80,25 +84,36 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
     }
 
     void setupByConfig(Config config, boolean waitForFirstLayout) throws Throwable {
+        setupByConfig(config, waitForFirstLayout, null, null);
+    }
+
+    void setupByConfig(Config config, boolean waitForFirstLayout,
+        @Nullable RecyclerView.LayoutParams childLayoutParams,
+        @Nullable RecyclerView.LayoutParams parentLayoutParams) throws Throwable {
         mRecyclerView = inflateWrappedRV();
 
         mRecyclerView.setHasFixedSize(true);
-        mTestAdapter = config.mTestAdapter == null ? new TestAdapter(config.mItemCount)
+        mTestAdapter = config.mTestAdapter == null
+                ? new TestAdapter(config.mItemCount, childLayoutParams)
                 : config.mTestAdapter;
         mRecyclerView.setAdapter(mTestAdapter);
         mLayoutManager = new WrappedLinearLayoutManager(getActivity(), config.mOrientation,
-                config.mReverseLayout);
+            config.mReverseLayout);
         mLayoutManager.setStackFromEnd(config.mStackFromEnd);
         mLayoutManager.setRecycleChildrenOnDetach(config.mRecycleChildrenOnDetach);
         mRecyclerView.setLayoutManager(mLayoutManager);
         if (config.mWrap) {
             mRecyclerView.setLayoutParams(
                     new ViewGroup.LayoutParams(
-                            config.mOrientation == HORIZONTAL ? WRAP_CONTENT : FILL_PARENT,
-                            config.mOrientation == VERTICAL ? WRAP_CONTENT : FILL_PARENT
+                            config.mOrientation == HORIZONTAL ? WRAP_CONTENT : MATCH_PARENT,
+                            config.mOrientation == VERTICAL ? WRAP_CONTENT : MATCH_PARENT
                     )
             );
         }
+        if (parentLayoutParams != null) {
+            mRecyclerView.setLayoutParams(parentLayoutParams);
+        }
+
         if (waitForFirstLayout) {
             waitForFirstLayout();
         }
@@ -133,7 +148,7 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
             }
         };
         mLayoutManager.expectLayouts(2);
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -162,7 +177,7 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
     }
 
     void scrollToPositionWithOffset(final int position, final int offset) throws Throwable {
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 mLayoutManager.scrollToPositionWithOffset(position, offset);
@@ -256,7 +271,7 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
 
     static class Config implements Cloneable {
 
-        static final int DEFAULT_ITEM_COUNT = 100;
+        static final int DEFAULT_ITEM_COUNT = 250;
 
         boolean mStackFromEnd;
 
@@ -320,14 +335,14 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
 
         @Override
         public String toString() {
-            return "Config{" +
-                    "mStackFromEnd=" + mStackFromEnd +
-                    ", mOrientation=" + mOrientation +
-                    ", mReverseLayout=" + mReverseLayout +
-                    ", mRecycleChildrenOnDetach=" + mRecycleChildrenOnDetach +
-                    ", mItemCount=" + mItemCount +
-                    ", wrap=" + mWrap +
-                    '}';
+            return "Config{"
+                    + "mStackFromEnd=" + mStackFromEnd
+                    + ",mOrientation=" + mOrientation
+                    + ",mReverseLayout=" + mReverseLayout
+                    + ",mRecycleChildrenOnDetach=" + mRecycleChildrenOnDetach
+                    + ",mItemCount=" + mItemCount
+                    + ",wrap=" + mWrap
+                    + '}';
         }
 
         public Config wrap(boolean wrap) {
@@ -339,10 +354,25 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
     class WrappedLinearLayoutManager extends LinearLayoutManager {
 
         CountDownLatch layoutLatch;
+        CountDownLatch snapLatch;
+        CountDownLatch prefetchLatch;
+        CountDownLatch callbackLatch;
 
         OrientationHelper mSecondaryOrientation;
 
         OnLayoutListener mOnLayoutListener;
+
+        RecyclerView.OnScrollListener mCallbackListener = new RecyclerView.OnScrollListener() {
+
+            @Override
+            public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+                super.onScrollStateChanged(recyclerView, newState);
+                callbackLatch.countDown();
+                if (callbackLatch.getCount() == 0L) {
+                    removeOnScrollListener(this);
+                }
+            }
+        };
 
         public WrappedLinearLayoutManager(Context context, int orientation, boolean reverseLayout) {
             super(context, orientation, reverseLayout);
@@ -350,6 +380,15 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
 
         public void expectLayouts(int count) {
             layoutLatch = new CountDownLatch(count);
+        }
+
+        public void expectCallbacks(int count) throws Throwable {
+            callbackLatch = new CountDownLatch(count);
+            mRecyclerView.addOnScrollListener(mCallbackListener);
+        }
+
+        private void removeOnScrollListener(RecyclerView.OnScrollListener listener) {
+            mRecyclerView.removeOnScrollListener(listener);
         }
 
         public void waitForLayout(int seconds) throws Throwable {
@@ -362,6 +401,58 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
                 @Override
                 public void run() {
                 }
+            });
+        }
+
+        public void assertNoCallbacks(String msg, long timeout) throws Throwable {
+            callbackLatch.await(timeout, TimeUnit.SECONDS);
+            long latchCount = callbackLatch.getCount();
+            assertFalse(msg + " :" + latchCount, latchCount == 0);
+            removeOnScrollListener(mCallbackListener);
+        }
+
+        public void expectPrefetch(int count) {
+            prefetchLatch = new CountDownLatch(count);
+        }
+
+        public void waitForPrefetch(int seconds) throws Throwable {
+            prefetchLatch.await(seconds * (DEBUG ? 100 : 1), SECONDS);
+            checkForMainThreadException();
+            MatcherAssert.assertThat("all prefetches should complete on time",
+                    prefetchLatch.getCount(), CoreMatchers.is(0L));
+            // use a runnable to ensure RV layout is finished
+            getInstrumentation().runOnMainSync(new Runnable() {
+                @Override
+                public void run() {
+                }
+            });
+        }
+
+        public void expectIdleState(int count) {
+            snapLatch = new CountDownLatch(count);
+            mRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+                    super.onScrollStateChanged(recyclerView, newState);
+                    if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                        snapLatch.countDown();
+                        if (snapLatch.getCount() == 0L) {
+                            mRecyclerView.removeOnScrollListener(this);
+                        }
+                    }
+                }
+            });
+        }
+
+        public void waitForSnap(int seconds) throws Throwable {
+            snapLatch.await(seconds * (DEBUG ? 100 : 1), SECONDS);
+            checkForMainThreadException();
+            MatcherAssert.assertThat("all scrolling should complete on time",
+                    snapLatch.getCount(), CoreMatchers.is(0L));
+            // use a runnable to ensure RV layout is finished
+            getInstrumentation().runOnMainSync(new Runnable() {
+                @Override
+                public void run() {}
             });
         }
 
@@ -506,7 +597,7 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
 
         Map<Item, Rect> collectChildCoordinates() throws Throwable {
             final Map<Item, Rect> items = new LinkedHashMap<Item, Rect>();
-            runTestOnUiThread(new Runnable() {
+            mActivityRule.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     final int childCount = getChildCount();
@@ -543,6 +634,11 @@ public class BaseLinearLayoutManagerTest extends BaseRecyclerViewInstrumentation
             layoutLatch.countDown();
         }
 
-
+        @Override
+        public void collectAdjacentPrefetchPositions(int dx, int dy, RecyclerView.State state,
+                LayoutPrefetchRegistry layoutPrefetchRegistry) {
+            if (prefetchLatch != null) prefetchLatch.countDown();
+            super.collectAdjacentPrefetchPositions(dx, dy, state, layoutPrefetchRegistry);
+        }
     }
 }

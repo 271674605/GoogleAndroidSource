@@ -17,6 +17,9 @@
 package com.android.phone;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.telephony.CarrierConfigManager;
 import android.util.Log;
 
 import com.android.ims.ImsConfig;
@@ -57,6 +60,21 @@ public class ImsUtil {
     }
 
     /**
+     * @return {@code true} if WFC is provisioned on the device.
+     */
+    public static boolean isWfcProvisioned(Context context) {
+        CarrierConfigManager cfgManager = (CarrierConfigManager) context
+                .getSystemService(Context.CARRIER_CONFIG_SERVICE);
+            if (cfgManager != null
+                    && cfgManager.getConfig().getBoolean(
+                            CarrierConfigManager.KEY_CARRIER_VOLTE_OVERRIDE_WFC_PROVISIONING_BOOL)
+                    && !ImsManager.isVolteProvisionedOnDevice(context)) {
+                return false;
+            }
+            return ImsManager.isWfcProvisionedOnDevice(context);
+    }
+
+    /**
      * @return {@code true} if the device is configured to use "Wi-Fi only" mode. If WFC is not
      * enabled, this will return {@code false}.
      */
@@ -65,5 +83,36 @@ public class ImsUtil {
                 ImsManager.getWfcMode(context) == ImsConfig.WfcModeFeatureValueConstants.WIFI_ONLY;
         if (DBG) Log.d(LOG_TAG, "isWfcModeWifiOnly :: isWifiOnlyMode" + isWifiOnlyMode);
         return isWfcEnabled(context) && isWifiOnlyMode;
+    }
+
+    /**
+     * When a call cannot be placed, determines if the use of WFC should be promoted, per the
+     * carrier config.  Use of WFC is promoted to the user if the device is connected to a WIFI
+     * network, WFC is disabled but provisioned, and the carrier config indicates that the
+     * features should be promoted.
+     *
+     * @return {@code true} if use of WFC should be promoted, {@code false} otherwise.
+     */
+    public static boolean shouldPromoteWfc(Context context) {
+        CarrierConfigManager cfgManager = (CarrierConfigManager) context
+                .getSystemService(Context.CARRIER_CONFIG_SERVICE);
+        if (cfgManager == null || !cfgManager.getConfig()
+                .getBoolean(CarrierConfigManager.KEY_CARRIER_PROMOTE_WFC_ON_CALL_FAIL_BOOL)) {
+            return false;
+        }
+
+        if (!isWfcProvisioned(context)) {
+            return false;
+        }
+
+        ConnectivityManager cm =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm != null) {
+            NetworkInfo ni = cm.getActiveNetworkInfo();
+            if (ni != null && ni.isConnected()) {
+                return ni.getType() == ConnectivityManager.TYPE_WIFI && !isWfcEnabled(context);
+            }
+        }
+        return false;
     }
 }

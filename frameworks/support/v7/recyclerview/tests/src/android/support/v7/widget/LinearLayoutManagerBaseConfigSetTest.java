@@ -16,27 +16,9 @@
 
 package android.support.v7.widget;
 
-
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
-import android.graphics.Rect;
-import android.support.v4.view.ViewCompat;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.util.Log;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewParent;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 import static android.support.v7.widget.LayoutState.LAYOUT_END;
 import static android.support.v7.widget.LayoutState.LAYOUT_START;
 import static android.support.v7.widget.LinearLayoutManager.HORIZONTAL;
-import static android.support.v7.widget.LinearLayoutManager.VERTICAL;
 
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.is;
@@ -46,14 +28,25 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 
-import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-import static android.view.ViewGroup.LayoutParams.FILL_PARENT;
+import android.graphics.Rect;
+import android.support.test.filters.LargeTest;
+import android.util.Log;
+import android.view.View;
+import android.view.ViewParent;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Tests that rely on the basic configuration and does not do any additions / removals
  */
 @RunWith(Parameterized.class)
-@MediumTest
+@LargeTest
 public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManagerTest {
 
     private final Config mConfig;
@@ -186,11 +179,11 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
                 );
             }
         };
-        runTestOnUiThread(viewInBoundsTest);
+        mActivityRule.runOnUiThread(viewInBoundsTest);
         // smooth scroll to end of the list and keep testing meanwhile. This will test pre-caching
         // case
         final int scrollPosition = config.mStackFromEnd ? 0 : mTestAdapter.getItemCount();
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 mRecyclerView.smoothScrollToPosition(scrollPosition);
@@ -198,7 +191,7 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
         });
         while (mLayoutManager.isSmoothScrolling() ||
                 mRecyclerView.getScrollState() != RecyclerView.SCROLL_STATE_IDLE) {
-            runTestOnUiThread(viewInBoundsTest);
+            mActivityRule.runOnUiThread(viewInBoundsTest);
             Thread.sleep(400);
         }
         // delete all items
@@ -206,7 +199,7 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
         mTestAdapter.deleteAndNotify(0, mTestAdapter.getItemCount());
         mLayoutManager.waitForLayout(2);
         // test empty case
-        runTestOnUiThread(viewInBoundsTest);
+        mActivityRule.runOnUiThread(viewInBoundsTest);
         // set a new adapter with huge items to test full bounds check
         mLayoutManager.expectLayouts(1);
         final int totalSpace = mLayoutManager.mOrientationHelper.getTotalSpace();
@@ -222,14 +215,14 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
                 }
             }
         };
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 mRecyclerView.setAdapter(newAdapter);
             }
         });
         mLayoutManager.waitForLayout(2);
-        runTestOnUiThread(viewInBoundsTest);
+        mActivityRule.runOnUiThread(viewInBoundsTest);
     }
 
     @Test
@@ -248,13 +241,13 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
 
         final int size = helper.getDecoratedMeasurement(vh.itemView);
         AttachDetachCollector collector = new AttachDetachCollector(mRecyclerView);
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (mConfig.mOrientation == HORIZONTAL) {
-                    ViewCompat.setTranslationX(vh.itemView, size * 2);
+                    vh.itemView.setTranslationX(size * 2);
                 } else {
-                    ViewCompat.setTranslationY(vh.itemView, size * 2);
+                    vh.itemView.setTranslationY(size * 2);
                 }
             }
         });
@@ -282,13 +275,13 @@ public class LinearLayoutManagerBaseConfigSetTest extends BaseLinearLayoutManage
 
         final int size = helper.getDecoratedMeasurement(vh.itemView);
         AttachDetachCollector collector = new AttachDetachCollector(mRecyclerView);
-        runTestOnUiThread(new Runnable() {
+        mActivityRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (mConfig.mOrientation == HORIZONTAL) {
-                    ViewCompat.setTranslationX(vh.itemView, -size * 2);
+                    vh.itemView.setTranslationX(-size * 2);
                 } else {
-                    ViewCompat.setTranslationY(vh.itemView, -size * 2);
+                    vh.itemView.setTranslationY(-size * 2);
                 }
             }
         });

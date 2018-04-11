@@ -169,12 +169,13 @@ public:
     int translateToHalMetadata(const camera3_capture_request_t *request,
             metadata_buffer_t *parm, uint32_t snapshotStreamId);
     camera_metadata_t* translateCbUrgentMetadataToResultMetadata (
-                             metadata_buffer_t *metadata);
+                             metadata_buffer_t *metadata, bool lastUrgentMetadataInBatch);
     camera_metadata_t* translateFromHalMetadata(metadata_buffer_t *metadata,
                             nsecs_t timestamp, int32_t request_id,
                             const CameraMetadata& jpegMetadata, uint8_t pipeline_depth,
                             uint8_t capture_intent, uint8_t hybrid_ae_enable,
-                            bool pprocDone, bool dynamic_blklvl);
+                            bool pprocDone, bool dynamic_blklvl,
+                            bool lastMetadataInBatch);
     camera_metadata_t* saveRequestSettings(const CameraMetadata& jpegMetadata,
                             camera3_capture_request_t *request);
     int initParameters();
@@ -230,16 +231,20 @@ private:
     int validateCaptureRequest(camera3_capture_request_t *request);
     int validateStreamDimensions(camera3_stream_configuration_t *streamList);
     int validateStreamRotations(camera3_stream_configuration_t *streamList);
+    int validateUsageFlags(const camera3_stream_configuration_t *streamList);
     void deriveMinFrameDuration();
     int32_t handlePendingReprocResults(uint32_t frame_number);
     int64_t getMinFrameDuration(const camera3_capture_request_t *request);
     void handleMetadataWithLock(mm_camera_super_buf_t *metadata_buf,
-            bool free_and_bufdone_meta_buf);
+            bool free_and_bufdone_meta_buf,
+            bool lastUrgentMetadataInBatch,
+            bool lastMetadataInBatch);
     void handleBatchMetadata(mm_camera_super_buf_t *metadata_buf,
             bool free_and_bufdone_meta_buf);
     void handleBufferWithLock(camera3_stream_buffer_t *buffer,
             uint32_t frame_number);
-    void handleInputBufferWithLock(uint32_t frame_number);
+    void handleInputBufferWithLock(camera3_stream_buffer_t *buffer,
+            uint32_t frame_number);
     void unblockRequestIfNecessary();
     void dumpMetadataToFile(tuning_params_t &meta, uint32_t &dumpFrameCount,
             bool enabled, const char *type, uint32_t frameNumber);

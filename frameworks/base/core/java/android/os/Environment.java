@@ -272,6 +272,11 @@ public class Environment {
     }
 
     /** {@hide} */
+    public static File getDataMiscCeDirectory() {
+        return buildPath(getDataDirectory(), "misc_ce");
+    }
+
+    /** {@hide} */
     public static File getDataMiscCeDirectory(int userId) {
         return buildPath(getDataDirectory(), "misc_ce", String.valueOf(userId));
     }
@@ -286,23 +291,18 @@ public class Environment {
     }
 
     /** {@hide} */
+    public static File getReferenceProfile(String packageName) {
+        return buildPath(getDataDirectory(), "misc", "profiles", "ref", packageName);
+    }
+
+    /** {@hide} */
     public static File getDataProfilesDePackageDirectory(int userId, String packageName) {
         return buildPath(getDataProfilesDeDirectory(userId), packageName);
     }
 
     /** {@hide} */
-    public static File getDataProfilesDeForeignDexDirectory(int userId) {
-        return buildPath(getDataProfilesDeDirectory(userId), "foreign-dex");
-    }
-
-    /** {@hide} */
     public static File getDataAppDirectory(String volumeUuid) {
         return new File(getDataDirectory(volumeUuid), "app");
-    }
-
-    /** {@hide} */
-    public static File getDataAppEphemeralDirectory(String volumeUuid) {
-        return new File(getDataDirectory(volumeUuid), "app-ephemeral");
     }
 
     /** {@hide} */
@@ -337,6 +337,59 @@ public class Environment {
             String packageName) {
         // TODO: keep consistent with installd
         return new File(getDataUserDeDirectory(volumeUuid, userId), packageName);
+    }
+
+    /**
+     * Return preloads directory.
+     * <p>This directory may contain pre-loaded content such as
+     * {@link #getDataPreloadsDemoDirectory() demo videos} and
+     * {@link #getDataPreloadsAppsDirectory() APK files} .
+     * {@hide}
+     */
+    public static File getDataPreloadsDirectory() {
+        return new File(getDataDirectory(), "preloads");
+    }
+
+    /**
+     * @see #getDataPreloadsDirectory()
+     * {@hide}
+     */
+    public static File getDataPreloadsDemoDirectory() {
+        return new File(getDataPreloadsDirectory(), "demo");
+    }
+
+    /**
+     * @see #getDataPreloadsDirectory()
+     * {@hide}
+     */
+    public static File getDataPreloadsAppsDirectory() {
+        return new File(getDataPreloadsDirectory(), "apps");
+    }
+
+    /**
+     * @see #getDataPreloadsDirectory()
+     * {@hide}
+     */
+    public static File getDataPreloadsMediaDirectory() {
+        return new File(getDataPreloadsDirectory(), "media");
+    }
+
+    /**
+     * Returns location of preloaded cache directory for package name
+     * @see #getDataPreloadsDirectory()
+     * {@hide}
+     */
+    public static File getDataPreloadsFileCacheDirectory(String packageName) {
+        return new File(getDataPreloadsFileCacheDirectory(), packageName);
+    }
+
+    /**
+     * Returns location of preloaded cache directory.
+     * @see #getDataPreloadsDirectory()
+     * {@hide}
+     */
+    public static File getDataPreloadsFileCacheDirectory() {
+        return new File(getDataPreloadsDirectory(), "file_cache");
     }
 
     /**

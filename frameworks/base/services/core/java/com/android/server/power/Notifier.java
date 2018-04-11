@@ -18,13 +18,15 @@ package com.android.server.power;
 
 import android.app.ActivityManagerInternal;
 import android.app.AppOpsManager;
+import android.app.RetailDemoModeServiceInternal;
 
 import com.android.internal.app.IAppOpsService;
 import com.android.internal.app.IBatteryStats;
+import com.android.internal.logging.MetricsLogger;
+import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
 import com.android.server.EventLogTags;
 import com.android.server.LocalServices;
 
-import android.app.ActivityManagerNative;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -32,6 +34,7 @@ import android.hardware.input.InputManagerInternal;
 import android.media.AudioManager;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
+import android.metrics.LogMaker;
 import android.net.Uri;
 import android.os.BatteryStats;
 import android.os.Handler;
@@ -91,6 +94,7 @@ final class Notifier {
     private final ActivityManagerInternal mActivityManagerInternal;
     private final InputManagerInternal mInputManagerInternal;
     private final InputMethodManagerInternal mInputMethodManagerInternal;
+    private final RetailDemoModeServiceInternal mRetailDemoModeServiceInternal;
 
     private final NotifierHandler mHandler;
     private final Intent mScreenOnIntent;
@@ -136,14 +140,17 @@ final class Notifier {
         mActivityManagerInternal = LocalServices.getService(ActivityManagerInternal.class);
         mInputManagerInternal = LocalServices.getService(InputManagerInternal.class);
         mInputMethodManagerInternal = LocalServices.getService(InputMethodManagerInternal.class);
+        mRetailDemoModeServiceInternal = LocalServices.getService(RetailDemoModeServiceInternal.class);
 
         mHandler = new NotifierHandler(looper);
         mScreenOnIntent = new Intent(Intent.ACTION_SCREEN_ON);
         mScreenOnIntent.addFlags(
-                Intent.FLAG_RECEIVER_REGISTERED_ONLY | Intent.FLAG_RECEIVER_FOREGROUND);
+                Intent.FLAG_RECEIVER_REGISTERED_ONLY | Intent.FLAG_RECEIVER_FOREGROUND
+                | Intent.FLAG_RECEIVER_VISIBLE_TO_INSTANT_APPS);
         mScreenOffIntent = new Intent(Intent.ACTION_SCREEN_OFF);
         mScreenOffIntent.addFlags(
-                Intent.FLAG_RECEIVER_REGISTERED_ONLY | Intent.FLAG_RECEIVER_FOREGROUND);
+                Intent.FLAG_RECEIVER_REGISTERED_ONLY | Intent.FLAG_RECEIVER_FOREGROUND
+                | Intent.FLAG_RECEIVER_VISIBLE_TO_INSTANT_APPS);
         mScreenBrightnessBoostIntent =
                 new Intent(PowerManager.ACTION_SCREEN_BRIGHTNESS_BOOST_CHANGED);
         mScreenBrightnessBoostIntent.addFlags(
@@ -188,6 +195,48 @@ final class Notifier {
             } catch (RemoteException ex) {
                 // Ignore
             }
+        }
+    }
+
+    public void onLongPartialWakeLockStart(String tag, int ownerUid, WorkSource workSource,
+            String historyTag) {
+        if (DEBUG) {
+            Slog.d(TAG, "onLongPartialWakeLockStart: ownerUid=" + ownerUid
+                    + ", workSource=" + workSource);
+        }
+
+        try {
+            if (workSource != null) {
+                final int N = workSource.size();
+                for (int i=0; i<N; i++) {
+                    mBatteryStats.noteLongPartialWakelockStart(tag, historyTag, workSource.get(i));
+                }
+            } else {
+                mBatteryStats.noteLongPartialWakelockStart(tag, historyTag, ownerUid);
+            }
+        } catch (RemoteException ex) {
+            // Ignore
+        }
+    }
+
+    public void onLongPartialWakeLockFinish(String tag, int ownerUid, WorkSource workSource,
+            String historyTag) {
+        if (DEBUG) {
+            Slog.d(TAG, "onLongPartialWakeLockFinish: ownerUid=" + ownerUid
+                    + ", workSource=" + workSource);
+        }
+
+        try {
+            if (workSource != null) {
+                final int N = workSource.size();
+                for (int i=0; i<N; i++) {
+                    mBatteryStats.noteLongPartialWakelockFinish(tag, historyTag, workSource.get(i));
+                }
+            } else {
+                mBatteryStats.noteLongPartialWakelockFinish(tag, historyTag, ownerUid);
+            }
+        } catch (RemoteException ex) {
+            // Ignore
         }
     }
 
@@ -357,7 +406,7 @@ final class Notifier {
                 mHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        EventLog.writeEvent(EventLogTags.POWER_SCREEN_STATE, 1, 0, 0, 0);
+                        // Note a SCREEN tron event is logged in PowerManagerService.
                         mPolicy.startedWakingUp();
                     }
                 });
@@ -413,7 +462,11 @@ final class Notifier {
                 mHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        EventLog.writeEvent(EventLogTags.POWER_SCREEN_STATE, 0, why, 0, 0);
+                        LogMaker log = new LogMaker(MetricsEvent.SCREEN);
+                        log.setType(MetricsEvent.TYPE_CLOSE);
+                        log.setSubtype(why);
+                        MetricsLogger.action(log);
+                        EventLogTags.writePowerScreenState(0, why, 0, 0, 0);
                         mPolicy.finishedGoingToSleep(why);
                     }
                 });
@@ -534,7 +587,9 @@ final class Notifier {
             }
             mUserActivityPending = false;
         }
-
+        if (mRetailDemoModeServiceInternal != null) {
+            mRetailDemoModeServiceInternal.onUserActivity();
+        }
         mPolicy.userActivity();
     }
 
@@ -601,7 +656,7 @@ final class Notifier {
             Slog.d(TAG, "Sending wake up broadcast.");
         }
 
-        if (ActivityManagerNative.isSystemReady()) {
+        if (mActivityManagerInternal.isSystemReady()) {
             mContext.sendOrderedBroadcastAsUser(mScreenOnIntent, UserHandle.ALL, null,
                     mWakeUpBroadcastDone, mHandler, 0, null, null);
         } else {
@@ -624,7 +679,7 @@ final class Notifier {
             Slog.d(TAG, "Sending go to sleep broadcast.");
         }
 
-        if (ActivityManagerNative.isSystemReady()) {
+        if (mActivityManagerInternal.isSystemReady()) {
             mContext.sendOrderedBroadcastAsUser(mScreenOffIntent, UserHandle.ALL, null,
                     mGoToSleepBroadcastDone, mHandler, 0, null, null);
         } else {

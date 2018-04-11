@@ -16,9 +16,9 @@
 
 package com.android.server;
 
+import android.annotation.Nullable;
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.app.ActivityManagerNative;
 import android.app.IUiModeManager;
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -35,19 +35,33 @@ import android.content.res.Resources;
 import android.os.BatteryManager;
 import android.os.Binder;
 import android.os.Handler;
-import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.RemoteException;
+import android.os.ResultReceiver;
+import android.os.ServiceManager;
+import android.os.ShellCallback;
+import android.os.ShellCommand;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.service.dreams.Sandman;
+import android.service.vr.IVrManager;
+import android.service.vr.IVrStateCallbacks;
+import android.text.TextUtils;
 import android.util.Slog;
 
+import java.io.File;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collections;
 
 import com.android.internal.R;
 import com.android.internal.app.DisableCarModeActivity;
+import com.android.internal.messages.nano.SystemMessageProto.SystemMessage;
+import com.android.internal.notification.SystemNotificationChannels;
+import com.android.internal.util.DumpUtils;
+import com.android.server.power.ShutdownThread;
 import com.android.server.twilight.TwilightListener;
 import com.android.server.twilight.TwilightManager;
 import com.android.server.twilight.TwilightState;
@@ -72,6 +86,7 @@ final class UiModeManagerService extends SystemService {
     private boolean mDeskModeKeepsScreenOn;
     private boolean mTelevision;
     private boolean mWatch;
+    private boolean mVrHeadset;
     private boolean mComputedNightMode;
     private int mCarModeEnableFlags;
 
@@ -155,8 +170,25 @@ final class UiModeManagerService extends SystemService {
 
     private final TwilightListener mTwilightListener = new TwilightListener() {
         @Override
-        public void onTwilightStateChanged() {
-            updateTwilight();
+        public void onTwilightStateChanged(@Nullable TwilightState state) {
+            synchronized (mLock) {
+                if (mNightMode == UiModeManager.MODE_NIGHT_AUTO) {
+                    updateComputedNightModeLocked();
+                    updateLocked(0, 0);
+                }
+            }
+        }
+    };
+
+    private final IVrStateCallbacks mVrStateCallbacks = new IVrStateCallbacks.Stub() {
+        @Override
+        public void onVrStateChanged(boolean enabled) {
+            synchronized (mLock) {
+                mVrHeadset = enabled;
+                if (mSystemReady) {
+                    updateLocked(0, 0);
+                }
+            }
         }
     };
 
@@ -198,15 +230,17 @@ final class UiModeManagerService extends SystemService {
                 Settings.Secure.UI_NIGHT_MODE, defaultNightMode);
 
         // Update the initial, static configurations.
-        synchronized (this) {
-            updateConfigurationLocked();
-            sendConfigurationLocked();
-        }
+        SystemServerInitThreadPool.get().submit(() -> {
+            synchronized (mLock) {
+                updateConfigurationLocked();
+                sendConfigurationLocked();
+            }
 
+        }, TAG + ".onStart");
         publishBinderService(Context.UI_MODE_SERVICE, mService);
     }
 
-    private final IBinder mService = new IUiModeManager.Stub() {
+    private final IUiModeManager.Stub mService = new IUiModeManager.Stub() {
         @Override
         public void enableCarMode(int flags) {
             if (isUiModeLocked()) {
@@ -312,16 +346,14 @@ final class UiModeManagerService extends SystemService {
         }
 
         @Override
+        public void onShellCommand(FileDescriptor in, FileDescriptor out, FileDescriptor err,
+                String[] args, ShellCallback callback, ResultReceiver resultReceiver) {
+            new Shell(mService).exec(mService, in, out, err, args, callback, resultReceiver);
+        }
+
+        @Override
         protected void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-            if (getContext().checkCallingOrSelfPermission(android.Manifest.permission.DUMP)
-                    != PackageManager.PERMISSION_GRANTED) {
-
-                pw.println("Permission Denial: can't dump uimode service from from pid="
-                        + Binder.getCallingPid()
-                        + ", uid=" + Binder.getCallingUid());
-                return;
-            }
-
+            if (!DumpUtils.checkDumpPermission(getContext(), TAG, pw)) return;
             dumpImpl(pw);
         }
     };
@@ -344,8 +376,8 @@ final class UiModeManagerService extends SystemService {
                     pw.print(" mSystemReady="); pw.println(mSystemReady);
             if (mTwilightManager != null) {
                 // We may not have a TwilightManager.
-                pw.print("  mTwilightService.getCurrentState()=");
-                pw.println(mTwilightManager.getCurrentState());
+                pw.print("  mTwilightService.getLastTwilightState()=");
+                pw.println(mTwilightManager.getLastTwilightState());
             }
         }
     }
@@ -355,12 +387,10 @@ final class UiModeManagerService extends SystemService {
         if (phase == SystemService.PHASE_SYSTEM_SERVICES_READY) {
             synchronized (mLock) {
                 mTwilightManager = getLocalService(TwilightManager.class);
-                if (mTwilightManager != null) {
-                    mTwilightManager.registerListener(mTwilightListener, mHandler);
-                }
                 mSystemReady = true;
                 mCarModeEnabled = mDockState == Intent.EXTRA_DOCK_STATE_CAR;
                 updateComputedNightModeLocked();
+                registerVrStateListener();
                 updateLocked(0, 0);
             }
         }
@@ -408,13 +438,21 @@ final class UiModeManagerService extends SystemService {
             uiMode = Configuration.UI_MODE_TYPE_CAR;
         } else if (isDeskDockState(mDockState)) {
             uiMode = Configuration.UI_MODE_TYPE_DESK;
+        } else if (mVrHeadset) {
+            uiMode = Configuration.UI_MODE_TYPE_VR_HEADSET;
         }
 
         if (mNightMode == UiModeManager.MODE_NIGHT_AUTO) {
+            if (mTwilightManager != null) {
+                mTwilightManager.registerListener(mTwilightListener, mHandler);
+            }
             updateComputedNightModeLocked();
             uiMode |= mComputedNightMode ? Configuration.UI_MODE_NIGHT_YES
                     : Configuration.UI_MODE_NIGHT_NO;
         } else {
+            if (mTwilightManager != null) {
+                mTwilightManager.unregisterListener(mTwilightListener);
+            }
             uiMode |= mNightMode << 4;
         }
 
@@ -437,7 +475,7 @@ final class UiModeManagerService extends SystemService {
             mSetUiMode = mConfiguration.uiMode;
 
             try {
-                ActivityManagerNative.getDefault().updateConfiguration(mConfiguration);
+                ActivityManager.getService().updateConfiguration(mConfiguration);
             } catch (RemoteException e) {
                 Slog.w(TAG, "Failure communicating with activity manager", e);
             }
@@ -457,9 +495,8 @@ final class UiModeManagerService extends SystemService {
         if (mCarModeEnabled) {
             if (mLastBroadcastState != Intent.EXTRA_DOCK_STATE_CAR) {
                 adjustStatusBarCarModeLocked();
-
                 if (oldAction != null) {
-                    getContext().sendBroadcastAsUser(new Intent(oldAction), UserHandle.ALL);
+                    sendForegroundBroadcastToAllUsers(oldAction);
                 }
                 mLastBroadcastState = Intent.EXTRA_DOCK_STATE_CAR;
                 action = UiModeManager.ACTION_ENTER_CAR_MODE;
@@ -467,7 +504,7 @@ final class UiModeManagerService extends SystemService {
         } else if (isDeskDockState(mDockState)) {
             if (!isDeskDockState(mLastBroadcastState)) {
                 if (oldAction != null) {
-                    getContext().sendBroadcastAsUser(new Intent(oldAction), UserHandle.ALL);
+                    sendForegroundBroadcastToAllUsers(oldAction);
                 }
                 mLastBroadcastState = mDockState;
                 action = UiModeManager.ACTION_ENTER_DESK_MODE;
@@ -493,6 +530,7 @@ final class UiModeManagerService extends SystemService {
             Intent intent = new Intent(action);
             intent.putExtra("enableFlags", enableFlags);
             intent.putExtra("disableFlags", disableFlags);
+            intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             getContext().sendOrderedBroadcastAsUser(intent, UserHandle.CURRENT, null,
                     mResultReceiver, null, Activity.RESULT_OK, null, null);
 
@@ -539,6 +577,11 @@ final class UiModeManagerService extends SystemService {
                 mWakeLock.release();
             }
         }
+    }
+
+    private void sendForegroundBroadcastToAllUsers(String action) {
+        getContext().sendBroadcastAsUser(new Intent(action)
+                .addFlags(Intent.FLAG_RECEIVER_FOREGROUND), UserHandle.ALL);
     }
 
     private void updateAfterBroadcastLocked(String action, int enableFlags, int disableFlags) {
@@ -594,10 +637,10 @@ final class UiModeManagerService extends SystemService {
             Intent homeIntent = buildHomeIntent(category);
             if (Sandman.shouldStartDockApp(getContext(), homeIntent)) {
                 try {
-                    int result = ActivityManagerNative.getDefault().startActivityWithConfig(
+                    int result = ActivityManager.getService().startActivityWithConfig(
                             null, null, homeIntent, null, null, null, 0, 0,
                             mConfiguration, null, UserHandle.USER_CURRENT);
-                    if (result >= ActivityManager.START_SUCCESS) {
+                    if (ActivityManager.isStartResultSuccessful(result)) {
                         dockAppStarted = true;
                     } else if (result != ActivityManager.START_INTENT_NOT_RESOLVED) {
                         Slog.e(TAG, "Could not start dock app: " + homeIntent
@@ -645,7 +688,8 @@ final class UiModeManagerService extends SystemService {
             if (mCarModeEnabled) {
                 Intent carModeOffIntent = new Intent(context, DisableCarModeActivity.class);
 
-                Notification.Builder n = new Notification.Builder(context)
+                Notification.Builder n =
+                        new Notification.Builder(context, SystemNotificationChannels.CAR_MODE)
                         .setSmallIcon(R.drawable.stat_notify_car_mode)
                         .setDefaults(Notification.DEFAULT_LIGHTS)
                         .setOngoing(true)
@@ -660,31 +704,130 @@ final class UiModeManagerService extends SystemService {
                                 PendingIntent.getActivityAsUser(context, 0, carModeOffIntent, 0,
                                         null, UserHandle.CURRENT));
                 mNotificationManager.notifyAsUser(null,
-                        R.string.car_mode_disable_notification_title, n.build(), UserHandle.ALL);
+                        SystemMessage.NOTE_CAR_MODE_DISABLE, n.build(), UserHandle.ALL);
             } else {
                 mNotificationManager.cancelAsUser(null,
-                        R.string.car_mode_disable_notification_title, UserHandle.ALL);
-            }
-        }
-    }
-
-    void updateTwilight() {
-        synchronized (mLock) {
-            if (mNightMode == UiModeManager.MODE_NIGHT_AUTO) {
-                updateComputedNightModeLocked();
-                updateLocked(0, 0);
+                        SystemMessage.NOTE_CAR_MODE_DISABLE, UserHandle.ALL);
             }
         }
     }
 
     private void updateComputedNightModeLocked() {
         if (mTwilightManager != null) {
-            TwilightState state = mTwilightManager.getCurrentState();
+            TwilightState state = mTwilightManager.getLastTwilightState();
             if (state != null) {
                 mComputedNightMode = state.isNight();
             }
         }
     }
 
+    private void registerVrStateListener() {
+        IVrManager vrManager = IVrManager.Stub.asInterface(ServiceManager.getService(
+                Context.VR_SERVICE));
+        try {
+            if (vrManager != null) {
+                vrManager.registerListener(mVrStateCallbacks);
+            }
+        } catch (RemoteException e) {
+            Slog.e(TAG, "Failed to register VR mode state listener: " + e);
+        }
+    }
 
+    /**
+     * Handles "adb shell" commands.
+     */
+    private static class Shell extends ShellCommand {
+        public static final String NIGHT_MODE_STR_YES = "yes";
+        public static final String NIGHT_MODE_STR_NO = "no";
+        public static final String NIGHT_MODE_STR_AUTO = "auto";
+        public static final String NIGHT_MODE_STR_UNKNOWN = "unknown";
+        private final IUiModeManager mInterface;
+
+        Shell(IUiModeManager iface) {
+            mInterface = iface;
+        }
+
+        @Override
+        public void onHelp() {
+            final PrintWriter pw = getOutPrintWriter();
+            pw.println("UiModeManager service (uimode) commands:");
+            pw.println("  help");
+            pw.println("    Print this help text.");
+            pw.println("  night [yes|no|auto]");
+            pw.println("    Set or read night mode.");
+        }
+
+        @Override
+        public int onCommand(String cmd) {
+            if (cmd == null) {
+                return handleDefaultCommands(cmd);
+            }
+
+            try {
+                switch (cmd) {
+                    case "night":
+                        return handleNightMode();
+                    default:
+                        return handleDefaultCommands(cmd);
+                }
+            } catch (RemoteException e) {
+                final PrintWriter err = getErrPrintWriter();
+                err.println("Remote exception: " + e);
+            }
+            return -1;
+        }
+
+        private int handleNightMode() throws RemoteException {
+            final PrintWriter err = getErrPrintWriter();
+            final String modeStr = getNextArg();
+            if (modeStr == null) {
+                printCurrentNightMode();
+                return 0;
+            }
+
+            final int mode = strToNightMode(modeStr);
+            if (mode >= 0) {
+                mInterface.setNightMode(mode);
+                printCurrentNightMode();
+                return 0;
+            } else {
+                err.println("Error: mode must be '" + NIGHT_MODE_STR_YES + "', '"
+                        + NIGHT_MODE_STR_NO + "', or '" + NIGHT_MODE_STR_AUTO + "'");
+                return -1;
+            }
+        }
+
+        private void printCurrentNightMode() throws RemoteException {
+            final PrintWriter pw = getOutPrintWriter();
+            final int currMode = mInterface.getNightMode();
+            final String currModeStr = nightModeToStr(currMode);
+            pw.println("Night mode: " + currModeStr);
+        }
+
+        private static String nightModeToStr(int mode) {
+            switch (mode) {
+                case UiModeManager.MODE_NIGHT_YES:
+                    return NIGHT_MODE_STR_YES;
+                case UiModeManager.MODE_NIGHT_NO:
+                    return NIGHT_MODE_STR_NO;
+                case UiModeManager.MODE_NIGHT_AUTO:
+                    return NIGHT_MODE_STR_AUTO;
+                default:
+                    return NIGHT_MODE_STR_UNKNOWN;
+            }
+        }
+
+        private static int strToNightMode(String modeStr) {
+            switch (modeStr) {
+                case NIGHT_MODE_STR_YES:
+                    return UiModeManager.MODE_NIGHT_YES;
+                case NIGHT_MODE_STR_NO:
+                    return UiModeManager.MODE_NIGHT_NO;
+                case NIGHT_MODE_STR_AUTO:
+                    return UiModeManager.MODE_NIGHT_AUTO;
+                default:
+                    return -1;
+            }
+        }
+    }
 }

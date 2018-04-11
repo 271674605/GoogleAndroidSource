@@ -26,70 +26,44 @@ namespace installd {
 constexpr const char* PRIMARY_USER_PREFIX = "data/";
 constexpr const char* SECONDARY_USER_PREFIX = "user/";
 
-constexpr const char* PKG_DIR_POSTFIX = "";
-
-constexpr const char* PKG_LIB_POSTFIX = "/lib";
-
-constexpr const char* CACHE_DIR_POSTFIX = "/cache";
-constexpr const char* CODE_CACHE_DIR_POSTFIX = "/code_cache";
-
-constexpr const char* APP_SUBDIR = "app/"; // sub-directory under ANDROID_DATA
-constexpr const char* PRIV_APP_SUBDIR = "priv-app/"; // sub-directory under ANDROID_DATA
-constexpr const char* EPHEMERAL_APP_SUBDIR = "app-ephemeral/"; // sub-directory under ANDROID_DATA
-
-constexpr const char* APP_LIB_SUBDIR = "app-lib/"; // sub-directory under ANDROID_DATA
-
-constexpr const char* MEDIA_SUBDIR = "media/"; // sub-directory under ANDROID_DATA
-
-constexpr const char* PROFILES_SUBDIR = "misc/profiles"; // sub-directory under ANDROID_DATA
-
-/* other handy constants */
-
-constexpr const char* PRIVATE_APP_SUBDIR = "app-private/"; // sub-directory under ANDROID_DATA
-
 // This is used as a string literal, can't be constants. TODO: std::string...
 #define DALVIK_CACHE "dalvik-cache"
-constexpr const char* DALVIK_CACHE_POSTFIX = "/classes.dex";
-constexpr const char* DALVIK_CACHE_POSTFIX2 = "@classes.dex";
-
-constexpr const char* IDMAP_PREFIX = "/data/resource-cache/";
-constexpr const char* IDMAP_SUFFIX = "@idmap";
+constexpr const char* DALVIK_CACHE_POSTFIX = "@classes.dex";
 
 constexpr size_t PKG_NAME_MAX = 128u;   /* largest allowed package name */
 constexpr size_t PKG_PATH_MAX = 256u;   /* max size of any path we use */
-
-// NOTE: keep in sync with StorageManager
-constexpr int FLAG_STORAGE_DE = 1 << 0;
-constexpr int FLAG_STORAGE_CE = 1 << 1;
-
-// NOTE: keep in sync with Installer
-constexpr int FLAG_CLEAR_CACHE_ONLY = 1 << 8;
-constexpr int FLAG_CLEAR_CODE_CACHE_ONLY = 1 << 9;
-
-/* dexopt needed flags matching those in dalvik.system.DexFile */
-constexpr int DEXOPT_DEX2OAT_NEEDED       = 1;
-constexpr int DEXOPT_PATCHOAT_NEEDED      = 2;
-constexpr int DEXOPT_SELF_PATCHOAT_NEEDED = 3;
 
 /****************************************************************************
  * IMPORTANT: These values are passed from Java code. Keep them in sync with
  * frameworks/base/services/core/java/com/android/server/pm/Installer.java
  ***************************************************************************/
 constexpr int DEXOPT_PUBLIC         = 1 << 1;
-constexpr int DEXOPT_SAFEMODE       = 1 << 2;
-constexpr int DEXOPT_DEBUGGABLE     = 1 << 3;
-constexpr int DEXOPT_BOOTCOMPLETE   = 1 << 4;
-constexpr int DEXOPT_PROFILE_GUIDED = 1 << 5;
-constexpr int DEXOPT_OTA            = 1 << 6;
+constexpr int DEXOPT_DEBUGGABLE     = 1 << 2;
+constexpr int DEXOPT_BOOTCOMPLETE   = 1 << 3;
+constexpr int DEXOPT_PROFILE_GUIDED = 1 << 4;
+constexpr int DEXOPT_SECONDARY_DEX  = 1 << 5;
+// DEXOPT_FORCE, DEXOPT_STORAGE_CE, DEXOPT_STORAGE_DE are exposed for secondary
+// dex files only. Primary apks are analyzed in PackageManager and installd
+// does not need to know if the compilation is forced or on what kind of storage
+// the dex files are.
+constexpr int DEXOPT_FORCE          = 1 << 6;
+constexpr int DEXOPT_STORAGE_CE     = 1 << 7;
+constexpr int DEXOPT_STORAGE_DE     = 1 << 8;
 
 /* all known values for dexopt flags */
 constexpr int DEXOPT_MASK =
     DEXOPT_PUBLIC
-    | DEXOPT_SAFEMODE
     | DEXOPT_DEBUGGABLE
     | DEXOPT_BOOTCOMPLETE
     | DEXOPT_PROFILE_GUIDED
-    | DEXOPT_OTA;
+    | DEXOPT_SECONDARY_DEX
+    | DEXOPT_FORCE
+    | DEXOPT_STORAGE_CE
+    | DEXOPT_STORAGE_DE;
+
+// NOTE: keep in sync with StorageManager
+constexpr int FLAG_STORAGE_DE = 1 << 0;
+constexpr int FLAG_STORAGE_CE = 1 << 1;
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
 

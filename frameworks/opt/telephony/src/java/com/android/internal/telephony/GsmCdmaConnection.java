@@ -26,16 +26,15 @@ import android.os.Registrant;
 import android.os.SystemClock;
 import android.telephony.CarrierConfigManager;
 import android.telephony.DisconnectCause;
-import android.telephony.Rlog;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.Rlog;
 import android.telephony.ServiceState;
 import android.text.TextUtils;
 
 import com.android.internal.telephony.cdma.CdmaCallWaitingNotification;
 import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
-import com.android.internal.telephony.uicc.UiccCardApplication;
-import com.android.internal.telephony.uicc.UiccController;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus.AppState;
+import com.android.internal.telephony.uicc.UiccCardApplication;
 
 /**
  * {@hide}
@@ -70,6 +69,8 @@ public class GsmCdmaConnection extends Connection {
     Handler mHandler;
 
     private PowerManager.WakeLock mPartialWakeLock;
+
+    private boolean mIsEmergencyCall = false;
 
     // The cached delay to be used between DTMF tones fetched from carrier config.
     private int mDtmfToneDelay = 0;
@@ -116,7 +117,7 @@ public class GsmCdmaConnection extends Connection {
 
     //***** Constructors
 
-    /** This is probably an MT call that we first saw in a CLCC response */
+    /** This is probably an MT call that we first saw in a CLCC response or a hand over. */
     public GsmCdmaConnection (GsmCdmaPhone phone, DriverCall dc, GsmCdmaCallTracker ct, int index) {
         super(phone.getPhoneType());
         createWakeLock(phone.getContext());
@@ -126,7 +127,7 @@ public class GsmCdmaConnection extends Connection {
         mHandler = new MyHandler(mOwner.getLooper());
 
         mAddress = dc.number;
-
+        mIsEmergencyCall = PhoneNumberUtils.isLocalEmergencyNumber(phone.getContext(), mAddress);
         mIsIncoming = dc.isMT;
         mCreateTime = System.currentTimeMillis();
         mCnapName = dc.name;
@@ -144,7 +145,7 @@ public class GsmCdmaConnection extends Connection {
 
     /** This is an MO call, created when dialing */
     public GsmCdmaConnection (GsmCdmaPhone phone, String dialString, GsmCdmaCallTracker ct,
-                              GsmCdmaCall parent) {
+                              GsmCdmaCall parent, boolean isEmergencyCall) {
         super(phone.getPhoneType());
         createWakeLock(phone.getContext());
         acquireWakeLock();
@@ -155,13 +156,16 @@ public class GsmCdmaConnection extends Connection {
         if (isPhoneTypeGsm()) {
             mDialString = dialString;
         } else {
-            Rlog.d(LOG_TAG, "[GsmCdmaConn] GsmCdmaConnection: dialString=" + maskDialString(dialString));
+            Rlog.d(LOG_TAG, "[GsmCdmaConn] GsmCdmaConnection: dialString=" +
+                    maskDialString(dialString));
             dialString = formatDialString(dialString);
             Rlog.d(LOG_TAG,
-                    "[GsmCdmaConn] GsmCdmaConnection:formated dialString=" + maskDialString(dialString));
+                    "[GsmCdmaConn] GsmCdmaConnection:formated dialString=" +
+                            maskDialString(dialString));
         }
 
         mAddress = PhoneNumberUtils.extractNetworkPortionAlt(dialString);
+        mIsEmergencyCall = isEmergencyCall;
         mPostDialString = PhoneNumberUtils.extractPostDialPortion(dialString);
 
         mIndex = -1;
@@ -215,11 +219,13 @@ public class GsmCdmaConnection extends Connection {
 
     public void dispose() {
         clearPostDialListeners();
+        if (mParent != null) {
+            mParent.detach(this);
+        }
         releaseAllWakeLocks();
     }
 
-    static boolean
-    equalsHandlesNulls (Object a, Object b) {
+    static boolean equalsHandlesNulls(Object a, Object b) {
         return (a == null) ? (b == null) : a.equals (b);
     }
 
@@ -433,11 +439,15 @@ public class GsmCdmaConnection extends Connection {
             case CallFailCause.ACM_LIMIT_EXCEEDED:
                 return DisconnectCause.LIMIT_EXCEEDED;
 
+            case CallFailCause.OPERATOR_DETERMINED_BARRING:
             case CallFailCause.CALL_BARRED:
                 return DisconnectCause.CALL_BARRED;
 
             case CallFailCause.FDN_BLOCKED:
                 return DisconnectCause.FDN_BLOCKED;
+
+            case CallFailCause.IMEI_NOT_ACCEPTED:
+                return DisconnectCause.IMEI_NOT_ACCEPTED;
 
             case CallFailCause.UNOBTAINABLE_NUMBER:
                 return DisconnectCause.UNOBTAINABLE_NUMBER;
@@ -488,45 +498,49 @@ public class GsmCdmaConnection extends Connection {
                 int serviceState = phone.getServiceState().getState();
                 UiccCardApplication cardApp = phone.getUiccCardApplication();
                 AppState uiccAppState = (cardApp != null) ? cardApp.getState() :
-                                                            AppState.APPSTATE_UNKNOWN;
+                        AppState.APPSTATE_UNKNOWN;
                 if (serviceState == ServiceState.STATE_POWER_OFF) {
                     return DisconnectCause.POWER_OFF;
-                } else if (serviceState == ServiceState.STATE_OUT_OF_SERVICE
-                        || serviceState == ServiceState.STATE_EMERGENCY_ONLY ) {
-                    return DisconnectCause.OUT_OF_SERVICE;
-                } else {
-                    if (isPhoneTypeGsm()) {
-                        if (uiccAppState != AppState.APPSTATE_READY) {
+                }
+                if (!mIsEmergencyCall) {
+                    // Only send OUT_OF_SERVICE if it is not an emergency call. We can still
+                    // technically be in STATE_OUT_OF_SERVICE or STATE_EMERGENCY_ONLY during
+                    // an emergency call and when it ends, we do not want to mistakenly generate
+                    // an OUT_OF_SERVICE disconnect cause during normal call ending.
+                    if ((serviceState == ServiceState.STATE_OUT_OF_SERVICE
+                            || serviceState == ServiceState.STATE_EMERGENCY_ONLY)) {
+                        return DisconnectCause.OUT_OF_SERVICE;
+                    }
+                    // If we are placing an emergency call and the SIM is currently PIN/PUK
+                    // locked the AppState will always not be equal to APPSTATE_READY.
+                    if (uiccAppState != AppState.APPSTATE_READY) {
+                        if (isPhoneTypeGsm()) {
                             return DisconnectCause.ICC_ERROR;
-                        } else if (causeCode == CallFailCause.ERROR_UNSPECIFIED) {
-                            if (phone.mSST.mRestrictedState.isCsRestricted()) {
-                                return DisconnectCause.CS_RESTRICTED;
-                            } else if (phone.mSST.mRestrictedState.isCsEmergencyRestricted()) {
-                                return DisconnectCause.CS_RESTRICTED_EMERGENCY;
-                            } else if (phone.mSST.mRestrictedState.isCsNormalRestricted()) {
-                                return DisconnectCause.CS_RESTRICTED_NORMAL;
-                            } else {
-                                return DisconnectCause.ERROR_UNSPECIFIED;
+                        } else { // CDMA
+                            if (phone.mCdmaSubscriptionSource ==
+                                    CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_RUIM) {
+                                return DisconnectCause.ICC_ERROR;
                             }
-                        } else if (causeCode == CallFailCause.NORMAL_CLEARING) {
-                            return DisconnectCause.NORMAL;
-                        } else {
-                            // If nothing else matches, report unknown call drop reason
-                            // to app, not NORMAL call end.
-                            return DisconnectCause.ERROR_UNSPECIFIED;
-                        }
-                    } else {
-                        if (phone.mCdmaSubscriptionSource ==
-                                CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_RUIM
-                                && uiccAppState != AppState.APPSTATE_READY) {
-                            return DisconnectCause.ICC_ERROR;
-                        } else if (causeCode==CallFailCause.NORMAL_CLEARING) {
-                            return DisconnectCause.NORMAL;
-                        } else {
-                            return DisconnectCause.ERROR_UNSPECIFIED;
                         }
                     }
                 }
+                if (isPhoneTypeGsm()) {
+                    if (causeCode == CallFailCause.ERROR_UNSPECIFIED) {
+                        if (phone.mSST.mRestrictedState.isCsRestricted()) {
+                            return DisconnectCause.CS_RESTRICTED;
+                        } else if (phone.mSST.mRestrictedState.isCsEmergencyRestricted()) {
+                            return DisconnectCause.CS_RESTRICTED_EMERGENCY;
+                        } else if (phone.mSST.mRestrictedState.isCsNormalRestricted()) {
+                            return DisconnectCause.CS_RESTRICTED_NORMAL;
+                        }
+                    }
+                }
+                if (causeCode == CallFailCause.NORMAL_CLEARING) {
+                    return DisconnectCause.NORMAL;
+                }
+                // If nothing else matches, report unknown call drop reason
+                // to app, not NORMAL call end.
+                return DisconnectCause.ERROR_UNSPECIFIED;
         }
     }
 
@@ -792,13 +806,13 @@ public class GsmCdmaConnection extends Connection {
     protected void finalize()
     {
         /**
-         * It is understood that This finializer is not guaranteed
+         * It is understood that This finalizer is not guaranteed
          * to be called and the release lock call is here just in
          * case there is some path that doesn't call onDisconnect
          * and or onConnectedInOrOut.
          */
-        if (mPartialWakeLock.isHeld()) {
-            Rlog.e(LOG_TAG, "[GsmCdmaConn] UNEXPECTED; mPartialWakeLock is held when finalizing.");
+        if (mPartialWakeLock != null && mPartialWakeLock.isHeld()) {
+            Rlog.e(LOG_TAG, "UNEXPECTED; mPartialWakeLock is held when finalizing.");
         }
         clearPostDialListeners();
         releaseWakeLock();
@@ -923,33 +937,37 @@ public class GsmCdmaConnection extends Connection {
         notifyPostDialListeners();
     }
 
-    private void
-    createWakeLock(Context context) {
+    private void createWakeLock(Context context) {
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         mPartialWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, LOG_TAG);
     }
 
-    private void
-    acquireWakeLock() {
-        log("acquireWakeLock");
-        mPartialWakeLock.acquire();
-    }
-
-    private void
-    releaseWakeLock() {
-        synchronized(mPartialWakeLock) {
-            if (mPartialWakeLock.isHeld()) {
-                log("releaseWakeLock");
-                mPartialWakeLock.release();
+    private void acquireWakeLock() {
+        if (mPartialWakeLock != null) {
+            synchronized (mPartialWakeLock) {
+                log("acquireWakeLock");
+                mPartialWakeLock.acquire();
             }
         }
     }
 
-    private void
-    releaseAllWakeLocks() {
-        synchronized(mPartialWakeLock) {
-            while (mPartialWakeLock.isHeld()) {
-                mPartialWakeLock.release();
+    private void releaseWakeLock() {
+        if (mPartialWakeLock != null) {
+            synchronized (mPartialWakeLock) {
+                if (mPartialWakeLock.isHeld()) {
+                    log("releaseWakeLock");
+                    mPartialWakeLock.release();
+                }
+            }
+        }
+    }
+
+    private void releaseAllWakeLocks() {
+        if (mPartialWakeLock != null) {
+            synchronized (mPartialWakeLock) {
+                while (mPartialWakeLock.isHeld()) {
+                    mPartialWakeLock.release();
+                }
             }
         }
     }
@@ -970,8 +988,7 @@ public class GsmCdmaConnection extends Connection {
     // This function is to find the next PAUSE character index if
     // multiple pauses in a row. Otherwise it finds the next non PAUSE or
     // non WAIT character index.
-    private static int
-    findNextPCharOrNonPOrNonWCharIndex(String phoneNumber, int currIndex) {
+    private static int findNextPCharOrNonPOrNonWCharIndex(String phoneNumber, int currIndex) {
         boolean wMatched = isWait(phoneNumber.charAt(currIndex));
         int index = currIndex + 1;
         int length = phoneNumber.length();
@@ -998,12 +1015,12 @@ public class GsmCdmaConnection extends Connection {
         return index;
     }
 
-    //CDMA
+    // CDMA
     // This function returns either PAUSE or WAIT character to append.
     // It is based on the next non PAUSE/WAIT character in the phoneNumber and the
     // index for the current PAUSE/WAIT character
-    private static char
-    findPOrWCharToAppend(String phoneNumber, int currPwIndex, int nextNonPwCharIndex) {
+    private static char findPOrWCharToAppend(String phoneNumber, int currPwIndex,
+                                             int nextNonPwCharIndex) {
         char c = phoneNumber.charAt(currPwIndex);
         char ret;
 

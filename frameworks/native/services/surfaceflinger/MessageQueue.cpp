@@ -25,7 +25,6 @@
 #include <utils/Log.h>
 
 #include <gui/IDisplayEventConnection.h>
-#include <gui/BitTube.h>
 
 #include "MessageQueue.h"
 #include "EventThread.h"
@@ -94,8 +93,8 @@ void MessageQueue::setEventThread(const sp<EventThread>& eventThread)
 {
     mEventThread = eventThread;
     mEvents = eventThread->createEventConnection();
-    mEventTube = mEvents->getDataChannel();
-    mLooper->addFd(mEventTube->getFd(), 0, Looper::EVENT_INPUT,
+    mEvents->stealReceiveChannel(&mEventTube);
+    mLooper->addFd(mEventTube.getFd(), 0, Looper::EVENT_INPUT,
             MessageQueue::cb_eventReceiver, this);
 }
 
@@ -134,31 +133,12 @@ status_t MessageQueue::postMessage(
 }
 
 
-/* when INVALIDATE_ON_VSYNC is set SF only processes
- * buffer updates on VSYNC and performs a refresh immediately
- * after.
- *
- * when INVALIDATE_ON_VSYNC is set to false, SF will instead
- * perform the buffer updates immediately, but the refresh only
- * at the next VSYNC.
- * THIS MODE IS BUGGY ON GALAXY NEXUS AND WILL CAUSE HANGS
- */
-#define INVALIDATE_ON_VSYNC 1
-
 void MessageQueue::invalidate() {
-#if INVALIDATE_ON_VSYNC
     mEvents->requestNextVsync();
-#else
-    mHandler->dispatchInvalidate();
-#endif
 }
 
 void MessageQueue::refresh() {
-#if INVALIDATE_ON_VSYNC
     mHandler->dispatchRefresh();
-#else
-    mEvents->requestNextVsync();
-#endif
 }
 
 int MessageQueue::cb_eventReceiver(int fd, int events, void* data) {
@@ -169,14 +149,10 @@ int MessageQueue::cb_eventReceiver(int fd, int events, void* data) {
 int MessageQueue::eventReceiver(int /*fd*/, int /*events*/) {
     ssize_t n;
     DisplayEventReceiver::Event buffer[8];
-    while ((n = DisplayEventReceiver::getEvents(mEventTube, buffer, 8)) > 0) {
+    while ((n = DisplayEventReceiver::getEvents(&mEventTube, buffer, 8)) > 0) {
         for (int i=0 ; i<n ; i++) {
             if (buffer[i].header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
-#if INVALIDATE_ON_VSYNC
                 mHandler->dispatchInvalidate();
-#else
-                mHandler->dispatchRefresh();
-#endif
                 break;
             }
         }

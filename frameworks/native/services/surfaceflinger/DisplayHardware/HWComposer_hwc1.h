@@ -22,6 +22,8 @@
 
 #include <hardware/hwcomposer_defs.h>
 
+#include <system/graphics.h>
+
 #include <ui/Fence.h>
 
 #include <utils/BitSet.h>
@@ -58,8 +60,10 @@ class HWComposer
 public:
     class EventHandler {
         friend class HWComposer;
-        virtual void onVSyncReceived(int disp, nsecs_t timestamp) = 0;
-        virtual void onHotplugReceived(int disp, bool connected) = 0;
+        virtual void onVSyncReceived(
+            HWComposer* composer, int32_t disp, nsecs_t timestamp) = 0;
+        virtual void onHotplugReceived(HWComposer* composer, int disp, bool connected) = 0;
+        virtual void onInvalidateReceived(HWComposer* composer) = 0;
     protected:
         virtual ~EventHandler() {}
     };
@@ -257,7 +261,15 @@ public:
         float xdpi;
         float ydpi;
         nsecs_t refresh;
-        int colorTransform;
+        android_color_mode_t colorMode;
+        bool operator==(const DisplayConfig& rhs) const {
+            return width == rhs.width &&
+                    height == rhs.height &&
+                    xdpi == rhs.xdpi &&
+                    ydpi == rhs.ydpi &&
+                    refresh == rhs.refresh &&
+                    colorMode == rhs.colorMode;
+        }
     };
 
     // Query display parameters.  Pass in a display index (e.g.
@@ -274,6 +286,7 @@ public:
     float getDpiX(int disp) const;
     float getDpiY(int disp) const;
     nsecs_t getRefreshPeriod(int disp) const;
+    android_color_mode_t getColorMode(int disp) const;
 
     const Vector<DisplayConfig>& getConfigs(int disp) const;
     size_t getCurrentConfig(int disp) const;

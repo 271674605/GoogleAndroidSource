@@ -24,7 +24,10 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.provider.CallLog.Calls;
 import android.provider.VoicemailContract;
+import android.provider.VoicemailContract.Status;
 import android.provider.VoicemailContract.Voicemails;
+import android.text.TextUtils;
+import android.util.ArraySet;
 import android.util.Log;
 
 import com.android.internal.annotations.VisibleForTesting;
@@ -36,7 +39,7 @@ import com.android.providers.contacts.util.PropertyUtils;
 public class CallLogDatabaseHelper {
     private static final String TAG = "CallLogDatabaseHelper";
 
-    private static final int DATABASE_VERSION = 2;
+    private static final int DATABASE_VERSION = 5;
 
     private static final boolean DEBUG = false; // DON'T SUBMIT WITH TRUE
 
@@ -148,9 +151,14 @@ public class CallLogDatabaseHelper {
                     Voicemails.SOURCE_DATA + " TEXT," +
                     Voicemails.SOURCE_PACKAGE + " TEXT," +
                     Voicemails.TRANSCRIPTION + " TEXT," +
+                    Voicemails.TRANSCRIPTION_STATE + " INTEGER NOT NULL DEFAULT 0," +
                     Voicemails.STATE + " INTEGER," +
                     Voicemails.DIRTY + " INTEGER NOT NULL DEFAULT 0," +
-                    Voicemails.DELETED + " INTEGER NOT NULL DEFAULT 0" +
+                    Voicemails.DELETED + " INTEGER NOT NULL DEFAULT 0," +
+                    Voicemails.BACKED_UP + " INTEGER NOT NULL DEFAULT 0," +
+                    Voicemails.RESTORED + " INTEGER NOT NULL DEFAULT 0," +
+                    Voicemails.ARCHIVED + " INTEGER NOT NULL DEFAULT 0," +
+                    Voicemails.IS_OMTP_VOICEMAIL + " INTEGER NOT NULL DEFAULT 0" +
                     ");");
 
             db.execSQL("CREATE TABLE " + Tables.VOICEMAIL_STATUS + " (" +
@@ -164,7 +172,8 @@ public class CallLogDatabaseHelper {
                     VoicemailContract.Status.DATA_CHANNEL_STATE + " INTEGER," +
                     VoicemailContract.Status.NOTIFICATION_CHANNEL_STATE + " INTEGER," +
                     VoicemailContract.Status.QUOTA_OCCUPIED + " INTEGER DEFAULT -1," +
-                    VoicemailContract.Status.QUOTA_TOTAL + " INTEGER DEFAULT -1" +
+                    VoicemailContract.Status.QUOTA_TOTAL + " INTEGER DEFAULT -1," +
+                    VoicemailContract.Status.SOURCE_TYPE + " TEXT" +
                     ");");
 
             migrateFromLegacyTables(db);
@@ -178,6 +187,18 @@ public class CallLogDatabaseHelper {
 
             if (oldVersion < 2) {
                 upgradeToVersion2(db);
+            }
+
+            if (oldVersion < 3) {
+                upgradeToVersion3(db);
+            }
+
+            if (oldVersion < 4) {
+                upgradeToVersion4(db);
+            }
+
+            if (oldVersion < 5) {
+                upgradeToVersion5(db);
             }
         }
     }
@@ -226,6 +247,32 @@ public class CallLogDatabaseHelper {
     private void upgradeToVersion2(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE " + Tables.CALLS + " ADD " + Calls.VIA_NUMBER +
                 " TEXT NOT NULL DEFAULT ''");
+    }
+
+    /**
+     * Add the {@link Status.SOURCE_TYPE} Column to the VoicemailStatus Database.
+     */
+    private void upgradeToVersion3(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE " + Tables.VOICEMAIL_STATUS + " ADD " + Status.SOURCE_TYPE +
+                " TEXT");
+    }
+
+    /**
+     * Add {@link Voicemails.BACKED_UP} {@link Voicemails.ARCHIVE} {@link
+     * Voicemails.IS_OMTP_VOICEMAIL} column to the CallLog database.
+     */
+    private void upgradeToVersion4(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE calls ADD backed_up INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("ALTER TABLE calls ADD restored INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("ALTER TABLE calls ADD archived INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("ALTER TABLE calls ADD is_omtp_voicemail INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /**
+     * Add {@link Voicemails.TRANSCRIPTION_STATE} column to the CallLog database.
+     */
+    private void upgradeToVersion5(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE calls ADD transcription_state INTEGER NOT NULL DEFAULT 0");
     }
 
     /**
@@ -320,6 +367,30 @@ public class CallLogDatabaseHelper {
     @Nullable // We return null during tests when migration is not needed.
     SQLiteDatabase getContactsWritableDatabaseForMigration() {
         return ContactsDatabaseHelper.getInstance(mContext).getWritableDatabase();
+    }
+
+    public ArraySet<String> selectDistinctColumn(String table, String column) {
+        final ArraySet<String> ret = new ArraySet<>();
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c = db.rawQuery("SELECT DISTINCT "
+                + column
+                + " FROM " + table, null);
+        try {
+            c.moveToPosition(-1);
+            while (c.moveToNext()) {
+                if (c.isNull(0)) {
+                    continue;
+                }
+                final String s = c.getString(0);
+
+                if (!TextUtils.isEmpty(s)) {
+                    ret.add(s);
+                }
+            }
+            return ret;
+        } finally {
+            c.close();
+        }
     }
 
     @VisibleForTesting

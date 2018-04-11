@@ -19,6 +19,7 @@ package com.android.server.telecom;
 import android.net.Uri;
 import android.telecom.Connection;
 import android.telecom.ParcelableCall;
+import android.telecom.ParcelableRttCall;
 import android.telecom.TelecomManager;
 
 import java.util.ArrayList;
@@ -28,11 +29,13 @@ import java.util.List;
  * Utilities dealing with {@link ParcelableCall}.
  */
 public class ParcelableCallUtils {
+    private static final int CALL_STATE_OVERRIDE_NONE = -1;
+
     public static class Converter {
         public ParcelableCall toParcelableCall(Call call, boolean includeVideoProvider,
                 PhoneAccountRegistrar phoneAccountRegistrar) {
             return ParcelableCallUtils.toParcelableCall(
-                    call, includeVideoProvider, phoneAccountRegistrar);
+                    call, includeVideoProvider, phoneAccountRegistrar, false, false);
         }
     }
 
@@ -45,15 +48,52 @@ public class ParcelableCallUtils {
      *      method creates a {@link VideoCallImpl} instance on access it is important for the
      *      recipient of the {@link ParcelableCall} to know if the video provider changed.
      * @param phoneAccountRegistrar The {@link PhoneAccountRegistrar}.
+     * @param supportsExternalCalls Indicates whether the call should be parcelled for an
+     *      {@link InCallService} which supports external calls or not.
+     */
+    public static ParcelableCall toParcelableCall(
+            Call call,
+            boolean includeVideoProvider,
+            PhoneAccountRegistrar phoneAccountRegistrar,
+            boolean supportsExternalCalls,
+            boolean includeRttCall) {
+        return toParcelableCall(call, includeVideoProvider, phoneAccountRegistrar,
+                supportsExternalCalls, CALL_STATE_OVERRIDE_NONE /* overrideState */,
+                includeRttCall);
+    }
+
+    /**
+     * Parcels all information for a {@link Call} into a new {@link ParcelableCall} instance.
+     *
+     * @param call The {@link Call} to parcel.
+     * @param includeVideoProvider {@code true} if the video provider should be parcelled with the
+     *      {@link Call}, {@code false} otherwise.  Since the {@link ParcelableCall#getVideoCall()}
+     *      method creates a {@link VideoCallImpl} instance on access it is important for the
+     *      recipient of the {@link ParcelableCall} to know if the video provider changed.
+     * @param phoneAccountRegistrar The {@link PhoneAccountRegistrar}.
+     * @param supportsExternalCalls Indicates whether the call should be parcelled for an
+     *      {@link InCallService} which supports external calls or not.
+     * @param overrideState When not {@link #CALL_STATE_OVERRIDE_NONE}, use the provided state as an
+     *      override to whatever is defined in the call.
      * @return The {@link ParcelableCall} containing all call information from the {@link Call}.
      */
     public static ParcelableCall toParcelableCall(
             Call call,
             boolean includeVideoProvider,
-            PhoneAccountRegistrar phoneAccountRegistrar) {
-        int state = getParcelableState(call);
+            PhoneAccountRegistrar phoneAccountRegistrar,
+            boolean supportsExternalCalls,
+            int overrideState,
+            boolean includeRttCall) {
+        int state;
+        if (overrideState == CALL_STATE_OVERRIDE_NONE) {
+            state = getParcelableState(call, supportsExternalCalls);
+        } else {
+            state = overrideState;
+        }
         int capabilities = convertConnectionToCallCapabilities(call.getConnectionCapabilities());
         int properties = convertConnectionToCallProperties(call.getConnectionProperties());
+        int supportedAudioRoutes = call.getSupportedAudioRoutes();
+
         if (call.isConference()) {
             properties |= android.telecom.Call.Details.PROPERTY_CONFERENCE;
         }
@@ -63,7 +103,7 @@ public class ParcelableCallUtils {
         }
 
         // If this is a single-SIM device, the "default SIM" will always be the only SIM.
-        boolean isDefaultSmsAccount =
+        boolean isDefaultSmsAccount = phoneAccountRegistrar != null &&
                 phoneAccountRegistrar.isUserSelectedSmsPhoneAccount(call.getTargetPhoneAccount());
         if (call.isRespondViaSmsCapable() && isDefaultSmsAccount) {
             capabilities |= android.telecom.Call.Details.CAPABILITY_RESPOND_VIA_TEXT;
@@ -116,6 +156,8 @@ public class ParcelableCallUtils {
             conferenceableCallIds.add(otherCall.getId());
         }
 
+        ParcelableRttCall rttCall = includeRttCall ? getParcelableRttCall(call) : null;
+
         return new ParcelableCall(
                 call.getId(),
                 state,
@@ -123,6 +165,7 @@ public class ParcelableCallUtils {
                 call.getCannedSmsResponses(),
                 capabilities,
                 properties,
+                supportedAudioRoutes,
                 connectTimeMillis,
                 handle,
                 call.getHandlePresentation(),
@@ -132,16 +175,19 @@ public class ParcelableCallUtils {
                 call.getTargetPhoneAccount(),
                 includeVideoProvider,
                 includeVideoProvider ? call.getVideoProvider() : null,
+                includeRttCall,
+                rttCall,
                 parentCallId,
                 childCallIds,
                 call.getStatusHints(),
                 call.getVideoState(),
                 conferenceableCallIds,
                 call.getIntentExtras(),
-                call.getExtras());
+                call.getExtras(),
+                call.getCreationTimeMillis());
     }
 
-    private static int getParcelableState(Call call) {
+    private static int getParcelableState(Call call, boolean supportsExternalCalls) {
         int state = CallState.NEW;
         switch (call.getState()) {
             case CallState.ABORTED:
@@ -156,6 +202,19 @@ public class ParcelableCallUtils {
                 break;
             case CallState.DIALING:
                 state = android.telecom.Call.STATE_DIALING;
+                break;
+            case CallState.PULLING:
+                if (supportsExternalCalls) {
+                    // The InCallService supports external calls, so it must handle
+                    // STATE_PULLING_CALL.
+                    state = android.telecom.Call.STATE_PULLING_CALL;
+                } else {
+                    // The InCallService does NOT support external calls, so remap
+                    // STATE_PULLING_CALL to STATE_DIALING.  In essence, pulling a call can be seen
+                    // as a form of dialing, so it is appropriate for InCallServices which do not
+                    // handle external calls.
+                    state = android.telecom.Call.STATE_DIALING;
+                }
                 break;
             case CallState.DISCONNECTING:
                 state = android.telecom.Call.STATE_DISCONNECTING;
@@ -267,11 +326,17 @@ public class ParcelableCallUtils {
         Connection.PROPERTY_GENERIC_CONFERENCE,
         android.telecom.Call.Details.PROPERTY_GENERIC_CONFERENCE,
 
-        Connection.PROPERTY_SHOW_CALLBACK_NUMBER,
+        Connection.PROPERTY_EMERGENCY_CALLBACK_MODE,
         android.telecom.Call.Details.PROPERTY_EMERGENCY_CALLBACK_MODE,
 
         Connection.PROPERTY_IS_EXTERNAL_CALL,
-        android.telecom.Call.Details.PROPERTY_IS_EXTERNAL_CALL
+        android.telecom.Call.Details.PROPERTY_IS_EXTERNAL_CALL,
+
+        Connection.PROPERTY_HAS_CDMA_VOICE_PRIVACY,
+        android.telecom.Call.Details.PROPERTY_HAS_CDMA_VOICE_PRIVACY,
+
+        Connection.PROPERTY_SELF_MANAGED,
+        android.telecom.Call.Details.PROPERTY_SELF_MANAGED
     };
 
     private static int convertConnectionToCallProperties(int connectionProperties) {
@@ -291,6 +356,14 @@ public class ParcelableCallUtils {
      */
     private static int removeCapability(int capabilities, int capability) {
         return capabilities & ~capability;
+    }
+
+    private static ParcelableRttCall getParcelableRttCall(Call call) {
+        if (!call.isRttCall()) {
+            return null;
+        }
+        return new ParcelableRttCall(call.getRttMode(), call.getInCallToCsRttPipeForInCall(),
+                call.getCsToInCallRttPipeForInCall());
     }
 
     private ParcelableCallUtils() {}

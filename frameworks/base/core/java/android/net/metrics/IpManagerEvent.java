@@ -16,45 +16,57 @@
 
 package android.net.metrics;
 
-import android.annotation.SystemApi;
+import android.annotation.IntDef;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.util.SparseArray;
 
 import com.android.internal.util.MessageUtils;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
 /**
+ * An event recorded by IpManager when IP provisioning completes for a network or
+ * when a network disconnects.
  * {@hide}
  */
-@SystemApi
-public final class IpManagerEvent extends IpConnectivityEvent implements Parcelable {
+public final class IpManagerEvent implements Parcelable {
 
-    public static final int PROVISIONING_OK    = 1;
-    public static final int PROVISIONING_FAIL  = 2;
-    public static final int COMPLETE_LIFECYCLE = 3;
+    public static final int PROVISIONING_OK                       = 1;
+    public static final int PROVISIONING_FAIL                     = 2;
+    public static final int COMPLETE_LIFECYCLE                    = 3;
+    public static final int ERROR_STARTING_IPV4                   = 4;
+    public static final int ERROR_STARTING_IPV6                   = 5;
+    public static final int ERROR_STARTING_IPREACHABILITYMONITOR  = 6;
 
-    public final String ifName;
-    public final int eventType;
+    @IntDef(value = {
+            PROVISIONING_OK, PROVISIONING_FAIL, COMPLETE_LIFECYCLE,
+            ERROR_STARTING_IPV4, ERROR_STARTING_IPV6, ERROR_STARTING_IPREACHABILITYMONITOR,
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface EventType {}
+
+    public final @EventType int eventType;
     public final long durationMs;
 
-    private IpManagerEvent(String ifName, int eventType, long duration) {
-        this.ifName = ifName;
+    public IpManagerEvent(@EventType int eventType, long duration) {
         this.eventType = eventType;
         this.durationMs = duration;
     }
 
     private IpManagerEvent(Parcel in) {
-        this.ifName = in.readString();
         this.eventType = in.readInt();
         this.durationMs = in.readLong();
     }
 
+    @Override
     public void writeToParcel(Parcel out, int flags) {
-        out.writeString(ifName);
         out.writeInt(eventType);
         out.writeLong(durationMs);
     }
 
+    @Override
     public int describeContents() {
         return 0;
     }
@@ -70,18 +82,15 @@ public final class IpManagerEvent extends IpConnectivityEvent implements Parcela
         }
     };
 
-    public static void logEvent(int eventType, String ifName, long durationMs) {
-        logEvent(new IpManagerEvent(ifName, eventType, durationMs));
-    }
-
     @Override
     public String toString() {
-        return String.format("IpManagerEvent(%s, %s, %dms)",
-                ifName, Decoder.constants.get(eventType), durationMs);
+        return String.format("IpManagerEvent(%s, %dms)",
+                Decoder.constants.get(eventType), durationMs);
     }
 
     final static class Decoder {
         static final SparseArray<String> constants = MessageUtils.findMessageNames(
-                new Class[]{IpManagerEvent.class}, new String[]{"PROVISIONING_", "COMPLETE_"});
+                new Class[]{IpManagerEvent.class},
+                new String[]{"PROVISIONING_", "COMPLETE_", "ERROR_"});
     }
-};
+}

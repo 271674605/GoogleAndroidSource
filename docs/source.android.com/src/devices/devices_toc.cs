@@ -43,8 +43,10 @@
           </a>
         </div>
         <ul>
-          <li><a href="<?cs var:toroot ?>devices/accessories/headset/specification.html">Specification</a></li>
-          <li><a href="<?cs var:toroot ?>devices/accessories/headset/requirements.html">Requirements</a></li>
+          <li><a href="<?cs var:toroot ?>devices/accessories/headset/plug-headset-spec.html">3.5 mm Headset Spec</a></li>
+          <li><a href="<?cs var:toroot ?>devices/accessories/headset/jack-headset-spec.html">3.5 mm Jack Spec</a></li>
+          <li><a href="<?cs var:toroot ?>devices/accessories/headset/usb-headset-spec.html">USB Headset Spec</a></li>
+          <li><a href="<?cs var:toroot ?>devices/accessories/headset/expected-behavior.html">Expected Behavior</a></li>
           <li><a href="<?cs var:toroot ?>devices/accessories/headset/testing.html">Testing</a></li>
         </ul>
       </li>
@@ -80,7 +82,18 @@
       </div>
         <ul>
           <li><a href="<?cs var:toroot ?>devices/audio/terminology.html">Terminology</a></li>
-          <li><a href="<?cs var:toroot ?>devices/audio/implement.html">Implementation</a></li>
+          <li class="nav-section">
+            <div class="nav-section-header">
+              <a href="<?cs var:toroot ?>devices/audio/implement.html">
+                <span class="en">Implementation</span>
+              </a>
+            </div>
+            <ul>
+              <li><a href="<?cs var:toroot ?>devices/audio/implement-policy.html">Policy Configuration</a></li>
+              <li><a href="<?cs var:toroot ?>devices/audio/implement-shared-library.html">Shared Library</a></li>
+              <li><a href="<?cs var:toroot ?>devices/audio/implement-pre-processing.html">Pre-processing Effects</a></li>
+            </ul>
+         </li>
           <li><a href="<?cs var:toroot ?>devices/audio/data_formats.html">Data Formats</a></li>
           <li><a href="<?cs var:toroot ?>devices/audio/attributes.html">Attributes</a></li>
           <li><a href="<?cs var:toroot ?>devices/audio/warmup.html">Warmup</a></li>
@@ -117,6 +130,7 @@
           <li><a href="<?cs var:toroot ?>devices/audio/tv.html">TV Audio</a></li>
         </ul>
       </li>
+      <li><a href="<?cs var:toroot ?>devices/automotive.html">Automotive</a></li>
       <li><a href="<?cs var:toroot ?>devices/bluetooth.html">Bluetooth</a></li>
       <li class="nav-section">
         <div class="nav-section-header">
@@ -144,8 +158,37 @@
           </a>
         </div>
         <ul>
-          <li><a href="<?cs var:toroot ?>devices/graphics/architecture.html">Architecture</a></li>
-          <li><a href="<?cs var:toroot ?>devices/graphics/implement.html">Implementation</a></li>
+         <li class="nav-section">
+            <div class="nav-section-header">
+              <a href="<?cs var:toroot ?>devices/graphics/architecture.html">
+                <span class="en">Architecture</span>
+              </a>
+            </div>
+            <ul>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-bq-gralloc.html">BufferQueue</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-sf-hwc.html">SurfaceFlinger and HWC</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-sh.html">Surface and SurfaceHolder</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-egl-opengl.html">OpenGL ES</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-vulkan.html">Vulkan</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-sv-glsv.html">SurfaceView</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-st.html">SurfaceTexture</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-tv.html">TextureView</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/arch-gameloops.html">Game Loops</a></li>
+            </ul>
+         </li>
+         <li class="nav-section">
+            <div class="nav-section-header">
+              <a href="<?cs var:toroot ?>devices/graphics/implement.html">
+                <span class="en">Implementing</span>
+              </a>
+            </div>
+            <ul>
+              <li><a href="<?cs var:toroot ?>devices/graphics/implement-hwc.html">Hardware Composer HAL</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/implement-vsync.html">VSYNC</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/implement-vulkan.html">Vulkan</a></li>
+              <li><a href="<?cs var:toroot ?>devices/graphics/implement-vdisplays.html">Virtual Displays</a></li>
+            </ul>
+         </li>
          <li class="nav-section">
             <div class="nav-section-header">
               <a href="<?cs var:toroot ?>devices/graphics/testing.html">
@@ -188,6 +231,8 @@
           </a>
         </div>
         <ul>
+          <li><a href="<?cs var:toroot ?>devices/media/framework-hardening.html">Framework
+          Hardening</a></li>
           <li><a href="<?cs var:toroot ?>devices/media/soc.html">SoC Dependencies</a></li>
           <li><a href="<?cs var:toroot ?>devices/media/oem.html">OEM Dependencies</a></li>
         </ul>
@@ -231,6 +276,7 @@
         </div>
         <ul>
           <li><a href="<?cs var:toroot ?>devices/tv/HDMI-CEC.html">HDMI-CEC control service</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tv/reference-tv-app.html">Reference TV App</a></li>
         </ul>
       </li>
     </ul>
@@ -257,6 +303,7 @@
           <li><a href="<?cs var:toroot ?>devices/tech/dalvik/constraints.html">Constraints</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/dalvik/configure.html">Configuration</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/dalvik/gc-debug.html">Garbage Collection</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/dalvik/jit-compiler.html">JIT Compilation</a></li>
         </ul>
       </li>
 
@@ -268,14 +315,32 @@
         </div>
         <ul>
           <li><a href="<?cs var:toroot ?>devices/tech/config/carrier.html">Carrier Customization</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/config/connect_tests.html">Connectivity Tests</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/filesystem.html">File System</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/kernel.html">Kernel Configuration</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/kernel_network_tests.html">Kernel Network Tests</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/low-ram.html">Low RAM</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/config/namespaces_libraries.html">Namespaces for Libraries</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/renderer.html">OpenGLRenderer</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/runtime_perms.html">Runtime Permissions</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/uicc.html">UICC</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/config/voicemail.html">Visual Voicemail</a></li>
+        </ul>
+      </li>
+
+      <li class="nav-section">
+        <div class="nav-section-header">
+            <a href="<?cs var:toroot ?>devices/tech/connect/index.html">
+              <span class="en">Connectivity</span>
+            </a>
+        </div>
+        <ul>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/block-numbers.html">Block Phone Numbers</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/call-notification.html">Call Notifications</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/data-saver.html">Data Saver Mode</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/emergency-affordance.html">Emergency Affordance</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/felica.html">Host Card Emulation of FeliCa</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/connect/ril.html">Radio Interface Layer (RIL)</a></li>
         </ul>
       </li>
 
@@ -303,6 +368,7 @@
           </a>
         </div>
         <ul>
+          <li><a href="<?cs var:toroot ?>devices/tech/debug/native-crash.html">Diagnosing Native Crashes</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/debug/asan.html">AddressSanitizer</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/debug/dumpsys.html">Dumpsys</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/debug/native-memory.html">Native Memory Use</a></li>
@@ -322,7 +388,25 @@
           <li><a href="<?cs var:toroot ?>devices/tech/admin/managed-profiles.html">Managed Profiles</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/admin/provision.html">Provisioning</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/admin/multiuser-apps.html">Multiuser Apps</a></li>
-          <li><a href="<?cs var:toroot ?>devices/tech/admin/testing-setup.html">Testing Setup</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/admin/enterprise-telephony.html">Enterprise Telephony</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/admin/testing-provision.html">Testing Device Provisioning</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/admin/testing-setup.html">Testing Device Administration</a></li>
+        </ul>
+      </li>
+
+      <li class="nav-section">
+        <div class="nav-section-header">
+            <a href="<?cs var:toroot ?>devices/tech/display/index.html">
+              <span class="en">Display Settings</span></a>
+        </div>
+        <ul>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/app-shortcuts.html">App Shortcuts</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/circular-icons.html">Circular Icons</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/dnd.html">Do Not Disturb</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/hdr.html">HDR Video</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/multi-window.html">Multi-Window</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/night-light.html">Night Light</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/display/retail-mode.html">Retail Demo Mode</a></li>
         </ul>
       </li>
 
@@ -345,7 +429,9 @@
           <li><a href="<?cs var:toroot ?>devices/tech/ota/block.html">Block-based OTA</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/ota/inside_packages.html">Inside OTA Packages</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/ota/device_code.html">Device-Specific Code</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/ota/reduce_size.html">Reducing OTA Size</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/ota/sign_builds.html">Signing Builds for Release</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/ota/ab_updates.html">A/B System Updates</a></li>
         </ul>
       </li>
 
@@ -354,11 +440,10 @@
           <a href="<?cs var:toroot ?>devices/tech/power/index.html"><span class="en">Power</span></a>
         </div>
         <ul>
-          <li><a href="<?cs var:toroot ?>devices/tech/power/mgmt.html">Power Management</a>
-          </li>
+          <li><a href="<?cs var:toroot ?>devices/tech/power/mgmt.html">Power Management</a></li>
+          <li><a href="<?cs var:toroot ?>devices/tech/power/performance.html">Performance Management</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/power/component.html">Component Power</a></li>
-          <li><a href="<?cs var:toroot ?>devices/tech/power/device.html">Device Power</a>
-          </li>
+          <li><a href="<?cs var:toroot ?>devices/tech/power/device.html">Device Power</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/power/values.html">Power Values</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/power/batterystats.html">Battery Use</a>
           </li>
@@ -377,7 +462,8 @@
           <li><a href="<?cs var:toroot ?>devices/tech/test_infra/tradefed/fundamentals/lifecycle.html">Test Lifecycle</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/test_infra/tradefed/fundamentals/options.html">Option Handling</a></li>
           <li><a href="<?cs var:toroot ?>devices/tech/test_infra/tradefed/full_example.html">An End-to-End Example</a></li>
-          <li id="tradefed-tree-list" class="nav-section">
+          <li><a href="<?cs var:toroot ?>devices/tech/test_infra/tradefed/fundamentals/vts.html">Systems Testing With VTS</a></li>
+	  <li id="tradefed-tree-list" class="nav-section">
             <div class="nav-section-header">
               <a href="<?cs var:toroot ?>reference/packages.html">
                 <span class="en">Package Index</span>

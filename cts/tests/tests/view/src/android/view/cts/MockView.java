@@ -25,12 +25,12 @@ import android.os.Parcelable;
 import android.util.AttributeSet;
 import android.util.SparseArray;
 import android.view.ContextMenu;
+import android.view.ContextMenu.ContextMenuInfo;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ContextMenu.ContextMenuInfo;
 
 public class MockView extends View {
     private boolean mCalledOnCreateContextMenu = false;
@@ -71,10 +71,7 @@ public class MockView extends View {
     private boolean mCalledOnKeyPreIme = false;
     private boolean mCalledOnResolvePointerIcon = false;
     private boolean mCalledOnVisibilityAggregated = false;
-    private boolean mCalledDispatchStartTemporaryDetach = false;
-    private boolean mCalledDispatchFinishTemporaryDetach = false;
-    private boolean mCalledOnStartTemporaryDetach = false;
-    private boolean mCalledOnFinishTemporaryDetach = false;
+    private boolean mCalledRequestFocus = false;
 
     private int mOldWidth = -1;
     private int mOldHeight = -1;
@@ -630,52 +627,22 @@ public class MockView extends View {
         mLastAggregatedVisibility = isVisible;
     }
 
+    @Override
+    public boolean requestFocus(int direction, Rect previouslyFocusedRect) {
+        mCalledRequestFocus = true;
+        return super.requestFocus(direction, previouslyFocusedRect);
+    }
+
     public boolean hasCalledOnVisibilityAggregated() {
         return mCalledOnVisibilityAggregated;
     }
 
+    public boolean hasCalledRequestFocus() {
+        return mCalledRequestFocus;
+    }
+
     public boolean getLastAggregatedVisibility() {
         return mLastAggregatedVisibility;
-    }
-
-    @Override
-    public void dispatchStartTemporaryDetach() {
-        super.dispatchStartTemporaryDetach();
-        mCalledDispatchStartTemporaryDetach = true;
-    }
-
-    @Override
-    public void dispatchFinishTemporaryDetach() {
-        super.dispatchFinishTemporaryDetach();
-        mCalledDispatchFinishTemporaryDetach = true;
-    }
-
-    @Override
-    public void onStartTemporaryDetach() {
-        super.onStartTemporaryDetach();
-        mCalledOnStartTemporaryDetach = true;
-    }
-
-    @Override
-    public void onFinishTemporaryDetach() {
-        super.onFinishTemporaryDetach();
-        mCalledOnFinishTemporaryDetach = true;
-    }
-
-    public boolean hasCalledDispatchStartTemporaryDetach() {
-        return mCalledDispatchStartTemporaryDetach;
-    }
-
-    public boolean hasCalledDispatchFinishTemporaryDetach() {
-        return mCalledDispatchFinishTemporaryDetach;
-    }
-
-    public boolean hasCalledOnStartTemporaryDetach() {
-        return mCalledOnStartTemporaryDetach;
-    }
-
-    public boolean hasCalledOnFinishTemporaryDetach() {
-        return mCalledOnFinishTemporaryDetach;
     }
 
     public void reset() {
@@ -718,11 +685,7 @@ public class MockView extends View {
         mCalledOnKeyPreIme = false;
         mCalledOnResolvePointerIcon = false;
         mCalledOnVisibilityAggregated = false;
-        mCalledOnVisibilityAggregated = false;
-        mCalledDispatchStartTemporaryDetach = false;
-        mCalledDispatchFinishTemporaryDetach = false;
-        mCalledOnStartTemporaryDetach = false;
-        mCalledOnFinishTemporaryDetach = false;
+        mCalledRequestFocus = false;
 
         mOldWidth = -1;
         mOldHeight = -1;

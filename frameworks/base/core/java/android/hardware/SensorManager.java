@@ -17,8 +17,11 @@
 package android.hardware;
 
 import android.annotation.SystemApi;
+import android.annotation.SystemService;
+import android.content.Context;
 import android.os.Build;
 import android.os.Handler;
+import android.os.MemoryFile;
 import android.util.Log;
 import android.util.SparseArray;
 
@@ -29,10 +32,7 @@ import java.util.List;
 /**
  * <p>
  * SensorManager lets you access the device's {@link android.hardware.Sensor
- * sensors}. Get an instance of this class by calling
- * {@link android.content.Context#getSystemService(java.lang.String)
- * Context.getSystemService()} with the argument
- * {@link android.content.Context#SENSOR_SERVICE}.
+ * sensors}.
  * </p>
  * <p>
  * Always make sure to disable sensors you don't need, especially when your
@@ -78,6 +78,7 @@ import java.util.List;
  * @see Sensor
  *
  */
+@SystemService(Context.SENSOR_SERVICE)
 public abstract class SensorManager {
     /** @hide */
     protected static final String TAG = "SensorManager";
@@ -492,7 +493,7 @@ public abstract class SensorManager {
         if (type == Sensor.TYPE_PROXIMITY || type == Sensor.TYPE_SIGNIFICANT_MOTION ||
                 type == Sensor.TYPE_TILT_DETECTOR || type == Sensor.TYPE_WAKE_GESTURE ||
                 type == Sensor.TYPE_GLANCE_GESTURE || type == Sensor.TYPE_PICK_UP_GESTURE ||
-                type == Sensor.TYPE_WRIST_TILT_GESTURE) {
+                type == Sensor.TYPE_WRIST_TILT_GESTURE || type == Sensor.TYPE_DYNAMIC_SENSOR_META) {
             wakeUpSensor = true;
         }
 
@@ -879,6 +880,73 @@ public abstract class SensorManager {
     /** @hide */
     protected abstract boolean flushImpl(SensorEventListener listener);
 
+
+    /**
+     * Create a sensor direct channel backed by shared memory wrapped in MemoryFile object.
+     *
+     * The resulting channel can be used for delivering sensor events to native code, other
+     * processes, GPU/DSP or other co-processors without CPU intervention. This is the recommanded
+     * for high performance sensor applications that use high sensor rates (e.g. greater than 200Hz)
+     * and cares about sensor event latency.
+     *
+     * Use the returned {@link android.hardware.SensorDirectChannel} object to configure direct
+     * report of sensor events. After use, call {@link android.hardware.SensorDirectChannel#close()}
+     * to free up resource in sensor system associated with the direct channel.
+     *
+     * @param mem A {@link android.os.MemoryFile} shared memory object.
+     * @return A {@link android.hardware.SensorDirectChannel} object if successful, null otherwise.
+     * @throws NullPointerException when mem is null.
+     * @see SensorDirectChannel#close()
+     * @see #configureDirectChannel(SensorDirectChannel, Sensor, int)
+     */
+    public SensorDirectChannel createDirectChannel(MemoryFile mem) {
+        return createDirectChannelImpl(mem, null);
+    }
+
+    /**
+     * Create a sensor direct channel backed by shared memory wrapped in HardwareBuffer object.
+     *
+     * The resulting channel can be used for delivering sensor events to native code, other
+     * processes, GPU/DSP or other co-processors without CPU intervention. This is the recommanded
+     * for high performance sensor applications that use high sensor rates (e.g. greater than 200Hz)
+     * and cares about sensor event latency.
+     *
+     * Use the returned {@link android.hardware.SensorDirectChannel} object to configure direct
+     * report of sensor events. After use, call {@link android.hardware.SensorDirectChannel#close()}
+     * to free up resource in sensor system associated with the direct channel.
+     *
+     * @param mem A {@link android.hardware.HardwareBuffer} shared memory object.
+     * @return A {@link android.hardware.SensorDirectChannel} object if successful,
+     *         null otherwise.
+     * @throws NullPointerException when mem is null.
+     * @see SensorDirectChannel#close()
+     * @see #configureDirectChannel(SensorDirectChannel, Sensor, int)
+     */
+    public SensorDirectChannel createDirectChannel(HardwareBuffer mem) {
+        return createDirectChannelImpl(null, mem);
+    }
+
+    /** @hide */
+    protected abstract SensorDirectChannel createDirectChannelImpl(
+            MemoryFile memoryFile, HardwareBuffer hardwareBuffer);
+
+    /** @hide */
+    void destroyDirectChannel(SensorDirectChannel channel) {
+        destroyDirectChannelImpl(channel);
+    }
+
+    /** @hide */
+    protected abstract void destroyDirectChannelImpl(SensorDirectChannel channel);
+
+    /** @removed */
+    @Deprecated
+    public int configureDirectChannel(SensorDirectChannel channel, Sensor sensor, int rateLevel) {
+        return configureDirectChannelImpl(channel, sensor, rateLevel);
+    }
+
+    /** @hide */
+    protected abstract int configureDirectChannelImpl(
+            SensorDirectChannel channel, Sensor s, int rate);
 
     /**
      * Used for receiving notifications from the SensorManager when dynamic sensors are connected or
@@ -1356,20 +1424,35 @@ public abstract class SensorManager {
     /**
      * Computes the device's orientation based on the rotation matrix.
      * <p>
-     * When it returns, the array values is filled with the result:
+     * When it returns, the array values are as follows:
      * <ul>
-     * <li>values[0]: <i>azimuth</i>, rotation around the -Z axis,
-     *                i.e. the opposite direction of Z axis.</li>
-     * <li>values[1]: <i>pitch</i>, rotation around the -X axis,
-     *                i.e the opposite direction of X axis.</li>
-     * <li>values[2]: <i>roll</i>, rotation around the Y axis.</li>
+     * <li>values[0]: <i>Azimuth</i>, angle of rotation about the -z axis.
+     *                This value represents the angle between the device's y
+     *                axis and the magnetic north pole. When facing north, this
+     *                angle is 0, when facing south, this angle is &pi;.
+     *                Likewise, when facing east, this angle is &pi;/2, and
+     *                when facing west, this angle is -&pi;/2. The range of
+     *                values is -&pi; to &pi;.</li>
+     * <li>values[1]: <i>Pitch</i>, angle of rotation about the x axis.
+     *                This value represents the angle between a plane parallel
+     *                to the device's screen and a plane parallel to the ground.
+     *                Assuming that the bottom edge of the device faces the
+     *                user and that the screen is face-up, tilting the top edge
+     *                of the device toward the ground creates a positive pitch
+     *                angle. The range of values is -&pi; to &pi;.</li>
+     * <li>values[2]: <i>Roll</i>, angle of rotation about the y axis. This
+     *                value represents the angle between a plane perpendicular
+     *                to the device's screen and a plane perpendicular to the
+     *                ground. Assuming that the bottom edge of the device faces
+     *                the user and that the screen is face-up, tilting the left
+     *                edge of the device toward the ground creates a positive
+     *                roll angle. The range of values is -&pi;/2 to &pi;/2.</li>
      * </ul>
      * <p>
-     * Applying these three intrinsic rotations in azimuth, pitch and roll order transforms
-     * identity matrix to the rotation matrix given in input R.
-     * All three angles above are in <b>radians</b> and <b>positive</b> in the
-     * <b>counter-clockwise</b> direction. Range of output is: azimuth from -&pi; to &pi;,
-     * pitch from -&pi;/2 to &pi;/2 and roll from -&pi; to &pi;.
+     * Applying these three rotations in the azimuth, pitch, roll order
+     * transforms an identity matrix to the rotation matrix passed into this
+     * method. Also, note that all three orientation angles are expressed in
+     * <b>radians</b>.
      *
      * @param R
      *        rotation matrix see {@link #getRotationMatrix}.
@@ -1813,4 +1896,12 @@ public abstract class SensorManager {
         }
         return delay;
     }
+
+    /** @hide */
+    public boolean setOperationParameter(SensorAdditionalInfo parameter) {
+        return setOperationParameterImpl(parameter);
+    }
+
+    /** @hide */
+    protected abstract boolean setOperationParameterImpl(SensorAdditionalInfo parameter);
 }

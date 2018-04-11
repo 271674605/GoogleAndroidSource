@@ -19,6 +19,7 @@ package android.support.design.widget;
 import android.content.Context;
 import android.graphics.Rect;
 import android.support.design.widget.CoordinatorLayout.Behavior;
+import android.support.v4.math.MathUtils;
 import android.support.v4.view.GravityCompat;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.WindowInsetsCompat;
@@ -35,8 +36,8 @@ import java.util.List;
  */
 abstract class HeaderScrollingViewBehavior extends ViewOffsetBehavior<View> {
 
-    private final Rect mTempRect1 = new Rect();
-    private final Rect mTempRect2 = new Rect();
+    final Rect mTempRect1 = new Rect();
+    final Rect mTempRect2 = new Rect();
 
     private int mVerticalLayoutGap = 0;
     private int mOverlayTop;
@@ -142,11 +143,8 @@ abstract class HeaderScrollingViewBehavior extends ViewOffsetBehavior<View> {
     }
 
     final int getOverlapPixelsForOffset(final View header) {
-        return mOverlayTop == 0
-                ? 0
-                : MathUtils.constrain(Math.round(getOverlapRatioForOffset(header) * mOverlayTop),
-                        0, mOverlayTop);
-
+        return mOverlayTop == 0 ? 0 : MathUtils.clamp(
+                (int) (getOverlapRatioForOffset(header) * mOverlayTop), 0, mOverlayTop);
     }
 
     private static int resolveGravity(int gravity) {

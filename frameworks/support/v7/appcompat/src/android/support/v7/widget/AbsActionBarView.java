@@ -19,8 +19,6 @@ package android.support.v7.widget;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
-import android.os.Build;
-import android.support.v4.view.MotionEventCompat;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.ViewPropertyAnimatorCompat;
 import android.support.v4.view.ViewPropertyAnimatorListener;
@@ -71,9 +69,7 @@ abstract class AbsActionBarView extends ViewGroup {
 
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
-        if (Build.VERSION.SDK_INT >= 8) {
-            super.onConfigurationChanged(newConfig);
-        }
+        super.onConfigurationChanged(newConfig);
 
         // Action bar can change size on configuration changes.
         // Reread the desired height from the theme-specified style.
@@ -94,7 +90,7 @@ abstract class AbsActionBarView extends ViewGroup {
         // eat the rest of the gesture without reporting the events to the default implementation
         // since that's what it expects.
 
-        final int action = MotionEventCompat.getActionMasked(ev);
+        final int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             mEatingTouch = false;
         }
@@ -118,19 +114,19 @@ abstract class AbsActionBarView extends ViewGroup {
         // Same deal as onTouchEvent() above. Eat all hover events, but still
         // respect the touch event dispatch contract.
 
-        final int action = MotionEventCompat.getActionMasked(ev);
-        if (action == MotionEventCompat.ACTION_HOVER_ENTER) {
+        final int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_HOVER_ENTER) {
             mEatingHover = false;
         }
 
         if (!mEatingHover) {
             final boolean handled = super.onHoverEvent(ev);
-            if (action == MotionEventCompat.ACTION_HOVER_ENTER && !handled) {
+            if (action == MotionEvent.ACTION_HOVER_ENTER && !handled) {
                 mEatingHover = true;
             }
         }
 
-        if (action == MotionEventCompat.ACTION_HOVER_EXIT
+        if (action == MotionEvent.ACTION_HOVER_EXIT
                 || action == MotionEvent.ACTION_CANCEL) {
             mEatingHover = false;
         }
@@ -164,7 +160,7 @@ abstract class AbsActionBarView extends ViewGroup {
 
         if (visibility == VISIBLE) {
             if (getVisibility() != VISIBLE) {
-                ViewCompat.setAlpha(this, 0f);
+                setAlpha(0f);
             }
             ViewPropertyAnimatorCompat anim = ViewCompat.animate(this).alpha(1f);
             anim.setDuration(duration);
@@ -202,6 +198,7 @@ abstract class AbsActionBarView extends ViewGroup {
 
     public void postShowOverflowMenu() {
         post(new Runnable() {
+            @Override
             public void run() {
                 showOverflowMenu();
             }

@@ -16,23 +16,34 @@
 
 package android.support.v7.app;
 
-import org.junit.Test;
-
-import android.support.v7.appcompat.test.R;
-import android.support.v7.testutils.BaseTestActivity;
-import android.support.v7.view.ActionMode;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.SmallTest;
-import android.view.KeyEvent;
-import android.view.Menu;
-import android.view.MenuItem;
-
-import java.util.concurrent.atomic.AtomicBoolean;
+import static android.support.test.espresso.Espresso.onView;
+import static android.support.test.espresso.action.ViewActions.click;
+import static android.support.test.espresso.assertion.ViewAssertions.doesNotExist;
+import static android.support.test.espresso.assertion.ViewAssertions.matches;
+import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static android.support.test.espresso.matcher.ViewMatchers.withClassName;
+import static android.support.test.espresso.matcher.ViewMatchers.withContentDescription;
+import static android.support.test.espresso.matcher.ViewMatchers.withId;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+
+import android.support.test.filters.LargeTest;
+import android.support.test.filters.SmallTest;
+import android.support.v4.view.MenuItemCompat;
+import android.support.v7.appcompat.test.R;
+import android.support.v7.testutils.BaseTestActivity;
+import android.support.v7.view.ActionMode;
+import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
+
+import org.hamcrest.Matchers;
+import org.junit.Test;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class BaseKeyEventsTestCase<A extends BaseTestActivity>
         extends BaseInstrumentationTestCase<A> {
@@ -83,31 +94,26 @@ public abstract class BaseKeyEventsTestCase<A extends BaseTestActivity>
     }
 
     @Test
-    @SmallTest
-    public void testBackCollapsesSearchView() throws InterruptedException {
-        // First expand the SearchView
-        getActivity().runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                assertTrue("SearchView expanded", getActivity().expandSearchView());
-            }
-        });
-        getInstrumentation().waitForIdleSync();
+    @LargeTest
+    public void testBackCollapsesActionView() throws InterruptedException {
+        // Click on the Search menu item
+        onView(withId(R.id.action_search)).perform(click());
+        // Check that the action view is displayed (expanded)
+        onView(withClassName(Matchers.is(CustomCollapsibleView.class.getName())))
+                .check(matches(isDisplayed()));
 
-        // Now send a back press
+        // Let things settle
+        getInstrumentation().waitForIdleSync();
+        // Now send a back event to collapse the custom action view
         getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
         getInstrumentation().waitForIdleSync();
 
-        if (getActivity().isSearchViewExpanded()) {
-            // If the SearchView is still expanded, it's probably because it had focus and the
-            // first back removed the focus. Send another.
-            getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
-            getInstrumentation().waitForIdleSync();
-        }
-
-        // Check that the Activity is still running and the SearchView is not expanded
-        assertFalse("Activity was not finished", getActivity().isFinishing());
-        assertFalse("SearchView was collapsed", getActivity().isSearchViewExpanded());
+        // Check that the Activity is still running
+        assertFalse(getActivity().isFinishing());
+        assertFalse(getActivity().isDestroyed());
+        // ... and that our action view is not attached
+        onView(withClassName(Matchers.is(CustomCollapsibleView.class.getName())))
+                .check(doesNotExist());
     }
 
     @Test
@@ -174,6 +180,36 @@ public abstract class BaseKeyEventsTestCase<A extends BaseTestActivity>
         KeyEvent upEvent = getActivity().getInvokedKeyUpEvent();
         assertNotNull("onKeyUp called", upEvent);
         assertEquals("onKeyDown event matches", KeyEvent.KEYCODE_MENU, upEvent.getKeyCode());
+    }
+
+    @Test
+    @SmallTest
+    public void testActionMenuContent() throws Throwable {
+        onView(withId(R.id.action_search))
+                .check(matches(isDisplayed()))
+                .check(matches(withContentDescription(R.string.search_menu_description)));
+
+        onView(withId(R.id.action_alpha_shortcut))
+                .check(matches(isDisplayed()))
+                .check(matches(withContentDescription((String) null)));
+
+        Menu menu = getActivity().getMenu();
+        final MenuItem alphaItem = menu.findItem(R.id.action_alpha_shortcut);
+        assertNotNull(alphaItem);
+
+        mActivityTestRule.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                MenuItemCompat.setContentDescription(alphaItem,
+                        getActivity().getString(R.string.alpha_menu_description));
+                MenuItemCompat.setTooltipText(alphaItem,
+                        getActivity().getString(R.string.alpha_menu_tooltip));
+            }
+        });
+
+        onView(withId(R.id.action_alpha_shortcut))
+                .check(matches(isDisplayed()))
+                .check(matches(withContentDescription(R.string.alpha_menu_description)));
     }
 
     private void repopulateWithEmptyMenu() throws InterruptedException {

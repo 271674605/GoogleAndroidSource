@@ -192,7 +192,7 @@ TEXT runtime·externalthreadhandler(SB),NOSPLIT,$0
 	SUBL	$m__size, SP		// space for M
 	MOVL	SP, 0(SP)
 	MOVL	$m__size, 4(SP)
-	CALL	runtime·memclr(SB)	// smashes AX,BX,CX
+	CALL	runtime·memclrNoHeapPointers(SB)	// smashes AX,BX,CX
 
 	LEAL	m_tls(SP), CX
 	MOVL	CX, 0x14(FS)
@@ -203,10 +203,11 @@ TEXT runtime·externalthreadhandler(SB),NOSPLIT,$0
 
 	MOVL	SP, 0(SP)
 	MOVL	$g__size, 4(SP)
-	CALL	runtime·memclr(SB)	// smashes AX,BX,CX
+	CALL	runtime·memclrNoHeapPointers(SB)	// smashes AX,BX,CX
 	LEAL	g__size(SP), BX
 	MOVL	BX, g_m(SP)
-	LEAL	-8192(SP), CX
+
+	LEAL	-32768(SP), CX		// must be less than SizeOfStackReserve set by linker
 	MOVL	CX, (g_stack+stack_lo)(SP)
 	ADDL	$const__StackGuard, CX
 	MOVL	CX, g_stackguard0(SP)
@@ -308,7 +309,7 @@ TEXT runtime·callbackasm1+0(SB),NOSPLIT,$0
 
 // void tstart(M *newm);
 TEXT runtime·tstart(SB),NOSPLIT,$0
-	MOVL	newm+4(SP), CX		// m
+	MOVL	newm+0(FP), CX		// m
 	MOVL	m_g0(CX), DX		// g
 
 	// Layout new m scheduler stack on os stack.
@@ -336,7 +337,7 @@ TEXT runtime·tstart(SB),NOSPLIT,$0
 
 // uint32 tstart_stdcall(M *newm);
 TEXT runtime·tstart_stdcall(SB),NOSPLIT,$0
-	MOVL	newm+4(SP), BX
+	MOVL	newm+0(FP), BX
 
 	PUSHL	BX
 	CALL	runtime·tstart(SB)
@@ -357,10 +358,11 @@ TEXT runtime·setldt(SB),NOSPLIT,$0
 	MOVL	CX, 0x14(FS)
 	RET
 
-// Sleep duration is in 100ns units.
-TEXT runtime·usleep1(SB),NOSPLIT,$0
-	MOVL	usec+0(FP), BX
-	MOVL	$runtime·usleep2(SB), AX // to hide from 8l
+// onosstack calls fn on OS stack.
+// func onosstack(fn unsafe.Pointer, arg uint32)
+TEXT runtime·onosstack(SB),NOSPLIT,$0
+	MOVL	fn+0(FP), AX		// to hide from 8l
+	MOVL	arg+4(FP), BX
 
 	// Execute call on m->g0 stack, in case we are not actually
 	// calling a system call wrapper, like when running under WINE.
@@ -418,6 +420,14 @@ TEXT runtime·usleep2(SB),NOSPLIT,$20
 	MOVL	$-1, handle-20(SP)
 	MOVL	SP, BP
 	MOVL	runtime·_NtWaitForSingleObject(SB), AX
+	CALL	AX
+	MOVL	BP, SP
+	RET
+
+// Runs on OS stack.
+TEXT runtime·switchtothread(SB),NOSPLIT,$0
+	MOVL	SP, BP
+	MOVL	runtime·_SwitchToThread(SB), AX
 	CALL	AX
 	MOVL	BP, SP
 	RET

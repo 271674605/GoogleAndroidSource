@@ -16,6 +16,8 @@
 
 package android.support.v7.app;
 
+import static android.support.annotation.RestrictTo.Scope.LIBRARY_GROUP;
+
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
@@ -24,9 +26,9 @@ import android.support.annotation.DrawableRes;
 import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.support.annotation.StringRes;
 import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v4.view.GravityCompat;
 import android.support.v7.appcompat.R;
@@ -89,6 +91,7 @@ import java.lang.annotation.RetentionPolicy;
 public abstract class ActionBar {
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({NAVIGATION_MODE_STANDARD, NAVIGATION_MODE_LIST, NAVIGATION_MODE_TABS})
     public @interface NavigationMode {}
@@ -133,6 +136,7 @@ public abstract class ActionBar {
     public static final int NAVIGATION_MODE_TABS = 2;
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     @IntDef(flag=true, value={
             DISPLAY_USE_LOGO,
             DISPLAY_SHOW_HOME,
@@ -604,12 +608,6 @@ public abstract class ActionBar {
      * Create and return a new {@link Tab}.
      * This tab will not be included in the action bar until it is added.
      *
-     * <p>Very often tabs will be used to switch between {@link Fragment}
-     * objects.  Here is a typical implementation of such tabs:</p>
-     *
-     * {@sample development/samples/ApiDemos/src/com/example/android/apis/app/FragmentTabs.java
-     *      complete}
-     *
      * @return A new Tab
      *
      * @see #addTab(Tab)
@@ -667,7 +665,7 @@ public abstract class ActionBar {
     public abstract void addTab(Tab tab, int position);
 
     /**
-     * Add a tab for use in tabbed navigation mode. The tab will be insterted at
+     * Add a tab for use in tabbed navigation mode. The tab will be inserted at
      * <code>position</code>.
      *
      * @param tab The tab to add
@@ -833,7 +831,7 @@ public abstract class ActionBar {
 
     /**
      * Enable or disable the "home" button in the corner of the action bar. (Note that this
-     * is the application home/up affordance on the action bar, not the systemwide home
+     * is the application home/up affordance on the action bar, not the system wide home
      * button.)
      *
      * <p>This defaults to true for packages targeting &lt; API 14. For packages targeting
@@ -867,6 +865,7 @@ public abstract class ActionBar {
      * @return true if the Title field has been truncated
      * @hide pending API approval
      */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean isTitleTruncated() { return false; }
 
     /**
@@ -901,7 +900,7 @@ public abstract class ActionBar {
      * call {@link #setHomeActionContentDescription(int) setHomeActionContentDescription()}
      * to provide a correct description of the action for accessibility support.</p>
      *
-     * @param resId Resource ID of a drawable to use for the up indicator, or 0
+     * @param resId Resource ID of a drawable to use for the up indicator, or null
      *              to use the theme's default
      *
      * @see #setDisplayOptions(int, int)
@@ -1037,52 +1036,69 @@ public abstract class ActionBar {
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public void setDefaultDisplayHomeAsUpEnabled(boolean enabled) {
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public void setShowHideAnimationEnabled(boolean enabled) {
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public void onConfigurationChanged(Configuration config) {
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public void dispatchMenuVisibilityChanged(boolean visible) {
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public ActionMode startActionMode(ActionMode.Callback callback) {
         return null;
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean openOptionsMenu() {
         return false;
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
+    public boolean closeOptionsMenu() {
+        return false;
+    }
+
+    /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean invalidateOptionsMenu() {
         return false;
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean onMenuKeyEvent(KeyEvent event) {
         return false;
     }
 
     /** @hide **/
+    @RestrictTo(LIBRARY_GROUP)
     public boolean onKeyShortcut(int keyCode, KeyEvent ev) {
         return false;
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public boolean collapseActionView() {
         return false;
     }
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     public void setWindowTitle(CharSequence title) {
     }
 
@@ -1090,7 +1106,9 @@ public abstract class ActionBar {
      * Attempts to move focus to the ActionBar if it does not already contain the focus.
      *
      * @return {@code true} if focus changes or {@code false} if focus doesn't change.
+     * @hide
      */
+    @RestrictTo(LIBRARY_GROUP)
     boolean requestFocus() {
         return false;
     }
@@ -1275,7 +1293,7 @@ public abstract class ActionBar {
          * @see #setContentDescription(CharSequence)
          * @see #getContentDescription()
          */
-        public abstract Tab setContentDescription(int resId);
+        public abstract Tab setContentDescription(@StringRes int resId);
 
         /**
          * Set a description of this tab's content for use in accessibility support.

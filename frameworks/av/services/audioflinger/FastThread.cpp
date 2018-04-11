@@ -22,6 +22,7 @@
 #include "Configuration.h"
 #include <linux/futex.h>
 #include <sys/syscall.h>
+#include <cutils/atomic.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
 #include "FastThread.h"
@@ -35,7 +36,7 @@
 
 namespace android {
 
-FastThread::FastThread() : Thread(false /*canCallJava*/),
+FastThread::FastThread(const char *cycleMs, const char *loadUs) : Thread(false /*canCallJava*/),
     // re-initialized to &sInitial by subclass constructor
     mPrevious(NULL), mCurrent(NULL),
     /* mOldTs({0, 0}), */
@@ -72,11 +73,15 @@ FastThread::FastThread() : Thread(false /*canCallJava*/),
     frameCount(0),
 #endif
     mAttemptedWrite(false)
+    // mCycleMs(cycleMs)
+    // mLoadUs(loadUs)
 {
     mOldTs.tv_sec = 0;
     mOldTs.tv_nsec = 0;
     mMeasuredWarmupTs.tv_sec = 0;
     mMeasuredWarmupTs.tv_nsec = 0;
+    strlcpy(mCycleMs, cycleMs, sizeof(mCycleMs));
+    strlcpy(mLoadUs, loadUs, sizeof(mLoadUs));
 }
 
 FastThread::~FastThread()
@@ -163,9 +168,9 @@ bool FastThread::threadLoop()
                 if (old <= 0) {
                     syscall(__NR_futex, coldFutexAddr, FUTEX_WAIT_PRIVATE, old - 1, NULL);
                 }
-                int policy = sched_getscheduler(0);
+                int policy = sched_getscheduler(0) & ~SCHED_RESET_ON_FORK;
                 if (!(policy == SCHED_FIFO || policy == SCHED_RR)) {
-                    ALOGE("did not receive expected priority boost");
+                    ALOGE("did not receive expected priority boost on time");
                 }
                 // This may be overly conservative; there could be times that the normal mixer
                 // requests such a brief cold idle that it doesn't require resetting this flag.
@@ -336,8 +341,8 @@ bool FastThread::threadLoop()
                     // this store #4 is not atomic with respect to stores #1, #2, #3 above, but
                     // the newest open & oldest closed halves are atomic with respect to each other
                     mDumpState->mBounds = mBounds;
-                    ATRACE_INT("cycle_ms", monotonicNs / 1000000);
-                    ATRACE_INT("load_us", loadNs / 1000);
+                    ATRACE_INT(mCycleMs, monotonicNs / 1000000);
+                    ATRACE_INT(mLoadUs, loadNs / 1000);
                 }
 #endif
             } else {

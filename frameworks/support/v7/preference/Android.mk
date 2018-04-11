@@ -14,21 +14,6 @@
 
 LOCAL_PATH := $(call my-dir)
 
-# Build the resources separately because the constants built with the resources need to access
-# the latest SDK but the actual code needs to build against SDK 7.
-include $(CLEAR_VARS)
-LOCAL_USE_AAPT2 := true
-LOCAL_MODULE := android-support-v7-preference-res
-LOCAL_SDK_VERSION := $(SUPPORT_CURRENT_SDK_VERSION)
-LOCAL_SRC_FILES := $(call all-java-files-under,constants)
-LOCAL_RESOURCE_DIR := $(LOCAL_PATH)/res
-LOCAL_SHARED_ANDROID_LIBRARIES := \
-    android-support-v7-appcompat \
-    android-support-v7-recyclerview
-LOCAL_JAR_EXCLUDE_FILES := none
-LOCAL_JAVA_LANGUAGE_VERSION := 1.7
-include $(BUILD_STATIC_JAVA_LIBRARY)
-
 # Here is the final static library that apps can link against.
 # Applications that use this library must specify
 #
@@ -36,18 +21,17 @@ include $(BUILD_STATIC_JAVA_LIBRARY)
 #       android-support-v7-preference \
 #       android-support-v7-appcompat \
 #       android-support-v7-recyclerview \
-#       android-support-v4 \
-#       android-support-annotations
+#       android-support-v4
 #
 # in their makefiles to include the resources and their dependencies in their package.
 include $(CLEAR_VARS)
 LOCAL_USE_AAPT2 := true
 LOCAL_MODULE := android-support-v7-preference
-LOCAL_SDK_VERSION := 7
-LOCAL_SDK_RES_VERSION := $(SUPPORT_CURRENT_SDK_VERSION)
-LOCAL_SRC_FILES := $(call all-java-files-under,src)
-LOCAL_STATIC_ANDROID_LIBRARIES := \
-    android-support-v7-preference-res
+LOCAL_SDK_VERSION := $(SUPPORT_CURRENT_SDK_VERSION)
+LOCAL_SRC_FILES := \
+    $(call all-java-files-under,constants) \
+    $(call all-java-files-under,src)
+LOCAL_RESOURCE_DIR := $(LOCAL_PATH)/res
 LOCAL_SHARED_ANDROID_LIBRARIES := \
     android-support-v7-appcompat \
     android-support-v7-recyclerview \
@@ -57,12 +41,3 @@ LOCAL_JAR_EXCLUDE_FILES := none
 LOCAL_JAVA_LANGUAGE_VERSION := 1.7
 LOCAL_AAPT_FLAGS := --add-javadoc-annotation doconly
 include $(BUILD_STATIC_JAVA_LIBRARY)
-
-# API Check
-# ---------------------------------------------
-support_module := $(LOCAL_MODULE)
-support_module_api_dir := $(LOCAL_PATH)/api
-support_module_src_files := $(LOCAL_SRC_FILES)
-support_module_java_libraries := $(LOCAL_JAVA_LIBRARIES)
-support_module_java_packages := android.support.v7.preference
-include $(SUPPORT_API_CHECK)

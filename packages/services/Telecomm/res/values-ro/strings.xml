@@ -22,7 +22,7 @@
     <string name="notification_missedCallTitle" msgid="7554385905572364535">"Apel nepreluat"</string>
     <string name="notification_missedWorkCallTitle" msgid="6242489980390803090">"Apel de serviciu nepreluat"</string>
     <string name="notification_missedCallsTitle" msgid="1361677948941502522">"Apeluri nepreluate"</string>
-    <string name="notification_missedCallsMsg" msgid="4575787816055205600">"<xliff:g id="NUM_MISSED_CALLS">%s</xliff:g> (de) apeluri nepreluate"</string>
+    <string name="notification_missedCallsMsg" msgid="4575787816055205600">"<xliff:g id="NUM_MISSED_CALLS">%s</xliff:g> apeluri nepreluate"</string>
     <string name="notification_missedCallTicker" msgid="504686252427747209">"Apel nepreluat de la <xliff:g id="MISSED_CALL_FROM">%s</xliff:g>"</string>
     <string name="notification_missedCall_call_back" msgid="2684890353590890187">"Sunați"</string>
     <string name="notification_missedCall_message" msgid="3049928912736917988">"Mesaj"</string>
@@ -45,9 +45,10 @@
     <string name="no_vm_number" msgid="4164780423805688336">"Lipsește numărul mesageriei vocale"</string>
     <string name="no_vm_number_msg" msgid="1300729501030053828">"Niciun număr de mesagerie vocală nu este stocat pe cardul SIM."</string>
     <string name="add_vm_number_str" msgid="4676479471644687453">"Adăugați numărul"</string>
-    <string name="change_default_dialer_dialog_title" msgid="4430590714918044425">"Schimbați aplicația Telefon prestabilită?"</string>
-    <string name="change_default_dialer_with_previous_app_set_text" msgid="3213396537499337949">"Folosiți <xliff:g id="NEW_APP">%1$s</xliff:g> și nu <xliff:g id="CURRENT_APP">%2$s</xliff:g> ca aplicație de telefonie prestabilită?"</string>
-    <string name="change_default_dialer_no_previous_app_set_text" msgid="7608426684114545221">"Folosiți <xliff:g id="NEW_APP">%s</xliff:g> ca aplicație de telefonie prestabilită?"</string>
+    <string name="change_default_dialer_dialog_title" msgid="9101655962941740507">"Setați <xliff:g id="NEW_APP">%s</xliff:g> ca aplicație prestabilită a telefonului?"</string>
+    <string name="change_default_dialer_dialog_affirmative" msgid="8606546663509166276">"Setați ca prestabilită"</string>
+    <string name="change_default_dialer_dialog_negative" msgid="9078144617060173845">"Anulați"</string>
+    <string name="change_default_dialer_warning_message" msgid="1417671460801684999">"<xliff:g id="NEW_APP">%s</xliff:g> va putea iniția apeluri și va putea controla toate aspectele acestora. E recomandat să setați ca aplicație prestabilită a telefonului numai aplicații în care aveți încredere."</string>
     <string name="blocked_numbers" msgid="2751843139572970579">"Numere blocate"</string>
     <string name="blocked_numbers_msg" msgid="1045015186124965643">"Nu veți primi apeluri sau mesaje text de la numerele blocate."</string>
     <string name="block_number" msgid="1101252256321306179">"Adăugați un număr"</string>
@@ -66,4 +67,20 @@
     <string name="blocked_numbers_block_emergency_number_message" msgid="917851876780698387">"Numărul de urgență nu poate fi blocat."</string>
     <string name="blocked_numbers_number_already_blocked_message" msgid="4392247814500811798">"<xliff:g id="BLOCKED_NUMBER">%1$s</xliff:g> este deja blocat."</string>
     <string name="toast_personal_call_msg" msgid="5115361633476779723">"Utilizarea telefonului personal pentru a apela"</string>
+    <string name="notification_incoming_call" msgid="7713197997773986670">"Apel <xliff:g id="CALL_VIA">%1$s</xliff:g> de la <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="notification_incoming_video_call" msgid="6638486071698373893">"Apel video <xliff:g id="CALL_VIA">%1$s</xliff:g> de la <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="answering_ends_other_call" msgid="8282145910153766401">"Dacă răspundeți, apelul dvs. <xliff:g id="CALL_VIA">%1$s</xliff:g> va fi încheiat."</string>
+    <string name="answering_ends_other_calls" msgid="1198589551399049197">"Dacă răspundeți, apelurile dvs. <xliff:g id="CALL_VIA">%1$s</xliff:g> vor fi încheiate."</string>
+    <string name="answering_ends_other_video_call" msgid="8510410917384186360">"Dacă răspundeți, apelul video <xliff:g id="CALL_VIA">%1$s</xliff:g> va fi încheiat."</string>
+    <string name="answering_ends_other_managed_call" msgid="5186137550267947785">"Dacă răspundeți, apelul în curs va fi încheiat."</string>
+    <string name="answering_ends_other_managed_calls" msgid="6429838309560397988">"Dacă răspundeți, apelurile în curs vor fi încheiate."</string>
+    <string name="answering_ends_other_managed_video_call" msgid="1585423762458248435">"Dacă răspundeți, apelul video în curs va fi încheiat."</string>
+    <string name="answer_incoming_call" msgid="4140530013111794587">"Răspundeți"</string>
+    <string name="decline_incoming_call" msgid="806026168661598368">"Respingeți"</string>
+    <string name="cant_call_due_to_ongoing_call" msgid="4952615196237854748">"Apelul nu poate fi inițiat din cauza apelului <xliff:g id="OTHER_CALL">%1$s</xliff:g>."</string>
+    <string name="cant_call_due_to_ongoing_calls" msgid="1380804892363503856">"Apelul nu poate fi inițiat din cauza apelurilor <xliff:g id="OTHER_CALL">%1$s</xliff:g>."</string>
+    <string name="cant_call_due_to_ongoing_unknown_call" msgid="149091978697302211">"Apelul nu poate fi inițiat din cauza unui apel din altă aplicație."</string>
+    <string name="notification_channel_incoming_call" msgid="3513761697082968084">"Apeluri primite"</string>
+    <string name="notification_channel_missed_call" msgid="8727062678632713146">"Apeluri nepreluate"</string>
+    <string name="alert_outgoing_call" msgid="982908156825958001">"Dacă inițiați acest apel, cel din <xliff:g id="OTHER_APP">%1$s</xliff:g> va fi încheiat."</string>
 </resources>

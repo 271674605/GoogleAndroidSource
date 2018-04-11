@@ -45,9 +45,10 @@
     <string name="no_vm_number" msgid="4164780423805688336">"عدم وجود شماره پست صوتی"</string>
     <string name="no_vm_number_msg" msgid="1300729501030053828">"شماره پست صوتی در سیم کارت ذخیره نشده است."</string>
     <string name="add_vm_number_str" msgid="4676479471644687453">"افزودن شماره"</string>
-    <string name="change_default_dialer_dialog_title" msgid="4430590714918044425">"برنامه شماره‌گیر پیش‌فرض تغییر کند؟"</string>
-    <string name="change_default_dialer_with_previous_app_set_text" msgid="3213396537499337949">"از <xliff:g id="NEW_APP">%1$s</xliff:g> به جای <xliff:g id="CURRENT_APP">%2$s</xliff:g> به عنوان برنامه شماره‌گیر پیش‌فرض استفاده شود؟"</string>
-    <string name="change_default_dialer_no_previous_app_set_text" msgid="7608426684114545221">"از <xliff:g id="NEW_APP">%s</xliff:g> به عنوان برنامه شماره‌گیر پیش‌فرض استفاده شود؟"</string>
+    <string name="change_default_dialer_dialog_title" msgid="9101655962941740507">"<xliff:g id="NEW_APP">%s</xliff:g> را به برنامه تلفن پیش‌فرضتان تبدیل می‌کنید؟"</string>
+    <string name="change_default_dialer_dialog_affirmative" msgid="8606546663509166276">"تنظیم پیش‌فرض"</string>
+    <string name="change_default_dialer_dialog_negative" msgid="9078144617060173845">"لغو"</string>
+    <string name="change_default_dialer_warning_message" msgid="1417671460801684999">"<xliff:g id="NEW_APP">%s</xliff:g> می‌تواند تماس‌ها را برقرار کند و همه مسائل مربوط به آنها را کنترل کند. فقط برنامه‌هایی را که به آنها اطمینان دارید به‌عنوان برنامه پیش‌فرض تلفن تنظیم کنید."</string>
     <string name="blocked_numbers" msgid="2751843139572970579">"شماره‌های مسدود‌شده"</string>
     <string name="blocked_numbers_msg" msgid="1045015186124965643">"از شماره‌های مسدود‌شده نمی‌توانید تماس یا پیامک دریافت کنید."</string>
     <string name="block_number" msgid="1101252256321306179">"افزودن شماره"</string>
@@ -66,4 +67,20 @@
     <string name="blocked_numbers_block_emergency_number_message" msgid="917851876780698387">"شماره اضطراری مسدود نشد."</string>
     <string name="blocked_numbers_number_already_blocked_message" msgid="4392247814500811798">"<xliff:g id="BLOCKED_NUMBER">%1$s</xliff:g> قبلاً مسدود شده است."</string>
     <string name="toast_personal_call_msg" msgid="5115361633476779723">"استفاده از شماره‌گیر شخصی برای گرفتن تماس"</string>
+    <string name="notification_incoming_call" msgid="7713197997773986670">"<xliff:g id="CALL_VIA">%1$s</xliff:g> تماس از <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="notification_incoming_video_call" msgid="6638486071698373893">"<xliff:g id="CALL_VIA">%1$s</xliff:g> تماس ویدیویی از <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="answering_ends_other_call" msgid="8282145910153766401">"پاسخ‌گویی به تماس <xliff:g id="CALL_VIA">%1$s</xliff:g> پایان می‌دهد"</string>
+    <string name="answering_ends_other_calls" msgid="1198589551399049197">"پاسخ‌گویی به تماس‌های <xliff:g id="CALL_VIA">%1$s</xliff:g> شما پاسخ می‌دهد"</string>
+    <string name="answering_ends_other_video_call" msgid="8510410917384186360">"پاسخ‌گویی به تماس ویدیویی <xliff:g id="CALL_VIA">%1$s</xliff:g> شما پایان می‌دهد"</string>
+    <string name="answering_ends_other_managed_call" msgid="5186137550267947785">"پاسخ‌گویی به تماس درحال انجامتان پایان می‌دهد"</string>
+    <string name="answering_ends_other_managed_calls" msgid="6429838309560397988">"پاسخ‌گویی به تماس‌های درحال انجامتان پایان می‌دهد"</string>
+    <string name="answering_ends_other_managed_video_call" msgid="1585423762458248435">"پاسخ‌گویی به تماس ویدیویی درحال انجامتان پایان می‌دهد"</string>
+    <string name="answer_incoming_call" msgid="4140530013111794587">"پاسخ‌گویی"</string>
+    <string name="decline_incoming_call" msgid="806026168661598368">"نپذیرفتن"</string>
+    <string name="cant_call_due_to_ongoing_call" msgid="4952615196237854748">"به دلیل تماس <xliff:g id="OTHER_CALL">%1$s</xliff:g>، نمی‌توان تماسی برقرار کرد."</string>
+    <string name="cant_call_due_to_ongoing_calls" msgid="1380804892363503856">"به دلیل تماس‌های <xliff:g id="OTHER_CALL">%1$s</xliff:g>، نمی‌توان تماسی برقرار کرد."</string>
+    <string name="cant_call_due_to_ongoing_unknown_call" msgid="149091978697302211">"به دلیل تماسی در برنامه دیگر، نمی‌توان تماسی برقرار کرد."</string>
+    <string name="notification_channel_incoming_call" msgid="3513761697082968084">"تماس‌های ورودی"</string>
+    <string name="notification_channel_missed_call" msgid="8727062678632713146">"تماس‌های بی‌پاسخ"</string>
+    <string name="alert_outgoing_call" msgid="982908156825958001">"اگر این تماس را برقرار کنید، تماس <xliff:g id="OTHER_APP">%1$s</xliff:g> شما قطع می‌شود."</string>
 </resources>

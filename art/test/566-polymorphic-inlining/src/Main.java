@@ -15,7 +15,9 @@
  */
 
 interface Itf {
-  public Class sameInvokeInterface();
+  public Class<?> sameInvokeInterface();
+  public Class<?> sameInvokeInterface2();
+  public Class<?> sameInvokeInterface3();
 }
 
 public class Main implements Itf {
@@ -39,6 +41,9 @@ public class Main implements Itf {
     itfs[1] = mains[1] = new Subclass();
     itfs[2] = mains[2] = new OtherSubclass();
 
+    // Create the profiling info eagerly to make sure they are filled.
+    ensureProfilingInfo566();
+
     // Make testInvokeVirtual and testInvokeInterface hot to get them jitted.
     // We pass Main and Subclass to get polymorphic inlining based on calling
     // the same method.
@@ -47,11 +52,13 @@ public class Main implements Itf {
       testInvokeVirtual(mains[1]);
       testInvokeInterface(itfs[0]);
       testInvokeInterface(itfs[1]);
+      testInvokeInterface2(itfs[0]);
+      testInvokeInterface2(itfs[1]);
       $noinline$testInlineToSameTarget(mains[0]);
       $noinline$testInlineToSameTarget(mains[1]);
     }
 
-    ensureJittedAndPolymorphicInline();
+    ensureJittedAndPolymorphicInline566();
 
     // At this point, the JIT should have compiled both methods, and inline
     // sameInvokeVirtual and sameInvokeInterface.
@@ -61,30 +68,52 @@ public class Main implements Itf {
     assertEquals(Itf.class, testInvokeInterface(itfs[0]));
     assertEquals(Itf.class, testInvokeInterface(itfs[1]));
 
+    assertEquals(Itf.class, testInvokeInterface2(itfs[0]));
+    assertEquals(Itf.class, testInvokeInterface2(itfs[1]));
+
     // This will trigger a deoptimization of the compiled code.
     assertEquals(OtherSubclass.class, testInvokeVirtual(mains[2]));
     assertEquals(OtherSubclass.class, testInvokeInterface(itfs[2]));
+    assertEquals(null, testInvokeInterface2(itfs[2]));
 
     // Run this once to make sure we execute the JITted code.
     $noinline$testInlineToSameTarget(mains[0]);
     assertEquals(20001, counter);
   }
 
-  public Class sameInvokeVirtual() {
-    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo
+  public Class<?> sameInvokeVirtual() {
+    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo.
     return Main.class;
   }
 
-  public Class sameInvokeInterface() {
-    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo
+  public Class<?> sameInvokeInterface() {
+    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo.
     return Itf.class;
   }
 
-  public static Class testInvokeInterface(Itf i) {
+  public Class<?> sameInvokeInterface2() {
+    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo.
+    return Itf.class;
+  }
+
+  public Class<?> sameInvokeInterface3() {
+    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo.
+    return Itf.class;
+  }
+
+  public static Class<?> testInvokeInterface(Itf i) {
     return i.sameInvokeInterface();
   }
 
-  public static Class testInvokeVirtual(Main m) {
+  public static Class<?> testInvokeInterface2(Itf i) {
+    // Make three interface calls that will do a ClassTableGet to ensure bogus code
+    // generation of ClassTableGet will crash.
+    i.sameInvokeInterface();
+    i.sameInvokeInterface2();
+    return i.sameInvokeInterface3();
+  }
+
+  public static Class<?> testInvokeVirtual(Main m) {
     return m.sameInvokeVirtual();
   }
 
@@ -95,9 +124,11 @@ public class Main implements Itf {
 
   public Object field = new Object();
 
-  public static native void ensureJittedAndPolymorphicInline();
+  public static native void ensureJittedAndPolymorphicInline566();
+  public static native void ensureProfilingInfo566();
 
   public void increment() {
+    field.getClass(); // null check to ensure we get an inlined frame in the CodeInfo
     counter++;
   }
   public static int counter = 0;
@@ -108,11 +139,18 @@ class Subclass extends Main {
 }
 
 class OtherSubclass extends Main {
-  public Class sameInvokeVirtual() {
+  public Class<?> sameInvokeVirtual() {
     return OtherSubclass.class;
   }
 
-  public Class sameInvokeInterface() {
+  public Class<?> sameInvokeInterface() {
     return OtherSubclass.class;
+  }
+
+  public Class<?> sameInvokeInterface2() {
+    return null;
+  }
+  public Class<?> sameInvokeInterface3() {
+    return null;
   }
 }

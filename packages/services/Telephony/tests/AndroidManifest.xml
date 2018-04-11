@@ -19,7 +19,6 @@
 
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.PERFORM_CDMA_PROVISIONING" />
-    <uses-permission android:name="android.permission.PERFORM_SIM_ACTIVATION" />
 
     <application android:label="@string/app_name">
         <uses-library android:name="android.test.runner" />
@@ -39,16 +38,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Test activity mimicking the PERFORM_CDMA_PROVISIONING behavior of
-             SetupWizard, useful for testing "non-interactive" OTASP. -->
-        <activity android:name="OtaspTestActivity"
-                  android:label="OtaspTest">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-
         <service android:name="SendInstantTextTestService"
                  android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE" >
             <intent-filter>
@@ -62,17 +51,16 @@
     </application>
 
     <!--
-        The prefered way is to use 'runtest':
-           runtest phone-unit
+        To run all tests:
+            adb shell am instrument -w
+                com.android.phone.tests/android.support.test.runner.AndroidJUnitRunner
 
-         runtest is a wrapper around 'adb shell'. The low level shell command is:
-           adb shell am instrument -w com.android.phone.tests/android.test.InstrumentationTestRunner
+        To run a single class test:
+            adb shell am instrument -e class com.android.phone.unit.FooUnitTest
+                -w com.android.phone.tests/android.support.test.runner.AndroidJUnitRunner
 
-         To run a single test case:
-           adb shell am instrument -w com.android.phone.tests/android.test.InstrumentationTestRunner
-                                   -e com.android.phone.unit.FooUnitTest
     -->
-    <instrumentation android:name="android.test.InstrumentationTestRunner"
+    <instrumentation android:name="android.support.test.runner.AndroidJUnitRunner"
         android:targetPackage="com.android.phone"
         android:label="Phone application tests." />
 </manifest>

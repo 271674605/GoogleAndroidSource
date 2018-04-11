@@ -15,10 +15,28 @@
     limitations under the License.
 -->
 
-<com.android.setupwizardlib.view.StickyHeaderListView
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@android:id/list"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    app:suwHeader="@layout/suw_glif_header" />
+    android:orientation="vertical">
+
+    <!-- Ignore UnusedAttribute: scrollIndicators is new in M. Default to no indicators in older
+         versions. -->
+    <com.android.setupwizardlib.view.StickyHeaderListView
+        xmlns:app="http://schemas.android.com/apk/res-auto"
+        android:id="@android:id/list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollIndicators="?attr/suwScrollIndicators"
+        app:suwHeader="@layout/suw_glif_header"
+        tools:ignore="UnusedAttribute" />
+
+    <ViewStub
+        android:id="@+id/suw_layout_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+</LinearLayout>

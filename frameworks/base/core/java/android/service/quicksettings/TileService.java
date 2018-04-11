@@ -19,11 +19,13 @@ import android.Manifest;
 import android.annotation.SdkConstant;
 import android.annotation.SdkConstant.SdkConstantType;
 import android.annotation.SystemApi;
+import android.annotation.TestApi;
 import android.app.Dialog;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Resources;
 import android.graphics.drawable.Icon;
 import android.os.Handler;
 import android.os.IBinder;
@@ -33,6 +35,8 @@ import android.os.RemoteException;
 import android.view.View;
 import android.view.View.OnAttachStateChangeListener;
 import android.view.WindowManager;
+
+import com.android.internal.R;
 
 /**
  * A TileService provides the user a tile that can be added to Quick Settings.
@@ -76,8 +80,13 @@ import android.view.WindowManager;
 public class TileService extends Service {
 
     /**
-     * An activity that provides a user interface for adjusting TileService preferences.
-     * Optional but recommended for apps that implement a TileService.
+     * An activity that provides a user interface for adjusting TileService
+     * preferences. Optional but recommended for apps that implement a
+     * TileService.
+     * <p>
+     * This intent may also define a {@link Intent#EXTRA_COMPONENT_NAME} value
+     * to indicate the {@link ComponentName} that caused the preferences to be
+     * opened.
      */
     @SdkConstant(SdkConstantType.INTENT_CATEGORY)
     public static final String ACTION_QS_TILE_PREFERENCES
@@ -123,7 +132,12 @@ public class TileService extends Service {
     /**
      * @hide
      */
-    public static final String EXTRA_COMPONENT = "android.service.quicksettings.extra.COMPONENT";
+    public static final String EXTRA_TOKEN = "token";
+
+    /**
+     * @hide
+     */
+    public static final String EXTRA_STATE = "state";
 
     private final H mHandler = new H(Looper.getMainLooper());
 
@@ -132,6 +146,7 @@ public class TileService extends Service {
     private IBinder mToken;
     private IQSService mService;
     private Runnable mUnlockRunnable;
+    private IBinder mTileToken;
 
     @Override
     public void onDestroy() {
@@ -197,7 +212,7 @@ public class TileService extends Service {
     public final void setStatusIcon(Icon icon, String contentDescription) {
         if (mService != null) {
             try {
-                mService.updateStatusIcon(mTile, icon, contentDescription);
+                mService.updateStatusIcon(mTileToken, icon, contentDescription);
             } catch (RemoteException e) {
             }
         }
@@ -224,14 +239,14 @@ public class TileService extends Service {
             @Override
             public void onViewDetachedFromWindow(View v) {
                 try {
-                    mService.onDialogHidden(getQsTile());
+                    mService.onDialogHidden(mTileToken);
                 } catch (RemoteException e) {
                 }
             }
         });
         dialog.show();
         try {
-            mService.onShowDialog(mTile);
+            mService.onShowDialog(mTileToken);
         } catch (RemoteException e) {
         }
     }
@@ -246,7 +261,7 @@ public class TileService extends Service {
     public final void unlockAndRun(Runnable runnable) {
         mUnlockRunnable = runnable;
         try {
-            mService.startUnlockAndRun(mTile);
+            mService.startUnlockAndRun(mTileToken);
         } catch (RemoteException e) {
         }
     }
@@ -292,7 +307,7 @@ public class TileService extends Service {
     public final void startActivityAndCollapse(Intent intent) {
         startActivity(intent);
         try {
-            mService.onStartActivity(mTile);
+            mService.onStartActivity(mTileToken);
         } catch (RemoteException e) {
         }
     }
@@ -311,14 +326,14 @@ public class TileService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         mService = IQSService.Stub.asInterface(intent.getIBinderExtra(EXTRA_SERVICE));
+        mTileToken = intent.getIBinderExtra(EXTRA_TOKEN);
         try {
-            ComponentName component = intent.getParcelableExtra(EXTRA_COMPONENT);
-            mTile = mService.getTile(component);
+            mTile = mService.getTile(mTileToken);
         } catch (RemoteException e) {
             throw new RuntimeException("Unable to reach IQSService", e);
         }
         if (mTile != null) {
-            mTile.setService(mService);
+            mTile.setService(mService, mTileToken);
             mHandler.sendEmptyMessage(H.MSG_START_SUCCESS);
         }
         return new IQSTileService.Stub() {
@@ -403,12 +418,21 @@ public class TileService extends Service {
                     break;
                 case MSG_START_SUCCESS:
                     try {
-                        mService.onStartSuccessful(mTile);
+                        mService.onStartSuccessful(mTileToken);
                     } catch (RemoteException e) {
                     }
                     break;
             }
         }
+    }
+
+    /**
+     * @return True if the device supports quick settings and its assocated APIs.
+     * @hide
+     */
+    @TestApi
+    public static boolean isQuickSettingsSupported() {
+        return Resources.getSystem().getBoolean(R.bool.config_quickSettingsSupported);
     }
 
     /**
@@ -419,7 +443,8 @@ public class TileService extends Service {
      */
     public static final void requestListeningState(Context context, ComponentName component) {
         Intent intent = new Intent(ACTION_REQUEST_LISTENING);
-        intent.putExtra(EXTRA_COMPONENT, component);
+        intent.putExtra(Intent.EXTRA_COMPONENT_NAME, component);
+        intent.setPackage("com.android.systemui");
         context.sendBroadcast(intent, Manifest.permission.BIND_QUICK_SETTINGS_TILE);
     }
 }

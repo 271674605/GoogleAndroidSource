@@ -50,7 +50,7 @@ public class PathMeasure {
     public PathMeasure(Path path, boolean forceClosed) {
         // The native implementation does not copy the path, prevent it from being GC'd
         mPath = path;
-        native_instance = native_create(path != null ? path.ni() : 0,
+        native_instance = native_create(path != null ? path.readOnlyNI() : 0,
                                         forceClosed);
     }
 
@@ -60,7 +60,7 @@ public class PathMeasure {
     public void setPath(Path path, boolean forceClosed) {
         mPath = path;
         native_setPath(native_instance,
-                       path != null ? path.ni() : 0,
+                       path != null ? path.readOnlyNI() : 0,
                        forceClosed);
     }
 
@@ -79,7 +79,7 @@ public class PathMeasure {
      * are unchanged.
      *
      * @param distance The distance along the current contour to sample
-     * @param pos If not null, eturns the sampled position (x==[0], y==[1])
+     * @param pos If not null, returns the sampled position (x==[0], y==[1])
      * @param tan If not null, returns the sampled tangent (x==[0], y==[1])
      * @return false if there was no path associated with this measure object
     */
@@ -134,8 +134,7 @@ public class PathMeasure {
             return false;
         }
 
-        dst.isSimplePath = false;
-        return native_getSegment(native_instance, startD, stopD, dst.ni(), startWithMoveTo);
+        return native_getSegment(native_instance, startD, stopD, dst.mutateNI(), startWithMoveTo);
     }
 
     /**

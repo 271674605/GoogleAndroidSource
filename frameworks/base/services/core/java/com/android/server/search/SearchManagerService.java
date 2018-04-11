@@ -17,7 +17,6 @@
 package com.android.server.search;
 
 import android.app.ActivityManager;
-import android.app.ActivityManagerNative;
 import android.app.AppGlobals;
 import android.app.IActivityManager;
 import android.app.ISearchManager;
@@ -33,6 +32,7 @@ import android.content.pm.ResolveInfo;
 import android.database.ContentObserver;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.UserManager;
@@ -42,6 +42,8 @@ import android.util.SparseArray;
 
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.content.PackageMonitor;
+import com.android.internal.os.BackgroundThread;
+import com.android.internal.util.DumpUtils;
 import com.android.internal.util.IndentingPrintWriter;
 import com.android.server.LocalServices;
 import com.android.server.SystemService;
@@ -57,6 +59,7 @@ import java.util.List;
  */
 public class SearchManagerService extends ISearchManager.Stub {
     private static final String TAG = "SearchManagerService";
+    final Handler mHandler;
 
     public static class Lifecycle extends SystemService {
         private SearchManagerService mService;
@@ -72,8 +75,13 @@ public class SearchManagerService extends ISearchManager.Stub {
         }
 
         @Override
-        public void onUnlockUser(int userHandle) {
-            mService.onUnlockUser(userHandle);
+        public void onUnlockUser(final int userId) {
+            mService.mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mService.onUnlockUser(userId);
+                }
+            });
         }
 
         @Override
@@ -99,6 +107,7 @@ public class SearchManagerService extends ISearchManager.Stub {
         mContext = context;
         new MyPackageMonitor().register(context, null, UserHandle.ALL, true);
         new GlobalSearchProviderObserver(context.getContentResolver());
+        mHandler = BackgroundThread.getHandler();
     }
 
     private Searchables getSearchables(int userId) {
@@ -132,7 +141,12 @@ public class SearchManagerService extends ISearchManager.Stub {
     }
 
     private void onUnlockUser(int userId) {
-        getSearchables(userId, true);
+        try {
+            getSearchables(userId, true);
+        } catch (IllegalStateException ignored) {
+            // We're just trying to warm a cache, so we don't mind if the user
+            // was stopped or destroyed before we got here.
+        }
     }
 
     private void onCleanupUser(int userId) {
@@ -292,7 +306,7 @@ public class SearchManagerService extends ISearchManager.Stub {
         try {
             Intent intent = new Intent(Intent.ACTION_ASSIST);
             intent.setComponent(comp);
-            IActivityManager am = ActivityManagerNative.getDefault();
+            IActivityManager am = ActivityManager.getService();
             return am.launchAssistIntent(intent, ActivityManager.ASSIST_CONTEXT_BASIC, hint,
                     userHandle, args);
         } catch (RemoteException e) {
@@ -304,7 +318,7 @@ public class SearchManagerService extends ISearchManager.Stub {
 
     @Override
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-        mContext.enforceCallingOrSelfPermission(android.Manifest.permission.DUMP, TAG);
+        if (!DumpUtils.checkDumpPermission(mContext, TAG, pw)) return;
 
         IndentingPrintWriter ipw = new IndentingPrintWriter(pw, "  ");
         synchronized (mSearchables) {

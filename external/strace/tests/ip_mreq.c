@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Dmitry V. Levin <ldv@altlinux.org>
+ * Copyright (c) 2015-2016 Dmitry V. Levin <ldv@altlinux.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,49 +25,133 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
-# include "config.h"
-#endif
-#include <assert.h>
-#include <unistd.h>
-#include <sys/socket.h>
+#include "tests.h"
 #include <netinet/in.h>
-#include <arpa/inet.h>
+
+#if defined IP_ADD_MEMBERSHIP && defined IPV6_ADD_MEMBERSHIP \
+ && defined IPV6_JOIN_ANYCAST && defined HAVE_IF_INDEXTONAME
+
+# include <stdio.h>
+# include <unistd.h>
+# include <sys/socket.h>
+# include <arpa/inet.h>
+# include <net/if.h>
 
 int
 main(void)
 {
-#if defined IP_ADD_MEMBERSHIP && defined IPV6_ADD_MEMBERSHIP \
- && defined IPV6_JOIN_ANYCAST && defined HAVE_INET_PTON
-	struct ip_mreq m4;
-	struct ipv6_mreq m6;
+	static const char multi4addr[] = "224.0.0.3";
+	static const char multi6addr[] = "ff01::c";
+	static const char interface[] = "127.0.0.1";
 
-	inet_pton(AF_INET, "224.0.0.3", &m4.imr_multiaddr);
-	inet_pton(AF_INET, "127.0.0.1", &m4.imr_interface);
-	inet_pton(AF_INET6, "ff01::c", &m6.ipv6mr_multiaddr);
-	m6.ipv6mr_interface = 1;
+	struct ip_mreq *const m4 = tail_alloc(sizeof(*m4));
+	struct ipv6_mreq *const m6 = tail_alloc(sizeof(*m6));
+	unsigned int i;
+	int rc;
+
+	inet_pton(AF_INET, multi4addr, &m4->imr_multiaddr);
+	inet_pton(AF_INET, interface, &m4->imr_interface);
+	inet_pton(AF_INET6, multi6addr, &m6->ipv6mr_multiaddr);
+
+	m6->ipv6mr_interface = if_nametoindex("lo");
+	if (!m6->ipv6mr_interface)
+		perror_msg_and_skip("lo");
 
 	(void) close(0);
-	assert(socket(AF_INET, SOCK_DGRAM, 0) == 0);
+	if (socket(AF_INET, SOCK_DGRAM, 0))
+		perror_msg_and_skip("socket");
 
-	assert(setsockopt(0, SOL_IP, IP_ADD_MEMBERSHIP, &m4, 1) == -1);
-	assert(setsockopt(0, SOL_IP, IP_DROP_MEMBERSHIP, &m4, 1) == -1);
-	if (setsockopt(0, SOL_IP, IP_ADD_MEMBERSHIP, &m4, sizeof(m4)) ||
-	    setsockopt(0, SOL_IP, IP_DROP_MEMBERSHIP, &m4, sizeof(m4)))
-		return 77;
+	struct {
+		int level;
+		const char *str_level;
+		int optname;
+		const char *str_optname;
+		void *optval;
+		unsigned int optsize;
+	} short_any[] = {
+		{
+			ARG_STR(SOL_IP), ARG_STR(IP_ADD_MEMBERSHIP),
+			m4, sizeof(*m4)
+		},
+		{
+			ARG_STR(SOL_IP), ARG_STR(IP_DROP_MEMBERSHIP),
+			m4, sizeof(*m4)
+		},
+		{
+			ARG_STR(SOL_IPV6), ARG_STR(IPV6_ADD_MEMBERSHIP),
+			m6, sizeof(*m6)
+		},
+		{
+			ARG_STR(SOL_IPV6), ARG_STR(IPV6_DROP_MEMBERSHIP),
+			m6, sizeof(*m6)
+		},
+		{
+			ARG_STR(SOL_IPV6), ARG_STR(IPV6_JOIN_ANYCAST),
+			m6, sizeof(*m6)
+		},
+		{
+			ARG_STR(SOL_IPV6), ARG_STR(IPV6_LEAVE_ANYCAST),
+			m6, sizeof(*m6)
+		}
+	};
 
-	assert(setsockopt(0, SOL_IPV6, IPV6_ADD_MEMBERSHIP, &m6, 1) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_DROP_MEMBERSHIP, &m6, 1) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_ADD_MEMBERSHIP, &m6, sizeof(m6)) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_DROP_MEMBERSHIP, &m6, sizeof(m6)) == -1);
+	for (i = 0; i < ARRAY_SIZE(short_any); ++i) {
+		rc = setsockopt(0, short_any[i].level, short_any[i].optname,
+				short_any[i].optval, 1);
+		printf("setsockopt(0, %s, %s, \"\\%hho\", 1) = %s\n",
+		       short_any[i].str_level, short_any[i].str_optname,
+		       * (unsigned char *) short_any[i].optval,
+		       sprintrc(rc));
 
-	assert(setsockopt(0, SOL_IPV6, IPV6_JOIN_ANYCAST, &m6, 1) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_LEAVE_ANYCAST, &m6, 1) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_JOIN_ANYCAST, &m6, sizeof(m6)) == -1);
-	assert(setsockopt(0, SOL_IPV6, IPV6_LEAVE_ANYCAST, &m6, sizeof(m6)) == -1);
+		rc = setsockopt(0, short_any[i].level, short_any[i].optname,
+				short_any[i].optval + 1, short_any[i].optsize);
+		printf("setsockopt(0, %s, %s, %p, %u) = %s\n",
+		       short_any[i].str_level, short_any[i].str_optname,
+		       short_any[i].optval + 1, short_any[i].optsize,
+		       sprintrc(rc));
+	}
 
+	struct {
+		int optname;
+		const char *str_optname;
+	} long_ip[] = {
+		{ ARG_STR(IP_ADD_MEMBERSHIP) },
+		{ ARG_STR(IP_DROP_MEMBERSHIP) }
+	}, long_ipv6[] = {
+		{ ARG_STR(IPV6_ADD_MEMBERSHIP) },
+		{ ARG_STR(IPV6_DROP_MEMBERSHIP) },
+		{ ARG_STR(IPV6_JOIN_ANYCAST) },
+		{ ARG_STR(IPV6_LEAVE_ANYCAST) }
+	};
+
+	for (i = 0; i < ARRAY_SIZE(long_ip); ++i) {
+		rc = setsockopt(0, SOL_IP, long_ip[i].optname,
+				m4, sizeof(*m4));
+		printf("setsockopt(0, SOL_IP, %s"
+		       ", {imr_multiaddr=inet_addr(\"%s\")"
+		       ", imr_interface=inet_addr(\"%s\")}, %u) = %s\n",
+		       long_ip[i].str_optname, multi4addr,
+		       interface, (unsigned) sizeof(*m4), sprintrc(rc));
+	}
+
+	for (i = 0; i < ARRAY_SIZE(long_ipv6); ++i) {
+		rc = setsockopt(0, SOL_IPV6, long_ipv6[i].optname,
+				m6, sizeof(*m6));
+		printf("setsockopt(0, SOL_IPV6, %s"
+		       ", {ipv6mr_multiaddr=inet_pton(\"%s\")"
+		       ", ipv6mr_interface=if_nametoindex(\"lo\")}"
+		       ", %u) = %s\n",
+		       long_ipv6[i].str_optname, multi6addr,
+		       (unsigned) sizeof(*m6), sprintrc(rc));
+	}
+
+	puts("+++ exited with 0 +++");
 	return 0;
-#else
-	return 77;
-#endif
 }
+
+#else
+
+SKIP_MAIN_UNDEFINED("IP_ADD_MEMBERSHIP && IPV6_ADD_MEMBERSHIP"
+		    " && IPV6_JOIN_ANYCAST && HAVE_IF_INDEXTONAME")
+
+#endif

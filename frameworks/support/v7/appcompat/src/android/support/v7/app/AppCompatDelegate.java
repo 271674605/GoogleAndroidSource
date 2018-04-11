@@ -16,6 +16,8 @@
 
 package android.support.v7.app;
 
+import static android.support.annotation.RestrictTo.Scope.LIBRARY_GROUP;
+
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
@@ -27,10 +29,9 @@ import android.support.annotation.IntDef;
 import android.support.annotation.LayoutRes;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.support.v4.app.FragmentActivity;
-import android.support.v4.os.BuildCompat;
 import android.support.v4.view.WindowCompat;
-import android.support.v7.appcompat.R;
 import android.support.v7.view.ActionMode;
 import android.support.v7.widget.Toolbar;
 import android.util.AttributeSet;
@@ -46,34 +47,42 @@ import java.lang.annotation.RetentionPolicy;
 /**
  * This class represents a delegate which you can use to extend AppCompat's support to any
  * {@link android.app.Activity}.
- * <p>
- * When using an {@link AppCompatDelegate}, you should any methods exposed in it rather than the
- * {@link android.app.Activity} method of the same name. This applies to:
+ *
+ * <p>When using an {@link AppCompatDelegate}, you should call the following methods instead of the
+ * {@link android.app.Activity} method of the same name:</p>
  * <ul>
  *     <li>{@link #addContentView(android.view.View, android.view.ViewGroup.LayoutParams)}</li>
  *     <li>{@link #setContentView(int)}</li>
  *     <li>{@link #setContentView(android.view.View)}</li>
  *     <li>{@link #setContentView(android.view.View, android.view.ViewGroup.LayoutParams)}</li>
  *     <li>{@link #requestWindowFeature(int)}</li>
+ *     <li>{@link #hasWindowFeature(int)}</li>
  *     <li>{@link #invalidateOptionsMenu()}</li>
  *     <li>{@link #startSupportActionMode(android.support.v7.view.ActionMode.Callback)}</li>
  *     <li>{@link #setSupportActionBar(android.support.v7.widget.Toolbar)}</li>
  *     <li>{@link #getSupportActionBar()}</li>
  *     <li>{@link #getMenuInflater()}</li>
+ *     <li>{@link #findViewById(int)}</li>
  * </ul>
- * There also some Activity lifecycle methods which should be proxied to the delegate:
+ *
+ * <p>The following methods should be called from the {@link android.app.Activity} method of the
+ * same name:</p>
  * <ul>
  *     <li>{@link #onCreate(android.os.Bundle)}</li>
  *     <li>{@link #onPostCreate(android.os.Bundle)}</li>
  *     <li>{@link #onConfigurationChanged(android.content.res.Configuration)}</li>
+ *     <li>{@link #onStart()}</li>
+ *     <li>{@link #onStop()}</li>
+ *     <li>{@link #onPostResume()}</li>
+ *     <li>{@link #onSaveInstanceState(Bundle)}</li>
  *     <li>{@link #setTitle(CharSequence)}</li>
  *     <li>{@link #onStop()}</li>
  *     <li>{@link #onDestroy()}</li>
  * </ul>
- * <p>
- * An {@link Activity} can only be linked with one {@link AppCompatDelegate} instance,
- * so the instance returned from {@link #create(Activity, AppCompatCallback)} should be kept
- * until the Activity is destroyed.
+ *
+ * <p>An {@link Activity} can only be linked with one {@link AppCompatDelegate} instance,
+ * therefore the instance returned from {@link #create(Activity, AppCompatCallback)} should be
+ * retained until the Activity is destroyed.</p>
  */
 public abstract class AppCompatDelegate {
 
@@ -122,6 +131,7 @@ public abstract class AppCompatDelegate {
     private static boolean sCompatVectorFromResourcesEnabled = false;
 
     /** @hide */
+    @RestrictTo(LIBRARY_GROUP)
     @IntDef({MODE_NIGHT_NO, MODE_NIGHT_YES, MODE_NIGHT_AUTO, MODE_NIGHT_FOLLOW_SYSTEM,
             MODE_NIGHT_UNSPECIFIED})
     @Retention(RetentionPolicy.SOURCE)
@@ -184,17 +194,16 @@ public abstract class AppCompatDelegate {
 
     private static AppCompatDelegate create(Context context, Window window,
             AppCompatCallback callback) {
-        final int sdk = Build.VERSION.SDK_INT;
-        if (BuildCompat.isAtLeastN()) {
+        if (Build.VERSION.SDK_INT >= 24) {
             return new AppCompatDelegateImplN(context, window, callback);
-        } else if (sdk >= 23) {
+        } else if (Build.VERSION.SDK_INT >= 23) {
             return new AppCompatDelegateImplV23(context, window, callback);
-        } else if (sdk >= 14) {
+        } else if (Build.VERSION.SDK_INT >= 14) {
             return new AppCompatDelegateImplV14(context, window, callback);
-        } else if (sdk >= 11) {
+        } else if (Build.VERSION.SDK_INT >= 11) {
             return new AppCompatDelegateImplV11(context, window, callback);
         } else {
-            return new AppCompatDelegateImplV7(context, window, callback);
+            return new AppCompatDelegateImplV9(context, window, callback);
         }
     }
 
@@ -259,6 +268,11 @@ public abstract class AppCompatDelegate {
     public abstract void onConfigurationChanged(Configuration newConfig);
 
     /**
+     * Should be called from {@link Activity#onStart()} Activity.onStart()}
+     */
+    public abstract void onStart();
+
+    /**
      * Should be called from {@link Activity#onStop Activity.onStop()}
      */
     public abstract void onStop();
@@ -274,8 +288,9 @@ public abstract class AppCompatDelegate {
      *
      * @return The view if found or null otherwise.
      */
+    @SuppressWarnings("TypeParameterUnusedInFormals")
     @Nullable
-    public abstract View findViewById(@IdRes int id);
+    public abstract <T extends View> T findViewById(@IdRes int id);
 
     /**
      * Should be called instead of {@link Activity#setContentView(android.view.View)}}
@@ -374,7 +389,7 @@ public abstract class AppCompatDelegate {
 
     /**
      * This should be called from a
-     * {@link android.support.v4.view.LayoutInflaterFactory LayoutInflaterFactory} in order
+     * {@link android.view.LayoutInflater.Factory2 LayoutInflater.Factory2} in order
      * to return tint-aware widgets.
      * <p>
      * This is only needed if you are using your own
@@ -409,7 +424,8 @@ public abstract class AppCompatDelegate {
      * Allow AppCompat to apply the {@code night} and {@code notnight} resource qualifiers.
      *
      * <p>Doing this enables the
-     * {@link R.style#Theme_AppCompat_DayNight Theme.AppCompat.DayNight}
+     * {@link
+     * android.support.v7.appcompat.R.style#Theme_AppCompat_DayNight Theme.AppCompat.DayNight}
      * family of themes to work, using the computed twilight to automatically select a dark or
      * light theme.</p>
      *
@@ -417,6 +433,10 @@ public abstract class AppCompatDelegate {
      *
      * <p>This only works on devices running
      * {@link Build.VERSION_CODES#ICE_CREAM_SANDWICH ICE_CREAM_SANDWICH} and above.</p>
+     *
+     * <p>If this is called after the host component has been created, the component will either be
+     * automatically recreated or its {@link Configuration} updated. Which one depends on how
+     * the component is setup (via {@code android:configChanges} or similar).</p>
      *
      * @see #setDefaultNightMode(int)
      * @see #setLocalNightMode(int)
@@ -427,22 +447,22 @@ public abstract class AppCompatDelegate {
 
     /**
      * Override the night mode used for this delegate's host component. This method only takes
-     * effect for those situtations where {@link #applyDayNight()} works.
+     * effect for those situations where {@link #applyDayNight()} works.
      *
-     * <p>Depending on when this is called, this may not take effect until the next time that
-     * the host component is created. You may use {@link Activity#recreate()} to force a
-     * recreation.</p>
-     *
-     * @see #applyDayNight()
+     * <p>As this will call {@link #applyDayNight()}, the host component might be
+     * recreated automatically.</p>
      */
     public abstract void setLocalNightMode(@NightMode int mode);
 
     /**
-     * Sets the default night mode. This is used across all activities/dialogs but can be overriden
+     * Sets the default night mode. This is used across all activities/dialogs but can be overridden
      * locally via {@link #setLocalNightMode(int)}.
      *
-     * <p>This method only takes effect for those situtations where {@link #applyDayNight()} works.
+     * <p>This method only takes effect for those situations where {@link #applyDayNight()} works.
      * Defaults to {@link #MODE_NIGHT_NO}.</p>
+     *
+     * <p>This only takes effect for components which are created after the call. Any components
+     * which are already open will not be updated.</p>
      *
      * @see #setLocalNightMode(int)
      * @see #getDefaultNightMode()
@@ -498,8 +518,8 @@ public abstract class AppCompatDelegate {
      * manually, then you probably do not want to enable this. You have been warned.</p>
      *
      * <p>Even with this disabled, you can still use vector resources through
-     * {@link android.support.v7.widget.AppCompatImageView#setImageResource(int)} and it's
-     * {@code app:srcCompat} attribute. They can also be used in anything which AppComapt inflates
+     * {@link android.support.v7.widget.AppCompatImageView#setImageResource(int)} and its
+     * {@code app:srcCompat} attribute. They can also be used in anything which AppCompat inflates
      * for you, such as menu resources.</p>
      *
      * <p>Please note: this only takes effect in Activities created after this call.</p>

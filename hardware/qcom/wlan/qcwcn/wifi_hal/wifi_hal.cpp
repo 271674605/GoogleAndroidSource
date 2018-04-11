@@ -30,19 +30,19 @@
 #include <netlink/object-api.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
-#include <netlink-types.h>
+#include <netlink-private/object-api.h>
+#include <netlink-private/types.h>
 
 #include "nl80211_copy.h"
 
 #include <dirent.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <cld80211_lib.h>
 
 #include "sync.h"
 
 #define LOG_TAG  "WifiHAL"
-
-#include "hardware_legacy/wifi.h"
 
 #include "wifi_hal.h"
 #include "common.h"
@@ -97,15 +97,10 @@ wifi_interface_handle wifi_get_iface_handle(wifi_handle handle, char *name)
 
 void wifi_socket_set_local_port(struct nl_sock *sock, uint32_t port)
 {
-    uint32_t pid = getpid() & 0x3FFFFF;
-
-    if (port == 0) {
-        sock->s_flags &= ~NL_OWN_PORT;
-    } else {
-        sock->s_flags |= NL_OWN_PORT;
-    }
-
-    sock->s_local.nl_pid = pid + (port << 22);
+    /* Release local port pool maintained by libnl and assign a own port
+     * identifier to the socket.
+     */
+    nl_socket_set_local_port(sock, ((uint32_t)getpid() & 0x3FFFFFU) | (port << 22));
 }
 
 static nl_sock * wifi_create_nl_socket(int port, int protocol)
@@ -119,16 +114,6 @@ static nl_sock * wifi_create_nl_socket(int port, int protocol)
 
     wifi_socket_set_local_port(sock, port);
 
-    struct sockaddr_nl *addr_nl = &(sock->s_local);
-    /* ALOGI("socket address is %d:%d:%d:%d",
-       addr_nl->nl_family, addr_nl->nl_pad, addr_nl->nl_pid,
-       addr_nl->nl_groups); */
-
-    struct sockaddr *addr = NULL;
-    // ALOGI("sizeof(sockaddr) = %d, sizeof(sockaddr_nl) = %d", sizeof(*addr),
-    // sizeof(*addr_nl));
-
-    // ALOGI("Connecting socket");
     if (nl_connect(sock, protocol)) {
         ALOGE("Could not connect handle");
         nl_socket_free(sock);
@@ -197,6 +182,40 @@ static wifi_error acquire_supported_features(wifi_interface_handle iface,
 
 cleanup:
     return (wifi_error)ret;
+}
+
+static wifi_error wifi_get_capabilities(wifi_interface_handle handle)
+{
+    wifi_error ret;
+    int requestId;
+    WifihalGeneric *wifihalGeneric;
+    wifi_handle wifiHandle = getWifiHandle(handle);
+    hal_info *info = getHalInfo(wifiHandle);
+
+    if (!(info->supported_feature_set & WIFI_FEATURE_GSCAN)) {
+        ALOGE("%s: GSCAN is not supported by driver", __FUNCTION__);
+        return WIFI_ERROR_NOT_SUPPORTED;
+    }
+
+    /* No request id from caller, so generate one and pass it on to the driver.
+     * Generate it randomly.
+     */
+    requestId = get_requestid();
+
+    wifihalGeneric = new WifihalGeneric(
+                            wifiHandle,
+                            requestId,
+                            OUI_QCA,
+                            QCA_NL80211_VENDOR_SUBCMD_GSCAN_GET_CAPABILITIES);
+    if (!wifihalGeneric) {
+        ALOGE("%s: Failed to create object of WifihalGeneric class", __FUNCTION__);
+        return WIFI_ERROR_UNKNOWN;
+    }
+
+    ret = wifihalGeneric->wifiGetCapabilities(handle);
+
+    delete wifihalGeneric;
+    return ret;
 }
 
 static wifi_error get_firmware_bus_max_size_supported(
@@ -276,6 +295,27 @@ static wifi_error wifi_init_user_sock(hal_info *info)
     return WIFI_SUCCESS;
 }
 
+static wifi_error wifi_init_cld80211_sock_cb(hal_info *info)
+{
+    struct nl_cb *cb = nl_socket_get_cb(info->cldctx->sock);
+    if (cb == NULL) {
+        ALOGE("Could not get cb");
+        return WIFI_ERROR_UNKNOWN;
+    }
+
+    info->user_sock_arg = 1;
+    nl_cb_set(cb, NL_CB_SEQ_CHECK, NL_CB_CUSTOM, no_seq_check, NULL);
+    nl_cb_err(cb, NL_CB_CUSTOM, error_handler, &info->user_sock_arg);
+    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &info->user_sock_arg);
+    nl_cb_set(cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &info->user_sock_arg);
+
+    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, user_sock_message_handler, info);
+    nl_cb_put(cb);
+
+    return WIFI_SUCCESS;
+}
+
+
 /*initialize function pointer table with Qualcomm HAL API*/
 wifi_error init_wifi_vendor_hal_func_table(wifi_hal_fn *fn) {
     if (fn == NULL) {
@@ -331,7 +371,6 @@ wifi_error init_wifi_vendor_hal_func_table(wifi_hal_fn *fn) {
     fn->wifi_get_driver_version = wifi_get_driver_version;
     fn->wifi_set_passpoint_list = wifi_set_passpoint_list;
     fn->wifi_reset_passpoint_list = wifi_reset_passpoint_list;
-    fn->wifi_set_bssid_blacklist = wifi_set_bssid_blacklist;
     fn->wifi_set_lci = wifi_set_lci;
     fn->wifi_set_lcr = wifi_set_lcr;
     fn->wifi_start_sending_offloaded_packet =
@@ -355,25 +394,47 @@ wifi_error init_wifi_vendor_hal_func_table(wifi_hal_fn *fn) {
     fn->wifi_set_packet_filter = wifi_set_packet_filter;
     fn->wifi_get_packet_filter_capabilities = wifi_get_packet_filter_capabilities;
     fn->wifi_nan_get_capabilities = nan_get_capabilities;
+    fn->wifi_nan_data_interface_create = nan_data_interface_create;
+    fn->wifi_nan_data_interface_delete = nan_data_interface_delete;
+    fn->wifi_nan_data_request_initiator = nan_data_request_initiator;
+    fn->wifi_nan_data_indication_response = nan_data_indication_response;
+    fn->wifi_nan_data_end = nan_data_end;
     fn->wifi_configure_nd_offload = wifi_configure_nd_offload;
     fn->wifi_get_driver_memory_dump = wifi_get_driver_memory_dump;
     fn->wifi_get_wake_reason_stats = wifi_get_wake_reason_stats;
     fn->wifi_start_pkt_fate_monitoring = wifi_start_pkt_fate_monitoring;
     fn->wifi_get_tx_pkt_fates = wifi_get_tx_pkt_fates;
     fn->wifi_get_rx_pkt_fates = wifi_get_rx_pkt_fates;
+    fn->wifi_get_roaming_capabilities = wifi_get_roaming_capabilities;
+    fn->wifi_configure_roaming = wifi_configure_roaming;
+    fn->wifi_enable_firmware_roaming = wifi_enable_firmware_roaming;
 
     return WIFI_SUCCESS;
+}
+
+static void cld80211lib_cleanup(hal_info *info)
+{
+    if (!info->cldctx)
+        return;
+    cld80211_remove_mcast_group(info->cldctx, "host_logs");
+    cld80211_remove_mcast_group(info->cldctx, "fw_logs");
+    cld80211_remove_mcast_group(info->cldctx, "per_pkt_stats");
+    cld80211_remove_mcast_group(info->cldctx, "diag_events");
+    cld80211_remove_mcast_group(info->cldctx, "fatal_events");
+    exit_cld80211_recv(info->cldctx);
+    cld80211_deinit(info->cldctx);
+    info->cldctx = NULL;
 }
 
 wifi_error wifi_initialize(wifi_handle *handle)
 {
     int err = 0;
-    bool driver_loaded = false;
     wifi_error ret = WIFI_SUCCESS;
     wifi_interface_handle iface_handle;
     struct nl_sock *cmd_sock = NULL;
     struct nl_sock *event_sock = NULL;
     struct nl_cb *cb = NULL;
+    int status = 0;
 
     ALOGI("Initializing wifi");
     hal_info *info = (hal_info *)malloc(sizeof(hal_info));
@@ -471,19 +532,46 @@ wifi_error wifi_initialize(wifi_handle *handle)
     wifi_add_membership(*handle, "regulatory");
     wifi_add_membership(*handle, "vendor");
 
-    ret = wifi_init_user_sock(info);
-    if (ret != WIFI_SUCCESS) {
-        ALOGE("Failed to alloc user socket");
-        goto unload;
-    }
+    info->cldctx = cld80211_init();
+    if (info->cldctx != NULL) {
+        info->user_sock = info->cldctx->sock;
+        ret = wifi_init_cld80211_sock_cb(info);
+        if (ret != WIFI_SUCCESS) {
+            ALOGE("Could not set cb for CLD80211 family");
+            goto cld80211_cleanup;
+        }
 
-    if (!is_wifi_driver_loaded()) {
-        ret = (wifi_error)wifi_load_driver();
-        if(ret != WIFI_SUCCESS) {
-            ALOGE("%s Failed to load wifi driver : %d\n", __func__, ret);
+        status = cld80211_add_mcast_group(info->cldctx, "host_logs");
+        if (status) {
+            ALOGE("Failed to add mcast group host_logs :%d", status);
+            goto cld80211_cleanup;
+        }
+        status = cld80211_add_mcast_group(info->cldctx, "fw_logs");
+        if (status) {
+            ALOGE("Failed to add mcast group fw_logs :%d", status);
+            goto cld80211_cleanup;
+        }
+        status = cld80211_add_mcast_group(info->cldctx, "per_pkt_stats");
+        if (status) {
+            ALOGE("Failed to add mcast group per_pkt_stats :%d", status);
+            goto cld80211_cleanup;
+        }
+        status = cld80211_add_mcast_group(info->cldctx, "diag_events");
+        if (status) {
+            ALOGE("Failed to add mcast group diag_events :%d", status);
+            goto cld80211_cleanup;
+        }
+        status = cld80211_add_mcast_group(info->cldctx, "fatal_events");
+        if (status) {
+            ALOGE("Failed to add mcast group fatal_events :%d", status);
+            goto cld80211_cleanup;
+        }
+    } else {
+        ret = wifi_init_user_sock(info);
+        if (ret != WIFI_SUCCESS) {
+            ALOGE("Failed to alloc user socket");
             goto unload;
         }
-        driver_loaded = true;
     }
 
     ret = wifi_init_interfaces(*handle);
@@ -532,6 +620,10 @@ wifi_error wifi_initialize(wifi_handle *handle)
         goto unload;
     }
 
+    ret = wifi_get_capabilities(iface_handle);
+    if (ret != WIFI_SUCCESS)
+        ALOGE("Failed to get wifi Capabilities, error: %d", ret);
+
     info->pkt_stats = (struct pkt_stats_s *)malloc(sizeof(struct pkt_stats_s));
     if (!info->pkt_stats) {
         ALOGE("%s: malloc Failed for size: %zu",
@@ -570,9 +662,20 @@ wifi_error wifi_initialize(wifi_handle *handle)
         goto unload;
     }
 
+    ret = initializeRSSIMonitorHandler(info);
+    if (ret != WIFI_SUCCESS) {
+        ALOGE("Initializing RSSI Event Handler Failed");
+        goto unload;
+    }
+
     ALOGV("Initialized Wifi HAL Successfully; vendor cmd = %d Supported"
             " features : %x", NL80211_CMD_VENDOR, info->supported_feature_set);
 
+cld80211_cleanup:
+    if (status != 0 || ret != WIFI_SUCCESS) {
+        ret = WIFI_ERROR_UNKNOWN;
+        cld80211lib_cleanup(info);
+    }
 unload:
     if (ret != WIFI_SUCCESS) {
         if (cmd_sock)
@@ -582,16 +685,19 @@ unload:
         if (info) {
             if (info->cmd) free(info->cmd);
             if (info->event_cb) free(info->event_cb);
-            if (info->user_sock) nl_socket_free(info->user_sock);
+            if (info->cldctx) {
+                cld80211lib_cleanup(info);
+            } else if (info->user_sock) {
+                nl_socket_free(info->user_sock);
+            }
             if (info->pkt_stats) free(info->pkt_stats);
             if (info->rx_aggr_pkts) free(info->rx_aggr_pkts);
             cleanupGscanHandlers(info);
+            cleanupRSSIMonitorHandler(info);
             free(info);
         }
     }
 
-    if (driver_loaded)
-        wifi_unload_driver();
     return ret;
 }
 
@@ -625,7 +731,9 @@ static void internal_cleaned_up_handler(wifi_handle handle)
         info->event_sock = NULL;
     }
 
-    if (info->user_sock != 0) {
+    if (info->cldctx != NULL) {
+        cld80211lib_cleanup(info);
+    } else if (info->user_sock != 0) {
         nl_socket_free(info->user_sock);
         info->user_sock = NULL;
     }
@@ -636,6 +744,7 @@ static void internal_cleaned_up_handler(wifi_handle handle)
         free(info->rx_aggr_pkts);
     wifi_logger_ring_buffers_deinit(info);
     cleanupGscanHandlers(info);
+    cleanupRSSIMonitorHandler(info);
 
     if (info->exit_sockets[0] >= 0) {
         close(info->exit_sockets[0]);
@@ -725,7 +834,6 @@ void wifi_event_loop(wifi_handle handle)
     /* TODO: Add support for timeouts */
 
     do {
-        int timeout = -1;                   /* Infinite timeout */
         pfd[0].revents = 0;
         pfd[1].revents = 0;
         pfd[2].revents = 0;
@@ -858,7 +966,6 @@ public:
         // ALOGI("handling reponse in %s", __func__);
 
         struct nlattr **tb = reply.attributes();
-        struct genlmsghdr *gnlh = reply.header();
         struct nlattr *mcgrp = NULL;
         int i;
 

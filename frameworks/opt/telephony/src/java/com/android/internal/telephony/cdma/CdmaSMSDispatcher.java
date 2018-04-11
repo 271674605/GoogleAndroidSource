@@ -217,7 +217,7 @@ public class CdmaSMSDispatcher extends SMSDispatcher {
 
     @Override
     protected void sendSubmitPdu(SmsTracker tracker) {
-        if (SystemProperties.getBoolean(TelephonyProperties.PROPERTY_INECM_MODE, false)) {
+        if (mPhone.isInEcm()) {
             if (VDBG) {
                 Rlog.d(TAG, "Block SMS in Emergency Callback mode");
             }
@@ -255,7 +255,7 @@ public class CdmaSMSDispatcher extends SMSDispatcher {
 
         int currentDataNetwork = mPhone.getServiceState().getDataNetworkType();
         boolean imsSmsDisabled = (currentDataNetwork == TelephonyManager.NETWORK_TYPE_EHRPD
-                    || (currentDataNetwork == TelephonyManager.NETWORK_TYPE_LTE
+                    || (ServiceState.isLte(currentDataNetwork)
                     && !mPhone.getServiceStateTracker().isConcurrentVoiceAndDataAllowed()))
                     && mPhone.getServiceState().getVoiceNetworkType()
                     == TelephonyManager.NETWORK_TYPE_1xRTT

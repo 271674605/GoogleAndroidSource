@@ -17,35 +17,33 @@
 package android.support.design.widget;
 
 import android.animation.Animator;
+import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.StateListAnimator;
-import android.annotation.TargetApi;
 import android.content.res.ColorStateList;
 import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.support.annotation.RequiresApi;
 import android.support.v4.graphics.drawable.DrawableCompat;
-import android.support.v4.view.ViewCompat;
-import android.view.animation.AnimationUtils;
-import android.view.animation.Interpolator;
+import android.view.View;
 
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
-class FloatingActionButtonLollipop extends FloatingActionButtonIcs {
+import java.util.ArrayList;
+import java.util.List;
 
-    private final Interpolator mInterpolator;
+@RequiresApi(21)
+class FloatingActionButtonLollipop extends FloatingActionButtonImpl {
+
     private InsetDrawable mInsetDrawable;
 
     FloatingActionButtonLollipop(VisibilityAwareImageButton view,
             ShadowViewDelegate shadowViewDelegate) {
         super(view, shadowViewDelegate);
-
-        mInterpolator = view.isInEditMode() ? null
-                : AnimationUtils.loadInterpolator(mView.getContext(),
-                        android.R.interpolator.fast_out_slow_in);
     }
 
     @Override
@@ -85,25 +83,67 @@ class FloatingActionButtonLollipop extends FloatingActionButtonIcs {
     }
 
     @Override
-    public void onElevationChanged(float elevation) {
-        mView.setElevation(elevation);
-        if (mShadowViewDelegate.isCompatPaddingEnabled()) {
-            updatePadding();
-        }
-    }
+    void onElevationsChanged(final float elevation, final float pressedTranslationZ) {
+        if (Build.VERSION.SDK_INT == 21) {
+            // Animations produce NPE in version 21. Bluntly set the values instead (matching the
+            // logic in the animations below).
+            if (mView.isEnabled()) {
+                mView.setElevation(elevation);
+                if (mView.isFocused() || mView.isPressed()) {
+                    mView.setTranslationZ(pressedTranslationZ);
+                } else {
+                    mView.setTranslationZ(0);
+                }
+            } else {
+                mView.setElevation(0);
+                mView.setTranslationZ(0);
+            }
+        } else {
+            final StateListAnimator stateListAnimator = new StateListAnimator();
 
-    @Override
-    void onTranslationZChanged(float translationZ) {
-        StateListAnimator stateListAnimator = new StateListAnimator();
-        // Animate translationZ to our value when pressed or focused
-        stateListAnimator.addState(PRESSED_ENABLED_STATE_SET,
-                setupAnimator(ObjectAnimator.ofFloat(mView, "translationZ", translationZ)));
-        stateListAnimator.addState(FOCUSED_ENABLED_STATE_SET,
-                setupAnimator(ObjectAnimator.ofFloat(mView, "translationZ", translationZ)));
-        // Animate translationZ to 0 otherwise
-        stateListAnimator.addState(EMPTY_STATE_SET,
-                setupAnimator(ObjectAnimator.ofFloat(mView, "translationZ", 0f)));
-        mView.setStateListAnimator(stateListAnimator);
+            // Animate elevation and translationZ to our values when pressed
+            AnimatorSet set = new AnimatorSet();
+            set.play(ObjectAnimator.ofFloat(mView, "elevation", elevation).setDuration(0))
+                    .with(ObjectAnimator.ofFloat(mView, View.TRANSLATION_Z, pressedTranslationZ)
+                            .setDuration(PRESSED_ANIM_DURATION));
+            set.setInterpolator(ANIM_INTERPOLATOR);
+            stateListAnimator.addState(PRESSED_ENABLED_STATE_SET, set);
+
+            // Same deal for when we're focused
+            set = new AnimatorSet();
+            set.play(ObjectAnimator.ofFloat(mView, "elevation", elevation).setDuration(0))
+                    .with(ObjectAnimator.ofFloat(mView, View.TRANSLATION_Z, pressedTranslationZ)
+                            .setDuration(PRESSED_ANIM_DURATION));
+            set.setInterpolator(ANIM_INTERPOLATOR);
+            stateListAnimator.addState(FOCUSED_ENABLED_STATE_SET, set);
+
+            // Animate translationZ to 0 if not pressed
+            set = new AnimatorSet();
+            List<Animator> animators = new ArrayList<>();
+            animators.add(ObjectAnimator.ofFloat(mView, "elevation", elevation).setDuration(0));
+            if (Build.VERSION.SDK_INT >= 22 && Build.VERSION.SDK_INT <= 24) {
+                // This is a no-op animation which exists here only for introducing the duration
+                // because setting the delay (on the next animation) via "setDelay" or "after"
+                // can trigger a NPE between android versions 22 and 24 (due to a framework
+                // bug). The issue has been fixed in version 25.
+                animators.add(ObjectAnimator.ofFloat(mView, View.TRANSLATION_Z,
+                        mView.getTranslationZ()).setDuration(PRESSED_ANIM_DELAY));
+            }
+            animators.add(ObjectAnimator.ofFloat(mView, View.TRANSLATION_Z, 0f)
+                    .setDuration(PRESSED_ANIM_DURATION));
+            set.playSequentially(animators.toArray(new ObjectAnimator[0]));
+            set.setInterpolator(ANIM_INTERPOLATOR);
+            stateListAnimator.addState(ENABLED_STATE_SET, set);
+
+            // Animate everything to 0 when disabled
+            set = new AnimatorSet();
+            set.play(ObjectAnimator.ofFloat(mView, "elevation", 0f).setDuration(0))
+                    .with(ObjectAnimator.ofFloat(mView, View.TRANSLATION_Z, 0f).setDuration(0));
+            set.setInterpolator(ANIM_INTERPOLATOR);
+            stateListAnimator.addState(EMPTY_STATE_SET, set);
+
+            mView.setStateListAnimator(stateListAnimator);
+        }
 
         if (mShadowViewDelegate.isCompatPaddingEnabled()) {
             updatePadding();
@@ -146,16 +186,17 @@ class FloatingActionButtonLollipop extends FloatingActionButtonIcs {
         return false;
     }
 
-    private Animator setupAnimator(Animator animator) {
-        animator.setInterpolator(mInterpolator);
-        return animator;
-    }
-
     @Override
     CircularBorderDrawable newCircularDrawable() {
         return new CircularBorderDrawableLollipop();
     }
 
+    @Override
+    GradientDrawable newGradientDrawableForShape() {
+        return new AlwaysStatefulGradientDrawable();
+    }
+
+    @Override
     void getPadding(Rect rect) {
         if (mShadowViewDelegate.isCompatPaddingEnabled()) {
             final float radius = mShadowViewDelegate.getRadius();
@@ -167,6 +208,19 @@ class FloatingActionButtonLollipop extends FloatingActionButtonIcs {
             rect.set(hPadding, vPadding, hPadding, vPadding);
         } else {
             rect.set(0, 0, 0, 0);
+        }
+    }
+
+    /**
+     * LayerDrawable on L+ caches its isStateful() state and doesn't refresh it,
+     * meaning that if we apply a tint to one of its children, the parent doesn't become
+     * stateful and the tint doesn't work for state changes. We workaround it by saying that we
+     * are always stateful. If we don't have a stateful tint, the change is ignored anyway.
+     */
+    static class AlwaysStatefulGradientDrawable extends GradientDrawable {
+        @Override
+        public boolean isStateful() {
+            return true;
         }
     }
 }

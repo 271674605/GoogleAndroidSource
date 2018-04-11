@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Version: 1.3-a8
+# Version: 1.3-a11
 #
 set -o nounset
 BASE_UMASK=$(umask)
@@ -24,9 +24,9 @@ umask 077
 # Settings
 #
 JACK_HOME="${JACK_HOME:=$HOME/.jack-server}"
-CLIENT_SETTING="${CLIENT_SETTING:=$HOME/.jack-settings}"
+JACK_CLIENT_SETTING="${JACK_CLIENT_SETTING:=$HOME/.jack-settings}"
 TMPDIR=${TMPDIR:=/tmp}
-JACK_SERVER_VM_ARGUMENTS="${JACK_SERVER_VM_ARGUMENTS:=-Dfile.encoding=UTF-8 -XX:+TieredCompilation}"
+JACK_SERVER_VM_ARGUMENTS="${JACK_SERVER_VM_ARGUMENTS:=-Dfile.encoding=UTF-8}"
 JACK_EXTRA_CURL_OPTIONS=${JACK_EXTRA_CURL_OPTIONS:=}
 
 LAUNCHER_JAR="$JACK_HOME/launcher.jar"
@@ -45,31 +45,31 @@ JACK_CONNECTION_TIMEOUT=300
 #
 # Load client settings
 #
-if [ -f "$CLIENT_SETTING" ]; then
-  source "$CLIENT_SETTING"
+if [ -f "$JACK_CLIENT_SETTING" ]; then
+  source "$JACK_CLIENT_SETTING"
 fi
 
 #
 # Create or update client settings if needed
 #
-if [[ ! -f "$CLIENT_SETTING" || $SETTING_VERSION -lt 4 ]]; then
-  echo "Writing client settings in" $CLIENT_SETTING
-  cat >"$CLIENT_SETTING.$$" <<-EOT
+if [[ ! -f "$JACK_CLIENT_SETTING" || $SETTING_VERSION -lt 4 ]]; then
+  echo "Writing client settings in" $JACK_CLIENT_SETTING
+  cat >"$JACK_CLIENT_SETTING.$$" <<-EOT
 	# Server settings
-	SERVER_HOST=${SERVER_HOST:=127.0.0.1}
+	SERVER_HOST=${SERVER_HOST:=localhost}
 	SERVER_PORT_SERVICE=${SERVER_PORT_SERVICE:=8076}
 	SERVER_PORT_ADMIN=${SERVER_PORT_ADMIN:=8077}
 
 	# Internal, do not touch
 	SETTING_VERSION=4
 EOT
-  ln -f "$CLIENT_SETTING.$$" "$CLIENT_SETTING"
-  rm "$CLIENT_SETTING.$$"
-  source "$CLIENT_SETTING"
+  ln -f "$JACK_CLIENT_SETTING.$$" "$JACK_CLIENT_SETTING"
+  rm "$JACK_CLIENT_SETTING.$$"
+  source "$JACK_CLIENT_SETTING"
 fi
 
 usage () {
-  echo "Usage : $0 [ install-server <launcher.jar> <server.jar> | uninstall-server | list <program> | update <program> <program.jar> | start-server | stop-server | kill-server | list-server | server-stat | server-log | server-gc | cleanup-server | dump-report]"
+  echo "Usage : $0 [ install-server <launcher.jar> <server.jar> | uninstall-server | list <program> | update <program> <program.jar> | start-server | stop-server | kill-server | list-server | server-stat | server-stat-reset | server-log | server-gc | cleanup-server | dump-report]"
 }
 
 abort () { exit 255; }
@@ -285,13 +285,31 @@ case $COMMAND in
 
 
   uninstall-server)
+    SERVERS_PID=$(ps -A -o "pid args" -u `id -u -n` | grep $LAUNCHER_NAME | grep -v grep | awk '{print $1}')
+    if [ -n "$SERVERS_PID" ]; then
+      echo "Jack server is running, please stop it before uninstall" >&2
+      echo "If you want to proceeed anyway, use '$0 force-uninstall-server'" >&2
+      exit 2
+    fi
+
     if [ ! -d "$JACK_HOME" ]; then
       echo "Jack server in \"$JACK_HOME\" not found" >&2
       abort
-    else
-      echo "Removing jack server from \"$JACK_HOME\""
-      rm -rf "$JACK_HOME"
     fi
+
+    echo "Removing jack server from \"$JACK_HOME\""
+    rm -rf "$JACK_HOME"
+    exit 0 ;;
+
+
+  force-uninstall-server)
+    if [ ! -d "$JACK_HOME" ]; then
+      echo "Jack server in \"$JACK_HOME\" not found" >&2
+      abort
+    fi
+
+    echo "Removing jack server from \"$JACK_HOME\""
+    rm -rf "$JACK_HOME"
     exit 0 ;;
 
 
@@ -386,6 +404,21 @@ case $COMMAND in
          )
     handleHttpErrors $? $HTTP_CODE
     exec 3>&- ;;
+
+
+  server-stat-reset)
+    echo "Reseting peak statistics from the background server"
+
+    HTTP_CODE=$(curl -f $JACK_EXTRA_CURL_OPTIONS \
+         --cert "${JACK_HOME}/client.pem" \
+         --cacert "${JACK_HOME}/server.pem" \
+         --output /dev/null \
+         --no-buffer --write-out '%{http_code}' --silent --connect-timeout $JACK_CONNECTION_TIMEOUT \
+         -X DELETE \
+         --noproxy ${SERVER_HOST} \
+         https://${SERVER_HOST}:$SERVER_PORT_ADMIN/stat \
+         )
+    handleHttpErrors $? $HTTP_CODE ;;
 
 
   server-log)
@@ -580,8 +613,8 @@ case $COMMAND in
 
     echo "Collecting Jack client configuration..."
     echo >>"$REPORT_INFO"
-    echo "\$ cat \"\$CLIENT_SETTING\"" >>"$REPORT_INFO"
-             cat   "$CLIENT_SETTING"   >>"$REPORT_INFO" 2>&1
+    echo "\$ cat \"\$JACK_CLIENT_SETTING\"" >>"$REPORT_INFO"
+             cat   "$JACK_CLIENT_SETTING"   >>"$REPORT_INFO" 2>&1
 
     echo "Listing Jack server installation dir..."
     echo >>"$REPORT_INFO"
@@ -602,6 +635,14 @@ case $COMMAND in
     echo >>"$REPORT_INFO"
     echo "\$ jack-admin server-stat" >>"$REPORT_INFO"
              "$0"       server-stat  >>"$REPORT_INFO" 2>&1
+
+    echo "Collecting base64 info..."
+    echo >>"$REPORT_INFO"
+    echo "\$ base64 --version" >>"$REPORT_INFO"
+             base64 --version  >>"$REPORT_INFO" 2>&1
+    echo >>"$REPORT_INFO"
+    echo "\$ (echo amFjaw==;echo LXNlcnZlcg==) | base64 --decode" >>"$REPORT_INFO"
+             (echo amFjaw==;echo LXNlcnZlcg==) | base64 --decode >>"$REPORT_INFO" 2>&1
 
     echo "Zipping Jack server installation dir except keys and certificates..."
     (cd "$JACK_HOME"; zip --exclude \*.pem \*.jks --recurse-paths "$REPORT_PATH" .) >/dev/null

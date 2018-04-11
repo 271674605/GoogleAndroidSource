@@ -47,14 +47,8 @@ namespace android {
         (IVD_CONTROL_API_COMMAND_TYPE_T)IMPEG2D_CMD_CTL_SET_NUM_CORES
 
 static const CodecProfileLevel kProfileLevels[] = {
-    { OMX_VIDEO_MPEG2ProfileSimple, OMX_VIDEO_MPEG2LevelLL  },
-    { OMX_VIDEO_MPEG2ProfileSimple, OMX_VIDEO_MPEG2LevelML  },
-    { OMX_VIDEO_MPEG2ProfileSimple, OMX_VIDEO_MPEG2LevelH14 },
     { OMX_VIDEO_MPEG2ProfileSimple, OMX_VIDEO_MPEG2LevelHL  },
 
-    { OMX_VIDEO_MPEG2ProfileMain  , OMX_VIDEO_MPEG2LevelLL  },
-    { OMX_VIDEO_MPEG2ProfileMain  , OMX_VIDEO_MPEG2LevelML  },
-    { OMX_VIDEO_MPEG2ProfileMain  , OMX_VIDEO_MPEG2LevelH14 },
     { OMX_VIDEO_MPEG2ProfileMain  , OMX_VIDEO_MPEG2LevelHL  },
 };
 
@@ -68,6 +62,7 @@ SoftMPEG2::SoftMPEG2(
             kProfileLevels, ARRAY_SIZE(kProfileLevels),
             320 /* width */, 240 /* height */, callbacks,
             appData, component),
+      mCodecCtx(NULL),
       mMemRecords(NULL),
       mFlushOutBuffer(NULL),
       mOmxColorFormat(OMX_COLOR_FormatYUV420Planar),
@@ -75,18 +70,22 @@ SoftMPEG2::SoftMPEG2(
       mNewWidth(mWidth),
       mNewHeight(mHeight),
       mChangingResolution(false),
+      mSignalledError(false),
       mStride(mWidth) {
     initPorts(kNumBuffers, INPUT_BUF_SIZE, kNumBuffers, CODEC_MIME_TYPE);
 
     // If input dump is enabled, then open create an empty file
     GENERATE_FILE_NAMES();
     CREATE_DUMP_FILE(mInFile);
-
-    CHECK_EQ(initDecoder(), (status_t)OK);
 }
 
 SoftMPEG2::~SoftMPEG2() {
-    CHECK_EQ(deInitDecoder(), (status_t)OK);
+    if (OK != deInitDecoder()) {
+        ALOGE("Failed to deinit decoder");
+        notify(OMX_EventError, OMX_ErrorUnsupportedSetting, 0, NULL);
+        mSignalledError = true;
+        return;
+    }
 }
 
 
@@ -204,6 +203,7 @@ status_t SoftMPEG2::resetDecoder() {
     setNumCores();
 
     mStride = 0;
+    mSignalledError = false;
 
     return OK;
 }
@@ -433,6 +433,7 @@ status_t SoftMPEG2::deInitDecoder() {
 
     mInitNeeded = true;
     mChangingResolution = false;
+    mCodecCtx = NULL;
 
     return OK;
 }
@@ -444,10 +445,11 @@ status_t SoftMPEG2::reInitDecoder() {
 
     ret = initDecoder();
     if (OK != ret) {
-        ALOGE("Create failure");
+        ALOGE("Failed to initialize decoder");
         deInitDecoder();
-        return NO_MEMORY;
+        return ret;
     }
+    mSignalledError = false;
     return OK;
 }
 
@@ -458,6 +460,47 @@ void SoftMPEG2::onReset() {
 
     resetDecoder();
     resetPlugin();
+}
+
+bool SoftMPEG2::getSeqInfo() {
+    IV_API_CALL_STATUS_T status;
+    impeg2d_ctl_get_seq_info_ip_t s_ctl_get_seq_info_ip;
+    impeg2d_ctl_get_seq_info_op_t s_ctl_get_seq_info_op;
+
+    s_ctl_get_seq_info_ip.e_cmd = IVD_CMD_VIDEO_CTL;
+    s_ctl_get_seq_info_ip.e_sub_cmd =
+        (IVD_CONTROL_API_COMMAND_TYPE_T)IMPEG2D_CMD_CTL_GET_SEQ_INFO;
+
+    s_ctl_get_seq_info_ip.u4_size = sizeof(impeg2d_ctl_get_seq_info_ip_t);
+    s_ctl_get_seq_info_op.u4_size = sizeof(impeg2d_ctl_get_seq_info_op_t);
+
+    status = ivdec_api_function(
+            (iv_obj_t *)mCodecCtx, (void *)&s_ctl_get_seq_info_ip,
+            (void *)&s_ctl_get_seq_info_op);
+
+    if (status != IV_SUCCESS) {
+        ALOGW("Error in getting Sequence info: 0x%x",
+                s_ctl_get_seq_info_op.u4_error_code);
+        return false;
+    }
+
+
+    int32_t primaries = s_ctl_get_seq_info_op.u1_colour_primaries;
+    int32_t transfer = s_ctl_get_seq_info_op.u1_transfer_characteristics;
+    int32_t coeffs = s_ctl_get_seq_info_op.u1_matrix_coefficients;
+    bool fullRange = false;  // mpeg2 video has limited range.
+
+    ColorAspects colorAspects;
+    ColorUtils::convertIsoColorAspectsToCodecAspects(
+            primaries, transfer, coeffs, fullRange, colorAspects);
+
+    // Update color aspects if necessary.
+    if (colorAspectsDiffer(colorAspects, mBitstreamColorAspects)) {
+        mBitstreamColorAspects = colorAspects;
+        status_t err = handleColorAspectsChange();
+        CHECK(err == OK);
+    }
+    return true;
 }
 
 OMX_ERRORTYPE SoftMPEG2::internalSetParameter(OMX_INDEXTYPE index, const OMX_PTR params) {
@@ -545,8 +588,20 @@ void SoftMPEG2::onPortFlushCompleted(OMX_U32 portIndex) {
 void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
     UNUSED(portIndex);
 
+    if (mSignalledError) {
+        return;
+    }
     if (mOutputPortSettingsChange != NONE) {
         return;
+    }
+
+    if (NULL == mCodecCtx) {
+        if (OK != initDecoder()) {
+            ALOGE("Failed to initialize decoder");
+            notify(OMX_EventError, OMX_ErrorUnsupportedSetting, 0, NULL);
+            mSignalledError = true;
+            return;
+        }
     }
 
     List<BufferInfo *> &inQueue = getPortQueue(kInputPortIndex);
@@ -601,7 +656,9 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
             bool portWillReset = false;
             handlePortSettingsChange(&portWillReset, mNewWidth, mNewHeight);
 
-            CHECK_EQ(reInitDecoder(), (status_t)OK);
+            if (OK != reInitDecoder()) {
+                ALOGE("Failed to reinitialize decoder");
+            }
             return;
         }
 
@@ -650,6 +707,8 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
             bool unsupportedDimensions = (IMPEG2D_UNSUPPORTED_DIMENSIONS == s_dec_op.u4_error_code);
             bool resChanged = (IVD_RES_CHANGED == (s_dec_op.u4_error_code & 0xFF));
 
+            getSeqInfo();
+
             GETTIME(&mTimeEnd, NULL);
             /* Compute time taken for decode() */
             TIME_DIFF(mTimeStart, mTimeEnd, timeTaken);
@@ -672,7 +731,10 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
                 bool portWillReset = false;
                 handlePortSettingsChange(&portWillReset, s_dec_op.u4_pic_wd, s_dec_op.u4_pic_ht);
 
-                CHECK_EQ(reInitDecoder(), (status_t)OK);
+                if (OK != reInitDecoder()) {
+                    ALOGE("Failed to reinitialize decoder");
+                    return;
+                }
 
                 if (setDecodeArgs(&s_dec_ip, &s_dec_op, inHeader, outHeader, timeStampIx)) {
                     ivdec_api_function(mCodecCtx, (void *)&s_dec_ip, (void *)&s_dec_op);
@@ -705,6 +767,8 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
                 continue;
             }
 
+            // Combine the resolution change and coloraspects change in one PortSettingChange event
+            // if necessary.
             if ((0 < s_dec_op.u4_pic_wd) && (0 < s_dec_op.u4_pic_ht)) {
                 uint32_t width = s_dec_op.u4_pic_wd;
                 uint32_t height = s_dec_op.u4_pic_ht;
@@ -713,8 +777,14 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
 
                 if (portWillReset) {
                     resetDecoder();
+                    resetPlugin();
                     return;
                 }
+            } else if (mUpdateColorAspects) {
+                notify(OMX_EventPortSettingsChanged, kOutputPortIndex,
+                    kDescribeColorAspectsIndex, NULL);
+                mUpdateColorAspects = false;
+                return;
             }
 
             if (s_dec_op.u4_output_present) {
@@ -781,6 +851,10 @@ void SoftMPEG2::onQueueFilled(OMX_U32 portIndex) {
             inHeader = NULL;
         }
     }
+}
+
+int SoftMPEG2::getColorAspectPreference() {
+    return kPreferBitstream;
 }
 
 }  // namespace android

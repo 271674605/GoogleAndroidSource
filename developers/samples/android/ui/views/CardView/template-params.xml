@@ -25,15 +25,15 @@
     <auto_add_support_lib>false</auto_add_support_lib>
 
     <!-- change minSdk if needed-->
-    <minSdk>21</minSdk>
+    <minSdk>7</minSdk>
 
     <dependency>com.android.support:cardview-v7:24.0.0</dependency>
 
     <strings>
         <intro>
             <![CDATA[
-            This sample demonstrates how to use CardView introduced in the support library for the
-            Android L preview.
+            This sample demonstrates how to use CardView introduced in the support library in
+            Android 5.0.
             ]]>
         </intro>
     </strings>

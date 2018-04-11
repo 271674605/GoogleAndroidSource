@@ -16,11 +16,13 @@
 
 package com.android.layoutlib.bridge.android;
 
+import com.android.internal.inputmethod.IInputContentUriToken;
 import com.android.internal.view.IInputContext;
 import com.android.internal.view.IInputMethodClient;
 import com.android.internal.view.IInputMethodManager;
 import com.android.internal.view.InputBindResult;
 
+import android.net.Uri;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ResultReceiver;
@@ -133,7 +135,8 @@ public class BridgeIInputMethodManager implements IInputMethodManager {
     }
 
     @Override
-    public void setImeWindowStatus(IBinder arg0, int arg1, int arg2) throws RemoteException {
+    public void setImeWindowStatus(IBinder arg0, IBinder arg1, int arg2, int arg3)
+            throws RemoteException {
         // TODO Auto-generated method stub
     }
 
@@ -226,7 +229,8 @@ public class BridgeIInputMethodManager implements IInputMethodManager {
     @Override
     public InputBindResult startInputOrWindowGainedFocus(
             /* @InputMethodClient.StartInputReason */ int startInputReason,
-            IInputMethodClient client, IBinder windowToken, int controlFlags, int softInputMode,
+            IInputMethodClient client, IBinder windowToken, int controlFlags,
+            /* @android.view.WindowManager.LayoutParams.SoftInputModeFlags */ int softInputMode,
             int windowFlags, EditorInfo attribute, IInputContext inputContext,
             /* @InputConnectionInspector.MissingMethodFlags */ int missingMethodFlags)
             throws RemoteException {
@@ -238,5 +242,17 @@ public class BridgeIInputMethodManager implements IInputMethodManager {
     public IBinder asBinder() {
         // TODO Auto-generated method stub
         return null;
+    }
+
+    @Override
+    public IInputContentUriToken createInputContentUriToken(IBinder token, Uri contentUri,
+            String packageName) {
+        // TODO Auto-generated method stub
+        return null;
+    }
+
+    @Override
+    public void reportFullscreenMode(IBinder token, boolean fullscreen) {
+        // TODO Auto-generated method stub
     }
 }

@@ -18,7 +18,11 @@ package android.app;
 
 import android.annotation.IntDef;
 import android.annotation.RawRes;
+import android.annotation.RequiresPermission;
+import android.annotation.SdkConstant;
 import android.annotation.SystemApi;
+import android.annotation.SystemService;
+import android.annotation.SdkConstant.SdkConstantType;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -48,9 +52,11 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.SystemProperties;
+import android.os.UserHandle;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.WindowManagerGlobal;
@@ -72,13 +78,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * Provides access to the system wallpaper. With WallpaperManager, you can
  * get the current wallpaper, get the desired dimensions for the wallpaper, set
- * the wallpaper, and more. Get an instance of WallpaperManager with
- * {@link #getInstance(android.content.Context) getInstance()}.
+ * the wallpaper, and more.
  *
  * <p> An app can check whether wallpapers are supported for the current user, by calling
  * {@link #isWallpaperSupported()}, and whether setting of wallpapers is allowed, by calling
  * {@link #isSetWallpaperAllowed()}.
  */
+@SystemService(Context.WALLPAPER_SERVICE)
 public class WallpaperManager {
     private static String TAG = "WallpaperManager";
     private static boolean DEBUG = false;
@@ -99,6 +105,7 @@ public class WallpaperManager {
      * <p>Output: RESULT_OK if user decided to crop/set the wallpaper, RESULT_CANCEL otherwise
      * Activities that support this intent should specify a MIME filter of "image/*"
      */
+    @SdkConstant(SdkConstantType.ACTIVITY_INTENT_ACTION)
     public static final String ACTION_CROP_AND_SET_WALLPAPER =
             "android.service.wallpaper.CROP_AND_SET_WALLPAPER";
 
@@ -265,7 +272,7 @@ public class WallpaperManager {
     }
 
     static class Globals extends IWallpaperManagerCallback.Stub {
-        private IWallpaperManager mService;
+        private final IWallpaperManager mService;
         private Bitmap mCachedWallpaper;
         private int mCachedWallpaperUserId;
         private Bitmap mDefaultWallpaper;
@@ -292,16 +299,16 @@ public class WallpaperManager {
 
         public Bitmap peekWallpaperBitmap(Context context, boolean returnDefault,
                 @SetWallpaperFlags int which, int userId) {
-            synchronized (this) {
-                if (mService != null) {
-                    try {
-                        if (!mService.isWallpaperSupported(context.getOpPackageName())) {
-                            return null;
-                        }
-                    } catch (RemoteException e) {
-                        throw e.rethrowFromSystemServer();
+            if (mService != null) {
+                try {
+                    if (!mService.isWallpaperSupported(context.getOpPackageName())) {
+                        return null;
                     }
+                } catch (RemoteException e) {
+                    throw e.rethrowFromSystemServer();
                 }
+            }
+            synchronized (this) {
                 if (mCachedWallpaper != null && mCachedWallpaperUserId == userId) {
                     return mCachedWallpaper;
                 }
@@ -316,17 +323,21 @@ public class WallpaperManager {
                 if (mCachedWallpaper != null) {
                     return mCachedWallpaper;
                 }
-                if (returnDefault) {
-                    if (mDefaultWallpaper == null) {
-                        mDefaultWallpaper = getDefaultWallpaperLocked(context, which);
-                    }
-                    return mDefaultWallpaper;
-                }
-                return null;
             }
+            if (returnDefault) {
+                Bitmap defaultWallpaper = mDefaultWallpaper;
+                if (defaultWallpaper == null) {
+                    defaultWallpaper = getDefaultWallpaper(context, which);
+                    synchronized (this) {
+                        mDefaultWallpaper = defaultWallpaper;
+                    }
+                }
+                return defaultWallpaper;
+            }
+            return null;
         }
 
-        public void forgetLoadedWallpaper() {
+        void forgetLoadedWallpaper() {
             synchronized (this) {
                 mCachedWallpaper = null;
                 mCachedWallpaperUserId = 0;
@@ -361,7 +372,7 @@ public class WallpaperManager {
             return null;
         }
 
-        private Bitmap getDefaultWallpaperLocked(Context context, @SetWallpaperFlags int which) {
+        private Bitmap getDefaultWallpaper(Context context, @SetWallpaperFlags int which) {
             InputStream is = openDefaultWallpaper(context, which);
             if (is != null) {
                 try {
@@ -412,8 +423,14 @@ public class WallpaperManager {
      * This is returned as an
      * abstract Drawable that you can install in a View to display whatever
      * wallpaper the user has currently set.
+     * <p>
+     * This method can return null if there is no system wallpaper available, if
+     * wallpapers are not supported in the current user, or if the calling app is not
+     * permitted to access the system wallpaper.
      *
-     * @return Returns a Drawable object that will draw the wallpaper.
+     * @return Returns a Drawable object that will draw the system wallpaper,
+     *     or {@code null} if no system wallpaper exists or if the calling application
+     *     is not able to access the wallpaper.
      */
     public Drawable getDrawable() {
         Bitmap bm = sGlobals.peekWallpaperBitmap(mContext, true, FLAG_SYSTEM);
@@ -783,7 +800,7 @@ public class WallpaperManager {
                 Log.w(TAG, "WallpaperService not running");
                 throw new RuntimeException(new DeadSystemException());
             } else {
-                return sGlobals.mService.getWallpaperInfo();
+                return sGlobals.mService.getWallpaperInfo(UserHandle.myUserId());
             }
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
@@ -898,7 +915,7 @@ public class WallpaperManager {
      * wallpaper.
      */
     public void setResource(@RawRes int resid) throws IOException {
-        setResource(resid, FLAG_SYSTEM);
+        setResource(resid, FLAG_SYSTEM | FLAG_LOCK);
     }
 
     /**
@@ -928,7 +945,8 @@ public class WallpaperManager {
             /* Set the wallpaper to the default values */
             ParcelFileDescriptor fd = sGlobals.mService.setWallpaper(
                     "res:" + resources.getResourceName(resid),
-                    mContext.getOpPackageName(), null, false, result, which, completion);
+                    mContext.getOpPackageName(), null, false, result, which, completion,
+                    UserHandle.myUserId());
             if (fd != null) {
                 FileOutputStream fos = null;
                 boolean ok = false;
@@ -1003,7 +1021,7 @@ public class WallpaperManager {
      */
     public int setBitmap(Bitmap fullImage, Rect visibleCropHint, boolean allowBackup)
             throws IOException {
-        return setBitmap(fullImage, visibleCropHint, allowBackup, FLAG_SYSTEM);
+        return setBitmap(fullImage, visibleCropHint, allowBackup, FLAG_SYSTEM | FLAG_LOCK);
     }
 
     /**
@@ -1029,6 +1047,19 @@ public class WallpaperManager {
     public int setBitmap(Bitmap fullImage, Rect visibleCropHint,
             boolean allowBackup, @SetWallpaperFlags int which)
             throws IOException {
+        return setBitmap(fullImage, visibleCropHint, allowBackup, which,
+                UserHandle.myUserId());
+    }
+
+    /**
+     * Like {@link #setBitmap(Bitmap, Rect, boolean, int)}, but allows to pass in an explicit user
+     * id. If the user id doesn't match the user id the process is running under, calling this
+     * requires permission {@link android.Manifest.permission#INTERACT_ACROSS_USERS_FULL}.
+     * @hide
+     */
+    public int setBitmap(Bitmap fullImage, Rect visibleCropHint,
+            boolean allowBackup, @SetWallpaperFlags int which, int userId)
+            throws IOException {
         validateRect(visibleCropHint);
         if (sGlobals.mService == null) {
             Log.w(TAG, "WallpaperService not running");
@@ -1039,7 +1070,7 @@ public class WallpaperManager {
         try {
             ParcelFileDescriptor fd = sGlobals.mService.setWallpaper(null,
                     mContext.getOpPackageName(), visibleCropHint, allowBackup,
-                    result, which, completion);
+                    result, which, completion, userId);
             if (fd != null) {
                 FileOutputStream fos = null;
                 try {
@@ -1128,7 +1159,7 @@ public class WallpaperManager {
      */
     public int setStream(InputStream bitmapData, Rect visibleCropHint, boolean allowBackup)
             throws IOException {
-        return setStream(bitmapData, visibleCropHint, allowBackup, FLAG_SYSTEM);
+        return setStream(bitmapData, visibleCropHint, allowBackup, FLAG_SYSTEM | FLAG_LOCK);
     }
 
     /**
@@ -1165,7 +1196,7 @@ public class WallpaperManager {
         try {
             ParcelFileDescriptor fd = sGlobals.mService.setWallpaper(null,
                     mContext.getOpPackageName(), visibleCropHint, allowBackup,
-                    result, which, completion);
+                    result, which, completion, UserHandle.myUserId());
             if (fd != null) {
                 FileOutputStream fos = null;
                 try {
@@ -1326,6 +1357,7 @@ public class WallpaperManager {
      * @hide
      */
     @SystemApi
+    @RequiresPermission(android.Manifest.permission.SET_WALLPAPER_HINTS)
     public void setDisplayPadding(Rect padding) {
         try {
             if (sGlobals.mService == null) {
@@ -1366,7 +1398,9 @@ public class WallpaperManager {
      * @hide
      */
     @SystemApi
+    @RequiresPermission(android.Manifest.permission.SET_WALLPAPER)
     public void clearWallpaper() {
+        clearWallpaper(FLAG_LOCK, mContext.getUserId());
         clearWallpaper(FLAG_SYSTEM, mContext.getUserId());
     }
 
@@ -1377,6 +1411,7 @@ public class WallpaperManager {
      * @hide
      */
     @SystemApi
+    @RequiresPermission(android.Manifest.permission.SET_WALLPAPER)
     public void clearWallpaper(@SetWallpaperFlags int which, int userId) {
         if (sGlobals.mService == null) {
             Log.w(TAG, "WallpaperService not running");
@@ -1392,19 +1427,31 @@ public class WallpaperManager {
     /**
      * Set the live wallpaper.
      *
-     * This can only be called by packages with android.permission.SET_WALLPAPER_COMPONENT
-     * permission.
-     *
      * @hide
      */
     @SystemApi
+    @RequiresPermission(android.Manifest.permission.SET_WALLPAPER_COMPONENT)
     public boolean setWallpaperComponent(ComponentName name) {
+        return setWallpaperComponent(name, UserHandle.myUserId());
+    }
+
+    /**
+     * Set the live wallpaper.
+     *
+     * This can only be called by packages with android.permission.SET_WALLPAPER_COMPONENT
+     * permission. The caller must hold the INTERACT_ACROSS_USERS_FULL permission to change
+     * another user's wallpaper.
+     *
+     * @hide
+     */
+    public boolean setWallpaperComponent(ComponentName name, int userId) {
         if (sGlobals.mService == null) {
             Log.w(TAG, "WallpaperService not running");
             throw new RuntimeException(new DeadSystemException());
         }
         try {
-            sGlobals.mService.setWallpaperComponentChecked(name, mContext.getOpPackageName());
+            sGlobals.mService.setWallpaperComponentChecked(name, mContext.getOpPackageName(),
+                    userId);
             return true;
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
@@ -1655,13 +1702,13 @@ public class WallpaperManager {
      * Only the OS itself may use this method.
      * @hide
      */
-    public boolean isWallpaperBackupEligible() {
+    public boolean isWallpaperBackupEligible(int which) {
         if (sGlobals.mService == null) {
             Log.w(TAG, "WallpaperService not running");
             throw new RuntimeException(new DeadSystemException());
         }
         try {
-            return sGlobals.mService.isWallpaperBackupEligible(mContext.getUserId());
+            return sGlobals.mService.isWallpaperBackupEligible(which, mContext.getUserId());
         } catch (RemoteException e) {
             Log.e(TAG, "Exception querying wallpaper backup eligibility: " + e.getMessage());
         }

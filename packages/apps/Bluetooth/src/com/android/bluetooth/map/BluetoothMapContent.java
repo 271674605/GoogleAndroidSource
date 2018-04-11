@@ -36,10 +36,8 @@ import android.text.util.Rfc822Token;
 import android.text.util.Rfc822Tokenizer;
 import android.text.TextUtils;
 import android.util.Log;
-import android.util.SparseArray;
 
 import com.android.bluetooth.SignedLongLong;
-import com.android.bluetooth.map.BluetoothMapContentObserver.Msg;
 import com.android.bluetooth.map.BluetoothMapUtils.TYPE;
 import com.android.bluetooth.map.BluetoothMapbMessageMime.MimePart;
 import com.android.bluetooth.mapapi.BluetoothMapContract;
@@ -54,13 +52,10 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 
 @TargetApi(19)
 public class BluetoothMapContent {
@@ -117,7 +112,6 @@ public class BluetoothMapContent {
     // MAP specification states that the default value for parameter mask are
     // the #REQUIRED attributes in the DTD, and not all enabled
     public static final long PARAMETER_MASK_ALL_ENABLED = 0xFFFFFFFFL;
-    public static final long PARAMETER_MASK_DEFAULT = 0x5EBL;
     public static final long CONVO_PARAMETER_MASK_ALL_ENABLED = 0xFFFFFFFFL;
     public static final long CONVO_PARAMETER_MASK_DEFAULT =
             CONVO_PARAM_MASK_CONVO_NAME |
@@ -949,10 +943,14 @@ public class BluetoothMapContent {
                     address = c.getString(c.getColumnIndex(Sms.ADDRESS));
                 }
                 if ((address == null) && msgType == Sms.MESSAGE_TYPE_DRAFT) {
-                    //Fetch address for Drafts folder from "canonical_address" table
+                    // Fetch address for Drafts folder from "canonical_address" table
                     int threadIdInd = c.getColumnIndex(Sms.THREAD_ID);
                     String threadIdStr = c.getString(threadIdInd);
-                    address = getCanonicalAddressSms(mResolver, Integer.valueOf(threadIdStr));
+                    // If a draft message has no recipient, it has no thread ID
+                    // hence threadIdStr could possibly be null
+                    if (threadIdStr != null) {
+                        address = getCanonicalAddressSms(mResolver, Integer.valueOf(threadIdStr));
+                    }
                     if(V)  Log.v(TAG, "threadId = " + threadIdStr + " adress:" + address +"\n");
                 }
             } else if (fi.mMsgType == FilterInfo.TYPE_MMS) {
@@ -960,7 +958,7 @@ public class BluetoothMapContent {
                 address = getAddressMms(mResolver, id, MMS_TO);
             } else if (fi.mMsgType == FilterInfo.TYPE_EMAIL) {
                 /* Might be another way to handle addresses */
-                address = getRecipientAddressingEmail(e, c,fi);
+                address = getRecipientAddressingEmail(e, c, fi);
             }
             if (V) Log.v(TAG, "setRecipientAddressing: " + address);
             if(address == null)
@@ -1601,7 +1599,8 @@ public class BluetoothMapContent {
         } else if (BluetoothMapContract.FOLDER_NAME_SENT.equalsIgnoreCase(folder)) {
             where = Sms.TYPE + " = 2 AND " + Sms.THREAD_ID + " <> -1";
         } else if (BluetoothMapContract.FOLDER_NAME_DRAFT.equalsIgnoreCase(folder)) {
-            where = Sms.TYPE + " = 3 AND " + Sms.THREAD_ID + " <> -1";
+            where = Sms.TYPE + " = 3 AND " +
+                "(" + Sms.THREAD_ID + " IS NULL OR " + Sms.THREAD_ID + " <> -1 )";
         } else if (BluetoothMapContract.FOLDER_NAME_DELETED.equalsIgnoreCase(folder)) {
             where = Sms.THREAD_ID + " = -1";
         }
@@ -1618,7 +1617,8 @@ public class BluetoothMapContent {
         } else if (BluetoothMapContract.FOLDER_NAME_SENT.equalsIgnoreCase(folder)) {
             where = Mms.MESSAGE_BOX + " = 2 AND " + Mms.THREAD_ID + " <> -1";
         } else if (BluetoothMapContract.FOLDER_NAME_DRAFT.equalsIgnoreCase(folder)) {
-            where = Mms.MESSAGE_BOX + " = 3 AND " + Mms.THREAD_ID + " <> -1";
+            where = Mms.MESSAGE_BOX + " = 3 AND " +
+                "(" + Mms.THREAD_ID + " IS NULL OR " + Mms.THREAD_ID + " <> -1 )";
         } else if (BluetoothMapContract.FOLDER_NAME_DELETED.equalsIgnoreCase(folder)) {
             where = Mms.THREAD_ID + " = -1";
         }
@@ -1650,10 +1650,8 @@ public class BluetoothMapContent {
 
     private String setWhereFilterFolderType(BluetoothMapFolderElement folderElement,
                                             FilterInfo fi) {
-        String where = "";
-        if(folderElement.shouldIgnore()) {
-            where = "1=1";
-        } else {
+        String where = "1=1";
+        if (!folderElement.shouldIgnore()) {
             if (fi.mMsgType == FilterInfo.TYPE_SMS) {
                 where = setWhereFilterFolderTypeSms(folderElement.getName());
             } else if (fi.mMsgType == FilterInfo.TYPE_MMS) {
@@ -1664,6 +1662,7 @@ public class BluetoothMapContent {
                 where = setWhereFilterFolderTypeIm(folderElement.getFolderId());
             }
         }
+
         return where;
     }
 
@@ -2058,9 +2057,9 @@ public class BluetoothMapContent {
          * should cause all parameters to be included in the message list. */
         if(ap.getParameterMask() == BluetoothMapAppParams.INVALID_VALUE_PARAMETER ||
                 ap.getParameterMask() == 0) {
-            ap.setParameterMask(PARAMETER_MASK_DEFAULT);
+            ap.setParameterMask(PARAMETER_MASK_ALL_ENABLED);
             if (V) Log.v(TAG, "msgListing(): appParameterMask is zero or not present, " +
-                    "changing to default: " + ap.getParameterMask());
+                    "changing to all enabled by default: " + ap.getParameterMask());
         }
         if (V) Log.v(TAG, "folderElement hasSmsMmsContent = " + folderElement.hasSmsMmsContent() +
                 " folderElement.hasEmailContent = " + folderElement.hasEmailContent() +

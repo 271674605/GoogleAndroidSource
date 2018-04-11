@@ -29,6 +29,7 @@ import android.os.UserHandle;
 import android.os.PersistableBundle;
 import android.provider.CallLog.Calls;
 import android.telecom.DisconnectCause;
+import android.telecom.Log;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.VideoProfile;
@@ -144,15 +145,23 @@ public final class CallLogManager extends CallsManagerListenerBase {
         // 1) It was not in the "choose account" phase when disconnected
         // 2) It is a conference call
         // 3) Call was not explicitly canceled
+        // 4) Call is not an external call
+        // 5) Call is not a self-managed call
         if (isNewlyDisconnected &&
                 (oldState != CallState.SELECT_PHONE_ACCOUNT &&
                  !call.isConference() &&
-                 !isCallCanceled)) {
+                 !isCallCanceled) &&
+                !call.isExternalCall() &&
+                !call.isSelfManaged()) {
             int type;
             if (!call.isIncoming()) {
                 type = Calls.OUTGOING_TYPE;
             } else if (disconnectCause == DisconnectCause.MISSED) {
                 type = Calls.MISSED_TYPE;
+            } else if (disconnectCause == DisconnectCause.ANSWERED_ELSEWHERE) {
+                type = Calls.ANSWERED_EXTERNALLY_TYPE;
+            } else if (disconnectCause == DisconnectCause.REJECTED) {
+                type = Calls.REJECTED_TYPE;
             } else {
                 type = Calls.INCOMING_TYPE;
             }
@@ -166,7 +175,8 @@ public final class CallLogManager extends CallsManagerListenerBase {
                     new LogCallCompletedListener() {
                         @Override
                         public void onLogCompleted(@Nullable Uri uri) {
-                            mMissedCallNotifier.showMissedCallNotification(call);
+                            mMissedCallNotifier.showMissedCallNotification(
+                                    new MissedCallNotifier.CallInfo(call));
                         }
                     });
         } else {
@@ -209,7 +219,8 @@ public final class CallLogManager extends CallsManagerListenerBase {
         Long callDataUsage = call.getCallDataUsage() == Call.DATA_USAGE_NOT_SET ? null :
                 call.getCallDataUsage();
 
-        int callFeatures = getCallFeatures(call.getVideoStateHistory());
+        int callFeatures = getCallFeatures(call.getVideoStateHistory(),
+                call.getDisconnectCause().getCode() == DisconnectCause.CALL_PULLED);
         logCall(call.getCallerInfo(), logNumber, call.getPostDialDigits(), formattedViaNumber,
                 call.getHandlePresentation(), callLogType, callFeatures, accountHandle,
                 creationTime, age, callDataUsage, call.isEmergencyCall(), call.getInitiatingUser(),
@@ -254,7 +265,8 @@ public final class CallLogManager extends CallsManagerListenerBase {
         boolean okToLogEmergencyNumber = false;
         CarrierConfigManager configManager = (CarrierConfigManager) mContext.getSystemService(
                 Context.CARRIER_CONFIG_SERVICE);
-        PersistableBundle configBundle = configManager.getConfig();
+        PersistableBundle configBundle = configManager.getConfigForSubId(
+                mPhoneAccountRegistrar.getSubscriptionIdForPhoneAccount(accountHandle));
         if (configBundle != null) {
             okToLogEmergencyNumber = configBundle.getBoolean(
                     CarrierConfigManager.KEY_ALLOW_EMERGENCY_NUMBERS_IN_CALL_LOG_BOOL);
@@ -282,13 +294,18 @@ public final class CallLogManager extends CallsManagerListenerBase {
      * Based on the video state of the call, determines the call features applicable for the call.
      *
      * @param videoState The video state.
+     * @param isPulledCall {@code true} if this call was pulled to another device.
      * @return The call features.
      */
-    private static int getCallFeatures(int videoState) {
+    private static int getCallFeatures(int videoState, boolean isPulledCall) {
+        int features = 0;
         if (VideoProfile.isVideo(videoState)) {
-            return Calls.FEATURES_VIDEO;
+            features |= Calls.FEATURES_VIDEO;
         }
-        return 0;
+        if (isPulledCall) {
+            features |= Calls.FEATURES_PULLED_EXTERNALLY;
+        }
+        return features;
     }
 
     /**

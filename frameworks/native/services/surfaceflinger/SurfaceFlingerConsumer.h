@@ -18,10 +18,14 @@
 #define ANDROID_SURFACEFLINGERCONSUMER_H
 
 #include "DispSync.h"
+
+#include <ui/Region.h>
 #include <gui/GLConsumer.h>
 
 namespace android {
 // ----------------------------------------------------------------------------
+
+class Layer;
 
 /*
  * This is a thin wrapper around GLConsumer.
@@ -35,10 +39,9 @@ public:
     };
 
     SurfaceFlingerConsumer(const sp<IGraphicBufferConsumer>& consumer,
-            uint32_t tex)
+            uint32_t tex, Layer* layer)
         : GLConsumer(consumer, tex, GLConsumer::TEXTURE_EXTERNAL, false, false),
-          mTransformToDisplayInverse(false), mSurfaceDamage(),
-          mPrevReleaseFence(Fence::NO_FENCE)
+          mTransformToDisplayInverse(false), mSurfaceDamage(), mLayer(layer)
     {}
 
     class BufferRejecter {
@@ -59,13 +62,14 @@ public:
     // texture.
     status_t updateTexImage(BufferRejecter* rejecter, const DispSync& dispSync,
             bool* autoRefresh, bool* queuedBuffer,
-            uint64_t maxFrameNumber = 0);
+            uint64_t maxFrameNumber);
 
     // See GLConsumer::bindTextureImageLocked().
     status_t bindTextureImage();
 
-    // must be called from SF main thread
     bool getTransformToDisplayInverse() const;
+
+    // must be called from SF main thread
     const Region& getSurfaceDamage() const;
 
     // Sets the contents changed listener. This should be used instead of
@@ -76,11 +80,16 @@ public:
 
     nsecs_t computeExpectedPresent(const DispSync& dispSync);
 
-    virtual void setReleaseFence(const sp<Fence>& fence) override;
-    sp<Fence> getPrevReleaseFence() const;
+    sp<Fence> getPrevFinalReleaseFence() const;
 #ifdef USE_HWC2
-    void releasePendingBuffer();
+    virtual void setReleaseFence(const sp<Fence>& fence) override;
+    bool releasePendingBuffer();
 #endif
+
+    void onDisconnect() override;
+    void addAndGetFrameTimestamps(
+            const NewFrameEventsEntry* newTimestamps,
+            FrameEventHistoryDelta* outDelta) override;
 
 private:
     virtual void onSidebandStreamChanged();
@@ -101,8 +110,8 @@ private:
     PendingRelease mPendingRelease;
 #endif
 
-    // The release fence of the already displayed buffer (previous frame).
-    sp<Fence> mPrevReleaseFence;
+    // The layer for this SurfaceFlingerConsumer
+    const wp<Layer> mLayer;
 };
 
 // ----------------------------------------------------------------------------

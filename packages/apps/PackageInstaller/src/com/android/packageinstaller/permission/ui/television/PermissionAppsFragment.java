@@ -15,7 +15,6 @@
  */
 package com.android.packageinstaller.permission.ui.television;
 
-import android.annotation.Nullable;
 import android.app.ActionBar;
 import android.app.AlertDialog;
 import android.app.Fragment;
@@ -36,8 +35,6 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
-import android.widget.ImageView;
 import android.widget.TextView;
 
 import com.android.packageinstaller.DeviceUtils;
@@ -81,6 +78,7 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
     private boolean mHasConfirmedRevoke;
 
     private boolean mShowSystem;
+    private boolean mHasSystemApps;
     private MenuItem mShowSystemMenu;
     private MenuItem mHideSystemMenu;
 
@@ -110,11 +108,13 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
 
     @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
-        mShowSystemMenu = menu.add(Menu.NONE, MENU_SHOW_SYSTEM, Menu.NONE,
-                R.string.menu_show_system);
-        mHideSystemMenu = menu.add(Menu.NONE, MENU_HIDE_SYSTEM, Menu.NONE,
-                R.string.menu_hide_system);
-        updateMenu();
+        if (mHasSystemApps) {
+            mShowSystemMenu = menu.add(Menu.NONE, MENU_SHOW_SYSTEM, Menu.NONE,
+                    R.string.menu_show_system);
+            mHideSystemMenu = menu.add(Menu.NONE, MENU_HIDE_SYSTEM, Menu.NONE,
+                    R.string.menu_hide_system);
+            updateMenu();
+        }
     }
 
     @Override
@@ -184,6 +184,9 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
             }
         }
 
+        mHasSystemApps = false;
+        boolean menuOptionsInvalided = false;
+
         for (PermissionApp app : permissionApps.getApps()) {
             if (!Utils.shouldShowPermission(app)) {
                 continue;
@@ -197,6 +200,13 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
             }
 
             boolean isSystemApp = Utils.isSystem(app, mLauncherPkgs);
+
+            if (isSystemApp && !menuOptionsInvalided) {
+                mHasSystemApps = true;
+                getActivity().invalidateOptionsMenu();
+                menuOptionsInvalided = true;
+            }
+
             if (isSystemApp && !isTelevision && !mShowSystem) {
                 if (existingPref != null) {
                     screen.removePreference(existingPref);
@@ -325,7 +335,8 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
             app.grantRuntimePermissions();
         } else {
             final boolean grantedByDefault = app.hasGrantedByDefaultPermissions();
-            if (grantedByDefault || (!app.hasRuntimePermissions() && !mHasConfirmedRevoke)) {
+            if (grantedByDefault || (!app.doesSupportRuntimePermissions()
+                    && !mHasConfirmedRevoke)) {
                 new AlertDialog.Builder(getContext())
                         .setMessage(grantedByDefault ? R.string.system_warning
                                 : R.string.old_sdk_deny_warning)
@@ -408,6 +419,18 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
             bindUi(this, permissionApps);
         }
 
+        @Override
+        public void onResume() {
+            super.onResume();
+            mOuterFragment.mPermissionApps.refresh(true);
+        }
+
+        @Override
+        public void onDestroy() {
+            super.onDestroy();
+            mOuterFragment.setOnPermissionsLoadedListener(null);
+        }
+
 
         private static void bindUi(SettingsWithHeader fragment, PermissionApps permissionApps) {
             final CharSequence label = permissionApps.getLabel();
@@ -415,11 +438,9 @@ public final class PermissionAppsFragment extends SettingsWithHeader implements 
                     fragment.getString(R.string.system_apps_decor_title, label));
         }
 
-
         @Override
         public void onPermissionsLoaded(PermissionApps permissionApps) {
             setPreferenceScreen();
-            mOuterFragment.setOnPermissionsLoadedListener(null);
         }
 
         private void setPreferenceScreen() {

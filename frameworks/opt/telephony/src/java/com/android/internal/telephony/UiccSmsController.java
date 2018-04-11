@@ -144,11 +144,11 @@ public class UiccSmsController extends ISms.Stub {
 
     public void sendTextForSubscriberWithSelfPermissions(int subId, String callingPackage,
             String destAddr, String scAddr, String text, PendingIntent sentIntent,
-            PendingIntent deliveryIntent) {
+            PendingIntent deliveryIntent, boolean persistMessage) {
         IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
         if (iccSmsIntMgr != null) {
             iccSmsIntMgr.sendTextWithSelfPermissions(callingPackage, destAddr, scAddr, text,
-                    sentIntent, deliveryIntent);
+                    sentIntent, deliveryIntent, persistMessage);
         } else {
             Rlog.e(LOG_TAG,"sendText iccSmsIntMgr is null for" +
                           " Subscription: " + subId);
@@ -390,6 +390,27 @@ public class UiccSmsController extends ISms.Stub {
                     + subId);
             sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
         }
+    }
+
+    @Override
+    public String createAppSpecificSmsToken(int subId, String callingPkg, PendingIntent intent) {
+        if (!isActiveSubId(subId)) {
+            Rlog.e(LOG_TAG, "Subscription " + subId + " is inactive.");
+            return null;
+        }
+
+        int phoneId = SubscriptionController.getInstance().getPhoneId(subId);
+        //Fixme: for multi-subscription case
+        if (!SubscriptionManager.isValidPhoneId(phoneId)
+                || phoneId == SubscriptionManager.DEFAULT_PHONE_INDEX) {
+            phoneId = 0;
+        }
+        if (phoneId < 0 || phoneId >= mPhone.length || mPhone[phoneId] == null) {
+            Rlog.e(LOG_TAG, "phoneId " + phoneId + " points to an invalid phone");
+            return null;
+        }
+        AppSmsManager appSmsManager = mPhone[phoneId].getAppSmsManager();
+        return appSmsManager.createAppSpecificSmsToken(callingPkg, intent);
     }
 
     /*

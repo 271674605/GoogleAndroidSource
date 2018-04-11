@@ -25,17 +25,21 @@
 #include <GraphicsJNI.h>
 #include <ScopedPrimitiveArray.h>
 
+#include <gui/BufferItemConsumer.h>
+#include <gui/BufferQueue.h>
+#include <gui/Surface.h>
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <EGL/egl_cache.h>
+#include <private/EGL/cache.h>
 
 #include <utils/Looper.h>
 #include <utils/RefBase.h>
 #include <utils/StrongPointer.h>
+#include <utils/Timers.h>
 #include <android_runtime/android_view_Surface.h>
 #include <system/window.h>
 
-#include "android_view_GraphicBuffer.h"
 #include "android_os_MessageQueue.h"
 
 #include <Animator.h>
@@ -43,7 +47,7 @@
 #include <FrameInfo.h>
 #include <FrameMetricsObserver.h>
 #include <IContextFactory.h>
-#include <JankTracker.h>
+#include <PropertyValuesAnimatorSet.h>
 #include <RenderNode.h>
 #include <renderthread/CanvasContext.h>
 #include <renderthread/RenderProxy.h>
@@ -70,31 +74,6 @@ static JNIEnv* getenv(JavaVM* vm) {
     return env;
 }
 
-// TODO: Clean this up, it's a bit odd to need to call over to
-// rendernode's jni layer. Probably means RootRenderNode should be pulled
-// into HWUI with appropriate callbacks for the various JNI hooks so
-// that RenderNode's JNI layer can handle its own thing
-void onRenderNodeRemoved(JNIEnv* env, RenderNode* node);
-
-class ScopedRemovedRenderNodeObserver : public TreeObserver {
-public:
-    ScopedRemovedRenderNodeObserver(JNIEnv* env) : mEnv(env) {}
-    ~ScopedRemovedRenderNodeObserver() {
-        for (auto& node : mMaybeRemovedNodes) {
-            if (node->hasParents()) continue;
-            onRenderNodeRemoved(mEnv, node.get());
-        }
-    }
-
-    virtual void onMaybeRemovedFromTree(RenderNode* node) override {
-        mMaybeRemovedNodes.insert(sp<RenderNode>(node));
-    }
-
-private:
-    JNIEnv* mEnv;
-    std::set< sp<RenderNode> > mMaybeRemovedNodes;
-};
-
 class OnFinishedEvent {
 public:
     OnFinishedEvent(BaseRenderNodeAnimator* animator, AnimationListener* listener)
@@ -105,7 +84,7 @@ public:
 
 class InvokeAnimationListeners : public MessageHandler {
 public:
-    InvokeAnimationListeners(std::vector<OnFinishedEvent>& events) {
+    explicit InvokeAnimationListeners(std::vector<OnFinishedEvent>& events) {
         mOnFinishedEvents.swap(events);
     }
 
@@ -120,6 +99,31 @@ public:
 
 private:
     std::vector<OnFinishedEvent> mOnFinishedEvents;
+};
+
+class FinishAndInvokeListener : public MessageHandler {
+public:
+    explicit FinishAndInvokeListener(PropertyValuesAnimatorSet* anim)
+            : mAnimator(anim) {
+        mListener = anim->getOneShotListener();
+        mRequestId = anim->getRequestId();
+    }
+
+    virtual void handleMessage(const Message& message) {
+        if (mAnimator->getRequestId() == mRequestId) {
+            // Request Id has not changed, meaning there's no animation lifecyle change since the
+            // message is posted, so go ahead and call finish to make sure the PlayState is properly
+            // updated. This is needed because before the next frame comes in from UI thread to
+            // trigger an animation update, there could be reverse/cancel etc. So we need to update
+            // the playstate in time to ensure all the subsequent events get chained properly.
+            mAnimator->end();
+        }
+        mListener->onAnimationFinished(nullptr);
+    }
+private:
+    sp<PropertyValuesAnimatorSet> mAnimator;
+    sp<AnimationListener> mListener;
+    uint32_t mRequestId;
 };
 
 class RenderingException : public MessageHandler {
@@ -145,7 +149,7 @@ private:
 
 class RootRenderNode : public RenderNode, ErrorHandler {
 public:
-    RootRenderNode(JNIEnv* env) : RenderNode() {
+    explicit RootRenderNode(JNIEnv* env) : RenderNode() {
         mLooper = Looper::getForThread();
         LOG_ALWAYS_FATAL_IF(!mLooper.get(),
                 "Must create RootRenderNode on a thread with a looper!");
@@ -160,14 +164,27 @@ public:
 
     virtual void prepareTree(TreeInfo& info) override {
         info.errorHandler = this;
+
+        for (auto& anim : mRunningVDAnimators) {
+            // Assume that the property change in VD from the animators will not be consumed. Mark
+            // otherwise if the VDs are found in the display list tree. For VDs that are not in
+            // the display list tree, we stop providing animation pulses by 1) removing them from
+            // the animation list, 2) post a delayed message to end them at end time so their
+            // listeners can receive the corresponding callbacks.
+            anim->getVectorDrawable()->setPropertyChangeWillBeConsumed(false);
+            // Mark the VD dirty so it will damage itself during prepareTree.
+            anim->getVectorDrawable()->markDirty();
+        }
+        if (info.mode == TreeInfo::MODE_FULL) {
+            for (auto &anim : mPausedVDAnimators) {
+                anim->getVectorDrawable()->setPropertyChangeWillBeConsumed(false);
+                anim->getVectorDrawable()->markDirty();
+            }
+        }
         // TODO: This is hacky
-        info.windowInsetLeft = -stagingProperties().getLeft();
-        info.windowInsetTop = -stagingProperties().getTop();
         info.updateWindowPositions = true;
         RenderNode::prepareTree(info);
         info.updateWindowPositions = false;
-        info.windowInsetLeft = 0;
-        info.windowInsetTop = 0;
         info.errorHandler = nullptr;
     }
 
@@ -175,8 +192,44 @@ public:
         mLooper->sendMessage(handler, 0);
     }
 
+    void sendMessageDelayed(const sp<MessageHandler>& handler, nsecs_t delayInMs) {
+        mLooper->sendMessageDelayed(ms2ns(delayInMs), handler, 0);
+    }
+
     void attachAnimatingNode(RenderNode* animatingNode) {
         mPendingAnimatingRenderNodes.push_back(animatingNode);
+    }
+
+    void attachPendingVectorDrawableAnimators() {
+        mRunningVDAnimators.insert(mPendingVectorDrawableAnimators.begin(),
+                mPendingVectorDrawableAnimators.end());
+        mPendingVectorDrawableAnimators.clear();
+    }
+
+    void detachAnimators() {
+        // Remove animators from the list and post a delayed message in future to end the animator
+        // For infinite animators, remove the listener so we no longer hold a global ref to the AVD
+        // java object, and therefore the AVD objects in both native and Java can be properly
+        // released.
+        for (auto& anim : mRunningVDAnimators) {
+            detachVectorDrawableAnimator(anim.get());
+            anim->clearOneShotListener();
+        }
+        for (auto& anim : mPausedVDAnimators) {
+            anim->clearOneShotListener();
+        }
+        mRunningVDAnimators.clear();
+        mPausedVDAnimators.clear();
+    }
+
+    // Move all the animators to the paused list, and send a delayed message to notify the finished
+    // listener.
+    void pauseAnimators() {
+        mPausedVDAnimators.insert(mRunningVDAnimators.begin(), mRunningVDAnimators.end());
+        for (auto& anim : mRunningVDAnimators) {
+            detachVectorDrawableAnimator(anim.get());
+        }
+        mRunningVDAnimators.clear();
     }
 
     void doAttachAnimatingNodes(AnimationContext* context) {
@@ -187,17 +240,144 @@ public:
         mPendingAnimatingRenderNodes.clear();
     }
 
+    // Run VectorDrawable animators after prepareTree.
+    void runVectorDrawableAnimators(AnimationContext* context, TreeInfo& info) {
+        // Push staging.
+        if (info.mode == TreeInfo::MODE_FULL) {
+            pushStagingVectorDrawableAnimators(context);
+        }
+
+        // Run the animators in the running list.
+        for (auto it = mRunningVDAnimators.begin(); it != mRunningVDAnimators.end();) {
+            if ((*it)->animate(*context)) {
+                it = mRunningVDAnimators.erase(it);
+            } else {
+                it++;
+            }
+        }
+
+        // Run the animators in paused list during full sync.
+        if (info.mode == TreeInfo::MODE_FULL) {
+            // During full sync we also need to pulse paused animators, in case their targets
+            // have been added back to the display list. All the animators that passed the
+            // scheduled finish time will be removed from the paused list.
+            for (auto it = mPausedVDAnimators.begin(); it != mPausedVDAnimators.end();) {
+                if ((*it)->animate(*context)) {
+                    // Animator has finished, remove from the list.
+                    it = mPausedVDAnimators.erase(it);
+                } else {
+                    it++;
+                }
+            }
+        }
+
+        // Move the animators with a target not in DisplayList to paused list.
+        for (auto it = mRunningVDAnimators.begin(); it != mRunningVDAnimators.end();) {
+            if (!(*it)->getVectorDrawable()->getPropertyChangeWillBeConsumed()) {
+                // Vector Drawable is not in the display list, we should remove this animator from
+                // the list, put it in the paused list, and post a delayed message to end the
+                // animator.
+                detachVectorDrawableAnimator(it->get());
+                mPausedVDAnimators.insert(*it);
+                it = mRunningVDAnimators.erase(it);
+            } else {
+                it++;
+            }
+        }
+
+        // Move the animators with a target in DisplayList from paused list to running list, and
+        // trim paused list.
+        if (info.mode == TreeInfo::MODE_FULL) {
+            // Check whether any paused animator's target is back in Display List. If so, put the
+            // animator back in the running list.
+            for (auto it = mPausedVDAnimators.begin(); it != mPausedVDAnimators.end();) {
+                if ((*it)->getVectorDrawable()->getPropertyChangeWillBeConsumed()) {
+                    mRunningVDAnimators.insert(*it);
+                    it = mPausedVDAnimators.erase(it);
+                } else {
+                    it++;
+                }
+            }
+            // Trim paused VD animators at full sync, so that when Java loses reference to an
+            // animator, we know we won't be requested to animate it any more, then we remove such
+            // animators from the paused list so they can be properly freed. We also remove the
+            // animators from paused list when the time elapsed since start has exceeded duration.
+            trimPausedVDAnimators(context);
+        }
+
+        info.out.hasAnimations |= !mRunningVDAnimators.empty();
+    }
+
+    void trimPausedVDAnimators(AnimationContext* context) {
+        // Trim paused vector drawable animator list.
+        for (auto it = mPausedVDAnimators.begin(); it != mPausedVDAnimators.end();) {
+            // Remove paused VD animator if no one else is referencing it. Note that animators that
+            // have passed scheduled finish time are removed from list when they are being pulsed
+            // before prepare tree.
+            // TODO: this is a bit hacky, need to figure out a better way to track when the paused
+            // animators should be freed.
+            if ((*it)->getStrongCount() == 1) {
+                it = mPausedVDAnimators.erase(it);
+            } else {
+                it++;
+            }
+        }
+    }
+
+    void pushStagingVectorDrawableAnimators(AnimationContext* context) {
+        for (auto& anim : mRunningVDAnimators) {
+            anim->pushStaging(*context);
+        }
+    }
+
     void destroy() {
         for (auto& renderNode : mPendingAnimatingRenderNodes) {
             renderNode->animators().endAllStagingAnimators();
         }
         mPendingAnimatingRenderNodes.clear();
+        mPendingVectorDrawableAnimators.clear();
+    }
+
+    void addVectorDrawableAnimator(PropertyValuesAnimatorSet* anim) {
+        mPendingVectorDrawableAnimators.insert(anim);
     }
 
 private:
     sp<Looper> mLooper;
     JavaVM* mVm;
     std::vector< sp<RenderNode> > mPendingAnimatingRenderNodes;
+    std::set< sp<PropertyValuesAnimatorSet> > mPendingVectorDrawableAnimators;
+    std::set< sp<PropertyValuesAnimatorSet> > mRunningVDAnimators;
+    // mPausedVDAnimators stores a list of animators that have not yet passed the finish time, but
+    // their VectorDrawable targets are no longer in the DisplayList. We skip these animators when
+    // render thread runs animators independent of UI thread (i.e. RT_ONLY mode). These animators
+    // need to be re-activated once their VD target is added back into DisplayList. Since that could
+    // only happen when we do a full sync, we need to make sure to pulse these paused animators at
+    // full sync. If any animator's VD target is found in DisplayList during a full sync, we move
+    // the animator back to the running list.
+    std::set< sp<PropertyValuesAnimatorSet> > mPausedVDAnimators;
+    void detachVectorDrawableAnimator(PropertyValuesAnimatorSet* anim) {
+        if (anim->isInfinite() || !anim->isRunning()) {
+            // Do not need to post anything if the animation is infinite (i.e. no meaningful
+            // end listener action), or if the animation has already ended.
+            return;
+        }
+        nsecs_t remainingTimeInMs = anim->getRemainingPlayTime();
+        // Post a delayed onFinished event that is scheduled to be handled when the animator ends.
+        if (anim->getOneShotListener()) {
+            // VectorDrawable's oneshot listener is updated when there are user triggered animation
+            // lifecycle changes, such as start(), end(), etc. By using checking and clearing
+            // one shot listener, we ensure the same end listener event gets posted only once.
+            // Therefore no duplicates. Another benefit of using one shot listener is that no
+            // removal is necessary: the end time of animation will not change unless triggered by
+            // user events, in which case the already posted listener's id will become stale, and
+            // the onFinished callback will then be ignored.
+            sp<FinishAndInvokeListener> message
+                    = new FinishAndInvokeListener(anim);
+            sendMessageDelayed(message, remainingTimeInMs);
+            anim->clearOneShotListener();
+        }
+    }
 };
 
 class AnimationContextBridge : public AnimationContext {
@@ -213,6 +393,7 @@ public:
     virtual void startFrame(TreeInfo::TraversalMode mode) {
         if (mode == TreeInfo::MODE_FULL) {
             mRootNode->doAttachAnimatingNodes(this);
+            mRootNode->attachPendingVectorDrawableAnimators();
         }
         AnimationContext::startFrame(mode);
     }
@@ -220,7 +401,12 @@ public:
     // Runs any animations still left in mCurrentFrameAnimations
     virtual void runRemainingAnimations(TreeInfo& info) {
         AnimationContext::runRemainingAnimations(info);
+        mRootNode->runVectorDrawableAnimators(this, info);
         postOnFinishedEvents();
+    }
+
+    virtual void pauseAnimators() override {
+        mRootNode->pauseAnimators();
     }
 
     virtual void callOnFinished(BaseRenderNodeAnimator* animator, AnimationListener* listener) {
@@ -230,6 +416,7 @@ public:
 
     virtual void destroy() {
         AnimationContext::destroy();
+        mRootNode->detachAnimators();
         postOnFinishedEvents();
     }
 
@@ -248,7 +435,7 @@ private:
 
 class ContextFactoryImpl : public IContextFactory {
 public:
-    ContextFactoryImpl(RootRenderNode* rootNode) : mRootNode(rootNode) {}
+    explicit ContextFactoryImpl(RootRenderNode* rootNode) : mRootNode(rootNode) {}
 
     virtual AnimationContext* createAnimationContext(renderthread::TimeLord& clock) {
         return new AnimationContextBridge(clock, mRootNode);
@@ -365,7 +552,6 @@ private:
 
     JavaVM* const mVm;
     jweak mObserverWeak;
-    jobject mJavaBufferGlobal;
 
     sp<MessageQueue> mMessageQueue;
     sp<NotifyHandler> mMessageHandler;
@@ -395,25 +581,31 @@ void NotifyHandler::handleMessage(const Message& message) {
     mObserver->decStrong(nullptr);
 }
 
-static void android_view_ThreadedRenderer_setAtlas(JNIEnv* env, jobject clazz,
-        jlong proxyPtr, jobject graphicBuffer, jlongArray atlasMapArray) {
-    sp<GraphicBuffer> buffer = graphicBufferForJavaObject(env, graphicBuffer);
-    jsize len = env->GetArrayLength(atlasMapArray);
-    if (len <= 0) {
-        ALOGW("Failed to initialize atlas, invalid map length: %d", len);
-        return;
+static jboolean android_view_ThreadedRenderer_supportsOpenGL(JNIEnv* env, jobject clazz) {
+    char prop[PROPERTY_VALUE_MAX];
+    if (property_get("ro.kernel.qemu", prop, NULL) == 0) {
+        // not in the emulator
+        return JNI_TRUE;
     }
-    int64_t* map = new int64_t[len];
-    env->GetLongArrayRegion(atlasMapArray, 0, len, map);
+    // In the emulator this property will be set > 0 when OpenGL ES 2.0 is
+    // enabled, 0 otherwise. On old emulator versions it will be undefined.
+    property_get("qemu.gles", prop, "0");
+    return atoi(prop) > 0 ? JNI_TRUE : JNI_FALSE;
+}
 
-    RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    proxy->setTextureAtlas(buffer, map, len);
+static void android_view_ThreadedRenderer_rotateProcessStatsBuffer(JNIEnv* env, jobject clazz) {
+    RenderProxy::rotateProcessStatsBuffer();
 }
 
 static void android_view_ThreadedRenderer_setProcessStatsBuffer(JNIEnv* env, jobject clazz,
-        jlong proxyPtr, jint fd) {
+        jint fd) {
+    RenderProxy::setProcessStatsBuffer(fd);
+}
+
+static jint android_view_ThreadedRenderer_getRenderThreadTid(JNIEnv* env, jobject clazz,
+        jlong proxyPtr) {
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    proxy->setProcessStatsBuffer(fd);
+    return proxy->getRenderThreadTid();
 }
 
 static jlong android_view_ThreadedRenderer_createRootRenderNode(JNIEnv* env, jobject clazz) {
@@ -484,9 +676,9 @@ static void android_view_ThreadedRenderer_setStopped(JNIEnv* env, jobject clazz,
 }
 
 static void android_view_ThreadedRenderer_setup(JNIEnv* env, jobject clazz, jlong proxyPtr,
-        jint width, jint height, jfloat lightRadius, jint ambientShadowAlpha, jint spotShadowAlpha) {
+        jfloat lightRadius, jint ambientShadowAlpha, jint spotShadowAlpha) {
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    proxy->setup(width, height, lightRadius, ambientShadowAlpha, spotShadowAlpha);
+    proxy->setup(lightRadius, ambientShadowAlpha, spotShadowAlpha);
 }
 
 static void android_view_ThreadedRenderer_setLightCenter(JNIEnv* env, jobject clazz,
@@ -507,18 +699,16 @@ static int android_view_ThreadedRenderer_syncAndDrawFrame(JNIEnv* env, jobject c
             "Mismatched size expectations, given %d expected %d",
             frameInfoSize, UI_THREAD_FRAME_INFO_SIZE);
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    ScopedRemovedRenderNodeObserver observer(env);
     env->GetLongArrayRegion(frameInfo, 0, frameInfoSize, proxy->frameInfo());
-    return proxy->syncAndDrawFrame(&observer);
+    return proxy->syncAndDrawFrame();
 }
 
 static void android_view_ThreadedRenderer_destroy(JNIEnv* env, jobject clazz,
         jlong proxyPtr, jlong rootNodePtr) {
-    ScopedRemovedRenderNodeObserver observer(env);
     RootRenderNode* rootRenderNode = reinterpret_cast<RootRenderNode*>(rootNodePtr);
     rootRenderNode->destroy();
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    proxy->destroy(&observer);
+    proxy->destroy();
 }
 
 static void android_view_ThreadedRenderer_registerAnimatingRenderNode(JNIEnv* env, jobject clazz,
@@ -526,6 +716,13 @@ static void android_view_ThreadedRenderer_registerAnimatingRenderNode(JNIEnv* en
     RootRenderNode* rootRenderNode = reinterpret_cast<RootRenderNode*>(rootNodePtr);
     RenderNode* animatingNode = reinterpret_cast<RenderNode*>(animatingNodePtr);
     rootRenderNode->attachAnimatingNode(animatingNode);
+}
+
+static void android_view_ThreadedRenderer_registerVectorDrawableAnimator(JNIEnv* env, jobject clazz,
+        jlong rootNodePtr, jlong animatorPtr) {
+    RootRenderNode* rootRenderNode = reinterpret_cast<RootRenderNode*>(rootNodePtr);
+    PropertyValuesAnimatorSet* animator = reinterpret_cast<PropertyValuesAnimatorSet*>(animatorPtr);
+    rootRenderNode->addVectorDrawableAnimator(animator);
 }
 
 static void android_view_ThreadedRenderer_invokeFunctor(JNIEnv* env, jobject clazz,
@@ -543,10 +740,9 @@ static jlong android_view_ThreadedRenderer_createTextureLayer(JNIEnv* env, jobje
 
 static void android_view_ThreadedRenderer_buildLayer(JNIEnv* env, jobject clazz,
         jlong proxyPtr, jlong nodePtr) {
-    ScopedRemovedRenderNodeObserver observer(env);
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
     RenderNode* node = reinterpret_cast<RenderNode*>(nodePtr);
-    proxy->buildLayer(node, &observer);
+    proxy->buildLayer(node);
 }
 
 static jboolean android_view_ThreadedRenderer_copyLayerInto(JNIEnv* env, jobject clazz,
@@ -581,9 +777,8 @@ static void android_view_ThreadedRenderer_detachSurfaceTexture(JNIEnv* env, jobj
 
 static void android_view_ThreadedRenderer_destroyHardwareResources(JNIEnv* env, jobject clazz,
         jlong proxyPtr) {
-    ScopedRemovedRenderNodeObserver observer(env);
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
-    proxy->destroyHardwareResources(&observer);
+    proxy->destroyHardwareResources();
 }
 
 static void android_view_ThreadedRenderer_trimMemory(JNIEnv* env, jobject clazz,
@@ -631,15 +826,6 @@ static void android_view_ThreadedRenderer_dumpProfileInfo(JNIEnv* env, jobject c
     proxy->dumpProfileInfo(fd, dumpFlags);
 }
 
-static void android_view_ThreadedRenderer_dumpProfileData(JNIEnv* env, jobject clazz,
-        jbyteArray jdata, jobject javaFileDescriptor) {
-    int fd = jniGetFDFromFileDescriptor(env, javaFileDescriptor);
-    ScopedByteArrayRO buffer(env, jdata);
-    if (buffer.get()) {
-        JankTracker::dumpBuffer(buffer.get(), buffer.size(), fd);
-    }
-}
-
 static void android_view_ThreadedRenderer_addRenderNode(JNIEnv* env, jobject clazz,
         jlong proxyPtr, jlong renderNodePtr, jboolean placeFront) {
     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
@@ -668,11 +854,86 @@ static void android_view_ThreadedRenderer_setContentDrawBounds(JNIEnv* env,
 }
 
 static jint android_view_ThreadedRenderer_copySurfaceInto(JNIEnv* env,
-        jobject clazz, jobject jsurface, jobject jbitmap) {
+        jobject clazz, jobject jsurface, jint left, jint top,
+        jint right, jint bottom, jobject jbitmap) {
     SkBitmap bitmap;
     GraphicsJNI::getSkBitmap(env, jbitmap, &bitmap);
     sp<Surface> surface = android_view_Surface_getSurface(env, jsurface);
-    return RenderProxy::copySurfaceInto(surface, &bitmap);
+    return RenderProxy::copySurfaceInto(surface, left, top, right, bottom, &bitmap);
+}
+
+class ContextFactory : public IContextFactory {
+public:
+    virtual AnimationContext* createAnimationContext(renderthread::TimeLord& clock) {
+        return new AnimationContext(clock);
+    }
+};
+
+static jobject android_view_ThreadedRenderer_createHardwareBitmapFromRenderNode(JNIEnv* env,
+        jobject clazz, jlong renderNodePtr, jint jwidth, jint jheight) {
+    RenderNode* renderNode = reinterpret_cast<RenderNode*>(renderNodePtr);
+    if (jwidth <= 0 || jheight <= 0) {
+        ALOGW("Invalid width %d or height %d", jwidth, jheight);
+        return nullptr;
+    }
+
+    uint32_t width = jwidth;
+    uint32_t height = jheight;
+
+    // Create a Surface wired up to a BufferItemConsumer
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> rawConsumer;
+    BufferQueue::createBufferQueue(&producer, &rawConsumer);
+    // We only need 1 buffer but some drivers have bugs so workaround it by setting max count to 2
+    rawConsumer->setMaxBufferCount(2);
+    sp<BufferItemConsumer> consumer = new BufferItemConsumer(rawConsumer,
+            GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_SW_READ_NEVER | GRALLOC_USAGE_SW_WRITE_NEVER);
+    consumer->setDefaultBufferSize(width, height);
+    sp<Surface> surface = new Surface(producer);
+
+    // Render into the surface
+    {
+        ContextFactory factory;
+        RenderProxy proxy{false, renderNode, &factory};
+        proxy.loadSystemProperties();
+        proxy.setSwapBehavior(SwapBehavior::kSwap_discardBuffer);
+        proxy.initialize(surface);
+        // Shadows can't be used via this interface, so just set the light source
+        // to all 0s.
+        proxy.setup(0, 0, 0);
+        proxy.setLightCenter((Vector3){0, 0, 0});
+        nsecs_t vsync = systemTime(CLOCK_MONOTONIC);
+        UiFrameInfoBuilder(proxy.frameInfo())
+                .setVsync(vsync, vsync)
+                .addFlag(FrameInfoFlags::SurfaceCanvas);
+        proxy.syncAndDrawFrame();
+    }
+
+    // Yank out the GraphicBuffer
+    BufferItem bufferItem;
+    status_t err;
+    if ((err = consumer->acquireBuffer(&bufferItem, 0, true)) != OK) {
+        ALOGW("Failed to acquireBuffer, error %d (%s)", err, strerror(-err));
+        return nullptr;
+    }
+    sp<GraphicBuffer> buffer = bufferItem.mGraphicBuffer;
+    // We don't really care if this fails or not since we're just going to destroy this anyway
+    consumer->releaseBuffer(bufferItem);
+    if (!buffer.get()) {
+        ALOGW("GraphicBuffer is null?");
+        return nullptr;
+    }
+    if (buffer->getWidth() != width || buffer->getHeight() != height) {
+        ALOGW("GraphicBuffer size mismatch, got %dx%d expected %dx%d",
+                buffer->getWidth(), buffer->getHeight(), width, height);
+        // Continue I guess?
+    }
+    sk_sp<Bitmap> bitmap = Bitmap::createFrom(buffer);
+    return createBitmap(env, bitmap.release(), android::bitmap::kBitmapCreateFlag_Mutable);
+}
+
+static void android_view_ThreadedRenderer_disableVsync(JNIEnv*, jclass) {
+    RenderProxy::disableVsync();
 }
 
 // ----------------------------------------------------------------------------
@@ -711,7 +972,7 @@ static void android_view_ThreadedRenderer_removeFrameMetricsObserver(JNIEnv* env
 static void android_view_ThreadedRenderer_setupShadersDiskCache(JNIEnv* env, jobject clazz,
         jstring diskCachePath) {
     const char* cacheArray = env->GetStringUTFChars(diskCachePath, NULL);
-    egl_cache_t::get()->setCacheFilename(cacheArray);
+    android::egl_set_cache_filename(cacheArray);
     env->ReleaseStringUTFChars(diskCachePath, cacheArray);
 }
 
@@ -722,8 +983,10 @@ static void android_view_ThreadedRenderer_setupShadersDiskCache(JNIEnv* env, job
 const char* const kClassPathName = "android/view/ThreadedRenderer";
 
 static const JNINativeMethod gMethods[] = {
-    { "nSetAtlas", "(JLandroid/view/GraphicBuffer;[J)V",   (void*) android_view_ThreadedRenderer_setAtlas },
-    { "nSetProcessStatsBuffer", "(JI)V", (void*) android_view_ThreadedRenderer_setProcessStatsBuffer },
+    { "nSupportsOpenGL", "()Z", (void*) android_view_ThreadedRenderer_supportsOpenGL },
+    { "nRotateProcessStatsBuffer", "()V", (void*) android_view_ThreadedRenderer_rotateProcessStatsBuffer },
+    { "nSetProcessStatsBuffer", "(I)V", (void*) android_view_ThreadedRenderer_setProcessStatsBuffer },
+    { "nGetRenderThreadTid", "(J)I", (void*) android_view_ThreadedRenderer_getRenderThreadTid },
     { "nCreateRootRenderNode", "()J", (void*) android_view_ThreadedRenderer_createRootRenderNode },
     { "nCreateProxy", "(ZJ)J", (void*) android_view_ThreadedRenderer_createProxy },
     { "nDeleteProxy", "(J)V", (void*) android_view_ThreadedRenderer_deleteProxy },
@@ -733,12 +996,13 @@ static const JNINativeMethod gMethods[] = {
     { "nUpdateSurface", "(JLandroid/view/Surface;)V", (void*) android_view_ThreadedRenderer_updateSurface },
     { "nPauseSurface", "(JLandroid/view/Surface;)Z", (void*) android_view_ThreadedRenderer_pauseSurface },
     { "nSetStopped", "(JZ)V", (void*) android_view_ThreadedRenderer_setStopped },
-    { "nSetup", "(JIIFII)V", (void*) android_view_ThreadedRenderer_setup },
+    { "nSetup", "(JFII)V", (void*) android_view_ThreadedRenderer_setup },
     { "nSetLightCenter", "(JFFF)V", (void*) android_view_ThreadedRenderer_setLightCenter },
     { "nSetOpaque", "(JZ)V", (void*) android_view_ThreadedRenderer_setOpaque },
     { "nSyncAndDrawFrame", "(J[JI)I", (void*) android_view_ThreadedRenderer_syncAndDrawFrame },
     { "nDestroy", "(JJ)V", (void*) android_view_ThreadedRenderer_destroy },
     { "nRegisterAnimatingRenderNode", "(JJ)V", (void*) android_view_ThreadedRenderer_registerAnimatingRenderNode },
+    { "nRegisterVectorDrawableAnimator", "(JJ)V", (void*) android_view_ThreadedRenderer_registerVectorDrawableAnimator },
     { "nInvokeFunctor", "(JZ)V", (void*) android_view_ThreadedRenderer_invokeFunctor },
     { "nCreateTextureLayer", "(J)J", (void*) android_view_ThreadedRenderer_createTextureLayer },
     { "nBuildLayer", "(JJ)V", (void*) android_view_ThreadedRenderer_buildLayer },
@@ -754,7 +1018,6 @@ static const JNINativeMethod gMethods[] = {
     { "nNotifyFramePending", "(J)V", (void*) android_view_ThreadedRenderer_notifyFramePending },
     { "nSerializeDisplayListTree", "(J)V", (void*) android_view_ThreadedRenderer_serializeDisplayListTree },
     { "nDumpProfileInfo", "(JLjava/io/FileDescriptor;I)V", (void*) android_view_ThreadedRenderer_dumpProfileInfo },
-    { "nDumpProfileData", "([BLjava/io/FileDescriptor;)V", (void*) android_view_ThreadedRenderer_dumpProfileData },
     { "setupShadersDiskCache", "(Ljava/lang/String;)V",
                 (void*) android_view_ThreadedRenderer_setupShadersDiskCache },
     { "nAddRenderNode", "(JJZ)V", (void*) android_view_ThreadedRenderer_addRenderNode},
@@ -767,8 +1030,11 @@ static const JNINativeMethod gMethods[] = {
     { "nRemoveFrameMetricsObserver",
             "(JJ)V",
             (void*)android_view_ThreadedRenderer_removeFrameMetricsObserver },
-    { "nCopySurfaceInto", "(Landroid/view/Surface;Landroid/graphics/Bitmap;)I",
+    { "nCopySurfaceInto", "(Landroid/view/Surface;IIIILandroid/graphics/Bitmap;)I",
                 (void*)android_view_ThreadedRenderer_copySurfaceInto },
+    { "nCreateHardwareBitmap", "(JII)Landroid/graphics/Bitmap;",
+            (void*)android_view_ThreadedRenderer_createHardwareBitmapFromRenderNode },
+    { "disableVsync", "()V", (void*)android_view_ThreadedRenderer_disableVsync },
 };
 
 int register_android_view_ThreadedRenderer(JNIEnv* env) {

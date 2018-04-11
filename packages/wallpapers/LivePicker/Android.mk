@@ -46,4 +46,15 @@ LOCAL_CERTIFICATE := platform
 
 LOCAL_PROGUARD_FLAG_FILES := proguard.flags
 
+LOCAL_STATIC_ANDROID_LIBRARIES := \
+    android-support-v7-appcompat \
+    android-support-v4 \
+    android-support-design \
+    android-support-transition \
+    android-support-v7-recyclerview
+
+LOCAL_RESOURCE_DIR := $(LOCAL_PATH)/res
+
+LOCAL_USE_AAPT2 := true
+
 include $(BUILD_PACKAGE)

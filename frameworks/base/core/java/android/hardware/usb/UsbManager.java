@@ -17,15 +17,21 @@
 
 package android.hardware.usb;
 
-import com.android.internal.util.Preconditions;
-
+import android.annotation.Nullable;
+import android.annotation.SdkConstant;
+import android.annotation.SystemService;
+import android.annotation.SdkConstant.SdkConstantType;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.os.RemoteException;
 import android.util.Log;
+
+import com.android.internal.util.Preconditions;
 
 import java.util.HashMap;
 
@@ -33,18 +39,13 @@ import java.util.HashMap;
  * This class allows you to access the state of USB and communicate with USB devices.
  * Currently only host mode is supported in the public API.
  *
- * <p>You can obtain an instance of this class by calling
- * {@link android.content.Context#getSystemService(java.lang.String) Context.getSystemService()}.
- *
- * {@samplecode
- * UsbManager manager = (UsbManager) getSystemService(Context.USB_SERVICE);}
- *
  * <div class="special reference">
  * <h3>Developer Guides</h3>
  * <p>For more information about communicating with USB hardware, read the
- * <a href="{@docRoot}guide/topics/usb/index.html">USB</a> developer guide.</p>
+ * <a href="{@docRoot}guide/topics/connectivity/usb/index.html">USB developer guide</a>.</p>
  * </div>
  */
+@SystemService(Context.USB_SERVICE)
 public class UsbManager {
     private static final String TAG = "UsbManager";
 
@@ -106,6 +107,7 @@ public class UsbManager {
      * for the attached device
      * </ul>
      */
+    @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_USB_DEVICE_ATTACHED =
             "android.hardware.usb.action.USB_DEVICE_ATTACHED";
 
@@ -118,6 +120,7 @@ public class UsbManager {
      * for the detached device
      * </ul>
      */
+    @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_USB_DEVICE_DETACHED =
             "android.hardware.usb.action.USB_DEVICE_DETACHED";
 
@@ -130,6 +133,7 @@ public class UsbManager {
      * for the attached accessory
      * </ul>
      */
+    @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_USB_ACCESSORY_ATTACHED =
             "android.hardware.usb.action.USB_ACCESSORY_ATTACHED";
 
@@ -142,6 +146,7 @@ public class UsbManager {
      * for the attached accessory that was detached
      * </ul>
      */
+    @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_USB_ACCESSORY_DETACHED =
             "android.hardware.usb.action.USB_ACCESSORY_DETACHED";
 
@@ -178,6 +183,14 @@ public class UsbManager {
      * {@hide}
      */
     public static final String USB_DATA_UNLOCKED = "unlocked";
+
+    /**
+     * Boolean extra indicating whether the intent represents a change in the usb
+     * configuration (as opposed to a state update).
+     *
+     * {@hide}
+     */
+    public static final String USB_CONFIG_CHANGED = "config_changed";
 
     /**
      * A placeholder indicating that no USB function is being specified.
@@ -329,7 +342,7 @@ public class UsbManager {
             ParcelFileDescriptor pfd = mService.openDevice(deviceName);
             if (pfd != null) {
                 UsbDeviceConnection connection = new UsbDeviceConnection(device);
-                boolean result = connection.open(deviceName, pfd);
+                boolean result = connection.open(deviceName, pfd, mContext);
                 pfd.close();
                 if (result) {
                     return connection;
@@ -468,10 +481,40 @@ public class UsbManager {
      * {@hide}
      */
     public void grantPermission(UsbDevice device) {
+        grantPermission(device, Process.myUid());
+    }
+
+    /**
+     * Grants permission for USB device to given uid without showing system dialog.
+     * Only system components can call this function.
+     * @param device to request permissions for
+     * @uid uid to give permission
+     *
+     * {@hide}
+     */
+    public void grantPermission(UsbDevice device, int uid) {
         try {
-            mService.grantDevicePermission(device, Process.myUid());
+            mService.grantDevicePermission(device, uid);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
+        }
+    }
+
+    /**
+     * Grants permission to specified package for USB device without showing system dialog.
+     * Only system components can call this function, as it requires the MANAGE_USB permission.
+     * @param device to request permissions for
+     * @param packageName of package to grant permissions
+     *
+     * {@hide}
+     */
+    public void grantPermission(UsbDevice device, String packageName) {
+        try {
+            int uid = mContext.getPackageManager()
+                .getPackageUidAsUser(packageName, mContext.getUserId());
+            grantPermission(device, uid);
+        } catch (NameNotFoundException e) {
+            Log.e(TAG, "Package " + packageName + " not found.", e);
         }
     }
 
@@ -509,33 +552,23 @@ public class UsbManager {
      * {@link #USB_FUNCTION_MIDI}, {@link #USB_FUNCTION_MTP}, {@link #USB_FUNCTION_PTP},
      * or {@link #USB_FUNCTION_RNDIS}.
      * </p><p>
+     * Also sets whether USB data (for example, MTP exposed pictures) should be made available
+     * on the USB connection when in device mode. Unlocking usb data should only be done with
+     * user involvement, since exposing pictures or other data could leak sensitive
+     * user information.
+     * </p><p>
      * Note: This function is asynchronous and may fail silently without applying
      * the requested changes.
      * </p>
      *
      * @param function name of the USB function, or null to restore the default function
+     * @param usbDataUnlocked whether user data is accessible
      *
      * {@hide}
      */
-    public void setCurrentFunction(String function) {
+    public void setCurrentFunction(String function, boolean usbDataUnlocked) {
         try {
-            mService.setCurrentFunction(function);
-        } catch (RemoteException e) {
-            throw e.rethrowFromSystemServer();
-        }
-    }
-
-    /**
-     * Sets whether USB data (for example, MTP exposed pictures) should be made available
-     * on the USB connection when in device mode. Unlocking usb data should only be done with
-     * user involvement, since exposing pictures or other data could leak sensitive
-     * user information.
-     *
-     * {@hide}
-     */
-    public void setUsbDataUnlocked(boolean unlocked) {
-        try {
-            mService.setUsbDataUnlocked(unlocked);
+            mService.setCurrentFunction(function, usbDataUnlocked);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
@@ -605,6 +638,26 @@ public class UsbManager {
 
         try {
             mService.setPortRoles(port.getId(), powerRole, dataRole);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    /**
+     * Sets the component that will handle USB device connection.
+     * <p>
+     * Setting component allows to specify external USB host manager to handle use cases, where
+     * selection dialog for an activity that will handle USB device is undesirable.
+     * Only system components can call this function, as it requires the MANAGE_USB permission.
+     *
+     * @param usbDeviceConnectionHandler The component to handle usb connections,
+     * {@code null} to unset.
+     *
+     * {@hide}
+     */
+    public void setUsbDeviceConnectionHandler(@Nullable ComponentName usbDeviceConnectionHandler) {
+        try {
+            mService.setUsbDeviceConnectionHandler(usbDeviceConnectionHandler);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }

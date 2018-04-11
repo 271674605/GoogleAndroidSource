@@ -1,43 +1,32 @@
 /*
- * Copyright (c) 2016, Google. All rights reserved.
+ * Copyright (C) 2016 The Android Open Source Project
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of The Linux Foundation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 
 #ifndef _NANOHUB_SYSTEM_COMMS_H_
 #define _NANOHUB_SYSTEM_COMMS_H_
 
 #include <utils/Condition.h>
-#include <utils/Mutex.h>
 
+#include <condition_variable>
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include <hardware/context_hub.h>
+#include <nanohub/nanohub.h>
+
 #include "nanohubhal.h"
 #include "message_buf.h"
 
@@ -57,10 +46,6 @@
 #define NANOHUB_FINISH_UPLOAD      8 // () -> (char success)
 #define NANOHUB_REBOOT             9 // () -> (char success)
 
-// Custom defined private messages
-#define CONTEXT_HUB_LOAD_OS (CONTEXT_HUB_TYPE_PRIVATE_MSG_BASE + 1)
-
-
 #define NANOHUB_APP_NOT_LOADED  (-1)
 #define NANOHUB_APP_LOADED      (0)
 
@@ -79,6 +64,18 @@ struct NanohubAppInfo {
     uint32_t version, flashUse, ramUse;
 } __attribute__((packed));
 
+struct MgmtStatus {
+    union {
+        uint32_t value;
+        struct {
+            uint8_t app;
+            uint8_t task;
+            uint8_t op;
+            uint8_t erase;
+        } __attribute__((packed));
+    };
+} __attribute__((packed));
+
 struct NanohubMemInfo {
     //sizes
     uint32_t flashSz, blSz, osSz, sharedSz, eeSz;
@@ -92,7 +89,7 @@ struct NanohubMemInfo {
 struct NanohubRsp {
     uint32_t cmd;
     int32_t status;
-    NanohubRsp(MessageBuf &buf, bool no_status = false);
+    explicit NanohubRsp(MessageBuf &buf, bool no_status = false);
 };
 
 inline bool operator == (const hub_app_name_t &a, const hub_app_name_t &b) {
@@ -124,6 +121,7 @@ private:
         virtual int handleRx(MessageBuf &buf) = 0;
         virtual int getState() const = 0; // FSM state
         virtual int getStatus() const = 0; // execution status (result code)
+        virtual void abort(int32_t) = 0;
         virtual ~ISession() {}
     };
 
@@ -132,12 +130,12 @@ private:
     class Session : public ISession {
         friend class SessionManager;
 
-        mutable Mutex mDoneLock; // controls condition and state transitions
-        Condition mDoneWait;
+        mutable std::mutex mDoneMutex; // controls condition and state transitions
+        std::condition_variable mDoneCond;
         volatile int mState;
 
     protected:
-        mutable Mutex mLock; // serializes message handling
+        mutable std::mutex mLock; // serializes message handling
         int32_t mStatus;
 
         enum {
@@ -147,43 +145,47 @@ private:
         };
 
         void complete() {
-            Mutex::Autolock _l(mDoneLock);
+            std::unique_lock<std::mutex> lk(mDoneMutex);
             if (mState != SESSION_DONE) {
                 mState = SESSION_DONE;
-                mDoneWait.broadcast();
+                lk.unlock();
+                mDoneCond.notify_all();
             }
+        }
+        void abort(int32_t status) {
+            std::lock_guard<std::mutex> _l(mLock);
+            mStatus = status;
+            complete();
         }
         void setState(int state) {
             if (state == SESSION_DONE) {
                 complete();
             } else {
-                Mutex::Autolock _l(mDoneLock);
+                std::lock_guard<std::mutex> _l(mDoneMutex);
                 mState = state;
             }
         }
     public:
         Session() { mState = SESSION_INIT; mStatus = -1; }
         int getStatus() const {
-            Mutex::Autolock _l(mLock);
+            std::lock_guard<std::mutex> _l(mLock);
             return mStatus;
         }
         int wait() {
-            Mutex::Autolock _l(mDoneLock);
-            while (mState != SESSION_DONE) {
-                mDoneWait.wait(mDoneLock);
-            }
+            std::unique_lock<std::mutex> lk(mDoneMutex);
+            mDoneCond.wait(lk, [this] { return mState == SESSION_DONE; });
             return 0;
         }
         virtual int getState() const override {
-            Mutex::Autolock _l(mDoneLock);
+            std::lock_guard<std::mutex> _l(mDoneMutex);
             return mState;
         }
         virtual bool isDone() const {
-            Mutex::Autolock _l(mDoneLock);
+            std::lock_guard<std::mutex> _l(mDoneMutex);
             return mState == SESSION_DONE;
         }
         virtual bool isRunning() const {
-            Mutex::Autolock _l(mDoneLock);
+            std::lock_guard<std::mutex> _l(mDoneMutex);
             return mState > SESSION_DONE;
         }
     };
@@ -192,19 +194,24 @@ private:
         enum {
             TRANSFER = SESSION_USER,
             FINISH,
-            RELOAD,
+            RUN,
+            RUN_FAILED,
+            REBOOT,
             MGMT,
         };
-        uint32_t mCmd; // UPLOAD_APP | UPPLOAD_OS
+        uint32_t mCmd; // LOAD_APP, UNLOAD_APP, ENABLE_APP, DISABLE_APP
         uint32_t mResult;
         std::vector<uint8_t> mData;
         uint32_t mLen;
         uint32_t mPos;
+        hub_app_name_t mAppName;
 
         int setupMgmt(const hub_message_t *appMsg, uint32_t cmd);
         int handleTransfer(NanohubRsp &rsp);
         int handleFinish(NanohubRsp &rsp);
-        int handleReload(NanohubRsp &rsp);
+        int handleRun(NanohubRsp &rsp);
+        int handleRunFailed(NanohubRsp &rsp);
+        int handleReboot(NanohubRsp &rsp);
         int handleMgmt(NanohubRsp &rsp);
     public:
         AppMgmtSession() {
@@ -212,6 +219,7 @@ private:
             mResult = 0;
             mPos = 0;
             mLen = 0;
+            memset(&mAppName, 0, sizeof(mAppName));
         }
         virtual int handleRx(MessageBuf &buf) override;
         virtual int setup(const hub_message_t *app_msg) override;
@@ -230,7 +238,7 @@ private:
         virtual int setup(const hub_message_t *) override;
         virtual int handleRx(MessageBuf &buf) override;
         bool haveKeys() const {
-            Mutex::Autolock _l(mLock);
+            std::lock_guard<std::mutex> _l(mLock);
             return mRsaKeyData.size() > 0 && !isRunning();
         }
     };
@@ -246,35 +254,25 @@ private:
     class SessionManager {
         typedef std::map<int, Session* > SessionMap;
 
-        Mutex lock;
+        std::mutex lock;
         SessionMap sessions_;
 
+        bool isActive(const SessionMap::iterator &pos) const
+        {
+            return !pos->second->isDone();
+        }
         void next(SessionMap::iterator &pos)
         {
-            Mutex::Autolock _l(lock);
-            pos->second->isDone() ? pos = sessions_.erase(pos) : ++pos;
+            isActive(pos) ? pos++ : pos = sessions_.erase(pos);
         }
 
     public:
         int handleRx(MessageBuf &buf);
-        int setup_and_add(int id, Session *session, const hub_message_t *appMsg) {
-            Mutex::Autolock _l(lock);
-            if (sessions_.count(id) == 0 && !session->isRunning()) {
-                int ret = session->setup(appMsg);
-                if (ret < 0) {
-                    session->complete();
-                } else {
-                    sessions_[id] = session;
-                }
-                return ret;
-            }
-            return -EBUSY;
-        }
-
+        int setup_and_add(int id, Session *session, const hub_message_t *appMsg);
     } mSessions;
 
     const hub_app_name_t mHostIfAppName = {
-        .id = NANO_APP_ID(NANOAPP_VENDOR_GOOGLE, 0)
+        .id = APP_ID_MAKE(NANOHUB_VENDOR_GOOGLE, 0)
     };
 
     static SystemComm *getSystem() {
@@ -293,7 +291,7 @@ private:
         if (NanoHub::messageTracingEnabled()) {
             dumpBuffer("HAL -> APP", get_hub_info()->os_app_name, typ, data, len);
         }
-        NanoHub::sendToApp(&get_hub_info()->os_app_name, typ, data, len);
+        NanoHub::sendToApp(HubMessage(&get_hub_info()->os_app_name, typ, data, len));
     }
     static int sendToSystem(const void *data, size_t len);
 

@@ -2,14 +2,13 @@
 Android CardView Sample Sample
 ===================================
 
-This sample demonstrates how to use CardView introduced in the support library for the
-Android L preview.
+This sample demonstrates how to use CardView introduced in the support library in Android 5.0.
 
 Pre-requisites
 --------------
 
-- Android SDK v21
-- Android Build Tools v23.0.0
+- Android SDK 24
+- Android Build Tools v24.0.2
 - Android Support Repository
 
 Getting Started
@@ -33,7 +32,7 @@ submitting a pull request through GitHub. Please see CONTRIBUTING.md for more de
 License
 -------
 
-Copyright 2014 The Android Open Source Project, Inc.
+Copyright 2016 The Android Open Source Project, Inc.
 
 Licensed to the Apache Software Foundation (ASF) under one or more contributor
 license agreements.  See the NOTICE file distributed with this work for

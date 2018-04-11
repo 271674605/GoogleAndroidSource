@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2011-2015 Dmitry V. Levin <ldv@altlinux.org>
+# Copyright (c) 2011-2016 Dmitry V. Levin <ldv@altlinux.org>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -26,6 +26,10 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ME_="${0##*/}"
+LOG="$ME_.tmp"
+OUT="$LOG.out"
+EXP="$LOG.exp"
+NAME="${ME_%.test}"
 
 warn_() { printf >&2 '%s\n' "$*"; }
 fail_() { warn_ "$ME_: failed test: $*"; exit 1; }
@@ -48,14 +52,15 @@ dump_log_and_fail_with()
 run_prog()
 {
 	if [ $# -eq 0 ]; then
-		set -- "./${ME_%.test}"
+		set -- "./$NAME"
 	fi
 	args="$*"
 	"$@" || {
-		if [ $? -eq 77 ]; then
+		rc=$?
+		if [ $rc -eq 77 ]; then
 			skip_ "$args exited with code 77"
 		else
-			fail_ "$args failed"
+			fail_ "$args failed with code $rc"
 		fi
 	}
 }
@@ -64,7 +69,7 @@ run_prog()
 run_prog_skip_if_failed()
 {
 	args="$*"
-	"$@" || framework_skip_ "$args failed"
+	"$@" || framework_skip_ "$args failed with code $?"
 }
 
 run_strace()
@@ -72,7 +77,7 @@ run_strace()
 	> "$LOG" || fail_ "failed to write $LOG"
 	args="$*"
 	$STRACE -o "$LOG" "$@" ||
-		dump_log_and_fail_with "$STRACE $args failed"
+		dump_log_and_fail_with "$STRACE $args failed with code $?"
 }
 
 run_strace_merge()
@@ -80,7 +85,7 @@ run_strace_merge()
 	rm -f -- "$LOG".[0-9]*
 	run_strace -ff -tt "$@"
 	"$srcdir"/../strace-log-merge "$LOG" > "$LOG" ||
-		dump_log_and_fail_with 'strace-log-merge failed'
+		dump_log_and_fail_with 'strace-log-merge failed with code $?'
 	rm -f -- "$LOG".[0-9]*
 }
 
@@ -108,7 +113,7 @@ match_awk()
 		output="$1"; shift
 	fi
 	if [ $# -eq 0 ]; then
-		program="$srcdir/${ME_%.test}.awk"
+		program="$srcdir/$NAME.awk"
 	else
 		program="$1"; shift
 	fi
@@ -138,7 +143,7 @@ match_diff()
 		output="$1"; shift
 	fi
 	if [ $# -eq 0 ]; then
-		expected="$srcdir/${ME_%.test}.expected"
+		expected="$srcdir/$NAME.expected"
 	else
 		expected="$1"; shift
 	fi
@@ -161,14 +166,14 @@ match_diff()
 # dump both files and fail with ERROR_MESSAGE.
 match_grep()
 {
-	local output patterns error pattern failed=
+	local output patterns error pattern cnt failed=
 	if [ $# -eq 0 ]; then
 		output="$LOG"
 	else
 		output="$1"; shift
 	fi
 	if [ $# -eq 0 ]; then
-		patterns="$srcdir/${ME_%.test}.expected"
+		patterns="$srcdir/$NAME.expected"
 	else
 		patterns="$1"; shift
 	fi
@@ -181,14 +186,16 @@ match_grep()
 	check_prog wc
 	check_prog grep
 
+	cnt=1
 	while read -r pattern; do
 		LC_ALL=C grep -E -x -e "$pattern" < "$output" > /dev/null || {
 			test -n "$failed" || {
 				echo 'Failed patterns of expected output:'
 				failed=1
 			}
-			printf '%s\n' "$pattern"
+			printf '#%d: %s\n' "$cnt" "$pattern"
 		}
+		cnt=$(($cnt + 1))
 	done < "$patterns"
 	test -z "$failed" || {
 		echo 'Actual output:'
@@ -197,13 +204,67 @@ match_grep()
 	}
 }
 
+# Usage: run_strace_match_diff [args to run_strace]
+run_strace_match_diff()
+{
+	args="$*"
+	[ -n "$args" -a -z "${args##*-e trace=*}" ] ||
+		set -- -e trace="$NAME" "$@"
+	run_prog > /dev/null
+	run_strace "$@" $args > "$EXP"
+	match_diff "$LOG" "$EXP"
+	rm -f "$EXP"
+}
+
+# Print kernel version code.
+# usage: kernel_version_code $(uname -r)
+kernel_version_code()
+{
+	(
+		set -f
+		IFS=.
+		set -- $1
+		v1="${1%%[!0-9]*}" && [ -n "$v1" ] || v1=0
+		v2="${2%%[!0-9]*}" && [ -n "$v2" ] || v2=0
+		v3="${3%%[!0-9]*}" && [ -n "$v3" ] || v3=0
+		echo "$(($v1 * 65536 + $v2 * 256 + $v3))"
+	)
+}
+
+# Usage: require_min_kernel_version_or_skip 3.0
+require_min_kernel_version_or_skip()
+{
+	local uname_r
+	uname_r="$(uname -r)"
+
+	[ "$(kernel_version_code "$uname_r")" -ge \
+	  "$(kernel_version_code "$1")" ] ||
+		skip_ "the kernel release $uname_r is not $1 or newer"
+}
+
+# Usage: grep_pid_status $pid GREP-OPTIONS...
+grep_pid_status()
+{
+	local pid
+	pid=$1; shift
+	cat < "/proc/$pid/status" | grep "$@"
+}
+
 check_prog cat
 check_prog rm
 
-LOG="$ME_.tmp"
 rm -f "$LOG"
 
-: "${STRACE:=../strace}"
+[ -n "${STRACE-}" ] || {
+	STRACE=../strace
+	case "${LOG_COMPILER-} ${LOG_FLAGS-}" in
+		*--suppressions=*--error-exitcode=*--tool=*)
+			# add valgrind command prefix
+			STRACE="${LOG_COMPILER-} ${LOG_FLAGS-} $STRACE"
+			;;
+	esac
+}
+
 : "${TIMEOUT_DURATION:=60}"
 : "${SLEEP_A_BIT:=sleep 1}"
 

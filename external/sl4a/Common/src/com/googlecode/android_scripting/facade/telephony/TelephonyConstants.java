@@ -1,17 +1,17 @@
 /*
- * Copyright (C) 2016 Google Inc.
+ * Copyright (C) 2017 The Android Open Source Project
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not
- * use this file except in compliance with the License. You may obtain a copy of
- * the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations under
- * the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.googlecode.android_scripting.facade.telephony;
@@ -164,6 +164,7 @@ public class TelephonyConstants {
     public static final String RAT_GSM = "GSM";
     public static final String RAT_TD_SCDMA = "TD_SCDMA";
     public static final String RAT_GLOBAL = "GLOBAL";
+    public static final String RAT_LTE_CA = "LTE_CA";
     public static final String RAT_UNKNOWN = "UNKNOWN";
 
     /**
@@ -346,39 +347,16 @@ public class TelephonyConstants {
     public static final String EventSignalStrengthChanged = "SignalStrengthChanged";
     public static final String EventVolteServiceStateChanged = "VolteServiceStateChanged";
     public static final String EventMessageWaitingIndicatorChanged = "MessageWaitingIndicatorChanged";
-    public static final String EventConnectivityChanged = "ConnectivityChanged";
 
     /**
-     * Constant for Packet Keep Alive Call Back
-     * **/
-    public static final String EventPacketKeepaliveCallback = "PacketKeepaliveCallback";
-
-    /*Sub-Event Names*/
-    public static final String PacketKeepaliveCallbackStarted = "Started";
-    public static final String PacketKeepaliveCallbackStopped = "Stopped";
-    public static final String PacketKeepaliveCallbackError = "Error";
-    public static final String PacketKeepaliveCallbackInvalid = "Invalid";
-
-    /**
-     * Constant for Network Call Back
-     * **/
-    public static final String EventNetworkCallback = "NetworkCallback";
-
-    /*Sub-Event Names*/
-    public static final String NetworkCallbackPreCheck = "PreCheck";
-    public static final String NetworkCallbackAvailable = "Available";
-    public static final String NetworkCallbackLosing = "Losing";
-    public static final String NetworkCallbackLost = "Lost";
-    public static final String NetworkCallbackUnavailable = "Unavailable";
-    public static final String NetworkCallbackCapabilitiesChanged = "CapabilitiesChanged";
-    public static final String NetworkCallbackSuspended = "Suspended";
-    public static final String NetworkCallbackResumed = "Resumed";
-    public static final String NetworkCallbackLinkPropertiesChanged = "LinkPropertiesChanged";
-    public static final String NetworkCallbackInvalid = "Invalid";
+     * Constants for OnStartTetheringCallback
+     */
+    public static final String TetheringStartedCallback = "ConnectivityManagerOnTetheringStarted";
+    public static final String TetheringFailedCallback = "ConnectivityManagerOnTetheringFailed";
 
     /**
      * Constant for Signal Strength fields
-     * **/
+     */
     public static class SignalStrengthContainer {
         public static final String SIGNAL_STRENGTH_GSM = "gsmSignalStrength";
         public static final String SIGNAL_STRENGTH_GSM_DBM = "gsmDbm";
@@ -450,17 +428,5 @@ public class TelephonyConstants {
 
     public static class VoLteServiceStateContainer {
         public static final String SRVCC_STATE = "srvccState";
-    }
-
-    public static class PacketKeepaliveContainer {
-        public static final String ID = "id";
-        public static final String PACKET_KEEPALIVE_EVENT = "packetKeepaliveEvent";
-    }
-
-    public static class NetworkCallbackContainer {
-        public static final String ID = "id";
-        public static final String NETWORK_CALLBACK_EVENT = "networkCallbackEvent";
-        public static final String MAX_MS_TO_LIVE = "maxMsToLive";
-        public static final String RSSI = "rssi";
     }
 }

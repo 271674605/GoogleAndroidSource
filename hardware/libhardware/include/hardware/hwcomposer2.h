@@ -17,6 +17,8 @@
 #ifndef ANDROID_HARDWARE_HWCOMPOSER2_H
 #define ANDROID_HARDWARE_HWCOMPOSER2_H
 
+#include <sys/cdefs.h>
+
 #include <hardware/hardware.h>
 
 #include "hwcomposer_defs.h"
@@ -86,6 +88,33 @@ typedef enum {
      * (such as position, size, etc.) need to be performed through the
      * validate/present cycle. */
     HWC2_CAPABILITY_SIDEBAND_STREAM = 1,
+
+    /* Specifies that the device will apply a color transform even when either
+     * the client or the device has chosen that all layers should be composed by
+     * the client. This will prevent the client from applying the color
+     * transform during its composition step. */
+    HWC2_CAPABILITY_SKIP_CLIENT_COLOR_TRANSFORM = 2,
+
+    /* Specifies that the present fence must not be used as an accurate
+     * representation of the actual present time of a frame.
+     * This capability must never be set by HWC2 devices.
+     * This capability may be set for HWC1 devices that use the
+     * HWC2On1Adapter where emulation of the present fence using the retire
+     * fence is not feasible.
+     * In the future, CTS tests will require present time to be reliable.
+     */
+    HWC2_CAPABILITY_PRESENT_FENCE_IS_NOT_RELIABLE = 3,
+
+    /* Specifies that a device is able to skip the validateDisplay call before
+     * receiving a call to presentDisplay. The client will always skip
+     * validateDisplay and try to call presentDisplay regardless of the changes
+     * in the properties of the layers. If the device returns anything else than
+     * HWC2_ERROR_NONE, it will call validateDisplay then presentDisplay again.
+     * For this capability to be worthwhile the device implementation of
+     * presentDisplay should fail as fast as possible in the case a
+     * validateDisplay step is needed.
+     */
+    HWC2_CAPABILITY_SKIP_VALIDATE= 4,
 } hwc2_capability_t;
 
 /* Possible composition types for a given layer */
@@ -325,6 +354,10 @@ static inline const char* getCapabilityName(hwc2_capability_t capability) {
     switch (capability) {
         case HWC2_CAPABILITY_INVALID: return "Invalid";
         case HWC2_CAPABILITY_SIDEBAND_STREAM: return "SidebandStream";
+        case HWC2_CAPABILITY_SKIP_CLIENT_COLOR_TRANSFORM:
+                return "SkipClientColorTransform";
+        case HWC2_CAPABILITY_PRESENT_FENCE_IS_NOT_RELIABLE:
+                return "PresentFenceIsNotReliable";
         default: return "Unknown";
     }
 }
@@ -352,7 +385,7 @@ static inline const char* getConnectionName(hwc2_connection_t connection) {
 
 static inline const char* getDisplayRequestName(
         hwc2_display_request_t request) {
-    switch (request) {
+    switch (__BIONIC_CAST(static_cast, int, request)) {
         case 0: return "None";
         case HWC2_DISPLAY_REQUEST_FLIP_CLIENT_TARGET: return "FlipClientTarget";
         case HWC2_DISPLAY_REQUEST_WRITE_CLIENT_TARGET_TO_OUTPUT:
@@ -451,7 +484,7 @@ static inline const char* getFunctionDescriptorName(
 }
 
 static inline const char* getLayerRequestName(hwc2_layer_request_t request) {
-    switch (request) {
+    switch (__BIONIC_CAST(static_cast, int, request)) {
         case 0: return "None";
         case HWC2_LAYER_REQUEST_CLEAR_CLIENT_TARGET: return "ClearClientTarget";
         default: return "Unknown";
@@ -469,7 +502,7 @@ static inline const char* getPowerModeName(hwc2_power_mode_t mode) {
 }
 
 static inline const char* getTransformName(hwc_transform_t transform) {
-    switch (transform) {
+    switch (__BIONIC_CAST(static_cast, int, transform)) {
         case 0: return "None";
         case HWC_TRANSFORM_FLIP_H: return "FlipH";
         case HWC_TRANSFORM_FLIP_V: return "FlipV";
@@ -540,6 +573,9 @@ TO_STRING(hwc2_callback_descriptor_t, Callback, getCallbackDescriptorName)
 enum class Capability : int32_t {
     Invalid = HWC2_CAPABILITY_INVALID,
     SidebandStream = HWC2_CAPABILITY_SIDEBAND_STREAM,
+    SkipClientColorTransform = HWC2_CAPABILITY_SKIP_CLIENT_COLOR_TRANSFORM,
+    PresentFenceIsNotReliable = HWC2_CAPABILITY_PRESENT_FENCE_IS_NOT_RELIABLE,
+    SkipValidate = HWC2_CAPABILITY_SKIP_VALIDATE,
 };
 TO_STRING(hwc2_capability_t, Capability, getCapabilityName)
 
@@ -729,7 +765,7 @@ typedef struct hwc2_device {
 static inline int hwc2_open(const struct hw_module_t* module,
         hwc2_device_t** device) {
     return module->methods->open(module, HWC_HARDWARE_COMPOSER,
-            (struct hw_device_t**) device);
+            TO_HW_DEVICE_T_OPEN(device));
 }
 
 static inline int hwc2_close(hwc2_device_t* device) {
@@ -1328,7 +1364,7 @@ typedef int32_t /*hwc2_error_t*/ (*HWC2_PFN_GET_RELEASE_FENCES)(
         hwc2_device_t* device, hwc2_display_t display, uint32_t* outNumElements,
         hwc2_layer_t* outLayers, int32_t* outFences);
 
-/* presentDisplay(..., outRetireFence)
+/* presentDisplay(..., outPresentFence)
  * Descriptor: HWC2_FUNCTION_PRESENT_DISPLAY
  * Must be provided by all HWC2 devices
  *
@@ -1342,15 +1378,16 @@ typedef int32_t /*hwc2_error_t*/ (*HWC2_PFN_GET_RELEASE_FENCES)(
  * setLayerBuffer), then it is safe to call this function without first
  * validating the display.
  *
- * If this call succeeds, outRetireFence will be populated with a file
- * descriptor referring to a retire sync fence object. For physical displays,
- * this fence will be signaled when the result of composition of the prior frame
- * is no longer necessary (because it has been copied or replaced by this
- * frame). For virtual displays, this fence will be signaled when writes to the
- * output buffer have completed and it is safe to read from it.
+ * If this call succeeds, outPresentFence will be populated with a file
+ * descriptor referring to a present sync fence object. For physical displays,
+ * this fence will be signaled at the vsync when the result of composition of
+ * this frame starts to appear (for video-mode panels) or starts to transfer to
+ * panel memory (for command-mode panels). For virtual displays, this fence will
+ * be signaled when writes to the output buffer have completed and it is safe to
+ * read from it.
  *
  * Parameters:
- *   outRetireFence - a sync fence file descriptor as described above; pointer
+ *   outPresentFence - a sync fence file descriptor as described above; pointer
  *       will be non-NULL
  *
  * Returns HWC2_ERROR_NONE or one of the following errors:
@@ -1361,7 +1398,8 @@ typedef int32_t /*hwc2_error_t*/ (*HWC2_PFN_GET_RELEASE_FENCES)(
  *       for this display
  */
 typedef int32_t /*hwc2_error_t*/ (*HWC2_PFN_PRESENT_DISPLAY)(
-        hwc2_device_t* device, hwc2_display_t display, int32_t* outRetireFence);
+        hwc2_device_t* device, hwc2_display_t display,
+        int32_t* outPresentFence);
 
 /* setActiveConfig(..., config)
  * Descriptor: HWC2_FUNCTION_SET_ACTIVE_CONFIG
@@ -1465,6 +1503,10 @@ typedef int32_t /*hwc2_error_t*/ (*HWC2_PFN_SET_COLOR_MODE)(
  * If the device is not capable of either using the hint or the matrix to apply
  * the desired color transform, it should force all layers to client composition
  * during validateDisplay.
+ *
+ * If HWC2_CAPABILITY_SKIP_CLIENT_COLOR_TRANSFORM is present, then the client
+ * will never apply the color transform during client composition, even if all
+ * layers are being composed by the client.
  *
  * The matrix provided is an affine color transformation of the following form:
  *

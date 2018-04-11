@@ -22,6 +22,9 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
+import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionInfo;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.util.Log;
@@ -36,6 +39,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static android.content.Context.TELEPHONY_SERVICE;
 
 public class DeviceInfoUtils {
     private static final String TAG = "DeviceInfoUtils";
@@ -77,11 +82,10 @@ public class DeviceInfoUtils {
 
         final String PROC_VERSION_REGEX =
                 "Linux version (\\S+) " + /* group 1: "3.0.31-g6fb96c9" */
-                "\\((\\S+?)\\) " +        /* group 2: "x@y.com" (kernel builder) */
-                "(?:\\(gcc.+? \\)) " +    /* ignore: GCC version information */
-                "(#\\d+) " +              /* group 3: "#1" */
-                "(?:.*?)?" +              /* ignore: optional SMP, PREEMPT, and any CONFIG_FLAGS */
-                "((Sun|Mon|Tue|Wed|Thu|Fri|Sat).+)"; /* group 4: "Thu Jun 28 11:02:39 PDT 2012" */
+                "\\((\\S+)\\)" +          /* group 2: "x@y.com" (kernel builder) */
+                ".*(#\\d+)" +             /* group 3: "#1" */
+                /* group 4: "Thu Jun 28 11:02:39 PDT 2012" */
+                ".*((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat).+)";
 
         Matcher m = Pattern.compile(PROC_VERSION_REGEX).matcher(rawKernelVersion);
         if (!m.matches()) {
@@ -167,6 +171,42 @@ public class DeviceInfoUtils {
         } else {
             return null;
         }
+    }
+
+    public static String getFormattedPhoneNumber(Context context, SubscriptionInfo subscriptionInfo) {
+        String formattedNumber = null;
+        if (subscriptionInfo != null) {
+            final TelephonyManager telephonyManager =
+                    (TelephonyManager) context.getSystemService(TELEPHONY_SERVICE);
+            final String rawNumber =
+                    telephonyManager.getLine1Number(subscriptionInfo.getSubscriptionId());
+            if (!TextUtils.isEmpty(rawNumber)) {
+                formattedNumber = PhoneNumberUtils.formatNumber(rawNumber);
+            }
+
+        }
+        return formattedNumber;
+    }
+
+    public static String getFormattedPhoneNumbers(Context context,
+            List<SubscriptionInfo> subscriptionInfo) {
+        StringBuilder sb = new StringBuilder();
+        if (subscriptionInfo != null) {
+            final TelephonyManager telephonyManager =
+                    (TelephonyManager) context.getSystemService(TELEPHONY_SERVICE);
+            final int count = subscriptionInfo.size();
+            for (int i = 0; i < count; i++) {
+                final String rawNumber = telephonyManager.getLine1Number(
+                        subscriptionInfo.get(i).getSubscriptionId());
+                if (!TextUtils.isEmpty(rawNumber)) {
+                    sb.append(PhoneNumberUtils.formatNumber(rawNumber));
+                    if (i < count - 1) {
+                        sb.append("\n");
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
 }

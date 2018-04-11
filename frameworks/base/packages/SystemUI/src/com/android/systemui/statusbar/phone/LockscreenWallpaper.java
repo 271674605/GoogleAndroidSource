@@ -26,6 +26,7 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
+import android.graphics.Xfermode;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.DrawableWrapper;
@@ -36,6 +37,8 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserHandle;
 import android.util.Log;
+
+import com.android.keyguard.KeyguardUpdateMonitor;
 
 import libcore.io.IoUtils;
 
@@ -48,9 +51,10 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
 
     private static final String TAG = "LockscreenWallpaper";
 
-    private final PhoneStatusBar mBar;
+    private final StatusBar mBar;
     private final WallpaperManager mWallpaperManager;
     private final Handler mH;
+    private final KeyguardUpdateMonitor mUpdateMonitor;
 
     private boolean mCached;
     private Bitmap mCache;
@@ -60,11 +64,12 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
     private UserHandle mSelectedUser;
     private AsyncTask<Void, Void, LoaderResult> mLoader;
 
-    public LockscreenWallpaper(Context ctx, PhoneStatusBar bar, Handler h) {
+    public LockscreenWallpaper(Context ctx, StatusBar bar, Handler h) {
         mBar = bar;
         mH = h;
         mWallpaperManager = (WallpaperManager) ctx.getSystemService(Context.WALLPAPER_SERVICE);
         mCurrentUserId = ActivityManager.getCurrentUser();
+        mUpdateMonitor = KeyguardUpdateMonitor.getInstance(ctx);
 
         IWallpaperManager service = IWallpaperManager.Stub.asInterface(
                 ServiceManager.getService(Context.WALLPAPER_SERVICE));
@@ -88,6 +93,7 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
         LoaderResult result = loadBitmap(mCurrentUserId, mSelectedUser);
         if (result.success) {
             mCached = true;
+            mUpdateMonitor.setHasLockscreenWallpaper(result.bitmap != null);
             mCache = result.bitmap;
         }
         return mCache;
@@ -115,15 +121,13 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
                 IoUtils.closeQuietly(fd);
             }
         } else {
-            if (selectedUser != null && selectedUser.getIdentifier() != currentUserId) {
-                // When selected user is different from the current user, show the selected
-                // user's static wallpaper.
+            if (selectedUser != null) {
+                // Show the selected user's static wallpaper.
                 return LoaderResult.success(
                         mWallpaperManager.getBitmapAsUser(selectedUser.getIdentifier()));
 
             } else {
-                // When there is no selected user, or it's same as the current user, show the
-                // system (possibly dynamic) wallpaper for the selected user.
+                // When there is no selected user, show the system wallpaper
                 return LoaderResult.success(null);
             }
         }
@@ -131,7 +135,9 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
 
     public void setCurrentUser(int user) {
         if (user != mCurrentUserId) {
-            mCached = false;
+            if (mSelectedUser == null || user != mSelectedUser.getIdentifier()) {
+                mCached = false;
+            }
             mCurrentUserId = user;
         }
     }
@@ -180,6 +186,7 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
                 if (result.success) {
                     mCached = true;
                     mCache = result.bitmap;
+                    mUpdateMonitor.setHasLockscreenWallpaper(result.bitmap != null);
                     mBar.updateMediaMetaData(
                             true /* metaDataChanged */, true /* allowEnterAnimation */);
                 }
@@ -221,6 +228,12 @@ public class LockscreenWallpaper extends IWallpaperManagerCallback.Stub implemen
         private WallpaperDrawable(Resources r, ConstantState state) {
             super(new BitmapDrawable(r, state.mBackground));
             mState = state;
+        }
+
+        @Override
+        public void setXfermode(@Nullable Xfermode mode) {
+            // DrawableWrapper does not call this for us.
+            getDrawable().setXfermode(mode);
         }
 
         @Override

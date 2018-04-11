@@ -24,6 +24,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.RemoteException;
+import android.os.Binder;
 import android.os.IBinder;
 import android.os.ServiceManager;
 import android.util.Log;
@@ -138,7 +139,7 @@ public final class BluetoothSap implements BluetoothProfile {
     }
 
     boolean doBind() {
-        Intent intent = new Intent(IBluetoothMap.class.getName());
+        Intent intent = new Intent(IBluetoothSap.class.getName());
         ComponentName comp = intent.resolveSystemService(mContext.getPackageManager(), 0);
         intent.setComponent(comp);
         if (comp == null || !mContext.bindServiceAsUser(intent, mConnection, 0,
@@ -393,7 +394,7 @@ public final class BluetoothSap implements BluetoothProfile {
     private ServiceConnection mConnection = new ServiceConnection() {
         public void onServiceConnected(ComponentName className, IBinder service) {
             if (DBG) log("Proxy object connected");
-            mService = IBluetoothSap.Stub.asInterface(service);
+            mService = IBluetoothSap.Stub.asInterface(Binder.allowBlocking(service));
             if (mServiceListener != null) {
                 mServiceListener.onServiceConnected(BluetoothProfile.SAP, BluetoothSap.this);
             }

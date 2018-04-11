@@ -32,7 +32,6 @@
 #include <netlink/object-api.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
-#include <netlink-types.h>
 #include <net/if.h>
 
 #include "nl80211_copy.h"
@@ -47,7 +46,6 @@
 #define PRINTF_FORMAT(a,b)
 #define STRUCT_PACKED
 #endif
-#include "qca-vendor.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -83,6 +81,10 @@ private:
 
     wifi_request_id mRequestId;
 
+    u32 mRadioStatsSize;
+
+    u8 mNumRadios;
+
     LLStatsCommand(wifi_handle handle, int id, u32 vendor_id, u32 subcmd);
 
 public:
@@ -100,6 +102,8 @@ public:
 
     virtual int requestResponse();
 
+    virtual wifi_error notifyResponse();
+
     virtual int handleResponse(WifiEvent &reply);
 
     virtual void getClearRspParams(u32 *stats_clear_rsp_mask, u8 *stop_rsp);
@@ -108,6 +112,8 @@ public:
                                             struct nlattr **tb_vendor);
 
     virtual void setHandler(wifi_stats_result_handler handler);
+
+    virtual void clearStats();
 };
 
 #ifdef __cplusplus

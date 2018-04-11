@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2015 Dmitry V. Levin <ldv@altlinux.org>
+ * Validate syscallent.h file.
+ *
+ * Copyright (c) 2015-2016 Dmitry V. Levin <ldv@altlinux.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,8 +27,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "defs.h"
-#include "syscall.h"
+#include "tests.h"
+#include "sysent.h"
+#include <stdio.h>
+#include <string.h>
+#include <asm/unistd.h>
 
 #define TD 0
 #define TF 0
@@ -39,13 +44,14 @@
 #define MA 0
 #define SI 0
 #define SE 0
+#define CST 0
 #define SEN(arg) 0,0
 
 static const struct_sysent syscallent[] = {
 #include "syscallent.h"
 };
 
-typedef const char const *pstr_t;
+typedef const char *pstr_t;
 static const pstr_t ksyslist[] = {
 #include "ksysent.h"
 };

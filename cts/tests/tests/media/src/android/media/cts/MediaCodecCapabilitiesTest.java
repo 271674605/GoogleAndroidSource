@@ -16,7 +16,6 @@
 package android.media.cts;
 
 import android.content.pm.PackageManager;
-import android.cts.util.MediaUtils;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecInfo.AudioCapabilities;
@@ -36,6 +35,10 @@ import android.media.MediaPlayer;
 import android.os.Build;
 import android.util.Log;
 
+import com.android.compatibility.common.util.ApiLevelUtil;
+import com.android.compatibility.common.util.DynamicConfigDeviceSide;
+import com.android.compatibility.common.util.MediaUtils;
+
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
@@ -52,14 +55,25 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
     private static final int TIMEOUT_US = 1000000;  // 1 sec
     private static final int IFRAME_INTERVAL = 10;          // 10 seconds between I-frames
 
-    private final MediaCodecList mRegularCodecs =
-            new MediaCodecList(MediaCodecList.REGULAR_CODECS);
     private final MediaCodecList mAllCodecs =
             new MediaCodecList(MediaCodecList.ALL_CODECS);
-    private final MediaCodecInfo[] mRegularInfos =
-            mRegularCodecs.getCodecInfos();
     private final MediaCodecInfo[] mAllInfos =
             mAllCodecs.getCodecInfos();
+
+    private static final String AVC_BASELINE_12_KEY =
+            "media_codec_capabilities_test_avc_baseline12";
+    private static final String AVC_BASELINE_30_KEY =
+            "media_codec_capabilities_test_avc_baseline30";
+    private static final String AVC_HIGH_31_KEY = "media_codec_capabilities_test_avc_high31";
+    private static final String AVC_HIGH_40_KEY = "media_codec_capabilities_test_avc_high40";
+    private static final String MODULE_NAME = "CtsMediaTestCases";
+    private DynamicConfigDeviceSide dynamicConfig;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        dynamicConfig = new DynamicConfigDeviceSide(MODULE_NAME);
+    }
 
     // Android device implementations with H.264 encoders, MUST support Baseline Profile Level 3.
     // SHOULD support Main Profile/ Level 4, if supported the device must also support Main
@@ -172,13 +186,8 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoWithRetries("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=160&source=youtube&user=android-device-test"
-                + "&sparams=ip,ipbits,expire,id,itag,source,user"
-                + "&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&signature=9EDCA0B395B8A949C511FD5E59B9F805CFF797FD."
-                + "702DE9BA7AF96785FD6930AD2DD693A0486C880E"
-                + "&key=ik0", 256, 144, PLAY_TIME_MS);
+        String urlString = dynamicConfig.getValue(AVC_BASELINE_12_KEY);
+        playVideoWithRetries(urlString, 256, 144, PLAY_TIME_MS);
     }
 
     public void testAvcBaseline30() throws Exception {
@@ -186,13 +195,8 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoWithRetries("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=18&source=youtube&user=android-device-test"
-                + "&sparams=ip,ipbits,expire,id,itag,source,user"
-                + "&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&signature=7DCDE3A6594D0B91A27676A3CDC3A87B149F82EA."
-                + "7A83031734CB1EDCE06766B6228842F954927960"
-                + "&key=ik0", 640, 360, PLAY_TIME_MS);
+        String urlString = dynamicConfig.getValue(AVC_BASELINE_30_KEY);
+        playVideoWithRetries(urlString, 640, 360, PLAY_TIME_MS);
     }
 
     public void testAvcHigh31() throws Exception {
@@ -200,31 +204,21 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoWithRetries("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=22&source=youtube&user=android-device-test"
-                + "&sparams=ip,ipbits,expire,id,itag,source,user"
-                + "&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&signature=179525311196616BD8E1381759B0E5F81A9E91B5."
-                + "C4A50E44059FEBCC6BBC78E3B3A4E0E0065777"
-                + "&key=ik0", 1280, 720, PLAY_TIME_MS);
+        String urlString = dynamicConfig.getValue(AVC_HIGH_31_KEY);
+        playVideoWithRetries(urlString, 1280, 720, PLAY_TIME_MS);
     }
 
     public void testAvcHigh40() throws Exception {
         if (!checkDecoder(MIMETYPE_VIDEO_AVC, AVCProfileHigh, AVCLevel4)) {
             return; // skip
         }
-        if (Build.VERSION.SDK_INT < 18) {
+        if (ApiLevelUtil.isBefore(18)) {
             MediaUtils.skipTest(TAG, "fragmented mp4 not supported");
             return;
         }
 
-        playVideoWithRetries("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=137&source=youtube&user=android-device-test"
-                + "&sparams=ip,ipbits,expire,id,itag,source,user"
-                + "&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&signature=B0976085596DD42DEA3F08307F76587241CB132B."
-                + "043B719C039E8B92F45391ADC0BE3665E2332930"
-                + "&key=ik0", 1920, 1080, PLAY_TIME_MS);
+        String urlString = dynamicConfig.getValue(AVC_HIGH_40_KEY);
+        playVideoWithRetries(urlString, 1920, 1080, PLAY_TIME_MS);
     }
 
     public void testHevcMain1() throws Exception {
@@ -391,7 +385,7 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
         // check if there is an adaptive decoder for each
         for (String mime : supportedFormats) {
             skipped = false;
-            // implicit assumption that QVGA video is always valid.
+            // implicit assumption that QCIF video is always valid.
             MediaFormat format = MediaFormat.createVideoFormat(mime, 176, 144);
             format.setFeatureEnabled(CodecCapabilities.FEATURE_AdaptivePlayback, true);
             String codec = mAllCodecs.findDecoderForFormat(format);
@@ -501,7 +495,7 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
                 MediaFormat format = null;
                 try {
                     codec = MediaCodec.createByCodecName(info.getName());
-                    // implicit assumption that QVGA video is always valid.
+                    // implicit assumption that QCIF video is always valid.
                     format = createReasonableVideoFormat(caps, mime, isEncoder, 176, 144);
                     format.setInteger(
                             MediaFormat.KEY_COLOR_FORMAT,
@@ -541,11 +535,13 @@ public class MediaCodecCapabilitiesTest extends MediaPlayerTestBase {
             int minWidth = vcaps.getSupportedWidths().getLower();
             int minHeight = vcaps.getSupportedHeightsFor(minWidth).getLower();
             int minBitrate = vcaps.getBitrateRange().getLower();
+            int minFrameRate = Math.max(vcaps.getSupportedFrameRatesFor(minWidth, minHeight)
+                    .getLower().intValue(), 1);
             format = MediaFormat.createVideoFormat(mime, minWidth, minHeight);
             format.setInteger(MediaFormat.KEY_COLOR_FORMAT, caps.colorFormats[0]);
             format.setInteger(MediaFormat.KEY_BIT_RATE, minBitrate);
-            format.setInteger(MediaFormat.KEY_FRAME_RATE, 10);
-            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10);
+            format.setInteger(MediaFormat.KEY_FRAME_RATE, minFrameRate);
+            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL);
         } else {
             AudioCapabilities acaps = caps.getAudioCapabilities();
             int minSampleRate = acaps.getSupportedSampleRateRanges()[0].getLower();

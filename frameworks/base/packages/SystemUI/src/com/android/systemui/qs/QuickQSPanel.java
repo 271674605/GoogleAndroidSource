@@ -17,18 +17,19 @@
 package com.android.systemui.qs;
 
 import android.content.Context;
-import android.content.res.Configuration;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.Space;
 
+import com.android.systemui.Dependency;
 import com.android.systemui.R;
-import com.android.systemui.qs.QSTile.SignalState;
-import com.android.systemui.qs.QSTile.State;
+import com.android.systemui.plugins.qs.*;
+import com.android.systemui.plugins.qs.QSTile.SignalState;
+import com.android.systemui.plugins.qs.QSTile.State;
+import com.android.systemui.plugins.qs.QSTileView;
 import com.android.systemui.qs.customize.QSCustomizer;
-import com.android.systemui.statusbar.phone.QSTileHost;
 import com.android.systemui.tuner.TunerService;
 import com.android.systemui.tuner.TunerService.Tunable;
 
@@ -43,11 +44,13 @@ public class QuickQSPanel extends QSPanel {
     public static final String NUM_QUICK_TILES = "sysui_qqs_count";
 
     private int mMaxTiles;
-    private QSPanel mFullPanel;
-    private View mHeader;
+    protected QSPanel mFullPanel;
 
     public QuickQSPanel(Context context, AttributeSet attrs) {
         super(context, attrs);
+        if (mFooter != null) {
+            removeView((View) mFooter.getView());
+        }
         if (mTileLayout != null) {
             for (int i = 0; i < mRecords.size(); i++) {
                 mTileLayout.removeTile(mRecords.get(i));
@@ -56,24 +59,33 @@ public class QuickQSPanel extends QSPanel {
         }
         mTileLayout = new HeaderTileLayout(context);
         mTileLayout.setListening(mListening);
-        addView((View) mTileLayout, 1 /* Between brightness and footer */);
+        addView((View) mTileLayout, 0 /* Between brightness and footer */);
+        super.setPadding(0, 0, 0, 0);
+    }
+
+    @Override
+    public void setPadding(int left, int top, int right, int bottom) {
+        // Always have no padding.
+    }
+
+    @Override
+    protected void addDivider() {
     }
 
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        TunerService.get(mContext).addTunable(mNumTiles, NUM_QUICK_TILES);
+        Dependency.get(TunerService.class).addTunable(mNumTiles, NUM_QUICK_TILES);
     }
 
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        TunerService.get(mContext).removeTunable(mNumTiles);
+        Dependency.get(TunerService.class).removeTunable(mNumTiles);
     }
 
     public void setQSPanelAndHeader(QSPanel fullPanel, View header) {
         mFullPanel = fullPanel;
-        mHeader = header;
     }
 
     @Override
@@ -84,19 +96,14 @@ public class QuickQSPanel extends QSPanel {
     @Override
     protected void drawTile(TileRecord r, State state) {
         if (state instanceof SignalState) {
-            State copy = r.tile.newTileState();
+            SignalState copy = new SignalState();
             state.copyTo(copy);
             // No activity shown in the quick panel.
-            ((SignalState) copy).activityIn = false;
-            ((SignalState) copy).activityOut = false;
+            copy.activityIn = false;
+            copy.activityOut = false;
             state = copy;
         }
         super.drawTile(r, state);
-    }
-
-    @Override
-    protected QSTileBaseView createTileView(QSTile<?> tile, boolean collapsedView) {
-        return new QSTileBaseView(mContext, tile.createTileView(mContext), collapsedView);
     }
 
     @Override
@@ -113,11 +120,6 @@ public class QuickQSPanel extends QSPanel {
     }
 
     @Override
-    protected void onTileClick(QSTile<?> tile) {
-        tile.secondaryClick();
-    }
-
-    @Override
     public void onTuningChanged(String key, String newValue) {
         // No tunings for you.
         if (key.equals(QS_SHOW_BRIGHTNESS)) {
@@ -127,9 +129,9 @@ public class QuickQSPanel extends QSPanel {
     }
 
     @Override
-    public void setTiles(Collection<QSTile<?>> tiles) {
-        ArrayList<QSTile<?>> quickTiles = new ArrayList<>();
-        for (QSTile<?> tile : tiles) {
+    public void setTiles(Collection<QSTile> tiles) {
+        ArrayList<QSTile> quickTiles = new ArrayList<>();
+        for (QSTile tile : tiles) {
             quickTiles.add(tile);
             if (quickTiles.size() == mMaxTiles) {
                 break;
@@ -145,13 +147,12 @@ public class QuickQSPanel extends QSPanel {
         }
     };
 
-    public int getNumQuickTiles(Context context) {
-        return TunerService.get(context).getValue(NUM_QUICK_TILES, 5);
+    public static int getNumQuickTiles(Context context) {
+        return Dependency.get(TunerService.class).getValue(NUM_QUICK_TILES, 6);
     }
 
     private static class HeaderTileLayout extends LinearLayout implements QSTileLayout {
 
-        private final Space mEndSpacer;
         protected final ArrayList<TileRecord> mRecords = new ArrayList<>();
         private boolean mListening;
 
@@ -161,25 +162,6 @@ public class QuickQSPanel extends QSPanel {
             setClipToPadding(false);
             setGravity(Gravity.CENTER_VERTICAL);
             setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-
-            mEndSpacer = new Space(context);
-            mEndSpacer.setLayoutParams(generateLayoutParams());
-            updateDownArrowMargin();
-            addView(mEndSpacer);
-            setOrientation(LinearLayout.HORIZONTAL);
-        }
-
-        @Override
-        protected void onConfigurationChanged(Configuration newConfig) {
-            super.onConfigurationChanged(newConfig);
-            updateDownArrowMargin();
-        }
-
-        private void updateDownArrowMargin() {
-            LayoutParams params = (LayoutParams) mEndSpacer.getLayoutParams();
-            params.setMarginStart(mContext.getResources().getDimensionPixelSize(
-                    R.dimen.qs_expand_margin));
-            mEndSpacer.setLayoutParams(params);
         }
 
         @Override
@@ -193,11 +175,11 @@ public class QuickQSPanel extends QSPanel {
 
         @Override
         public void addTile(TileRecord tile) {
-            addView(tile.tileView, getChildCount() - 1 /* Leave icon at end */,
-                    generateLayoutParams());
-            // Add a spacer.
-            addView(new Space(mContext), getChildCount() - 1 /* Leave icon at end */,
-                    generateSpaceParams());
+            if (getChildCount() != 0) {
+                // Add a spacer.
+                addView(new Space(mContext), getChildCount(), generateSpaceParams());
+            }
+            addView(tile.tileView, getChildCount(), generateLayoutParams());
             mRecords.add(tile);
             tile.tile.setListening(this, mListening);
         }
@@ -222,13 +204,15 @@ public class QuickQSPanel extends QSPanel {
             int childIndex = getChildIndex(tile.tileView);
             // Remove the tile.
             removeViewAt(childIndex);
-            // Remove its spacer as well.
-            removeViewAt(childIndex);
+            if (getChildCount() != 0) {
+                // Remove its spacer as well.
+                removeViewAt(childIndex);
+            }
             mRecords.remove(tile);
             tile.tile.setListening(this, false);
         }
 
-        private int getChildIndex(QSTileBaseView tileView) {
+        private int getChildIndex(QSTileView tileView) {
             final int N = getChildCount();
             for (int i = 0; i < N; i++) {
                 if (getChildAt(i) == tileView) {

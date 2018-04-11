@@ -34,13 +34,6 @@ import java.util.Collections;
  * Events are delivered to registered instances of {@link Callback}.
  */
 public final class GnssMeasurementsEvent implements Parcelable {
-    /** @removed */
-    public static final int STATUS_NOT_SUPPORTED = 0;
-    /** @removed */
-    public static final int STATUS_READY = 1;
-    /** @removed */
-    public static final int STATUS_GNSS_LOCATION_DISABLED = 2;
-
     private final GnssClock mClock;
     private final Collection<GnssMeasurement> mReadOnlyMeasurements;
 
@@ -98,13 +91,13 @@ public final class GnssMeasurementsEvent implements Parcelable {
             throw new InvalidParameterException("Parameter 'clock' must not be null.");
         }
         if (measurements == null || measurements.length == 0) {
-            throw new InvalidParameterException(
-                    "Parameter 'measurements' must not be null or empty.");
+            mReadOnlyMeasurements = Collections.emptyList();
+        } else {
+            Collection<GnssMeasurement> measurementCollection = Arrays.asList(measurements);
+            mReadOnlyMeasurements = Collections.unmodifiableCollection(measurementCollection);
         }
 
         mClock = clock;
-        Collection<GnssMeasurement> measurementCollection = Arrays.asList(measurements);
-        mReadOnlyMeasurements = Collections.unmodifiableCollection(measurementCollection);
     }
 
     /**

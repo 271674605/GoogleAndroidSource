@@ -44,7 +44,6 @@
 #include <netlink/object-api.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
-#include <netlink-types.h>
 #include <net/if.h>
 
 #include "nl80211_copy.h"
@@ -59,7 +58,6 @@
 #define PRINTF_FORMAT(a,b)
 #define STRUCT_PACKED
 #endif
-#include "qca-vendor.h"
 
 #ifdef __cplusplus
 extern "C"

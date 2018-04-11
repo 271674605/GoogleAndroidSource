@@ -229,7 +229,8 @@ public class TaskStack {
          * Notifies when a task has been removed from the stack.
          */
         void onStackTaskRemoved(TaskStack stack, Task removedTask, Task newFrontMostTask,
-                AnimationProps animation, boolean fromDockGesture);
+                AnimationProps animation, boolean fromDockGesture,
+                boolean dismissRecentsIfAllRemoved);
 
         /**
          * Notifies when all tasks have been removed from the stack.
@@ -246,6 +247,9 @@ public class TaskStack {
      * The various possible dock states when dragging and dropping a task.
      */
     public static class DockState implements DropTarget {
+
+        public static final int DOCK_AREA_BG_COLOR = 0xFFffffff;
+        public static final int DOCK_AREA_GRID_BG_COLOR = 0xFF000000;
 
         // The rotation to apply to the hint text
         @Retention(RetentionPolicy.SOURCE)
@@ -275,10 +279,16 @@ public class TaskStack {
                 new RectF(0, 0.5f, 1, 1));
 
         @Override
-        public boolean acceptsDrop(int x, int y, int width, int height, boolean isCurrentTarget) {
-            return isCurrentTarget
-                    ? areaContainsPoint(expandedTouchDockArea, width, height, x, y)
-                    : areaContainsPoint(touchArea, width, height, x, y);
+        public boolean acceptsDrop(int x, int y, int width, int height, Rect insets,
+                boolean isCurrentTarget) {
+            if (isCurrentTarget) {
+                getMappedRect(expandedTouchDockArea, width, height, mTmpRect);
+                return mTmpRect.contains(x, y);
+            } else {
+                getMappedRect(touchArea, width, height, mTmpRect);
+                updateBoundsWithSystemInsets(mTmpRect, insets);
+                return mTmpRect.contains(x, y);
+            }
         }
 
         // Represents the view state of this dock state
@@ -313,7 +323,8 @@ public class TaskStack {
             private ViewState(int areaAlpha, int hintAlpha, @TextOrientation int hintOrientation,
                     int hintTextResId) {
                 dockAreaAlpha = areaAlpha;
-                dockAreaOverlay = new ColorDrawable(0xFFffffff);
+                dockAreaOverlay = new ColorDrawable(Recents.getConfiguration().isGridEnabled
+                        ? DOCK_AREA_GRID_BG_COLOR : DOCK_AREA_BG_COLOR);
                 dockAreaOverlay.setAlpha(0);
                 hintTextAlpha = hintAlpha;
                 hintTextOrientation = hintOrientation;
@@ -423,12 +434,13 @@ public class TaskStack {
         private final RectF touchArea;
         private final RectF dockArea;
         private final RectF expandedTouchDockArea;
+        private static final Rect mTmpRect = new Rect();
 
         /**
          * @param createMode used to pass to ActivityManager to dock the task
          * @param touchArea the area in which touch will initiate this dock state
          * @param dockArea the visible dock area
-         * @param expandedTouchDockArea the areain which touch will continue to dock after entering
+         * @param expandedTouchDockArea the area in which touch will continue to dock after entering
          *                              the initial touch area.  This is also the new dock area to
          *                              draw.
          */
@@ -452,23 +464,11 @@ public class TaskStack {
         }
 
         /**
-         * Returns whether {@param x} and {@param y} are contained in the area scaled to the
-         * given {@param width} and {@param height}.
-         */
-        public boolean areaContainsPoint(RectF area, int width, int height, float x, float y) {
-            int left = (int) (area.left * width);
-            int top = (int) (area.top * height);
-            int right = (int) (area.right * width);
-            int bottom = (int) (area.bottom * height);
-            return x >= left && y >= top && x <= right && y <= bottom;
-        }
-
-        /**
          * Returns the docked task bounds with the given {@param width} and {@param height}.
          */
-        public Rect getPreDockedBounds(int width, int height) {
-            return new Rect((int) (dockArea.left * width), (int) (dockArea.top * height),
-                    (int) (dockArea.right * width), (int) (dockArea.bottom * height));
+        public Rect getPreDockedBounds(int width, int height, Rect insets) {
+            getMappedRect(dockArea, width, height, mTmpRect);
+            return updateBoundsWithSystemInsets(mTmpRect, insets);
         }
 
         /**
@@ -511,9 +511,33 @@ public class TaskStack {
             int top = dockArea.bottom < 1f
                     ? 0
                     : insets.top;
-            layoutAlgorithm.getTaskStackBounds(displayRect, windowRectOut, top, insets.right,
+            // For now, ignore the left insets since we always dock on the left and show Recents
+            // on the right
+            layoutAlgorithm.getTaskStackBounds(displayRect, windowRectOut, top, 0, insets.right,
                     taskStackBounds);
             return taskStackBounds;
+        }
+
+        /**
+         * Returns the expanded bounds in certain dock sides such that the bounds account for the
+         * system insets (namely the vertical nav bar).  This call modifies and returns the given
+         * {@param bounds}.
+         */
+        private Rect updateBoundsWithSystemInsets(Rect bounds, Rect insets) {
+            if (dockSide == DOCKED_LEFT) {
+                bounds.right += insets.left;
+            } else if (dockSide == DOCKED_RIGHT) {
+                bounds.left -= insets.right;
+            }
+            return bounds;
+        }
+
+        /**
+         * Returns the mapped rect to the given dimensions.
+         */
+        private void getMappedRect(RectF bounds, int width, int height, Rect out) {
+            out.set((int) (bounds.left * width), (int) (bounds.top * height),
+                    (int) (bounds.right * width), (int) (bounds.bottom * height));
         }
     }
 
@@ -608,13 +632,22 @@ public class TaskStack {
      * how they should update themselves.
      */
     public void removeTask(Task t, AnimationProps animation, boolean fromDockGesture) {
+        removeTask(t, animation, fromDockGesture, true /* dismissRecentsIfAllRemoved */);
+    }
+
+    /**
+     * Removes a task from the stack, with an additional {@param animation} hint to the callbacks on
+     * how they should update themselves.
+     */
+    public void removeTask(Task t, AnimationProps animation, boolean fromDockGesture,
+            boolean dismissRecentsIfAllRemoved) {
         if (mStackTaskList.contains(t)) {
             removeTaskImpl(mStackTaskList, t);
             Task newFrontMostTask = getStackFrontMostTask(false  /* includeFreeform */);
             if (mCb != null) {
                 // Notify that a task has been removed
                 mCb.onStackTaskRemoved(this, t, newFrontMostTask, animation,
-                        fromDockGesture);
+                        fromDockGesture, dismissRecentsIfAllRemoved);
             }
         }
         mRawTaskList.remove(t);
@@ -623,17 +656,25 @@ public class TaskStack {
     /**
      * Removes all tasks from the stack.
      */
-    public void removeAllTasks() {
+    public void removeAllTasks(boolean notifyStackChanges) {
         ArrayList<Task> tasks = mStackTaskList.getTasks();
         for (int i = tasks.size() - 1; i >= 0; i--) {
             Task t = tasks.get(i);
             removeTaskImpl(mStackTaskList, t);
             mRawTaskList.remove(t);
         }
-        if (mCb != null) {
+        if (mCb != null && notifyStackChanges) {
             // Notify that all tasks have been removed
             mCb.onStackTasksRemoved(this);
         }
+    }
+
+
+    /**
+     * @see #setTasks(Context, List, boolean, boolean)
+     */
+    public void setTasks(Context context, TaskStack stack, boolean notifyStackChanges) {
+        setTasks(context, stack.mRawTaskList, notifyStackChanges);
     }
 
     /**
@@ -700,7 +741,8 @@ public class TaskStack {
         Task newFrontMostTask = getStackFrontMostTask(false);
         for (int i = 0; i < removedTaskCount; i++) {
             mCb.onStackTaskRemoved(this, removedTasks.get(i), newFrontMostTask,
-                    AnimationProps.IMMEDIATE, false /* fromDockGesture */);
+                    AnimationProps.IMMEDIATE, false /* fromDockGesture */,
+                    true /* dismissRecentsIfAllRemoved */);
         }
 
         // Only callback for the newly added tasks after this stack has been updated
@@ -826,6 +868,49 @@ public class TaskStack {
             if (task.isLaunchTarget) {
                 return task;
             }
+        }
+        return null;
+    }
+
+    /**
+     * Returns whether the next launch target should actually be the PiP task.
+     */
+    public boolean isNextLaunchTargetPip(long lastPipTime) {
+        Task launchTarget = getLaunchTarget();
+        Task nextLaunchTarget = getNextLaunchTargetRaw();
+        if (nextLaunchTarget != null && lastPipTime > 0) {
+            // If the PiP time is more recent than the next launch target, then launch the PiP task
+            return lastPipTime > nextLaunchTarget.key.lastActiveTime;
+        } else if (launchTarget != null && lastPipTime > 0 && getTaskCount() == 1) {
+            // Otherwise, if there is no next launch target, but there is a PiP, then launch
+            // the PiP task
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the task in stack tasks which should be launched next if Recents are toggled
+     * again, or null if there is no task to be launched. Callers should check
+     * {@link #isNextLaunchTargetPip(long)} before fetching the next raw launch target from the
+     * stack.
+     */
+    public Task getNextLaunchTarget() {
+        Task nextLaunchTarget = getNextLaunchTargetRaw();
+        if (nextLaunchTarget != null) {
+            return nextLaunchTarget;
+        }
+        return getStackTasks().get(getTaskCount() - 1);
+    }
+
+    private Task getNextLaunchTargetRaw() {
+        int taskCount = getTaskCount();
+        if (taskCount == 0) {
+            return null;
+        }
+        int launchTaskIndex = indexOfStackTask(getLaunchTarget());
+        if (launchTaskIndex != -1 && launchTaskIndex > 0) {
+            return getStackTasks().get(launchTaskIndex - 1);
         }
         return null;
     }

@@ -28,17 +28,25 @@
 #include <cutils/properties.h>
 
 #define LOG_TAG "NatController"
+#include <android-base/stringprintf.h>
 #include <cutils/log.h>
 #include <logwrap/logwrap.h>
 
+#include "NetdConstants.h"
 #include "NatController.h"
 #include "NetdConstants.h"
 #include "RouteController.h"
 
+using android::base::StringPrintf;
+
 const char* NatController::LOCAL_FORWARD = "natctrl_FORWARD";
 const char* NatController::LOCAL_MANGLE_FORWARD = "natctrl_mangle_FORWARD";
 const char* NatController::LOCAL_NAT_POSTROUTING = "natctrl_nat_POSTROUTING";
+const char* NatController::LOCAL_RAW_PREROUTING = "natctrl_raw_PREROUTING";
 const char* NatController::LOCAL_TETHER_COUNTERS_CHAIN = "natctrl_tether_counters";
+
+auto NatController::execFunction = android_fork_execvp;
+auto NatController::iptablesRestoreFunction = execIptablesRestore;
 
 NatController::NatController() {
 }
@@ -55,7 +63,7 @@ struct CommandsAndArgs {
 int NatController::runCmd(int argc, const char **argv) {
     int res;
 
-    res = android_fork_execvp(argc, (char **)argv, NULL, false, false);
+    res = execFunction(argc, (char **)argv, NULL, false, false);
 
 #if !LOG_NDEBUG
     std::string full_cmd = argv[0];
@@ -82,53 +90,61 @@ int NatController::setupIptablesHooks() {
         return res;
     }
 
-    struct CommandsAndArgs defaultCommands[] = {
-        /*
-         * First chain is for tethering counters.
-         * This chain is reached via --goto, and then RETURNS.
-         *
-         * Second chain is used to limit downstream mss to the upstream pmtu
-         * so we don't end up fragmenting every large packet tethered devices
-         * send.  Note this feature requires kernel support with flag
-         * CONFIG_NETFILTER_XT_TARGET_TCPMSS=y, which not all builds will have,
-         * so the final rule is allowed to fail.
-         * Bug 17629786 asks to make the failure more obvious, or even fatal
-         * so that all builds eventually gain the performance improvement.
-         */
-        {{IPTABLES_PATH, "-w", "-F", LOCAL_TETHER_COUNTERS_CHAIN,}, 0},
-        {{IPTABLES_PATH, "-w", "-X", LOCAL_TETHER_COUNTERS_CHAIN,}, 0},
-        {{IPTABLES_PATH, "-w", "-N", LOCAL_TETHER_COUNTERS_CHAIN,}, 1},
-        {{IPTABLES_PATH, "-w", "-t", "mangle", "-A", LOCAL_MANGLE_FORWARD, "-p", "tcp", "--tcp-flags",
-                "SYN", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu"}, 0},
-    };
-    for (unsigned int cmdNum = 0; cmdNum < ARRAY_SIZE(defaultCommands); cmdNum++) {
-        if (runCmd(ARRAY_SIZE(defaultCommands[cmdNum].cmd), defaultCommands[cmdNum].cmd) &&
-            defaultCommands[cmdNum].checkRes) {
-                return -1;
-        }
+    // Used to limit downstream mss to the upstream pmtu so we don't end up fragmenting every large
+    // packet tethered devices send. This is IPv4-only, because in IPv6 we send the MTU in the RA.
+    // This is no longer optional and tethering will fail to start if it fails.
+    std::string mssRewriteCommand = StringPrintf(
+        "*mangle\n"
+        "-A %s -p tcp --tcp-flags SYN SYN -j TCPMSS --clamp-mss-to-pmtu\n"
+        "COMMIT\n", LOCAL_MANGLE_FORWARD);
+
+    // This is for tethering counters. This chain is reached via --goto, and then RETURNS.
+    std::string defaultCommands = StringPrintf(
+        "*filter\n"
+        ":%s -\n"
+        "COMMIT\n", LOCAL_TETHER_COUNTERS_CHAIN);
+
+    res = iptablesRestoreFunction(V4, mssRewriteCommand);
+    if (res < 0) {
+        return res;
     }
+
+    res = iptablesRestoreFunction(V4V6, defaultCommands);
+    if (res < 0) {
+        return res;
+    }
+
     ifacePairList.clear();
 
     return 0;
 }
 
 int NatController::setDefaults() {
-    /*
-     * The following only works because:
-     *  - the defaultsCommands[].cmd array is padded with NULL, and
-     *  - the 1st argc of runCmd() will just be the max for the CommandsAndArgs[].cmd, and
-     *  - internally it will be memcopied to an array and terminated with a NULL.
-     */
-    struct CommandsAndArgs defaultCommands[] = {
-        {{IPTABLES_PATH, "-w", "-F", LOCAL_FORWARD,}, 1},
-        {{IPTABLES_PATH, "-w", "-A", LOCAL_FORWARD, "-j", "DROP"}, 1},
-        {{IPTABLES_PATH, "-w", "-t", "nat", "-F", LOCAL_NAT_POSTROUTING}, 1},
-    };
-    for (unsigned int cmdNum = 0; cmdNum < ARRAY_SIZE(defaultCommands); cmdNum++) {
-        if (runCmd(ARRAY_SIZE(defaultCommands[cmdNum].cmd), defaultCommands[cmdNum].cmd) &&
-            defaultCommands[cmdNum].checkRes) {
-                return -1;
-        }
+    std::string v4Cmd = StringPrintf(
+        "*filter\n"
+        ":%s -\n"
+        "-A %s -j DROP\n"
+        "COMMIT\n"
+        "*nat\n"
+        ":%s -\n"
+        "COMMIT\n", LOCAL_FORWARD, LOCAL_FORWARD, LOCAL_NAT_POSTROUTING);
+
+    std::string v6Cmd = StringPrintf(
+        "*filter\n"
+        ":%s -\n"
+        "COMMIT\n"
+        "*raw\n"
+        ":%s -\n"
+        "COMMIT\n", LOCAL_FORWARD, LOCAL_RAW_PREROUTING);
+
+    int res = iptablesRestoreFunction(V4, v4Cmd);
+    if (res < 0) {
+        return res;
+    }
+
+    res = iptablesRestoreFunction(V6, v6Cmd);
+    if (res < 0) {
+        return res;
     }
 
     natCount = 0;
@@ -153,7 +169,7 @@ int NatController::enableNat(const char* intIface, const char* extIface) {
 
     // add this if we are the first added nat
     if (natCount == 0) {
-        const char *cmd[] = {
+        const char *v4Cmd[] = {
                 IPTABLES_PATH,
                 "-w",
                 "-t",
@@ -165,7 +181,15 @@ int NatController::enableNat(const char* intIface, const char* extIface) {
                 "-j",
                 "MASQUERADE"
         };
-        if (runCmd(ARRAY_SIZE(cmd), cmd)) {
+
+        /*
+         * IPv6 tethering doesn't need the state-based conntrack rules, so
+         * it unconditionally jumps to the tether counters chain all the time.
+         */
+        const char *v6Cmd[] = {IP6TABLES_PATH, "-w", "-A", LOCAL_FORWARD,
+                               "-g", LOCAL_TETHER_COUNTERS_CHAIN};
+
+        if (runCmd(ARRAY_SIZE(v4Cmd), v4Cmd) || runCmd(ARRAY_SIZE(v6Cmd), v6Cmd)) {
             ALOGE("Error setting postroute rule: iface=%s", extIface);
             // unwind what's been done, but don't care about success - what more could we do?
             setDefaults();
@@ -232,19 +256,16 @@ int NatController::setTetherCountingRules(bool add, const char *intIface, const 
         return 0;
     }
     const char *cmd2b[] = {
-            IPTABLES_PATH,
-            "-w",
-            "-A",
-            LOCAL_TETHER_COUNTERS_CHAIN,
-            "-i",
-            intIface,
-            "-o",
-            extIface,
-            "-j",
-          "RETURN"
+        IPTABLES_PATH,
+        "-w", "-A", LOCAL_TETHER_COUNTERS_CHAIN, "-i", intIface, "-o", extIface, "-j", "RETURN"
     };
 
-    if (runCmd(ARRAY_SIZE(cmd2b), cmd2b) && add) {
+    const char *cmd2c[] = {
+        IP6TABLES_PATH,
+        "-w", "-A", LOCAL_TETHER_COUNTERS_CHAIN, "-i", intIface, "-o", extIface, "-j", "RETURN"
+    };
+
+    if (runCmd(ARRAY_SIZE(cmd2b), cmd2b) || runCmd(ARRAY_SIZE(cmd2c), cmd2c)) {
         free(pair_name);
         return -1;
     }
@@ -258,19 +279,16 @@ int NatController::setTetherCountingRules(bool add, const char *intIface, const 
     }
 
     const char *cmd3b[] = {
-            IPTABLES_PATH,
-            "-w",
-            "-A",
-            LOCAL_TETHER_COUNTERS_CHAIN,
-            "-i",
-            extIface,
-            "-o",
-            intIface,
-            "-j",
-            "RETURN"
+        IPTABLES_PATH,
+        "-w", "-A", LOCAL_TETHER_COUNTERS_CHAIN, "-i", extIface, "-o", intIface, "-j", "RETURN"
     };
 
-    if (runCmd(ARRAY_SIZE(cmd3b), cmd3b) && add) {
+    const char *cmd3c[] = {
+        IP6TABLES_PATH,
+        "-w", "-A", LOCAL_TETHER_COUNTERS_CHAIN, "-i", extIface, "-o", intIface, "-j", "RETURN"
+    };
+
+    if (runCmd(ARRAY_SIZE(cmd3b), cmd3b) || runCmd(ARRAY_SIZE(cmd3c), cmd3c)) {
         // unwind what's been done, but don't care about success - what more could we do?
         free(pair_name);
         return -1;
@@ -333,6 +351,25 @@ int NatController::setForwardRules(bool add, const char *intIface, const char *e
             LOCAL_TETHER_COUNTERS_CHAIN
     };
 
+    const char *cmd4[] = {
+            IP6TABLES_PATH,
+            "-w",
+            "-t",
+            "raw",
+            add ? "-A" : "-D",
+            LOCAL_RAW_PREROUTING,
+            "-i",
+            intIface,
+            "-m",
+            "rpfilter",
+            "--invert",
+            "!",
+            "-s",
+            "fe80::/64",
+            "-j",
+            "DROP"
+    };
+
     if (runCmd(ARRAY_SIZE(cmd2), cmd2) && add) {
         // bail on error, but only if adding
         rc = -1;
@@ -345,6 +382,11 @@ int NatController::setForwardRules(bool add, const char *intIface, const char *e
         goto err_return;
     }
 
+    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add) {
+        rc = -1;
+        goto err_rpfilter;
+    }
+
     if (setTetherCountingRules(add, intIface, extIface) && add) {
         rc = -1;
         goto err_return;
@@ -352,6 +394,9 @@ int NatController::setForwardRules(bool add, const char *intIface, const char *e
 
     return 0;
 
+err_rpfilter:
+    cmd3[2] = "-D";
+    runCmd(ARRAY_SIZE(cmd3), cmd3);
 err_return:
     cmd2[2] = "-D";
     runCmd(ARRAY_SIZE(cmd2), cmd2);

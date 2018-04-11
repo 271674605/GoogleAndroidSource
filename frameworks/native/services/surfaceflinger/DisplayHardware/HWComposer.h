@@ -58,28 +58,33 @@ class DisplayDevice;
 class Fence;
 class FloatRect;
 class GraphicBuffer;
-class HWC2On1Adapter;
 class NativeHandle;
 class Region;
 class String8;
-class SurfaceFlinger;
 
 class HWComposer
 {
 public:
     class EventHandler {
         friend class HWComposer;
-        virtual void onVSyncReceived(int32_t disp, nsecs_t timestamp) = 0;
-        virtual void onHotplugReceived(int32_t disp, bool connected) = 0;
+        virtual void onVSyncReceived(
+            HWComposer* composer, int32_t disp, nsecs_t timestamp) = 0;
+        virtual void onHotplugReceived(HWComposer* composer, int32_t disp, bool connected) = 0;
+        virtual void onInvalidateReceived(HWComposer* composer) = 0;
     protected:
         virtual ~EventHandler() {}
     };
 
-    HWComposer(const sp<SurfaceFlinger>& flinger);
+    // useVrComposer is passed to the composer HAL. When true, the composer HAL
+    // will use the vr composer service, otherwise it uses the real hardware
+    // composer.
+    HWComposer(bool useVrComposer);
 
     ~HWComposer();
 
     void setEventHandler(EventHandler* handler);
+
+    bool hasCapability(HWC2::Capability capability) const;
 
     // Attempts to allocate a virtual display. If the virtual display is created
     // on the HWC device, outId will contain its HWC ID.
@@ -92,17 +97,21 @@ public:
     // Asks the HAL what it can do
     status_t prepare(DisplayDevice& displayDevice);
 
-    status_t setClientTarget(int32_t displayId, const sp<Fence>& acquireFence,
+    status_t setClientTarget(int32_t displayId, uint32_t slot,
+            const sp<Fence>& acquireFence,
             const sp<GraphicBuffer>& target, android_dataspace_t dataspace);
 
-    // Finalize the layers and present them
-    status_t commit(int32_t displayId);
+    // Present layers to the display and read releaseFences.
+    status_t presentAndGetReleaseFences(int32_t displayId);
 
     // set power mode
     status_t setPowerMode(int32_t displayId, int mode);
 
     // set active config
     status_t setActiveConfig(int32_t displayId, size_t configId);
+
+    // Sets a color transform to be applied to the result of composition
+    status_t setColorTransform(int32_t displayId, const mat4& transform);
 
     // reset state when an external, non-virtual display is disconnected
     void disconnectDisplay(int32_t displayId);
@@ -113,9 +122,8 @@ public:
     // does this display have layers handled by GLES
     bool hasClientComposition(int32_t displayId) const;
 
-    // get the retire fence for the previous frame (i.e., corresponding to the
-    // last call to presentDisplay
-    sp<Fence> getRetireFence(int32_t displayId) const;
+    // get the present fence received from the last call to present.
+    sp<Fence> getPresentFence(int32_t displayId) const;
 
     // Get last release fence for the given layer
     sp<Fence> getLayerReleaseFence(int32_t displayId,
@@ -135,21 +143,12 @@ public:
 
     // Events handling ---------------------------------------------------------
 
-    void setVsyncEnabled(int32_t disp, HWC2::Vsync enabled);
-
-    struct DisplayConfig {
-        uint32_t width;
-        uint32_t height;
-        float xdpi;
-        float ydpi;
-        nsecs_t refresh;
-        int colorTransform;
-    };
+    void setVsyncEnabled(int32_t displayId, HWC2::Vsync enabled);
 
     // Query display parameters.  Pass in a display index (e.g.
     // HWC_DISPLAY_PRIMARY).
-    nsecs_t getRefreshTimestamp(int32_t disp) const;
-    bool isConnected(int32_t disp) const;
+    nsecs_t getRefreshTimestamp(int32_t displayId) const;
+    bool isConnected(int32_t displayId) const;
 
     // Non-const because it can update configMap inside of mDisplayData
     std::vector<std::shared_ptr<const HWC2::Display::Config>>
@@ -158,13 +157,20 @@ public:
     std::shared_ptr<const HWC2::Display::Config>
             getActiveConfig(int32_t displayId) const;
 
+    std::vector<android_color_mode_t> getColorModes(int32_t displayId) const;
+
+    status_t setActiveColorMode(int32_t displayId, android_color_mode_t mode);
+
+    bool isUsingVrComposer() const;
+
     // for debugging ----------------------------------------------------------
     void dump(String8& out) const;
 
+    android::Hwc2::Composer* getComposer() const { return mHwcDevice->getComposer(); }
 private:
     static const int32_t VIRTUAL_DISPLAY_ID_BASE = 2;
 
-    void loadHwcModule();
+    void loadHwcModule(bool useVrComposer);
 
     bool isValidDisplay(int32_t displayId) const;
     static void validateChange(HWC2::Composition from, HWC2::Composition to);
@@ -186,7 +192,7 @@ private:
         bool hasDeviceComposition;
         std::shared_ptr<HWC2::Display> hwcDisplay;
         HWC2::DisplayRequest displayRequests;
-        sp<Fence> lastRetireFence;  // signals when the last set op retires
+        sp<Fence> lastPresentFence;  // signals when the last set op retires
         std::unordered_map<std::shared_ptr<HWC2::Layer>, sp<Fence>>
                 releaseFences;
         buffer_handle_t outbufHandle;
@@ -196,10 +202,11 @@ private:
 
         // protected by mVsyncLock
         HWC2::Vsync vsyncEnabled;
+
+        bool validateWasSkipped;
+        HWC2::Error presentError;
     };
 
-    sp<SurfaceFlinger>              mFlinger;
-    std::unique_ptr<HWC2On1Adapter> mAdapter;
     std::unique_ptr<HWC2::Device>   mHwcDevice;
     std::vector<DisplayData>        mDisplayData;
     std::set<size_t>                mFreeDisplaySlots;

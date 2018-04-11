@@ -21,9 +21,7 @@
 
 #include <utils/Compat.h>
 #include <utils/Log.h>
-#include <utils/Unicode.h>
 #include <utils/String16.h>
-#include <utils/threads.h>
 
 #include <ctype.h>
 
@@ -104,20 +102,21 @@ static char* allocFromUTF16(const char16_t* in, size_t len)
 {
     if (len == 0) return getEmptyString();
 
-    const ssize_t bytes = utf16_to_utf8_length(in, len);
-    if (bytes < 0) {
+     // Allow for closing '\0'
+    const ssize_t resultStrLen = utf16_to_utf8_length(in, len) + 1;
+    if (resultStrLen < 1) {
         return getEmptyString();
     }
 
-    SharedBuffer* buf = SharedBuffer::alloc(bytes+1);
+    SharedBuffer* buf = SharedBuffer::alloc(resultStrLen);
     ALOG_ASSERT(buf, "Unable to allocate shared buffer");
     if (!buf) {
         return getEmptyString();
     }
 
-    char* str = (char*)buf->data();
-    utf16_to_utf8(in, len, str);
-    return str;
+    char* resultStr = (char*)buf->data();
+    utf16_to_utf8(in, len, resultStr, resultStrLen);
+    return resultStr;
 }
 
 static char* allocFromUTF32(const char32_t* in, size_t len)
@@ -126,21 +125,21 @@ static char* allocFromUTF32(const char32_t* in, size_t len)
         return getEmptyString();
     }
 
-    const ssize_t bytes = utf32_to_utf8_length(in, len);
-    if (bytes < 0) {
+    const ssize_t resultStrLen = utf32_to_utf8_length(in, len) + 1;
+    if (resultStrLen < 1) {
         return getEmptyString();
     }
 
-    SharedBuffer* buf = SharedBuffer::alloc(bytes+1);
+    SharedBuffer* buf = SharedBuffer::alloc(resultStrLen);
     ALOG_ASSERT(buf, "Unable to allocate shared buffer");
     if (!buf) {
         return getEmptyString();
     }
 
-    char* str = (char*) buf->data();
-    utf32_to_utf8(in, len, str);
+    char* resultStr = (char*) buf->data();
+    utf32_to_utf8(in, len, resultStr, resultStrLen);
 
-    return str;
+    return resultStr;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +361,7 @@ status_t String8::appendFormatV(const char* fmt, va_list args)
 status_t String8::real_append(const char* other, size_t otherLen)
 {
     const size_t myLen = bytes();
-    
+
     SharedBuffer* buf = SharedBuffer::bufferFromData(mString)
         ->editResize(myLen+otherLen+1);
     if (buf) {

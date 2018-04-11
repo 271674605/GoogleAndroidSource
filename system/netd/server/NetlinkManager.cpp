@@ -46,6 +46,9 @@
 
 #include "pcap-netfilter-linux-android.h"
 
+namespace android {
+namespace net {
+
 const int NetlinkManager::NFLOG_QUOTA_GROUP = 1;
 const int NetlinkManager::NETFILTER_STRICT_GROUP = 2;
 
@@ -142,7 +145,7 @@ int NetlinkManager::start() {
 
     if ((mQuotaHandler = setupSocket(&mQuotaSock, NETLINK_NFLOG,
             NFLOG_QUOTA_GROUP, NetlinkListener::NETLINK_FORMAT_BINARY, false)) == NULL) {
-        ALOGE("Unable to open quota socket");
+        ALOGW("Unable to open qlog quota socket, check if xt_quota2 can send via UeventHandler");
         // TODO: return -1 once the emulator gets a new kernel.
     }
 
@@ -208,3 +211,6 @@ int NetlinkManager::stop() {
 
     return status;
 }
+
+}  // namespace net
+}  // namespace android

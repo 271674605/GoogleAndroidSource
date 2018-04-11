@@ -18,6 +18,7 @@ package com.android.server.telecom;
 
 import android.content.Context;
 import android.os.PowerManager;
+import android.telecom.Log;
 
 import com.android.internal.annotations.VisibleForTesting;
 
@@ -38,6 +39,9 @@ public class ProximitySensorManager extends CallsManagerListenerBase {
 
     @Override
     public void onCallRemoved(Call call) {
+        if (call.isExternalCall()) {
+            return;
+        }
         if (mCallsManager.getCalls().isEmpty()) {
             Log.i(this, "All calls removed, resetting proximity sensor to default state");
             turnOff(true);

@@ -21,6 +21,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.hardware.camera2.utils.SurfaceUtils;
 import android.os.Handler;
@@ -57,14 +58,14 @@ public class CameraConstrainedHighSpeedCaptureSessionImpl
      * There must be no pending actions
      * (e.g. no pending captures, no repeating requests, no flush).</p>
      */
-    CameraConstrainedHighSpeedCaptureSessionImpl(int id, List<Surface> outputs,
+    CameraConstrainedHighSpeedCaptureSessionImpl(int id,
             CameraCaptureSession.StateCallback callback, Handler stateHandler,
             android.hardware.camera2.impl.CameraDeviceImpl deviceImpl,
             Handler deviceStateHandler, boolean configureSuccess,
             CameraCharacteristics characteristics) {
         mCharacteristics = characteristics;
         CameraCaptureSession.StateCallback wrapperCallback = new WrapperCallback(callback);
-        mSessionImpl = new CameraCaptureSessionImpl(id, /*input*/null, outputs, wrapperCallback,
+        mSessionImpl = new CameraCaptureSessionImpl(id, /*input*/null, wrapperCallback,
                 stateHandler, deviceImpl, deviceStateHandler, configureSuccess);
     }
 
@@ -256,6 +257,12 @@ public class CameraConstrainedHighSpeedCaptureSessionImpl
         return mSessionImpl.isAborting();
     }
 
+    @Override
+    public void finalizeOutputConfigurations(List<OutputConfiguration> deferredOutputConfigs)
+            throws CameraAccessException {
+        mSessionImpl.finalizeOutputConfigurations(deferredOutputConfigs);
+    }
+
     private class WrapperCallback extends StateCallback {
         private final StateCallback mCallback;
 
@@ -263,31 +270,40 @@ public class CameraConstrainedHighSpeedCaptureSessionImpl
             mCallback = callback;
         }
 
+        @Override
         public void onConfigured(CameraCaptureSession session) {
             mCallback.onConfigured(CameraConstrainedHighSpeedCaptureSessionImpl.this);
         }
 
+        @Override
         public void onConfigureFailed(CameraCaptureSession session) {
             mCallback.onConfigureFailed(CameraConstrainedHighSpeedCaptureSessionImpl.this);
         }
 
+        @Override
         public void onReady(CameraCaptureSession session) {
             mCallback.onReady(CameraConstrainedHighSpeedCaptureSessionImpl.this);
         }
 
+        @Override
         public void onActive(CameraCaptureSession session) {
             mCallback.onActive(CameraConstrainedHighSpeedCaptureSessionImpl.this);
         }
 
+        @Override
+        public void onCaptureQueueEmpty(CameraCaptureSession session) {
+            mCallback.onCaptureQueueEmpty(CameraConstrainedHighSpeedCaptureSessionImpl.this);
+        }
+
+        @Override
         public void onClosed(CameraCaptureSession session) {
             mCallback.onClosed(CameraConstrainedHighSpeedCaptureSessionImpl.this);
         }
 
+        @Override
         public void onSurfacePrepared(CameraCaptureSession session, Surface surface) {
             mCallback.onSurfacePrepared(CameraConstrainedHighSpeedCaptureSessionImpl.this,
                     surface);
         }
-
-
     }
 }

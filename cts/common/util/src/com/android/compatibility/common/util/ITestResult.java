@@ -118,26 +118,36 @@ public interface ITestResult extends Comparable<ITestResult> {
     void passed(ReportLog report);
 
     /**
-     * Report that the test was not executed.
-     *
-     * This means something like a loss of connection to the hardware,
-     * and indicates the run of this test was invalid and needs to be redone.
-     */
-    void notExecuted();
-
-    /**
      * Report that the test was skipped.
      *
      * This means that the test is not considered appropriate for the
-     * current device, and thus is never attempted.  Unlike notExecuted(),
-     * this indicates the run of this test was valid and nothing further
-     * needs to be done.
+     * current device, and thus is never attempted. The test does not require execution,
+     * and nothing more needs to be done.
      */
     void skipped();
+
+    /**
+     * Retrieves whether execution for this test result has been determined unnecessary.
+     */
+    boolean isSkipped();
 
     /**
      * Resets the result.
      */
     void reset();
 
+    /**
+     * Sets whether the test result status has been generated from a previous testing session.
+     */
+    void setRetry(boolean isRetry);
+
+    /**
+     * Retrieves whether the test result status has been generated from a previous testing session.
+     */
+    boolean isRetry();
+
+    /**
+     * Clear the existing result and default to 'failed'
+     */
+    void removeResult();
 }

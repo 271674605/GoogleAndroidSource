@@ -240,7 +240,7 @@ final class StaggeredGridDefault extends StaggeredGrid {
             // find start item index of "previous column"
             int edgeLimitSearchIndex = findRowEdgeLimitSearchIndex(true);
             if (edgeLimitSearchIndex < 0) {
-                // if "previous colummn" is not found, using edgeLimit of
+                // if "previous column" is not found, using edgeLimit of
                 // first row currently in grid
                 edgeLimit = Integer.MIN_VALUE;
                 for (int i = 0; i < mNumRows; i++) {
@@ -289,13 +289,13 @@ final class StaggeredGridDefault extends StaggeredGrid {
                     if (rowIndex == 0) {
                         location = mReversedFlow ? getRowMin(mNumRows - 1) : getRowMax(mNumRows - 1);
                         if (location != Integer.MAX_VALUE && location != Integer.MIN_VALUE) {
-                            location = location + (mReversedFlow ? -mMargin : mMargin);
+                            location = location + (mReversedFlow ? -mSpacing : mSpacing);
                         }
                     } else {
                         location = mReversedFlow ? getRowMax(rowIndex - 1) : getRowMin(rowIndex - 1);
                     }
                 } else {
-                    location = location + (mReversedFlow ? -mMargin : mMargin);
+                    location = location + (mReversedFlow ? -mSpacing : mSpacing);
                 }
                 int size = appendVisibleItemToRow(itemIndex++, rowIndex, location);
                 filledOne = true;
@@ -307,7 +307,7 @@ final class StaggeredGridDefault extends StaggeredGrid {
                         if (itemIndex == count || (!oneColumnMode && checkAppendOverLimit(toLimit))) {
                             return filledOne;
                         }
-                        location = location + (mReversedFlow ? - size - mMargin : size + mMargin);
+                        location = location + (mReversedFlow ? - size - mSpacing : size + mSpacing);
                         size = appendVisibleItemToRow(itemIndex++, rowIndex, location);
                     }
                 } else {
@@ -340,7 +340,7 @@ final class StaggeredGridDefault extends StaggeredGrid {
             // find start item index of "previous column"
             int edgeLimitSearchIndex = findRowEdgeLimitSearchIndex(false);
             if (edgeLimitSearchIndex < 0) {
-                // if "previous colummn" is not found, using edgeLimit of
+                // if "previous column" is not found, using edgeLimit of
                 // last row currently in grid and fill from upper row
                 rowIndex = rowIndex - 1;
                 edgeLimit = Integer.MAX_VALUE;
@@ -390,13 +390,13 @@ final class StaggeredGridDefault extends StaggeredGrid {
                     if (rowIndex == mNumRows - 1) {
                         location = mReversedFlow ? getRowMax(0) : getRowMin(0);
                         if (location != Integer.MAX_VALUE && location != Integer.MIN_VALUE) {
-                            location = location + (mReversedFlow ? mMargin : -mMargin);
+                            location = location + (mReversedFlow ? mSpacing : -mSpacing);
                         }
                     } else {
                         location = mReversedFlow ? getRowMin(rowIndex + 1) : getRowMax(rowIndex + 1);
                     }
                 } else {
-                    location = location + (mReversedFlow ? mMargin : -mMargin);
+                    location = location + (mReversedFlow ? mSpacing : -mSpacing);
                 }
                 int size = prependVisibleItemToRow(itemIndex--, rowIndex, location);
                 filledOne = true;
@@ -409,7 +409,7 @@ final class StaggeredGridDefault extends StaggeredGrid {
                         if (itemIndex < 0 || (!oneColumnMode && checkPrependOverLimit(toLimit))) {
                             return filledOne;
                         }
-                        location = location + (mReversedFlow ? size + mMargin : -size - mMargin);
+                        location = location + (mReversedFlow ? size + mSpacing : -size - mSpacing);
                         size = prependVisibleItemToRow(itemIndex--, rowIndex, location);
                     }
                 } else {

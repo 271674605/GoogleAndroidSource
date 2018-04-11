@@ -26,6 +26,7 @@ import android.telephony.PhoneNumberUtils;
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallStateException;
 import com.android.internal.telephony.Connection;
+import com.android.internal.telephony.imsphone.ImsPhoneConnection;
 import com.android.internal.telephony.Phone;
 import com.android.phone.settings.SettingsConstants;
 
@@ -64,7 +65,6 @@ final class CdmaConnection extends TelephonyConnection {
      * {@code True} if the CDMA connection should allow mute.
      */
     private boolean mAllowMute;
-    private final boolean mIsOutgoing;
     // Queue of pending short-DTMF characters.
     private final Queue<Character> mDtmfQueue = new LinkedList<>();
     private final EmergencyTonePlayer mEmergencyTonePlayer;
@@ -79,12 +79,13 @@ final class CdmaConnection extends TelephonyConnection {
             boolean allowMute,
             boolean isOutgoing,
             String telecomCallId) {
-        super(connection, telecomCallId);
+        super(connection, telecomCallId, isOutgoing);
         mEmergencyTonePlayer = emergencyTonePlayer;
         mAllowMute = allowMute;
-        mIsOutgoing = isOutgoing;
         mIsCallWaiting = connection != null && connection.getState() == Call.State.WAITING;
-        if (mIsCallWaiting) {
+        boolean isImsCall = getOriginalConnection() instanceof ImsPhoneConnection;
+        // Start call waiting timer for CDMA waiting call.
+        if (mIsCallWaiting && !isImsCall) {
             startCallWaitingTimer();
         }
     }
@@ -181,7 +182,7 @@ final class CdmaConnection extends TelephonyConnection {
     }
 
     @Override
-    public void performConference(TelephonyConnection otherConnection) {
+    public void performConference(android.telecom.Connection otherConnection) {
         if (isImsConnection()) {
             super.performConference(otherConnection);
         } else {

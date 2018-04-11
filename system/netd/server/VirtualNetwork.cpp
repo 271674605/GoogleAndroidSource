@@ -23,6 +23,9 @@
 #define LOG_TAG "Netd"
 #include "log/log.h"
 
+namespace android {
+namespace net {
+
 VirtualNetwork::VirtualNetwork(unsigned netId, bool hasDns, bool secure) :
         Network(netId), mHasDns(hasDns), mSecure(secure) {
 }
@@ -54,7 +57,7 @@ int VirtualNetwork::maybeCloseSockets(bool add, const UidRanges& uidRanges,
         return -EBADFD;
     }
 
-    if (int ret = sd.destroySockets(uidRanges, protectableUsers)) {
+    if (int ret = sd.destroySockets(uidRanges, protectableUsers, true /* excludeLoopback */)) {
         ALOGE("Failed to close sockets while %s %s to network %d: %s",
               add ? "adding" : "removing", uidRanges.toString().c_str(), mNetId, strerror(-ret));
         return ret;
@@ -121,3 +124,6 @@ int VirtualNetwork::removeInterface(const std::string& interface) {
     mInterfaces.erase(interface);
     return 0;
 }
+
+}  // namespace net
+}  // namespace android

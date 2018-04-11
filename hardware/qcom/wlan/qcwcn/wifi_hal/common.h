@@ -39,7 +39,6 @@
 #include <netlink/object-api.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
-#include <netlink-types.h>
 
 #include "nl80211_copy.h"
 
@@ -85,7 +84,14 @@ typedef struct {
     int  id;                                        // id to use when talking to driver
 } interface_info;
 
+typedef struct {
+    wifi_gscan_capabilities gscan_capa;
+    wifi_roaming_capabilities roaming_capa;
+} wifi_capa;
+
 struct gscan_event_handlers_s;
+struct rssi_monitor_event_handler_s;
+struct cld80211_ctx;
 
 typedef struct hal_info_s {
 
@@ -139,6 +145,9 @@ typedef struct hal_info_s {
     packet_fate_monitor_info *pkt_fate_stats;
     /* mutex for the packet fate stats shared resource protection */
     pthread_mutex_t pkt_fate_stats_lock;
+    struct rssi_monitor_event_handler_s *rssi_handlers;
+    wifi_capa capa;
+    struct cld80211_ctx *cldctx;
 } hal_info;
 
 wifi_error wifi_register_handler(wifi_handle handle, int cmd, nl_recvmsg_msg_cb_t func, void *arg);
@@ -160,6 +169,8 @@ wifi_handle getWifiHandle(hal_info *info);
 wifi_interface_handle getIfaceHandle(interface_info *info);
 wifi_error initializeGscanHandlers(hal_info *info);
 wifi_error cleanupGscanHandlers(hal_info *info);
+wifi_error initializeRSSIMonitorHandler(hal_info *info);
+wifi_error cleanupRSSIMonitorHandler(hal_info *info);
 
 lowi_cb_table_t *getLowiCallbackTable(u32 requested_lowi_capabilities);
 
@@ -179,6 +190,10 @@ wifi_error wifi_stop_rssi_monitoring(wifi_request_id id, wifi_interface_handle i
 #define REQUEST_ID_MAX 1000
 #define get_requestid() ((arc4random()%REQUEST_ID_MAX) + 1)
 #define WAIT_TIME_FOR_SET_REG_DOMAIN 50000
+
+#ifndef UNUSED
+#define UNUSED(x)    (void)(x)
+#endif
 
 #ifdef __cplusplus
 extern "C"

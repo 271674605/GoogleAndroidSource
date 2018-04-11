@@ -11,8 +11,8 @@ ndk_prebuilt_shared_stl {
 }
 
 libcxx_includes =  [
-    "current/sources/cxx-stl/llvm-libc++/libcxx/include",
-    "current/sources/cxx-stl/llvm-libc++/gabi++/include",
+    "current/sources/cxx-stl/llvm-libc++/include",
+    "current/sources/cxx-stl/llvm-libc++abi/include",
     "current/sources/android/support/include",
 ]
 

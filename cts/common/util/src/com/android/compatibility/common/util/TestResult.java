@@ -29,6 +29,8 @@ public class TestResult implements ITestResult {
     private String mBugReport;
     private String mLog;
     private String mScreenshot;
+    private boolean mIsRetry;
+    private boolean mSkipped;
 
     /**
      * Create a {@link TestResult} for the given test name.
@@ -172,6 +174,7 @@ public class TestResult implements ITestResult {
      */
     @Override
     public void failed(String trace) {
+        mSkipped = false;
         setResultStatus(TestStatus.FAIL);
         int index = trace.indexOf('\n');
         if (index < 0) {
@@ -188,6 +191,7 @@ public class TestResult implements ITestResult {
      */
     @Override
     public void passed(ReportLog report) {
+        mSkipped = false;
         if (getResultStatus() != TestStatus.FAIL) {
             setResultStatus(TestStatus.PASS);
             if (report != null) {
@@ -200,18 +204,19 @@ public class TestResult implements ITestResult {
      * {@inheritDoc}
      */
     @Override
-    public void notExecuted() {
-        setResultStatus(TestStatus.NOT_EXECUTED);
+    public void skipped() {
+        if (getResultStatus() == null) {
+            mSkipped = true;
+            setResultStatus(TestStatus.PASS);
+        }
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void skipped() {
-        // TODO(b/28386054): Report SKIPPED as a separate result.
-        // For now, we mark this as PASS.
-        setResultStatus(TestStatus.PASS);
+    public boolean isSkipped() {
+        return mSkipped;
     }
 
     /**
@@ -226,6 +231,33 @@ public class TestResult implements ITestResult {
         mBugReport = null;
         mLog = null;
         mScreenshot = null;
+        mIsRetry = false;
+        mSkipped = false;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setRetry(boolean isRetry) {
+        mIsRetry = isRetry;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean isRetry() {
+        return mIsRetry;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void removeResult() {
+        setResultStatus(TestStatus.FAIL);
+        setStackTrace("");
     }
 
     /**

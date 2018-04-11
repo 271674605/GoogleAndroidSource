@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Dmitry V. Levin <ldv@altlinux.org>
+ * Copyright (c) 2015-2016 Dmitry V. Levin <ldv@altlinux.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,10 +25,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
-# include "config.h"
-#endif
-
+#include "tests.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <signal.h>
@@ -43,23 +41,22 @@ main(void)
 	 * x32 is broken from the beginning:
 	 * https://lkml.org/lkml/2015/11/30/790
 	 */
-	return 77;
+	error_msg_and_skip("x32 is broken");
 #else
 	const sigset_t set = {};
 	const struct sigaction act = { .sa_handler = SIG_IGN };
 	const struct itimerval itv = { .it_value.tv_usec = 111111 };
 	struct timespec req = { .tv_nsec = 222222222 }, rem;
 
-	if (sigaction(SIGALRM, &act, NULL))
-		return 77;
-	if (sigprocmask(SIG_SETMASK, &set, NULL))
-		return 77;
+	assert(sigaction(SIGALRM, &act, NULL) == 0);
+	assert(sigprocmask(SIG_SETMASK, &set, NULL) == 0);
 	if (setitimer(ITIMER_REAL, &itv, NULL))
-		return 77;
+		perror_msg_and_skip("setitimer");
 	if (nanosleep(&req, &rem))
-		return 0;
+		perror_msg_and_fail("nanosleep");
 
-	printf("nanosleep\\(\\{%jd, %jd\\}, \\{%jd, %jd\\}\\)"
+	printf("nanosleep\\(\\{tv_sec=%jd, tv_nsec=%jd\\}, "
+	       "\\{tv_sec=%jd, tv_nsec=%jd\\}\\)"
 	       " = \\? ERESTART_RESTARTBLOCK \\(Interrupted by signal\\)\n",
 	       (intmax_t) req.tv_sec, (intmax_t) req.tv_nsec,
 	       (intmax_t) rem.tv_sec, (intmax_t) rem.tv_nsec);
@@ -70,7 +67,8 @@ main(void)
 #else
 # define ALTERNATIVE_NANOSLEEP_REQ ""
 #endif
-	printf("(nanosleep\\((%s\\{%jd, %jd\\}), %p|restart_syscall\\(<\\.\\.\\."
+	printf("(nanosleep\\((%s\\{tv_sec=%jd, tv_nsec=%jd\\}), "
+	       "%p|restart_syscall\\(<\\.\\.\\."
 	       " resuming interrupted nanosleep \\.\\.\\.>)\\) = 0\n",
 	       ALTERNATIVE_NANOSLEEP_REQ,
 	       (intmax_t) req.tv_sec, (intmax_t) req.tv_nsec, &rem);

@@ -18,7 +18,7 @@ package com.android.internal.telecom;
 
 import android.content.ComponentName;
 import android.content.Intent;
-import android.telecom.ParcelableCallAnalytics;
+import android.telecom.TelecomAnalytics;
 import android.telecom.PhoneAccountHandle;
 import android.net.Uri;
 import android.os.Bundle;
@@ -57,6 +57,11 @@ interface ITelecomService {
      */
     List<PhoneAccountHandle> getCallCapablePhoneAccounts(
             boolean includeDisabledAccounts, String callingPackage);
+
+    /**
+     * @see TelecomServiceImpl#getSelfManagedPhoneAccounts
+     */
+    List<PhoneAccountHandle> getSelfManagedPhoneAccounts(String callingPackage);
 
     /**
      * @see TelecomManager#getPhoneAccountsSupportingScheme
@@ -148,7 +153,7 @@ interface ITelecomService {
     /**
     * @see TelecomServiceImpl#dumpCallAnalytics
     */
-    List<ParcelableCallAnalytics> dumpCallAnalytics();
+    TelecomAnalytics dumpCallAnalytics();
 
     //
     // Internal system apis relating to call management.
@@ -163,6 +168,11 @@ interface ITelecomService {
      * @see TelecomServiceImpl#isInCall
      */
     boolean isInCall(String callingPackage);
+
+    /**
+     * @see TelecomServiceImpl#isInManagedCall
+     */
+    boolean isInManagedCall(String callingPackage);
 
     /**
      * @see TelecomServiceImpl#isRinging
@@ -182,12 +192,12 @@ interface ITelecomService {
     /**
      * @see TelecomServiceImpl#acceptRingingCall
      */
-    void acceptRingingCall();
+    void acceptRingingCall(String callingPackage);
 
     /**
      * @see TelecomServiceImpl#acceptRingingCallWithVideoState(int)
      */
-    void acceptRingingCallWithVideoState(int videoState);
+    void acceptRingingCallWithVideoState(String callingPackage, int videoState);
 
     /**
      * @see TelecomServiceImpl#cancelMissedCallsNotification
@@ -249,4 +259,19 @@ interface ITelecomService {
     * @see TelecomServiceImpl#createManageBlockedNumbersIntent
     **/
     Intent createManageBlockedNumbersIntent();
+
+    /**
+     * @see TelecomServiceImpl#isIncomingCallPermitted
+     */
+    boolean isIncomingCallPermitted(in PhoneAccountHandle phoneAccountHandle);
+
+    /**
+     * @see TelecomServiceImpl#isOutgoingCallPermitted
+     */
+    boolean isOutgoingCallPermitted(in PhoneAccountHandle phoneAccountHandle);
+
+    /**
+     * @see TelecomServiceImpl#waitOnHandler
+     */
+    void waitOnHandlers();
 }

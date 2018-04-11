@@ -17,19 +17,26 @@
 package android.support.v7.app;
 
 import android.content.Context;
+import android.support.annotation.RequiresApi;
 import android.util.AttributeSet;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.Window;
 
-class AppCompatDelegateImplV11 extends AppCompatDelegateImplV7 {
+@RequiresApi(14)
+class AppCompatDelegateImplV11 extends AppCompatDelegateImplV9 {
 
     AppCompatDelegateImplV11(Context context, Window window, AppCompatCallback callback) {
         super(context, window, callback);
     }
 
+    @Override
+    public boolean hasWindowFeature(int featureId) {
+        return super.hasWindowFeature(featureId) || mWindow.hasFeature(featureId);
+    }
+
+    @Override
     View callActivityOnCreateView(View parent, String name, Context context, AttributeSet attrs) {
-        // On Honeycomb+, Activity's private inflater factory will handle calling it's
+        // On Honeycomb+, Activity's private inflater factory will handle calling its
         // onCreateView(...)
         return null;
     }

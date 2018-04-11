@@ -16,40 +16,48 @@
 
 package android.net.metrics;
 
-import android.annotation.SystemApi;
 import android.os.Parcel;
 import android.os.Parcelable;
 
 /**
+ * An event recorded when a DhcpClient state machine transitions to a new state.
  * {@hide}
  */
-@SystemApi
-public final class DhcpClientEvent extends IpConnectivityEvent implements Parcelable {
-    public final String ifName;
-    public final String msg;
+public final class DhcpClientEvent implements Parcelable {
 
-    private DhcpClientEvent(String ifName, String msg) {
-        this.ifName = ifName;
+    // Names for recording DhcpClient pseudo-state transitions.
+    /** {@hide} Represents transitions from DhcpInitState to DhcpBoundState */
+    public static final String INITIAL_BOUND = "InitialBoundState";
+    /** {@hide} Represents transitions from and to DhcpBoundState via DhcpRenewingState */
+    public static final String RENEWING_BOUND = "RenewingBoundState";
+
+    public final String msg;
+    public final int durationMs;
+
+    public DhcpClientEvent(String msg, int durationMs) {
         this.msg = msg;
+        this.durationMs = durationMs;
     }
 
     private DhcpClientEvent(Parcel in) {
-        this.ifName = in.readString();
         this.msg = in.readString();
+        this.durationMs = in.readInt();
     }
 
+    @Override
     public void writeToParcel(Parcel out, int flags) {
-        out.writeString(ifName);
         out.writeString(msg);
+        out.writeInt(durationMs);
     }
 
+    @Override
     public int describeContents() {
         return 0;
     }
 
     @Override
     public String toString() {
-        return String.format("DhcpClientEvent(%s, %s)", ifName, msg);
+        return String.format("DhcpClientEvent(%s, %dms)", msg, durationMs);
     }
 
     public static final Parcelable.Creator<DhcpClientEvent> CREATOR
@@ -62,8 +70,4 @@ public final class DhcpClientEvent extends IpConnectivityEvent implements Parcel
             return new DhcpClientEvent[size];
         }
     };
-
-    public static void logStateEvent(String ifName, String state) {
-        logEvent(new DhcpClientEvent(ifName, state));
-    }
-};
+}

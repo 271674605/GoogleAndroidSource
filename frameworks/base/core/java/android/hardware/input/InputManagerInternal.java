@@ -22,6 +22,8 @@ import android.view.InputEvent;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodSubtype;
 
+import java.util.List;
+
 /**
  * Input manager local system service interface.
  *
@@ -35,7 +37,7 @@ public abstract class InputManagerInternal {
      * by the input system.  The input system must copy this information to retain it.
      */
     public abstract void setDisplayViewports(DisplayViewport defaultViewport,
-            DisplayViewport externalTouchViewport);
+            DisplayViewport externalTouchViewport, List<DisplayViewport> virtualTouchViewports);
 
     /**
      * Called by the power manager to tell the input manager whether it should start
@@ -59,4 +61,9 @@ public abstract class InputManagerInternal {
      * @param deviceId The id of input device.
      */
     public abstract void toggleCapsLock(int deviceId);
+
+    /**
+     * Set whether the input stack should deliver pulse gesture events when the device is asleep.
+     */
+    public abstract void setPulseGestureEnabled(boolean enabled);
 }

@@ -43,14 +43,19 @@ public class KeyguardStateMonitor extends IKeyguardStateCallback.Stub {
     private volatile boolean mIsShowing = true;
     private volatile boolean mSimSecure = true;
     private volatile boolean mInputRestricted = true;
+    private volatile boolean mTrusted = false;
+    private volatile boolean mHasLockscreenWallpaper = false;
 
     private int mCurrentUserId;
 
     private final LockPatternUtils mLockPatternUtils;
+    private final StateCallback mCallback;
 
-    public KeyguardStateMonitor(Context context, IKeyguardService service) {
+    public KeyguardStateMonitor(Context context, IKeyguardService service, StateCallback callback) {
         mLockPatternUtils = new LockPatternUtils(context);
         mCurrentUserId = ActivityManager.getCurrentUser();
+        mCallback = callback;
+
         try {
             service.addStateMonitorCallback(this);
         } catch (RemoteException e) {
@@ -68,6 +73,14 @@ public class KeyguardStateMonitor extends IKeyguardStateCallback.Stub {
 
     public boolean isInputRestricted() {
         return mInputRestricted;
+    }
+
+    public boolean isTrusted() {
+        return mTrusted;
+    }
+
+    public boolean hasLockscreenWallpaper() {
+        return mHasLockscreenWallpaper;
     }
 
     @Override // Binder interface
@@ -93,12 +106,28 @@ public class KeyguardStateMonitor extends IKeyguardStateCallback.Stub {
         mInputRestricted = inputRestricted;
     }
 
+    @Override // Binder interface
+    public void onTrustedChanged(boolean trusted) {
+        mTrusted = trusted;
+        mCallback.onTrustedChanged();
+    }
+
+    @Override // Binder interface
+    public void onHasLockscreenWallpaperChanged(boolean hasLockscreenWallpaper) {
+        mHasLockscreenWallpaper = hasLockscreenWallpaper;
+    }
+
+    public interface StateCallback {
+        void onTrustedChanged();
+    }
+
     public void dump(String prefix, PrintWriter pw) {
         pw.println(prefix + TAG);
         prefix += "  ";
         pw.println(prefix + "mIsShowing=" + mIsShowing);
         pw.println(prefix + "mSimSecure=" + mSimSecure);
         pw.println(prefix + "mInputRestricted=" + mInputRestricted);
+        pw.println(prefix + "mTrusted=" + mTrusted);
         pw.println(prefix + "mCurrentUserId=" + mCurrentUserId);
     }
 }

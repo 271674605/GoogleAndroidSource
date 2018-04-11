@@ -69,6 +69,9 @@ public class Support_TestWebServer implements Support_HttpConstants {
     /* Switch on/off logging */
     boolean mLog = false;
 
+    /* Minimum delay before sending each response */
+    int mDelay = 0;
+
     /* If set, this will keep connections alive after a request has been
      * processed.
      */
@@ -83,12 +86,6 @@ public class Support_TestWebServer implements Support_HttpConstants {
 
     /* If set, this indicates the reason for redirection */
     int redirectCode = -1;
-
-    /* Set the number of connections the server will accept before shutdown */
-    int acceptLimit = 100;
-
-    /* Count of number of accepted connections */
-    int acceptedConnections = 0;
 
     public Support_TestWebServer() {
     }
@@ -166,14 +163,6 @@ public class Support_TestWebServer implements Support_HttpConstants {
     }
 
     /**
-     * Call this to specify the maximum number of sockets to accept
-     * @param limit The number of sockets to accept
-     */
-    public void setAcceptLimit(int limit) {
-        acceptLimit = limit;
-    }
-
-    /**
      * Call this to indicate redirection port requirement.
      * When this value is set, the server will respond to a request with
      * a redirect code with the Location response header set to the value
@@ -188,15 +177,20 @@ public class Support_TestWebServer implements Support_HttpConstants {
     }
 
     /**
+     * Call this to introduce a minimum delay before server responds to requests. When this value is
+     * not set, no delay will be introduced.
+     * @param delay The delay in milliseconds
+     */
+    public void setDelay(int delay) {
+        mDelay = delay;
+    }
+
+    /**
      * Returns a map from recently-requested paths (like "/index.html") to a
      * snapshot of the request data.
      */
     public Map<String, Request> pathToRequest() {
         return pathToRequest;
-    }
-
-    public int getNumAcceptedConnections() {
-        return acceptedConnections;
     }
 
     /**
@@ -217,12 +211,8 @@ public class Support_TestWebServer implements Support_HttpConstants {
     class AcceptThread extends Thread {
 
         ServerSocket ss = null;
-        boolean running = false;
+        volatile boolean closed = false;
 
-        /**
-         * @param port the port to use, or 0 to let the OS choose.
-         * Hard-coding ports is evil, so always pass 0!
-         */
         public int init() throws IOException {
             ss = new ServerSocket(0);
             ss.setSoTimeout(5000);
@@ -233,16 +223,11 @@ public class Support_TestWebServer implements Support_HttpConstants {
         /**
          * Main thread responding to new connections
          */
-        public synchronized void run() {
-            running = true;
-            while (running) {
+        public void run() {
+            while (!closed) {
                 try {
                     Socket s = ss.accept();
-                    acceptedConnections++;
-                    if (acceptedConnections >= acceptLimit) {
-                        running = false;
-                    }
-                    new Thread(new Worker(s), "additional worker").start();
+                    new Thread(new Worker(s).setDelay(mDelay), "additional worker").start();
                 } catch (SocketException e) {
                     log(e.getMessage());
                 } catch (IOException e) {
@@ -255,7 +240,7 @@ public class Support_TestWebServer implements Support_HttpConstants {
         // Close this socket
         public void close() {
             try {
-                running = false;
+                closed = true;
                 /* Stop server socket from processing further. Currently
                    this does not cause the SocketException from ss.accept
                    therefore the acceptLimit functionality has been added
@@ -330,6 +315,9 @@ public class Support_TestWebServer implements Support_HttpConstants {
         /* Indicates whether current request has any data content */
         private boolean hasContent = false;
 
+        /* Optional delay before sending response */
+        private int delay = 0;
+
         /* Request headers are stored here */
         private Map<String, String> headers = new LinkedHashMap<String, String>();
 
@@ -337,6 +325,11 @@ public class Support_TestWebServer implements Support_HttpConstants {
         Worker(Socket s) {
             this.buf = new byte[BUF_SIZE];
             this.s = s;
+        }
+
+        Worker setDelay(int delay) {
+            this.delay = delay;
+            return this;
         }
 
         public synchronized void run() {
@@ -612,6 +605,15 @@ public class Support_TestWebServer implements Support_HttpConstants {
 
                 // Reset test number prior to outputing data
                 testNum = -1;
+
+                // Delay before sending response
+                if (mDelay > 0) {
+                    try {
+                        Thread.sleep(mDelay);
+                    } catch (InterruptedException e) {
+                        // Ignored
+                    }
+                }
 
                 // Write out the data
                 printStatus(ps);

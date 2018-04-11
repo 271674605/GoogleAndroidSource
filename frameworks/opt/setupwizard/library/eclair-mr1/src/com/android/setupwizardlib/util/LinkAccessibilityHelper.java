@@ -16,14 +16,21 @@
 
 package com.android.setupwizardlib.util;
 
+import static android.support.v4.os.BuildCompat.isAtLeastO;
+
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.support.v4.view.AccessibilityDelegateCompat;
 import android.support.v4.view.accessibility.AccessibilityNodeInfoCompat;
+import android.support.v4.view.accessibility.AccessibilityNodeProviderCompat;
 import android.support.v4.widget.ExploreByTouchHelper;
 import android.text.Layout;
 import android.text.Spanned;
 import android.text.style.ClickableSpan;
 import android.util.Log;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.TextView;
 
@@ -32,6 +39,10 @@ import java.util.List;
 /**
  * An accessibility delegate that allows {@link android.text.style.ClickableSpan} to be focused and
  * clicked by accessibility services.
+ * <p>
+ * <strong>Note: </strong> From Android O on, there is native support for ClickableSpan
+ * accessibility, so this class is not needed (and indeed has no effect.)
+ * </p>
  *
  * <p />Sample usage:
  * <pre>
@@ -54,19 +65,138 @@ import java.util.List;
  * @see com.android.setupwizardlib.view.RichTextView
  * @see android.support.v4.widget.ExploreByTouchHelper
  */
-public class LinkAccessibilityHelper extends ExploreByTouchHelper {
+public class LinkAccessibilityHelper extends AccessibilityDelegateCompat {
 
     private static final String TAG = "LinkAccessibilityHelper";
 
     private final TextView mView;
     private final Rect mTempRect = new Rect();
+    private final ExploreByTouchHelper mExploreByTouchHelper;
 
     public LinkAccessibilityHelper(TextView view) {
-        super(view);
+        if (!isAtLeastO()) {
+            // Pre-O, we essentially extend ExploreByTouchHelper to expose a virtual view hierarchy
+            mExploreByTouchHelper = new ExploreByTouchHelper(view) {
+                @Override
+                protected int getVirtualViewAt(float x, float y) {
+                    return LinkAccessibilityHelper.this.getVirtualViewAt(x, y);
+                }
+
+                @Override
+                protected void getVisibleVirtualViews(List<Integer> virtualViewIds) {
+                    LinkAccessibilityHelper.this.getVisibleVirtualViews(virtualViewIds);
+                }
+
+                @Override
+                protected void onPopulateEventForVirtualView(int virtualViewId,
+                        AccessibilityEvent event) {
+                    LinkAccessibilityHelper.this
+                            .onPopulateEventForVirtualView(virtualViewId, event);
+                }
+
+                @Override
+                protected void onPopulateNodeForVirtualView(int virtualViewId,
+                        AccessibilityNodeInfoCompat infoCompat) {
+                    LinkAccessibilityHelper.this
+                            .onPopulateNodeForVirtualView(virtualViewId, infoCompat);
+
+                }
+
+                @Override
+                protected boolean onPerformActionForVirtualView(int virtualViewId, int action,
+                        Bundle arguments) {
+                    return LinkAccessibilityHelper.this
+                            .onPerformActionForVirtualView(virtualViewId, action, arguments);
+                }
+            };
+        } else {
+            mExploreByTouchHelper = null;
+        }
         mView = view;
     }
 
     @Override
+    public void sendAccessibilityEvent(View host, int eventType) {
+        if (mExploreByTouchHelper != null) {
+            mExploreByTouchHelper.sendAccessibilityEvent(host, eventType);
+        } else {
+            super.sendAccessibilityEvent(host, eventType);
+        }
+    }
+
+    @Override
+    public void sendAccessibilityEventUnchecked(View host, AccessibilityEvent event) {
+        if (mExploreByTouchHelper != null) {
+            mExploreByTouchHelper.sendAccessibilityEventUnchecked(host, event);
+        } else {
+            super.sendAccessibilityEventUnchecked(host, event);
+        }
+    }
+
+    @Override
+    public boolean dispatchPopulateAccessibilityEvent(View host, AccessibilityEvent event) {
+        return (mExploreByTouchHelper != null)
+                ? mExploreByTouchHelper.dispatchPopulateAccessibilityEvent(host, event)
+                : super.dispatchPopulateAccessibilityEvent(host, event);
+    }
+
+    @Override
+    public void onPopulateAccessibilityEvent(View host, AccessibilityEvent event) {
+        if (mExploreByTouchHelper != null) {
+            mExploreByTouchHelper.onPopulateAccessibilityEvent(host, event);
+        } else {
+            super.onPopulateAccessibilityEvent(host, event);
+        }
+    }
+
+    @Override
+    public void onInitializeAccessibilityEvent(View host, AccessibilityEvent event) {
+        if (mExploreByTouchHelper != null) {
+            mExploreByTouchHelper.onInitializeAccessibilityEvent(host, event);
+        } else {
+            super.onInitializeAccessibilityEvent(host, event);
+        }
+    }
+
+    @Override
+    public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfoCompat info) {
+        if (mExploreByTouchHelper != null) {
+            mExploreByTouchHelper.onInitializeAccessibilityNodeInfo(host, info);
+        } else {
+            super.onInitializeAccessibilityNodeInfo(host, info);
+        }
+    }
+
+    @Override
+    public boolean onRequestSendAccessibilityEvent(ViewGroup host, View child,
+            AccessibilityEvent event) {
+        return (mExploreByTouchHelper != null)
+                ? mExploreByTouchHelper.onRequestSendAccessibilityEvent(host, child, event)
+                : super.onRequestSendAccessibilityEvent(host, child, event);
+    }
+
+    @Override
+    public AccessibilityNodeProviderCompat getAccessibilityNodeProvider(View host) {
+        return (mExploreByTouchHelper != null)
+                ? mExploreByTouchHelper.getAccessibilityNodeProvider(host)
+                : super.getAccessibilityNodeProvider(host);
+    }
+
+    @Override
+    public boolean performAccessibilityAction(View host, int action, Bundle args) {
+        return (mExploreByTouchHelper != null)
+                ? mExploreByTouchHelper.performAccessibilityAction(host, action, args)
+                : super.performAccessibilityAction(host, action, args);
+    }
+
+    /**
+     * Delegated to {@link ExploreByTouchHelper}
+     */
+    public final boolean dispatchHoverEvent(MotionEvent event) {
+        return (mExploreByTouchHelper != null) ? mExploreByTouchHelper.dispatchHoverEvent(event)
+                : false;
+    }
+
     protected int getVirtualViewAt(float x, float y) {
         final CharSequence text = mView.getText();
         if (text instanceof Spanned) {
@@ -78,10 +208,9 @@ public class LinkAccessibilityHelper extends ExploreByTouchHelper {
                 return spannedText.getSpanStart(linkSpan);
             }
         }
-        return INVALID_ID;
+        return ExploreByTouchHelper.INVALID_ID;
     }
 
-    @Override
     protected void getVisibleVirtualViews(List<Integer> virtualViewIds) {
         final CharSequence text = mView.getText();
         if (text instanceof Spanned) {
@@ -94,7 +223,6 @@ public class LinkAccessibilityHelper extends ExploreByTouchHelper {
         }
     }
 
-    @Override
     protected void onPopulateEventForVirtualView(int virtualViewId, AccessibilityEvent event) {
         final ClickableSpan span = getSpanForOffset(virtualViewId);
         if (span != null) {
@@ -105,7 +233,6 @@ public class LinkAccessibilityHelper extends ExploreByTouchHelper {
         }
     }
 
-    @Override
     protected void onPopulateNodeForVirtualView(int virtualViewId,
             AccessibilityNodeInfoCompat info) {
         final ClickableSpan span = getSpanForOffset(virtualViewId);
@@ -118,17 +245,14 @@ public class LinkAccessibilityHelper extends ExploreByTouchHelper {
         info.setFocusable(true);
         info.setClickable(true);
         getBoundsForSpan(span, mTempRect);
-        if (!mTempRect.isEmpty()) {
-            info.setBoundsInParent(getBoundsForSpan(span, mTempRect));
-        } else {
+        if (mTempRect.isEmpty()) {
             Log.e(TAG, "LinkSpan bounds is empty for: " + virtualViewId);
             mTempRect.set(0, 0, 1, 1);
-            info.setBoundsInParent(mTempRect);
         }
+        info.setBoundsInParent(mTempRect);
         info.addAction(AccessibilityNodeInfoCompat.ACTION_CLICK);
     }
 
-    @Override
     protected boolean onPerformActionForVirtualView(int virtualViewId, int action,
             Bundle arguments) {
         if (action == AccessibilityNodeInfoCompat.ACTION_CLICK) {
@@ -171,22 +295,36 @@ public class LinkAccessibilityHelper extends ExploreByTouchHelper {
         CharSequence text = mView.getText();
         outRect.setEmpty();
         if (text instanceof Spanned) {
-            Spanned spannedText = (Spanned) text;
-            final int spanStart = spannedText.getSpanStart(span);
-            final int spanEnd = spannedText.getSpanEnd(span);
             final Layout layout = mView.getLayout();
-            final float xStart = layout.getPrimaryHorizontal(spanStart);
-            final float xEnd = layout.getPrimaryHorizontal(spanEnd);
-            final int lineStart = layout.getLineForOffset(spanStart);
-            final int lineEnd = layout.getLineForOffset(spanEnd);
-            layout.getLineBounds(lineStart, outRect);
-            outRect.left = (int) xStart;
-            if (lineEnd == lineStart) {
-                outRect.right = (int) xEnd;
-            } // otherwise just leave it at the end of the start line
+            if (layout != null) {
+                Spanned spannedText = (Spanned) text;
+                final int spanStart = spannedText.getSpanStart(span);
+                final int spanEnd = spannedText.getSpanEnd(span);
+                final float xStart = layout.getPrimaryHorizontal(spanStart);
+                final float xEnd = layout.getPrimaryHorizontal(spanEnd);
+                final int lineStart = layout.getLineForOffset(spanStart);
+                final int lineEnd = layout.getLineForOffset(spanEnd);
+                layout.getLineBounds(lineStart, outRect);
+                if (lineEnd == lineStart) {
+                    // If the span is on a single line, adjust both the left and right bounds
+                    // so outrect is exactly bounding the span.
+                    outRect.left = (int) Math.min(xStart, xEnd);
+                    outRect.right = (int) Math.max(xStart, xEnd);
+                } else {
+                    // If the span wraps across multiple lines, only use the first line (as returned
+                    // by layout.getLineBounds above), and adjust the "start" of outrect to where
+                    // the span starts, leaving the "end" of outrect at the end of the line.
+                    // ("start" being left for LTR, and right for RTL)
+                    if (layout.getParagraphDirection(lineStart) == Layout.DIR_RIGHT_TO_LEFT) {
+                        outRect.right = (int) xStart;
+                    } else {
+                        outRect.left = (int) xStart;
+                    }
+                }
 
-            // Offset for padding
-            outRect.offset(mView.getTotalPaddingLeft(), mView.getTotalPaddingTop());
+                // Offset for padding
+                outRect.offset(mView.getTotalPaddingLeft(), mView.getTotalPaddingTop());
+            }
         }
         return outRect;
     }

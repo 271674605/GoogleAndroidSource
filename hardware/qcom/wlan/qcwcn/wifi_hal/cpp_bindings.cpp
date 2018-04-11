@@ -29,7 +29,6 @@
 #include <netlink/object-api.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
-#include <netlink-types.h>
 #include <net/if.h>
 
 #include "nl80211_copy.h"
@@ -38,7 +37,7 @@
 #include "wifi_hal.h"
 #include "common.h"
 #include "cpp_bindings.h"
-#include "qca-vendor.h"
+#include "vendor_definitions.h"
 
 void appendFmt(char *buf, size_t buf_len, int &offset, const char *fmt, ...)
 {
@@ -755,7 +754,6 @@ WifiVendorCommand::~WifiVendorCommand()
 int WifiVendorCommand::handleResponse(WifiEvent &reply)
 {
     struct nlattr **tb = reply.attributes();
-    struct nlattr *attr = NULL;
     struct genlmsghdr *gnlh = reply.header();
 
     if (gnlh->cmd == NL80211_CMD_VENDOR) {
@@ -772,7 +770,6 @@ int WifiVendorCommand::handleResponse(WifiEvent &reply)
 int WifiVendorCommand::handleEvent(WifiEvent &event)
 {
     struct nlattr **tb = event.attributes();
-    struct nlattr *attr = NULL;
     struct genlmsghdr *gnlh = event.header();
 
     if (gnlh->cmd == NL80211_CMD_VENDOR) {
@@ -966,7 +963,8 @@ wifi_error WifiVendorCommand::get_mac_addr(struct nlattr **tb_vendor,
     }
 
     memcpy(addr, (u8 *)nla_data(tb_vendor[attribute]),
-                  nla_len(tb_vendor[attribute]));
+                 nla_len(tb_vendor[attribute]));
+
     return WIFI_SUCCESS;
 }
 

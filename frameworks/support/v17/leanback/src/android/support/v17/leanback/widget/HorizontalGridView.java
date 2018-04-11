@@ -37,7 +37,7 @@ import android.view.View;
  * {@link RecyclerView.Adapter} can optionally implement {@link FacetProviderAdapter} which
  * provides {@link FacetProvider} for a given view type;  {@link RecyclerView.ViewHolder}
  * can also implement {@link FacetProvider}.  Facet from ViewHolder
- * has a higher priority than the one from FacetProiderAdapter associated with viewType.
+ * has a higher priority than the one from FacetProviderAdapter associated with viewType.
  * Supported optional facets are:
  * <ol>
  * <li> {@link ItemAlignmentFacet}
@@ -255,8 +255,7 @@ public class HorizontalGridView extends BaseGridView {
         final int c = getChildCount();
         for (int i = 0; i < c; i++) {
             View view = getChildAt(i);
-            if (mLayoutManager.getOpticalLeft(view) <
-                    getPaddingLeft() - mLowFadeShaderOffset) {
+            if (mLayoutManager.getOpticalLeft(view) < getPaddingLeft() - mLowFadeShaderOffset) {
                 return true;
             }
         }

@@ -23,9 +23,9 @@ import android.os.Parcelable;
 import android.util.ArraySet;
 import android.util.DisplayMetrics;
 
-import java.util.Arrays;
-
 import libcore.util.Objects;
+
+import java.util.Arrays;
 
 /**
  * Describes the characteristics of a particular logical display.
@@ -169,14 +169,11 @@ public final class DisplayInfo implements Parcelable {
      */
     public Display.Mode[] supportedModes = Display.Mode.EMPTY_ARRAY;
 
-    /** The active color transform. */
-    public int colorTransformId;
+    /** The active color mode. */
+    public int colorMode;
 
-    /** The default color transform. */
-    public int defaultColorTransformId;
-
-    /** The list of supported color transforms */
-    public Display.ColorTransform[] supportedColorTransforms = Display.ColorTransform.EMPTY_ARRAY;
+    /** The list of supported color modes */
+    public int[] supportedColorModes = { Display.COLOR_MODE_DEFAULT };
 
     /** The display's HDR capabilities */
     public Display.HdrCapabilities hdrCapabilities;
@@ -241,6 +238,15 @@ public final class DisplayInfo implements Parcelable {
      */
     public String ownerPackageName;
 
+    /**
+     * @hide
+     * Get current remove mode of the display - what actions should be performed with the display's
+     * content when it is removed.
+     *
+     * @see Display#getRemoveMode()
+     */
+    public int removeMode = Display.REMOVE_MODE_MOVE_CONTENT_TO_PRIMARY;
+
     public static final Creator<DisplayInfo> CREATOR = new Creator<DisplayInfo>() {
         @Override
         public DisplayInfo createFromParcel(Parcel source) {
@@ -291,8 +297,8 @@ public final class DisplayInfo implements Parcelable {
                 && rotation == other.rotation
                 && modeId == other.modeId
                 && defaultModeId == other.defaultModeId
-                && colorTransformId == other.colorTransformId
-                && defaultColorTransformId == other.defaultColorTransformId
+                && colorMode == other.colorMode
+                && Arrays.equals(supportedColorModes, other.supportedColorModes)
                 && Objects.equal(hdrCapabilities, other.hdrCapabilities)
                 && logicalDensityDpi == other.logicalDensityDpi
                 && physicalXDpi == other.physicalXDpi
@@ -301,7 +307,8 @@ public final class DisplayInfo implements Parcelable {
                 && presentationDeadlineNanos == other.presentationDeadlineNanos
                 && state == other.state
                 && ownerUid == other.ownerUid
-                && Objects.equal(ownerPackageName, other.ownerPackageName);
+                && Objects.equal(ownerPackageName, other.ownerPackageName)
+                && removeMode == other.removeMode;
     }
 
     @Override
@@ -332,10 +339,9 @@ public final class DisplayInfo implements Parcelable {
         modeId = other.modeId;
         defaultModeId = other.defaultModeId;
         supportedModes = Arrays.copyOf(other.supportedModes, other.supportedModes.length);
-        colorTransformId = other.colorTransformId;
-        defaultColorTransformId = other.defaultColorTransformId;
-        supportedColorTransforms = Arrays.copyOf(
-                other.supportedColorTransforms, other.supportedColorTransforms.length);
+        colorMode = other.colorMode;
+        supportedColorModes = Arrays.copyOf(
+                other.supportedColorModes, other.supportedColorModes.length);
         hdrCapabilities = other.hdrCapabilities;
         logicalDensityDpi = other.logicalDensityDpi;
         physicalXDpi = other.physicalXDpi;
@@ -345,6 +351,7 @@ public final class DisplayInfo implements Parcelable {
         state = other.state;
         ownerUid = other.ownerUid;
         ownerPackageName = other.ownerPackageName;
+        removeMode = other.removeMode;
     }
 
     public void readFromParcel(Parcel source) {
@@ -373,12 +380,11 @@ public final class DisplayInfo implements Parcelable {
         for (int i = 0; i < nModes; i++) {
             supportedModes[i] = Display.Mode.CREATOR.createFromParcel(source);
         }
-        colorTransformId = source.readInt();
-        defaultColorTransformId = source.readInt();
-        int nColorTransforms = source.readInt();
-        supportedColorTransforms = new Display.ColorTransform[nColorTransforms];
-        for (int i = 0; i < nColorTransforms; i++) {
-            supportedColorTransforms[i] = Display.ColorTransform.CREATOR.createFromParcel(source);
+        colorMode = source.readInt();
+        int nColorModes = source.readInt();
+        supportedColorModes = new int[nColorModes];
+        for (int i = 0; i < nColorModes; i++) {
+            supportedColorModes[i] = source.readInt();
         }
         hdrCapabilities = source.readParcelable(null);
         logicalDensityDpi = source.readInt();
@@ -390,6 +396,7 @@ public final class DisplayInfo implements Parcelable {
         ownerUid = source.readInt();
         ownerPackageName = source.readString();
         uniqueId = source.readString();
+        removeMode = source.readInt();
     }
 
     @Override
@@ -418,11 +425,10 @@ public final class DisplayInfo implements Parcelable {
         for (int i = 0; i < supportedModes.length; i++) {
             supportedModes[i].writeToParcel(dest, flags);
         }
-        dest.writeInt(colorTransformId);
-        dest.writeInt(defaultColorTransformId);
-        dest.writeInt(supportedColorTransforms.length);
-        for (int i = 0; i < supportedColorTransforms.length; i++) {
-            supportedColorTransforms[i].writeToParcel(dest, flags);
+        dest.writeInt(colorMode);
+        dest.writeInt(supportedColorModes.length);
+        for (int i = 0; i < supportedColorModes.length; i++) {
+            dest.writeInt(supportedColorModes[i]);
         }
         dest.writeParcelable(hdrCapabilities, flags);
         dest.writeInt(logicalDensityDpi);
@@ -434,6 +440,7 @@ public final class DisplayInfo implements Parcelable {
         dest.writeInt(ownerUid);
         dest.writeString(ownerPackageName);
         dest.writeString(uniqueId);
+        dest.writeInt(removeMode);
     }
 
     @Override
@@ -496,24 +503,6 @@ public final class DisplayInfo implements Parcelable {
         return result;
     }
 
-    public Display.ColorTransform getColorTransform() {
-        return findColorTransform(colorTransformId);
-    }
-
-    public Display.ColorTransform getDefaultColorTransform() {
-        return findColorTransform(defaultColorTransformId);
-    }
-
-    private Display.ColorTransform findColorTransform(int colorTransformId) {
-        for (int i = 0; i < supportedColorTransforms.length; i++) {
-            Display.ColorTransform colorTransform = supportedColorTransforms[i];
-            if (colorTransform.getId() == colorTransformId) {
-                return colorTransform;
-            }
-        }
-        throw new IllegalStateException("Unable to locate color transform: " + colorTransformId);
-    }
-
     public void getAppMetrics(DisplayMetrics outMetrics) {
         getAppMetrics(outMetrics, CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO, null);
     }
@@ -543,6 +532,20 @@ public final class DisplayInfo implements Parcelable {
                 logicalHeight : logicalWidth;
     }
 
+    public boolean isHdr() {
+        int[] types = hdrCapabilities != null ? hdrCapabilities.getSupportedHdrTypes() : null;
+        return types != null && types.length > 0;
+    }
+
+    public boolean isWideColorGamut() {
+        for (int colorMode : supportedColorModes) {
+            if (colorMode == Display.COLOR_MODE_DCI_P3 || colorMode > Display.COLOR_MODE_SRGB) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Returns true if the specified UID has access to this display.
      */
@@ -559,12 +562,10 @@ public final class DisplayInfo implements Parcelable {
         outMetrics.xdpi = outMetrics.noncompatXdpi = physicalXDpi;
         outMetrics.ydpi = outMetrics.noncompatYdpi = physicalYDpi;
 
-        width = (configuration != null
-                && configuration.screenWidthDp != Configuration.SCREEN_WIDTH_DP_UNDEFINED)
-                ? (int)((configuration.screenWidthDp * outMetrics.density) + 0.5f) : width;
-        height = (configuration != null
-                && configuration.screenHeightDp != Configuration.SCREEN_HEIGHT_DP_UNDEFINED)
-                ? (int)((configuration.screenHeightDp * outMetrics.density) + 0.5f) : height;
+        width = configuration != null && configuration.appBounds != null
+                ? configuration.appBounds.width() : width;
+        height = configuration != null && configuration.appBounds != null
+                ? configuration.appBounds.height() : height;
 
         outMetrics.noncompatWidthPixels  = outMetrics.widthPixels = width;
         outMetrics.noncompatHeightPixels = outMetrics.heightPixels = height;
@@ -615,12 +616,10 @@ public final class DisplayInfo implements Parcelable {
         sb.append(defaultModeId);
         sb.append(", modes ");
         sb.append(Arrays.toString(supportedModes));
-        sb.append(", colorTransformId ");
-        sb.append(colorTransformId);
-        sb.append(", defaultColorTransformId ");
-        sb.append(defaultColorTransformId);
-        sb.append(", supportedColorTransforms ");
-        sb.append(Arrays.toString(supportedColorTransforms));
+        sb.append(", colorMode ");
+        sb.append(colorMode);
+        sb.append(", supportedColorModes ");
+        sb.append(Arrays.toString(supportedColorModes));
         sb.append(", hdrCapabilities ");
         sb.append(hdrCapabilities);
         sb.append(", rotation ");
@@ -649,6 +648,8 @@ public final class DisplayInfo implements Parcelable {
             sb.append(" (uid ").append(ownerUid).append(")");
         }
         sb.append(flagsToString(flags));
+        sb.append(", removeMode ");
+        sb.append(removeMode);
         sb.append("}");
         return sb.toString();
     }

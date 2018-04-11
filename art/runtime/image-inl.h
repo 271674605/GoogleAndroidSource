@@ -20,6 +20,9 @@
 #include "image.h"
 
 #include "art_method.h"
+#include "imt_conflict_table.h"
+#include "imtable.h"
+#include "read_barrier-inl.h"
 
 namespace art {
 
@@ -45,9 +48,27 @@ inline mirror::ObjectArray<mirror::Object>* ImageHeader::GetImageRoots() const {
 }
 
 template <typename Visitor>
+inline void ImageHeader::VisitPackedImTables(const Visitor& visitor,
+                                             uint8_t* base,
+                                             PointerSize pointer_size) const {
+  const ImageSection& section = GetImageSection(kSectionImTables);
+  for (size_t pos = 0; pos < section.Size();) {
+    ImTable* imt = reinterpret_cast<ImTable*>(base + section.Offset() + pos);
+    for (size_t i = 0; i < ImTable::kSize; ++i) {
+      ArtMethod* orig = imt->Get(i, pointer_size);
+      ArtMethod* updated = visitor(orig);
+      if (updated != orig) {
+        imt->Set(i, updated, pointer_size);
+      }
+    }
+    pos += ImTable::SizeInBytes(pointer_size);
+  }
+}
+
+template <typename Visitor>
 inline void ImageHeader::VisitPackedImtConflictTables(const Visitor& visitor,
                                                       uint8_t* base,
-                                                      size_t pointer_size) const {
+                                                      PointerSize pointer_size) const {
   const ImageSection& section = GetImageSection(kSectionIMTConflictTables);
   for (size_t pos = 0; pos < section.Size(); ) {
     auto* table = reinterpret_cast<ImtConflictTable*>(base + section.Offset() + pos);

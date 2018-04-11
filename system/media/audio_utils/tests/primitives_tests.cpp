@@ -19,8 +19,10 @@
 
 #include <math.h>
 #include <vector>
-#include <cutils/log.h>
+
 #include <gtest/gtest.h>
+#include <log/log.h>
+
 #include <audio_utils/primitives.h>
 #include <audio_utils/format.h>
 #include <audio_utils/channels.h>
@@ -100,6 +102,14 @@ void checkMonotone(const T *ary, size_t size)
 {
     for (size_t i = 1; i < size; ++i) {
         EXPECT_LT(ary[i-1], ary[i]);
+    }
+}
+
+void checkMonotonep24(uint8_t * pary, size_t size)
+{
+    size_t frames = size/3;
+    for (size_t i = 1; i < frames; ++i) {
+        EXPECT_LT(i32_from_p24(pary + 3*(i-1)), i32_from_p24(pary + 3*i));
     }
 }
 
@@ -254,6 +264,31 @@ TEST(audio_utils_primitives, memcpy) {
 
     memcpy_to_i16_from_i32(i16ary, i32ary, 65536);
     memset(i32ary, 0, 65536 * sizeof(i32ary[0]));
+    checkMonotone(i16ary, 65536);
+
+    // do round-trip test i16 -> p24 -> i32 -> p24 -> q8_23 -> p24 -> i16
+    memcpy_to_p24_from_i16(pary, i16ary, 65536);
+    memset(i16ary, 0, 65536 * sizeof(i16ary[0]));
+    checkMonotonep24(pary, 65536 * 3);
+
+    memcpy_to_i32_from_p24(i32ary, pary, 65536);
+    memset(pary, 0, 65536 * 3 * sizeof(pary[0]));
+    checkMonotone(i32ary, 65536);
+
+    memcpy_to_p24_from_i32(pary, i32ary, 65536);
+    memset(i32ary, 0, 65536 * sizeof(i32ary[0]));
+    checkMonotonep24(pary, 65536 * 3);
+
+    memcpy_to_q8_23_from_p24(i32ary, pary, 65536);
+    memset(pary, 0, 65536 * 3 * sizeof(pary[0]));
+    checkMonotone(i32ary, 65536);
+
+    memcpy_to_p24_from_q8_23(pary, i32ary, 65536);
+    memset(i32ary, 0, 65536 * sizeof(i32ary[0]));
+    checkMonotonep24(pary, 65536 * 3);
+
+    memcpy_to_i16_from_p24(i16ary, pary, 65536);
+    memset(pary, 0, 65536 * 3 * sizeof(pary[0]));
     checkMonotone(i16ary, 65536);
 
     // do partial round-trip testing q4_27 to i16 and float

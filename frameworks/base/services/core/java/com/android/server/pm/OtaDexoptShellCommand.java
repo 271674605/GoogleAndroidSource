@@ -21,6 +21,7 @@ import android.os.RemoteException;
 import android.os.ShellCommand;
 
 import java.io.PrintWriter;
+import java.util.Locale;
 
 class OtaDexoptShellCommand extends ShellCommand {
     final IOtaDexopt mInterface;
@@ -46,6 +47,10 @@ class OtaDexoptShellCommand extends ShellCommand {
                     return runOtaDone();
                 case "step":
                     return runOtaStep();
+                case "next":
+                    return runOtaNext();
+                case "progress":
+                    return runOtaProgress();
                 default:
                     return handleDefaultCommands(cmd);
             }
@@ -81,6 +86,21 @@ class OtaDexoptShellCommand extends ShellCommand {
         return 0;
     }
 
+    private int runOtaNext() throws RemoteException {
+        getOutPrintWriter().println(mInterface.nextDexoptCommand());
+        return 0;
+    }
+
+    private int runOtaProgress() throws RemoteException {
+        final float progress = mInterface.getProgress();
+        final PrintWriter pw = getOutPrintWriter();
+        // Note: The float output is parsed by update_engine. It does needs to be non-localized,
+        //       as it's always expected to be "0.xy," never "0,xy" or similar. So use the ROOT
+        //       Locale for formatting. (b/37760573)
+        pw.format(Locale.ROOT, "%.2f", progress);
+        return 0;
+    }
+
     @Override
     public void onHelp() {
         final PrintWriter pw = getOutPrintWriter();
@@ -94,6 +114,8 @@ class OtaDexoptShellCommand extends ShellCommand {
         pw.println("    Replies whether the OTA is complete or not.");
         pw.println("  step");
         pw.println("    OTA dexopt the next package.");
+        pw.println("  next");
+        pw.println("    Get parameters for OTA dexopt of the next package.");
         pw.println("  cleanup");
         pw.println("    Clean up internal states. Ends an OTA session.");
     }

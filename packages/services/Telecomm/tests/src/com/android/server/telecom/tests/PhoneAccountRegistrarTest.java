@@ -26,6 +26,7 @@ import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Process;
 import android.os.UserHandle;
+import android.telecom.Log;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
@@ -34,7 +35,7 @@ import android.util.Xml;
 
 import com.android.internal.telecom.IConnectionService;
 import com.android.internal.util.FastXmlSerializer;
-import com.android.server.telecom.Log;
+import com.android.server.telecom.DefaultDialerCache;
 import com.android.server.telecom.PhoneAccountRegistrar;
 import com.android.server.telecom.PhoneAccountRegistrar.DefaultPhoneAccountHandle;
 
@@ -52,13 +53,19 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.Set;
 
+import static org.mockito.Matchers.anyInt;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.when;
+
 public class PhoneAccountRegistrarTest extends TelecomTestCase {
 
     private static final int MAX_VERSION = Integer.MAX_VALUE;
     private static final String FILE_NAME = "phone-account-registrar-test-1223.xml";
+    private static final String TEST_LABEL = "right";
     private PhoneAccountRegistrar mRegistrar;
-    @Mock
-    private TelecomManager mTelecomManager;
+    @Mock private TelecomManager mTelecomManager;
+    @Mock private DefaultDialerCache mDefaultDialerCache;
+    @Mock private PhoneAccountRegistrar.AppLabelProxy mAppLabelProxy;
 
     @Override
     public void setUp() throws Exception {
@@ -69,9 +76,13 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
                 mComponentContextFixture.getTestDouble().getApplicationContext().getFilesDir(),
                 FILE_NAME)
                 .delete();
+        when(mDefaultDialerCache.getDefaultDialerApplication(anyInt()))
+                .thenReturn("com.android.dialer");
+        when(mAppLabelProxy.getAppLabel(anyString()))
+                .thenReturn(TEST_LABEL);
         mRegistrar = new PhoneAccountRegistrar(
                 mComponentContextFixture.getTestDouble().getApplicationContext(),
-                FILE_NAME);
+                FILE_NAME, mDefaultDialerCache, mAppLabelProxy);
     }
 
     @Override
@@ -118,6 +129,16 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
                 mContext);
 
         assertPhoneAccountEquals(input, result);
+    }
+
+    @MediumTest
+    public void testDefaultPhoneAccountHandleEmptyGroup() throws Exception {
+        DefaultPhoneAccountHandle input = new DefaultPhoneAccountHandle(Process.myUserHandle(),
+                makeQuickAccountHandle("i1"), "");
+        DefaultPhoneAccountHandle result = roundTripXml(this, input,
+                PhoneAccountRegistrar.sDefaultPhoneAcountHandleXml, mContext);
+
+        assertDefaultPhoneAccountHandleEquals(input, result);
     }
 
     /**
@@ -171,8 +192,7 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
     public void testAccounts() throws Exception {
         int i = 0;
 
-        mComponentContextFixture.addConnectionService(
-                makeQuickConnectionServiceComponentName(),
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
                 Mockito.mock(IConnectionService.class));
 
         registerAndEnableAccount(makeQuickAccountBuilder("id" + i, i++)
@@ -205,8 +225,7 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
 
     @MediumTest
     public void testDefaultOutgoing() throws Exception {
-        mComponentContextFixture.addConnectionService(
-                makeQuickConnectionServiceComponentName(),
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
                 Mockito.mock(IConnectionService.class));
 
         // By default, there is no default outgoing account (nothing has been registered)
@@ -253,6 +272,229 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
     }
 
     @MediumTest
+    public void testReplacePhoneAccountByGroup() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        // By default, there is no default outgoing account (nothing has been registered)
+        assertNull(
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL));
+
+        // Register one tel: account
+        PhoneAccountHandle telAccount1 = makeQuickAccountHandle("tel_acct1");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        mRegistrar.setUserSelectedOutgoingPhoneAccount(telAccount1, Process.myUserHandle());
+        PhoneAccountHandle defaultAccount =
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL);
+        assertEquals(telAccount1, defaultAccount);
+
+        // Add call capable SIP account, make sure tel: doesn't change
+        PhoneAccountHandle sipAccount = makeQuickAccountHandle("sip_acct");
+        registerAndEnableAccount(new PhoneAccount.Builder(sipAccount, "sip_acct")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .build());
+        defaultAccount = mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(
+                PhoneAccount.SCHEME_TEL);
+        assertEquals(telAccount1, defaultAccount);
+
+        // Replace tel: account with another in the same Group
+        PhoneAccountHandle telAccount2 = makeQuickAccountHandle("tel_acct2");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount2, "tel_acct2")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        defaultAccount = mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(
+                PhoneAccount.SCHEME_TEL);
+        assertEquals(telAccount2, defaultAccount);
+        assertNull(mRegistrar.getPhoneAccountUnchecked(telAccount1));
+    }
+
+    @MediumTest
+    public void testAddSameDefault() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        // By default, there is no default outgoing account (nothing has been registered)
+        assertNull(
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL));
+
+        // Register one tel: account
+        PhoneAccountHandle telAccount1 = makeQuickAccountHandle("tel_acct1");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        mRegistrar.setUserSelectedOutgoingPhoneAccount(telAccount1, Process.myUserHandle());
+        PhoneAccountHandle defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount1, defaultAccount);
+        mRegistrar.unregisterPhoneAccount(telAccount1);
+
+        // Register Emergency Account and unregister
+        PhoneAccountHandle emerAccount = makeQuickAccountHandle("emer_acct");
+        registerAndEnableAccount(new PhoneAccount.Builder(emerAccount, "emer_acct")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .build());
+        defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertNull(defaultAccount);
+        mRegistrar.unregisterPhoneAccount(emerAccount);
+
+        // Re-register the same account and make sure the default is in place
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount1, defaultAccount);
+    }
+
+    @MediumTest
+    public void testAddSameGroup() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        // By default, there is no default outgoing account (nothing has been registered)
+        assertNull(
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL));
+
+        // Register one tel: account
+        PhoneAccountHandle telAccount1 = makeQuickAccountHandle("tel_acct1");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        mRegistrar.setUserSelectedOutgoingPhoneAccount(telAccount1, Process.myUserHandle());
+        PhoneAccountHandle defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount1, defaultAccount);
+        mRegistrar.unregisterPhoneAccount(telAccount1);
+
+        // Register Emergency Account and unregister
+        PhoneAccountHandle emerAccount = makeQuickAccountHandle("emer_acct");
+        registerAndEnableAccount(new PhoneAccount.Builder(emerAccount, "emer_acct")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .build());
+        defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertNull(defaultAccount);
+        mRegistrar.unregisterPhoneAccount(emerAccount);
+
+        // Re-register a new account with the same group
+        PhoneAccountHandle telAccount2 = makeQuickAccountHandle("tel_acct2");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount2, "tel_acct2")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount2, defaultAccount);
+    }
+
+    @MediumTest
+    public void testAddSameGroupButDifferentComponent() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        // By default, there is no default outgoing account (nothing has been registered)
+        assertNull(mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(
+                PhoneAccount.SCHEME_TEL));
+
+        // Register one tel: account
+        PhoneAccountHandle telAccount1 = makeQuickAccountHandle("tel_acct1");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        mRegistrar.setUserSelectedOutgoingPhoneAccount(telAccount1, Process.myUserHandle());
+        PhoneAccountHandle defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount1, defaultAccount);
+        assertNotNull(mRegistrar.getPhoneAccountUnchecked(telAccount1));
+
+        // Register a new account with the same group, but different Component, so don't replace
+        // Default
+        PhoneAccountHandle telAccount2 =  makeQuickAccountHandle(
+                new ComponentName("other1", "other2"), "tel_acct2");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount2, "tel_acct2")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        assertNotNull(mRegistrar.getPhoneAccountUnchecked(telAccount2));
+
+        defaultAccount =
+                mRegistrar.getUserSelectedOutgoingPhoneAccount(Process.myUserHandle());
+        assertEquals(telAccount1, defaultAccount);
+    }
+
+    @MediumTest
+    public void testAddSameGroupButDifferentComponent2() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        // By default, there is no default outgoing account (nothing has been registered)
+        assertNull(mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(
+                PhoneAccount.SCHEME_TEL));
+
+        // Register first tel: account
+        PhoneAccountHandle telAccount1 =  makeQuickAccountHandle(
+                new ComponentName("other1", "other2"), "tel_acct1");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount1, "tel_acct1")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+        assertNotNull(mRegistrar.getPhoneAccountUnchecked(telAccount1));
+        mRegistrar.setUserSelectedOutgoingPhoneAccount(telAccount1, Process.myUserHandle());
+
+        // Register second account with the same group, but a second Component, so don't replace
+        // Default
+        PhoneAccountHandle telAccount2 = makeQuickAccountHandle("tel_acct2");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount2, "tel_acct2")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+
+        PhoneAccountHandle defaultAccount =
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL);
+        assertEquals(telAccount1, defaultAccount);
+
+        // Register third account with the second component name, but same group id
+        PhoneAccountHandle telAccount3 = makeQuickAccountHandle("tel_acct3");
+        registerAndEnableAccount(new PhoneAccount.Builder(telAccount3, "tel_acct3")
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
+                .setGroupId("testGroup")
+                .build());
+
+        // Make sure that the default account is still the original PhoneAccount and that the
+        // second PhoneAccount with the second ComponentName was replaced by the third PhoneAccount
+        defaultAccount =
+                mRegistrar.getOutgoingPhoneAccountForSchemeOfCurrentUser(PhoneAccount.SCHEME_TEL);
+        assertEquals(telAccount1, defaultAccount);
+
+        assertNotNull(mRegistrar.getPhoneAccountUnchecked(telAccount1));
+        assertNull(mRegistrar.getPhoneAccountUnchecked(telAccount2));
+        assertNotNull(mRegistrar.getPhoneAccountUnchecked(telAccount3));
+    }
+
+    @MediumTest
     public void testPhoneAccountParceling() throws Exception {
         PhoneAccountHandle handle = makeQuickAccountHandle("foo");
         roundTripPhoneAccount(new PhoneAccount.Builder(handle, null).build());
@@ -268,6 +510,7 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
                         .setShortDescription("short description")
                         .setSubscriptionAddress(Uri.parse("tel:2345678"))
                         .setSupportedUriSchemes(Arrays.asList("tel", "sip"))
+                        .setGroupId("testGroup")
                         .build());
         roundTripPhoneAccount(
                 new PhoneAccount.Builder(handle, "foo")
@@ -281,7 +524,57 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
                         .setShortDescription("short description")
                         .setSubscriptionAddress(Uri.parse("tel:2345678"))
                         .setSupportedUriSchemes(Arrays.asList("tel", "sip"))
+                        .setGroupId("testGroup")
                         .build());
+    }
+
+    /**
+     * Tests ability to register a self-managed PhoneAccount; verifies that the user defined label
+     * is overridden.
+     * @throws Exception
+     */
+    @MediumTest
+    public void testSelfManagedPhoneAccount() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        PhoneAccountHandle selfManagedHandle =  makeQuickAccountHandle(
+                new ComponentName("self", "managed"), "selfie1");
+
+        PhoneAccount selfManagedAccount = new PhoneAccount.Builder(selfManagedHandle, "Wrong")
+                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
+                .build();
+
+        mRegistrar.registerPhoneAccount(selfManagedAccount);
+
+        PhoneAccount registeredAccount = mRegistrar.getPhoneAccountUnchecked(selfManagedHandle);
+        assertEquals(TEST_LABEL, registeredAccount.getLabel());
+    }
+
+    /**
+     * Tests to ensure that when registering a self-managed PhoneAccount, it cannot also be defined
+     * as a call provider, connection manager, or sim subscription.
+     * @throws Exception
+     */
+    @MediumTest
+    public void testSelfManagedCapabilityOverride() throws Exception {
+        mComponentContextFixture.addConnectionService(makeQuickConnectionServiceComponentName(),
+                Mockito.mock(IConnectionService.class));
+
+        PhoneAccountHandle selfManagedHandle =  makeQuickAccountHandle(
+                new ComponentName("self", "managed"), "selfie1");
+
+        PhoneAccount selfManagedAccount = new PhoneAccount.Builder(selfManagedHandle, TEST_LABEL)
+                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED |
+                        PhoneAccount.CAPABILITY_CALL_PROVIDER |
+                        PhoneAccount.CAPABILITY_CONNECTION_MANAGER |
+                        PhoneAccount.CAPABILITY_SIM_SUBSCRIPTION)
+                .build();
+
+        mRegistrar.registerPhoneAccount(selfManagedAccount);
+
+        PhoneAccount registeredAccount = mRegistrar.getPhoneAccountUnchecked(selfManagedHandle);
+        assertEquals(PhoneAccount.CAPABILITY_SELF_MANAGED, registeredAccount.getCapabilities());
     }
 
     private static ComponentName makeQuickConnectionServiceComponentName() {
@@ -291,10 +584,11 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
     }
 
     private static PhoneAccountHandle makeQuickAccountHandle(String id) {
-        return new PhoneAccountHandle(
-                makeQuickConnectionServiceComponentName(),
-                id,
-                Process.myUserHandle());
+        return makeQuickAccountHandle(makeQuickConnectionServiceComponentName(), id);
+    }
+
+    private static PhoneAccountHandle makeQuickAccountHandle(ComponentName name, String id) {
+        return new PhoneAccountHandle(name, id, Process.myUserHandle());
     }
 
     private PhoneAccount.Builder makeQuickAccountBuilder(String id, int idx) {
@@ -457,7 +751,8 @@ public class PhoneAccountRegistrarTest extends TelecomTestCase {
                 new ComponentName("pkg0", "cls0"), "id0");
         UserHandle userHandle = phoneAccountHandle.getUserHandle();
         s.defaultOutgoingAccountHandles
-                .put(userHandle, new DefaultPhoneAccountHandle(userHandle, phoneAccountHandle));
+                .put(userHandle, new DefaultPhoneAccountHandle(userHandle, phoneAccountHandle,
+                        "testGroup"));
         return s;
     }
 }

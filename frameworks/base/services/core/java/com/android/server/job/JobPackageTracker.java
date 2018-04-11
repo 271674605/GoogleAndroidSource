@@ -345,6 +345,7 @@ public final class JobPackageTracker {
 
     public void notePending(JobStatus job) {
         final long now = SystemClock.uptimeMillis();
+        job.madePending = now;
         rebatchIfNeeded(now);
         mCurDataSet.incPending(job.getSourceUid(), job.getSourcePackageName(), now);
     }
@@ -357,6 +358,7 @@ public final class JobPackageTracker {
 
     public void noteActive(JobStatus job) {
         final long now = SystemClock.uptimeMillis();
+        job.madeActive = now;
         rebatchIfNeeded(now);
         if (job.lastEvaluatedPriority >= JobInfo.PRIORITY_TOP_APP) {
             mCurDataSet.incActiveTop(job.getSourceUid(), job.getSourcePackageName(), now);
@@ -395,7 +397,10 @@ public final class JobPackageTracker {
             return 0;
         }
         final long now = SystemClock.uptimeMillis();
-        long time = cur.getActiveTime(now) + cur.getPendingTime(now);
+        long time = 0;
+        if (cur != null) {
+            time += cur.getActiveTime(now) + cur.getPendingTime(now);
+        }
         long period = mCurDataSet.getTotalTime(now);
         if (last != null) {
             time += last.getActiveTime(now) + last.getPendingTime(now);
@@ -434,7 +439,7 @@ public final class JobPackageTracker {
         for (int i=0; i<size; i++) {
             final int index = mEventIndices.indexOf(i);
             final int uid = mEventUids[index];
-            if (filterUid != -1 && filterUid != UserHandle.getAppId(filterUid)) {
+            if (filterUid != -1 && filterUid != UserHandle.getAppId(uid)) {
                 continue;
             }
             final int cmd = mEventCmds[index];

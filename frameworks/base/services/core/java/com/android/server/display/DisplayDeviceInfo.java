@@ -93,6 +93,11 @@ final class DisplayDeviceInfo {
     public static final int FLAG_ROUND = 1 << 8;
 
     /**
+     * Flag: This display can show its content when non-secure keyguard is shown.
+     */
+    public static final int FLAG_CAN_SHOW_WITH_INSECURE_KEYGUARD = 1 << 9;
+
+    /**
      * Touch attachment: Display does not receive touch.
      */
     public static final int TOUCH_NONE = 0;
@@ -108,6 +113,13 @@ final class DisplayDeviceInfo {
     public static final int TOUCH_EXTERNAL = 2;
 
     /**
+     * Touch attachment: Touch input is via an input device matching {@link VirtualDisplay}'s
+     * uniqueId.
+     * @hide
+     */
+    public static final int TOUCH_VIRTUAL = 3;
+
+    /**
      * Diff result: The {@link #state} fields differ.
      */
     public static final int DIFF_STATE = 1 << 0;
@@ -116,6 +128,11 @@ final class DisplayDeviceInfo {
      * Diff result: Other fields differ.
      */
     public static final int DIFF_OTHER = 1 << 1;
+
+    /**
+     * Diff result: The color mode fields differ.
+     */
+    public static final int DIFF_COLOR_MODE = 1 << 2;
 
     /**
      * Gets the name of the display device, which may be derived from EDID or
@@ -155,14 +172,11 @@ final class DisplayDeviceInfo {
      */
     public Display.Mode[] supportedModes = Display.Mode.EMPTY_ARRAY;
 
-    /** The active color transform of the display */
-    public int colorTransformId;
+    /** The active color mode of the display */
+    public int colorMode;
 
-    /** The default color transform of the display */
-    public int defaultColorTransformId;
-
-    /** The supported color transforms of the display */
-    public Display.ColorTransform[] supportedColorTransforms = Display.ColorTransform.EMPTY_ARRAY;
+    /** The supported color modes of the display */
+    public int[] supportedColorModes = { Display.COLOR_MODE_DEFAULT };
 
     /**
      * The HDR capabilities this display claims to support.
@@ -283,6 +297,9 @@ final class DisplayDeviceInfo {
         if (state != other.state) {
             diff |= DIFF_STATE;
         }
+        if (colorMode != other.colorMode) {
+            diff |= DIFF_COLOR_MODE;
+        }
         if (!Objects.equal(name, other.name)
                 || !Objects.equal(uniqueId, other.uniqueId)
                 || width != other.width
@@ -290,9 +307,7 @@ final class DisplayDeviceInfo {
                 || modeId != other.modeId
                 || defaultModeId != other.defaultModeId
                 || !Arrays.equals(supportedModes, other.supportedModes)
-                || colorTransformId != other.colorTransformId
-                || defaultColorTransformId != other.defaultColorTransformId
-                || !Arrays.equals(supportedColorTransforms, other.supportedColorTransforms)
+                || !Arrays.equals(supportedColorModes, other.supportedColorModes)
                 || !Objects.equal(hdrCapabilities, other.hdrCapabilities)
                 || densityDpi != other.densityDpi
                 || xDpi != other.xDpi
@@ -324,9 +339,8 @@ final class DisplayDeviceInfo {
         modeId = other.modeId;
         defaultModeId = other.defaultModeId;
         supportedModes = other.supportedModes;
-        colorTransformId = other.colorTransformId;
-        defaultColorTransformId = other.defaultColorTransformId;
-        supportedColorTransforms = other.supportedColorTransforms;
+        colorMode = other.colorMode;
+        supportedColorModes = other.supportedColorModes;
         hdrCapabilities = other.hdrCapabilities;
         densityDpi = other.densityDpi;
         xDpi = other.xDpi;
@@ -353,9 +367,8 @@ final class DisplayDeviceInfo {
         sb.append(", modeId ").append(modeId);
         sb.append(", defaultModeId ").append(defaultModeId);
         sb.append(", supportedModes ").append(Arrays.toString(supportedModes));
-        sb.append(", colorTransformId ").append(colorTransformId);
-        sb.append(", defaultColorTransformId ").append(defaultColorTransformId);
-        sb.append(", supportedColorTransforms ").append(Arrays.toString(supportedColorTransforms));
+        sb.append(", colorMode ").append(colorMode);
+        sb.append(", supportedColorModes ").append(Arrays.toString(supportedColorModes));
         sb.append(", HdrCapabilities ").append(hdrCapabilities);
         sb.append(", density ").append(densityDpi);
         sb.append(", ").append(xDpi).append(" x ").append(yDpi).append(" dpi");
@@ -385,6 +398,8 @@ final class DisplayDeviceInfo {
                 return "INTERNAL";
             case TOUCH_EXTERNAL:
                 return "EXTERNAL";
+            case TOUCH_VIRTUAL:
+                return "VIRTUAL";
             default:
                 return Integer.toString(touch);
         }
@@ -418,6 +433,9 @@ final class DisplayDeviceInfo {
         }
         if ((flags & FLAG_ROUND) != 0) {
             msg.append(", FLAG_ROUND");
+        }
+        if ((flags & FLAG_CAN_SHOW_WITH_INSECURE_KEYGUARD) != 0) {
+            msg.append(", FLAG_CAN_SHOW_WITH_INSECURE_KEYGUARD");
         }
         return msg.toString();
     }

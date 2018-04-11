@@ -36,9 +36,9 @@ import android.view.ViewHierarchyEncoder;
 import android.view.ViewRootImpl;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
-import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.accessibility.AccessibilityNodeInfo.CollectionInfo;
 import android.view.accessibility.AccessibilityNodeInfo.CollectionItemInfo;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.animation.GridLayoutAnimationController;
 import android.widget.RemoteViews.RemoteView;
 
@@ -54,7 +54,7 @@ import java.lang.annotation.RetentionPolicy;
  *
  * <p>See the <a href="{@docRoot}guide/topics/ui/layout/gridview.html">Grid
  * View</a> guide.</p>
- * 
+ *
  * @attr ref android.R.styleable#GridView_horizontalSpacing
  * @attr ref android.R.styleable#GridView_verticalSpacing
  * @attr ref android.R.styleable#GridView_stretchMode
@@ -71,33 +71,33 @@ public class GridView extends AbsListView {
 
     /**
      * Disables stretching.
-     * 
-     * @see #setStretchMode(int) 
+     *
+     * @see #setStretchMode(int)
      */
     public static final int NO_STRETCH = 0;
     /**
      * Stretches the spacing between columns.
-     * 
-     * @see #setStretchMode(int) 
+     *
+     * @see #setStretchMode(int)
      */
     public static final int STRETCH_SPACING = 1;
     /**
      * Stretches columns.
-     * 
-     * @see #setStretchMode(int) 
+     *
+     * @see #setStretchMode(int)
      */
     public static final int STRETCH_COLUMN_WIDTH = 2;
     /**
      * Stretches the spacing between columns. The spacing is uniform.
-     * 
-     * @see #setStretchMode(int) 
+     *
+     * @see #setStretchMode(int)
      */
     public static final int STRETCH_SPACING_UNIFORM = 3;
 
     /**
      * Creates as many columns as can fit on screen.
-     * 
-     * @see #setNumColumns(int) 
+     *
+     * @see #setNumColumns(int)
      */
     public static final int AUTO_FIT = -1;
 
@@ -161,7 +161,7 @@ public class GridView extends AbsListView {
         if (index >= 0) {
             setGravity(index);
         }
-        
+
         a.recycle();
     }
 
@@ -175,7 +175,7 @@ public class GridView extends AbsListView {
      * through the specified intent.
      * @param intent the intent used to identify the RemoteViewsService for the adapter to connect to.
      */
-    @android.view.RemotableViewMethod
+    @android.view.RemotableViewMethod(asyncImpl="setRemoteViewsAdapterAsync")
     public void setRemoteViewsAdapter(Intent intent) {
         super.setRemoteViewsAdapter(intent);
     }
@@ -192,7 +192,7 @@ public class GridView extends AbsListView {
         }
 
         resetList();
-        mRecycler.clear();        
+        mRecycler.clear();
         mAdapter = adapter;
 
         mOldSelectedPosition = INVALID_POSITION;
@@ -222,7 +222,7 @@ public class GridView extends AbsListView {
             setNextSelectedPositionInt(position);
             checkSelectionChanged();
         } else {
-            checkFocus();            
+            checkFocus();
             // Nothing selected
             checkSelectionChanged();
         }
@@ -376,7 +376,7 @@ public class GridView extends AbsListView {
         }
 
         mReferenceView = child;
-        
+
         if (selectedView != null) {
             mReferenceViewInSelectedRow = mReferenceView;
         }
@@ -515,7 +515,7 @@ public class GridView extends AbsListView {
                 offsetChildrenTopAndBottom(offset);
             }
         }
-    }    
+    }
 
     @Override
     int findMotionRow(int y) {
@@ -624,7 +624,7 @@ public class GridView extends AbsListView {
 
             // This is how far the bottom edge of the last view is from the bottom of the
             // drawable area
-            int bottomOffset = end - lastBottom;        
+            int bottomOffset = end - lastBottom;
 
             final View firstChild = getChildAt(0);
             final int firstTop = firstChild.getTop();
@@ -636,7 +636,7 @@ public class GridView extends AbsListView {
                     // Don't pull the top too far down
                     bottomOffset = Math.min(bottomOffset, mListPadding.top - firstTop);
                 }
-                
+
                 // Move everything down
                 offsetChildrenTopAndBottom(bottomOffset);
                 if (mFirstPosition > 0) {
@@ -679,7 +679,7 @@ public class GridView extends AbsListView {
                     // Don't pull the bottom too far up
                     topOffset = Math.min(topOffset, lastBottom - end);
                 }
-                
+
                 // Move everything up
                 offsetChildrenTopAndBottom(-topOffset);
                 if (lastPosition < mItemCount - 1) {
@@ -965,7 +965,7 @@ public class GridView extends AbsListView {
         final int stretchMode = mStretchMode;
         final int requestedColumnWidth = mRequestedColumnWidth;
         boolean didNotInitiallyFit = false;
-        
+
         if (mRequestedNumColumns == AUTO_FIT) {
             if (requestedColumnWidth > 0) {
                 // Client told us to pick the number of columns
@@ -979,57 +979,57 @@ public class GridView extends AbsListView {
             // We picked the columns
             mNumColumns = mRequestedNumColumns;
         }
-        
+
         if (mNumColumns <= 0) {
             mNumColumns = 1;
         }
 
         switch (stretchMode) {
-        case NO_STRETCH:
-            // Nobody stretches
-            mColumnWidth = requestedColumnWidth;
-            mHorizontalSpacing = requestedHorizontalSpacing;
-            break;
-
-        default:
-            int spaceLeftOver = availableSpace - (mNumColumns * requestedColumnWidth) -
-                    ((mNumColumns - 1) * requestedHorizontalSpacing);
-
-            if (spaceLeftOver < 0) {
-                didNotInitiallyFit = true;
-            }
-
-            switch (stretchMode) {
-            case STRETCH_COLUMN_WIDTH:
-                // Stretch the columns
-                mColumnWidth = requestedColumnWidth + spaceLeftOver / mNumColumns;
+            case NO_STRETCH:
+                // Nobody stretches
+                mColumnWidth = requestedColumnWidth;
                 mHorizontalSpacing = requestedHorizontalSpacing;
                 break;
 
-            case STRETCH_SPACING:
-                // Stretch the spacing between columns
-                mColumnWidth = requestedColumnWidth;
-                if (mNumColumns > 1) {
-                    mHorizontalSpacing = requestedHorizontalSpacing + 
-                        spaceLeftOver / (mNumColumns - 1);
-                } else {
-                    mHorizontalSpacing = requestedHorizontalSpacing + spaceLeftOver;
-                }
-                break;
+            default:
+                int spaceLeftOver = availableSpace - (mNumColumns * requestedColumnWidth)
+                        - ((mNumColumns - 1) * requestedHorizontalSpacing);
 
-            case STRETCH_SPACING_UNIFORM:
-                // Stretch the spacing between columns
-                mColumnWidth = requestedColumnWidth;
-                if (mNumColumns > 1) {
-                    mHorizontalSpacing = requestedHorizontalSpacing + 
-                        spaceLeftOver / (mNumColumns + 1);
-                } else {
-                    mHorizontalSpacing = requestedHorizontalSpacing + spaceLeftOver;
+                if (spaceLeftOver < 0) {
+                    didNotInitiallyFit = true;
                 }
-                break;
-            }
 
-            break;
+                switch (stretchMode) {
+                    case STRETCH_COLUMN_WIDTH:
+                        // Stretch the columns
+                        mColumnWidth = requestedColumnWidth + spaceLeftOver / mNumColumns;
+                        mHorizontalSpacing = requestedHorizontalSpacing;
+                        break;
+
+                    case STRETCH_SPACING:
+                        // Stretch the spacing between columns
+                        mColumnWidth = requestedColumnWidth;
+                        if (mNumColumns > 1) {
+                            mHorizontalSpacing = requestedHorizontalSpacing
+                                    + spaceLeftOver / (mNumColumns - 1);
+                        } else {
+                            mHorizontalSpacing = requestedHorizontalSpacing + spaceLeftOver;
+                        }
+                        break;
+
+                    case STRETCH_SPACING_UNIFORM:
+                        // Stretch the spacing between columns
+                        mColumnWidth = requestedColumnWidth;
+                        if (mNumColumns > 1) {
+                            mHorizontalSpacing = requestedHorizontalSpacing
+                                    + spaceLeftOver / (mNumColumns + 1);
+                        } else {
+                            mHorizontalSpacing = requestedHorizontalSpacing + spaceLeftOver;
+                        }
+                        break;
+                }
+
+                break;
         }
         return didNotInitiallyFit;
     }
@@ -1052,7 +1052,7 @@ public class GridView extends AbsListView {
             }
             widthSize += getVerticalScrollbarWidth();
         }
-        
+
         int childWidth = widthSize - mListPadding.left - mListPadding.right;
         boolean didNotInitiallyFit = determineColumns(childWidth);
 
@@ -1087,7 +1087,7 @@ public class GridView extends AbsListView {
                 mRecycler.addScrapView(child, -1);
             }
         }
-        
+
         if (heightMode == MeasureSpec.UNSPECIFIED) {
             heightSize = mListPadding.top + mListPadding.bottom + childHeight +
                     getVerticalFadingEdgeLength() * 2;
@@ -1095,7 +1095,7 @@ public class GridView extends AbsListView {
 
         if (heightMode == MeasureSpec.AT_MOST) {
             int ourSize =  mListPadding.top + mListPadding.bottom;
-           
+
             final int numColumns = mNumColumns;
             for (int i = 0; i < count; i += numColumns) {
                 ourSize += childHeight;
@@ -1407,72 +1407,73 @@ public class GridView extends AbsListView {
 
 
     /**
-     * Obtain the view and add it to our list of children. The view can be made
-     * fresh, converted from an unused view, or used as is if it was in the
-     * recycle bin.
+     * Obtains the view and adds it to our list of children. The view can be
+     * made fresh, converted from an unused view, or used as is if it was in
+     * the recycle bin.
      *
-     * @param position Logical position in the list
-     * @param y Top or bottom edge of the view to add
-     * @param flow if true, align top edge to y. If false, align bottom edge to
-     *        y.
-     * @param childrenLeft Left edge where children should be positioned
-     * @param selected Is this position selected?
-     * @param where to add new item in the list
+     * @param position logical position in the list
+     * @param y top or bottom edge of the view to add
+     * @param flow {@code true} to align top edge to y, {@code false} to align
+     *             bottom edge to y
+     * @param childrenLeft left edge where children should be positioned
+     * @param selected {@code true} if the position is selected, {@code false}
+     *                 otherwise
+     * @param where position at which to add new item in the list
      * @return View that was added
      */
     private View makeAndAddView(int position, int y, boolean flow, int childrenLeft,
             boolean selected, int where) {
-        View child;
-
         if (!mDataChanged) {
             // Try to use an existing view for this position
-            child = mRecycler.getActiveView(position);
-            if (child != null) {
+            final View activeView = mRecycler.getActiveView(position);
+            if (activeView != null) {
                 // Found it -- we're using an existing child
                 // This just needs to be positioned
-                setupChild(child, position, y, flow, childrenLeft, selected, true, where);
-                return child;
+                setupChild(activeView, position, y, flow, childrenLeft, selected, true, where);
+                return activeView;
             }
         }
 
         // Make a new view for this position, or convert an unused view if
-        // possible
-        child = obtainView(position, mIsScrap);
+        // possible.
+        final View child = obtainView(position, mIsScrap);
 
-        // This needs to be positioned and measured
+        // This needs to be positioned and measured.
         setupChild(child, position, y, flow, childrenLeft, selected, mIsScrap[0], where);
 
         return child;
     }
 
     /**
-     * Add a view as a child and make sure it is measured (if necessary) and
+     * Adds a view as a child and make sure it is measured (if necessary) and
      * positioned properly.
      *
-     * @param child The view to add
-     * @param position The position of the view
-     * @param y The y position relative to which this view will be positioned
-     * @param flow if true, align top edge to y. If false, align bottom edge
-     *        to y.
-     * @param childrenLeft Left edge where children should be positioned
-     * @param selected Is this position selected?
-     * @param recycled Has this view been pulled from the recycle bin? If so it
-     *        does not need to be remeasured.
-     * @param where Where to add the item in the list
+     * @param child the view to add
+     * @param position the position of this child
+     * @param y the y position relative to which this view will be positioned
+     * @param flowDown {@code true} to align top edge to y, {@code false} to
+     *                 align bottom edge to y
+     * @param childrenLeft left edge where children should be positioned
+     * @param selected {@code true} if the position is selected, {@code false}
+     *                 otherwise
+     * @param isAttachedToWindow {@code true} if the view is already attached
+     *                           to the window, e.g. whether it was reused, or
+     *                           {@code false} otherwise
+     * @param where position at which to add new item in the list
      *
      */
-    private void setupChild(View child, int position, int y, boolean flow, int childrenLeft,
-            boolean selected, boolean recycled, int where) {
+    private void setupChild(View child, int position, int y, boolean flowDown, int childrenLeft,
+            boolean selected, boolean isAttachedToWindow, int where) {
         Trace.traceBegin(Trace.TRACE_TAG_VIEW, "setupGridItem");
 
         boolean isSelected = selected && shouldShowSelector();
         final boolean updateChildSelected = isSelected != child.isSelected();
         final int mode = mTouchMode;
-        final boolean isPressed = mode > TOUCH_MODE_DOWN && mode < TOUCH_MODE_SCROLL &&
-                mMotionPosition == position;
+        final boolean isPressed = mode > TOUCH_MODE_DOWN && mode < TOUCH_MODE_SCROLL
+                && mMotionPosition == position;
         final boolean updateChildPressed = isPressed != child.isPressed();
-        
-        boolean needToMeasure = !recycled || updateChildSelected || child.isLayoutRequested();
+        final boolean needToMeasure = !isAttachedToWindow || updateChildSelected
+                || child.isLayoutRequested();
 
         // Respect layout params that are already in the view. Otherwise make
         // some up...
@@ -1483,13 +1484,9 @@ public class GridView extends AbsListView {
         p.viewType = mAdapter.getItemViewType(position);
         p.isEnabled = mAdapter.isEnabled(position);
 
-        if (recycled && !p.forceAdd) {
-            attachViewToParent(child, where, p);
-        } else {
-            p.forceAdd = false;
-            addViewInLayout(child, where, p, true);
-        }
-
+        // Set up view state before attaching the view, since we may need to
+        // rely on the jumpDrawablesToCurrentState() call that occurs as part
+        // of view attachment.
         if (updateChildSelected) {
             child.setSelected(isSelected);
             if (isSelected) {
@@ -1510,6 +1507,21 @@ public class GridView extends AbsListView {
             }
         }
 
+        if (isAttachedToWindow && !p.forceAdd) {
+            attachViewToParent(child, where, p);
+
+            // If the view isn't attached, or if it's attached but for a different
+            // position, then jump the drawables.
+            if (!isAttachedToWindow
+                    || (((AbsListView.LayoutParams) child.getLayoutParams()).scrappedFromPosition)
+                            != position) {
+                child.jumpDrawablesToCurrentState();
+            }
+        } else {
+            p.forceAdd = false;
+            addViewInLayout(child, where, p, true);
+        }
+
         if (needToMeasure) {
             int childHeightSpec = ViewGroup.getChildMeasureSpec(
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), 0, p.height);
@@ -1525,7 +1537,7 @@ public class GridView extends AbsListView {
         final int h = child.getMeasuredHeight();
 
         int childLeft;
-        final int childTop = flow ? y : y - h;
+        final int childTop = flowDown ? y : y - h;
 
         final int layoutDirection = getLayoutDirection();
         final int absoluteGravity = Gravity.getAbsoluteGravity(mGravity, layoutDirection);
@@ -1553,13 +1565,8 @@ public class GridView extends AbsListView {
             child.offsetTopAndBottom(childTop - child.getTop());
         }
 
-        if (mCachingStarted) {
+        if (mCachingStarted && !child.isDrawingCacheEnabled()) {
             child.setDrawingCacheEnabled(true);
-        }
-
-        if (recycled && (((AbsListView.LayoutParams)child.getLayoutParams()).scrappedFromPosition)
-                != position) {
-            child.jumpDrawablesToCurrentState();
         }
 
         Trace.traceEnd(Trace.TRACE_TAG_VIEW);
@@ -1567,9 +1574,9 @@ public class GridView extends AbsListView {
 
     /**
      * Sets the currently selected item
-     * 
+     *
      * @param position Index (starting at 0) of the data item to be selected.
-     * 
+     *
      * If in touch mode, the item will not be selected but it will still be positioned
      * appropriately.
      */
@@ -1602,8 +1609,8 @@ public class GridView extends AbsListView {
 
         setNextSelectedPositionInt(position);
         layoutChildren();
-        
-        final int next = mStackFromBottom ? mItemCount - 1  - mNextSelectedPosition : 
+
+        final int next = mStackFromBottom ? mItemCount - 1  - mNextSelectedPosition :
             mNextSelectedPosition;
         final int previous = mStackFromBottom ? mItemCount - 1
                 - previousSelectedPosition : previousSelectedPosition;
@@ -1711,20 +1718,17 @@ public class GridView extends AbsListView {
                     break;
 
                 case KeyEvent.KEYCODE_TAB:
-                    // XXX Sometimes it is useful to be able to TAB through the items in
+                    // TODO: Sometimes it is useful to be able to TAB through the items in
                     //     a GridView sequentially.  Unfortunately this can create an
                     //     asymmetry in TAB navigation order unless the list selection
                     //     always reverts to the top or bottom when receiving TAB focus from
-                    //     another widget.  Leaving this behavior disabled for now but
-                    //     perhaps it should be configurable (and more comprehensive).
-                    if (false) {
-                        if (event.hasNoModifiers()) {
-                            handled = resurrectSelectionIfNeeded()
-                                    || sequenceScroll(FOCUS_FORWARD);
-                        } else if (event.hasModifiers(KeyEvent.META_SHIFT_ON)) {
-                            handled = resurrectSelectionIfNeeded()
-                                    || sequenceScroll(FOCUS_BACKWARD);
-                        }
+                    //     another widget.
+                    if (event.hasNoModifiers()) {
+                        handled = resurrectSelectionIfNeeded()
+                                || sequenceScroll(FOCUS_FORWARD);
+                    } else if (event.hasModifiers(KeyEvent.META_SHIFT_ON)) {
+                        handled = resurrectSelectionIfNeeded()
+                                || sequenceScroll(FOCUS_BACKWARD);
                     }
                     break;
             }
@@ -1795,7 +1799,7 @@ public class GridView extends AbsListView {
             invokeOnItemScrollListener();
             moved = true;
         }
-        
+
         if (moved) {
             awakenScrollBars();
         }
@@ -1867,7 +1871,7 @@ public class GridView extends AbsListView {
         if (moved) {
             awakenScrollBars();
         }
-        
+
         return moved;
     }
 
@@ -1984,7 +1988,7 @@ public class GridView extends AbsListView {
 
         if (!mStackFromBottom) {
             rowStart = childIndex - (childIndex % mNumColumns);
-            rowEnd = Math.max(rowStart + mNumColumns - 1, count);
+            rowEnd = Math.min(rowStart + mNumColumns - 1, count);
         } else {
             rowEnd = count - 1 - (invertedIndex - (invertedIndex % mNumColumns));
             rowStart = Math.max(0, rowEnd - mNumColumns + 1);
@@ -2209,17 +2213,17 @@ public class GridView extends AbsListView {
             requestLayoutIfNecessary();
         }
     }
-    
+
     /**
-     * Get the number of columns in the grid. 
+     * Get the number of columns in the grid.
      * Returns {@link #AUTO_FIT} if the Grid has never been laid out.
      *
      * @attr ref android.R.styleable#GridView_numColumns
-     * 
+     *
      * @see #setNumColumns(int)
      */
     @ViewDebug.ExportedProperty
-    public int getNumColumns() {  
+    public int getNumColumns() {
         return mNumColumns;
     }
 
@@ -2252,13 +2256,13 @@ public class GridView extends AbsListView {
                 // we are too high, slide all views down to align with bottom
                 child = getChildAt(childCount - 1);
                 delta = child.getBottom() - (getHeight() - mListPadding.bottom);
-                
+
                 if (mFirstPosition + childCount < mItemCount) {
                     // It's OK to have some space below the last item if it is
                     // part of the vertical spacing
                     delta += mVerticalSpacing;
                 }
-                
+
                 if (delta > 0) {
                     // We only are looking to see if we are too high, not too low
                     delta = 0;
@@ -2270,14 +2274,14 @@ public class GridView extends AbsListView {
             }
         }
     }
-    
+
     @Override
     protected int computeVerticalScrollExtent() {
         final int count = getChildCount();
         if (count > 0) {
             final int numColumns = mNumColumns;
             final int rowCount = (count + numColumns - 1) / numColumns;
-            
+
             int extent = rowCount * 100;
 
             View view = getChildAt(0);

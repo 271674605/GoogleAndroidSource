@@ -76,6 +76,25 @@ public class Main {
    * the shifter operand.
    */
 
+  /// CHECK-START-ARM: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm (before)
+  /// CHECK-DAG:   <<l:j\d+>>           ParameterValue
+  /// CHECK-DAG:   <<b:b\d+>>           ParameterValue
+  /// CHECK:       <<tmp:j\d+>>         TypeConversion [<<b>>]
+  /// CHECK:                            Sub [<<l>>,<<tmp>>]
+
+  /// CHECK-START-ARM: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm (after)
+  /// CHECK-DAG:   <<l:j\d+>>           ParameterValue
+  /// CHECK-DAG:   <<b:b\d+>>           ParameterValue
+  /// CHECK:                            DataProcWithShifterOp [<<l>>,<<b>>] kind:Sub+SXTB
+
+  /// CHECK-START-ARM: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        TypeConversion
+  /// CHECK-NOT:                        Sub
+
+  /// CHECK-START-ARM: long Main.$opt$noinline$translate(long, byte) disassembly (after)
+  /// CHECK:                            subs r{{\d+}}, r{{\d+}}, r{{\d+}}
+  /// CHECK:                            sbc r{{\d+}}, r{{\d+}}, r{{\d+}}, asr #31
+
   /// CHECK-START-ARM64: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm64 (before)
   /// CHECK-DAG:   <<l:j\d+>>           ParameterValue
   /// CHECK-DAG:   <<b:b\d+>>           ParameterValue
@@ -85,7 +104,7 @@ public class Main {
   /// CHECK-START-ARM64: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm64 (after)
   /// CHECK-DAG:   <<l:j\d+>>           ParameterValue
   /// CHECK-DAG:   <<b:b\d+>>           ParameterValue
-  /// CHECK:                            Arm64DataProcWithShifterOp [<<l>>,<<b>>] kind:Sub+SXTB
+  /// CHECK:                            DataProcWithShifterOp [<<l>>,<<b>>] kind:Sub+SXTB
 
   /// CHECK-START-ARM64: long Main.$opt$noinline$translate(long, byte) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        TypeConversion
@@ -106,6 +125,21 @@ public class Main {
    * inputs are the the IR.
    */
 
+  /// CHECK-START-ARM: int Main.$opt$noinline$sameInput(int) instruction_simplifier_arm (before)
+  /// CHECK:       <<a:i\d+>>           ParameterValue
+  /// CHECK:       <<Const2:i\d+>>      IntConstant 2
+  /// CHECK:       <<tmp:i\d+>>         Shl [<<a>>,<<Const2>>]
+  /// CHECK:                            Add [<<tmp>>,<<tmp>>]
+
+  /// CHECK-START-ARM: int Main.$opt$noinline$sameInput(int) instruction_simplifier_arm (after)
+  /// CHECK-DAG:   <<a:i\d+>>           ParameterValue
+  /// CHECK-DAG:   <<Const2:i\d+>>      IntConstant 2
+  /// CHECK:       <<Shl:i\d+>>         Shl [<<a>>,<<Const2>>]
+  /// CHECK:                            Add [<<Shl>>,<<Shl>>]
+
+  /// CHECK-START-ARM: int Main.$opt$noinline$sameInput(int) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: int Main.$opt$noinline$sameInput(int) instruction_simplifier_arm64 (before)
   /// CHECK:       <<a:i\d+>>           ParameterValue
   /// CHECK:       <<Const2:i\d+>>      IntConstant 2
@@ -119,7 +153,7 @@ public class Main {
   /// CHECK:                            Add [<<Shl>>,<<Shl>>]
 
   /// CHECK-START-ARM64: int Main.$opt$noinline$sameInput(int) instruction_simplifier_arm64 (after)
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   public static int $opt$noinline$sameInput(int a) {
     if (doThrow) throw new Error();
@@ -130,6 +164,28 @@ public class Main {
   /**
    * Check that we perform the merge for multiple uses.
    */
+
+  /// CHECK-START-ARM: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm (before)
+  /// CHECK:       <<arg:i\d+>>         ParameterValue
+  /// CHECK:       <<Const23:i\d+>>     IntConstant 23
+  /// CHECK:       <<tmp:i\d+>>         Shl [<<arg>>,<<Const23>>]
+  /// CHECK:                            Add [<<tmp>>,{{i\d+}}]
+  /// CHECK:                            Add [<<tmp>>,{{i\d+}}]
+  /// CHECK:                            Add [<<tmp>>,{{i\d+}}]
+  /// CHECK:                            Add [<<tmp>>,{{i\d+}}]
+  /// CHECK:                            Add [<<tmp>>,{{i\d+}}]
+
+  /// CHECK-START-ARM: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm (after)
+  /// CHECK:       <<arg:i\d+>>         ParameterValue
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+
+  /// CHECK-START-ARM: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        Shl
+  /// CHECK-NOT:                        Add
 
   /// CHECK-START-ARM64: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm64 (before)
   /// CHECK:       <<arg:i\d+>>         ParameterValue
@@ -143,11 +199,11 @@ public class Main {
 
   /// CHECK-START-ARM64: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm64 (after)
   /// CHECK:       <<arg:i\d+>>         ParameterValue
-  /// CHECK:                            Arm64DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
-  /// CHECK:                            Arm64DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
-  /// CHECK:                            Arm64DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
-  /// CHECK:                            Arm64DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
-  /// CHECK:                            Arm64DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
+  /// CHECK:                            DataProcWithShifterOp [{{i\d+}},<<arg>>] kind:Add+LSL shift:23
 
   /// CHECK-START-ARM64: int Main.$opt$noinline$multipleUses(int) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        Shl
@@ -171,9 +227,19 @@ public class Main {
    * operand, so test that only the shifts are merged.
    */
 
+  /// CHECK-START-ARM: void Main.$opt$noinline$testAnd(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$noinline$testAnd(long, long) disassembly (after)
+  /// CHECK:                            and lsl
+  /// CHECK:                            sbfx
+  /// CHECK:                            asr
+  /// CHECK:                            and
+
   /// CHECK-START-ARM64: void Main.$opt$noinline$testAnd(long, long) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$noinline$testAnd(long, long) disassembly (after)
   /// CHECK:                            and lsl
@@ -186,9 +252,18 @@ public class Main {
                      (a & (b << 5)) | (a & (byte)b));
   }
 
+  /// CHECK-START-ARM: void Main.$opt$noinline$testOr(int, int) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$noinline$testOr(int, int) disassembly (after)
+  /// CHECK:                            orr asr
+  /// CHECK:                            ubfx
+  /// CHECK:                            orr
+
   /// CHECK-START-ARM64: void Main.$opt$noinline$testOr(int, int) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$noinline$testOr(int, int) disassembly (after)
   /// CHECK:                            orr asr
@@ -201,9 +276,19 @@ public class Main {
                     (a | (b >> 6)) | (a | (char)b));
   }
 
+  /// CHECK-START-ARM: void Main.$opt$noinline$testXor(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$noinline$testXor(long, long) disassembly (after)
+  /// CHECK:                            eor lsr
+  /// CHECK:                            mov
+  /// CHECK:                            asr
+  /// CHECK:                            eor
+
   /// CHECK-START-ARM64: void Main.$opt$noinline$testXor(long, long) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$noinline$testXor(long, long) disassembly (after)
   /// CHECK:                            eor lsr
@@ -216,9 +301,12 @@ public class Main {
                      (a ^ (b >>> 7)) | (a ^ (int)b));
   }
 
+  /// CHECK-START-ARM: void Main.$opt$noinline$testNeg(int) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                            DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$noinline$testNeg(int) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$noinline$testNeg(int) disassembly (after)
   /// CHECK:                            neg lsl
@@ -239,9 +327,12 @@ public class Main {
    * does occur on the right-hand.
    */
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendByteInt1(int, byte) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendByteInt1(int, byte) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendByteInt1(int, byte) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        TypeConversion
@@ -252,9 +343,11 @@ public class Main {
     assertIntEquals(a + $noinline$byteToShort(b), a + (short)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendByteInt2(int, byte) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendByteInt2(int, byte) instruction_simplifier_arm64 (after)
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   public static void $opt$validateExtendByteInt2(int a, byte b) {
     // The conversion to `int` has been optimized away, so there is nothing to merge.
@@ -263,13 +356,25 @@ public class Main {
     assertLongEquals(a + $noinline$byteToLong(b), a + (long)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendByteLong(long, byte) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$validateExtendByteLong(long, byte) instruction_simplifier_arm (after)
+  /// CHECK:                            TypeConversion
+  /// CHECK-NOT:                        TypeConversion
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendByteLong(long, byte) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendByteLong(long, byte) instruction_simplifier_arm64 (after)
   /// CHECK:                            TypeConversion
@@ -294,9 +399,12 @@ public class Main {
     $opt$validateExtendByteLong(a, b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendCharInt1(int, char) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendCharInt1(int, char) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendCharInt1(int, char) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        TypeConversion
@@ -306,22 +414,41 @@ public class Main {
     assertIntEquals(a + $noinline$charToShort(b), a + (short)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendCharInt2(int, char) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendCharInt2(int, char) instruction_simplifier_arm64 (after)
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   public static void $opt$validateExtendCharInt2(int a, char b) {
     // The conversion to `int` has been optimized away, so there is nothing to merge.
     assertIntEquals (a + $noinline$charToInt (b), a +  (int)b);
-    // There is an environment use for `(long)b`, preventing the merge.
+    // There is an environment use for `(long)b` and the implicit `(long)a`, preventing the merge.
     assertLongEquals(a + $noinline$charToLong(b), a + (long)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendCharLong(long, char) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$validateExtendCharLong(long, char) instruction_simplifier_arm (after)
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK-NOT:                        TypeConversion
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendCharLong(long, char) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendCharLong(long, char) instruction_simplifier_arm64 (after)
   /// CHECK:                            TypeConversion
@@ -332,7 +459,7 @@ public class Main {
     // The first two tests have a type conversion.
     assertLongEquals(a + $noinline$charToByte (b), a +  (byte)b);
     assertLongEquals(a + $noinline$charToShort(b), a + (short)b);
-    // This test does not because the conversion to `int` is optimized away.
+    // On ARM64 this test does not because the conversion to `int` is optimized away.
     assertLongEquals(a + $noinline$charToInt  (b), a +   (int)b);
   }
 
@@ -342,9 +469,12 @@ public class Main {
     $opt$validateExtendCharLong(a, b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendShortInt1(int, short) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendShortInt1(int, short) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendShortInt1(int, short) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        TypeConversion
@@ -354,21 +484,41 @@ public class Main {
     assertIntEquals(a + $noinline$shortToChar (b), a + (char)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendShortInt2(int, short) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendShortInt2(int, short) instruction_simplifier_arm64 (after)
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
-  /// CHECK-NOT:                        Arm64DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   public static void $opt$validateExtendShortInt2(int a, short b) {
     // The conversion to `int` has been optimized away, so there is nothing to merge.
     assertIntEquals (a + $noinline$shortToInt  (b), a +  (int)b);
-    // There is an environment use for `(long)b`, preventing the merge.
+    // There is an environment use for `(long)b` and the implicit `(long)a`, preventing the merge.
     assertLongEquals(a + $noinline$shortToLong (b), a + (long)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendShortLong(long, short) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$validateExtendShortLong(long, short) instruction_simplifier_arm (after)
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK-NOT:                        TypeConversion
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendShortLong(long, short) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendShortLong(long, short) instruction_simplifier_arm64 (after)
   /// CHECK:                            TypeConversion
@@ -379,7 +529,7 @@ public class Main {
     // The first two tests have a type conversion.
     assertLongEquals(a + $noinline$shortToByte(b), a + (byte)b);
     assertLongEquals(a + $noinline$shortToChar(b), a + (char)b);
-    // This test does not because the conversion to `int` is optimized away.
+    // On ARM64 this test does not because the conversion to `int` is optimized away.
     assertLongEquals(a + $noinline$shortToInt (b), a +  (int)b);
   }
 
@@ -389,11 +539,31 @@ public class Main {
     $opt$validateExtendShortLong(a, b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendInt(long, int) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$validateExtendInt(long, int) instruction_simplifier_arm (after)
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK-NOT:                        TypeConversion
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendInt(long, int) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendInt(long, int) instruction_simplifier_arm64 (after)
   /// CHECK:                            TypeConversion
@@ -411,11 +581,34 @@ public class Main {
     assertLongEquals(a + $noinline$intToLong (b), a +  (long)b);
   }
 
+  /// CHECK-START-ARM: void Main.$opt$validateExtendLong(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  /// CHECK-START-ARM: void Main.$opt$validateExtendLong(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK:                            TypeConversion
+  /// CHECK-NOT:                        TypeConversion
+
   /// CHECK-START-ARM64: void Main.$opt$validateExtendLong(long, long) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateExtendLong(long, long) instruction_simplifier_arm64 (after)
   /// CHECK:                            TypeConversion
@@ -449,40 +642,83 @@ public class Main {
 
 
   // Each test line below should see one merge.
+  /// CHECK-START-ARM: void Main.$opt$validateShiftInt(int, int) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+  // Note: `b << 32`, `b >> 32` and `b >>> 32` are optimized away by generic simplifier.
+
+  /// CHECK-START-ARM: void Main.$opt$validateShiftInt(int, int) instruction_simplifier_arm (after)
+  /// CHECK-NOT:                        Shl
+  /// CHECK-NOT:                        Shr
+  /// CHECK-NOT:                        UShr
+
   /// CHECK-START-ARM64: void Main.$opt$validateShiftInt(int, int) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
   // Note: `b << 32`, `b >> 32` and `b >>> 32` are optimized away by generic simplifier.
 
   /// CHECK-START-ARM64: void Main.$opt$validateShiftInt(int, int) instruction_simplifier_arm64 (after)
@@ -500,9 +736,9 @@ public class Main {
     assertIntEquals(a + $noinline$IntShl(b, 16),  a + (b << 16));
     assertIntEquals(a + $noinline$IntShl(b, 30),  a + (b << 30));
     assertIntEquals(a + $noinline$IntShl(b, 31),  a + (b << 31));
-    assertIntEquals(a + $noinline$IntShl(b, 32),  a + (b << 32));
-    assertIntEquals(a + $noinline$IntShl(b, 62),  a + (b << 62));
-    assertIntEquals(a + $noinline$IntShl(b, 63),  a + (b << 63));
+    assertIntEquals(a + $noinline$IntShl(b, 32),  a + (b << $opt$inline$IntConstant32()));
+    assertIntEquals(a + $noinline$IntShl(b, 62),  a + (b << $opt$inline$IntConstant62()));
+    assertIntEquals(a + $noinline$IntShl(b, 63),  a + (b << $opt$inline$IntConstant63()));
 
     assertIntEquals(a - $noinline$IntShr(b, 1),   a - (b >>  1));
     assertIntEquals(a - $noinline$IntShr(b, 6),   a - (b >>  6));
@@ -513,9 +749,9 @@ public class Main {
     assertIntEquals(a - $noinline$IntShr(b, 16),  a - (b >> 16));
     assertIntEquals(a - $noinline$IntShr(b, 30),  a - (b >> 30));
     assertIntEquals(a - $noinline$IntShr(b, 31),  a - (b >> 31));
-    assertIntEquals(a - $noinline$IntShr(b, 32),  a - (b >> 32));
-    assertIntEquals(a - $noinline$IntShr(b, 62),  a - (b >> 62));
-    assertIntEquals(a - $noinline$IntShr(b, 63),  a - (b >> 63));
+    assertIntEquals(a - $noinline$IntShr(b, 32),  a - (b >> $opt$inline$IntConstant32()));
+    assertIntEquals(a - $noinline$IntShr(b, 62),  a - (b >> $opt$inline$IntConstant62()));
+    assertIntEquals(a - $noinline$IntShr(b, 63),  a - (b >> $opt$inline$IntConstant63()));
 
     assertIntEquals(a ^ $noinline$IntUshr(b, 1),   a ^ (b >>>  1));
     assertIntEquals(a ^ $noinline$IntUshr(b, 6),   a ^ (b >>>  6));
@@ -526,10 +762,16 @@ public class Main {
     assertIntEquals(a ^ $noinline$IntUshr(b, 16),  a ^ (b >>> 16));
     assertIntEquals(a ^ $noinline$IntUshr(b, 30),  a ^ (b >>> 30));
     assertIntEquals(a ^ $noinline$IntUshr(b, 31),  a ^ (b >>> 31));
-    assertIntEquals(a ^ $noinline$IntUshr(b, 32),  a ^ (b >>> 32));
-    assertIntEquals(a ^ $noinline$IntUshr(b, 62),  a ^ (b >>> 62));
-    assertIntEquals(a ^ $noinline$IntUshr(b, 63),  a ^ (b >>> 63));
+    assertIntEquals(a ^ $noinline$IntUshr(b, 32),  a ^ (b >>> $opt$inline$IntConstant32()));
+    assertIntEquals(a ^ $noinline$IntUshr(b, 62),  a ^ (b >>> $opt$inline$IntConstant62()));
+    assertIntEquals(a ^ $noinline$IntUshr(b, 63),  a ^ (b >>> $opt$inline$IntConstant63()));
   }
+
+  // Hiding constants outside the range [0, 32) used for int shifts from Jack.
+  // (Jack extracts only the low 5 bits.)
+  public static int $opt$inline$IntConstant32() { return 32; }
+  public static int $opt$inline$IntConstant62() { return 62; }
+  public static int $opt$inline$IntConstant63() { return 63; }
 
 
   static long $noinline$LongShl(long b, long c) {
@@ -546,43 +788,89 @@ public class Main {
   }
 
   // Each test line below should see one merge.
+  /// CHECK-START-ARM: void Main.$opt$validateShiftLong(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
+
+  // On ARM shifts by 1 are not merged.
+  /// CHECK-START-ARM: void Main.$opt$validateShiftLong(long, long) instruction_simplifier_arm (after)
+  /// CHECK:                            Shl
+  /// CHECK-NOT:                        Shl
+  /// CHECK:                            Shr
+  /// CHECK-NOT:                        Shr
+  /// CHECK:                            UShr
+  /// CHECK-NOT:                        UShr
+
   /// CHECK-START-ARM64: void Main.$opt$validateShiftLong(long, long) instruction_simplifier_arm64 (after)
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
-  /// CHECK:                            Arm64DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK:                            DataProcWithShifterOp
+  /// CHECK-NOT:                        DataProcWithShifterOp
 
   /// CHECK-START-ARM64: void Main.$opt$validateShiftLong(long, long) instruction_simplifier_arm64 (after)
   /// CHECK-NOT:                        Shl

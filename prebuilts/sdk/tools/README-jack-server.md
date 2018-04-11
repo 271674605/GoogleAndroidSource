@@ -1,4 +1,4 @@
-This documentation describes usage of Jack server 1.3-a8.
+This documentation describes usage of Jack server 1.3-a11.
 
 # Jack server
 
@@ -9,21 +9,29 @@ and benefit from already warm instances.
 
 ## Setup for Mac OS
 
-Jack server is automatically installed and started by android build but requires initial setup on
-Mac OS:
+Jack server requires initial setup on Mac OS:
 
   - Install MacPorts from [macports.org](http://www.macports.org/install.php)  
     Make sure that `/opt/local/bin appears` in your path before `/usr/bin`. If not, please
     add the following to your `~/.bash_profile` file (If you do not have a `.bash_profile`
     file in your home directory, create one):
-```  
-    export PATH=/opt/local/bin:$PATH`
+```
+    $ export PATH=/opt/local/bin:$PATH`
 ```
 
   - Get curl package from MacPorts:
 ```
     $ POSIXLY_CORRECT=1 sudo port install curl +ssl
 ```
+
+## Installing the server
+
+Jack server is automatically installed and started by Android build. If you need to do the
+installation manually use:
+```
+    $ jack-admin install-server <launcher.jar> <server.jar>
+```
+
 
 ## Starting the server
 
@@ -43,7 +51,7 @@ It can be configured in `$HOME/.jack-settings`
 
 This file contains script shell variables:  
 `SERVER_HOST`: IP address of the server  
-by default: `SERVER_HOST=127.0.0.1`.
+by default: `SERVER_HOST=localhost`.
 
 `SERVER_PORT_SERVICE`: Server service TCP port number. Needs to match the service port
 number defined in `$HOME/.jack-server/config.properties` on the server host
@@ -71,6 +79,7 @@ The server can also be configured in `$HOME/.jack-server/config.properties`.
 ### `config.properties` file
 
 It contains Jack server configuration properties.  
+Modifications to those settings are taken into account after restarting the server.  
 Description with default values follows:
 
 `jack.server.max-service=<number>`  
@@ -115,7 +124,8 @@ Print help.
 Install the Jack server.
 
 `$ jack-admin uninstall-server`  
-Uninstall the Jack server and all components.
+Uninstall the Jack server and all components. You should ensure that the Jack server
+is not running before uninstalling.
 
 `$ jack-admin list jack`  
 List installed versions for Jack.
@@ -183,11 +193,25 @@ bug and attach the file produced by `jack-admin dump-report`.
 See [Starting the server](#starting-the-server) above.
 
 
-### If your computer becomes unresponsive during compilation or if you experience Jack compilations
-failing on `Out of memory error.`:
+### If your computer becomes unresponsive during compilation:
 
 You can improve the situation by reducing the number of jack simultaneous compilations by editing
-your `$HOME/.jack-server/config.properties` and changing jack.server.max-service to a lower value.
+your `$HOME/.jack-server/config.properties` and changing jack.server.max-service to a lower value
+and then restarting the server.  
+
+### If you experience Jack compilations failing on `Out of memory error.`:
+
+You can improve the situation by reducing the number of jack simultaneous compilations by editing
+your `$HOME/.jack-server/config.properties` and changing jack.server.max-service to a lower value
+and then restarting the server.  
+If this is not enough, you may change the arguments used to start the server jvm and force a
+greater maximum Java heap size ("-Xmx"):  
+- Stop the server using `jack-admin stop-server`, then:  
+- If you start the server manually:  
+`JACK_SERVER_VM_ARGUMENTS="-Xmx2g -Dfile.encoding=UTF-8 -XX:+TieredCompilation" jack-admin start-server`  
+- If you use the jack server in the android tree then  
+`export ANDROID_JACK_VM_ARGS="-Xmx2g -Dfile.encoding=UTF-8 -XX:+TieredCompilation"`  
+and restart your build command.
 
 
 ### If you have trouble starting the server

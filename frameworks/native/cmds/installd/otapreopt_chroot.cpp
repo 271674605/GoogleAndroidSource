@@ -14,13 +14,19 @@
  ** limitations under the License.
  */
 
+#include <fcntl.h>
 #include <linux/unistd.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
 
+#include <sstream>
+
 #include <android-base/logging.h>
 #include <android-base/macros.h>
 #include <android-base/stringprintf.h>
+
+#include "installd_constants.h"
+#include "otapreopt_utils.h"
 
 #ifndef LOG_TAG
 #define LOG_TAG "otapreopt"
@@ -31,7 +37,37 @@ using android::base::StringPrintf;
 namespace android {
 namespace installd {
 
+static void CloseDescriptor(int fd) {
+    if (fd >= 0) {
+        int result = close(fd);
+        UNUSED(result);  // Ignore result. Printing to logcat will open a new descriptor
+                         // that we do *not* want.
+    }
+}
+
+static void CloseDescriptor(const char* descriptor_string) {
+    int fd = -1;
+    std::istringstream stream(descriptor_string);
+    stream >> fd;
+    if (!stream.fail()) {
+        CloseDescriptor(fd);
+    }
+}
+
+// Entry for otapreopt_chroot. Expected parameters are:
+//   [cmd] [status-fd] [target-slot] "dexopt" [dexopt-params]
+// The file descriptor denoted by status-fd will be closed. The rest of the parameters will
+// be passed on to otapreopt in the chroot.
 static int otapreopt_chroot(const int argc, char **arg) {
+    // Close all file descriptors. They are coming from the caller, we do not want to pass them
+    // on across our fork/exec into a different domain.
+    // 1) Default descriptors.
+    CloseDescriptor(STDIN_FILENO);
+    CloseDescriptor(STDOUT_FILENO);
+    CloseDescriptor(STDERR_FILENO);
+    // 2) The status channel.
+    CloseDescriptor(arg[1]);
+
     // We need to run the otapreopt tool from the postinstall partition. As such, set up a
     // mount namespace and change root.
 
@@ -59,6 +95,28 @@ static int otapreopt_chroot(const int argc, char **arg) {
         }
     }
 
+    // Try to mount the vendor partition. update_engine doesn't do this for us, but we
+    // want it for vendor APKs.
+    // Notes:
+    //  1) We pretty much guess a name here and hope to find the partition by name.
+    //     It is just as complicated and brittle to scan /proc/mounts. But this requires
+    //     validating the target-slot so as not to try to mount some totally random path.
+    //  2) We're in a mount namespace here, so when we die, this will be cleaned up.
+    //  3) Ignore errors. Printing anything at this stage will open a file descriptor
+    //     for logging.
+    if (!ValidateTargetSlotSuffix(arg[2])) {
+        LOG(ERROR) << "Target slot suffix not legal: " << arg[2];
+        exit(207);
+    }
+    std::string vendor_partition = StringPrintf("/dev/block/bootdevice/by-name/vendor%s",
+                                                arg[2]);
+    int vendor_result = mount(vendor_partition.c_str(),
+                              "/postinstall/vendor",
+                              "ext4",
+                              MS_RDONLY,
+                              /* data */ nullptr);
+    UNUSED(vendor_result);
+
     // Chdir into /postinstall.
     if (chdir("/postinstall") != 0) {
         PLOG(ERROR) << "Unable to chdir into /postinstall.";
@@ -78,15 +136,18 @@ static int otapreopt_chroot(const int argc, char **arg) {
 
     // Now go on and run otapreopt.
 
-    const char* argv[1 + 9 + 1];
-    CHECK_EQ(argc, 10);
-    argv[0] = "/system/bin/otapreopt";
-    for (size_t i = 1; i <= 9; ++i) {
-        argv[i] = arg[i];
-    }
-    argv[10] = nullptr;
+    // Incoming:  cmd + status-fd + target-slot + cmd... + null      | Incoming | = argc + 1
+    // Outgoing:  cmd             + target-slot + cmd... + null      | Outgoing | = argc
+    const char** argv = new const char*[argc];
 
-    execv(argv[0], (char * const *)argv);
+    argv[0] = "/system/bin/otapreopt";
+
+    // The first parameter is the status file descriptor, skip.
+    for (size_t i = 2; i <= static_cast<size_t>(argc); ++i) {
+        argv[i - 1] = arg[i];
+    }
+
+    execv(argv[0], static_cast<char * const *>(const_cast<char**>(argv)));
     PLOG(ERROR) << "execv(OTAPREOPT) failed.";
     exit(99);
 }

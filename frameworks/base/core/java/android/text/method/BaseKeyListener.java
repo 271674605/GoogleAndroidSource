@@ -19,19 +19,22 @@ package android.text.method;
 import android.graphics.Paint;
 import android.icu.lang.UCharacter;
 import android.icu.lang.UProperty;
-import android.view.KeyEvent;
-import android.view.View;
-import android.text.*;
+import android.text.Editable;
+import android.text.Emoji;
+import android.text.InputType;
+import android.text.Layout;
+import android.text.NoCopySpan;
+import android.text.Selection;
+import android.text.Spanned;
 import android.text.method.TextKeyListener.Capitalize;
 import android.text.style.ReplacementSpan;
+import android.view.KeyEvent;
+import android.view.View;
 import android.widget.TextView;
 
 import com.android.internal.annotations.GuardedBy;
 
 import java.text.BreakIterator;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
 
 /**
  * Abstract base class for key listeners.
@@ -129,8 +132,8 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
         // The offset is immediately before a variation selector.
         final int STATE_BEFORE_VS = 6;
 
-        // The offset is immediately before a ZWJ emoji.
-        final int STATE_BEFORE_ZWJ_EMOJI = 7;
+        // The offset is immediately before an emoji.
+        final int STATE_BEFORE_EMOJI = 7;
         // The offset is immediately before a ZWJ that were seen before a ZWJ emoji.
         final int STATE_BEFORE_ZWJ = 8;
         // The offset is immediately before a variation selector and a ZWJ that were seen before a
@@ -142,8 +145,11 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
         // The number of following RIS code points is even.
         final int STATE_EVEN_NUMBERED_RIS = 11;
 
+        // The offset is in emoji tag sequence.
+        final int STATE_IN_TAG_SEQUENCE = 12;
+
         // The state machine has been stopped.
-        final int STATE_FINISHED = 12;
+        final int STATE_FINISHED = 13;
 
         int deleteCharCount = 0;  // Char count to be deleted by backspace.
         int lastSeenVSCharCount = 0;  // Char count of previous variation selector.
@@ -169,7 +175,9 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                     } else if (codePoint == Emoji.COMBINING_ENCLOSING_KEYCAP) {
                         state = STATE_BEFORE_KEYCAP;
                     } else if (Emoji.isEmoji(codePoint)) {
-                        state = STATE_BEFORE_ZWJ_EMOJI;
+                        state = STATE_BEFORE_EMOJI;
+                    } else if (codePoint == Emoji.CANCEL_TAG) {
+                        state = STATE_IN_TAG_SEQUENCE;
                     } else {
                         state = STATE_FINISHED;
                     }
@@ -179,6 +187,7 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                         ++deleteCharCount;
                     }
                     state = STATE_FINISHED;
+                    break;
                 case STATE_ODD_NUMBERED_RIS:
                     if (Emoji.isRegionalIndicatorSymbol(codePoint)) {
                         deleteCharCount += 2; /* Char count of RIS */
@@ -232,7 +241,7 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                 case STATE_BEFORE_VS:
                     if (Emoji.isEmoji(codePoint)) {
                         deleteCharCount += Character.charCount(codePoint);
-                        state = STATE_BEFORE_ZWJ_EMOJI;
+                        state = STATE_BEFORE_EMOJI;
                         break;
                     }
 
@@ -242,7 +251,7 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                     }
                     state = STATE_FINISHED;
                     break;
-                case STATE_BEFORE_ZWJ_EMOJI:
+                case STATE_BEFORE_EMOJI:
                     if (codePoint == Emoji.ZERO_WIDTH_JOINER) {
                         state = STATE_BEFORE_ZWJ;
                     } else {
@@ -252,7 +261,8 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                 case STATE_BEFORE_ZWJ:
                     if (Emoji.isEmoji(codePoint)) {
                         deleteCharCount += Character.charCount(codePoint) + 1;  // +1 for ZWJ.
-                        state = STATE_BEFORE_ZWJ_EMOJI;
+                        state = Emoji.isEmojiModifier(codePoint) ?
+                                STATE_BEFORE_EMOJI_MODIFIER : STATE_BEFORE_EMOJI;
                     } else if (isVariationSelector(codePoint)) {
                         lastSeenVSCharCount = Character.charCount(codePoint);
                         state = STATE_BEFORE_VS_AND_ZWJ;
@@ -265,10 +275,24 @@ public abstract class BaseKeyListener extends MetaKeyKeyListener
                         // +1 for ZWJ.
                         deleteCharCount += lastSeenVSCharCount + 1 + Character.charCount(codePoint);
                         lastSeenVSCharCount = 0;
-                        state = STATE_BEFORE_ZWJ_EMOJI;
+                        state = STATE_BEFORE_EMOJI;
                     } else {
                         state = STATE_FINISHED;
                     }
+                    break;
+                case STATE_IN_TAG_SEQUENCE:
+                    if (Emoji.isTagSpecChar(codePoint)) {
+                        deleteCharCount += 2; /* Char count of emoji tag spec character. */
+                        // Keep the same state.
+                    } else if (Emoji.isEmoji(codePoint)) {
+                        deleteCharCount += Character.charCount(codePoint);
+                        state = STATE_FINISHED;
+                    } else {
+                        // Couldn't find tag_base character. Delete the last tag_term character.
+                        deleteCharCount = 2;  // for U+E007F
+                        state = STATE_FINISHED;
+                    }
+                    // TODO: Need handle emoji variation selectors. Issue 35224297
                     break;
                 default:
                     throw new IllegalArgumentException("state " + state + " is unknown");

@@ -16,8 +16,6 @@
 
 package android.widget;
 
-import com.android.internal.R;
-
 import android.annotation.AttrRes;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
@@ -33,6 +31,8 @@ import android.view.ViewDebug;
 import android.view.ViewGroup;
 import android.view.ViewHierarchyEncoder;
 import android.widget.RemoteViews.RemoteView;
+
+import com.android.internal.R;
 
 import java.util.ArrayList;
 
@@ -382,13 +382,14 @@ public class FrameLayout extends ViewGroup {
 
     @Override
     protected ViewGroup.LayoutParams generateLayoutParams(ViewGroup.LayoutParams lp) {
-        if (lp instanceof LayoutParams) {
-            return new LayoutParams((LayoutParams) lp);
-        } else if (lp instanceof MarginLayoutParams) {
-            return new LayoutParams((MarginLayoutParams) lp);
-        } else {
-            return new LayoutParams(lp);
+        if (sPreserveMarginParamsInLayoutParamConversion) {
+            if (lp instanceof LayoutParams) {
+                return new LayoutParams((LayoutParams) lp);
+            } else if (lp instanceof MarginLayoutParams) {
+                return new LayoutParams((MarginLayoutParams) lp);
+            }
         }
+        return new LayoutParams(lp);
     }
 
     @Override

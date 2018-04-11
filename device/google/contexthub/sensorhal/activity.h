@@ -21,80 +21,88 @@
 #include <hardware/activity_recognition.h>
 #include <media/stagefright/foundation/ABase.h>
 #include <utils/KeyedVector.h>
+#include <utils/Vector.h>
 
+#include "activityeventhandler.h"
 #include "hubconnection.h"
 
-#define DEBUG_ACTIVITY_RECOGNITION  0
+namespace android {
 
-struct ActivityContext {
+class ActivityContext : public ActivityEventHandler {
+  public:
     activity_recognition_device_t device;
 
     explicit ActivityContext(const struct hw_module_t *module);
-
-    void onActivityEvent(
-            uint64_t when_us, bool is_flush, float x, float y, float z);
-
-    bool getHubAlive();
-
-private:
-    android::Mutex mLock;
-
-    android::sp<android::HubConnection> mHubConnection;
-
-    bool mHubAlive;
-
-    const activity_recognition_callback_procs_t *mCallback;
-
-    android::KeyedVector<uint64_t, int64_t> mMaxBatchReportLatencyNs;
-
-    int mPrevActivity;
-
-    bool mInitExitDone;
-
     ~ActivityContext();
 
-    int close();
+    bool getHubAlive();
 
     void registerActivityCallback(
             const activity_recognition_callback_procs_t *callback);
 
-    bool isEnabled(uint32_t activity_handle, uint32_t event_type) const;
-
-    int enableActivityEvent(
-            uint32_t activity_handle,
-            uint32_t event_type,
-            int64_t max_batch_report_latency_ns);
+    int enableActivityEvent(uint32_t activity_handle,
+        uint32_t event_type, int64_t max_report_latency_ns);
 
     int disableActivityEvent(uint32_t activity_handle, uint32_t event_type);
 
     int flush();
 
-    int64_t calculateReportLatencyNs();
+    // ActivityEventHandler interface.
+    virtual void OnActivityEvent(int sensorIndex, uint8_t eventIndex,
+                                 uint64_t whenNs) override;
+    virtual void OnFlush() override;
+    virtual void OnSensorHubReset() override;
 
-    static int CloseWrapper(struct hw_device_t *dev);
+  private:
+    android::sp<android::HubConnection> mHubConnection;
 
-    static void RegisterActivityCallbackWrapper(
-            const struct activity_recognition_device *dev,
-            const activity_recognition_callback_procs_t *callback);
+    android::Mutex mCallbackLock;
+    const activity_recognition_callback_procs_t *mCallback;
 
-    static int EnableActivityEventWrapper(
-            const struct activity_recognition_device *dev,
-            uint32_t activity_handle,
-            uint32_t event_type,
-            int64_t max_batch_report_latency_ns);
+    struct ActivityEvent {
+        uint8_t eventIndex;
+        int sensorIndex;
+        uint64_t whenNs;
+    };
 
-    static int DisableActivityEventWrapper(
-            const struct activity_recognition_device *dev,
-            uint32_t activity_handle,
-            uint32_t event_type);
+    // Whether or not the newest published event index is known. When the AR HAL
+    // is initially started this is set to false to allow any event index from
+    // the sensor hub. It is also set to false when a hub reset occurs.
+    bool mNewestPublishedEventIndexIsKnown;
 
-    static int FlushWrapper(const struct activity_recognition_device *dev);
+    // The index of the newest published event. The next event from the sensor
+    // hub must follow this event or else it will be pushed into a list of
+    // events to be published once the gap in events has been received.
+    uint8_t mNewestPublishedEventIndex;
 
-    static void HubCallbackWrapper(
-            void *me, uint64_t time_ms, bool is_flush, float x, float y, float z);
+    // The timestamp of the most recently published event. If the absolute value
+    // of the delta of the next timestamp to the current timestamp is below some
+    // threshold, this timestamp will be reused. This is used to ensure that
+    // activity transitions share the same timestamp and works around agressive
+    // AP->ContextHub time synchronization mechansims.
+    uint64_t mNewestPublishedTimestamp;
+
+    // The list of unpublished events. These are published once the next
+    // event arrives and is greater than mNewestPublishedEventIndex by 1
+    // (wrapping across 255).
+    Vector<ActivityEvent> mUnpublishedEvents;
+
+    // Track the number of flush events sent to the sensor hub.
+    int mOutstandingFlushEvents;
+
+    // Publishes remaining unpublished events.
+    void PublishUnpublishedEvents();
+
+    // Publishes an AR event to the AR HAL client.
+    void PublishEvent(const ActivityEvent& event);
+
+    // Searches for very old AR events, discards them and publishes EVENT_EXIT
+    // transitions for all activities.
+    void DiscardExpiredUnpublishedEvents(uint64_t whenNs);
 
     DISALLOW_EVIL_CONSTRUCTORS(ActivityContext);
 };
 
-#endif  // ACTIVITY_H_
+}  // namespace android
 
+#endif  // ACTIVITY_H_

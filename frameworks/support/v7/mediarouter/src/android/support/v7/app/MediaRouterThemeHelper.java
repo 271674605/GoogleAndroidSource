@@ -36,8 +36,8 @@ final class MediaRouterThemeHelper {
     @Retention(RetentionPolicy.SOURCE)
     private @interface ControllerColorType {}
 
-    private static final int COLOR_DARK_ON_LIGHT_BACKGROUND = 0xDE000000; /* Opacity of 87% */
-    private static final int COLOR_WHITE_ON_DARK_BACKGROUND = Color.WHITE;
+    static final int COLOR_DARK_ON_LIGHT_BACKGROUND = 0xDE000000; /* Opacity of 87% */
+    static final int COLOR_WHITE_ON_DARK_BACKGROUND = Color.WHITE;
 
     private MediaRouterThemeHelper() {
     }
@@ -55,6 +55,8 @@ final class MediaRouterThemeHelper {
      * @return The themed context.
      */
     public static Context createThemedContext(Context context, int style) {
+        // First, apply dialog property overlay.
+
         int theme;
         if (isLightTheme(context)) {
             if (getControllerColor(context, style) == COLOR_DARK_ON_LIGHT_BACKGROUND) {
@@ -69,7 +71,12 @@ final class MediaRouterThemeHelper {
                 theme = R.style.Theme_MediaRouter;
             }
         }
-        return new ContextThemeWrapper(context, theme);
+        int mediaRouteThemeResId = getThemeResource(context, R.attr.mediaRouteTheme);
+        Context themedContext = new ContextThemeWrapper(context, theme);
+        if (mediaRouteThemeResId != 0) {
+            themedContext = new ContextThemeWrapper(themedContext, mediaRouteThemeResId);
+        }
+        return themedContext;
     }
 
     public static int getThemeResource(Context context, int attr) {
@@ -135,6 +142,18 @@ final class MediaRouterThemeHelper {
             controllerColor = ColorUtils.compositeColors(controllerColor, backgroundColor);
         }
         volumeSlider.setColor(controllerColor);
+    }
+
+    // This is copied from {@link AlertDialog#resolveDialogTheme} to pre-evaluate theme in advance.
+    public static int getAlertDialogResolvedTheme(Context context, int themeResId) {
+        if (themeResId >= 0x01000000) {   // start of real resource IDs.
+            return themeResId;
+        } else {
+            TypedValue outValue = new TypedValue();
+            context.getTheme().resolveAttribute(
+                    android.support.v7.appcompat.R.attr.alertDialogTheme, outValue, true);
+            return outValue.resourceId;
+        }
     }
 
     private static boolean isLightTheme(Context context) {

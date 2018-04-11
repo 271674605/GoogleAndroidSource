@@ -1,37 +1,23 @@
 /*
- * Copyright (c) 2016, Google. All rights reserved.
+ * Copyright (C) 2016 The Android Open Source Project
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of The Linux Foundation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #define LOG_TAG "NanohubHAL"
 
 #include <fcntl.h>
 #include <poll.h>
-#include <pthread.h>
 #include <unistd.h>
 #include <sys/inotify.h>
 #include <sys/types.h>
@@ -43,6 +29,8 @@
 #include <utils/Log.h>
 #include <cutils/properties.h>
 
+#include <nanohub/nanohub.h>
+
 #include <cinttypes>
 #include <iomanip>
 #include <sstream>
@@ -51,7 +39,7 @@
 #include "system_comms.h"
 #include "nanohubhal.h"
 
-#define NANOHUB_LOCK_DIR        "/data/system/nanohub_lock"
+#define NANOHUB_LOCK_DIR        "/data/vendor/sensor/nanohub_lock"
 #define NANOHUB_LOCK_FILE       NANOHUB_LOCK_DIR "/lock"
 #define NANOHUB_LOCK_DIR_PERMS  (S_IRUSR | S_IWUSR | S_IXUSR)
 
@@ -158,17 +146,30 @@ static void wait_on_dev_lock(pollfd &pfd) {
     }
 }
 
-int NanoHub::doSendToDevice(const hub_app_name_t *name, const void *data, uint32_t len)
+NanoHub::NanoHub() {
+    reset();
+}
+
+NanoHub::~NanoHub() {
+    if (mMsgCbkFunc) {
+        ALOGD("Shutting down");
+        closeHub();
+    }
+}
+
+int NanoHub::doSendToDevice(const hub_app_name_t name, const void *data, uint32_t len, uint32_t messageType)
 {
     if (len > MAX_RX_PACKET) {
         return -EINVAL;
     }
 
-    nano_message msg = {
+    // transmit message to FW in CHRE format
+    nano_message_chre msg = {
         .hdr = {
-            .event_id = APP_FROM_HOST_EVENT_ID,
-            .app_name = *name,
+            .eventId = APP_FROM_HOST_CHRE_EVENT_ID,
+            .appId = name.id,
             .len = static_cast<uint8_t>(len),
+            .appEventId = messageType,
         },
     };
 
@@ -177,25 +178,32 @@ int NanoHub::doSendToDevice(const hub_app_name_t *name, const void *data, uint32
     return rwrite(mFd, &msg, len + sizeof(msg.hdr));
 }
 
-void NanoHub::doSendToApp(const hub_app_name_t *name, uint32_t typ, const void *data, uint32_t len)
+void NanoHub::doSendToApp(HubMessage &&msg)
 {
-    hub_message_t msg = {
-        .app_name = *name,
-        .message_type = typ,
-        .message_len = len,
-        .message = data,
+    std::unique_lock<std::mutex> lk(mAppTxLock);
+    mAppTxQueue.push_back((HubMessage &&)msg);
+    lk.unlock();
+    mAppTxCond.notify_all();
+}
+
+void* NanoHub::runAppTx()
+{
+    std::unique_lock<std::mutex> lk(mAppTxLock);
+    while(true) {
+        mAppTxCond.wait(lk, [this] { return !mAppTxQueue.empty() || mAppQuit; });
+        if (mAppQuit) {
+            break;
+        }
+        HubMessage &m = mAppTxQueue.front();
+        lk.unlock();
+        mMsgCbkFunc(0, &m, mMsgCbkData);
+        lk.lock();
+        mAppTxQueue.pop_front();
     };
-
-    mMsgCbkFunc(0, &msg, mMsgCbkData);
+    return NULL;
 }
 
-void* NanoHub::run(void *data)
-{
-    NanoHub *self = static_cast<NanoHub*>(data);
-    return self->doRun();
-}
-
-void* NanoHub::doRun()
+void* NanoHub::runDeviceRx()
 {
     enum {
         IDX_NANOHUB,
@@ -220,7 +228,7 @@ void* NanoHub::doRun()
     while (1) {
         int ret = poll(myFds, numPollFds, -1);
         if (ret <= 0) {
-            ALOGD("poll is being weird");
+            ALOGD("poll returned with an error: %s", strerror(errno));
             continue;
         }
 
@@ -249,6 +257,7 @@ void* NanoHub::doRun()
                 break;
             }
 
+            // receive message from FW in legacy format
             if (ret != (int)(sizeof(msg.hdr) + len)) {
                 ALOGE("Expected %zu bytes, read %d bytes", sizeof(msg.hdr) + len, ret);
                 break;
@@ -258,10 +267,11 @@ void* NanoHub::doRun()
             if (ret < 0) {
                 ALOGE("SystemComm::handleRx() returned %d", ret);
             } else if (ret) {
+                hub_app_name_t app_name = { .id = msg.hdr.appId };
                 if (messageTracingEnabled()) {
-                    dumpBuffer("DEV -> APP", msg.hdr.app_name, msg.hdr.event_id, &msg.data[0], msg.hdr.len);
+                    dumpBuffer("DEV -> APP", app_name, msg.hdr.eventId, &msg.data[0], msg.hdr.len);
                 }
-                doSendToApp(&msg.hdr.app_name, msg.hdr.event_id, &msg.data[0], msg.hdr.len);
+                doSendToApp(HubMessage(&app_name, msg.hdr.eventId, &msg.data[0], msg.hdr.len));
             }
         }
 
@@ -292,17 +302,9 @@ int NanoHub::openHub()
         goto fail_pipe;
     }
 
-    if (pthread_create(&mWorkerThread, NULL, &NanoHub::run, this)) {
-        ALOGE("failed to spawn worker thread");
-        ret = -errno;
-        goto fail_thread;
-    }
-
+    mPollThread = std::thread([this] { runDeviceRx(); });
+    mAppThread = std::thread([this] { runAppTx(); });
     return 0;
-
-fail_thread:
-    close(mThreadClosingPipe[0]);
-    close(mThreadClosingPipe[1]);
 
 fail_pipe:
     close(mFd);
@@ -315,15 +317,32 @@ int NanoHub::closeHub(void)
 {
     char zero = 0;
 
-    //signal
-    while(write(mThreadClosingPipe[1], &zero, 1) != 1);
+    // stop mPollThread
+    while(write(mThreadClosingPipe[1], &zero, 1) != 1) {
+        continue;
+    }
+
+    // stop mAppThread
+    {
+        std::unique_lock<std::mutex> lk(mAppTxLock);
+        mAppQuit = true;
+        lk.unlock();
+        mAppTxCond.notify_all();
+    }
 
     //wait
-    (void)pthread_join(mWorkerThread, NULL);
+    if (mPollThread.joinable()) {
+        mPollThread.join();
+    }
 
+    //wait
+    if (mAppThread.joinable()) {
+        mAppThread.join();
+    }
     //cleanup
     ::close(mThreadClosingPipe[0]);
     ::close(mThreadClosingPipe[1]);
+    ::close(mFd);
 
     reset();
 
@@ -336,7 +355,7 @@ int NanoHub::doSubscribeMessages(uint32_t hub_id, context_hub_callback *cbk, voi
         return -ENODEV;
     }
 
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
     int ret = 0;
 
     if (!mMsgCbkFunc && !cbk) { //we're off and staying off - do nothing
@@ -369,7 +388,7 @@ int NanoHub::doSendToNanohub(uint32_t hub_id, const hub_message_t *msg)
     }
 
     int ret = 0;
-    Mutex::Autolock _l(mLock);
+    std::lock_guard<std::mutex> _l(mLock);
 
     if (!mMsgCbkFunc) {
         ALOGW("refusing to send a message when nobody around to get a reply!");
@@ -384,14 +403,14 @@ int NanoHub::doSendToNanohub(uint32_t hub_id, const hub_message_t *msg)
                 dumpBuffer("APP -> HAL", msg->app_name, msg->message_type, msg->message, msg->message_len);
             }
             ret = SystemComm::handleTx(msg);
-        } else if (msg->message_type || msg->message_len > MAX_RX_PACKET) {
+        } else if (msg->message_len > MAX_RX_PACKET) {
             ALOGW("not sending invalid message 2");
             ret = -EINVAL;
         } else {
             if (messageTracingEnabled()) {
-                dumpBuffer("APP -> DEV", msg->app_name, 0, msg->message, msg->message_len);
+                dumpBuffer("APP -> DEV", msg->app_name, msg->message_type, msg->message, msg->message_len);
             }
-            ret = doSendToDevice(&msg->app_name, msg->message, msg->message_len);
+            ret = doSendToDevice(msg->app_name, msg->message, msg->message_len, msg->message_type);
         }
     }
 

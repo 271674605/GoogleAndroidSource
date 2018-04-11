@@ -21,6 +21,10 @@
 #ifndef __WINE_D3D9TYPES_H
 #define __WINE_D3D9TYPES_H
 
+#ifdef __i386__
+#include <pshpack4.h>
+#endif
+
 /*****************************************************************************
  * Direct 3D v9 #defines
  */
@@ -56,10 +60,10 @@
 #define D3DCS_PLANE5                 __MSABI_LONG(0x800)
 #define D3DCS_ALL                    __MSABI_LONG(0xFFF)
 
-#define D3DFVF_TEXTUREFORMAT1 3
-#define D3DFVF_TEXTUREFORMAT2 0
-#define D3DFVF_TEXTUREFORMAT3 1
-#define D3DFVF_TEXTUREFORMAT4 2
+#define D3DFVF_TEXTUREFORMAT1 3u
+#define D3DFVF_TEXTUREFORMAT2 0u
+#define D3DFVF_TEXTUREFORMAT3 1u
+#define D3DFVF_TEXTUREFORMAT4 2u
 #define D3DFVF_TEXCOORDSIZE1(CoordIndex) (D3DFVF_TEXTUREFORMAT1 << (CoordIndex*2 + 16))
 #define D3DFVF_TEXCOORDSIZE2(CoordIndex) (D3DFVF_TEXTUREFORMAT2)
 #define D3DFVF_TEXCOORDSIZE3(CoordIndex) (D3DFVF_TEXTUREFORMAT3 << (CoordIndex*2 + 16))
@@ -108,6 +112,14 @@
 #define D3DUSAGE_DYNAMIC            __MSABI_LONG(0x00000200)
 #define D3DUSAGE_AUTOGENMIPMAP      __MSABI_LONG(0x00000400)
 #define D3DUSAGE_DMAP               __MSABI_LONG(0x00004000)
+
+/* Parts added with d3d9ex */
+#if !defined(D3D_DISABLE_9EX)
+#define D3DUSAGE_RESTRICTED_CONTENT              __MSABI_LONG(0x00000800)
+#define D3DUSAGE_RESTRICT_SHARED_RESOURCE_DRIVER __MSABI_LONG(0x00001000)
+#define D3DUSAGE_RESTRICT_SHARED_RESOURCE        __MSABI_LONG(0x00002000)
+#define D3DUSAGE_TEXTAPI                         __MSABI_LONG(0x10000000)
+#endif /* D3D_DISABLE_9EX */
 
 #define D3DUSAGE_QUERY_FILTER                   __MSABI_LONG(0x00020000)
 #define D3DUSAGE_QUERY_LEGACYBUMPMAP            __MSABI_LONG(0x00008000)
@@ -174,8 +186,8 @@
 
 #define D3DPV_DONOTCOPYDATA         (1 << 0)
 
-#define D3DSTREAMSOURCE_INDEXEDDATA  (1 << 30)
-#define D3DSTREAMSOURCE_INSTANCEDATA (2 << 30)
+#define D3DSTREAMSOURCE_INDEXEDDATA  (1u << 30)
+#define D3DSTREAMSOURCE_INSTANCEDATA (2u << 30)
 
 #define D3D_MAX_SIMULTANEOUS_RENDERTARGETS 4
 
@@ -206,7 +218,6 @@
 #define D3DPRESENTFLAG_NOAUTOROTATE         0x00000020 /* d3d9ex, ignore display rotation */
 #define D3DPRESENTFLAG_UNPRUNEDMODE         0x00000040 /* d3d9ex, specify invalid display modes */
 
-#define D3DPRESENT_BACK_BUFFERS_MAX         __MSABI_LONG(3)
 #define D3DPRESENT_RATE_DEFAULT             0x00000000
 
 /**************************** 
@@ -642,8 +653,6 @@ typedef enum _D3DBACKBUFFER_TYPE {
 
     D3DBACKBUFFER_TYPE_FORCE_DWORD  = 0x7fffffff
 } D3DBACKBUFFER_TYPE;
-
-#define D3DPRESENT_BACK_BUFFER_MAX __MSABI_LONG(3)
 
 typedef enum _D3DBASISTYPE {
    D3DBASIS_BEZIER        = 0,
@@ -1559,6 +1568,16 @@ typedef enum _D3DCOMPOSERECTSOP{
     D3DCOMPOSERECTS_NEG,
     D3DCOMPOSERECTS_FORCE_DWORD = 0x7fffffff
 } D3DCOMPOSERECTSOP;
+
+typedef struct _D3DPRESENTSTATS
+{
+    UINT          PresentCount;
+    UINT          PresentRefreshCount;
+    UINT          SyncRefreshCount;
+    LARGE_INTEGER SyncQPCTime;
+    LARGE_INTEGER SyncGPUTime;
+} D3DPRESENTSTATS;
+
 #endif /* D3D_DISABLE_9EX */
 
 typedef enum _D3DSHADER_COMPARISON
@@ -1572,5 +1591,9 @@ typedef enum _D3DSHADER_COMPARISON
     D3DSPC_LE,
     D3DSPC_RESERVED1,
 } D3DSHADER_COMPARISON;
+
+#ifdef __i386__
+#include <poppack.h>
+#endif
 
 #endif /* __WINE_D3D9TYPES_H */

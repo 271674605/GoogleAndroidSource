@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import its.image
+import math
+
+import its.caps
 import its.device
 import its.objects
 import its.target
-import its.caps
+
 
 def main():
     """Test the validity of some metadata entries.
@@ -47,7 +49,6 @@ def main():
     check('props.has_key("android.info.supportedHardwareLevel")')
     check('props["android.info.supportedHardwareLevel"] is not None')
     check('props["android.info.supportedHardwareLevel"] in [0,1,2,3]')
-    full = getval('props["android.info.supportedHardwareLevel"]') == 1
     manual_sensor = its.caps.manual_sensor(props)
 
     # Test: rollingShutterSkew, and frameDuration tags must all be present,
@@ -73,7 +74,40 @@ def main():
     check('props["android.scaler.croppingType"] is not None')
     check('props["android.scaler.croppingType"] in [0,1]')
 
-    assert(not failed)
+    # Test: android.sensor.blackLevelPattern exists for RAW and is not None
+    if its.caps.raw(props):
+        check('props.has_key("android.sensor.blackLevelPattern")')
+        check('props["android.sensor.blackLevelPattern"] is not None')
+
+    assert not failed
+
+    if not its.caps.legacy(props):
+        # Test: pixel_pitch, FOV, and hyperfocal distance are reasonable
+        fmts = props["android.scaler.streamConfigurationMap"]["availableStreamConfigurations"]
+        fmts = sorted(fmts, key=lambda k: k["width"]*k["height"], reverse=True)
+        sensor_size = props["android.sensor.info.physicalSize"]
+        pixel_pitch_h = (sensor_size["height"] / fmts[0]["height"] * 1E3)
+        pixel_pitch_w = (sensor_size["width"] / fmts[0]["width"] * 1E3)
+        print "Assert pixel_pitch WxH: %.2f um, %.2f um" % (pixel_pitch_w,
+                                                            pixel_pitch_h)
+        assert 1.0 <= pixel_pitch_w <= 10
+        assert 1.0 <= pixel_pitch_h <= 10
+        assert 0.333 <= pixel_pitch_w/pixel_pitch_h <= 3.0
+
+        diag = math.sqrt(sensor_size["height"] ** 2 +
+                         sensor_size["width"] ** 2)
+        fl = md["android.lens.focalLength"]
+        fov = 2 * math.degrees(math.atan(diag / (2 * fl)))
+        print "Assert field of view: %.1f degrees" % fov
+        assert 30 <= fov <= 130
+
+        if its.caps.lens_approx_calibrated(props):
+            diopter_hyperfocal = props["android.lens.info.hyperfocalDistance"]
+            if diopter_hyperfocal != 0.0:
+                hyperfocal = 1.0 / diopter_hyperfocal
+                print "Assert hyperfocal distance: %.2f m" % hyperfocal
+                assert 0.02 <= hyperfocal
+
 
 def getval(expr, default=None):
     try:
@@ -82,6 +116,8 @@ def getval(expr, default=None):
         return default
 
 failed = False
+
+
 def check(expr):
     global md, props, failed
     try:

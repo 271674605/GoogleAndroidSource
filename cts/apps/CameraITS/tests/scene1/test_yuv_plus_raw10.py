@@ -36,7 +36,7 @@ def main():
         # Use a manual request with a linear tonemap so that the YUV and RAW
         # should look the same (once converted by the its.image module).
         e, s = its.target.get_target_exposure_combos(cam)["midExposureTime"]
-        req = its.objects.manual_capture_request(s, e, True, props)
+        req = its.objects.manual_capture_request(s, e, 0.0, True, props)
 
         max_raw10_size = \
                 its.objects.get_available_output_sizes("raw10", props)[0]
@@ -51,11 +51,11 @@ def main():
         tile = its.image.get_image_patch(img, 0.45, 0.45, 0.1, 0.1)
         rgb0 = its.image.compute_image_means(tile)
 
-        # Raw shots are 1/2 x 1/2 smaller after conversion to RGB, so scale the
-        # tile appropriately.
+        # Raw shots are 1/2 x 1/2 smaller after conversion to RGB, but tile
+        # cropping is relative.
         img = its.image.convert_capture_to_rgb_image(cap_raw, props=props)
         its.image.write_image(img, "%s_raw.jpg" % (NAME), True)
-        tile = its.image.get_image_patch(img, 0.475, 0.475, 0.05, 0.05)
+        tile = its.image.get_image_patch(img, 0.45, 0.45, 0.1, 0.1)
         rgb1 = its.image.compute_image_means(tile)
 
         rms_diff = math.sqrt(

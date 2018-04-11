@@ -197,7 +197,7 @@ fallback:
 	RET
 
 TEXT runtime·rtsigprocmask(SB),NOSPLIT,$0-28
-	MOVL	sig+0(FP), DI
+	MOVL	how+0(FP), DI
 	MOVQ	new+8(FP), SI
 	MOVQ	old+16(FP), DX
 	MOVL	size+24(FP), R10
@@ -208,7 +208,7 @@ TEXT runtime·rtsigprocmask(SB),NOSPLIT,$0-28
 	MOVL	$0xf1, 0xf1  // crash
 	RET
 
-TEXT runtime·rt_sigaction(SB),NOSPLIT,$0-36
+TEXT runtime·sysSigaction(SB),NOSPLIT,$0-36
 	MOVQ	sig+0(FP), DI
 	MOVQ	new+8(FP), SI
 	MOVQ	old+16(FP), DX
@@ -218,28 +218,144 @@ TEXT runtime·rt_sigaction(SB),NOSPLIT,$0-36
 	MOVL	AX, ret+32(FP)
 	RET
 
-TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
-	MOVL	sig+8(FP), DI
-	MOVQ	info+16(FP), SI
-	MOVQ	ctx+24(FP), DX
-	MOVQ	fn+0(FP), AX
+// Call the function stored in _cgo_sigaction using the GCC calling convention.
+TEXT runtime·callCgoSigaction(SB),NOSPLIT,$16
+	MOVQ	sig+0(FP), DI
+	MOVQ	new+8(FP), SI
+	MOVQ	old+16(FP), DX
+	MOVQ	_cgo_sigaction(SB), AX
+	MOVQ	SP, BX	// callee-saved
+	ANDQ	$~15, SP	// alignment as per amd64 psABI
 	CALL	AX
+	MOVQ	BX, SP
+	MOVL	AX, ret+24(FP)
 	RET
 
-TEXT runtime·sigtramp(SB),NOSPLIT,$24
-	MOVQ	DI, 0(SP)   // signum
-	MOVQ	SI, 8(SP)   // info
-	MOVQ	DX, 16(SP)  // ctx
+TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
+	MOVQ	fn+0(FP),    AX
+	MOVL	sig+8(FP),   DI
+	MOVQ	info+16(FP), SI
+	MOVQ	ctx+24(FP),  DX
+	PUSHQ	BP
+	MOVQ	SP, BP
+	ANDQ	$~15, SP     // alignment for x86_64 ABI
+	CALL	AX
+	MOVQ	BP, SP
+	POPQ	BP
+	RET
+
+TEXT runtime·sigtramp(SB),NOSPLIT,$72
+	// Save callee-saved C registers, since the caller may be a C signal handler.
+	MOVQ	BX,  bx-8(SP)
+	MOVQ	BP,  bp-16(SP)  // save in case GOEXPERIMENT=noframepointer is set
+	MOVQ	R12, r12-24(SP)
+	MOVQ	R13, r13-32(SP)
+	MOVQ	R14, r14-40(SP)
+	MOVQ	R15, r15-48(SP)
+	// We don't save mxcsr or the x87 control word because sigtrampgo doesn't
+	// modify them.
+
+	MOVQ	DX, ctx-56(SP)
+	MOVQ	SI, info-64(SP)
+	MOVQ	DI, signum-72(SP)
 	MOVQ	$runtime·sigtrampgo(SB), AX
 	CALL AX
+
+	MOVQ	r15-48(SP), R15
+	MOVQ	r14-40(SP), R14
+	MOVQ	r13-32(SP), R13
+	MOVQ	r12-24(SP), R12
+	MOVQ	bp-16(SP),  BP
+	MOVQ	bx-8(SP),   BX
 	RET
 
+// Used instead of sigtramp in programs that use cgo.
+// Arguments from kernel are in DI, SI, DX.
+TEXT runtime·cgoSigtramp(SB),NOSPLIT,$0
+	// If no traceback function, do usual sigtramp.
+	MOVQ	runtime·cgoTraceback(SB), AX
+	TESTQ	AX, AX
+	JZ	sigtramp
+
+	// If no traceback support function, which means that
+	// runtime/cgo was not linked in, do usual sigtramp.
+	MOVQ	_cgo_callers(SB), AX
+	TESTQ	AX, AX
+	JZ	sigtramp
+
+	// Figure out if we are currently in a cgo call.
+	// If not, just do usual sigtramp.
+	get_tls(CX)
+	MOVQ	g(CX),AX
+	TESTQ	AX, AX
+	JZ	sigtrampnog     // g == nil
+	MOVQ	g_m(AX), AX
+	TESTQ	AX, AX
+	JZ	sigtramp        // g.m == nil
+	MOVL	m_ncgo(AX), CX
+	TESTL	CX, CX
+	JZ	sigtramp        // g.m.ncgo == 0
+	MOVQ	m_curg(AX), CX
+	TESTQ	CX, CX
+	JZ	sigtramp        // g.m.curg == nil
+	MOVQ	g_syscallsp(CX), CX
+	TESTQ	CX, CX
+	JZ	sigtramp        // g.m.curg.syscallsp == 0
+	MOVQ	m_cgoCallers(AX), R8
+	TESTQ	R8, R8
+	JZ	sigtramp        // g.m.cgoCallers == nil
+	MOVL	m_cgoCallersUse(AX), CX
+	TESTL	CX, CX
+	JNZ	sigtramp	// g.m.cgoCallersUse != 0
+
+	// Jump to a function in runtime/cgo.
+	// That function, written in C, will call the user's traceback
+	// function with proper unwind info, and will then call back here.
+	// The first three arguments, and the fifth, are already in registers.
+	// Set the two remaining arguments now.
+	MOVQ	runtime·cgoTraceback(SB), CX
+	MOVQ	$runtime·sigtramp(SB), R9
+	MOVQ	_cgo_callers(SB), AX
+	JMP	AX
+
+sigtramp:
+	JMP	runtime·sigtramp(SB)
+
+sigtrampnog:
+	// Signal arrived on a non-Go thread. If this is SIGPROF, get a
+	// stack trace.
+	CMPL	DI, $27 // 27 == SIGPROF
+	JNZ	sigtramp
+
+	// Lock sigprofCallersUse.
+	MOVL	$0, AX
+	MOVL	$1, CX
+	MOVQ	$runtime·sigprofCallersUse(SB), R11
+	LOCK
+	CMPXCHGL	CX, 0(R11)
+	JNZ	sigtramp  // Skip stack trace if already locked.
+
+	// Jump to the traceback function in runtime/cgo.
+	// It will call back to sigprofNonGo, which will ignore the
+	// arguments passed in registers.
+	// First three arguments to traceback function are in registers already.
+	MOVQ	runtime·cgoTraceback(SB), CX
+	MOVQ	$runtime·sigprofCallers(SB), R8
+	MOVQ	$runtime·sigprofNonGo(SB), R9
+	MOVQ	_cgo_callers(SB), AX
+	JMP	AX
+
+// For cgo unwinding to work, this function must look precisely like
+// the one in glibc.  The glibc source code is:
+// https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/x86_64/sigaction.c
+// The code that cares about the precise instructions used is:
+// https://gcc.gnu.org/viewcvs/gcc/trunk/libgcc/config/i386/linux-unwind.h?revision=219188&view=markup
 TEXT runtime·sigreturn(SB),NOSPLIT,$0
-	MOVL	$15, AX	// rt_sigreturn
+	MOVQ	$15, AX	// rt_sigreturn
 	SYSCALL
 	INT $3	// not reached
 
-TEXT runtime·mmap(SB),NOSPLIT,$0
+TEXT runtime·sysMmap(SB),NOSPLIT,$0
 	MOVQ	addr+0(FP), DI
 	MOVQ	n+8(FP), SI
 	MOVL	prot+16(FP), DX
@@ -253,6 +369,24 @@ TEXT runtime·mmap(SB),NOSPLIT,$0
 	JLS	3(PC)
 	NOTQ	AX
 	INCQ	AX
+	MOVQ	AX, ret+32(FP)
+	RET
+
+// Call the function stored in _cgo_mmap using the GCC calling convention.
+// This must be called on the system stack.
+TEXT runtime·callCgoMmap(SB),NOSPLIT,$16
+	MOVQ	addr+0(FP), DI
+	MOVQ	n+8(FP), SI
+	MOVL	prot+16(FP), DX
+	MOVL	flags+20(FP), CX
+	MOVL	fd+24(FP), R8
+	MOVL	off+28(FP), R9
+	MOVQ	_cgo_mmap(SB), AX
+	MOVQ	SP, BX
+	ANDQ	$~15, SP	// alignment as per amd64 psABI
+	MOVQ	BX, 0(SP)
+	CALL	AX
+	MOVQ	0(SP), SP
 	MOVQ	AX, ret+32(FP)
 	RET
 
@@ -289,10 +423,10 @@ TEXT runtime·futex(SB),NOSPLIT,$0
 	MOVL	AX, ret+40(FP)
 	RET
 
-// int32 clone(int32 flags, void *stack, M *mp, G *gp, void (*fn)(void));
+// int32 clone(int32 flags, void *stk, M *mp, G *gp, void (*fn)(void));
 TEXT runtime·clone(SB),NOSPLIT,$0
 	MOVL	flags+0(FP), DI
-	MOVQ	stack+8(FP), SI
+	MOVQ	stk+8(FP), SI
 	MOVQ	$0, DX
 	MOVQ	$0, R10
 
@@ -339,15 +473,15 @@ nog:
 	// Call fn
 	CALL	R12
 
-	// It shouldn't return.  If it does, exit that thread.
+	// It shouldn't return. If it does, exit that thread.
 	MOVL	$111, DI
 	MOVL	$60, AX
 	SYSCALL
 	JMP	-3(PC)	// keep exiting
 
 TEXT runtime·sigaltstack(SB),NOSPLIT,$-8
-	MOVQ	new+8(SP), DI
-	MOVQ	old+16(SP), SI
+	MOVQ	new+0(FP), DI
+	MOVQ	old+8(FP), SI
 	MOVQ	$131, AX
 	SYSCALL
 	CMPQ	AX, $0xfffffffffffff001
@@ -357,8 +491,14 @@ TEXT runtime·sigaltstack(SB),NOSPLIT,$-8
 
 // set tls base to DI
 TEXT runtime·settls(SB),NOSPLIT,$32
+#ifdef GOOS_android
+	// Same as in sys_darwin_386.s:/ugliness, different constant.
+	// DI currently holds m->tls, which must be fs:0x1d0.
+	// See cgo/gcc_android_amd64.c for the derivation of the constant.
+	SUBQ	$0x1d0, DI  // In android, the tls base 
+#else
 	ADDQ	$8, DI	// ELF wants to use -8(FS)
-
+#endif
 	MOVQ	DI, SI
 	MOVQ	$0x1002, DI	// ARCH_SET_FS
 	MOVQ	$158, AX	// arch_prctl
@@ -427,4 +567,34 @@ TEXT runtime·closeonexec(SB),NOSPLIT,$0
 	MOVQ    $1, DX  // FD_CLOEXEC
 	MOVL	$72, AX  // fcntl
 	SYSCALL
+	RET
+
+
+// int access(const char *name, int mode)
+TEXT runtime·access(SB),NOSPLIT,$0
+	MOVQ	name+0(FP), DI
+	MOVL	mode+8(FP), SI
+	MOVL	$21, AX  // syscall entry
+	SYSCALL
+	MOVL	AX, ret+16(FP)
+	RET
+
+// int connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
+TEXT runtime·connect(SB),NOSPLIT,$0-28
+	MOVL	fd+0(FP), DI
+	MOVQ	addr+8(FP), SI
+	MOVL	len+16(FP), DX
+	MOVL	$42, AX  // syscall entry
+	SYSCALL
+	MOVL	AX, ret+24(FP)
+	RET
+
+// int socket(int domain, int type, int protocol)
+TEXT runtime·socket(SB),NOSPLIT,$0-20
+	MOVL	domain+0(FP), DI
+	MOVL	typ+4(FP), SI
+	MOVL	prot+8(FP), DX
+	MOVL	$41, AX  // syscall entry
+	SYSCALL
+	MOVL	AX, ret+16(FP)
 	RET

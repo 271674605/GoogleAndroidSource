@@ -31,13 +31,15 @@ class AppCompatBackgroundHelper {
     private final View mView;
     private final AppCompatDrawableManager mDrawableManager;
 
+    private int mBackgroundResId = -1;
+
     private TintInfo mInternalBackgroundTint;
     private TintInfo mBackgroundTint;
     private TintInfo mTmpInfo;
 
-    AppCompatBackgroundHelper(View view, AppCompatDrawableManager drawableManager) {
+    AppCompatBackgroundHelper(View view) {
         mView = view;
-        mDrawableManager = drawableManager;
+        mDrawableManager = AppCompatDrawableManager.get();
     }
 
     void loadFromAttributes(AttributeSet attrs, int defStyleAttr) {
@@ -45,8 +47,10 @@ class AppCompatBackgroundHelper {
                 R.styleable.ViewBackgroundHelper, defStyleAttr, 0);
         try {
             if (a.hasValue(R.styleable.ViewBackgroundHelper_android_background)) {
-                ColorStateList tint = mDrawableManager.getTintList(mView.getContext(),
-                        a.getResourceId(R.styleable.ViewBackgroundHelper_android_background, -1));
+                mBackgroundResId = a.getResourceId(
+                        R.styleable.ViewBackgroundHelper_android_background, -1);
+                ColorStateList tint = mDrawableManager
+                        .getTintList(mView.getContext(), mBackgroundResId);
                 if (tint != null) {
                     setInternalBackgroundTint(tint);
                 }
@@ -67,15 +71,19 @@ class AppCompatBackgroundHelper {
     }
 
     void onSetBackgroundResource(int resId) {
+        mBackgroundResId = resId;
         // Update the default background tint
         setInternalBackgroundTint(mDrawableManager != null
                 ? mDrawableManager.getTintList(mView.getContext(), resId)
                 : null);
+        applySupportBackgroundTint();
     }
 
     void onSetBackgroundDrawable(Drawable background) {
+        mBackgroundResId = -1;
         // We don't know that this drawable is, so we need to clear the default background tint
         setInternalBackgroundTint(null);
+        applySupportBackgroundTint();
     }
 
     void setSupportBackgroundTintList(ColorStateList tint) {
@@ -84,7 +92,6 @@ class AppCompatBackgroundHelper {
         }
         mBackgroundTint.mTintList = tint;
         mBackgroundTint.mHasTintList = true;
-
         applySupportBackgroundTint();
     }
 
@@ -109,10 +116,9 @@ class AppCompatBackgroundHelper {
     void applySupportBackgroundTint() {
         final Drawable background = mView.getBackground();
         if (background != null) {
-            if (Build.VERSION.SDK_INT == 21 && applyFrameworkTintUsingColorFilter(background)) {
-                // GradientDrawable doesn't implement setTintList on API 21, and since there is
-                // no nice way to unwrap DrawableContainers we have to blanket apply this
-                // on API 21. This needs to be called before the internal tints below so it takes
+            if (shouldApplyFrameworkTintUsingColorFilter()
+                    && applyFrameworkTintUsingColorFilter(background)) {
+                // This needs to be called before the internal tints below so it takes
                 // effect on any widgets using the compat tint on API 21 (EditText)
                 return;
             }
@@ -138,6 +144,23 @@ class AppCompatBackgroundHelper {
             mInternalBackgroundTint = null;
         }
         applySupportBackgroundTint();
+    }
+
+    private boolean shouldApplyFrameworkTintUsingColorFilter() {
+        final int sdk = Build.VERSION.SDK_INT;
+        if (sdk > 21) {
+            // On API 22+, if we're using an internal compat background tint, we're also
+            // responsible for applying any custom tint set via the framework impl
+            return mInternalBackgroundTint != null;
+        } else if (sdk == 21) {
+            // GradientDrawable doesn't implement setTintList on API 21, and since there is
+            // no nice way to unwrap DrawableContainers we have to blanket apply this
+            // on API 21
+            return true;
+        } else {
+            // API 19 and below doesn't have framework tint
+            return false;
+        }
     }
 
     /**

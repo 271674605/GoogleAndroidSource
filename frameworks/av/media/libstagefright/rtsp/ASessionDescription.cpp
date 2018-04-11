@@ -212,12 +212,14 @@ void ASessionDescription::getFormatType(
     *PT = x;
 
     char key[20];
-    sprintf(key, "a=rtpmap:%lu", x);
-
-    CHECK(findAttribute(index, key, desc));
-
-    sprintf(key, "a=fmtp:%lu", x);
-    if (!findAttribute(index, key, params)) {
+    snprintf(key, sizeof(key), "a=rtpmap:%lu", x);
+    if (findAttribute(index, key, desc)) {
+        snprintf(key, sizeof(key), "a=fmtp:%lu", x);
+        if (!findAttribute(index, key, params)) {
+            params->clear();
+        }
+    } else {
+        desc->clear();
         params->clear();
     }
 }
@@ -229,7 +231,7 @@ bool ASessionDescription::getDimensions(
     *height = 0;
 
     char key[20];
-    sprintf(key, "a=framesize:%lu", PT);
+    snprintf(key, sizeof(key), "a=framesize:%lu", PT);
     AString value;
     if (!findAttribute(index, key, &value)) {
         return false;

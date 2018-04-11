@@ -15,19 +15,28 @@
  */
 package android.media.cts;
 
-import android.cts.util.MediaUtils;
+import android.media.BufferingParams;
 import android.media.MediaFormat;
 import android.media.MediaPlayer;
 import android.media.MediaPlayer.TrackInfo;
 import android.media.TimedMetaData;
+import android.net.Uri;
+import android.os.Bundle;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.test.InstrumentationTestRunner;
 import android.util.Log;
 import android.webkit.cts.CtsTestServer;
 
+import com.android.compatibility.common.util.DynamicConfigDeviceSide;
+import com.android.compatibility.common.util.MediaUtils;
+
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.HashMap;
+import java.util.List;
 
 /**
  * Tests of MediaPlayer streaming capabilities.
@@ -35,7 +44,43 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
     private static final String TAG = "StreamingMediaPlayerTest";
 
+    private static final String HTTP_H263_AMR_VIDEO_1_KEY =
+            "streaming_media_player_test_http_h263_amr_video1";
+    private static final String HTTP_H263_AMR_VIDEO_2_KEY =
+            "streaming_media_player_test_http_h263_amr_video2";
+    private static final String HTTP_H264_BASE_AAC_VIDEO_1_KEY =
+            "streaming_media_player_test_http_h264_base_aac_video1";
+    private static final String HTTP_H264_BASE_AAC_VIDEO_2_KEY =
+            "streaming_media_player_test_http_h264_base_aac_video2";
+    private static final String HTTP_MPEG4_SP_AAC_VIDEO_1_KEY =
+            "streaming_media_player_test_http_mpeg4_sp_aac_video1";
+    private static final String HTTP_MPEG4_SP_AAC_VIDEO_2_KEY =
+            "streaming_media_player_test_http_mpeg4_sp_aac_video2";
+    private static final String MODULE_NAME = "CtsMediaTestCases";
+    private DynamicConfigDeviceSide dynamicConfig;
+
     private CtsTestServer mServer;
+
+    private String mInputUrl;
+
+    @Override
+    protected void setUp() throws Exception {
+        // if launched with InstrumentationTestRunner to pass a command line argument
+        if (getInstrumentation() instanceof InstrumentationTestRunner) {
+            InstrumentationTestRunner testRunner =
+                    (InstrumentationTestRunner)getInstrumentation();
+
+            Bundle arguments = testRunner.getArguments();
+            mInputUrl = arguments.getString("url");
+            Log.v(TAG, "setUp: arguments: " + arguments);
+            if (mInputUrl != null) {
+                Log.v(TAG, "setUp: arguments[url] " + mInputUrl);
+            }
+        }
+
+        super.setUp();
+        dynamicConfig = new DynamicConfigDeviceSide(MODULE_NAME);
+    }
 
 /* RTSP tests are more flaky and vulnerable to network condition.
    Disable until better solution is available
@@ -73,12 +118,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=13&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=5729247E22691EBB3E804DDD523EC42DC17DD8CE"
-                + ".443B81C1E8E6D64E4E1555F568BA46C206507D78"
-                + "&key=ik0&user=android-device-test", 176, 144);
+        String urlString = dynamicConfig.getValue(HTTP_H263_AMR_VIDEO_1_KEY);
+        playVideoTest(urlString, 176, 144);
     }
 
     public void testHTTP_H263_AMR_Video2() throws Exception {
@@ -86,12 +127,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=c80658495af60617"
-                + "&itag=13&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=508D82AB36939345BF6B8D0623CB6CABDD9C64C3"
-                + ".9B3336A96846DF38E5343C46AA57F6CF2956E427"
-                + "&key=ik0&user=android-device-test", 176, 144);
+        String urlString = dynamicConfig.getValue(HTTP_H263_AMR_VIDEO_2_KEY);
+        playVideoTest(urlString, 176, 144);
     }
 
     public void testHTTP_MPEG4SP_AAC_Video1() throws Exception {
@@ -99,12 +136,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=17&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=837198AAADF6F36BA6B2D324F690A7C5B7AFE3FF"
-                + ".7138CE5E36D718220726C1FC305497FF2D082249"
-                + "&key=ik0&user=android-device-test", 176, 144);
+        String urlString = dynamicConfig.getValue(HTTP_MPEG4_SP_AAC_VIDEO_1_KEY);
+        playVideoTest(urlString, 176, 144);
     }
 
     public void testHTTP_MPEG4SP_AAC_Video2() throws Exception {
@@ -112,12 +145,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=c80658495af60617"
-                + "&itag=17&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=70E979A621001201BC18622BDBF914FA870BDA40"
-                + ".6E78890B80F4A33A18835F775B1FF64F0A4D0003"
-                + "&key=ik0&user=android-device-test", 176, 144);
+        String urlString = dynamicConfig.getValue(HTTP_MPEG4_SP_AAC_VIDEO_2_KEY);
+        playVideoTest(urlString, 176, 144);
     }
 
     public void testHTTP_H264Base_AAC_Video1() throws Exception {
@@ -125,12 +154,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=271de9756065677e"
-                + "&itag=18&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=667AEEF54639926662CE62361400B8F8C1753B3F"
-                + ".15F46C382C68A9F121BA17BF1F56BEDEB4B06091"
-                + "&key=ik0&user=android-device-test", 640, 360);
+        String urlString = dynamicConfig.getValue(HTTP_H264_BASE_AAC_VIDEO_1_KEY);
+        playVideoTest(urlString, 640, 360);
     }
 
     public void testHTTP_H264Base_AAC_Video2() throws Exception {
@@ -138,12 +163,8 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
             return; // skip
         }
 
-        playVideoTest("http://redirector.c.youtube.com/videoplayback?id=c80658495af60617"
-                + "&itag=18&source=youtube&ip=0.0.0.0&ipbits=0&expire=19000000000"
-                + "&sparams=ip,ipbits,expire,id,itag,source"
-                + "&signature=46A04ED550CA83B79B60060BA80C79FDA5853D26"
-                + ".49582D382B4A9AFAA163DED38D2AE531D85603C0"
-                + "&key=ik0&user=android-device-test", 640, 360);
+        String urlString = dynamicConfig.getValue(HTTP_H264_BASE_AAC_VIDEO_2_KEY);
+        playVideoTest(urlString, 640, 360);
     }
 
     // Streaming HLS video from YouTube
@@ -160,6 +181,71 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
                 + "1996AD6A1BBCB70DCB87.95733B544ACC5F01A1223A837D2CF04DF85A336"
                 + "0/key/ik0/file/m3u8", 60 * 1000);
     }
+
+    public void testHlsWithHeadersCookies() throws Exception {
+        if (!MediaUtils.checkDecoder(MediaFormat.MIMETYPE_VIDEO_AVC)) {
+            return; // skip
+        }
+
+        final Uri uri = Uri.parse(
+                "http://www.youtube.com/api/manifest/hls_variant/id/"
+                + "0168724d02bd9945/itag/5/source/youtube/playlist_type/DVR/ip/"
+                + "0.0.0.0/ipbits/0/expire/19000000000/sparams/ip,ipbits,expire"
+                + ",id,itag,source,playlist_type/signature/773AB8ACC68A96E5AA48"
+                + "1996AD6A1BBCB70DCB87.95733B544ACC5F01A1223A837D2CF04DF85A336"
+                + "0/key/ik0/file/m3u8");
+
+        // TODO: dummy values for headers/cookies till we find a server that actually needs them
+        HashMap<String, String> headers = new HashMap<>();
+        headers.put("header0", "value0");
+        headers.put("header1", "value1");
+
+        String cookieName = "auth_1234567";
+        String cookieValue = "0123456789ABCDEF0123456789ABCDEF";
+        HttpCookie cookie = new HttpCookie(cookieName, cookieValue);
+        cookie.setHttpOnly(true);
+        cookie.setDomain("www.youtube.com");
+        cookie.setPath("/");        // all paths
+        cookie.setSecure(false);
+        cookie.setDiscard(false);
+        cookie.setMaxAge(24 * 3600);  // 24hrs
+
+        java.util.Vector<HttpCookie> cookies = new java.util.Vector<HttpCookie>();
+        cookies.add(cookie);
+
+        // Play stream for 60 seconds
+        playLiveVideoTest(uri, headers, cookies, 60 * 1000);
+    }
+
+    public void testHlsSampleAes_bbb_audio_only_overridable() throws Exception {
+        if (!MediaUtils.checkDecoder(MediaFormat.MIMETYPE_VIDEO_AVC)) {
+            return; // skip
+        }
+
+        String defaultUrl = "http://storage.googleapis.com/wvmedia/cenc/hls/sample_aes/" +
+                            "bbb_1080p_30fps_11min/audio_only/prog_index.m3u8";
+
+        // if url override provided
+        String testUrl = (mInputUrl != null) ? mInputUrl : defaultUrl;
+
+        // Play stream for 60 seconds
+        playLiveAudioOnlyTest(
+                testUrl,
+                60 * 1000);
+    }
+
+    public void testHlsSampleAes_bbb_unmuxed_1500k() throws Exception {
+        if (!MediaUtils.checkDecoder(MediaFormat.MIMETYPE_VIDEO_AVC)) {
+            return; // skip
+        }
+
+        // Play stream for 60 seconds
+        playLiveVideoTest(
+                "http://storage.googleapis.com/wvmedia/cenc/hls/sample_aes/" +
+                "bbb_1080p_30fps_11min/unmuxed_1500k/prog_index.m3u8",
+                60 * 1000);
+    }
+
 
     // Streaming audio from local HTTP server
     public void testPlayMp3Stream1() throws Throwable {
@@ -288,6 +374,85 @@ public class StreamingMediaPlayerTest extends MediaPlayerTestBase {
                 return;
             }
             fail("https playback should have failed");
+        } finally {
+            mServer.shutdown();
+        }
+    }
+
+    // TODO: unhide this test when we sort out how to expose buffering control API.
+    private void doTestBuffering() throws Throwable {
+        final String name = "ringer.mp3";
+        mServer = new CtsTestServer(mContext);
+        try {
+            String stream_url = mServer.getAssetUrl(name);
+
+            if (!MediaUtils.checkCodecsForPath(mContext, stream_url)) {
+                Log.w(TAG, "can not find stream " + stream_url + ", skipping test");
+                return; // skip
+            }
+
+            // getDefaultBufferingParams should be called after setDataSource.
+            try {
+                BufferingParams params = mMediaPlayer.getDefaultBufferingParams();
+                fail("MediaPlayer failed to check state for getDefaultBufferingParams");
+            } catch (IllegalStateException e) {
+                // expected
+            }
+
+            mMediaPlayer.setDataSource(stream_url);
+
+            mMediaPlayer.setDisplay(getActivity().getSurfaceHolder());
+            mMediaPlayer.setScreenOnWhilePlaying(true);
+
+            mOnBufferingUpdateCalled.reset();
+            mMediaPlayer.setOnBufferingUpdateListener(new MediaPlayer.OnBufferingUpdateListener() {
+                @Override
+                public void onBufferingUpdate(MediaPlayer mp, int percent) {
+                    mOnBufferingUpdateCalled.signal();
+                }
+            });
+            mMediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                @Override
+                public boolean onError(MediaPlayer mp, int what, int extra) {
+                    fail("Media player had error " + what + " playing " + name);
+                    return true;
+                }
+            });
+
+            assertFalse(mOnBufferingUpdateCalled.isSignalled());
+
+            BufferingParams params = mMediaPlayer.getDefaultBufferingParams();
+
+            int newMark = -1;
+            BufferingParams newParams = null;
+            int initialBufferingMode = params.getInitialBufferingMode();
+            if (initialBufferingMode == BufferingParams.BUFFERING_MODE_SIZE_ONLY
+                    || initialBufferingMode == BufferingParams.BUFFERING_MODE_TIME_THEN_SIZE) {
+                newMark = params.getInitialBufferingWatermarkKB() + 1;
+                newParams = new BufferingParams.Builder(params).setInitialBufferingWatermarkKB(
+                        newMark).build();
+            } else if (initialBufferingMode == BufferingParams.BUFFERING_MODE_TIME_ONLY) {
+                newMark = params.getInitialBufferingWatermarkMs() + 1;
+                newParams = new BufferingParams.Builder(params).setInitialBufferingWatermarkMs(
+                        newMark).build();
+            } else {
+                newParams = params;
+            }
+            mMediaPlayer.setBufferingParams(newParams);
+
+            int checkMark = -1;
+            BufferingParams checkParams = mMediaPlayer.getBufferingParams();
+            if (initialBufferingMode == BufferingParams.BUFFERING_MODE_SIZE_ONLY
+                    || initialBufferingMode == BufferingParams.BUFFERING_MODE_TIME_THEN_SIZE) {
+                checkMark = checkParams.getInitialBufferingWatermarkKB();
+            } else if (initialBufferingMode == BufferingParams.BUFFERING_MODE_TIME_ONLY) {
+                checkMark = checkParams.getInitialBufferingWatermarkMs();
+            }
+            assertEquals("marks do not match", newMark, checkMark);
+
+            // TODO: add more dynamic checking, e.g., buffering shall not exceed pre-set mark.
+
+            mMediaPlayer.reset();
         } finally {
             mServer.shutdown();
         }

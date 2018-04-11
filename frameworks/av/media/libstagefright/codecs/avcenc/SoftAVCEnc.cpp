@@ -30,7 +30,6 @@
 #include <media/stagefright/Utils.h>
 #include <OMX_IndexExt.h>
 #include <OMX_VideoExt.h>
-#include <ui/Rect.h>
 
 #include "ih264_typedefs.h"
 #include "iv2.h"
@@ -614,6 +613,7 @@ OMX_ERRORTYPE SoftAVC::initEncoder() {
     IV_STATUS_T status;
     WORD32 level;
     uint32_t displaySizeY;
+
     CHECK(!mStarted);
 
     OMX_ERRORTYPE errType = OMX_ErrorNone;
@@ -917,6 +917,9 @@ OMX_ERRORTYPE SoftAVC::releaseEncoder() {
         }
     }
 
+    // clear other pointers into the space being free()d
+    mCodecCtx = NULL;
+
     mStarted = false;
 
     return OMX_ErrorNone;
@@ -1016,10 +1019,10 @@ OMX_ERRORTYPE SoftAVC::internalSetParameter(OMX_INDEXTYPE index, const OMX_PTR p
 
             if ((avcType->nAllowedPictureTypes & OMX_VIDEO_PictureTypeB) &&
                     avcType->nPFrames) {
-                mBframes = avcType->nBFrames / avcType->nPFrames;
+                mBframes = avcType->nBFrames;
             }
 
-            mIInterval = avcType->nPFrames + avcType->nBFrames;
+            mIInterval = (avcType->nPFrames + 1) * (avcType->nBFrames + 1);
             mConstrainedIntraFlag = avcType->bconstIpred;
 
             if (OMX_VIDEO_AVCLoopFilterDisable == avcType->eLoopFilterMode)
@@ -1033,7 +1036,9 @@ OMX_ERRORTYPE SoftAVC::internalSetParameter(OMX_INDEXTYPE index, const OMX_PTR p
                     || avcType->bDirect8x8Inference != OMX_FALSE
                     || avcType->bDirectSpatialTemporal != OMX_FALSE
                     || avcType->nCabacInitIdc != 0) {
-                return OMX_ErrorUndefined;
+                // OMX does not allow a way to signal what values are wrong, so it's
+                // best for components to just do best effort in supporting these values
+                ALOGV("ignoring unsupported settings");
             }
 
             if (OK != ConvertOmxAvcLevelToAvcSpecLevel(avcType->eLevel, &mAVCEncLevel)) {
@@ -1505,6 +1510,14 @@ void SoftAVC::onQueueFilled(OMX_U32 portIndex) {
         }
     }
     return;
+}
+
+void SoftAVC::onReset() {
+    SoftVideoEncoderOMXComponent::onReset();
+
+    if (releaseEncoder() != OMX_ErrorNone) {
+        ALOGW("releaseEncoder failed");
+    }
 }
 
 }  // namespace android

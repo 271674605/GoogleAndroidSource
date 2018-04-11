@@ -25,21 +25,24 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.os.PersistableBundle;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.preference.CheckBoxPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceScreen;
+import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
 import android.telephony.CarrierConfigManager;
+import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
@@ -105,9 +108,9 @@ public class CallFeaturesSetting extends PreferenceActivity
     private SubscriptionInfoHelper mSubscriptionInfoHelper;
     private TelecomManager mTelecomManager;
 
-    private CheckBoxPreference mButtonAutoRetry;
+    private SwitchPreference mButtonAutoRetry;
     private PreferenceScreen mVoicemailSettingsScreen;
-    private CheckBoxPreference mEnableVideoCalling;
+    private SwitchPreference mEnableVideoCalling;
 
     /*
      * Click Listeners, handle click based on objects attached to UI.
@@ -185,6 +188,24 @@ public class CallFeaturesSetting extends PreferenceActivity
         mTelecomManager = TelecomManager.from(this);
     }
 
+    private final PhoneStateListener mPhoneStateListener = new PhoneStateListener() {
+        @Override
+        public void onCallStateChanged(int state, String incomingNumber) {
+            if (DBG) log("PhoneStateListener onCallStateChanged: state is " + state);
+            if (mEnableVideoCalling != null) {
+                mEnableVideoCalling.setEnabled(state == TelephonyManager.CALL_STATE_IDLE);
+            }
+        }
+    };
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        TelephonyManager telephonyManager =
+                (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        telephonyManager.listen(mPhoneStateListener, PhoneStateListener.LISTEN_NONE);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -198,6 +219,7 @@ public class CallFeaturesSetting extends PreferenceActivity
 
         TelephonyManager telephonyManager =
                 (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        telephonyManager.listen(mPhoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
 
         Preference phoneAccountSettingsPreference = findPreference(PHONE_ACCOUNT_SETTINGS_KEY);
         if (telephonyManager.isMultiSimEnabled() || !SipUtil.isVoipSupported(mPhone.getContext())) {
@@ -210,9 +232,11 @@ public class CallFeaturesSetting extends PreferenceActivity
         mVoicemailSettingsScreen.setIntent(mSubscriptionInfoHelper.getIntent(
                 VoicemailSettingsActivity.class));
 
-        mButtonAutoRetry = (CheckBoxPreference) findPreference(BUTTON_RETRY_KEY);
+        maybeHideVoicemailSettings();
 
-        mEnableVideoCalling = (CheckBoxPreference) findPreference(ENABLE_VIDEO_CALLING_KEY);
+        mButtonAutoRetry = (SwitchPreference) findPreference(BUTTON_RETRY_KEY);
+
+        mEnableVideoCalling = (SwitchPreference) findPreference(ENABLE_VIDEO_CALLING_KEY);
 
         PersistableBundle carrierConfig =
                 PhoneGlobals.getInstance().getCarrierConfigForSubId(mPhone.getSubId());
@@ -229,6 +253,8 @@ public class CallFeaturesSetting extends PreferenceActivity
 
         Preference cdmaOptions = prefSet.findPreference(BUTTON_CDMA_OPTIONS);
         Preference gsmOptions = prefSet.findPreference(BUTTON_GSM_UMTS_OPTIONS);
+        Preference fdnButton = prefSet.findPreference(BUTTON_FDN_KEY);
+        fdnButton.setIntent(mSubscriptionInfoHelper.getIntent(FdnSetting.class));
         if (carrierConfig.getBoolean(CarrierConfigManager.KEY_WORLD_PHONE_BOOL)) {
             cdmaOptions.setIntent(mSubscriptionInfoHelper.getIntent(CdmaCallOptions.class));
             gsmOptions.setIntent(mSubscriptionInfoHelper.getIntent(GsmUmtsCallOptions.class));
@@ -237,7 +263,6 @@ public class CallFeaturesSetting extends PreferenceActivity
             prefSet.removePreference(gsmOptions);
 
             int phoneType = mPhone.getPhoneType();
-            Preference fdnButton = prefSet.findPreference(BUTTON_FDN_KEY);
             if (carrierConfig.getBoolean(CarrierConfigManager.KEY_HIDE_CARRIER_NETWORK_SETTINGS_BOOL)) {
                 prefSet.removePreference(fdnButton);
             } else {
@@ -249,7 +274,6 @@ public class CallFeaturesSetting extends PreferenceActivity
                         addPreferencesFromResource(R.xml.cdma_call_privacy);
                     }
                 } else if (phoneType == PhoneConstants.PHONE_TYPE_GSM) {
-                    fdnButton.setIntent(mSubscriptionInfoHelper.getIntent(FdnSetting.class));
 
                     if (carrierConfig.getBoolean(
                             CarrierConfigManager.KEY_ADDITIONAL_CALL_SETTING_BOOL)) {
@@ -262,7 +286,11 @@ public class CallFeaturesSetting extends PreferenceActivity
             }
         }
 
-        if (ImsManager.isVtEnabledByPlatform(mPhone.getContext())) {
+        if (ImsManager.isVtEnabledByPlatform(mPhone.getContext()) &&
+                ImsManager.isVtProvisionedOnDevice(mPhone.getContext()) &&
+                (carrierConfig.getBoolean(
+                        CarrierConfigManager.KEY_IGNORE_DATA_ENABLED_CHANGED_FOR_VIDEO_CALLS)
+                        || mPhone.mDcTracker.isDataEnabled())) {
             boolean currentValue =
                     ImsManager.isEnhanced4gLteModeSettingEnabledByUser(mPhone.getContext())
                     ? PhoneGlobals.getInstance().phoneMgr.isVideoCallingEnabled(
@@ -300,12 +328,14 @@ public class CallFeaturesSetting extends PreferenceActivity
             } else {
                 prefSet.removePreference(wifiCallingSettings);
             }
-        } else if (!ImsManager.isWfcEnabledByPlatform(mPhone.getContext())) {
+        } else if (!ImsManager.isWfcEnabledByPlatform(mPhone.getContext()) ||
+                !ImsManager.isWfcProvisionedOnDevice(mPhone.getContext())) {
             prefSet.removePreference(wifiCallingSettings);
         } else {
             int resId = com.android.internal.R.string.wifi_calling_off_summary;
             if (ImsManager.isWfcEnabledByUser(mPhone.getContext())) {
-                int wfcMode = ImsManager.getWfcMode(mPhone.getContext());
+                boolean isRoaming = telephonyManager.isNetworkRoaming();
+                int wfcMode = ImsManager.getWfcMode(mPhone.getContext(), isRoaming);
                 switch (wfcMode) {
                     case ImsConfig.WfcModeFeatureValueConstants.WIFI_ONLY:
                         resId = com.android.internal.R.string.wfc_mode_wifi_only_summary;
@@ -321,6 +351,41 @@ public class CallFeaturesSetting extends PreferenceActivity
                 }
             }
             wifiCallingSettings.setSummary(resId);
+        }
+    }
+
+    /**
+     * Hides the top level voicemail settings entry point if the default dialer contains a
+     * particular manifest metadata key. This is required when the default dialer wants to display
+     * its own version of voicemail settings.
+     */
+    private void maybeHideVoicemailSettings() {
+        String defaultDialer = getSystemService(TelecomManager.class).getDefaultDialerPackage();
+        if (defaultDialer == null) {
+            return;
+        }
+        try {
+            Bundle metadata = getPackageManager()
+                    .getApplicationInfo(defaultDialer, PackageManager.GET_META_DATA).metaData;
+            if (metadata == null) {
+                return;
+            }
+            if (!metadata
+                    .getBoolean(TelephonyManager.METADATA_HIDE_VOICEMAIL_SETTINGS_MENU, false)) {
+                if (DBG) {
+                    log("maybeHideVoicemailSettings(): not disabled by default dialer");
+                }
+                return;
+            }
+            getPreferenceScreen().removePreference(mVoicemailSettingsScreen);
+            if (DBG) {
+                log("maybeHideVoicemailSettings(): disabled by default dialer");
+            }
+        } catch (NameNotFoundException e) {
+            // do nothing
+            if (DBG) {
+                log("maybeHideVoicemailSettings(): not controlled by default dialer");
+            }
         }
     }
 

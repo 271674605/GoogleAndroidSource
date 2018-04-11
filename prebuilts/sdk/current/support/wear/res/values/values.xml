@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="BoxInsetLayout_Layout"><attr name="boxedEdges">
+            
+            <flag name="none" value="0x00"/>
+            
+            <flag name="left" value="0x01"/>
+            
+            <flag name="top" value="0x02"/>
+            
+            <flag name="right" value="0x04"/>
+            
+            <flag name="bottom" value="0x08"/>
+            
+            <flag name="all" value="0x0F"/>
+        </attr></declare-styleable>
+    <declare-styleable name="CircledImageView"><attr name="android:src"/><attr format="color" name="circle_color"/><attr format="dimension" name="circle_radius"/><attr format="dimension" name="circle_radius_pressed"/><attr format="dimension" name="circle_border_width"/><attr format="color" name="circle_border_color"/><attr format="enum" name="circle_border_cap">
+            <enum name="butt" value="0"/>
+            <enum name="round" value="1"/>
+            <enum name="square" value="2"/>
+        </attr><attr format="dimension" name="circle_padding"/><attr format="dimension" name="shadow_width"/><attr format="dimension" name="image_circle_percentage"/><attr format="dimension" name="image_horizontal_offcenter_percentage"/><attr format="color" name="image_tint"/><attr format="fraction" name="circle_radius_percent"/><attr format="fraction" name="circle_radius_pressed_percent"/><attr format="enum" name="square_dimen">
+            <enum name="none" value="0"/>
+            <enum name="height" value="1"/>
+            <enum name="width" value="2"/>
+        </attr></declare-styleable>
+    <declare-styleable name="PageIndicatorView"><attr format="dimension" name="pageIndicatorDotSpacing"/><attr format="dimension" name="pageIndicatorDotRadius"/><attr format="dimension" name="pageIndicatorDotRadiusSelected"/><attr format="color" name="pageIndicatorDotColor"/><attr format="color" name="pageIndicatorDotColorSelected"/><attr format="boolean" name="pageIndicatorDotFadeWhenIdle"/><attr format="integer" name="pageIndicatorDotFadeOutDelay"/><attr format="integer" name="pageIndicatorDotFadeOutDuration"/><attr format="integer" name="pageIndicatorDotFadeInDuration"/><attr format="color" name="pageIndicatorDotShadowColor"/><attr format="dimension" name="pageIndicatorDotShadowRadius"/><attr format="dimension" name="pageIndicatorDotShadowDx"/><attr format="dimension" name="pageIndicatorDotShadowDy"/></declare-styleable>
+    <declare-styleable name="WearableActionDrawerView"><attr format="string" name="drawerTitle"/><attr format="reference" name="actionMenu"/><attr format="boolean" name="showOverflowInPeek"/></declare-styleable>
+    <declare-styleable name="WearableDrawerView"><attr format="reference" name="peekView"/><attr format="reference" name="drawerContent"/><attr format="boolean" name="enableAutoPeek"/><attr name="android:background"/><attr name="android:elevation"/></declare-styleable>
+    <declare-styleable name="WearableNavigationDrawerView"><attr format="enum" name="navigationStyle">
+            
+            <enum name="singlePage" value="0"/>
+            
+            <enum name="multiPage" value="1"/>
+        </attr></declare-styleable>
+    <declare-styleable name="WearableRecyclerView"><attr format="fraction" name="bezelWidth"/><attr format="boolean" name="circularScrollingGestureEnabled"/><attr format="float" name="scrollDegreesPerScreen"/></declare-styleable>
+    <dimen name="action_drawer_expand_icon_top_margin">-3dp</dimen>
+    <dimen name="action_drawer_item_bottom_padding">8dp</dimen>
+    <dimen name="action_drawer_item_icon_padding">7dp</dimen>
+    <dimen name="action_drawer_item_icon_right_margin">8dp</dimen>
+    <dimen name="action_drawer_item_icon_size">36dp</dimen>
+    <dimen name="action_drawer_item_text_size">14sp</dimen>
+    <dimen name="action_drawer_item_top_padding">8dp</dimen>
+    <dimen name="action_drawer_peek_top_padding">2dp</dimen>
+    <dimen name="action_drawer_peek_view_height">43dp</dimen>
+    <dimen name="drawer_view_edge_size">38dp</dimen>
+    <dimen name="nav_drawer_single_page_circle_radius">24dp</dimen>
+    <dimen name="nav_drawer_single_page_icon_padding">6dp</dimen>
+    <dimen name="nav_drawer_single_page_icon_size">28dp</dimen>
+    <dimen name="nav_drawer_text_size">12sp</dimen>
+    <dimen name="peek_view_bottom_padding">8dp</dimen>
+    <dimen name="peek_view_icon_size">22dp</dimen>
+    <dimen name="peek_view_top_padding">8dp</dimen>
+    <dimen name="wearable_drawer_view_elevation">12dp</dimen>
+    <dimen name="wrv_curve_default_x_offset">24dp</dimen>
+    <item name="action_drawer_item_first_item_top_padding" type="fraction">15%</item>
+    <item name="action_drawer_item_last_item_bottom_padding" type="fraction">15%</item>
+    <item name="action_drawer_item_left_padding" type="fraction">15%</item>
+    <item name="action_drawer_item_right_padding" type="fraction">10%</item>
+    <fraction name="nav_drawer_margin_2_items">20%</fraction>
+    <fraction name="nav_drawer_margin_3_items">16%</fraction>
+    <fraction name="nav_drawer_margin_4_items_horizontal">13%</fraction>
+    <fraction name="nav_drawer_margin_4_items_vertical">16.9%</fraction>
+    <fraction name="nav_drawer_margin_5_items_horizontal_middle_row">13%</fraction>
+    <fraction name="nav_drawer_margin_5_items_horizontal_outer_rows">27.4%</fraction>
+    <fraction name="nav_drawer_margin_5_items_vertical">16.9%</fraction>
+    <fraction name="nav_drawer_margin_6_items_horizontal">16%</fraction>
+    <fraction name="nav_drawer_margin_6_items_vertical">26.8%</fraction>
+    <fraction name="nav_drawer_margin_7_items_horizontal_middle_row">13%</fraction>
+    <fraction name="nav_drawer_margin_7_items_horizontal_outer_rows">27.4%</fraction>
+    <fraction name="nav_drawer_margin_7_items_vertical">16.9%</fraction>
+    <fraction name="nav_drawer_text_margin">13%</fraction>
+    <item name="wearable_support_navigation_drawer_view_pager" type="id"/>
+    <string name="action_drawer_content_description">Action drawer</string>
+    <string name="navigation_drawer_content_description">Navigation drawer</string>
+    <style name="SinglePageNavDrawerIconStyle">
+        <item name="android:layout_height">@dimen/nav_drawer_single_page_icon_size</item>
+        <item name="android:layout_width">@dimen/nav_drawer_single_page_icon_size</item>
+        <item name="android:padding">@dimen/nav_drawer_single_page_icon_padding</item>
+        <item name="android:clipToPadding">false</item>
+        <item name="circle_radius">@dimen/nav_drawer_single_page_circle_radius</item>
+        <item name="circle_color">#33ffffff</item>
+    </style>
+    <style name="SinglePageNavDrawerTextStyle">
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:fontFamily">sans-serif-condensed</item>
+        <item name="android:textSize">@dimen/nav_drawer_text_size</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">2</item>
+        <item name="layout_marginTopPercent">@fraction/nav_drawer_text_margin</item>
+        <item name="layout_marginStartPercent">@fraction/nav_drawer_text_margin</item>
+        <item name="layout_marginEndPercent">@fraction/nav_drawer_text_margin</item>
+    </style>
+    <style name="Widget.Wearable.WearableDrawerView" parent="">
+        <item name="android:elevation">@dimen/wearable_drawer_view_elevation</item>
+        <item name="android:background">?android:attr/colorBackgroundFloating</item>
+    </style>
+</resources>

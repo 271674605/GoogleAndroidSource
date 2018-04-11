@@ -45,9 +45,10 @@
     <string name="no_vm_number" msgid="4164780423805688336">"Nambari ya sauti inayokosekana"</string>
     <string name="no_vm_number_msg" msgid="1300729501030053828">"Hakuna nambari ya ujumbe wa sauti iliyohifadhiwa katika SIM kadi."</string>
     <string name="add_vm_number_str" msgid="4676479471644687453">"Ongeza nambari"</string>
-    <string name="change_default_dialer_dialog_title" msgid="4430590714918044425">"Ungependa kubadilisha programu chaguo-msingi ya simu?"</string>
-    <string name="change_default_dialer_with_previous_app_set_text" msgid="3213396537499337949">"Ungependa kutumia <xliff:g id="NEW_APP">%1$s</xliff:g> badala ya <xliff:g id="CURRENT_APP">%2$s</xliff:g> kama programu ya chaguo-msingi ya kupigia simu?"</string>
-    <string name="change_default_dialer_no_previous_app_set_text" msgid="7608426684114545221">"Ungependa kutumia <xliff:g id="NEW_APP">%s</xliff:g> kama programu ya chaguo-msingi ya kupigia simu?"</string>
+    <string name="change_default_dialer_dialog_title" msgid="9101655962941740507">"Unataka kufanya <xliff:g id="NEW_APP">%s</xliff:g> iwe programu chaguo-msingi ya simu?"</string>
+    <string name="change_default_dialer_dialog_affirmative" msgid="8606546663509166276">"Fanya iwe Chaguo-Msingi"</string>
+    <string name="change_default_dialer_dialog_negative" msgid="9078144617060173845">"Ghairi"</string>
+    <string name="change_default_dialer_warning_message" msgid="1417671460801684999">"<xliff:g id="NEW_APP">%s</xliff:g> itaweza kupiga simu na kudhibiti kila kipengele cha simu. Unastahili kuweka programu unazoziamini tu kama programu chaguo-msingi ya kupiga simu."</string>
     <string name="blocked_numbers" msgid="2751843139572970579">"Nambari zilizozuiwa"</string>
     <string name="blocked_numbers_msg" msgid="1045015186124965643">"Hutapokea simu au SMS kutoka kwa nambari zilizozuiwa."</string>
     <string name="block_number" msgid="1101252256321306179">"Ongeza nambari"</string>
@@ -66,4 +67,20 @@
     <string name="blocked_numbers_block_emergency_number_message" msgid="917851876780698387">"Huwezi kuzuia nambari ya dharura."</string>
     <string name="blocked_numbers_number_already_blocked_message" msgid="4392247814500811798">"<xliff:g id="BLOCKED_NUMBER">%1$s</xliff:g> tayari imezuiwa."</string>
     <string name="toast_personal_call_msg" msgid="5115361633476779723">"Kupiga simu kwa kutumia kipiga simu cha binafsi"</string>
+    <string name="notification_incoming_call" msgid="7713197997773986670">"Simu ya <xliff:g id="CALL_VIA">%1$s</xliff:g> kutoka kwa <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="notification_incoming_video_call" msgid="6638486071698373893">"Simu ya video ya <xliff:g id="CALL_VIA">%1$s</xliff:g> kutoka kwa <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="answering_ends_other_call" msgid="8282145910153766401">"Ukijibu utakata simu yako ya <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_calls" msgid="1198589551399049197">"Ukijibu utakata simu zako za <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_video_call" msgid="8510410917384186360">"Ukijibu utakata simu yako ya video ya <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_managed_call" msgid="5186137550267947785">"Ukijibu utakata simu yako inayoendelea"</string>
+    <string name="answering_ends_other_managed_calls" msgid="6429838309560397988">"Ukijibu utakata simu zako zinazoendelea"</string>
+    <string name="answering_ends_other_managed_video_call" msgid="1585423762458248435">"Ukijibu utakata simu yako ya video inayoendelea"</string>
+    <string name="answer_incoming_call" msgid="4140530013111794587">"Jibu"</string>
+    <string name="decline_incoming_call" msgid="806026168661598368">"Kataa"</string>
+    <string name="cant_call_due_to_ongoing_call" msgid="4952615196237854748">"Haiwezekani kupiga kwa sababu ya simu yako ya <xliff:g id="OTHER_CALL">%1$s</xliff:g> inayoendelea."</string>
+    <string name="cant_call_due_to_ongoing_calls" msgid="1380804892363503856">"Haiwezekani kupiga kwa sababu ya simu zako za <xliff:g id="OTHER_CALL">%1$s</xliff:g> zinazoendelea."</string>
+    <string name="cant_call_due_to_ongoing_unknown_call" msgid="149091978697302211">"Haiwezekani kwa sababu kuna simu inayoendelea kwenye programu nyingine."</string>
+    <string name="notification_channel_incoming_call" msgid="3513761697082968084">"Simu zinazoingia"</string>
+    <string name="notification_channel_missed_call" msgid="8727062678632713146">"Simu ambazo hukujibu"</string>
+    <string name="alert_outgoing_call" msgid="982908156825958001">"Ukipiga simu hii, simu yako kwenye <xliff:g id="OTHER_APP">%1$s</xliff:g> itakatwa."</string>
 </resources>

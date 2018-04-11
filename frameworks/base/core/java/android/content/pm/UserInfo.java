@@ -28,8 +28,8 @@ import android.os.UserManager;
  */
 public class UserInfo implements Parcelable {
 
-    /** 8 bits for user type */
-    public static final int FLAG_MASK_USER_TYPE = 0x000000FF;
+    /** 16 bits for user type */
+    public static final int FLAG_MASK_USER_TYPE = 0x0000FFFF;
 
     /**
      * *************************** NOTE ***************************
@@ -87,6 +87,11 @@ public class UserInfo implements Parcelable {
      */
     public static final int FLAG_EPHEMERAL = 0x00000100;
 
+    /**
+     * User is for demo purposes only and can be removed at any time.
+     */
+    public static final int FLAG_DEMO = 0x00000200;
+
     public static final int NO_PROFILE_GROUP_ID = UserHandle.USER_NULL;
 
     public int id;
@@ -97,8 +102,15 @@ public class UserInfo implements Parcelable {
     public long creationTime;
     public long lastLoggedInTime;
     public String lastLoggedInFingerprint;
+    /**
+     * If this user is a parent user, it would be its own user id.
+     * If this user is a child user, it would be its parent user id.
+     * Otherwise, it would be {@link #NO_PROFILE_GROUP_ID}.
+     */
     public int profileGroupId;
     public int restrictedProfileParentId;
+    /** Which profile badge color/label to use. */
+    public int profileBadge;
 
     /** User is only partially created. */
     public boolean partial;
@@ -153,6 +165,10 @@ public class UserInfo implements Parcelable {
         return (flags & FLAG_INITIALIZED) == FLAG_INITIALIZED;
     }
 
+    public boolean isDemo() {
+        return (flags & FLAG_DEMO) == FLAG_DEMO;
+    }
+
     /**
      * Returns true if the user is a split system user.
      * <p>If {@link UserManager#isSplitSystemUser split system user mode} is not enabled,
@@ -179,8 +195,7 @@ public class UserInfo implements Parcelable {
             // Don't support switching to an ephemeral user with removal in progress.
             return false;
         }
-        // TODO remove fw.show_hidden_users when we have finished developing managed profiles.
-        return !isManagedProfile() || SystemProperties.getBoolean("fw.show_hidden_users", false);
+        return !isManagedProfile();
     }
 
     /**
@@ -220,6 +235,7 @@ public class UserInfo implements Parcelable {
         profileGroupId = orig.profileGroupId;
         restrictedProfileParentId = orig.restrictedProfileParentId;
         guestToRemove = orig.guestToRemove;
+        profileBadge = orig.profileBadge;
     }
 
     public UserHandle getUserHandle() {
@@ -248,6 +264,7 @@ public class UserInfo implements Parcelable {
         dest.writeInt(profileGroupId);
         dest.writeInt(guestToRemove ? 1 : 0);
         dest.writeInt(restrictedProfileParentId);
+        dest.writeInt(profileBadge);
     }
 
     public static final Parcelable.Creator<UserInfo> CREATOR
@@ -273,5 +290,6 @@ public class UserInfo implements Parcelable {
         profileGroupId = source.readInt();
         guestToRemove = source.readInt() != 0;
         restrictedProfileParentId = source.readInt();
+        profileBadge = source.readInt();
     }
 }

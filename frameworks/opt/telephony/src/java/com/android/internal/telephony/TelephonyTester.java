@@ -20,17 +20,23 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.BadParcelableException;
 import android.os.Build;
+import android.preference.PreferenceManager;
 import android.telephony.Rlog;
+import android.telephony.ServiceState;
 
 import com.android.ims.ImsCall;
 import com.android.ims.ImsCallProfile;
 import com.android.ims.ImsConferenceState;
 import com.android.ims.ImsExternalCallState;
+import com.android.ims.ImsReasonInfo;
 import com.android.internal.telephony.imsphone.ImsExternalCallTracker;
 import com.android.internal.telephony.imsphone.ImsPhone;
 import com.android.internal.telephony.imsphone.ImsPhoneCall;
+import com.android.internal.telephony.imsphone.ImsPhoneCallTracker;
 import com.android.internal.telephony.test.TestConferenceEventPackageParser;
 
 import java.io.File;
@@ -71,6 +77,12 @@ public class TelephonyTester {
     private static final String EXTRA_STATE = "state";
     private static final String EXTRA_CANPULL = "canPull";
 
+    /**
+     * Test-only intent used to trigger the signalling which occurs when a handover to WIFI fails.
+     */
+    private static final String ACTION_TEST_HANDOVER_FAIL =
+            "com.android.internal.telephony.TestHandoverFail";
+
     private static List<ImsExternalCallState> mImsExternalCallStates = null;
 
     private Phone mPhone;
@@ -81,21 +93,29 @@ public class TelephonyTester {
             @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            if (DBG) log("sIntentReceiver.onReceive: action=" + action);
-            if (action.equals(mPhone.getActionDetached())) {
-                log("simulate detaching");
-                mPhone.getServiceStateTracker().mDetachedRegistrants.notifyRegistrants();
-            } else if (action.equals(mPhone.getActionAttached())) {
-                log("simulate attaching");
-                mPhone.getServiceStateTracker().mAttachedRegistrants.notifyRegistrants();
-            } else if (action.equals(ACTION_TEST_CONFERENCE_EVENT_PACKAGE)) {
-                log("inject simulated conference event package");
-                handleTestConferenceEventPackage(context, intent.getStringExtra(EXTRA_FILENAME));
-            } else if (action.equals(ACTION_TEST_DIALOG_EVENT_PACKAGE)) {
-                log("handle test dialog event package intent");
-                handleTestDialogEventPackageIntent(intent);
-            } else {
-                if (DBG) log("onReceive: unknown action=" + action);
+            try {
+                if (DBG) log("sIntentReceiver.onReceive: action=" + action);
+                if (action.equals(mPhone.getActionDetached())) {
+                    log("simulate detaching");
+                    mPhone.getServiceStateTracker().mDetachedRegistrants.notifyRegistrants();
+                } else if (action.equals(mPhone.getActionAttached())) {
+                    log("simulate attaching");
+                    mPhone.getServiceStateTracker().mAttachedRegistrants.notifyRegistrants();
+                } else if (action.equals(ACTION_TEST_CONFERENCE_EVENT_PACKAGE)) {
+                    log("inject simulated conference event package");
+                    handleTestConferenceEventPackage(context,
+                            intent.getStringExtra(EXTRA_FILENAME));
+                } else if (action.equals(ACTION_TEST_DIALOG_EVENT_PACKAGE)) {
+                    log("handle test dialog event package intent");
+                    handleTestDialogEventPackageIntent(intent);
+                } else if (action.equals(ACTION_TEST_HANDOVER_FAIL)) {
+                    log("handle handover fail test intent");
+                    handleHandoverFailedIntent();
+                } else {
+                    if (DBG) log("onReceive: unknown action=" + action);
+                }
+            } catch (BadParcelableException e) {
+                Rlog.w(LOG_TAG, e);
             }
         }
     };
@@ -116,6 +136,7 @@ public class TelephonyTester {
                 log("register for intent action=" + ACTION_TEST_CONFERENCE_EVENT_PACKAGE);
                 filter.addAction(ACTION_TEST_CONFERENCE_EVENT_PACKAGE);
                 filter.addAction(ACTION_TEST_DIALOG_EVENT_PACKAGE);
+                filter.addAction(ACTION_TEST_HANDOVER_FAIL);
                 mImsExternalCallStates = new ArrayList<ImsExternalCallState>();
             }
 
@@ -131,6 +152,28 @@ public class TelephonyTester {
 
     private static void log(String s) {
         Rlog.d(LOG_TAG, s);
+    }
+
+    private void handleHandoverFailedIntent() {
+        // Attempt to get the active IMS call
+        ImsPhone imsPhone = (ImsPhone) mPhone;
+        if (imsPhone == null) {
+            return;
+        }
+
+        ImsPhoneCall imsPhoneCall = imsPhone.getForegroundCall();
+        if (imsPhoneCall == null) {
+            return;
+        }
+
+        ImsCall imsCall = imsPhoneCall.getImsCall();
+        if (imsCall == null) {
+            return;
+        }
+
+        imsCall.getImsCallSessionListenerProxy().callSessionHandoverFailed(imsCall.getCallSession(),
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN,
+                new ImsReasonInfo());
     }
 
     /**

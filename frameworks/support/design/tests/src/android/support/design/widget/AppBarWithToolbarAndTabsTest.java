@@ -16,27 +16,30 @@
 
 package android.support.design.widget;
 
+import static android.support.design.testutils.TestUtilsActions.addTabs;
+import static android.support.test.espresso.Espresso.onView;
+import static android.support.test.espresso.matcher.ViewMatchers.withId;
+
+import static org.junit.Assert.assertEquals;
+
+import android.os.SystemClock;
 import android.support.annotation.LayoutRes;
 import android.support.annotation.StringRes;
 import android.support.design.test.R;
 import android.support.design.testutils.Cheeses;
-import android.test.suitebuilder.annotation.LargeTest;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.FlakyTest;
+import android.support.test.filters.LargeTest;
+import android.support.test.filters.Suppress;
+
 import org.junit.Test;
 
-import static android.support.design.testutils.TestUtilsActions.addTabs;
-import static android.support.design.testutils.TestUtilsActions.waitUntilIdle;
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.matcher.ViewMatchers.isRoot;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static org.junit.Assert.assertEquals;
-
-@MediumTest
+@LargeTest
 public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
     private TabLayout mTabLayout;
 
     @Override
-    protected void configureContent(@LayoutRes int layoutResId, @StringRes int titleResId) {
+    protected void configureContent(@LayoutRes int layoutResId, @StringRes int titleResId)
+            throws Throwable {
         super.configureContent(layoutResId, titleResId);
 
         mTabLayout = (TabLayout) mAppBar.findViewById(R.id.tabs);
@@ -46,7 +49,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
     }
 
     @Test
-    public void testScrollingToolbarAndScrollingTabs() {
+    public void testScrollingToolbarAndScrollingTabs() throws Throwable {
         configureContent(R.layout.design_appbar_toolbar_scroll_tabs_scroll,
                 R.string.design_appbar_toolbar_scroll_tabs_scroll);
 
@@ -65,11 +68,12 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
         final int longSwipeAmount = 3 * appbarHeight / 2;
         final int shortSwipeAmount = toolbarHeight;
 
-        // Perform a swipe-up gesture across the horizontal center of the screen.
+        // Perform a swipe-up gesture across the horizontal center of the screen, starting from
+        // just below the AppBarLayout
         performVerticalSwipeUpGesture(
                 R.id.coordinator_layout,
                 centerX,
-                originalAppbarBottom + 3 * longSwipeAmount / 2,
+                originalAppbarBottom + 20,
                 longSwipeAmount);
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
@@ -138,7 +142,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
     }
 
     @Test
-    public void testScrollingToolbarAndPinnedTabs() {
+    public void testScrollingToolbarAndPinnedTabs() throws Throwable {
         configureContent(R.layout.design_appbar_toolbar_scroll_tabs_pinned,
                 R.string.design_appbar_toolbar_scroll_tabs_pin);
 
@@ -157,11 +161,12 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
         final int longSwipeAmount = 3 * appbarHeight / 2;
         final int shortSwipeAmount = toolbarHeight;
 
-        // Perform a swipe-up gesture across the horizontal center of the screen.
+        // Perform a swipe-up gesture across the horizontal center of the screen, starting from
+        // just below the AppBarLayout
         performVerticalSwipeUpGesture(
                 R.id.coordinator_layout,
                 centerX,
-                originalAppbarBottom + 3 * longSwipeAmount / 2,
+                originalAppbarBottom + 20,
                 longSwipeAmount);
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
@@ -229,9 +234,11 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
         assertAppBarElevation(mDefaultElevationValue);
     }
 
+    @Suppress
+    @FlakyTest(bugId = 30701044)
     @LargeTest
     @Test
-    public void testSnappingToolbarAndSnappingTabs() {
+    public void testSnappingToolbarAndSnappingTabs() throws Throwable {
         configureContent(R.layout.design_appbar_toolbar_scroll_tabs_scroll_snap,
                 R.string.design_appbar_toolbar_scroll_tabs_scroll_snap);
 
@@ -266,7 +273,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 toolbarHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should be in its original position as it
@@ -286,7 +293,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 3 * toolbarHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should "snap" the toolbar away and align the tab layout below
@@ -304,7 +311,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 tabsHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should "snap" back to align the tab layout below
@@ -321,7 +328,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 3 * tabsHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should not be visually "present" on the screen, with its bottom
@@ -338,7 +345,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 tabsHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should still not be visually "present" on the screen, with
@@ -357,7 +364,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 3 * tabsHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should "snap" the toolbar away and align the tab layout below
@@ -374,7 +381,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 toolbarHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should still align the tab layout below
@@ -391,7 +398,7 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
                 3 * tabsHeight / 4);
 
         // Wait for the snap animation to be done
-        onView(isRoot()).perform(waitUntilIdle());
+        waitForSnapAnimationToFinish();
 
         mAppBar.getLocationOnScreen(appbarOnScreenXY);
         // At this point the app bar should be in its original position.
@@ -399,5 +406,13 @@ public class AppBarWithToolbarAndTabsTest extends AppBarLayoutBaseTest {
         assertEquals(originalAppbarTop, appbarOnScreenXY[1], 1);
         assertEquals(originalAppbarBottom, appbarOnScreenXY[1] + appbarHeight, 1);
         assertAppBarElevation(mDefaultElevationValue);
+    }
+
+    private void waitForSnapAnimationToFinish() {
+        final AppBarLayout.Behavior behavior = (AppBarLayout.Behavior)
+                ((CoordinatorLayout.LayoutParams) mAppBar.getLayoutParams()).getBehavior();
+        while (behavior.isOffsetAnimatorRunning()) {
+            SystemClock.sleep(16);
+        }
     }
 }

@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
+Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -342,6 +342,13 @@ OMX_ERRORTYPE omx_venc::component_init(OMX_STRING role)
     m_sConfigIntraRefresh.nPortIndex = (OMX_U32) PORT_INDEX_OUT;
     m_sConfigIntraRefresh.nRefreshPeriod = 0;
 
+    OMX_INIT_STRUCT(&m_sConfigColorAspects, DescribeColorAspectsParams);
+    m_sConfigColorAspects.nPortIndex = (OMX_U32) PORT_INDEX_OUT;
+    m_sConfigColorAspects.sAspects.mRange =  ColorAspects::RangeUnspecified;
+    m_sConfigColorAspects.sAspects.mPrimaries = ColorAspects::PrimariesUnspecified;
+    m_sConfigColorAspects.sAspects.mMatrixCoeffs = ColorAspects::MatrixUnspecified;
+    m_sConfigColorAspects.sAspects.mTransfer = ColorAspects::TransferUnspecified;
+
     if (codec_type == OMX_VIDEO_CodingMPEG4) {
         m_sParamProfileLevel.eProfile = (OMX_U32) OMX_VIDEO_MPEG4ProfileSimple;
         m_sParamProfileLevel.eLevel = (OMX_U32) OMX_VIDEO_MPEG4Level0;
@@ -544,6 +551,14 @@ OMX_ERRORTYPE omx_venc::component_init(OMX_STRING role)
     m_sMBIStatistics.nPortIndex = (OMX_U32) PORT_INDEX_OUT;
     m_sMBIStatistics.eMBIStatisticsType = QOMX_MBI_STATISTICS_MODE_DEFAULT;
 
+    OMX_INIT_STRUCT(&m_sParamTemporalLayers, OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE);
+    m_sParamTemporalLayers.eSupportedPatterns = OMX_VIDEO_AndroidTemporalLayeringPatternAndroid;
+
+    OMX_INIT_STRUCT(&m_sConfigTemporalLayers, OMX_VIDEO_CONFIG_ANDROID_TEMPORALLAYERINGTYPE);
+
+    OMX_INIT_STRUCT(&m_sParamAVTimerTimestampMode, QOMX_ENABLETYPE);
+    m_sParamAVTimerTimestampMode.bEnable = OMX_FALSE;
+
     m_state                   = OMX_StateLoaded;
     m_sExtraData = 0;
 
@@ -588,6 +603,13 @@ OMX_ERRORTYPE omx_venc::component_init(OMX_STRING role)
     }
 
     DEBUG_PRINT_INFO("Component_init : %s : return = 0x%x", m_nkind, eRet);
+
+    {
+        VendorExtensionStore *extStore = const_cast<VendorExtensionStore *>(&mVendorExtensionStore);
+        init_vendor_extensions(*extStore);
+        mVendorExtensionStore.dumpExtensions((const char *)m_nkind);
+    }
+
     return eRet;
 init_error:
     handle->venc_close();
@@ -664,6 +686,12 @@ OMX_ERRORTYPE  omx_venc::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
                                 (unsigned int)portDefn->nBufferCountActual, (unsigned int)MAX_NUM_INPUT_BUFFERS);
                         return OMX_ErrorUnsupportedSetting;
                     }
+                    if (m_inp_mem_ptr &&
+                            (portDefn->nBufferCountActual != m_sInPortDef.nBufferCountActual ||
+                            portDefn->nBufferSize != m_sInPortDef.nBufferSize)) {
+                        DEBUG_PRINT_ERROR("ERROR: (In_PORT) buffer count/size can change only if port is unallocated !");
+                        return OMX_ErrorInvalidState;
+                    }
                     if (portDefn->nBufferCountMin > portDefn->nBufferCountActual) {
                         DEBUG_PRINT_ERROR("ERROR: (In_PORT) Min buffers (%u) > actual count (%u)",
                                 (unsigned int)portDefn->nBufferCountMin, (unsigned int)portDefn->nBufferCountActual);
@@ -718,6 +746,13 @@ OMX_ERRORTYPE  omx_venc::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
                                 (unsigned int)portDefn->nBufferCountActual, (unsigned int)MAX_NUM_OUTPUT_BUFFERS);
                         return OMX_ErrorUnsupportedSetting;
                     }
+                    if (m_out_mem_ptr &&
+                            (portDefn->nBufferCountActual != m_sOutPortDef.nBufferCountActual ||
+                            portDefn->nBufferSize != m_sOutPortDef.nBufferSize)) {
+                        DEBUG_PRINT_ERROR("ERROR: (Out_PORT) buffer count/size can change only if port is unallocated !");
+                        return OMX_ErrorInvalidState;
+                    }
+
                     if (portDefn->nBufferCountMin > portDefn->nBufferCountActual) {
                         DEBUG_PRINT_ERROR("ERROR: (Out_PORT) Min buffers (%u) > actual count (%u)",
                                 (unsigned int)portDefn->nBufferCountMin, (unsigned int)portDefn->nBufferCountActual);
@@ -1613,6 +1648,37 @@ OMX_ERRORTYPE  omx_venc::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
                 }
                 break;
             }
+        case OMX_IndexParamAndroidVideoTemporalLayering:
+            {
+                VALIDATE_OMX_PARAM_DATA(paramData, OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE);
+                if (!handle->venc_set_param(paramData,
+                        (OMX_INDEXTYPE)OMX_IndexParamAndroidVideoTemporalLayering)) {
+                    DEBUG_PRINT_ERROR("Failed to configure temporal layers");
+                    return OMX_ErrorUnsupportedSetting;
+                }
+                // save the actual configuration applied
+                memcpy(&m_sParamTemporalLayers, paramData, sizeof(m_sParamTemporalLayers));
+                // keep the config data in sync
+                m_sConfigTemporalLayers.ePattern = m_sParamTemporalLayers.ePattern;
+                m_sConfigTemporalLayers.nBLayerCountActual = m_sParamTemporalLayers.nBLayerCountActual;
+                m_sConfigTemporalLayers.nPLayerCountActual = m_sParamTemporalLayers.nPLayerCountActual;
+                m_sConfigTemporalLayers.bBitrateRatiosSpecified = m_sParamTemporalLayers.bBitrateRatiosSpecified;
+                memcpy(&m_sConfigTemporalLayers.nBitrateRatios[0],
+                        &m_sParamTemporalLayers.nBitrateRatios[0],
+                        OMX_VIDEO_ANDROID_MAXTEMPORALLAYERS * sizeof(OMX_U32));
+                break;
+            }
+        case OMX_QTIIndexParamEnableAVTimerTimestamps:
+            {
+                VALIDATE_OMX_PARAM_DATA(paramData, QOMX_ENABLETYPE);
+                if (!handle->venc_set_param(paramData,
+                            (OMX_INDEXTYPE)OMX_QTIIndexParamEnableAVTimerTimestamps)) {
+                    DEBUG_PRINT_ERROR("ERROR: Setting OMX_QTIIndexParamEnableAVTimerTimestamps failed");
+                    return OMX_ErrorUnsupportedSetting;
+                }
+                memcpy(&m_sParamAVTimerTimestampMode, paramData, sizeof(QOMX_ENABLETYPE));
+                break;
+            }
         case OMX_IndexParamVideoSliceFMO:
         default:
             {
@@ -1877,6 +1943,15 @@ OMX_ERRORTYPE  omx_venc::set_config(OMX_IN OMX_HANDLETYPE      hComp,
                 } else {
                     m_sConfigFrameRotation.nRotation = pParam->nRotation;
                 }
+
+                // Update output-port resolution (since it might have been flipped by rotation)
+                if (handle->venc_get_dimensions(PORT_INDEX_OUT,
+                        &m_sOutPortDef.format.video.nFrameWidth,
+                        &m_sOutPortDef.format.video.nFrameHeight)) {
+                    DEBUG_PRINT_HIGH("set Rotation: updated dimensions = %u x %u",
+                            m_sOutPortDef.format.video.nFrameWidth,
+                            m_sOutPortDef.format.video.nFrameHeight);
+                }
                 break;
             }
         case OMX_QcomIndexConfigVideoFramePackingArrangement:
@@ -1971,16 +2046,16 @@ OMX_ERRORTYPE  omx_venc::set_config(OMX_IN OMX_HANDLETYPE      hComp,
                 }
                 break;
             }
-        case OMX_QcomIndexConfigMaxHierPLayers:
+        case OMX_QcomIndexConfigNumHierPLayers:
         {
-            VALIDATE_OMX_PARAM_DATA(configData, QOMX_EXTNINDEX_VIDEO_MAX_HIER_P_LAYERS);
-            QOMX_EXTNINDEX_VIDEO_MAX_HIER_P_LAYERS* pParam =
-                (QOMX_EXTNINDEX_VIDEO_MAX_HIER_P_LAYERS*)configData;
-            if (!handle->venc_set_config(pParam, (OMX_INDEXTYPE)OMX_QcomIndexConfigMaxHierPLayers)) {
-                DEBUG_PRINT_ERROR("ERROR: Setting OMX_QcomIndexConfigMaxHierPLayers failed");
+            VALIDATE_OMX_PARAM_DATA(configData, QOMX_EXTNINDEX_VIDEO_HIER_P_LAYERS);
+            QOMX_EXTNINDEX_VIDEO_HIER_P_LAYERS* pParam =
+                (QOMX_EXTNINDEX_VIDEO_HIER_P_LAYERS*)configData;
+            if (!handle->venc_set_config(pParam, (OMX_INDEXTYPE)OMX_QcomIndexConfigNumHierPLayers)) {
+                DEBUG_PRINT_ERROR("ERROR: Setting OMX_QcomIndexConfigNumHierPLayers failed");
                 return OMX_ErrorUnsupportedSetting;
             }
-            memcpy(&m_sMaxHPlayers, pParam, sizeof(m_sMaxHPlayers));
+            memcpy(&m_sHPlayers, pParam, sizeof(m_sHPlayers));
             break;
         }
         case OMX_QcomIndexConfigBaseLayerId:
@@ -2054,6 +2129,35 @@ OMX_ERRORTYPE  omx_venc::set_config(OMX_IN OMX_HANDLETYPE      hComp,
                 }
                break;
            }
+        case OMX_IndexConfigAndroidVideoTemporalLayering:
+            {
+                VALIDATE_OMX_PARAM_DATA(configData, OMX_VIDEO_CONFIG_ANDROID_TEMPORALLAYERINGTYPE);
+                DEBUG_PRINT_ERROR("Setting/modifying Temporal layers at run-time is not supported !");
+                return OMX_ErrorUnsupportedSetting;
+            }
+        case OMX_QTIIndexConfigDescribeColorAspects:
+           {
+               VALIDATE_OMX_PARAM_DATA(configData, DescribeColorAspectsParams);
+               DescribeColorAspectsParams *params = (DescribeColorAspectsParams *)configData;
+               print_debug_color_aspects(&(params->sAspects), "set_config");
+               if (!handle->venc_set_config(configData, (OMX_INDEXTYPE)OMX_QTIIndexConfigDescribeColorAspects)) {
+                   DEBUG_PRINT_ERROR("Failed to set OMX_QTIIndexConfigDescribeColorAspects");
+                   return OMX_ErrorUnsupportedSetting;
+               }
+               memcpy(&m_sConfigColorAspects, configData, sizeof(m_sConfigColorAspects));
+               break;
+           }
+        case OMX_IndexConfigAndroidVendorExtension:
+            {
+                VALIDATE_OMX_PARAM_DATA(configData, OMX_CONFIG_ANDROID_VENDOR_EXTENSIONTYPE);
+
+                OMX_CONFIG_ANDROID_VENDOR_EXTENSIONTYPE *ext =
+                    reinterpret_cast<OMX_CONFIG_ANDROID_VENDOR_EXTENSIONTYPE *>(configData);
+                VALIDATE_OMX_VENDOR_EXTENSION_PARAM_DATA(ext);
+
+                return set_vendor_extension_config(ext);
+            }
+
         default:
             DEBUG_PRINT_ERROR("ERROR: unsupported index %d", (int) configIndex);
             break;
@@ -2268,6 +2372,11 @@ bool omx_venc::dev_get_batch_size(OMX_U32 *size)
     DEBUG_PRINT_ERROR("Get batch size is not supported");
     return false;
 #endif
+}
+
+bool omx_venc::dev_get_temporal_layer_caps(OMX_U32 *nMaxLayers,
+        OMX_U32 *nMaxBLayers) {
+    return handle->venc_get_temporal_layer_caps(nMaxLayers, nMaxBLayers);
 }
 
 bool omx_venc::dev_loaded_start()

@@ -18,6 +18,7 @@ package com.android.internal.telephony.test;
 
 import android.os.Handler;
 import android.os.Message;
+import android.service.carrier.CarrierIdentifier;
 
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.RadioCapability;
@@ -25,6 +26,8 @@ import com.android.internal.telephony.UUSInfo;
 import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
 import com.android.internal.telephony.dataconnection.DataProfile;
 import com.android.internal.telephony.gsm.SmsBroadcastConfigInfo;
+
+import java.util.List;
 
 public class SimulatedCommandsVerifier implements CommandsInterface {
     private static SimulatedCommandsVerifier sInstance;
@@ -141,22 +144,22 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void registerForVoiceNetworkStateChanged(Handler h, int what, Object obj) {
+    public void registerForNetworkStateChanged(Handler h, int what, Object obj) {
 
     }
 
     @Override
-    public void unregisterForVoiceNetworkStateChanged(Handler h) {
+    public void unregisterForNetworkStateChanged(Handler h) {
 
     }
 
     @Override
-    public void registerForDataNetworkStateChanged(Handler h, int what, Object obj) {
+    public void registerForDataCallListChanged(Handler h, int what, Object obj) {
 
     }
 
     @Override
-    public void unregisterForDataNetworkStateChanged(Handler h) {
+    public void unregisterForDataCallListChanged(Handler h) {
 
     }
 
@@ -1006,11 +1009,6 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void getNeighboringCids(Message response) {
-
-    }
-
-    @Override
     public void setLocationUpdates(boolean enable, Message response) {
 
     }
@@ -1141,9 +1139,8 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void setupDataCall(int radioTechnology, int profile, String apn, String user,
-                              String password, int authType, String protocol, Message result) {
-
+    public void setupDataCall(int radioTechnology, DataProfile dataProfile, boolean isRoaming,
+                              boolean allowRoaming, Message result) {
     }
 
     @Override
@@ -1198,16 +1195,6 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void getCellInfoList(Message result) {
-
-    }
-
-    @Override
-    public void setCellInfoListRate(int rateInMillis, Message response) {
-
-    }
-
-    @Override
     public void registerForCellInfoList(Handler h, int what, Object obj) {
 
     }
@@ -1218,13 +1205,12 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void setInitialAttachApn(String apn, String protocol, int authType, String username,
-                                    String password, Message result) {
+    public void setInitialAttachApn(DataProfile dataProfile, boolean isRoaming, Message result) {
 
     }
 
     @Override
-    public void setDataProfile(DataProfile[] dps, Message result) {
+    public void setDataProfile(DataProfile[] dps, boolean isRoaming, Message result) {
 
     }
 
@@ -1234,7 +1220,7 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     }
 
     @Override
-    public void iccOpenLogicalChannel(String AID, Message response) {
+    public void iccOpenLogicalChannel(String AID, int p2, Message response) {
 
     }
 
@@ -1349,5 +1335,35 @@ public class SimulatedCommandsVerifier implements CommandsInterface {
     @Override
     public void getModemActivityInfo(Message result) {
 
+    }
+
+    @Override
+    public void setAllowedCarriers(List<CarrierIdentifier> carriers, Message result) {
+
+    }
+
+    @Override
+    public void getAllowedCarriers(Message result) {
+
+    }
+
+    @Override
+    public void registerForPcoData(Handler h, int what, Object obj) {
+    }
+
+    @Override
+    public void unregisterForPcoData(Handler h) {
+    }
+
+    @Override
+    public void sendDeviceState(int stateType, boolean state, Message result) {
+    }
+
+    @Override
+    public void setUnsolResponseFilter(int filter, Message result){
+    }
+
+    @Override
+    public void setSimCardPower(boolean powerUp, Message result) {
     }
 }

@@ -31,10 +31,13 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.ResultReceiver;
 import android.transition.Transition;
+import android.transition.TransitionListenerAdapter;
 import android.transition.TransitionManager;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
+import android.view.Window;
+
+import com.android.internal.view.OneShotPreDrawListener;
 
 import java.util.ArrayList;
 
@@ -59,18 +62,20 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
     private Bundle mExitSharedElementBundle;
     private boolean mIsExitStarted;
     private boolean mSharedElementsHidden;
+    private HideSharedElementsCallback mHideSharedElementsCallback;
 
-    public ExitTransitionCoordinator(Activity activity, ArrayList<String> names,
+    public ExitTransitionCoordinator(Activity activity, Window window,
+            SharedElementCallback listener, ArrayList<String> names,
             ArrayList<String> accepted, ArrayList<View> mapped, boolean isReturning) {
-        super(activity.getWindow(), names, getListener(activity, isReturning), isReturning);
+        super(window, names, listener, isReturning);
         viewsReady(mapSharedElements(accepted, mapped));
         stripOffscreenViews();
         mIsBackgroundReady = !isReturning;
         mActivity = activity;
     }
 
-    private static SharedElementCallback getListener(Activity activity, boolean isReturning) {
-        return isReturning ? activity.mEnterTransitionListener : activity.mExitTransitionListener;
+    void setHideSharedElementsCallback(HideSharedElementsCallback callback) {
+        mHideSharedElementsCallback = callback;
     }
 
     @Override
@@ -120,13 +125,16 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
     }
 
     public void resetViews() {
+        ViewGroup decorView = getDecor();
+        if (decorView != null) {
+            TransitionManager.endTransitions(decorView);
+        }
         if (mTransitioningViews != null) {
             showViews(mTransitioningViews, true);
             setTransitioningViewsVisiblity(View.VISIBLE, true);
         }
         showViews(mSharedElements, true);
         mIsHidden = true;
-        ViewGroup decorView = getDecor();
         if (!mIsReturning && decorView != null) {
             decorView.suppressLayout(false);
         }
@@ -154,7 +162,7 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
 
     private void startSharedElementExit(final ViewGroup decorView) {
         Transition transition = getSharedElementExitTransition();
-        transition.addListener(new Transition.TransitionListenerAdapter() {
+        transition.addListener(new TransitionListenerAdapter() {
             @Override
             public void onTransitionEnd(Transition transition) {
                 transition.removeListener(this);
@@ -165,15 +173,9 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
         });
         final ArrayList<View> sharedElementSnapshots = createSnapshots(mExitSharedElementBundle,
                 mSharedElementNames);
-        decorView.getViewTreeObserver()
-                .addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
-                    @Override
-                    public boolean onPreDraw() {
-                        decorView.getViewTreeObserver().removeOnPreDrawListener(this);
-                        setSharedElementState(mExitSharedElementBundle, sharedElementSnapshots);
-                        return true;
-                    }
-                });
+        OneShotPreDrawListener.add(decorView, () -> {
+            setSharedElementState(mExitSharedElementBundle, sharedElementSnapshots);
+        });
         setGhostVisibility(View.INVISIBLE);
         scheduleGhostVisibilityChange(View.INVISIBLE);
         if (mListener != null) {
@@ -188,6 +190,9 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
 
     private void hideSharedElements() {
         moveSharedElementsFromOverlay();
+        if (mHideSharedElementsCallback != null) {
+            mHideSharedElementsCallback.hideSharedElements();
+        }
         if (!mIsHidden) {
             hideViews(mSharedElements);
         }
@@ -197,6 +202,7 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
 
     public void startExit() {
         if (!mIsExitStarted) {
+            backgroundAnimatorComplete();
             mIsExitStarted = true;
             pauseInput();
             ViewGroup decorView = getDecor();
@@ -207,7 +213,11 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
             startTransition(new Runnable() {
                 @Override
                 public void run() {
-                    beginTransitions();
+                    if (mActivity != null) {
+                        beginTransitions();
+                    } else {
+                        startExitTransition();
+                    }
                 }
             });
         }
@@ -231,7 +241,7 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
             delayCancel();
             moveSharedElementsToOverlay();
             if (decorView != null && decorView.getBackground() == null) {
-                getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+                getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             }
             final boolean targetsM = decorView == null || decorView.getContext()
                     .getApplicationInfo().targetSdkVersion >= VERSION_CODES.M;
@@ -295,11 +305,13 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
                             mIsBackgroundReady = true;
                             notifyComplete();
                         }
+                        backgroundAnimatorComplete();
                     }
                 });
                 mBackgroundAnimator.setDuration(getFadeDuration());
                 mBackgroundAnimator.start();
             } else {
+                backgroundAnimatorComplete();
                 mIsBackgroundReady = true;
             }
         }
@@ -309,6 +321,10 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
         Transition viewsTransition = null;
         if (mTransitioningViews != null && !mTransitioningViews.isEmpty()) {
             viewsTransition = configureTransition(getViewsTransition(), true);
+            removeExcludedViews(viewsTransition, mTransitioningViews);
+            if (mTransitioningViews.isEmpty()) {
+                viewsTransition = null;
+            }
         }
         if (viewsTransition == null) {
             viewsTransitionComplete();
@@ -317,7 +333,6 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
             viewsTransition.addListener(new ContinueTransitionListener() {
                 @Override
                 public void onTransitionEnd(Transition transition) {
-                    transition.removeListener(this);
                     viewsTransitionComplete();
                     if (mIsHidden && transitioningViews != null) {
                         showViews(transitioningViews, true);
@@ -344,11 +359,11 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
             sharedElementTransition.addListener(new ContinueTransitionListener() {
                 @Override
                 public void onTransitionEnd(Transition transition) {
-                    transition.removeListener(this);
                     sharedElementTransitionComplete();
                     if (mIsHidden) {
                         showViews(mSharedElements, true);
                     }
+                    super.onTransitionEnd(transition);
                 }
             });
             mSharedElements.get(0).invalidate();
@@ -507,5 +522,9 @@ class ExitTransitionCoordinator extends ActivityTransitionCoordinator {
         } else {
             return getWindow().getSharedElementExitTransition();
         }
+    }
+
+    interface HideSharedElementsCallback {
+        void hideSharedElements();
     }
 }

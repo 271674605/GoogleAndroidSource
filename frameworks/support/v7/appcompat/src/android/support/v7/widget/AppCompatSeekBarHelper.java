@@ -21,6 +21,7 @@ import android.graphics.Canvas;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.Nullable;
+import android.support.annotation.RequiresApi;
 import android.support.v4.graphics.drawable.DrawableCompat;
 import android.support.v4.view.ViewCompat;
 import android.support.v7.appcompat.R;
@@ -37,11 +38,12 @@ class AppCompatSeekBarHelper extends AppCompatProgressBarHelper {
     private boolean mHasTickMarkTint = false;
     private boolean mHasTickMarkTintMode = false;
 
-    AppCompatSeekBarHelper(SeekBar view, AppCompatDrawableManager drawableManager) {
-        super(view, drawableManager);
+    AppCompatSeekBarHelper(SeekBar view) {
+        super(view);
         mView = view;
     }
 
+    @Override
     void loadFromAttributes(AttributeSet attrs, int defStyleAttr) {
         super.loadFromAttributes(attrs, defStyleAttr);
 
@@ -121,14 +123,14 @@ class AppCompatSeekBarHelper extends AppCompatProgressBarHelper {
 
     private void applyTickMarkTint() {
         if (mTickMark != null && (mHasTickMarkTint || mHasTickMarkTintMode)) {
-            mTickMark = mTickMark.mutate();
+            mTickMark = DrawableCompat.wrap(mTickMark.mutate());
 
             if (mHasTickMarkTint) {
-                mTickMark.setTintList(mTickMarkTintList);
+                DrawableCompat.setTintList(mTickMark, mTickMarkTintList);
             }
 
             if (mHasTickMarkTintMode) {
-                mTickMark.setTintMode(mTickMarkTintMode);
+                DrawableCompat.setTintMode(mTickMark, mTickMarkTintMode);
             }
 
             // The drawable (or one of its children) may not have been
@@ -139,6 +141,7 @@ class AppCompatSeekBarHelper extends AppCompatProgressBarHelper {
         }
     }
 
+    @RequiresApi(11)
     void jumpDrawablesToCurrentState() {
         if (mTickMark != null) {
             mTickMark.jumpToCurrentState();

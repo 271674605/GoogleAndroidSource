@@ -34,10 +34,8 @@ import android.os.Message;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
-import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.util.SparseArray;
-import android.util.TypedValue;
 import android.widget.RemoteViews;
 import android.widget.RemoteViews.OnClickHandler;
 
@@ -187,19 +185,28 @@ public class AppWidgetHost {
                 idsToUpdate[i] = mViews.keyAt(i);
             }
         }
-        List<RemoteViews> updatedViews;
-        int[] updatedIds = new int[idsToUpdate.length];
+        List<PendingHostUpdate> updates;
         try {
-            updatedViews = sService.startListening(
-                    mCallbacks, mContextOpPackageName, mHostId, idsToUpdate, updatedIds).getList();
+            updates = sService.startListening(
+                    mCallbacks, mContextOpPackageName, mHostId, idsToUpdate).getList();
         }
         catch (RemoteException e) {
             throw new RuntimeException("system server dead?", e);
         }
 
-        int N = updatedViews.size();
+        int N = updates.size();
         for (int i = 0; i < N; i++) {
-            updateAppWidgetView(updatedIds[i], updatedViews.get(i));
+            PendingHostUpdate update = updates.get(i);
+            switch (update.type) {
+                case PendingHostUpdate.TYPE_VIEWS_UPDATE:
+                    updateAppWidgetView(update.appWidgetId, update.views);
+                    break;
+                case PendingHostUpdate.TYPE_PROVIDER_CHANGED:
+                    onProviderChanged(update.appWidgetId, update.widgetInfo);
+                    break;
+                case PendingHostUpdate.TYPE_VIEW_DATA_CHANGED:
+                    viewDataChanged(update.appWidgetId, update.viewId);
+            }
         }
     }
 
@@ -269,8 +276,6 @@ public class AppWidgetHost {
 
     /**
      * Gets a list of all the appWidgetIds that are bound to the current host
-     *
-     * @hide
      */
     public int[] getAppWidgetIds() {
         try {
@@ -373,15 +378,7 @@ public class AppWidgetHost {
         // Convert complex to dp -- we are getting the AppWidgetProviderInfo from the
         // AppWidgetService, which doesn't have our context, hence we need to do the
         // conversion here.
-        appWidget.minWidth =
-            TypedValue.complexToDimensionPixelSize(appWidget.minWidth, mDisplayMetrics);
-        appWidget.minHeight =
-            TypedValue.complexToDimensionPixelSize(appWidget.minHeight, mDisplayMetrics);
-        appWidget.minResizeWidth =
-            TypedValue.complexToDimensionPixelSize(appWidget.minResizeWidth, mDisplayMetrics);
-        appWidget.minResizeHeight =
-            TypedValue.complexToDimensionPixelSize(appWidget.minResizeHeight, mDisplayMetrics);
-
+        appWidget.updateDimensions(mDisplayMetrics);
         synchronized (mViews) {
             v = mViews.get(appWidgetId);
         }

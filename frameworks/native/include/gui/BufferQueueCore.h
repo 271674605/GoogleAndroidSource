@@ -20,6 +20,7 @@
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/BufferSlot.h>
+#include <gui/OccupancyTracker.h>
 
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
@@ -50,7 +51,6 @@
 namespace android {
 
 class IConsumerListener;
-class IGraphicBufferAlloc;
 class IProducerListener;
 
 class BufferQueueCore : public virtual RefBase {
@@ -78,14 +78,13 @@ public:
     typedef Vector<BufferItem> Fifo;
 
     // BufferQueueCore manages a pool of gralloc memory slots to be used by
-    // producers and consumers. allocator is used to allocate all the needed
-    // gralloc buffers.
-    BufferQueueCore(const sp<IGraphicBufferAlloc>& allocator = NULL);
+    // producers and consumers.
+    BufferQueueCore();
     virtual ~BufferQueueCore();
 
 private:
     // Dump our state in a string
-    void dump(String8& result, const char* prefix) const;
+    void dumpState(const String8& prefix, String8* outResult) const;
 
     // getMinUndequeuedBufferCountLocked returns the minimum number of buffers
     // that must remain in a state other than DEQUEUED. The async parameter
@@ -124,6 +123,11 @@ private:
     // all slots, even if they're currently dequeued, queued, or acquired.
     void freeAllBuffersLocked();
 
+    // discardFreeBuffersLocked releases all currently-free buffers held by the
+    // queue, in order to reduce the memory consumption of the queue to the
+    // minimum possible without discarding data.
+    void discardFreeBuffersLocked();
+
     // If delta is positive, makes more slots available. If negative, takes
     // away slots. Returns false if the request can't be met.
     bool adjustAvailableSlotsLocked(int delta);
@@ -136,10 +140,6 @@ private:
     // the information stored in mSlots
     void validateConsistencyLocked() const;
 #endif
-
-    // mAllocator is the connection to SurfaceFlinger that is used to allocate
-    // new GraphicBuffer objects.
-    sp<IGraphicBufferAlloc> mAllocator;
 
     // mMutex is the mutex used to prevent concurrent access to the member
     // variables of BufferQueueCore objects. It must be locked whenever any
@@ -172,13 +172,23 @@ private:
     // GraphicBuffers.
     uint32_t mConsumerUsageBits;
 
+    // mConsumerIsProtected indicates the consumer is ready to handle protected
+    // buffer.
+    bool mConsumerIsProtected;
+
     // mConnectedApi indicates the producer API that is currently connected
     // to this BufferQueue. It defaults to NO_CONNECTED_API, and gets updated
     // by the connect and disconnect methods.
     int mConnectedApi;
+    // PID of the process which last successfully called connect(...)
+    pid_t mConnectedPid;
 
-    // mConnectedProducerToken is used to set a binder death notification on
+    // mLinkedToDeath is used to set a binder death notification on
     // the producer.
+    sp<IProducerListener> mLinkedToDeath;
+
+    // mConnectedProducerListener is used to handle the onBufferReleased
+    // notification.
     sp<IProducerListener> mConnectedProducerListener;
 
     // mSlots is an array of buffer slots that must be mirrored on the producer
@@ -305,13 +315,13 @@ private:
 
     // Cached data about the shared buffer in shared buffer mode
     struct SharedBufferCache {
-        SharedBufferCache(Rect _crop, uint32_t _transform, int _scalingMode,
-                android_dataspace _dataspace)
+        SharedBufferCache(Rect _crop, uint32_t _transform,
+                uint32_t _scalingMode, android_dataspace _dataspace)
         : crop(_crop),
           transform(_transform),
           scalingMode(_scalingMode),
           dataspace(_dataspace) {
-        };
+        }
 
         Rect crop;
         uint32_t transform;
@@ -321,6 +331,8 @@ private:
 
     // The slot of the last queued buffer
     int mLastQueuedSlot;
+
+    OccupancyTracker mOccupancyTracker;
 
     const uint64_t mUniqueId;
 

@@ -16,15 +16,29 @@
 
 package android.support.design.testutils;
 
+import static org.junit.Assert.assertEquals;
+
+import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.support.annotation.ColorInt;
+import android.support.annotation.IdRes;
+import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
 import android.support.test.espresso.matcher.BoundedMatcher;
+import android.support.v4.view.GravityCompat;
 import android.support.v4.view.ViewCompat;
+import android.support.v4.widget.TextViewCompat;
+import android.support.v7.view.menu.MenuItemImpl;
+import android.view.Gravity;
+import android.view.Menu;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.hamcrest.Description;
@@ -186,6 +200,46 @@ public class TestUtilsMatchers {
     }
 
     /**
+     * Returns a matcher that matches <code>ImageView</code>s which have drawable flat-filled
+     * with the specific color.
+     */
+    public static Matcher drawable(@ColorInt final int color, final int allowedComponentVariance) {
+        return new BoundedMatcher<View, ImageView>(ImageView.class) {
+            private String mFailedComparisonDescription;
+
+            @Override
+            public void describeTo(final Description description) {
+                description.appendText("with drawable of color: ");
+
+                description.appendText(mFailedComparisonDescription);
+            }
+
+            @Override
+            public boolean matchesSafely(final ImageView view) {
+                Drawable drawable = view.getDrawable();
+                if (drawable == null) {
+                    return false;
+                }
+
+                // One option is to check if we have a ColorDrawable and then call getColor
+                // but that API is v11+. Instead, we call our helper method that checks whether
+                // all pixels in a Drawable are of the same specified color.
+                try {
+                    TestUtils.assertAllPixelsOfColor("", drawable, view.getWidth(),
+                            view.getHeight(), true, color, allowedComponentVariance, true);
+                    // If we are here, the color comparison has passed.
+                    mFailedComparisonDescription = null;
+                    return true;
+                } catch (Throwable t) {
+                    // If we are here, the color comparison has failed.
+                    mFailedComparisonDescription = t.getMessage();
+                    return false;
+                }
+            }
+        };
+    }
+
+    /**
      * Returns a matcher that matches Views with the specified background fill color.
      */
     public static Matcher withBackgroundFill(final @ColorInt int fillColor) {
@@ -309,6 +363,170 @@ public class TestUtilsMatchers {
                 fab.getContentRect(area);
 
                 return area.height() == size;
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches FloatingActionButtons with the specified gravity.
+     */
+    public static Matcher withFabContentAreaOnMargins(final int gravity) {
+        return new BoundedMatcher<View, View>(View.class) {
+            private String failedCheckDescription;
+
+            @Override
+            public void describeTo(final Description description) {
+                description.appendText(failedCheckDescription);
+            }
+
+            @Override
+            public boolean matchesSafely(final View view) {
+                if (!(view instanceof FloatingActionButton)) {
+                    return false;
+                }
+
+                final FloatingActionButton fab = (FloatingActionButton) view;
+                final ViewGroup.MarginLayoutParams lp =
+                        (ViewGroup.MarginLayoutParams) fab.getLayoutParams();
+                final ViewGroup parent = (ViewGroup) view.getParent();
+
+                final Rect area = new Rect();
+                fab.getContentRect(area);
+
+                final int absGravity = GravityCompat.getAbsoluteGravity(gravity,
+                        ViewCompat.getLayoutDirection(view));
+
+                try {
+                    switch (absGravity & Gravity.VERTICAL_GRAVITY_MASK) {
+                        case Gravity.TOP:
+                            assertEquals(lp.topMargin, fab.getTop() + area.top);
+                            break;
+                        case Gravity.BOTTOM:
+                            assertEquals(parent.getHeight() - lp.bottomMargin,
+                                    fab.getTop() + area.bottom);
+                            break;
+                    }
+                    switch (absGravity & Gravity.HORIZONTAL_GRAVITY_MASK) {
+                        case Gravity.LEFT:
+                            assertEquals(lp.leftMargin, fab.getLeft() + area.left);
+                            break;
+                        case Gravity.RIGHT:
+                            assertEquals(parent.getWidth() - lp.rightMargin,
+                                    fab.getLeft() + area.right);
+                            break;
+                    }
+                    return true;
+                } catch (Throwable t) {
+                    failedCheckDescription = t.getMessage();
+                    return false;
+                }
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches FloatingActionButtons with the specified content height
+     */
+    public static Matcher withCompoundDrawable(final int index, final Drawable expected) {
+        return new BoundedMatcher<View, View>(View.class) {
+            private String failedCheckDescription;
+
+            @Override
+            public void describeTo(final Description description) {
+                description.appendText(failedCheckDescription);
+            }
+
+            @Override
+            public boolean matchesSafely(final View view) {
+                if (!(view instanceof TextView)) {
+                    return false;
+                }
+
+                final TextView textView = (TextView) view;
+                return expected == TextViewCompat.getCompoundDrawablesRelative(textView)[index];
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches {@link View}s that are pressed.
+     */
+    public static Matcher<View> isPressed() {
+        return new TypeSafeMatcher<View>() {
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("is pressed");
+            }
+
+            @Override
+            public boolean matchesSafely(View view) {
+                return view.isPressed();
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches views which have a z-value greater than 0. Also matches if
+     * the platform we're running on does not support z-values.
+     */
+    public static Matcher<View> hasZ() {
+        return new TypeSafeMatcher<View>() {
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("has a z value greater than 0");
+            }
+
+            @Override
+            public boolean matchesSafely(View view) {
+                return Build.VERSION.SDK_INT < 21 || ViewCompat.getZ(view) > 0f;
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches TextViews with the specified typeface.
+     */
+    public static Matcher withTypeface(@NonNull final Typeface typeface) {
+        return new TypeSafeMatcher<TextView>(TextView.class) {
+            @Override
+            public void describeTo(final Description description) {
+                description.appendText("view with typeface: " + typeface);
+            }
+
+            @Override
+            public boolean matchesSafely(final TextView view) {
+                return typeface.equals(view.getTypeface());
+            }
+        };
+    }
+
+    /**
+     * Returns a matcher that matches the action view of the specified menu item.
+     *
+     * @param menu The menu
+     * @param id   The ID of the menu item
+     */
+    public static Matcher<View> isActionViewOf(@NonNull final Menu menu, @IdRes final int id) {
+        return new TypeSafeMatcher<View>() {
+
+            private Resources mResources;
+
+            @Override
+            protected boolean matchesSafely(View view) {
+                mResources = view.getResources();
+                MenuItemImpl item = (MenuItemImpl) menu.findItem(id);
+                return item != null && item.getActionView() == view;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                String name;
+                if (mResources != null) {
+                    name = mResources.getResourceName(id);
+                } else {
+                    name = Integer.toString(id);
+                }
+                description.appendText("is action view of menu item " + name);
             }
         };
     }

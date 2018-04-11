@@ -25,7 +25,7 @@ import android.telecom.DisconnectCause;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.RemoteConnection;
 import android.telecom.VideoProfile;
-import android.telecom.cts.BaseTelecomTestWithMockServices.InvokeCounter;
+import android.telecom.cts.TestUtils.InvokeCounter;
 import android.util.SparseArray;
 
 /**
@@ -160,6 +160,30 @@ public class MockConnection extends Connection {
         super.onPostDialContinue(proceed);
         if (mInvokeCounterMap.get(ON_POST_DIAL_WAIT) != null) {
             mInvokeCounterMap.get(ON_POST_DIAL_WAIT).invoke(proceed);
+        }
+    }
+
+    @Override
+    public void onCallEvent(String event, Bundle extras) {
+        super.onCallEvent(event, extras);
+        if (mInvokeCounterMap.get(ON_CALL_EVENT) != null) {
+            mInvokeCounterMap.get(ON_CALL_EVENT).invoke(event, extras);
+        }
+    }
+
+    @Override
+    public void onPullExternalCall() {
+        super.onPullExternalCall();
+        if (mInvokeCounterMap.get(ON_PULL_EXTERNAL_CALL) != null) {
+            mInvokeCounterMap.get(ON_PULL_EXTERNAL_CALL).invoke();
+        }
+    }
+
+    @Override
+    public void onExtrasChanged(Bundle extras) {
+        super.onExtrasChanged(extras);
+        if (mInvokeCounterMap.get(ON_EXTRAS_CHANGED) != null) {
+            mInvokeCounterMap.get(ON_EXTRAS_CHANGED).invoke(extras);
         }
     }
 

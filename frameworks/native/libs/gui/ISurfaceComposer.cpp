@@ -21,16 +21,17 @@
 #include <sys/types.h>
 
 #include <binder/Parcel.h>
-#include <binder/IMemory.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 
-#include <gui/BitTube.h>
 #include <gui/IDisplayEventConnection.h>
-#include <gui/ISurfaceComposer.h>
 #include <gui/IGraphicBufferProducer.h>
+#include <gui/ISurfaceComposer.h>
+#include <gui/ISurfaceComposerClient.h>
 
 #include <private/gui/LayerState.h>
+
+#include <system/graphics.h>
 
 #include <ui/DisplayInfo.h>
 #include <ui/DisplayStatInfo.h>
@@ -42,12 +43,10 @@
 
 namespace android {
 
-class IDisplayEventConnection;
-
 class BpSurfaceComposer : public BpInterface<ISurfaceComposer>
 {
 public:
-    BpSurfaceComposer(const sp<IBinder>& impl)
+    explicit BpSurfaceComposer(const sp<IBinder>& impl)
         : BpInterface<ISurfaceComposer>(impl)
     {
     }
@@ -62,12 +61,14 @@ public:
         return interface_cast<ISurfaceComposerClient>(reply.readStrongBinder());
     }
 
-    virtual sp<IGraphicBufferAlloc> createGraphicBufferAlloc()
+    virtual sp<ISurfaceComposerClient> createScopedConnection(
+            const sp<IGraphicBufferProducer>& parent)
     {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        remote()->transact(BnSurfaceComposer::CREATE_GRAPHIC_BUFFER_ALLOC, data, &reply);
-        return interface_cast<IGraphicBufferAlloc>(reply.readStrongBinder());
+        data.writeStrongBinder(IInterface::asBinder(parent));
+        remote()->transact(BnSurfaceComposer::CREATE_SCOPED_CONNECTION, data, &reply);
+        return interface_cast<ISurfaceComposerClient>(reply.readStrongBinder());
     }
 
     virtual void setTransactionState(
@@ -102,7 +103,7 @@ public:
     virtual status_t captureScreen(const sp<IBinder>& display,
             const sp<IGraphicBufferProducer>& producer,
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ,
+            int32_t minLayerZ, int32_t maxLayerZ,
             bool useIdentityTransform,
             ISurfaceComposer::Rotation rotation)
     {
@@ -113,8 +114,8 @@ public:
         data.write(sourceCrop);
         data.writeUint32(reqWidth);
         data.writeUint32(reqHeight);
-        data.writeUint32(minLayerZ);
-        data.writeUint32(maxLayerZ);
+        data.writeInt32(minLayerZ);
+        data.writeInt32(maxLayerZ);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
         remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
@@ -156,7 +157,51 @@ public:
         return result != 0;
     }
 
-    virtual sp<IDisplayEventConnection> createDisplayEventConnection()
+    virtual status_t getSupportedFrameTimestamps(
+            std::vector<FrameEvent>* outSupported) const {
+        if (!outSupported) {
+            return UNEXPECTED_NULL;
+        }
+        outSupported->clear();
+
+        Parcel data, reply;
+
+        status_t err = data.writeInterfaceToken(
+                ISurfaceComposer::getInterfaceDescriptor());
+        if (err != NO_ERROR) {
+            return err;
+        }
+
+        err = remote()->transact(
+                BnSurfaceComposer::GET_SUPPORTED_FRAME_TIMESTAMPS,
+                data, &reply);
+        if (err != NO_ERROR) {
+            return err;
+        }
+
+        int32_t result = 0;
+        err = reply.readInt32(&result);
+        if (err != NO_ERROR) {
+            return err;
+        }
+        if (result != NO_ERROR) {
+            return result;
+        }
+
+        std::vector<int32_t> supported;
+        err = reply.readInt32Vector(&supported);
+        if (err != NO_ERROR) {
+            return err;
+        }
+
+        outSupported->reserve(supported.size());
+        for (int32_t s : supported) {
+            outSupported->push_back(static_cast<FrameEvent>(s));
+        }
+        return NO_ERROR;
+    }
+
+    virtual sp<IDisplayEventConnection> createDisplayEventConnection(VsyncSource vsyncSource)
     {
         Parcel data, reply;
         sp<IDisplayEventConnection> result;
@@ -165,6 +210,7 @@ public:
         if (err != NO_ERROR) {
             return result;
         }
+        data.writeInt32(static_cast<int32_t>(vsyncSource));
         err = remote()->transact(
                 BnSurfaceComposer::CREATE_DISPLAY_EVENT_CONNECTION,
                 data, &reply);
@@ -269,6 +315,82 @@ public:
         return reply.readInt32();
     }
 
+    virtual status_t getDisplayColorModes(const sp<IBinder>& display,
+            Vector<android_color_mode_t>* outColorModes) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayColorModes failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayColorModes failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::GET_DISPLAY_COLOR_MODES, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayColorModes failed to transact: %d", result);
+            return result;
+        }
+        result = static_cast<status_t>(reply.readInt32());
+        if (result == NO_ERROR) {
+            size_t numModes = reply.readUint32();
+            outColorModes->clear();
+            outColorModes->resize(numModes);
+            for (size_t i = 0; i < numModes; ++i) {
+                outColorModes->replaceAt(static_cast<android_color_mode_t>(reply.readInt32()), i);
+            }
+        }
+        return result;
+    }
+
+    virtual android_color_mode_t getActiveColorMode(const sp<IBinder>& display) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("getActiveColorMode failed to writeInterfaceToken: %d", result);
+            return static_cast<android_color_mode_t>(result);
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("getActiveColorMode failed to writeStrongBinder: %d", result);
+            return static_cast<android_color_mode_t>(result);
+        }
+        result = remote()->transact(BnSurfaceComposer::GET_ACTIVE_COLOR_MODE, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("getActiveColorMode failed to transact: %d", result);
+            return static_cast<android_color_mode_t>(result);
+        }
+        return static_cast<android_color_mode_t>(reply.readInt32());
+    }
+
+    virtual status_t setActiveColorMode(const sp<IBinder>& display,
+            android_color_mode_t colorMode) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("setActiveColorMode failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveColorMode failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = data.writeInt32(colorMode);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveColorMode failed to writeInt32: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::SET_ACTIVE_COLOR_MODE, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveColorMode failed to transact: %d", result);
+            return result;
+        }
+        return static_cast<status_t>(reply.readInt32());
+    }
+
     virtual status_t clearAnimationFrameStats() {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
@@ -301,10 +423,52 @@ public:
         }
         result = reply.readInt32();
         if (result == NO_ERROR) {
-            result = reply.readParcelable(outCapabilities);
+            result = reply.read(*outCapabilities);
         }
         return result;
     }
+
+    virtual status_t enableVSyncInjections(bool enable) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("enableVSyncInjections failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeBool(enable);
+        if (result != NO_ERROR) {
+            ALOGE("enableVSyncInjections failed to writeBool: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::ENABLE_VSYNC_INJECTIONS,
+                data, &reply, TF_ONE_WAY);
+        if (result != NO_ERROR) {
+            ALOGE("enableVSyncInjections failed to transact: %d", result);
+            return result;
+        }
+        return result;
+    }
+
+    virtual status_t injectVSync(nsecs_t when) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("injectVSync failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeInt64(when);
+        if (result != NO_ERROR) {
+            ALOGE("injectVSync failed to writeInt64: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::INJECT_VSYNC, data, &reply, TF_ONE_WAY);
+        if (result != NO_ERROR) {
+            ALOGE("injectVSync failed to transact: %d", result);
+            return result;
+        }
+        return result;
+    }
+
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -325,9 +489,11 @@ status_t BnSurfaceComposer::onTransact(
             reply->writeStrongBinder(b);
             return NO_ERROR;
         }
-        case CREATE_GRAPHIC_BUFFER_ALLOC: {
+        case CREATE_SCOPED_CONNECTION: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<IBinder> b = IInterface::asBinder(createGraphicBufferAlloc());
+            sp<IGraphicBufferProducer> bufferProducer =
+                interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
+            sp<IBinder> b = IInterface::asBinder(createScopedConnection(bufferProducer));
             reply->writeStrongBinder(b);
             return NO_ERROR;
         }
@@ -380,8 +546,8 @@ status_t BnSurfaceComposer::onTransact(
             data.read(sourceCrop);
             uint32_t reqWidth = data.readUint32();
             uint32_t reqHeight = data.readUint32();
-            uint32_t minLayerZ = data.readUint32();
-            uint32_t maxLayerZ = data.readUint32();
+            int32_t minLayerZ = data.readInt32();
+            int32_t maxLayerZ = data.readInt32();
             bool useIdentityTransform = static_cast<bool>(data.readInt32());
             int32_t rotation = data.readInt32();
 
@@ -400,9 +566,29 @@ status_t BnSurfaceComposer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
+        case GET_SUPPORTED_FRAME_TIMESTAMPS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            std::vector<FrameEvent> supportedTimestamps;
+            status_t result = getSupportedFrameTimestamps(&supportedTimestamps);
+            status_t err = reply->writeInt32(result);
+            if (err != NO_ERROR) {
+                return err;
+            }
+            if (result != NO_ERROR) {
+                return result;
+            }
+
+            std::vector<int32_t> supported;
+            supported.reserve(supportedTimestamps.size());
+            for (FrameEvent s : supportedTimestamps) {
+                supported.push_back(static_cast<int32_t>(s));
+            }
+            return reply->writeInt32Vector(supported);
+        }
         case CREATE_DISPLAY_EVENT_CONNECTION: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<IDisplayEventConnection> connection(createDisplayEventConnection());
+            sp<IDisplayEventConnection> connection(createDisplayEventConnection(
+                    static_cast<ISurfaceComposer::VsyncSource>(data.readInt32())));
             reply->writeStrongBinder(IInterface::asBinder(connection));
             return NO_ERROR;
         }
@@ -469,6 +655,56 @@ status_t BnSurfaceComposer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
+        case GET_DISPLAY_COLOR_MODES: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            Vector<android_color_mode_t> colorModes;
+            sp<IBinder> display = nullptr;
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayColorModes failed to readStrongBinder: %d", result);
+                return result;
+            }
+            result = getDisplayColorModes(display, &colorModes);
+            reply->writeInt32(result);
+            if (result == NO_ERROR) {
+                reply->writeUint32(static_cast<uint32_t>(colorModes.size()));
+                for (size_t i = 0; i < colorModes.size(); ++i) {
+                    reply->writeInt32(colorModes[i]);
+                }
+            }
+            return NO_ERROR;
+        }
+        case GET_ACTIVE_COLOR_MODE: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> display = nullptr;
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("getActiveColorMode failed to readStrongBinder: %d", result);
+                return result;
+            }
+            android_color_mode_t colorMode = getActiveColorMode(display);
+            result = reply->writeInt32(static_cast<int32_t>(colorMode));
+            return result;
+        }
+        case SET_ACTIVE_COLOR_MODE: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> display = nullptr;
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("getActiveColorMode failed to readStrongBinder: %d", result);
+                return result;
+            }
+            int32_t colorModeInt = 0;
+            result = data.readInt32(&colorModeInt);
+            if (result != NO_ERROR) {
+                ALOGE("setActiveColorMode failed to readInt32: %d", result);
+                return result;
+            }
+            result = setActiveColorMode(display,
+                    static_cast<android_color_mode_t>(colorModeInt));
+            result = reply->writeInt32(result);
+            return result;
+        }
         case CLEAR_ANIMATION_FRAME_STATS: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             status_t result = clearAnimationFrameStats();
@@ -503,9 +739,29 @@ status_t BnSurfaceComposer::onTransact(
             result = getHdrCapabilities(display, &capabilities);
             reply->writeInt32(result);
             if (result == NO_ERROR) {
-                reply->writeParcelable(capabilities);
+                reply->write(capabilities);
             }
             return NO_ERROR;
+        }
+        case ENABLE_VSYNC_INJECTIONS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            bool enable = false;
+            status_t result = data.readBool(&enable);
+            if (result != NO_ERROR) {
+                ALOGE("enableVSyncInjections failed to readBool: %d", result);
+                return result;
+            }
+            return enableVSyncInjections(enable);
+        }
+        case INJECT_VSYNC: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            int64_t when = 0;
+            status_t result = data.readInt64(&when);
+            if (result != NO_ERROR) {
+                ALOGE("enableVSyncInjections failed to readInt64: %d", result);
+                return result;
+            }
+            return injectVSync(when);
         }
         default: {
             return BBinder::onTransact(code, data, reply, flags);

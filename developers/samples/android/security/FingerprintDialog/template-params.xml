@@ -25,6 +25,8 @@
     <package>com.example.android.fingerprintdialog</package>
 
     <minSdk>23</minSdk>
+    <targetSdkVersion>24</targetSdkVersion>
+    <compileSdkVersion>24</compileSdkVersion>
 
     <strings>
         <intro>
@@ -39,7 +41,7 @@ before proceeding some actions such as purchasing an item.
 
     <metadata>
         <!-- Values: {DRAFT | PUBLISHED | INTERNAL | DEPRECATED | SUPERCEDED} -->
-        <status>DRAFT</status>
+        <status>PUBLISHED</status>
         <categories>security</categories>
         <technologies>Android</technologies>
         <languages>Java</languages>

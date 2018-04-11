@@ -62,15 +62,15 @@ std::string ParseECVersion(std::string input_line);
 
 // Writes the data passed to path. The file at path will be overwritten if it
 // exists. Returns true on success, false otherwise.
-bool WriteFile(const char* path, const void* data, int data_len);
+bool WriteFile(const char* path, const void* data, size_t data_len);
 
 // Calls write() or pwrite() repeatedly until all count bytes at buf are
 // written to fd or an error occurs. Returns true on success.
 bool WriteAll(int fd, const void* buf, size_t count);
 bool PWriteAll(int fd, const void* buf, size_t count, off_t offset);
 
-bool WriteAll(FileDescriptorPtr fd, const void* buf, size_t count);
-bool PWriteAll(FileDescriptorPtr fd,
+bool WriteAll(const FileDescriptorPtr& fd, const void* buf, size_t count);
+bool PWriteAll(const FileDescriptorPtr& fd,
                const void* buf,
                size_t count,
                off_t offset);
@@ -88,7 +88,7 @@ bool ReadAll(
 bool PReadAll(int fd, void* buf, size_t count, off_t offset,
               ssize_t* out_bytes_read);
 
-bool PReadAll(FileDescriptorPtr fd, void* buf, size_t count, off_t offset,
+bool PReadAll(const FileDescriptorPtr& fd, void* buf, size_t count, off_t offset,
               ssize_t* out_bytes_read);
 
 // Opens |path| for reading and appends its entire content to the container
@@ -131,6 +131,13 @@ bool IsSymlink(const char* path);
 // only returns true if "/dev/ubi%d_0" becomes available in |timeout| seconds.
 bool TryAttachingUbiVolume(int volume_num, int timeout);
 
+// Setup the directory |new_root_temp_dir| to be used as the root directory for
+// temporary files instead of the system's default. If the directory doesn't
+// exists, it will be created when first used.
+// NOTE: The memory pointed by |new_root_temp_dir| must be available until this
+// function is called again with a different value.
+void SetRootTempDir(const char* new_root_temp_dir);
+
 // If |base_filename_template| is neither absolute (starts with "/") nor
 // explicitly relative to the current working directory (starts with "./" or
 // "../"), then it is prepended the system's temporary directory. On success,
@@ -141,14 +148,6 @@ bool TryAttachingUbiVolume(int volume_num, int timeout);
 bool MakeTempFile(const std::string& base_filename_template,
                   std::string* filename,
                   int* fd);
-
-// If |base_dirname_template| is neither absolute (starts with "/") nor
-// explicitly relative to the current working directory (starts with "./" or
-// "../"), then it is prepended the system's temporary directory. On success,
-// stores the name of the new temporary directory in |dirname|. The template
-// must end with "XXXXXX". Returns true on success.
-bool MakeTempDirectory(const std::string& base_dirname_template,
-                       std::string* dirname);
 
 // Splits the partition device name into the block device name and partition
 // number. For example, "/dev/sda3" will be split into {"/dev/sda", 3} and
@@ -193,43 +192,11 @@ bool MountFilesystem(const std::string& device,
                      const std::string& fs_mount_options);
 bool UnmountFilesystem(const std::string& mountpoint);
 
-// Returns the block count and the block byte size of the file system on
-// |device| (which may be a real device or a path to a filesystem image) or on
-// an opened file descriptor |fd|. The actual file-system size is |block_count|
-// * |block_size| bytes. Returns true on success, false otherwise.
-bool GetFilesystemSize(const std::string& device,
-                       int* out_block_count,
-                       int* out_block_size);
-bool GetFilesystemSizeFromFD(int fd,
-                             int* out_block_count,
-                             int* out_block_size);
-
-// Determines the block count and block size of the ext3 fs. At least 2048 bytes
-// are required to parse the first superblock. Returns whether the buffer
-// contains a valid ext3 filesystem and the values were parsed.
-bool GetExt3Size(const uint8_t* buffer, size_t buffer_size,
-                 int* out_block_count,
-                 int* out_block_size);
-
-// Determines the block count and block size of the squashfs v4 fs. At least 96
-// bytes are required to parse the header of the filesystem. Since squashfs
-// doesn't define a physical block size, a value of 4096 is used for the block
-// size, which is the default padding when creating the filesystem.
-// Returns whether the buffer contains a valid squashfs v4 header and the size
-// was parsed. Only little endian squashfs is supported.
-bool GetSquashfs4Size(const uint8_t* buffer, size_t buffer_size,
-                      int* out_block_count,
-                      int* out_block_size);
-
-// Returns whether the filesystem is an ext[234] filesystem. In case of failure,
-// such as if the file |device| doesn't exists or can't be read, it returns
-// false.
-bool IsExtFilesystem(const std::string& device);
-
-// Returns whether the filesystem is a squashfs filesystem. In case of failure,
-// such as if the file |device| doesn't exists or can't be read, it returns
-// false.
-bool IsSquashfsFilesystem(const std::string& device);
+// Return whether the passed |mountpoint| path is a directory where a filesystem
+// is mounted. Due to detection mechanism limitations, when used on directories
+// where another part of the tree was bind mounted returns true only if bind
+// mounted on top of a different filesystem (not inside the same filesystem).
+bool IsMountpoint(const std::string& mountpoint);
 
 // Returns a human-readable string with the file format based on magic constants
 // on the header of the file.
@@ -247,10 +214,6 @@ std::string ToString(DownloadSource source);
 
 // Returns a string representation of the given enum.
 std::string ToString(PayloadType payload_type);
-
-// Schedules a Main Loop callback to trigger the crash reporter to perform an
-// upload as if this process had crashed.
-void ScheduleCrashReporterUpload();
 
 // Fuzzes an integer |value| randomly in the range:
 // [value - range / 2, value + range - range / 2]
@@ -314,16 +277,6 @@ std::string FormatTimeDelta(base::TimeDelta delta);
 // idempotent, i.e. if called with a value previously returned by this method,
 // it'll return the same value again.
 ErrorCode GetBaseErrorCode(ErrorCode code);
-
-// Creates the powerwash marker file with the appropriate commands in it.  Uses
-// |file_path| as the path to the marker file if non-null, otherwise uses the
-// global default. Returns true if successfully created.  False otherwise.
-bool CreatePowerwashMarkerFile(const char* file_path);
-
-// Deletes the marker file used to trigger Powerwash using clobber-state.  Uses
-// |file_path| as the path to the marker file if non-null, otherwise uses the
-// global default. Returns true if successfully deleted. False otherwise.
-bool DeletePowerwashMarkerFile(const char* file_path);
 
 // Decodes the data in |base64_encoded| and stores it in a temporary
 // file. Returns false if the given data is empty, not well-formed
@@ -406,27 +359,6 @@ class ScopedPathUnlinker {
   const std::string path_;
   bool should_remove_;
   DISALLOW_COPY_AND_ASSIGN(ScopedPathUnlinker);
-};
-
-// Utility class to delete an empty directory when it goes out of scope.
-class ScopedDirRemover {
- public:
-  explicit ScopedDirRemover(const std::string& path)
-      : path_(path),
-        should_remove_(true) {}
-  ~ScopedDirRemover() {
-    if (should_remove_ && (rmdir(path_.c_str()) < 0)) {
-      PLOG(ERROR) << "Unable to remove dir " << path_;
-    }
-  }
-  void set_should_remove(bool should_remove) { should_remove_ = should_remove; }
-
- protected:
-  const std::string path_;
-
- private:
-  bool should_remove_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedDirRemover);
 };
 
 // A little object to call ActionComplete on the ActionProcessor when

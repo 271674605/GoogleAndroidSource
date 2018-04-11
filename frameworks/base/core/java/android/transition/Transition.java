@@ -799,8 +799,10 @@ public abstract class Transition implements Cloneable {
      * targetId list. If the target parameter is null, then the target list
      * is not checked (this is in the case of ListView items, where the
      * views are ignored and only the ids are used).
+     *
+     * @hide
      */
-    boolean isValidTarget(View target) {
+    public boolean isValidTarget(View target) {
         if (target == null) {
             return false;
         }
@@ -1941,6 +1943,26 @@ public abstract class Transition implements Cloneable {
     }
 
     /**
+     * Force the transition to move to its end state, ending all the animators.
+     *
+     * @hide
+     */
+    void forceToEnd(ViewGroup sceneRoot) {
+        ArrayMap<Animator, AnimationInfo> runningAnimators = getRunningAnimators();
+        int numOldAnims = runningAnimators.size();
+        if (sceneRoot != null) {
+            WindowId windowId = sceneRoot.getWindowId();
+            for (int i = numOldAnims - 1; i >= 0; i--) {
+                AnimationInfo info = runningAnimators.valueAt(i);
+                if (info.view != null && windowId != null && windowId.equals(info.windowId)) {
+                    Animator anim = runningAnimators.keyAt(i);
+                    anim.end();
+                }
+            }
+        }
+    }
+
+    /**
      * This method cancels a transition that is currently running.
      *
      * @hide
@@ -2319,34 +2341,6 @@ public abstract class Transition implements Cloneable {
          * @param transition The transition which was resumed.
          */
         void onTransitionResume(Transition transition);
-    }
-
-    /**
-     * Utility adapter class to avoid having to override all three methods
-     * whenever someone just wants to listen for a single event.
-     *
-     * @hide
-     * */
-    public static class TransitionListenerAdapter implements TransitionListener {
-        @Override
-        public void onTransitionStart(Transition transition) {
-        }
-
-        @Override
-        public void onTransitionEnd(Transition transition) {
-        }
-
-        @Override
-        public void onTransitionCancel(Transition transition) {
-        }
-
-        @Override
-        public void onTransitionPause(Transition transition) {
-        }
-
-        @Override
-        public void onTransitionResume(Transition transition) {
-        }
     }
 
     /**

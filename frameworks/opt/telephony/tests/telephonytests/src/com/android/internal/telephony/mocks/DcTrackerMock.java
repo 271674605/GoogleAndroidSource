@@ -20,7 +20,6 @@ import android.net.LinkProperties;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Handler;
-import android.os.Looper;
 import android.os.Message;
 import android.util.LocalLog;
 
@@ -94,10 +93,6 @@ public class DcTrackerMock extends DcTracker {
         throw new RuntimeException("Not Implemented");
     }
     @Override
-    public boolean getAnyDataEnabled(boolean checkUserDataEnabled) {
-        throw new RuntimeException("Not Implemented");
-    }
-    @Override
     public boolean hasMatchedTetherApnSetting() {
         throw new RuntimeException("Not Implemented");
     }
@@ -110,11 +105,11 @@ public class DcTrackerMock extends DcTracker {
         throw new RuntimeException("Not Implemented");
     }
     @Override
-    public void setDataOnRoamingEnabled(boolean enabled) {
+    public void setDataRoamingEnabled(boolean enabled) {
         throw new RuntimeException("Not Implemented");
     }
     @Override
-    public boolean getDataOnRoamingEnabled() {
+    public boolean getDataRoamingEnabled() {
         throw new RuntimeException("Not Implemented");
     }
     @Override
@@ -146,15 +141,7 @@ public class DcTrackerMock extends DcTracker {
         throw new RuntimeException("Not Implemented");
     }
     @Override
-    public boolean setInternalDataEnabledFlag(boolean enable) {
-        throw new RuntimeException("Not Implemented");
-    }
-    @Override
     public boolean setInternalDataEnabled(boolean enable) {
-        throw new RuntimeException("Not Implemented");
-    }
-    @Override
-    public void setDataAllowed(boolean enable, Message response) {
         throw new RuntimeException("Not Implemented");
     }
     @Override

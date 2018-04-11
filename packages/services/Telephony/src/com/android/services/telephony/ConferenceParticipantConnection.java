@@ -16,6 +16,7 @@
 
 package com.android.services.telephony;
 
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 
@@ -70,7 +71,7 @@ public class ConferenceParticipantConnection extends Connection {
             address = null;
         } else {
             String countryIso = getCountryIso(parentConnection.getCall().getPhone());
-            address = getParticipantAddress(participant, countryIso);
+            address = getParticipantAddress(participant.getHandle(), countryIso);
         }
         setAddress(address, presentation);
         setCallerDisplayName(participant.getDisplayName(), presentation);
@@ -178,8 +179,19 @@ public class ConferenceParticipantConnection extends Connection {
         if (TextUtils.isEmpty(number)) {
             return PhoneConstants.PRESENTATION_RESTRICTED;
         }
+        // Per RFC3261, the host name portion can also potentially include extra information:
+        // E.g. sip:anonymous1@anonymous.invalid;legid=1
+        // In this case, hostName will be anonymous.invalid and there is an extra parameter for
+        // legid=1.
+        // Parameters are optional, and the address (e.g. test@test.com) will always be the first
+        // part, with any parameters coming afterwards.
+        String hostParts[] = number.split("[;]");
+        String addressPart = hostParts[0];
 
-        String numberParts[] = number.split("[@]");
+        // Get the number portion from the address part.
+        // This will typically be formatted similar to: 6505551212@test.com
+        String numberParts[] = addressPart.split("[@]");
+
         // If we can't parse the host name out of the URI, then there is probably other data
         // present, and is likely a valid SIP URI.
         if (numberParts.length != 2) {
@@ -201,21 +213,19 @@ public class ConferenceParticipantConnection extends Connection {
      * Conference event package data contains SIP URIs, so we try to extract the phone number and
      * format into a typical tel: style URI.
      *
-     * @param participant The conference participant.
+     * @param address The conference participant's address.
      * @param countryIso The country ISO of the current subscription; used when formatting the
      *                   participant phone number to E.164 format.
      * @return The participant's address URI.
      */
-    private Uri getParticipantAddress(ConferenceParticipant participant, String countryIso) {
-        Uri address = participant.getHandle();
+    @VisibleForTesting
+    public static Uri getParticipantAddress(Uri address, String countryIso) {
         if (address == null) {
             return address;
         }
-
-        // If the participant's address is already a TEL scheme, just return it as is.
-        if (PhoneAccount.SCHEME_TEL.equals(address.getScheme())) {
-            return address;
-        }
+        // Even if address is already in tel: format, still parse it and rebuild.
+        // This is to recognize tel URIs such as:
+        // tel:6505551212;phone-context=ims.mnc012.mcc034.3gppnetwork.org
 
         // Conference event package participants are identified using SIP URIs (see RFC3261).
         // A valid SIP uri has the format: sip:user:password@host:port;uri-parameters?headers
@@ -292,6 +302,10 @@ public class ConferenceParticipantConnection extends Connection {
         sb.append(System.identityHashCode(this));
         sb.append(" endPoint:");
         sb.append(Log.pii(mEndpoint));
+        sb.append(" address:");
+        sb.append(Log.pii(getAddress()));
+        sb.append(" addressPresentation:");
+        sb.append(getAddressPresentation());
         sb.append(" parentConnection:");
         sb.append(Log.pii(mParentConnection.getAddress()));
         sb.append(" state:");

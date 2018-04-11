@@ -16,9 +16,9 @@ package com.android.systemui.statusbar.phone;
 
 import android.graphics.drawable.Drawable;
 import android.view.View;
-import android.widget.ImageView;
 
-import com.android.systemui.statusbar.policy.KeyButtonView;
+import com.android.systemui.plugins.statusbar.phone.NavBarButtonProvider.ButtonInterface;
+import com.android.systemui.statusbar.policy.KeyButtonDrawable;
 
 import java.util.ArrayList;
 
@@ -37,10 +37,11 @@ public class ButtonDispatcher {
     private View.OnLongClickListener mLongClickListener;
     private Boolean mLongClickable;
     private Integer mAlpha;
+    private Float mDarkIntensity;
     private Integer mVisibility = -1;
-    private int mImageResource = -1;
-    private Drawable mImageDrawable;
+    private KeyButtonDrawable mImageDrawable;
     private View mCurrentView;
+    private boolean mVertical;
 
     public ButtonDispatcher(int id) {
         mId = id;
@@ -61,13 +62,18 @@ public class ButtonDispatcher {
         if (mAlpha != null) {
             view.setAlpha(mAlpha);
         }
+        if (mDarkIntensity != null) {
+            ((ButtonInterface) view).setDarkIntensity(mDarkIntensity);
+        }
         if (mVisibility != null) {
             view.setVisibility(mVisibility);
         }
-        if (mImageResource > 0) {
-            ((ImageView) view).setImageResource(mImageResource);
-        } else if (mImageDrawable != null) {
-            ((ImageView) view).setImageDrawable(mImageDrawable);
+        if (mImageDrawable != null) {
+            ((ButtonInterface) view).setImageDrawable(mImageDrawable);
+        }
+
+        if (view instanceof  ButtonInterface) {
+            ((ButtonInterface) view).setVertical(mVertical);
         }
     }
 
@@ -83,21 +89,11 @@ public class ButtonDispatcher {
         return mAlpha != null ? mAlpha : 1;
     }
 
-    public void setImageDrawable(Drawable drawable) {
+    public void setImageDrawable(KeyButtonDrawable drawable) {
         mImageDrawable = drawable;
-        mImageResource = -1;
         final int N = mViews.size();
         for (int i = 0; i < N; i++) {
-            ((ImageView) mViews.get(i)).setImageDrawable(mImageDrawable);
-        }
-    }
-
-    public void setImageResource(int resource) {
-        mImageResource = resource;
-        mImageDrawable = null;
-        final int N = mViews.size();
-        for (int i = 0; i < N; i++) {
-            ((ImageView) mViews.get(i)).setImageResource(mImageResource);
+            ((ButtonInterface) mViews.get(i)).setImageDrawable(mImageDrawable);
         }
     }
 
@@ -114,7 +110,7 @@ public class ButtonDispatcher {
         // This seems to be an instantaneous thing, so not going to persist it.
         final int N = mViews.size();
         for (int i = 0; i < N; i++) {
-            ((KeyButtonView) mViews.get(i)).abortCurrentGesture();
+            ((ButtonInterface) mViews.get(i)).abortCurrentGesture();
         }
     }
 
@@ -123,6 +119,14 @@ public class ButtonDispatcher {
         final int N = mViews.size();
         for (int i = 0; i < N; i++) {
             mViews.get(i).setAlpha(alpha);
+        }
+    }
+
+    public void setDarkIntensity(float darkIntensity) {
+        mDarkIntensity = darkIntensity;
+        final int N = mViews.size();
+        for (int i = 0; i < N; i++) {
+            ((ButtonInterface) mViews.get(i)).setDarkIntensity(darkIntensity);
         }
     }
 
@@ -158,11 +162,36 @@ public class ButtonDispatcher {
         }
     }
 
+    public ArrayList<View> getViews() {
+        return mViews;
+    }
+
     public View getCurrentView() {
         return mCurrentView;
     }
 
     public void setCurrentView(View currentView) {
         mCurrentView = currentView.findViewById(mId);
+    }
+
+    public void setCarMode(boolean carMode) {
+        final int N = mViews.size();
+        for (int i = 0; i < N; i++) {
+            final View view = mViews.get(i);
+            if (view instanceof ButtonInterface) {
+                ((ButtonInterface) view).setCarMode(carMode);
+            }
+        }
+    }
+
+    public void setVertical(boolean vertical) {
+        mVertical = vertical;
+        final int N = mViews.size();
+        for (int i = 0; i < N; i++) {
+            final View view = mViews.get(i);
+            if (view instanceof ButtonInterface) {
+                ((ButtonInterface) view).setVertical(vertical);
+            }
+        }
     }
 }

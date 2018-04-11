@@ -25,6 +25,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "tests.h"
+#include <assert.h>
 #include <stdio.h>
 #include <signal.h>
 #include <unistd.h>
@@ -36,14 +38,13 @@ main (void)
 		.sa_handler = SIG_IGN
 	};
 	union sigval value = {
-		.sival_ptr = (void *) (unsigned long) 0xdeadbeefbadc0ded
+		.sival_ptr = (void *) (unsigned long) 0xdeadbeefbadc0dedULL
 	};
 	pid_t pid = getpid();
 
-	if (sigaction(SIGUSR1, &sa, NULL) == -1)
-		return 77;
-	if (sigqueue(pid, SIGUSR1, value) == -1)
-		return 77;
+	assert(sigaction(SIGUSR1, &sa, NULL) == 0);
+	if (sigqueue(pid, SIGUSR1, value))
+		perror_msg_and_skip("sigqueue");
 	printf("rt_sigqueueinfo(%u, SIGUSR1, {si_signo=SIGUSR1, "
 		"si_code=SI_QUEUE, si_pid=%u, si_uid=%u, "
 		"si_value={int=%d, ptr=%p}}) = 0\n",

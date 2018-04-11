@@ -53,7 +53,6 @@ import java.util.WeakHashMap;
 
 /**
  * Provides the contents for the suggestion drop-down list.in {@link SearchView}.
- * @hide
  */
 class SuggestionsAdapter extends ResourceCursorAdapter implements OnClickListener {
 
@@ -111,7 +110,7 @@ class SuggestionsAdapter extends ResourceCursorAdapter implements OnClickListene
      * copied to the query text field.
      * <p>
      *
-     * @param refine which queries to refine. Possible values are {@link #REFINE_NONE},
+     * @param refineWhat which queries to refine. Possible values are {@link #REFINE_NONE},
      * {@link #REFINE_BY_ENTRY}, and {@link #REFINE_ALL}.
      */
     public void setQueryRefinement(int refineWhat) {
@@ -324,6 +323,7 @@ class SuggestionsAdapter extends ResourceCursorAdapter implements OnClickListene
         }
     }
 
+    @Override
     public void onClick(View v) {
         Object tag = v.getTag();
         if (tag instanceof CharSequence) {
@@ -454,6 +454,29 @@ class SuggestionsAdapter extends ResourceCursorAdapter implements OnClickListene
             if (v != null) {
                 ChildViewCache views = (ChildViewCache) v.getTag();
                 TextView tv = views.mText1;
+                tv.setText(e.toString());
+            }
+            return v;
+        }
+    }
+
+    /**
+     * This method is overridden purely to provide a bit of protection against
+     * flaky content providers.
+     *
+     * @see android.widget.CursorAdapter#getDropDownView(int, View, ViewGroup)
+     */
+    @Override
+    public View getDropDownView(int position, View convertView, ViewGroup parent) {
+        try {
+            return super.getDropDownView(position, convertView, parent);
+        } catch (RuntimeException e) {
+            Log.w(LOG_TAG, "Search suggestions cursor threw exception.", e);
+            // Put exception string in item title
+            final View v = newDropDownView(mContext, mCursor, parent);
+            if (v != null) {
+                final ChildViewCache views = (ChildViewCache) v.getTag();
+                final TextView tv = views.mText1;
                 tv.setText(e.toString());
             }
             return v;
@@ -616,7 +639,7 @@ class SuggestionsAdapter extends ResourceCursorAdapter implements OnClickListene
      * Gets the activity or application icon for an activity.
      *
      * @param component Name of an activity.
-     * @return A drawable, or {@code null} if neither the acitivy or the application
+     * @return A drawable, or {@code null} if neither the activity or the application
      *         have an icon set.
      */
     private Drawable getActivityIcon(ComponentName component) {

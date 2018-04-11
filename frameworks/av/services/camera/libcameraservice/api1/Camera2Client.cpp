@@ -56,7 +56,8 @@ Camera2Client::Camera2Client(const sp<CameraService>& cameraService,
         int servicePid,
         bool legacyMode):
         Camera2ClientBase(cameraService, cameraClient, clientPackageName,
-                cameraId, cameraFacing, clientPid, clientUid, servicePid),
+                String8::format("%d", cameraId), cameraFacing,
+                clientPid, clientUid, servicePid),
         mParameters(cameraId, cameraFacing)
 {
     ATRACE_CALL();
@@ -67,13 +68,18 @@ Camera2Client::Camera2Client(const sp<CameraService>& cameraService,
     mLegacyMode = legacyMode;
 }
 
-status_t Camera2Client::initialize(CameraModule *module)
+status_t Camera2Client::initialize(sp<CameraProviderManager> manager) {
+    return initializeImpl(manager);
+}
+
+template<typename TProviderPtr>
+status_t Camera2Client::initializeImpl(TProviderPtr providerPtr)
 {
     ATRACE_CALL();
     ALOGV("%s: Initializing client for camera %d", __FUNCTION__, mCameraId);
     status_t res;
 
-    res = Camera2ClientBase::initialize(module);
+    res = Camera2ClientBase::initialize(providerPtr);
     if (res != OK) {
         return res;
     }
@@ -322,6 +328,9 @@ status_t Camera2Client::dumpClient(int fd, const Vector<String16>& args) {
             p.fastInfo.bestStillCaptureFpsRange[0],
             p.fastInfo.bestStillCaptureFpsRange[1]);
 
+    result.appendFormat("    Use zero shutter lag: %s\n",
+            p.useZeroShutterLag() ? "yes" : "no");
+
     result.append("  Current streams:\n");
     result.appendFormat("    Preview stream ID: %d\n",
             getPreviewStreamId());
@@ -523,7 +532,7 @@ status_t Camera2Client::setPreviewTarget(
 }
 
 status_t Camera2Client::setPreviewWindowL(const sp<IBinder>& binder,
-        sp<Surface> window) {
+        const sp<Surface>& window) {
     ATRACE_CALL();
     status_t res;
 
@@ -813,7 +822,7 @@ status_t Camera2Client::startPreviewL(Parameters &params, bool restart) {
         }
     }
 
-    if (params.zslMode && !params.recordingHint &&
+    if (params.useZeroShutterLag() &&
             getRecordingStreamId() == NO_STREAM) {
         res = updateProcessorStream(mZslProcessor, params);
         if (res != OK) {
@@ -990,7 +999,7 @@ status_t Camera2Client::startRecording() {
 }
 
 status_t Camera2Client::startRecordingL(Parameters &params, bool restart) {
-    status_t res;
+    status_t res = OK;
 
     ALOGV("%s: state == %d, restart = %d", __FUNCTION__, params.state, restart);
 
@@ -1031,7 +1040,7 @@ status_t Camera2Client::startRecordingL(Parameters &params, bool restart) {
     }
 
     if (!restart) {
-        mCameraService->playSound(CameraService::SOUND_RECORDING_START);
+        sCameraService->playSound(CameraService::SOUND_RECORDING_START);
         mStreamingProcessor->updateRecordingRequest(params);
         if (res != OK) {
             ALOGE("%s: Camera %d: Unable to update recording request: %s (%d)",
@@ -1188,7 +1197,7 @@ void Camera2Client::stopRecording() {
             return;
     };
 
-    mCameraService->playSound(CameraService::SOUND_RECORDING_STOP);
+    sCameraService->playSound(CameraService::SOUND_RECORDING_STOP);
 
     // Remove recording stream because the video target may be abandoned soon.
     res = stopStream();
@@ -1244,6 +1253,13 @@ void Camera2Client::releaseRecordingFrame(const sp<IMemory>& mem) {
 
 void Camera2Client::releaseRecordingFrameHandle(native_handle_t *handle) {
     (void)handle;
+    ATRACE_CALL();
+    ALOGW("%s: Not supported in buffer queue mode.", __FUNCTION__);
+}
+
+void Camera2Client::releaseRecordingFrameHandleBatch(
+        const std::vector<native_handle_t*>& handles) {
+    (void)handles;
     ATRACE_CALL();
     ALOGW("%s: Not supported in buffer queue mode.", __FUNCTION__);
 }
@@ -1362,7 +1378,7 @@ status_t Camera2Client::cancelAutoFocus() {
 
             return OK;
         }
-        if (l.mParameters.zslMode) {
+        if (l.mParameters.allowZslMode) {
             mZslProcessor->clearZslQueue();
         }
     }
@@ -1460,7 +1476,7 @@ status_t Camera2Client::takePicture(int msgType) {
 
         // Clear ZSL buffer queue when Jpeg size is changed.
         bool jpegStreamChanged = mJpegProcessor->getStreamId() != lastJpegStreamId;
-        if (l.mParameters.zslMode && jpegStreamChanged) {
+        if (l.mParameters.allowZslMode && jpegStreamChanged) {
             ALOGV("%s: Camera %d: Clear ZSL buffer queue when Jpeg size is changed",
                     __FUNCTION__, mCameraId);
             mZslProcessor->clearZslQueue();
@@ -1495,7 +1511,7 @@ status_t Camera2Client::setParameters(const String8& params) {
     if (res != OK) return res;
     Parameters::focusMode_t focusModeAfter = l.mParameters.focusMode;
 
-    if (l.mParameters.zslMode && focusModeAfter != focusModeBefore) {
+    if (l.mParameters.allowZslMode && focusModeAfter != focusModeBefore) {
         mZslProcessor->clearZslQueue();
     }
 
@@ -1618,7 +1634,7 @@ status_t Camera2Client::commandEnableShutterSoundL(bool enable) {
 }
 
 status_t Camera2Client::commandPlayRecordingSoundL() {
-    mCameraService->playSound(CameraService::SOUND_RECORDING_START);
+    sCameraService->playSound(CameraService::SOUND_RECORDING_START);
     return OK;
 }
 
@@ -1900,12 +1916,12 @@ int Camera2Client::getZslStreamId() const {
 }
 
 status_t Camera2Client::registerFrameListener(int32_t minId, int32_t maxId,
-        wp<camera2::FrameProcessor::FilteredListener> listener, bool sendPartials) {
+        const wp<camera2::FrameProcessor::FilteredListener>& listener, bool sendPartials) {
     return mFrameProcessor->registerListener(minId, maxId, listener, sendPartials);
 }
 
 status_t Camera2Client::removeFrameListener(int32_t minId, int32_t maxId,
-        wp<camera2::FrameProcessor::FilteredListener> listener) {
+        const wp<camera2::FrameProcessor::FilteredListener>& listener) {
     return mFrameProcessor->removeListener(minId, maxId, listener);
 }
 

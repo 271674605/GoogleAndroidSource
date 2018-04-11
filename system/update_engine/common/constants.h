@@ -19,13 +19,6 @@
 
 namespace chromeos_update_engine {
 
-// The name of the marker file used to trigger powerwash when post-install
-// completes successfully so that the device is powerwashed on next reboot.
-extern const char kPowerwashMarkerFile[];
-
-// The contents of the powerwash marker file.
-extern const char kPowerwashCommand[];
-
 // Directory for AU prefs that are preserved across powerwash.
 extern const char kPowerwashSafePrefsSubDirectory[];
 
@@ -61,6 +54,7 @@ extern const char kPrefsNumResponsesSeen[];
 extern const char kPrefsOmahaCohort[];
 extern const char kPrefsOmahaCohortHint[];
 extern const char kPrefsOmahaCohortName[];
+extern const char kPrefsOmahaEolStatus[];
 extern const char kPrefsP2PEnabled[];
 extern const char kPrefsP2PFirstAttemptTimestamp[];
 extern const char kPrefsP2PNumAttempts[];
@@ -99,6 +93,8 @@ extern const char kPayloadPropertyMetadataSize[];
 extern const char kPayloadPropertyMetadataHash[];
 extern const char kPayloadPropertyAuthorization[];
 extern const char kPayloadPropertyUserAgent[];
+extern const char kPayloadPropertyPowerwash[];
+extern const char kPayloadPropertyNetworkId[];
 
 // A download source is any combination of protocol and server (that's of
 // interest to us when looking at UMA metrics) using which we may download

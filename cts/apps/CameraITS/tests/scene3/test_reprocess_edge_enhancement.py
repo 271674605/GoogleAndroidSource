@@ -22,7 +22,7 @@ import matplotlib
 import matplotlib.pyplot
 import numpy
 import os.path
-import pylab
+from matplotlib import pylab
 
 
 def test_edge_mode(cam, edge_mode, sensitivity, exp, fd, out_surface,
@@ -90,7 +90,7 @@ def main():
     the sharpess of non-reprocess images.
     """
 
-    THRESHOLD_RELATIVE_SHARPNESS_DIFF = 0.1
+    THRESHOLD_RELATIVE_SHARPNESS_DIFF = 0.15
 
     with its.device.ItsSession() as cam:
         props = cam.get_camera_properties()

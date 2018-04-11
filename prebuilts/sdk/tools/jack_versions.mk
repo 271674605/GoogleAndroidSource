@@ -13,11 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+LOCAL_PATH:= $(call my-dir)
 
-JACK_STABLE_VERSION := 3.36.CANDIDATE
-JACK_DOGFOOD_VERSION := 3.36.CANDIDATE
-JACK_SDKTOOL_VERSION := 4.7.BETA
-JACK_LANG_DEV_VERSION := 3.36.CANDIDATE
+jack_jar_tools := $(LOCAL_PATH)/jack-jar-tools.jar
+jack_eng_jar := $(LOCAL_PATH)/jacks/jack.jar
+
+JACK_STABLE_VERSION := 4.31.CANDIDATE
+JACK_DOGFOOD_VERSION := 4.31.CANDIDATE
+JACK_SDKTOOL_VERSION := 4.31.CANDIDATE
+JACK_LANG_DEV_VERSION := 4.31.CANDIDATE
+ifneq ("$(wildcard $(jack_eng_jar))","")
+JACK_ENGINEERING_VERSION := $(shell java -jar $(jack_jar_tools) --version-code jack $(jack_eng_jar))
+endif
 
 ifneq ($(ANDROID_JACK_DEFAULT_VERSION),)
 JACK_DEFAULT_VERSION := $(JACK_$(ANDROID_JACK_DEFAULT_VERSION)_VERSION)
@@ -28,10 +35,10 @@ JACK_APPS_VERSION := $(ANDROID_JACK_DEFAULT_VERSION)
 else
 ifneq (,$(TARGET_BUILD_APPS))
 # Unbundled branches
-JACK_DEFAULT_VERSION := $(JACK_DOGFOOD_VERSION)
+JACK_DEFAULT_VERSION := $(JACK_STABLE_VERSION)
 else
 # Complete android tree
-JACK_DEFAULT_VERSION := $(JACK_DOGFOOD_VERSION)
+JACK_DEFAULT_VERSION := $(JACK_STABLE_VERSION)
 endif
-JACK_APPS_VERSION := DOGFOOD
+JACK_APPS_VERSION := STABLE
 endif

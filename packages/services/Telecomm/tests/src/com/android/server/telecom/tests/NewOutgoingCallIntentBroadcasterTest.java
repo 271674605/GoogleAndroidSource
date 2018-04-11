@@ -38,10 +38,12 @@ import com.android.server.telecom.CallsManager;
 import com.android.server.telecom.NewOutgoingCallIntentBroadcaster;
 import com.android.server.telecom.PhoneNumberUtilsAdapter;
 import com.android.server.telecom.PhoneNumberUtilsAdapterImpl;
+import com.android.server.telecom.TelecomSystem;
 
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyBoolean;
 import static org.mockito.Matchers.anyInt;
@@ -77,6 +79,7 @@ public class NewOutgoingCallIntentBroadcasterTest extends TelecomTestCase {
         mContext = mComponentContextFixture.getTestDouble().getApplicationContext();
         mPhoneNumberUtilsAdapterSpy = spy(new PhoneNumberUtilsAdapterImpl());
         when(mCall.getInitiatingUser()).thenReturn(UserHandle.CURRENT);
+        when(mCallsManager.getLock()).thenReturn(new TelecomSystem.SyncRoot() { });
     }
 
     @SmallTest
@@ -98,7 +101,7 @@ public class NewOutgoingCallIntentBroadcasterTest extends TelecomTestCase {
 
         assertEquals(DisconnectCause.NOT_DISCONNECTED, result);
         verify(mCallsManager).placeOutgoingCall(eq(mCall), eq(Uri.parse(voicemailNumber)),
-                any(GatewayInfo.class), eq(true), eq(VideoProfile.STATE_AUDIO_ONLY));
+                nullable(GatewayInfo.class), eq(true), eq(VideoProfile.STATE_AUDIO_ONLY));
     }
 
     @SmallTest
@@ -311,7 +314,28 @@ public class NewOutgoingCallIntentBroadcasterTest extends TelecomTestCase {
 
         result.receiver.onReceive(mContext, result.intent);
         verifyNoCallPlaced();
-        verify(mCall).disconnect(true);
+        ArgumentCaptor<Long> timeoutCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(mCall).disconnect(timeoutCaptor.capture());
+        assertTrue(timeoutCaptor.getValue() > 0);
+    }
+
+    @SmallTest
+    public void testCallNumberModifiedToNullWithLongCustomTimeout() {
+        Uri handle = Uri.parse("tel:6505551234");
+        Intent callIntent = buildIntent(handle, Intent.ACTION_CALL, null);
+        ReceiverIntentPair result = regularCallTestHelper(callIntent, null);
+
+        long customTimeout = 100000000;
+        Bundle bundle = new Bundle();
+        bundle.putLong(TelecomManager.EXTRA_NEW_OUTGOING_CALL_CANCEL_TIMEOUT, customTimeout);
+        result.receiver.setResultData(null);
+        result.receiver.setResultExtras(bundle);
+
+        result.receiver.onReceive(mContext, result.intent);
+        verifyNoCallPlaced();
+        ArgumentCaptor<Long> timeoutCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(mCall).disconnect(timeoutCaptor.capture());
+        assertTrue(timeoutCaptor.getValue() < customTimeout);
     }
 
     @SmallTest
@@ -326,7 +350,7 @@ public class NewOutgoingCallIntentBroadcasterTest extends TelecomTestCase {
         doReturn(true).when(mPhoneNumberUtilsAdapterSpy).isPotentialLocalEmergencyNumber(
                 any(Context.class), eq(newEmergencyNumber));
         result.receiver.onReceive(mContext, result.intent);
-        verify(mCall).disconnect(true);
+        verify(mCall).disconnect(eq(0L));
     }
 
     private ReceiverIntentPair regularCallTestHelper(Intent intent,
@@ -381,7 +405,8 @@ public class NewOutgoingCallIntentBroadcasterTest extends TelecomTestCase {
 
         Intent capturedIntent = intentCaptor.getValue();
         assertEquals(Intent.ACTION_NEW_OUTGOING_CALL, capturedIntent.getAction());
-        assertEquals(Intent.FLAG_RECEIVER_FOREGROUND, capturedIntent.getFlags());
+        assertEquals(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND,
+                capturedIntent.getFlags());
         assertTrue(areBundlesEqual(expectedExtras, capturedIntent.getExtras()));
 
         BroadcastReceiver receiver = receiverCaptor.getValue();

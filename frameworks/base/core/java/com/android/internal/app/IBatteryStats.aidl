@@ -79,6 +79,8 @@ interface IBatteryStats {
             String newHistoryName, int newType, boolean newUnimportantForLogging);
     void noteStopWakelockFromSource(in WorkSource ws, int pid, String name, String historyName,
             int type);
+    void noteLongPartialWakelockStart(String name, String historyName, int uid);
+    void noteLongPartialWakelockFinish(String name, String historyName, int uid);
 
     void noteVibratorOn(int uid, long durationMillis);
     void noteVibratorOff(int uid);
@@ -118,18 +120,19 @@ interface IBatteryStats {
     void noteWifiBatchedScanStoppedFromSource(in WorkSource ws);
     void noteWifiMulticastEnabledFromSource(in WorkSource ws);
     void noteWifiMulticastDisabledFromSource(in WorkSource ws);
-    void noteWifiRadioPowerState(int powerState, long timestampNs);
+    void noteWifiRadioPowerState(int powerState, long timestampNs, int uid);
     void noteNetworkInterfaceType(String iface, int type);
     void noteNetworkStatsEnabled();
     void noteDeviceIdleMode(int mode, String activeReason, int activeUid);
     void setBatteryState(int status, int health, int plugType, int level, int temp, int volt,
-            int chargeUAh);
+            int chargeUAh, int chargeFullUAh);
     long getAwakeTimeBattery();
     long getAwakeTimePlugged();
 
-    void noteBleScanStarted(in WorkSource ws);
+    void noteBleScanStarted(in WorkSource ws, boolean isUnoptimized);
     void noteBleScanStopped(in WorkSource ws);
     void noteResetBleScan();
+    void noteBleScanResults(in WorkSource ws, int numNewResults);
 
     HealthStatsParceler takeUidSnapshot(int uid);
     HealthStatsParceler[] takeUidSnapshots(in int[] uid);

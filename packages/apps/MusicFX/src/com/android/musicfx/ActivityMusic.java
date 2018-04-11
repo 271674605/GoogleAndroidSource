@@ -30,9 +30,11 @@ import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.AudioEffect.Descriptor;
+import android.media.audiofx.Virtualizer;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
@@ -260,9 +262,7 @@ public class ActivityMusic extends Activity implements OnSeekBarChangeListener {
 
             if (effect.type.equals(AudioEffect.EFFECT_TYPE_VIRTUALIZER)) {
                 mVirtualizerSupported = true;
-                if (effect.uuid.equals(UUID.fromString("1d4033c0-8557-11df-9f2d-0002a5d5c51b"))) {
-                    mVirtualizerIsHeadphoneOnly = true;
-                }
+                mVirtualizerIsHeadphoneOnly = !isVirtualizerTransauralSupported();
             } else if (effect.type.equals(AudioEffect.EFFECT_TYPE_BASS_BOOST)) {
                 mBassBoostSupported = true;
             } else if (effect.type.equals(AudioEffect.EFFECT_TYPE_EQUALIZER)) {
@@ -447,20 +447,21 @@ public class ActivityMusic extends Activity implements OnSeekBarChangeListener {
                 reverbSpinnerInit((Spinner)findViewById(R.id.prSpinner));
             }
 
+            ActionBar ab = getActionBar();
+            final int padding = getResources().getDimensionPixelSize(
+                    R.dimen.action_bar_switch_padding);
+            mToggleSwitch.setPadding(0,0, padding, 0);
+            ab.setCustomView(mToggleSwitch, new ActionBar.LayoutParams(
+                    ActionBar.LayoutParams.WRAP_CONTENT,
+                    ActionBar.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER_VERTICAL | Gravity.RIGHT));
+            ab.setDisplayOptions(ActionBar.DISPLAY_SHOW_TITLE | ActionBar.DISPLAY_SHOW_CUSTOM);
+
         } else {
             viewGroup.setVisibility(View.GONE);
             ((TextView) findViewById(R.id.noEffectsTextView)).setVisibility(View.VISIBLE);
         }
 
-        ActionBar ab = getActionBar();
-        final int padding = getResources().getDimensionPixelSize(
-                R.dimen.action_bar_switch_padding);
-        mToggleSwitch.setPadding(0,0, padding, 0);
-        ab.setCustomView(mToggleSwitch, new ActionBar.LayoutParams(
-                ActionBar.LayoutParams.WRAP_CONTENT,
-                ActionBar.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER_VERTICAL | Gravity.RIGHT));
-        ab.setDisplayOptions(ActionBar.DISPLAY_SHOW_TITLE | ActionBar.DISPLAY_SHOW_CUSTOM);
     }
 
     /*
@@ -501,7 +502,10 @@ public class ActivityMusic extends Activity implements OnSeekBarChangeListener {
 
         // Unregister for broadcast intents. (These affect the visible UI,
         // so we only care about them while we're in the foreground.)
-        unregisterReceiver(mReceiver);
+        if ((mVirtualizerSupported) || (mBassBoostSupported) || (mEqualizerSupported)
+                || (mPresetReverbSupported)) {
+            unregisterReceiver(mReceiver);
+        }
     }
 
     private void reverbSpinnerInit(Spinner spinner) {
@@ -804,5 +808,21 @@ public class ActivityMusic extends Activity implements OnSeekBarChangeListener {
         final Toast toast = Toast.makeText(context, getString(R.string.headset_plug), duration);
         toast.setGravity(Gravity.CENTER, toast.getXOffset() / 2, toast.getYOffset() / 2);
         toast.show();
+    }
+
+    private static boolean isVirtualizerTransauralSupported() {
+        Virtualizer virt = null;
+        boolean transauralSupported = false;
+        try {
+            virt = new Virtualizer(0, android.media.AudioSystem.newAudioSessionId());
+            transauralSupported = virt.canVirtualize(AudioFormat.CHANNEL_OUT_STEREO,
+                    Virtualizer.VIRTUALIZATION_MODE_TRANSAURAL);
+        } catch (Exception e) {
+        } finally {
+            if (virt != null) {
+                virt.release();
+            }
+        }
+        return transauralSupported;
     }
 }

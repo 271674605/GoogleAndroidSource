@@ -17,11 +17,10 @@ import android.content.Context;
 import android.support.v17.leanback.R;
 import android.support.v17.leanback.system.Settings;
 import android.support.v17.leanback.transition.TransitionHelper;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewGroup.LayoutParams;
-import android.util.Log;
 
 /**
  * A presenter that renders objects in a {@link VerticalGridView}.
@@ -44,7 +43,7 @@ public class VerticalGridPresenter extends Presenter {
 
         @Override
         public void onBind(final ItemBridgeAdapter.ViewHolder itemViewHolder) {
-            // Only when having an OnItemClickListner, we attach the OnClickListener.
+            // Only when having an OnItemClickListener, we attach the OnClickListener.
             if (getOnItemViewClickedListener() != null) {
                 final View itemView = itemViewHolder.mHolder.view;
                 itemView.setOnClickListener(new View.OnClickListener() {
@@ -99,7 +98,7 @@ public class VerticalGridPresenter extends Presenter {
     private OnItemViewSelectedListener mOnItemViewSelectedListener;
     private OnItemViewClickedListener mOnItemViewClickedListener;
     private boolean mRoundedCornersEnabled = true;
-    private ShadowOverlayHelper mShadowOverlayHelper;
+    ShadowOverlayHelper mShadowOverlayHelper;
     private ItemBridgeAdapter.Wrapper mShadowOverlayWrapper;
 
     /**
@@ -180,9 +179,9 @@ public class VerticalGridPresenter extends Presenter {
     }
 
     /**
-     * Returns true if opticalBounds is supported (SDK >= 18) so that default shadow
-     * is applied to each individual child of {@link VerticalGridView}.
-     * Subclass may return false to disable.
+     * Default implementation returns true if SDK version >= 21, shadow (either static or z-order
+     * based) will be applied to each individual child of {@link VerticalGridView}.
+     * Subclass may return false to disable default implementation of shadow and provide its own.
      */
     public boolean isUsingDefaultShadow() {
         return ShadowOverlayHelper.supportsShadow();
@@ -284,7 +283,7 @@ public class VerticalGridPresenter extends Presenter {
         vh.mItemBridgeAdapter.setWrapper(mShadowOverlayWrapper);
         mShadowOverlayHelper.prepareParentForShadow(vh.mGridView);
         vh.getGridView().setFocusDrawingOrderEnabled(mShadowOverlayHelper.getShadowType()
-                == ShadowOverlayHelper.SHADOW_STATIC);
+                != ShadowOverlayHelper.SHADOW_DYNAMIC);
         FocusHighlightHelper.setupBrowseItemFocusHighlight(vh.mItemBridgeAdapter,
                 mFocusZoomFactor, mUseFocusDimmer);
 
@@ -324,7 +323,7 @@ public class VerticalGridPresenter extends Presenter {
      * return new ShadowOverlayHelper.Options().roundedCornerRadius(10);
      * </code>
      *
-     * @return   The options to be used for shadow, overlay and rouded corner.
+     * @return   The options to be used for shadow, overlay and rounded corner.
      */
     protected ShadowOverlayHelper.Options createShadowOverlayOptions() {
         return ShadowOverlayHelper.Options.DEFAULT;
@@ -378,7 +377,7 @@ public class VerticalGridPresenter extends Presenter {
         return mOnItemViewClickedListener;
     }
 
-    private void selectChildView(ViewHolder vh, View view) {
+    void selectChildView(ViewHolder vh, View view) {
         if (getOnItemViewSelectedListener() != null) {
             ItemBridgeAdapter.ViewHolder ibh = (view == null) ? null :
                     (ItemBridgeAdapter.ViewHolder) vh.getGridView().getChildViewHolder(view);

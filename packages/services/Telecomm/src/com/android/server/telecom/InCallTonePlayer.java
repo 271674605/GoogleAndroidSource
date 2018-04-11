@@ -20,6 +20,9 @@ import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Handler;
 import android.os.Looper;
+import android.telecom.Log;
+import android.telecom.Logging.Runnable;
+import android.telecom.Logging.Session;
 
 import com.android.internal.annotations.VisibleForTesting;
 
@@ -273,7 +276,12 @@ public class InCallTonePlayer extends Thread {
             mSession = Log.createSubsession();
         }
 
-        start();
+        super.start();
+    }
+
+    @Override
+    public void start() {
+        Log.w(this, "Do not call the start method directly; use startTone instead.");
     }
 
     /**
@@ -292,15 +300,13 @@ public class InCallTonePlayer extends Thread {
 
     private void cleanUpTonePlayer() {
         // Release focus on the main thread.
-        mMainThreadHandler.post(new Runnable("ICTP.cUTP") {
+        mMainThreadHandler.post(new Runnable("ICTP.cUTP", mLock) {
             @Override
             public void loggedRun() {
-                synchronized (mLock) {
-                    if (sTonesPlaying == 0) {
-                        Log.wtf(this, "Over-releasing focus for tone player.");
-                    } else if (--sTonesPlaying == 0) {
-                        mCallAudioManager.setIsTonePlaying(false);
-                    }
+                if (sTonesPlaying == 0) {
+                    Log.wtf(this, "Over-releasing focus for tone player.");
+                } else if (--sTonesPlaying == 0) {
+                    mCallAudioManager.setIsTonePlaying(false);
                 }
             }
         }.prepare());

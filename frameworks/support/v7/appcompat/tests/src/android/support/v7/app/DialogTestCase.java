@@ -16,18 +16,20 @@
 
 package android.support.v7.app;
 
-import org.junit.Test;
-
-import android.app.Dialog;
-import android.os.Bundle;
-
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-public class DialogTestCase extends BaseInstrumentationTestCase<WindowDecorActionBarActivity> {
+import android.app.Dialog;
+import android.os.Bundle;
+import android.support.test.filters.MediumTest;
+
+import org.junit.Test;
+
+@MediumTest
+public class DialogTestCase extends BaseInstrumentationTestCase<WindowDecorAppCompatActivity> {
 
     public DialogTestCase() {
-        super(WindowDecorActionBarActivity.class);
+        super(WindowDecorAppCompatActivity.class);
     }
 
     @Test

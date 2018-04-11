@@ -52,6 +52,17 @@ public:
          * The caller is responsible for free()'ing the returned ptr.
          */
         char *getStatsLine(void) const;
+
+        bool addStatsIfMatch(const TetherStats& other) {
+            if (intIface == other.intIface && extIface == other.extIface) {
+                rxBytes   += other.rxBytes;
+                rxPackets += other.rxPackets;
+                txBytes   += other.txBytes;
+                txPackets += other.txPackets;
+                return true;
+            }
+            return false;
+        }
     };
 
     BandwidthController();
@@ -113,9 +124,9 @@ protected:
     };
 
     enum IptIpVer { IptIpV4, IptIpV6 };
-    enum IptOp { IptOpInsert, IptOpReplace, IptOpDelete, IptOpAppend };
+    enum IptFullOp { IptFullOpInsert, IptFullOpDelete, IptFullOpAppend };
     enum IptJumpOp { IptJumpReject, IptJumpReturn, IptJumpNoAdd };
-    enum SpecialAppOp { SpecialAppOpAdd, SpecialAppOpRemove };
+    enum IptOp { IptOpInsert, IptOpDelete };
     enum QuotaType { QuotaUnique, QuotaShared };
     enum RunCmdErrHandling { RunCmdFailureBad, RunCmdFailureOk };
 #if LOG_NDEBUG
@@ -126,15 +137,15 @@ protected:
 
     int manipulateSpecialApps(int numUids, char *appStrUids[],
                                const char *chain,
-                               IptJumpOp jumpHandling, SpecialAppOp appOp);
-    int manipulateNaughtyApps(int numUids, char *appStrUids[], SpecialAppOp appOp);
-    int manipulateNiceApps(int numUids, char *appStrUids[], SpecialAppOp appOp);
+                               IptJumpOp jumpHandling, IptOp appOp);
+    int manipulateNaughtyApps(int numUids, char *appStrUids[], IptOp appOp);
+    int manipulateNiceApps(int numUids, char *appStrUids[], IptOp appOp);
 
     int prepCostlyIface(const char *ifn, QuotaType quotaType);
     int cleanupCostlyIface(const char *ifn, QuotaType quotaType);
 
     std::string makeIptablesSpecialAppCmd(IptOp op, int uid, const char *chain);
-    std::string makeIptablesQuotaCmd(IptOp op, const char *costName, int64_t quota);
+    std::string makeIptablesQuotaCmd(IptFullOp op, const char *costName, int64_t quota);
 
     int runIptablesAlertCmd(IptOp op, const char *alertName, int64_t bytes);
     int runIptablesAlertFwdCmd(IptOp op, const char *alertName, int64_t bytes);
@@ -156,6 +167,10 @@ protected:
     int setCostlyAlert(const char *costName, int64_t bytes, int64_t *alertBytes);
     int removeCostlyAlert(const char *costName, int64_t *alertBytes);
 
+    typedef std::vector<TetherStats> TetherStatsList;
+
+    static void addStats(TetherStatsList& statsList, const TetherStats& stats);
+
     /*
      * stats should never have only intIface initialized. Other 3 combos are ok.
      * fp should be a file to the apropriate FORWARD chain of iptables rules.
@@ -165,8 +180,9 @@ protected:
      *  in:extIface out:intIface
      * and the rules are grouped in pairs when more that one tethering was setup.
      */
-    static int parseForwardChainStats(SocketClient *cli, const TetherStats filter, FILE *fp,
-                                      std::string &extraProcessingInfo);
+    static int addForwardChainStats(const TetherStats& filter,
+                                    TetherStatsList& statsList, const std::string& iptOutput,
+                                    std::string &extraProcessingInfo);
 
     /*
      * Attempt to find the bw_costly_* tables that need flushing,
@@ -175,7 +191,7 @@ protected:
      * Deals with both ip4 and ip6 tables.
      */
     void flushExistingCostlyTables(bool doClean);
-    static void parseAndFlushCostlyTables(FILE *fp, bool doRemove);
+    static void parseAndFlushCostlyTables(const std::string& ruleList, bool doRemove);
 
     /*
      * Attempt to flush our tables.
@@ -206,7 +222,11 @@ protected:
     friend class BandwidthControllerTest;
     static int (*execFunction)(int, char **, int *, bool, bool);
     static FILE *(*popenFunction)(const char *, const char *);
-    static int (*iptablesRestoreFunction)(IptablesTarget, const std::string&);
+    static int (*iptablesRestoreFunction)(IptablesTarget, const std::string&, std::string *);
+
+private:
+    static const char *opToString(IptOp op);
+    static const char *jumpToString(IptJumpOp jumpHandling);
 };
 
 #endif

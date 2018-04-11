@@ -90,6 +90,12 @@ final class CdmaConferenceController {
     private CdmaConference mConference;
 
     void add(final CdmaConnection connection) {
+        if (mCdmaConnections.contains(connection)) {
+            // Adding a duplicate realistically shouldn't happen.
+            Log.w(this, "add - connection already tracked; connection=%s", connection);
+            return;
+        }
+
         if (!mCdmaConnections.isEmpty() && connection.isOutgoing()) {
             // There already exists a connection, so this will probably result in a conference once
             // it is added. For outgoing connections which are added while another connection
@@ -116,8 +122,18 @@ final class CdmaConferenceController {
                 }
             }, ADD_OUTGOING_CONNECTION_DELAY_MILLIS);
         } else {
-            // This is the first connection, or it is incoming, so let it flow through.
-            addInternal(connection);
+            // Post the call to addInternal to the handler with no delay.
+            // Why you ask?  In TelephonyConnectionService#
+            // onCreateIncomingConnection(PhoneAccountHandle, ConnectionRequest) or
+            // TelephonyConnectionService#onCreateOutgoingConnection(PhoneAccountHandle,
+            // ConnectionRequest) we can create a new connection it will trigger a call to
+            // TelephonyConnectionService#addConnectionToConferenceController, which will cause us
+            // to get here.  HOWEVER, at this point ConnectionService#addConnection has not yet run,
+            // so if we end up calling ConnectionService#addConference, the connection service will
+            // not yet know about the new connection, so it won't get added to the conference.
+            // Posting to the handler ensures addConnection has a chance to happen before we add the
+            // conference.
+            mHandler.post(() -> addInternal(connection));
         }
     }
 
@@ -127,7 +143,14 @@ final class CdmaConferenceController {
         recalculateConference();
     }
 
-    private void remove(CdmaConnection connection) {
+    void remove(CdmaConnection connection) {
+        if (!mCdmaConnections.contains(connection)) {
+            // Debug only since TelephonyConnectionService tries to clean up the connections tracked
+            // when the original connection changes.  It does this proactively.
+            Log.d(this, "remove - connection not tracked; connection=%s", connection);
+            return;
+        }
+
         connection.removeConnectionListener(mConnectionListener);
         mCdmaConnections.remove(connection);
         recalculateConference();

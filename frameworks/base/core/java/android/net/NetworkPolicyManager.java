@@ -18,8 +18,9 @@ package android.net;
 
 import static android.content.pm.PackageManager.GET_SIGNATURES;
 import static android.net.NetworkPolicy.CYCLE_NONE;
-import static android.text.format.Time.MONTH_DAY;
 
+import android.annotation.SystemService;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -27,27 +28,29 @@ import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.Signature;
 import android.os.RemoteException;
 import android.os.UserHandle;
-import android.text.format.Time;
 import android.util.DebugUtils;
 
 import com.google.android.collect.Sets;
 
+import java.util.Calendar;
 import java.util.HashSet;
+import java.util.TimeZone;
 
 /**
  * Manager for creating and modifying network policy rules.
  *
  * {@hide}
  */
+@SystemService(Context.NETWORK_POLICY_SERVICE)
 public class NetworkPolicyManager {
 
-    /* POLICY_* are masks and can be ORed */
+    /* POLICY_* are masks and can be ORed, although currently they are not.*/
     /** No specific network policy, use system default. */
     public static final int POLICY_NONE = 0x0;
     /** Reject network usage on metered networks when application in background. */
     public static final int POLICY_REJECT_METERED_BACKGROUND = 0x1;
-    /** Allow network use (metered or not) in the background in battery save mode. */
-    public static final int POLICY_ALLOW_BACKGROUND_BATTERY_SAVE = 0x2;
+    /** Allow metered network use in the background even when in data usage save mode. */
+    public static final int POLICY_ALLOW_METERED_BACKGROUND = 0x4;
 
     /*
      * Rules defining whether an uid has access to a network given its type (metered / non-metered).
@@ -126,8 +129,8 @@ public class NetworkPolicyManager {
     /**
      * Set policy flags for specific UID.
      *
-     * @param policy {@link #POLICY_NONE} or combination of flags like
-     * {@link #POLICY_REJECT_METERED_BACKGROUND} or {@link #POLICY_ALLOW_BACKGROUND_BATTERY_SAVE}.
+     * @param policy should be {@link #POLICY_NONE} or any combination of {@code POLICY_} flags,
+     *     although it is not validated.
      */
     public void setUidPolicy(int uid, int policy) {
         try {
@@ -138,9 +141,12 @@ public class NetworkPolicyManager {
     }
 
     /**
-     * Add policy flags for specific UID.  The given policy bits will be set for
-     * the uid.  Policy flags may be either
-     * {@link #POLICY_REJECT_METERED_BACKGROUND} or {@link #POLICY_ALLOW_BACKGROUND_BATTERY_SAVE}.
+     * Add policy flags for specific UID.
+     *
+     * <p>The given policy bits will be set for the uid.
+     *
+     * @param policy should be {@link #POLICY_NONE} or any combination of {@code POLICY_} flags,
+     *     although it is not validated.
      */
     public void addUidPolicy(int uid, int policy) {
         try {
@@ -151,9 +157,12 @@ public class NetworkPolicyManager {
     }
 
     /**
-     * Clear/remove policy flags for specific UID.  The given policy bits will be set for
-     * the uid.  Policy flags may be either
-     * {@link #POLICY_REJECT_METERED_BACKGROUND} or {@link #POLICY_ALLOW_BACKGROUND_BATTERY_SAVE}.
+     * Clear/remove policy flags for specific UID.
+     *
+     * <p>The given policy bits will be set for the uid.
+     *
+     * @param policy should be {@link #POLICY_NONE} or any combination of {@code POLICY_} flags,
+     *     although it is not validated.
      */
     public void removeUidPolicy(int uid, int policy) {
         try {
@@ -253,28 +262,18 @@ public class NetworkPolicyManager {
             throw new IllegalArgumentException("Unable to compute boundary without cycleDay");
         }
 
-        final Time now = new Time(policy.cycleTimezone);
-        now.set(currentTime);
+        final Calendar cal = Calendar.getInstance(TimeZone.getTimeZone(policy.cycleTimezone));
+        cal.setTimeInMillis(currentTime);
+        snapToCycleDay(cal, policy.cycleDay);
 
-        // first, find cycle boundary for current month
-        final Time cycle = new Time(now);
-        cycle.hour = cycle.minute = cycle.second = 0;
-        snapToCycleDay(cycle, policy.cycleDay);
-
-        if (Time.compare(cycle, now) >= 0) {
-            // cycle boundary is beyond now, use last cycle boundary; start by
-            // pushing ourselves squarely into last month.
-            final Time lastMonth = new Time(now);
-            lastMonth.hour = lastMonth.minute = lastMonth.second = 0;
-            lastMonth.monthDay = 1;
-            lastMonth.month -= 1;
-            lastMonth.normalize(true);
-
-            cycle.set(lastMonth);
-            snapToCycleDay(cycle, policy.cycleDay);
+        if (cal.getTimeInMillis() >= currentTime) {
+            // Cycle boundary is beyond now, use last cycle boundary
+            cal.set(Calendar.DAY_OF_MONTH, 1);
+            cal.add(Calendar.MONTH, -1);
+            snapToCycleDay(cal, policy.cycleDay);
         }
 
-        return cycle.toMillis(true);
+        return cal.getTimeInMillis();
     }
 
     /** {@hide} */
@@ -283,28 +282,18 @@ public class NetworkPolicyManager {
             throw new IllegalArgumentException("Unable to compute boundary without cycleDay");
         }
 
-        final Time now = new Time(policy.cycleTimezone);
-        now.set(currentTime);
+        final Calendar cal = Calendar.getInstance(TimeZone.getTimeZone(policy.cycleTimezone));
+        cal.setTimeInMillis(currentTime);
+        snapToCycleDay(cal, policy.cycleDay);
 
-        // first, find cycle boundary for current month
-        final Time cycle = new Time(now);
-        cycle.hour = cycle.minute = cycle.second = 0;
-        snapToCycleDay(cycle, policy.cycleDay);
-
-        if (Time.compare(cycle, now) <= 0) {
-            // cycle boundary is before now, use next cycle boundary; start by
-            // pushing ourselves squarely into next month.
-            final Time nextMonth = new Time(now);
-            nextMonth.hour = nextMonth.minute = nextMonth.second = 0;
-            nextMonth.monthDay = 1;
-            nextMonth.month += 1;
-            nextMonth.normalize(true);
-
-            cycle.set(nextMonth);
-            snapToCycleDay(cycle, policy.cycleDay);
+        if (cal.getTimeInMillis() <= currentTime) {
+            // Cycle boundary is before now, use next cycle boundary
+            cal.set(Calendar.DAY_OF_MONTH, 1);
+            cal.add(Calendar.MONTH, 1);
+            snapToCycleDay(cal, policy.cycleDay);
         }
 
-        return cycle.toMillis(true);
+        return cal.getTimeInMillis();
     }
 
     /**
@@ -313,16 +302,20 @@ public class NetworkPolicyManager {
      *
      * @hide
      */
-    public static void snapToCycleDay(Time time, int cycleDay) {
-        if (cycleDay > time.getActualMaximum(MONTH_DAY)) {
-            // cycle day isn't valid this month; snap to last second of month
-            time.month += 1;
-            time.monthDay = 1;
-            time.second = -1;
+    public static void snapToCycleDay(Calendar cal, int cycleDay) {
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        if (cycleDay > cal.getActualMaximum(Calendar.DAY_OF_MONTH)) {
+            cal.add(Calendar.MONTH, 1);
+            cal.set(Calendar.DAY_OF_MONTH, 1);
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.add(Calendar.SECOND, -1);
         } else {
-            time.monthDay = cycleDay;
+            cal.set(Calendar.DAY_OF_MONTH, cycleDay);
         }
-        time.normalize(true);
     }
 
     /**
@@ -363,7 +356,7 @@ public class NetworkPolicyManager {
         return true;
     }
 
-    /*
+    /**
      * @hide
      */
     public static String uidRulesToString(int uidRules) {
@@ -375,5 +368,36 @@ public class NetworkPolicyManager {
         }
         string.append(")");
         return string.toString();
+    }
+
+    /**
+     * @hide
+     */
+    public static String uidPoliciesToString(int uidPolicies) {
+        final StringBuilder string = new StringBuilder().append(uidPolicies).append(" (");
+        if (uidPolicies == POLICY_NONE) {
+            string.append("NONE");
+        } else {
+            string.append(DebugUtils.flagsToString(NetworkPolicyManager.class,
+                    "POLICY_", uidPolicies));
+        }
+        string.append(")");
+        return string.toString();
+    }
+
+    /**
+     * Returns true if {@param procState} is considered foreground and as such will be allowed
+     * to access network when the device is idle or in battery saver mode. Otherwise, false.
+     */
+    public static boolean isProcStateAllowedWhileIdleOrPowerSaveMode(int procState) {
+        return procState <= ActivityManager.PROCESS_STATE_FOREGROUND_SERVICE;
+    }
+
+    /**
+     * Returns true if {@param procState} is considered foreground and as such will be allowed
+     * to access network when the device is in data saver mode. Otherwise, false.
+     */
+    public static boolean isProcStateAllowedWhileOnRestrictBackground(int procState) {
+        return procState <= ActivityManager.PROCESS_STATE_FOREGROUND_SERVICE;
     }
 }

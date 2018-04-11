@@ -38,7 +38,6 @@
 #define PRINTF_FORMAT(a,b)
 #define STRUCT_PACKED
 #endif
-#include "qca-vendor.h"
 #include "vendor_definitions.h"
 #include "wifi_hal.h"
 
@@ -83,7 +82,6 @@ public:
 class WifihalGeneric: public WifiVendorCommand
 {
 private:
-    wifi_interface_handle mHandle;
     feature_set mSet;
     int mSetSizeMax;
     int *mSetSizePtr;
@@ -91,6 +89,9 @@ private:
     int filterVersion;
     int filterLength;
     int firmware_bus_max_size;
+    wifi_capa *mCapa;
+
+    virtual wifi_error wifiParseCapabilities(struct nlattr **tbVendor);
 
 public:
     WifihalGeneric(wifi_handle handle, int id, u32 vendor_id, u32 subcmd);
@@ -104,6 +105,7 @@ public:
     virtual int getFilterVersion();
     virtual int getFilterLength();
     virtual int getBusSize();
+    virtual wifi_error wifiGetCapabilities(wifi_interface_handle handle);
 };
 #ifdef __cplusplus
 }

@@ -41,6 +41,11 @@ public interface IInvocationResult {
     int countResults(TestStatus result);
 
     /**
+     * @return the number of tests that have not been executed in this moduleResult.
+     */
+    int getNotExecuted();
+
+    /**
      * @param plan the plan associated with this result.
      */
     void setTestPlan(String plan);
@@ -109,4 +114,25 @@ public interface IInvocationResult {
      * Return the number of completed test modules for this invocation.
      */
     int getModuleCompleteCount();
+
+    /**
+     * Return status of checksum from previous session
+     */
+    RetryChecksumStatus getRetryChecksumStatus();
+
+    /**
+     * Set status of checksum from previous session
+     */
+    void setRetryChecksumStatus(RetryChecksumStatus retryStatus);
+
+    /**
+     * Return the directory of the previous sessions results
+     */
+    File getRetryDirectory();
+
+    /**
+     * Set the directory of the previous sessions results
+     */
+    void setRetryDirectory(File resultDir);
+
 }

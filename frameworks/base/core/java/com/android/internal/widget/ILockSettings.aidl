@@ -17,6 +17,7 @@
 package com.android.internal.widget;
 
 import android.app.trust.IStrongAuthTracker;
+import com.android.internal.widget.ICheckCredentialProgressCallback;
 import com.android.internal.widget.VerifyCredentialResponse;
 
 /** {@hide} */
@@ -27,14 +28,12 @@ interface ILockSettings {
     boolean getBoolean(in String key, in boolean defaultValue, in int userId);
     long getLong(in String key, in long defaultValue, in int userId);
     String getString(in String key, in String defaultValue, in int userId);
-    void setLockPattern(in String pattern, in String savedPattern, int userId);
+    void setLockCredential(in String credential, int type, in String savedCredential, int userId);
     void resetKeyStore(int userId);
-    VerifyCredentialResponse checkPattern(in String pattern, int userId);
-    VerifyCredentialResponse verifyPattern(in String pattern, long challenge, int userId);
-    void setLockPassword(in String password, in String savedPassword, int userId);
-    VerifyCredentialResponse checkPassword(in String password, int userId);
-    VerifyCredentialResponse verifyPassword(in String password, long challenge, int userId);
-    VerifyCredentialResponse verifyTiedProfileChallenge(String password, boolean isPattern, long challenge, int userId);
+    VerifyCredentialResponse checkCredential(in String credential, int type, int userId,
+            in ICheckCredentialProgressCallback progressCallback);
+    VerifyCredentialResponse verifyCredential(in String credential, int type, long challenge, int userId);
+    VerifyCredentialResponse verifyTiedProfileChallenge(String credential, int type, long challenge, int userId);
     boolean checkVoldPassword(int userId);
     boolean havePattern(int userId);
     boolean havePassword(int userId);
@@ -46,4 +45,10 @@ interface ILockSettings {
     void systemReady();
     void userPresent(int userId);
     int getStrongAuthForUser(int userId);
+
+    long addEscrowToken(in byte[] token, int userId);
+    boolean removeEscrowToken(long handle, int userId);
+    boolean isEscrowTokenActive(long handle, int userId);
+    boolean setLockCredentialWithToken(String credential, int type, long tokenHandle, in byte[] token, int userId);
+    void unlockUserWithToken(long tokenHandle, in byte[] token, int userId);
 }

@@ -78,17 +78,15 @@ enum wifilogger_host_diag_type {
 };
 
 enum wlan_diag_frame_type {
-     WLAN_DIAG_TYPE_CONFIG,
-     WLAN_DIAG_TYPE_EVENT, /* Diag Events */
-     WLAN_DIAG_TYPE_LOG, /* Diag Logs */
-     WLAN_DIAG_TYPE_MSG, /* F3 messages */
-     WLAN_DIAG_TYPE_LEGACY_MSG,
+    WLAN_DIAG_TYPE_CONFIG,
+    WLAN_DIAG_TYPE_EVENT, /* Diag Events */
+    WLAN_DIAG_TYPE_LOG, /* Diag Logs */
+    WLAN_DIAG_TYPE_MSG, /* F3 messages */
+    WLAN_DIAG_TYPE_LEGACY_MSG,
+    WLAN_DIAG_TYPE_EVENT_V2,
+    WLAN_DIAG_TYPE_LOG_V2,
+    WLAN_DIAG_TYPE_MSG_V2,
 };
-
-static uint32_t get_le32(const uint8_t *pos)
-{
-    return pos[0] | (pos[1] << 8) | (pos[2] << 16) | (pos[3] << 24);
-}
 
 typedef struct event_remap {
     int q_event;
@@ -117,6 +115,11 @@ typedef struct sAniHdr {
    unsigned short length;
 } tAniHdr, tAniMsgHdr;
 
+typedef struct sAniCLDMsg {
+   int radio;          // unit number of the radio
+   tAniHdr wmsg;       // Airgo Message Header
+} tAniCLDHdr;
+
 /*
  * This msg hdr will always follow tAniHdr in all the messages exchanged
  * between the Applications in userspace the Pseudo Driver, in either
@@ -124,8 +127,7 @@ typedef struct sAniHdr {
  */
 typedef struct sAniNlMsg {
     struct  nlmsghdr nlh;   // Netlink Header
-    int radio;          // unit number of the radio
-    tAniHdr wmsg;       // Airgo Message Header
+    tAniCLDHdr clh;
 } tAniNlHdr;
 
 typedef struct sAniAppRegReq {
@@ -151,6 +153,12 @@ typedef struct fw_event_hdr_s
 
 typedef struct
 {
+    u32 reserved:24;
+    u32 diag_event_type:8;
+}__attribute__((packed)) fw_diag_msg_fixed_hdr_t;
+
+typedef struct
+{
     u32 timestamp:24;
     u32 diag_event_type:8;
     /* Below 16-bit field has different formats based on event type */
@@ -165,6 +173,24 @@ typedef struct
     u16 diag_id;
     u8  payload[0];
 }__attribute__((packed)) fw_diag_msg_hdr_t;
+
+typedef struct
+{
+    u32 unused:24;
+    u32 diag_event_type:8;
+    u32 timestamp;
+    /* Below 16-bit field has different formats based on event type */
+    union {
+        u16 payload_len;
+        struct {
+            u8 payload_len;
+            u8 vdev_level:3;
+            u8 vdev_id:5;
+        }__attribute__((packed)) msg_hdr;
+    }__attribute__((packed)) u;
+    u16 diag_id;
+    u8  payload[0];
+}__attribute__((packed)) fw_diag_msg_hdr_v2_t;
 
 typedef struct wlan_wake_lock_event {
     u32 status;

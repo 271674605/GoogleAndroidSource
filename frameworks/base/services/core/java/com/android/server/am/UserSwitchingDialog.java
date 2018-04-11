@@ -68,6 +68,12 @@ final class UserSwitchingDialog extends AlertDialog
         String viewMessage;
         if (UserManager.isSplitSystemUser() && newUser.id == UserHandle.USER_SYSTEM) {
             viewMessage = res.getString(R.string.user_logging_out_message, oldUser.name);
+        } else if (UserManager.isDeviceInDemoMode(context)) {
+            if (oldUser.isDemo()) {
+                viewMessage = res.getString(R.string.demo_restarting_message);
+            } else {
+                viewMessage = res.getString(R.string.demo_starting_message);
+            }
         } else {
             viewMessage = res.getString(R.string.user_switching_message, newUser.name);
         }
@@ -106,7 +112,8 @@ final class UserSwitchingDialog extends AlertDialog
     void startUser() {
         synchronized (this) {
             if (!mStartedUser) {
-                mService.mUserController.startUserInForeground(mUserId, this);
+                mService.mUserController.startUserInForeground(mUserId);
+                dismiss();
                 mStartedUser = true;
                 final View decorView = getWindow().getDecorView();
                 if (decorView != null) {

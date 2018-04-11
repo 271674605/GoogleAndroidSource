@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -44,6 +44,10 @@
 #include <errno.h>
 #include <LocDualContext.h>
 #include <cutils/properties.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sstream>
+#include <string>
 
 using namespace loc_core;
 
@@ -133,6 +137,70 @@ static const GpsMeasurementInterface sLocEngGpsMeasurementInterface =
     loc_gps_measurement_init,
     loc_gps_measurement_close
 };
+
+// for XTRA
+static inline int createSocket() {
+    int socketFd = -1;
+
+    if ((socketFd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+        LOC_LOGe("create socket error. reason:%s", strerror(errno));
+
+     } else {
+        const char* socketPath = "/data/misc/location/xtra/socket_hal_xtra";
+        struct sockaddr_un addr = { .sun_family = AF_UNIX };
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socketPath);
+
+        if (::connect(socketFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            LOC_LOGe("cannot connect to XTRA. reason:%s", strerror(errno));
+            if (::close(socketFd)) {
+                LOC_LOGe("close socket error. reason:%s", strerror(errno));
+            }
+            socketFd = -1;
+        }
+    }
+
+    return socketFd;
+}
+
+static inline void closeSocket(const int socketFd) {
+    if (socketFd >= 0) {
+        if(::close(socketFd)) {
+            LOC_LOGe("close socket error. reason:%s", strerror(errno));
+        }
+    }
+}
+
+static inline bool sendConnectionEvent(const bool connected, const uint8_t type) {
+    int socketFd = createSocket();
+    if (socketFd < 0) {
+        LOC_LOGe("XTRA unreachable. sending failed.");
+        return false;
+    }
+
+    std::stringstream ss;
+    ss <<  "connection";
+    ss << " " << (connected ? "1" : "0");
+    ss << " " << (int)type;
+    ss << "\n"; // append seperator
+
+    const std::string& data = ss.str();
+    int remain = data.length();
+    ssize_t sent = 0;
+
+    while (remain > 0 &&
+          (sent = ::send(socketFd, data.c_str() + (data.length() - remain),
+                       remain, MSG_NOSIGNAL)) > 0) {
+        remain -= sent;
+    }
+
+    if (sent < 0) {
+        LOC_LOGe("sending error. reason:%s", strerror(errno));
+    }
+
+    closeSocket(socketFd);
+
+    return (remain == 0);
+}
 
 static void loc_agps_ril_init( AGpsRilCallbacks* callbacks );
 static void loc_agps_ril_set_ref_location(const AGpsRefLocation *agps_reflocation, size_t sz_struct);
@@ -285,6 +353,7 @@ static int loc_init(GpsCallbacks* callbacks)
     }
 
     event = LOC_API_ADAPTER_BIT_PARSED_POSITION_REPORT |
+            LOC_API_ADAPTER_BIT_GNSS_MEASUREMENT |
             LOC_API_ADAPTER_BIT_SATELLITE_REPORT |
             LOC_API_ADAPTER_BIT_LOCATION_SERVER_REQUEST |
             LOC_API_ADAPTER_BIT_ASSISTANCE_DATA_REQUEST |
@@ -304,7 +373,9 @@ static int loc_init(GpsCallbacks* callbacks)
                                     NULL, /* location_ext_parser */
                                     NULL, /* sv_ext_parser */
                                     callbacks->request_utc_time_cb, /* request_utc_time_cb */
-                                    };
+                                    callbacks->set_system_info_cb, /* set_system_info_cb */
+                                    callbacks->gnss_sv_status_cb, /* gnss_sv_status_cb */
+    };
 
     gps_loc_cb = callbacks->location_cb;
     gps_sv_cb = callbacks->sv_status_cb;
@@ -314,8 +385,7 @@ static int loc_init(GpsCallbacks* callbacks)
     loc_afw_data.adapter->mSupportsPositionInjection = !loc_afw_data.adapter->hasCPIExtendedCapabilities();
     loc_afw_data.adapter->mSupportsTimeInjection = !loc_afw_data.adapter->hasCPIExtendedCapabilities();
     loc_afw_data.adapter->setGpsLockMsg(0);
-    loc_afw_data.adapter->requestUlp(getCarrierCapabilities());
-    loc_afw_data.adapter->setXtraUserAgent();
+    loc_afw_data.adapter->requestUlp(ContextBase::getCarrierCapabilities());
 
     if(retVal) {
         LOC_LOGE("loc_eng_init() fail!");
@@ -538,7 +608,10 @@ SIDE EFFECTS
 static void loc_delete_aiding_data(GpsAidingData f)
 {
     ENTRY_LOG();
+
+#ifndef TARGET_BUILD_VARIANT_USER
     loc_eng_delete_aiding_data(loc_afw_data, f);
+#endif
 
     EXIT_LOG(%s, VOID_RET);
 }
@@ -612,12 +685,7 @@ const void* loc_get_extension(const char* name)
    }
    else if (strcmp(name, AGPS_RIL_INTERFACE) == 0)
    {
-       char baseband[PROPERTY_VALUE_MAX];
-       property_get("ro.baseband", baseband, "msm");
-       if (strcmp(baseband, "csfb") == 0)
-       {
-           ret_val = &sLocEngAGpsRilInterface;
-       }
+       ret_val = &sLocEngAGpsRilInterface;
    }
    else if (strcmp(name, GPS_GEOFENCING_INTERFACE) == 0)
    {
@@ -992,7 +1060,14 @@ static void loc_agps_ril_init( AGpsRilCallbacks* callbacks ) {}
 static void loc_agps_ril_set_ref_location(const AGpsRefLocation *agps_reflocation, size_t sz_struct) {}
 static void loc_agps_ril_set_set_id(AGpsSetIDType type, const char* setid) {}
 static void loc_agps_ril_ni_message(uint8_t *msg, size_t len) {}
-static void loc_agps_ril_update_network_state(int connected, int type, int roaming, const char* extra_info) {}
+static void loc_agps_ril_update_network_state(int connected, int type, int roaming, const char* extra_info) {
+    ENTRY_LOG();
+    // for XTRA
+    sendConnectionEvent((connected != 0) ? true : false,
+                        (uint8_t)type);
+
+    EXIT_LOG(%s, VOID_RET);
+}
 
 /*===========================================================================
 FUNCTION    loc_agps_ril_update_network_availability
@@ -1014,7 +1089,12 @@ SIDE EFFECTS
 static void loc_agps_ril_update_network_availability(int available, const char* apn)
 {
     ENTRY_LOG();
-    loc_eng_agps_ril_update_network_availability(loc_afw_data, available, apn);
+    char baseband[PROPERTY_VALUE_MAX];
+    property_get("ro.baseband", baseband, "msm");
+    if (strcmp(baseband, "csfb") == 0)
+    {
+        loc_eng_agps_ril_update_network_availability(loc_afw_data, available, apn);
+    }
     EXIT_LOG(%s, VOID_RET);
 }
 

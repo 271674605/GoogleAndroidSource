@@ -27,7 +27,9 @@
 #include <dirent.h>
 #include <sys/wait.h>
 
-#define CONSTRAIN(amount, low, high) (amount < low ? low : (amount > high ? high : amount))
+#define CONSTRAIN(amount, low, high) ((amount) < (low) ? (low) : ((amount) > (high) ? (high) : (amount)))
+
+#define EXEC_BLOCKING 0
 
 using android::base::StringPrintf;
 
@@ -93,6 +95,9 @@ static status_t execRm(const std::string& path, int startProgress, int stepProgr
         return OK;
     }
 
+#if EXEC_BLOCKING
+    return ForkExecvp(cmd);
+#else
     pid_t pid = ForkExecvpAsync(cmd);
     if (pid == -1) return -1;
 
@@ -113,6 +118,7 @@ static status_t execRm(const std::string& path, int startProgress, int stepProgr
                 ((deltaFreeBytes * stepProgress) / expectedBytes), 0, stepProgress));
     }
     return -1;
+#endif
 }
 
 static status_t execCp(const std::string& fromPath, const std::string& toPath,
@@ -121,6 +127,12 @@ static status_t execCp(const std::string& fromPath, const std::string& toPath,
 
     uint64_t expectedBytes = GetTreeBytes(fromPath);
     uint64_t startFreeBytes = GetFreeBytes(toPath);
+
+    if (expectedBytes > startFreeBytes) {
+        LOG(ERROR) << "Data size " << expectedBytes << " is too large to fit in free space "
+                << startFreeBytes;
+        return -1;
+    }
 
     std::vector<std::string> cmd;
     cmd.push_back(kCpPath);
@@ -134,6 +146,9 @@ static status_t execCp(const std::string& fromPath, const std::string& toPath,
     }
     cmd.push_back(toPath.c_str());
 
+#if EXEC_BLOCKING
+    return ForkExecvp(cmd);
+#else
     pid_t pid = ForkExecvpAsync(cmd);
     if (pid == -1) return -1;
 
@@ -154,6 +169,7 @@ static status_t execCp(const std::string& fromPath, const std::string& toPath,
                 ((deltaFreeBytes * stepProgress) / expectedBytes), 0, stepProgress));
     }
     return -1;
+#endif
 }
 
 static void bringOffline(const std::shared_ptr<VolumeBase>& vol) {
@@ -182,8 +198,11 @@ void MoveTask::run() {
 
     // Step 1: tear down volumes and mount silently without making
     // visible to userspace apps
-    bringOffline(mFrom);
-    bringOffline(mTo);
+    {
+        std::lock_guard<std::mutex> lock(VolumeManager::Instance()->getLock());
+        bringOffline(mFrom);
+        bringOffline(mTo);
+    }
 
     fromPath = mFrom->getInternalPath();
     toPath = mTo->getInternalPath();
@@ -195,14 +214,17 @@ void MoveTask::run() {
 
     // Step 3: perform actual copy
     if (execCp(fromPath, toPath, 20, 60) != OK) {
-        goto fail;
+        goto copy_fail;
     }
 
     // NOTE: MountService watches for this magic value to know
     // that move was successful
     notifyProgress(82);
-    bringOnline(mFrom);
-    bringOnline(mTo);
+    {
+        std::lock_guard<std::mutex> lock(VolumeManager::Instance()->getLock());
+        bringOnline(mFrom);
+        bringOnline(mTo);
+    }
 
     // Step 4: clean up old data
     if (execRm(fromPath, 85, 15) != OK) {
@@ -212,9 +234,18 @@ void MoveTask::run() {
     notifyProgress(kMoveSucceeded);
     release_wake_lock(kWakeLock);
     return;
+
+copy_fail:
+    // if we failed to copy the data we should not leave it laying around
+    // in target location. Do not check return value, we can not do any
+    // useful anyway.
+    execRm(toPath, 80, 1);
 fail:
-    bringOnline(mFrom);
-    bringOnline(mTo);
+    {
+        std::lock_guard<std::mutex> lock(VolumeManager::Instance()->getLock());
+        bringOnline(mFrom);
+        bringOnline(mTo);
+    }
     notifyProgress(kMoveFailedInternalError);
     release_wake_lock(kWakeLock);
     return;

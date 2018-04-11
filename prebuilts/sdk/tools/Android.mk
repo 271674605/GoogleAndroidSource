@@ -32,6 +32,19 @@ include $(BUILD_PREBUILT)
 ##################################
 include $(CLEAR_VARS)
 
+LOCAL_MODULE := jack-diagnose
+LOCAL_SRC_FILES := jack-diagnose
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_SUFFIX := $(HOST_EXECUTABLE_SUFFIX)
+LOCAL_BUILT_MODULE_STEM := jack-diagnose$(HOST_EXECUTABLE_SUFFIX)
+LOCAL_IS_HOST_MODULE := true
+
+include $(BUILD_PREBUILT)
+
+##################################
+include $(CLEAR_VARS)
+
 LOCAL_MODULE := jack
 LOCAL_SRC_FILES := jack
 LOCAL_MODULE_CLASS := EXECUTABLES
@@ -39,9 +52,40 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_SUFFIX := $(HOST_EXECUTABLE_SUFFIX)
 LOCAL_BUILT_MODULE_STEM := jack$(HOST_EXECUTABLE_SUFFIX)
 LOCAL_IS_HOST_MODULE := true
-LOCAL_REQUIRED_MODULES := jack-admin
+LOCAL_REQUIRED_MODULES := jack-admin jack-diagnose
 
 include $(BUILD_PREBUILT)
+
+##################################
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := jack-coverage-plugin
+LOCAL_SRC_FILES := jack-coverage-plugin.jar
+LOCAL_MODULE_CLASS := JAVA_LIBRARIES
+MOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
+LOCAL_BUILT_MODULE_STEM := jack-coverage-plugin$(COMMON_JAVA_PACKAGE_SUFFIX)
+LOCAL_IS_HOST_MODULE := true
+
+include $(BUILD_PREBUILT)
+
+##################################
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := jack-jacoco-reporter
+LOCAL_SRC_FILES := jack-jacoco-reporter.jar
+LOCAL_MODULE_CLASS := JAVA_LIBRARIES
+MOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_SUFFIX := $(COMMON_JAVA_PACKAGE_SUFFIX)
+LOCAL_BUILT_MODULE_STEM := jack-jacoco-reporter$(COMMON_JAVA_PACKAGE_SUFFIX)
+LOCAL_IS_HOST_MODULE := true
+
+include $(BUILD_PREBUILT)
+
+# Distribute the reporter tool for coverage builds
+ifeq (true,$(EMMA_INSTRUMENT))
+$(call dist-for-goals, dist_files, $(LOCAL_BUILT_MODULE))
+endif # EMMA_INSTRUMENT
 
 # New versions of the build/ project reference these tools directly without
 # needing to install them, but some unbundled branches use a master version of
@@ -292,33 +336,4 @@ endif # TARGET_BUILD_APPS only
 
 endif # old version of build/ project.
 
-# Only build Clang/LLVM components when forced to.
-ifneq (true,$(FORCE_BUILD_LLVM_COMPONENTS))
-
-##################################
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := libLLVM
-LOCAL_SRC_FILES := $(HOST_OS)/lib64/$(LOCAL_MODULE)$(HOST_SHLIB_SUFFIX)
-LOCAL_MODULE_CLASS := SHARED_LIBRARIES
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(HOST_SHLIB_SUFFIX)
-LOCAL_IS_HOST_MODULE := true
-LOCAL_MULTILIB := 64
-
-include $(BUILD_PREBUILT)
-
-##################################
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := libclang
-LOCAL_SRC_FILES := $(HOST_OS)/lib64/$(LOCAL_MODULE)$(HOST_SHLIB_SUFFIX)
-LOCAL_MODULE_CLASS := SHARED_LIBRARIES
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_SUFFIX := $(HOST_SHLIB_SUFFIX)
-LOCAL_IS_HOST_MODULE := true
-LOCAL_MULTILIB := 64
-
-include $(BUILD_PREBUILT)
-
-endif #!FORCE_BUILD_LLVM_COMPONENTS
+# libLLVM and libclang are defined in Android.bp

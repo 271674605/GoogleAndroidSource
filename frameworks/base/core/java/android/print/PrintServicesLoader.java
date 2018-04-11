@@ -22,6 +22,7 @@ import android.content.Loader;
 import android.os.Handler;
 import android.os.Message;
 import android.printservice.PrintServiceInfo;
+
 import com.android.internal.util.Preconditions;
 
 import java.util.List;
@@ -39,7 +40,7 @@ public class PrintServicesLoader extends Loader<List<PrintServiceInfo>> {
     private final @NonNull PrintManager mPrintManager;
 
     /** Handler to sequentialize the delivery of the results to the main thread */
-    private Handler mHandler;
+    private final @NonNull Handler mHandler;
 
     /** Listens for updates to the data from the platform */
     private PrintManager.PrintServicesChangeListener mListener;
@@ -54,6 +55,7 @@ public class PrintServicesLoader extends Loader<List<PrintServiceInfo>> {
     public PrintServicesLoader(@NonNull PrintManager printManager, @NonNull Context context,
             int selectionFlags) {
         super(Preconditions.checkNotNull(context));
+        mHandler = new MyHandler();
         mPrintManager = Preconditions.checkNotNull(printManager);
         mSelectionFlags = Preconditions.checkFlagsArgument(selectionFlags,
                 PrintManager.ALL_SERVICES);
@@ -75,14 +77,13 @@ public class PrintServicesLoader extends Loader<List<PrintServiceInfo>> {
 
     @Override
     protected void onStartLoading() {
-        mHandler = new MyHandler();
         mListener = new PrintManager.PrintServicesChangeListener() {
             @Override public void onPrintServicesChanged() {
                 queueNewResult();
             }
         };
 
-        mPrintManager.addPrintServicesChangeListener(mListener);
+        mPrintManager.addPrintServicesChangeListener(mListener, null);
 
         // Immediately deliver a result
         deliverResult(mPrintManager.getPrintServices(mSelectionFlags));
@@ -95,10 +96,7 @@ public class PrintServicesLoader extends Loader<List<PrintServiceInfo>> {
             mListener = null;
         }
 
-        if (mHandler != null) {
-            mHandler.removeMessages(0);
-            mHandler = null;
-        }
+        mHandler.removeMessages(0);
     }
 
     @Override
@@ -119,8 +117,6 @@ public class PrintServicesLoader extends Loader<List<PrintServiceInfo>> {
 
         @Override
         public void handleMessage(Message msg) {
-            super.handleMessage(msg);
-
             if (isStarted()) {
                 deliverResult((List<PrintServiceInfo>) msg.obj);
             }

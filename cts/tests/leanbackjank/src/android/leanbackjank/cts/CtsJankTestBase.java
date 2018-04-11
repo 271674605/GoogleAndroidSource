@@ -38,7 +38,7 @@ public abstract class CtsJankTestBase extends JankTestBase {
         if (!metrics.containsKey(key)) {
             return;
         }
-        mLog.addValue(source, key, metrics.getInt(key), resultType, resultUnit);
+        mLog.addValue(source, formatKeyForTestMetrics(key), metrics.getInt(key), resultType, resultUnit);
     }
 
     private void printDoubleValueWithKey(String source, Bundle metrics, String key,
@@ -46,7 +46,12 @@ public abstract class CtsJankTestBase extends JankTestBase {
         if (!metrics.containsKey(key)) {
             return;
         }
-        mLog.addValue(source, key, metrics.getDouble(key), resultType, resultUnit);
+        mLog.addValue(source, formatKeyForTestMetrics(key), metrics.getDouble(key), resultType,
+                resultUnit);
+    }
+
+    private String formatKeyForTestMetrics(String key) {
+        return key.toLowerCase().replace('-', '_');
     }
 
     @Override
@@ -59,7 +64,7 @@ public abstract class CtsJankTestBase extends JankTestBase {
                 ResultType.LOWER_BETTER, ResultUnit.MS);
         printIntValueWithKey(source, metrics, WindowContentFrameStatsMonitor.KEY_MAX_NUM_JANKY,
                 ResultType.LOWER_BETTER, ResultUnit.COUNT);
-        mLog.setSummary(WindowContentFrameStatsMonitor.KEY_AVG_NUM_JANKY,
+        mLog.setSummary(formatKeyForTestMetrics(WindowContentFrameStatsMonitor.KEY_AVG_NUM_JANKY),
                 metrics.getDouble(WindowContentFrameStatsMonitor.KEY_AVG_NUM_JANKY),
                 ResultType.LOWER_BETTER, ResultUnit.COUNT);
 

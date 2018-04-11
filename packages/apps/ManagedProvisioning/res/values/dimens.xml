@@ -21,8 +21,8 @@
     <!-- Main text -->
     <dimen name="main_text_padding_left_right">40dp</dimen>
     <dimen name="main_text_padding_bottom">24dp</dimen>
-    <dimen name="main_text_padding_top">34dp</dimen>
-    <dimen name="main_text_padding_between_text">16dp</dimen>
+    <dimen name="main_text_padding_top">0dp</dimen>
+    <dimen name="main_text_padding_between_text">24dp</dimen>
     <dimen name="main_text_size">16sp</dimen>
 
     <!-- Dialog Fragment text -->
@@ -37,6 +37,7 @@
 
     <dimen name="row_height">72dp</dimen>
     <dimen name="row_padding_top">0dp</dimen>
+    <dimen name="button_padding_top">32dp</dimen>
 
     <dimen name="checkbox_padding_left">24dp</dimen>
     <dimen name="checkbox_margin_top">24dp</dimen>
@@ -49,4 +50,27 @@
     <dimen name="logo_padding_left_right">40dp</dimen>
     <dimen name="max_logo_width">140dp</dimen>
     <dimen name="max_logo_height">86dp</dimen>
+
+    <!--== Provisioning2 ==-->
+
+    <!-- General -->
+    <dimen name="spacer_8">8dp</dimen>
+    <dimen name="spacer_12">12dp</dimen>
+    <dimen name="spacer_16">16dp</dimen>
+    <dimen name="spacer_20">20dp</dimen>
+    <dimen name="spacer_24">24dp</dimen>
+    <dimen name="spacer_32">32dp</dimen>
+    <dimen name="spacer_40">40dp</dimen>
+
+    <!-- Pre-provisioning -->
+    <dimen name="info_view_width">412dp</dimen>
+    <dimen name="info_view_width_x0.5">206dp</dimen>
+    <dimen name="info_view_width_x1.5">618dp</dimen>
+    <dimen name="info_view_width_x2.5">1030dp</dimen>
+
+    <dimen name="info_text_title_size">24sp</dimen>
+
+    <dimen name="intro_button_width">208dp</dimen>
+    <dimen name="intro_button_height">36dp</dimen>
+    <dimen name="case_icon_size">32dp</dimen>
 </resources>

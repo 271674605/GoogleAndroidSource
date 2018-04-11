@@ -18,6 +18,8 @@ import android.support.v7.preference.DropDownPreference;
 import android.text.TextUtils;
 import android.util.ArraySet;
 import android.util.AttributeSet;
+
+import com.android.systemui.Dependency;
 import com.android.systemui.statusbar.phone.StatusBarIconController;
 import com.android.systemui.statusbar.policy.Clock;
 
@@ -32,6 +34,8 @@ public class ClockPreference extends DropDownPreference implements TunerService.
     private boolean mHasSeconds;
     private ArraySet<String> mBlacklist;
     private boolean mHasSetValue;
+    private boolean mReceivedSeconds;
+    private boolean mReceivedClock;
 
     public ClockPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -42,25 +46,27 @@ public class ClockPreference extends DropDownPreference implements TunerService.
     @Override
     public void onAttached() {
         super.onAttached();
-        TunerService.get(getContext()).addTunable(this, StatusBarIconController.ICON_BLACKLIST,
+        Dependency.get(TunerService.class).addTunable(this, StatusBarIconController.ICON_BLACKLIST,
                 Clock.CLOCK_SECONDS);
     }
 
     @Override
     public void onDetached() {
-        TunerService.get(getContext()).removeTunable(this);
+        Dependency.get(TunerService.class).removeTunable(this);
         super.onDetached();
     }
 
     @Override
     public void onTuningChanged(String key, String newValue) {
         if (StatusBarIconController.ICON_BLACKLIST.equals(key)) {
+            mReceivedClock = true;
             mBlacklist = StatusBarIconController.getIconBlacklist(newValue);
             mClockEnabled = !mBlacklist.contains(mClock);
         } else if (Clock.CLOCK_SECONDS.equals(key)) {
+            mReceivedSeconds = true;
             mHasSeconds = newValue != null && Integer.parseInt(newValue) != 0;
         }
-        if (!mHasSetValue) {
+        if (!mHasSetValue && mReceivedClock && mReceivedSeconds) {
             // Because of the complicated tri-state it can end up looping and setting state back to
             // what the user didn't choose.  To avoid this, just set the state once and rely on the
             // preference to handle updates.
@@ -77,13 +83,14 @@ public class ClockPreference extends DropDownPreference implements TunerService.
 
     @Override
     protected boolean persistString(String value) {
-        TunerService.get(getContext()).setValue(Clock.CLOCK_SECONDS, SECONDS.equals(value) ? 1 : 0);
+        Dependency.get(TunerService.class).setValue(Clock.CLOCK_SECONDS, SECONDS.equals(value) ? 1
+                : 0);
         if (DISABLED.equals(value)) {
             mBlacklist.add(mClock);
         } else {
             mBlacklist.remove(mClock);
         }
-        TunerService.get(getContext()).setValue(StatusBarIconController.ICON_BLACKLIST,
+        Dependency.get(TunerService.class).setValue(StatusBarIconController.ICON_BLACKLIST,
                 TextUtils.join(",", mBlacklist));
         return true;
     }

@@ -19,7 +19,8 @@ package com.android.server.telecom;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.UserHandle;
+import android.telecom.Log;
+import android.telecom.Logging.Runnable;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.TelephonyManager;
 
@@ -40,7 +41,7 @@ final class CreateConnectionTimeout extends Runnable {
 
     CreateConnectionTimeout(Context context, PhoneAccountRegistrar phoneAccountRegistrar,
             ConnectionServiceWrapper service, Call call) {
-        super("CCT");
+        super("CCT", null /*lock*/);
         mContext = context;
         mPhoneAccountRegistrar = phoneAccountRegistrar;
         mConnectionService = service;
@@ -114,7 +115,8 @@ final class CreateConnectionTimeout extends Runnable {
         int state = call.getState();
         return state == CallState.NEW
             || state == CallState.CONNECTING
-            || state == CallState.DIALING;
+            || state == CallState.DIALING
+            || state == CallState.PULLING;
     }
 
     private long getTimeoutLengthMillis() {

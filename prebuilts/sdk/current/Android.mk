@@ -18,11 +18,25 @@ LOCAL_PATH := $(call my-dir)
 
 #########################################
 # The prebuilt support libraries.
-# Only needed for unbundled build.
+
+# For apps (unbundled) build, replace the typical
+# make target artifacts with prebuilts.
 ifneq ($(TARGET_BUILD_APPS),)
 include $(CLEAR_VARS)
-LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES := \
+
+# Set up prebuilts for the core Support Library artifacts.
+LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES += \
   $(patsubst $(LOCAL_PATH)/%,%,\
     $(shell find $(LOCAL_PATH)/support -name "*.jar"))
+
+# Set up prebuilts for additional non-core library artifacts.
+LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES += \
+  $(patsubst $(LOCAL_PATH)/%,%,\
+    $(shell find $(LOCAL_PATH)/multidex -name "*.jar"))
+
 include $(BUILD_MULTI_PREBUILT)
+
+# Generates the v4, v13, and appcompat libraries with static dependencies.
+include $(call all-makefiles-under,$(LOCAL_PATH))
+
 endif  # TARGET_BUILD_APPS not empty

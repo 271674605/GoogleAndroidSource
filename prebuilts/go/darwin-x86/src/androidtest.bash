@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2014 The Go Authors.  All rights reserved.
+# Copyright 2014 The Go Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
@@ -23,6 +23,18 @@ if [ "$GOOS" != "android" ]; then
 	exit 1
 fi
 
+if [ -z $GOARM ]; then
+	export GOARM=7
+fi
+if [ "$GOARM" != "7" ]; then
+	echo "android only supports GOARM=7, got GOARM=$GOARM" 1>&2
+	exit 1
+fi
+if [ "$GOARCH" = "" ]; then
+	echo "GOARCH must be set" 1>&2
+	exit 1
+fi
+
 export CGO_ENABLED=1
 unset GOBIN
 
@@ -34,6 +46,12 @@ export PATH=$GOROOT/bin:$PATH
 GOOS=$GOHOSTOS GOARCH=$GOHOSTARCH go build \
 	-o ../bin/go_android_${GOARCH}_exec \
 	../misc/android/go_android_exec.go
+
+export pkgdir=$(dirname $(go list -f '{{.Target}}' runtime))
+if [ "$pkgdir" = "" ]; then
+	echo "could not find android pkg dir" 1>&2
+	exit 1
+fi
 
 export ANDROID_TEST_DIR=/tmp/androidtest-$$
 
@@ -56,7 +74,8 @@ mkdir -p $FAKE_GOROOT/pkg
 cp -a "${GOROOT}/src" "${FAKE_GOROOT}/"
 cp -a "${GOROOT}/test" "${FAKE_GOROOT}/"
 cp -a "${GOROOT}/lib" "${FAKE_GOROOT}/"
-cp -a "${GOROOT}/pkg/android_$GOARCH" "${FAKE_GOROOT}/pkg/"
+cp -a "${pkgdir}" "${FAKE_GOROOT}/pkg/"
+
 echo '# Syncing test files to android device'
 adb shell mkdir -p /data/local/tmp/goroot
 time adb sync data &> /dev/null

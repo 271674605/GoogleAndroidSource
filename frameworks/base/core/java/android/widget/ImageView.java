@@ -19,10 +19,10 @@ package android.widget;
 import android.annotation.DrawableRes;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
+import android.annotation.TestApi;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -56,11 +56,31 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Displays an arbitrary image, such as an icon.  The ImageView class
- * can load images from various sources (such as resources or content
- * providers), takes care of computing its measurement from the image so that
- * it can be used in any layout manager, and provides various display options
- * such as scaling and tinting.
+ * Displays image resources, for example {@link android.graphics.Bitmap}
+ * or {@link android.graphics.drawable.Drawable} resources.
+ * ImageView is also commonly used to {@link #setImageTintMode(PorterDuff.Mode)
+ * apply tints to an image} and handle {@link #setScaleType(ScaleType) image scaling}.
+ *
+ * <p>
+ * The following XML snippet is a common example of using an ImageView to display an image resource:
+ * </p>
+ * <pre>
+ * &lt;LinearLayout
+ *     xmlns:android="http://schemas.android.com/apk/res/android"
+ *     android:layout_width="match_parent"
+ *     android:layout_height="match_parent"&gt;
+ *     &lt;ImageView
+ *         android:layout_width="wrap_content"
+ *         android:layout_height="wrap_content"
+ *         android:src="@mipmap/ic_launcher"
+ *         /&gt;
+ * &lt;/LinearLayout&gt;
+ * </pre>
+ *
+ * <p>
+ * To learn more about Drawables, see: <a href="{@docRoot}guide/topics/resources/drawable-resource.html">Drawable Resources</a>.
+ * To learn more about working with Bitmaps, see: <a href="{@docRoot}topic/performance/graphics/index.htm">Handling Bitmaps</a>.
+ * </p>
  *
  * @attr ref android.R.styleable#ImageView_adjustViewBounds
  * @attr ref android.R.styleable#ImageView_src
@@ -115,11 +135,17 @@ public class ImageView extends View {
     private int mBaseline = -1;
     private boolean mBaselineAlignBottom = false;
 
-    // AdjustViewBounds behavior will be in compatibility mode for older apps.
-    private boolean mAdjustViewBoundsCompat = false;
+    /** Compatibility modes dependent on targetSdkVersion of the app. */
+    private static boolean sCompatDone;
+
+    /** AdjustViewBounds behavior will be in compatibility mode for older apps. */
+    private static boolean sCompatAdjustViewBounds;
 
     /** Whether to pass Resources when creating the source from a stream. */
-    private boolean mUseCorrectStreamDensity;
+    private static boolean sCompatUseCorrectStreamDensity;
+
+    /** Whether to use pre-Nougat drawable visibility dispatching conditions. */
+    private static boolean sCompatDrawableVisibilityDispatch;
 
     private static final ScaleType[] sScaleTypeArray = {
         ScaleType.MATRIX,
@@ -150,6 +176,11 @@ public class ImageView extends View {
         super(context, attrs, defStyleAttr, defStyleRes);
 
         initImageView();
+
+        // ImageView is not important by default, unless app developer overrode attribute.
+        if (getImportantForAutofill() == IMPORTANT_FOR_AUTOFILL_AUTO) {
+            setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_NO);
+        }
 
         final TypedArray a = context.obtainStyledAttributes(
                 attrs, R.styleable.ImageView, defStyleAttr, defStyleRes);
@@ -206,9 +237,13 @@ public class ImageView extends View {
         mMatrix = new Matrix();
         mScaleType = ScaleType.FIT_CENTER;
 
-        final int targetSdkVersion = mContext.getApplicationInfo().targetSdkVersion;
-        mAdjustViewBoundsCompat = targetSdkVersion <= Build.VERSION_CODES.JELLY_BEAN_MR1;
-        mUseCorrectStreamDensity = targetSdkVersion > Build.VERSION_CODES.M;
+        if (!sCompatDone) {
+            final int targetSdkVersion = mContext.getApplicationInfo().targetSdkVersion;
+            sCompatAdjustViewBounds = targetSdkVersion <= Build.VERSION_CODES.JELLY_BEAN_MR1;
+            sCompatUseCorrectStreamDensity = targetSdkVersion > Build.VERSION_CODES.M;
+            sCompatDrawableVisibilityDispatch = targetSdkVersion < Build.VERSION_CODES.N;
+            sCompatDone = true;
+        }
     }
 
     @Override
@@ -381,9 +416,13 @@ public class ImageView extends View {
         mMaxHeight = maxHeight;
     }
 
-    /** Return the view's drawable, or null if no drawable has been
-        assigned.
-    */
+    /**
+     * Gets the current Drawable, or null if no Drawable has been
+     * assigned.
+     *
+     * @return the view's drawable, or null if no drawable has been
+     * assigned.
+     */
     public Drawable getDrawable() {
         if (mDrawable == mRecycleableBitmapDrawable) {
             // Consider our cached version dirty since app code now has a reference to it
@@ -414,7 +453,6 @@ public class ImageView extends View {
 
     /**
      * Sets a drawable as the content of this ImageView.
-     *
      * <p class="note">This does Bitmap reading and decoding on the UI
      * thread, which can cause a latency hiccup.  If that's a concern,
      * consider using {@link #setImageDrawable(android.graphics.drawable.Drawable)} or
@@ -446,17 +484,37 @@ public class ImageView extends View {
 
     /** @hide **/
     public Runnable setImageResourceAsync(@DrawableRes int resId) {
-        return new ImageDrawableCallback(getContext().getDrawable(resId), null, resId);
+        Drawable d = null;
+        if (resId != 0) {
+            try {
+                d = getContext().getDrawable(resId);
+            } catch (Exception e) {
+                Log.w(LOG_TAG, "Unable to find resource: " + resId, e);
+                resId = 0;
+            }
+        }
+        return new ImageDrawableCallback(d, null, resId);
     }
 
     /**
      * Sets the content of this ImageView to the specified Uri.
-     *
+     * Note that you use this method to load images from a local Uri only.
+     * <p/>
+     * To learn how to display images from a remote Uri see: <a href="https://developer.android.com/topic/performance/graphics/index.html">Handling Bitmaps</a>
+     * <p/>
      * <p class="note">This does Bitmap reading and decoding on the UI
      * thread, which can cause a latency hiccup.  If that's a concern,
      * consider using {@link #setImageDrawable(Drawable)} or
      * {@link #setImageBitmap(android.graphics.Bitmap)} and
      * {@link android.graphics.BitmapFactory} instead.</p>
+     *
+     * <p class="note">On devices running SDK < 24, this method will fail to
+     * apply correct density scaling to images loaded from
+     * {@link ContentResolver#SCHEME_CONTENT content} and
+     * {@link ContentResolver#SCHEME_FILE file} schemes. Applications running
+     * on devices with SDK >= 24 <strong>MUST</strong> specify the
+     * {@code targetSdkVersion} in their manifest as 24 or above for density
+     * scaling to be applied to images loaded from these schemes.</p>
      *
      * @param uri the Uri of an image, or {@code null} to clear the content
      */
@@ -545,6 +603,13 @@ public class ImageView extends View {
      * Subsequent calls to {@link #setImageDrawable(Drawable)} will automatically
      * mutate the drawable and apply the specified tint and tint mode using
      * {@link Drawable#setTintList(ColorStateList)}.
+     * <p>
+     * <em>Note:</em> The default tint mode used by this setter is NOT
+     * consistent with the default tint mode used by the
+     * {@link android.R.styleable#ImageView_tint android:tint}
+     * attribute. If the {@code android:tint} attribute is specified, the
+     * default tint mode will be set to {@link PorterDuff.Mode#SRC_ATOP} to
+     * ensure consistency with earlier versions of the platform.
      *
      * @param tint the tint to apply, may be {@code null} to clear tint
      *
@@ -560,6 +625,9 @@ public class ImageView extends View {
     }
 
     /**
+     * Get the current {@link android.content.res.ColorStateList} used to tint the image Drawable,
+     * or null if no tint is applied.
+     *
      * @return the tint applied to the image drawable
      * @attr ref android.R.styleable#ImageView_tint
      * @see #setImageTintList(ColorStateList)
@@ -588,7 +656,8 @@ public class ImageView extends View {
     }
 
     /**
-     * @return the blending mode used to apply the tint to the image drawable
+     * Gets the blending mode used to apply the tint to the image Drawable
+     * @return the blending mode used to apply the tint to the image Drawable
      * @attr ref android.R.styleable#ImageView_tintMode
      * @see #setImageTintMode(PorterDuff.Mode)
      */
@@ -635,6 +704,13 @@ public class ImageView extends View {
         setImageDrawable(mRecycleableBitmapDrawable);
     }
 
+    /**
+     * Set the state of the current {@link android.graphics.drawable.StateListDrawable}.
+     * For more information about State List Drawables, see: <a href="https://developer.android.com/guide/topics/resources/drawable-resource.html#StateList">the Drawable Resource Guide</a>.
+     *
+     * @param state the state to set for the StateListDrawable
+     * @param merge if true, merges the state values for the state you specify into the current state
+     */
     public void setImageState(int[] state, boolean merge) {
         mState = state;
         mMergeState = merge;
@@ -748,17 +824,16 @@ public class ImageView extends View {
     }
 
     /**
-     * Return the current scale type in use by this ImageView.
-     *
+     * Returns the current ScaleType that is used to scale the bounds of an image to the bounds of the ImageView.
+     * @return The ScaleType used to scale the image.
      * @see ImageView.ScaleType
-     *
      * @attr ref android.R.styleable#ImageView_scaleType
      */
     public ScaleType getScaleType() {
         return mScaleType;
     }
 
-    /** Return the view's optional matrix. This is applied to the
+    /** Returns the view's optional matrix. This is applied to the
         view's drawable when it is drawn. If there is no matrix,
         this method will return an identity matrix.
         Do not change this matrix in place but make a copy.
@@ -777,7 +852,7 @@ public class ImageView extends View {
      * to the view's drawable when it is drawn.  Allows custom scaling,
      * translation, and perspective distortion.
      *
-     * @param matrix the transformation parameters in matrix form
+     * @param matrix The transformation parameters in matrix form.
      */
     public void setImageMatrix(Matrix matrix) {
         // collapse null and identity to just null
@@ -841,7 +916,7 @@ public class ImageView extends View {
             } catch (Exception e) {
                 Log.w(LOG_TAG, "Unable to find resource: " + mResource, e);
                 // Don't try again.
-                mUri = null;
+                mResource = 0;
             }
         } else if (mUri != null) {
             d = getDrawableFromUri(mUri);
@@ -874,8 +949,8 @@ public class ImageView extends View {
             InputStream stream = null;
             try {
                 stream = mContext.getContentResolver().openInputStream(uri);
-                return Drawable.createFromResourceStream(
-                        mUseCorrectStreamDensity ? getResources() : null, null, stream, null);
+                return Drawable.createFromResourceStream(sCompatUseCorrectStreamDensity
+                        ? getResources() : null, null, stream, null);
             } catch (Exception e) {
                 Log.w(LOG_TAG, "Unable to open content: " + uri, e);
             } finally {
@@ -910,10 +985,13 @@ public class ImageView extends View {
             mRecycleableBitmapDrawable.setBitmap(null);
         }
 
+        boolean sameDrawable = false;
+
         if (mDrawable != null) {
+            sameDrawable = mDrawable == d;
             mDrawable.setCallback(null);
             unscheduleDrawable(mDrawable);
-            if (isAttachedToWindow()) {
+            if (!sCompatDrawableVisibilityDispatch && !sameDrawable && isAttachedToWindow()) {
                 mDrawable.setVisible(false, false);
             }
         }
@@ -926,8 +1004,11 @@ public class ImageView extends View {
             if (d.isStateful()) {
                 d.setState(getDrawableState());
             }
-            if (isAttachedToWindow()) {
-                d.setVisible(getWindowVisibility() == VISIBLE && isShown(), true);
+            if (!sameDrawable || sCompatDrawableVisibilityDispatch) {
+                final boolean visible = sCompatDrawableVisibilityDispatch
+                        ? getVisibility() == VISIBLE
+                        : isAttachedToWindow() && getWindowVisibility() == VISIBLE && isShown();
+                d.setVisible(visible, true);
             }
             d.setLevel(mLevel);
             mDrawableWidth = d.getIntrinsicWidth();
@@ -1051,7 +1132,7 @@ public class ImageView extends View {
                                 pleft + pright;
 
                         // Allow the width to outgrow its original estimate if height is fixed.
-                        if (!resizeHeight && !mAdjustViewBoundsCompat) {
+                        if (!resizeHeight && !sCompatAdjustViewBounds) {
                             widthSize = resolveAdjustedSize(newWidth, mMaxWidth, widthMeasureSpec);
                         }
 
@@ -1067,7 +1148,7 @@ public class ImageView extends View {
                                 ptop + pbottom;
 
                         // Allow the height to outgrow its original estimate if width is fixed.
-                        if (!resizeWidth && !mAdjustViewBoundsCompat) {
+                        if (!resizeWidth && !sCompatAdjustViewBounds) {
                             heightSize = resolveAdjustedSize(newHeight, mMaxHeight,
                                     heightMeasureSpec);
                         }
@@ -1323,11 +1404,10 @@ public class ImageView extends View {
     }
 
     /**
-     * Set whether to set the baseline of this view to the bottom of the view.
+     * Sets whether the baseline of this view to the bottom of the view.
      * Setting this value overrides any calls to setBaseline.
      *
-     * @param aligned If true, the image view will be baseline aligned with
-     *      based on its bottom edge.
+     * @param aligned If true, the image view will be baseline aligned by its bottom edge.
      *
      * @attr ref android.R.styleable#ImageView_baselineAlignBottom
      */
@@ -1339,8 +1419,9 @@ public class ImageView extends View {
     }
 
     /**
-     * Return whether this view's baseline will be considered the bottom of the view.
+     * Checks whether this view's baseline is considered the bottom of the view.
      *
+     * @return True if the ImageView's baseline is considered the bottom of the view, false if otherwise.
      * @see #setBaselineAlignBottom(boolean)
      */
     public boolean getBaselineAlignBottom() {
@@ -1348,7 +1429,7 @@ public class ImageView extends View {
     }
 
     /**
-     * Set a tinting option for the image.
+     * Sets a tinting option for the image.
      *
      * @param color Color tint to apply.
      * @param mode How to apply the color.  The standard mode is
@@ -1372,6 +1453,12 @@ public class ImageView extends View {
         setColorFilter(color, PorterDuff.Mode.SRC_ATOP);
     }
 
+    /**
+     * Removes the image's {@link android.graphics.ColorFilter}.
+     *
+     * @see #setColorFilter(int)
+     * @see #getColorFilter()
+     */
     public final void clearColorFilter() {
         setColorFilter(null);
     }
@@ -1419,7 +1506,9 @@ public class ImageView extends View {
     /**
      * Returns the alpha that will be applied to the drawable of this ImageView.
      *
-     * @return the alpha that will be applied to the drawable of this ImageView
+     * @return the alpha value that will be applied to the drawable of this
+     * ImageView (between 0 and 255 inclusive, with 0 being transparent and
+     * 255 being opaque)
      *
      * @see #setImageAlpha(int)
      */
@@ -1430,7 +1519,8 @@ public class ImageView extends View {
     /**
      * Sets the alpha value that should be applied to the image.
      *
-     * @param alpha the alpha value that should be applied to the image
+     * @param alpha the alpha value that should be applied to the image (between
+     * 0 and 255 inclusive, with 0 being transparent and 255 being opaque)
      *
      * @see #getImageAlpha()
      */
@@ -1506,8 +1596,37 @@ public class ImageView extends View {
     @Override
     public void onVisibilityAggregated(boolean isVisible) {
         super.onVisibilityAggregated(isVisible);
-        if (mDrawable != null) {
+        // Only do this for new apps post-Nougat
+        if (mDrawable != null && !sCompatDrawableVisibilityDispatch) {
             mDrawable.setVisible(isVisible, false);
+        }
+    }
+
+    @RemotableViewMethod
+    @Override
+    public void setVisibility(int visibility) {
+        super.setVisibility(visibility);
+        // Only do this for old apps pre-Nougat; new apps use onVisibilityAggregated
+        if (mDrawable != null && sCompatDrawableVisibilityDispatch) {
+            mDrawable.setVisible(visibility == VISIBLE, false);
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // Only do this for old apps pre-Nougat; new apps use onVisibilityAggregated
+        if (mDrawable != null && sCompatDrawableVisibilityDispatch) {
+            mDrawable.setVisible(getVisibility() == VISIBLE, false);
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        // Only do this for old apps pre-Nougat; new apps use onVisibilityAggregated
+        if (mDrawable != null && sCompatDrawableVisibilityDispatch) {
+            mDrawable.setVisible(false, false);
         }
     }
 
@@ -1521,5 +1640,14 @@ public class ImageView extends View {
     protected void encodeProperties(@NonNull ViewHierarchyEncoder stream) {
         super.encodeProperties(stream);
         stream.addProperty("layout:baseline", getBaseline());
+    }
+
+    /** @hide */
+    @Override
+    @TestApi
+    public boolean isDefaultFocusHighlightNeeded(Drawable background, Drawable foreground) {
+        final boolean lackFocusState = mDrawable == null || !mDrawable.isStateful()
+                || !mDrawable.hasFocusStateSpecified();
+        return super.isDefaultFocusHighlightNeeded(background, foreground) && lackFocusState;
     }
 }

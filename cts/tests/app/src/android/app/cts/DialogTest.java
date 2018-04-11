@@ -28,7 +28,6 @@ import android.content.DialogInterface.OnKeyListener;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
-import android.cts.util.PollingCheck;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Rect;
@@ -51,6 +50,8 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 
 import android.app.stubs.R;
+
+import com.android.compatibility.common.util.PollingCheck;
 
 import java.lang.ref.WeakReference;
 
@@ -370,6 +371,8 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
     public void testTouchEvent() {
         startDialogActivity(DialogStubActivity.TEST_ONSTART_AND_ONSTOP);
         final TestDialog d = (TestDialog) mActivity.getDialog();
+        final Rect containingRect = new Rect();
+        mActivity.getWindow().getDecorView().getWindowVisibleDisplayFrame(containingRect);
 
         assertNull(d.onTouchEvent);
         assertNull(d.touchEvent);
@@ -381,7 +384,7 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
 
         long now = SystemClock.uptimeMillis();
         MotionEvent touchMotionEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN,
-                1, getStatusBarHeight(), 0);
+                containingRect.left + 1, containingRect.top + 1, 0);
         mInstrumentation.sendPointerSync(touchMotionEvent);
 
         new PollingCheck(TEST_TIMEOUT) {
@@ -404,7 +407,7 @@ public class DialogTest extends ActivityInstrumentationTestCase2<DialogStubActiv
             d.setCanceledOnTouchOutside(true);
 
             touchMotionEvent = MotionEvent.obtain(now, now + 1, MotionEvent.ACTION_DOWN,
-                    1, getStatusBarHeight(), 0);
+                    containingRect.left + 1, containingRect.top + 1, 0);
             mInstrumentation.sendPointerSync(touchMotionEvent);
 
             new PollingCheck(TEST_TIMEOUT) {

@@ -18,7 +18,6 @@ import android.support.v17.leanback.R;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
-import android.widget.EditText;
 
 /**
  * EditText widget that monitors keyboard changes.
@@ -55,7 +54,9 @@ public class SearchEditText extends StreamingTextView {
     public boolean onKeyPreIme(int keyCode, KeyEvent event) {
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (DEBUG) Log.v(TAG, "Keyboard being dismissed");
-            mKeyboardDismissListener.onKeyboardDismiss();
+            if (mKeyboardDismissListener != null) {
+                mKeyboardDismissListener.onKeyboardDismiss();
+            }
             return false;
         }
         return super.onKeyPreIme(keyCode, event);

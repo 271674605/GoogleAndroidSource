@@ -42,11 +42,21 @@ public class MasterClearReceiver extends BroadcastReceiver {
                 return;
             }
         }
+        if (Intent.ACTION_MASTER_CLEAR.equals(intent.getAction())) {
+            Slog.w(TAG, "The request uses the deprecated Intent#ACTION_MASTER_CLEAR, "
+                    + "Intent#ACTION_FACTORY_RESET should be used instead.");
+        }
+        if (intent.hasExtra(Intent.EXTRA_FORCE_MASTER_CLEAR)) {
+            Slog.w(TAG, "The request uses the deprecated Intent#EXTRA_FORCE_MASTER_CLEAR, "
+                    + "Intent#EXTRA_FORCE_FACTORY_RESET should be used instead.");
+        }
 
         final boolean shutdown = intent.getBooleanExtra("shutdown", false);
         final String reason = intent.getStringExtra(Intent.EXTRA_REASON);
         final boolean wipeExternalStorage = intent.getBooleanExtra(
                 Intent.EXTRA_WIPE_EXTERNAL_STORAGE, false);
+        final boolean forceWipe = intent.getBooleanExtra(Intent.EXTRA_FORCE_MASTER_CLEAR, false)
+                || intent.getBooleanExtra(Intent.EXTRA_FORCE_FACTORY_RESET, false);
 
         Slog.w(TAG, "!!! FACTORY RESET !!!");
         // The reboot call is blocking, so we need to do it on another thread.
@@ -54,7 +64,7 @@ public class MasterClearReceiver extends BroadcastReceiver {
             @Override
             public void run() {
                 try {
-                    RecoverySystem.rebootWipeUserData(context, shutdown, reason);
+                    RecoverySystem.rebootWipeUserData(context, shutdown, reason, forceWipe);
                     Log.wtf(TAG, "Still running after master clear?!");
                 } catch (IOException e) {
                     Slog.e(TAG, "Can't perform master clear/factory reset", e);

@@ -42,6 +42,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 
 import com.android.internal.R;
 import com.android.internal.view.menu.MenuBuilder;
@@ -161,7 +162,7 @@ public class Toolbar extends ViewGroup {
     private int mTitleMarginTop;
     private int mTitleMarginBottom;
 
-    private final RtlSpacingHelper mContentInsets = new RtlSpacingHelper();
+    private RtlSpacingHelper mContentInsets;
     private int mContentInsetStartWithNavigation;
     private int mContentInsetEndWithActions;
 
@@ -270,6 +271,7 @@ public class Toolbar extends ViewGroup {
         final int contentInsetRight =
                 a.getDimensionPixelSize(R.styleable.Toolbar_contentInsetRight, 0);
 
+        ensureContentInsets();
         mContentInsets.setAbsolute(contentInsetLeft, contentInsetRight);
 
         if (contentInsetStart != RtlSpacingHelper.UNDEFINED ||
@@ -328,6 +330,26 @@ public class Toolbar extends ViewGroup {
             setSubtitleTextColor(a.getColor(R.styleable.Toolbar_subtitleTextColor, 0xffffffff));
         }
         a.recycle();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+
+        // If the container is a cluster, unmark itself as a cluster to avoid having nested
+        // clusters.
+        ViewParent parent = getParent();
+        while (parent != null && parent instanceof ViewGroup) {
+            final ViewGroup vgParent = (ViewGroup) parent;
+            if (vgParent.isKeyboardNavigationCluster()) {
+                setKeyboardNavigationCluster(false);
+                if (vgParent.getTouchscreenBlocksFocus()) {
+                    setTouchscreenBlocksFocus(false);
+                }
+                break;
+            }
+            parent = vgParent.getParent();
+        }
     }
 
     /**
@@ -463,13 +485,13 @@ public class Toolbar extends ViewGroup {
      */
     public void setTitleMarginBottom(int margin) {
         mTitleMarginBottom = margin;
-
         requestLayout();
     }
 
     @Override
     public void onRtlPropertiesChanged(@ResolvedLayoutDir int layoutDirection) {
         super.onRtlPropertiesChanged(layoutDirection);
+        ensureContentInsets();
         mContentInsets.setDirection(layoutDirection == LAYOUT_DIRECTION_RTL);
     }
 
@@ -1092,6 +1114,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetStart
      */
     public void setContentInsetsRelative(int contentInsetStart, int contentInsetEnd) {
+        ensureContentInsets();
         mContentInsets.setRelative(contentInsetStart, contentInsetEnd);
     }
 
@@ -1112,7 +1135,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetStart
      */
     public int getContentInsetStart() {
-        return mContentInsets.getStart();
+        return mContentInsets != null ? mContentInsets.getStart() : 0;
     }
 
     /**
@@ -1132,7 +1155,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetEnd
      */
     public int getContentInsetEnd() {
-        return mContentInsets.getEnd();
+        return mContentInsets != null ? mContentInsets.getEnd() : 0;
     }
 
     /**
@@ -1154,6 +1177,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetRight
      */
     public void setContentInsetsAbsolute(int contentInsetLeft, int contentInsetRight) {
+        ensureContentInsets();
         mContentInsets.setAbsolute(contentInsetLeft, contentInsetRight);
     }
 
@@ -1174,7 +1198,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetLeft
      */
     public int getContentInsetLeft() {
-        return mContentInsets.getLeft();
+        return mContentInsets != null ? mContentInsets.getLeft() : 0;
     }
 
     /**
@@ -1194,7 +1218,7 @@ public class Toolbar extends ViewGroup {
      * @attr ref android.R.styleable#Toolbar_contentInsetRight
      */
     public int getContentInsetRight() {
-        return mContentInsets.getRight();
+        return mContentInsets != null ? mContentInsets.getRight() : 0;
     }
 
     /**
@@ -1686,7 +1710,8 @@ public class Toolbar extends ViewGroup {
         collapsingMargins[0] = collapsingMargins[1] = 0;
 
         // Align views within the minimum toolbar height, if set.
-        final int alignmentHeight = getMinimumHeight();
+        final int minHeight = getMinimumHeight();
+        final int alignmentHeight = minHeight >= 0 ? Math.min(minHeight, b - t) : 0;
 
         if (shouldLayout(mNavButtonView)) {
             if (isRtl) {
@@ -2125,6 +2150,12 @@ public class Toolbar extends ViewGroup {
         mMenuBuilderCallback = mcb;
         if (mMenuView != null) {
             mMenuView.setMenuCallbacks(pcb, mcb);
+        }
+    }
+
+    private void ensureContentInsets() {
+        if (mContentInsets == null) {
+            mContentInsets = new RtlSpacingHelper();
         }
     }
 

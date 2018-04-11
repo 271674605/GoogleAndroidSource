@@ -46,6 +46,7 @@ class TwilightCalculator {
     private static final float J0 = 0.0009f;
 
     // correction for civil twilight
+    @SuppressWarnings("FloatingPointLiteralPrecision")
     private static final float ALTIDUTE_CORRECTION_CIVIL_TWILIGHT = -0.104719755f;
 
     // coefficients for calculating Equation of Center.
@@ -53,6 +54,7 @@ class TwilightCalculator {
     private static final float C2 = 0.000349066f;
     private static final float C3 = 0.000005236f;
 
+    @SuppressWarnings("FloatingPointLiteralPrecision")
     private static final float OBLIQUITY = 0.40927971f;
 
     // Java time on Jan 1, 2000 12:00 UTC.
@@ -79,10 +81,11 @@ class TwilightCalculator {
      * calculates the civil twilight bases on time and geo-coordinates.
      *
      * @param time time in milliseconds.
-     * @param latiude latitude in degrees.
+     * @param latitude latitude in degrees.
      * @param longitude latitude in degrees.
      */
-    public void calculateTwilight(long time, double latiude, double longitude) {
+    @SuppressWarnings("FloatingPointLiteralPrecision")
+    public void calculateTwilight(long time, double latitude, double longitude) {
         final float daysSince2000 = (float) (time - UTC_2000) / DateUtils.DAY_IN_MILLIS;
 
         // mean anomaly
@@ -104,7 +107,7 @@ class TwilightCalculator {
         // declination of sun
         double solarDec = Math.asin(Math.sin(solarLng) * Math.sin(OBLIQUITY));
 
-        final double latRad = latiude * DEGREES_TO_RADIANS;
+        final double latRad = latitude * DEGREES_TO_RADIANS;
 
         double cosHourAngle = (Math.sin(ALTIDUTE_CORRECTION_CIVIL_TWILIGHT) - Math.sin(latRad)
                 * Math.sin(solarDec)) / (Math.cos(latRad) * Math.cos(solarDec));

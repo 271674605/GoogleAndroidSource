@@ -21,6 +21,7 @@
 #include <gui/IProducerListener.h>
 #include <gui/Surface.h>
 
+#include "utils/LatencyHistogram.h"
 #include "Camera3Stream.h"
 #include "Camera3IOStreamBase.h"
 #include "Camera3OutputStreamInterface.h"
@@ -46,7 +47,7 @@ struct StreamInfo {
     uint32_t combinedUsage;
     size_t totalBufferCount;
     bool isConfigured;
-    StreamInfo(int id = CAMERA3_STREAM_ID_INVALID,
+    explicit StreamInfo(int id = CAMERA3_STREAM_ID_INVALID,
             int setId = CAMERA3_STREAM_SET_ID_INVALID,
             uint32_t w = 0,
             uint32_t h = 0,
@@ -94,6 +95,16 @@ class Camera3OutputStream :
             android_dataspace dataSpace, camera3_stream_rotation_t rotation,
             nsecs_t timestampOffset, int setId = CAMERA3_STREAM_SET_ID_INVALID);
 
+    /**
+     * Set up a stream with deferred consumer for formats that have 2 dimensions, such as
+     * RAW and YUV. The consumer must be set before using this stream for output. A valid
+     * stream set id needs to be set to support buffer sharing between multiple streams.
+     */
+    Camera3OutputStream(int id, uint32_t width, uint32_t height, int format,
+            uint32_t consumerUsage, android_dataspace dataSpace,
+            camera3_stream_rotation_t rotation, nsecs_t timestampOffset,
+            int setId = CAMERA3_STREAM_SET_ID_INVALID);
+
     virtual ~Camera3OutputStream();
 
     /**
@@ -117,6 +128,21 @@ class Camera3OutputStream :
      */
     bool isConsumedByHWComposer() const;
 
+    /**
+     * Return if this output stream is consumed by hardware texture.
+     */
+    bool isConsumedByHWTexture() const;
+
+    /**
+     * Return if the consumer configuration of this stream is deferred.
+     */
+    virtual bool isConsumerConfigurationDeferred(size_t surface_id) const;
+
+    /**
+     * Set the consumer surfaces to the output stream.
+     */
+    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers);
+
     class BufferReleasedListener : public BnProducerListener {
         public:
           BufferReleasedListener(wp<Camera3OutputStream> parent) : mParent(parent) {}
@@ -134,6 +160,12 @@ class Camera3OutputStream :
     virtual status_t detachBuffer(sp<GraphicBuffer>* buffer, int* fenceFd);
 
     /**
+     * Notify that the buffer is being released to the buffer queue instead of
+     * being queued to the consumer.
+     */
+    virtual status_t notifyBufferReleased(ANativeWindowBuffer *anwBuffer);
+
+    /**
      * Set the graphic buffer manager to get/return the stream buffers.
      *
      * It is only legal to call this method when stream is in STATE_CONSTRUCTED state.
@@ -144,6 +176,7 @@ class Camera3OutputStream :
     Camera3OutputStream(int id, camera3_stream_type_t type,
             uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera3_stream_rotation_t rotation,
+            uint32_t consumerUsage = 0, nsecs_t timestampOffset = 0,
             int setId = CAMERA3_STREAM_SET_ID_INVALID);
 
     /**
@@ -158,8 +191,22 @@ class Camera3OutputStream :
 
     virtual status_t disconnectLocked();
 
+    status_t getEndpointUsageForSurface(uint32_t *usage,
+            const sp<Surface>& surface) const;
+    status_t configureConsumerQueueLocked();
+
+    // Consumer as the output of camera HAL
     sp<Surface> mConsumer;
+
+    uint32_t getPresetConsumerUsage() const { return mConsumerUsage; }
+
+    static const nsecs_t       kDequeueBufferTimeout   = 1000000000; // 1 sec
+
+    status_t getBufferLockedCommon(ANativeWindowBuffer** anb, int* fenceFd);
+
+
   private:
+
     int               mTransform;
 
     virtual status_t  setTransformLocked(int transform);
@@ -195,16 +242,36 @@ class Camera3OutputStream :
     nsecs_t mTimestampOffset;
 
     /**
+     * Consumer end point usage flag set by the constructor for the deferred
+     * consumer case.
+     */
+    uint32_t    mConsumerUsage;
+
+    /**
      * Internal Camera3Stream interface
      */
-    virtual status_t getBufferLocked(camera3_stream_buffer *buffer);
+    virtual status_t getBufferLocked(camera3_stream_buffer *buffer,
+            const std::vector<size_t>& surface_ids);
+
     virtual status_t returnBufferLocked(
             const camera3_stream_buffer &buffer,
             nsecs_t timestamp);
 
+    virtual status_t queueBufferToConsumer(sp<ANativeWindow>& consumer,
+            ANativeWindowBuffer* buffer, int anwReleaseFence);
+
     virtual status_t configureQueueLocked();
 
     virtual status_t getEndpointUsage(uint32_t *usage) const;
+
+    /**
+     * Private methods
+     */
+    void onBuffersRemovedLocked(const std::vector<sp<GraphicBuffer>>&);
+    status_t detachBufferLocked(sp<GraphicBuffer>* buffer, int* fenceFd);
+
+    static const int32_t kDequeueLatencyBinSize = 5; // in ms
+    CameraLatencyHistogram mDequeueBufferLatency;
 
 }; // class Camera3OutputStream
 

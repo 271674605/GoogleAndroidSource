@@ -49,10 +49,10 @@
 // XXX then the signal will be lost.
 
 // We use one bit in pthread_condattr_t (long) values as the 'shared' flag
-// and one bit for the clock type (CLOCK_REALTIME is ((clockid_t) 1), and
-// CLOCK_MONOTONIC is ((clockid_t) 0).). The rest of the bits are a counter.
+// and one bit for the clock type (CLOCK_REALTIME is 0 and
+// CLOCK_MONOTONIC is 1). The rest of the bits are a counter.
 //
-// The 'value' field pthread_cond_t has the same layout.
+// The 'value' field in pthread_cond_t has the same layout.
 
 #define COND_SHARED_MASK 0x0001
 #define COND_CLOCK_MASK 0x0002
@@ -224,16 +224,18 @@ extern "C" int pthread_cond_timedwait_monotonic_np(pthread_cond_t* cond_interfac
   return pthread_cond_timedwait_monotonic(cond_interface, mutex, abs_timeout);
 }
 
+// Force this function using CLOCK_MONOTONIC because it was always using
+// CLOCK_MONOTONIC in history.
 extern "C" int pthread_cond_timedwait_relative_np(pthread_cond_t* cond_interface,
                                                   pthread_mutex_t* mutex,
                                                   const timespec* rel_timeout) {
   timespec ts;
   timespec* abs_timeout = nullptr;
   if (rel_timeout != nullptr) {
-    absolute_timespec_from_timespec(ts, *rel_timeout, CLOCK_REALTIME);
+    absolute_timespec_from_timespec(ts, *rel_timeout, CLOCK_MONOTONIC);
     abs_timeout = &ts;
   }
-  return __pthread_cond_timedwait(__get_internal_cond(cond_interface), mutex, true, abs_timeout);
+  return __pthread_cond_timedwait(__get_internal_cond(cond_interface), mutex, false, abs_timeout);
 }
 
 extern "C" int pthread_cond_timeout_np(pthread_cond_t* cond_interface,

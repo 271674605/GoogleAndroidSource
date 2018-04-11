@@ -19,7 +19,7 @@ package android.app.usage;
 import android.content.ComponentName;
 import android.content.res.Configuration;
 
-import java.io.IOException;
+import java.util.List;
 
 /**
  * UsageStatsManager local system service interface.
@@ -54,6 +54,17 @@ public abstract class UsageStatsManagerInternal {
      * @param config The new device configuration.
      */
     public abstract void reportConfigurationChange(Configuration config, int userId);
+
+    /**
+     * Reports that an action equivalent to a ShortcutInfo is taken by the user.
+     *
+     * @param packageName The package name of the shortcut publisher
+     * @param shortcutId The ID of the shortcut in question
+     * @param userId The user in which the content provider was accessed.
+     *
+     * @see android.content.pm.ShortcutManager#reportShortcutUsed(String)
+     */
+    public abstract void reportShortcutUsage(String packageName, String shortcutId, int userId);
 
     /**
      * Reports that a content provider has been accessed by a foreground app.
@@ -116,4 +127,12 @@ public abstract class UsageStatsManagerInternal {
 
     public abstract void applyRestoredPayload(int user, String key, byte[] payload);
 
+    /**
+     * Return usage stats.
+     *
+     * @param obfuscateInstantApps whether instant app package names need to be obfuscated in the
+     *     result.
+     */
+    public abstract List<UsageStats> queryUsageStatsForUser(
+            int userId, int interval, long beginTime, long endTime, boolean obfuscateInstantApps);
 }

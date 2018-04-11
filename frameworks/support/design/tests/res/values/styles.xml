@@ -27,4 +27,16 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 
+    <style name="Theme.TranslucentNavBar" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+
+    <style name="TextAppearanceWithThemedCslTextColor" parent="@android:style/TextAppearance">
+        <item name="android:textColor">@color/color_state_list_themed</item>
+    </style>
+
+    <style name="AppBarWithScrollbars" parent="ThemeOverlay.AppCompat.Dark.ActionBar">
+        <item name="android:scrollbars">horizontal</item>
+    </style>
 </resources>

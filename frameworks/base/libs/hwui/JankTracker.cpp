@@ -13,19 +13,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "JankTracker.h"
 
-#include "Properties.h"
-
-#include <algorithm>
-#include <cutils/ashmem.h>
-#include <cutils/log.h>
-#include <cstdio>
 #include <errno.h>
 #include <inttypes.h>
-#include <limits>
-#include <cmath>
 #include <sys/mman.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <limits>
+
+#include <cutils/ashmem.h>
+#include <log/log.h>
+
+#include "Properties.h"
+#include "utils/TimeUtils.h"
 
 namespace android {
 namespace uirenderer {
@@ -106,7 +110,7 @@ static uint32_t frameCountIndexForFrameTime(nsecs_t frameTime) {
 }
 
 // Only called when dumping stats, less performance sensitive
-static uint32_t frameTimeForFrameCountIndex(uint32_t index) {
+int32_t JankTracker::frameTimeForFrameCountIndex(uint32_t index) {
     index = index + kBucketMinThreshold;
     if (index > kBucket2msIntervals) {
         index += (index - kBucket2msIntervals);
@@ -119,11 +123,31 @@ static uint32_t frameTimeForFrameCountIndex(uint32_t index) {
     return index;
 }
 
-JankTracker::JankTracker(nsecs_t frameIntervalNanos) {
+int32_t JankTracker::frameTimeForSlowFrameCountIndex(uint32_t index) {
+    return (index * kSlowFrameBucketIntervalMs) + kSlowFrameBucketStartMs;
+}
+
+JankTracker::JankTracker(const DisplayInfo& displayInfo) {
     // By default this will use malloc memory. It may be moved later to ashmem
     // if there is shared space for it and a request comes in to do that.
     mData = new ProfileData;
     reset();
+    nsecs_t frameIntervalNanos = static_cast<nsecs_t>(1_s / displayInfo.fps);
+#if USE_HWC2
+    nsecs_t sfOffset = frameIntervalNanos - (displayInfo.presentationDeadline - 1_ms);
+    nsecs_t offsetDelta = sfOffset - displayInfo.appVsyncOffset;
+    // There are two different offset cases. If the offsetDelta is positive
+    // and small, then the intention is to give apps extra time by leveraging
+    // pipelining between the UI & RT threads. If the offsetDelta is large or
+    // negative, the intention is to subtract time from the total duration
+    // in which case we can't afford to wait for dequeueBuffer blockage.
+    if (offsetDelta <= 4_ms && offsetDelta >= 0) {
+        // SF will begin composition at VSYNC-app + offsetDelta. If we are triple
+        // buffered, this is the expected time at which dequeueBuffer will
+        // return due to the staggering of VSYNC-app & VSYNC-sf.
+        mDequeueTimeForgiveness = offsetDelta + 4_ms;
+    }
+#endif
     setFrameInterval(frameIntervalNanos);
 }
 
@@ -141,8 +165,25 @@ void JankTracker::freeData() {
     mData = nullptr;
 }
 
+void JankTracker::rotateStorage() {
+    // If we are mapped we want to stop using the ashmem backend and switch to malloc
+    // We are expecting a switchStorageToAshmem call to follow this, but it's not guaranteed
+    // If we aren't sitting on top of ashmem then just do a reset() as it's functionally
+    // equivalent do a free, malloc, reset.
+    if (mIsMapped) {
+        freeData();
+        mData = new ProfileData;
+    }
+    reset();
+}
+
 void JankTracker::switchStorageToAshmem(int ashmemfd) {
     int regionSize = ashmem_get_size_region(ashmemfd);
+    if (regionSize < 0) {
+        int err = errno;
+        ALOGW("Failed to get ashmem region size from fd %d, err %d %s", ashmemfd, err, strerror(err));
+        return;
+    }
     if (regionSize < static_cast<int>(sizeof(ProfileData))) {
         ALOGW("Ashmem region is too small! Received %d, required %u",
                 regionSize, static_cast<unsigned int>(sizeof(ProfileData)));
@@ -213,7 +254,25 @@ void JankTracker::addFrame(const FrameInfo& frame) {
     mData->totalFrameCount++;
     // Fast-path for jank-free frames
     int64_t totalDuration = frame.duration(sFrameStart, FrameInfoIndex::FrameCompleted);
+    if (mDequeueTimeForgiveness
+            && frame[FrameInfoIndex::DequeueBufferDuration] > 500_us) {
+        nsecs_t expectedDequeueDuration =
+                mDequeueTimeForgiveness + frame[FrameInfoIndex::Vsync]
+                - frame[FrameInfoIndex::IssueDrawCommandsStart];
+        if (expectedDequeueDuration > 0) {
+            // Forgive only up to the expected amount, but not more than
+            // the actual time spent blocked.
+            nsecs_t forgiveAmount = std::min(expectedDequeueDuration,
+                    frame[FrameInfoIndex::DequeueBufferDuration]);
+            LOG_ALWAYS_FATAL_IF(forgiveAmount >= totalDuration,
+                    "Impossible dequeue duration! dequeue duration reported %" PRId64
+                    ", total duration %" PRId64, forgiveAmount, totalDuration);
+            totalDuration -= forgiveAmount;
+        }
+    }
+    LOG_ALWAYS_FATAL_IF(totalDuration <= 0, "Impossible totalDuration %" PRId64, totalDuration);
     uint32_t framebucket = frameCountIndexForFrameTime(totalDuration);
+    LOG_ALWAYS_FATAL_IF(framebucket < 0, "framebucket < 0 (%u)", framebucket);
     // Keep the fast path as fast as possible.
     if (CC_LIKELY(totalDuration < mFrameInterval)) {
         mData->frameCounts[framebucket]++;
@@ -246,15 +305,19 @@ void JankTracker::addFrame(const FrameInfo& frame) {
     }
 }
 
-void JankTracker::dumpBuffer(const void* buffer, size_t bufsize, int fd) {
-    if (bufsize < sizeof(ProfileData)) {
-        return;
+void JankTracker::dumpData(int fd, const ProfileDataDescription* description, const ProfileData* data) {
+    if (description) {
+        switch (description->type) {
+            case JankTrackerType::Generic:
+                break;
+            case JankTrackerType::Package:
+                dprintf(fd, "\nPackage: %s", description->name.c_str());
+                break;
+            case JankTrackerType::Window:
+                dprintf(fd, "\nWindow: %s", description->name.c_str());
+                break;
+        }
     }
-    const ProfileData* data = reinterpret_cast<const ProfileData*>(buffer);
-    dumpData(data, fd);
-}
-
-void JankTracker::dumpData(const ProfileData* data, int fd) {
     if (sFrameStart != FrameInfoIndex::IntendedVsync) {
         dprintf(fd, "\nNote: Data has been filtered!");
     }
@@ -275,7 +338,7 @@ void JankTracker::dumpData(const ProfileData* data, int fd) {
                 data->frameCounts[i]);
     }
     for (size_t i = 0; i < data->slowFrameCounts.size(); i++) {
-        dprintf(fd, " %zums=%u", (i * kSlowFrameBucketIntervalMs) + kSlowFrameBucketStartMs,
+        dprintf(fd, " %ums=%u", frameTimeForSlowFrameCountIndex(i),
                 data->slowFrameCounts[i]);
     }
     dprintf(fd, "\n");

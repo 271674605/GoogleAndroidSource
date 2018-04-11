@@ -16,9 +16,9 @@
 
 package com.android.tv.settings.users;
 
-import android.app.ActivityManagerNative;
-import android.app.IUserSwitchObserver;
+import android.app.ActivityManager;
 import android.app.Service;
+import android.app.UserSwitchObserver;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -26,7 +26,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.IBinder;
-import android.os.IRemoteCallback;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.UserManager;
@@ -99,7 +98,7 @@ public class UserSwitchListenerService extends Service {
 
     private static void switchUserNow(int userId) {
         try {
-            ActivityManagerNative.getDefault().switchUser(userId);
+            ActivityManager.getService().switchUser(userId);
         } catch (RemoteException re) {
             Log.e(TAG, "Caught exception while switching user! ", re);
         }
@@ -109,12 +108,8 @@ public class UserSwitchListenerService extends Service {
     public void onCreate() {
         super.onCreate();
         try {
-            ActivityManagerNative.getDefault().registerUserSwitchObserver(
-                    new IUserSwitchObserver.Stub() {
-                        @Override
-                        public void onUserSwitching(int newUserId, IRemoteCallback reply) {
-                        }
-
+            ActivityManager.getService().registerUserSwitchObserver(
+                    new UserSwitchObserver() {
                         @Override
                         public void onUserSwitchComplete(int newUserId) throws RemoteException {
                             if (DEBUG) {
@@ -122,12 +117,7 @@ public class UserSwitchListenerService extends Service {
                             }
                             setBootUser(UserSwitchListenerService.this, newUserId);
                         }
-
-                        @Override
-                        public void onForegroundProfileSwitch(int profileId)
-                            throws RemoteException {
-                        }
-                    });
+                    }, UserSwitchListenerService.class.getName());
         } catch (RemoteException e) {
         }
     }

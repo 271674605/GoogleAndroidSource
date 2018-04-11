@@ -136,6 +136,7 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:panelColorForeground">#ff000000</item>
         <item name="android:panelColorBackground">#ffffffff</item>
+        <item name="includeLayout">@layout/include_layout_from_attr</item>
     </style>
 
     <style name="Theme_OverrideOuter">
@@ -177,4 +178,13 @@
         <item name="android:windowSwipeToDismiss">false</item>
     </style>
 
+    <style name="WhiteBackgroundTheme" parent="@android:style/Theme.Holo.NoActionBar.Fullscreen">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowOverscan">true</item>
+        <item name="android:fadingEdge">none</item>
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowContentTransitions">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

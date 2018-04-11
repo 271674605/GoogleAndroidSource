@@ -36,7 +36,8 @@ Camera3DummyStream::~Camera3DummyStream() {
 
 }
 
-status_t Camera3DummyStream::getBufferLocked(camera3_stream_buffer *) {
+status_t Camera3DummyStream::getBufferLocked(camera3_stream_buffer *,
+        const std::vector<size_t>&) {
     ATRACE_CALL();
     ALOGE("%s: Stream %d: Dummy stream cannot produce buffers!", __FUNCTION__, mId);
     return INVALID_OPERATION;
@@ -103,6 +104,15 @@ bool Camera3DummyStream::isVideoStream() const {
     return false;
 }
 
+bool Camera3DummyStream::isConsumerConfigurationDeferred(size_t /*surface_id*/) const {
+    return false;
+}
+
+status_t Camera3DummyStream::setConsumers(const std::vector<sp<Surface>>& /*consumers*/) {
+    ALOGE("%s: Stream %d: Dummy stream doesn't support set consumer surface!",
+            __FUNCTION__, mId);
+    return INVALID_OPERATION;
+}
 }; // namespace camera3
 
 }; // namespace android

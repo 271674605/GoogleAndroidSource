@@ -23,6 +23,7 @@ import com.android.systemui.statusbar.ExpandableNotificationRow;
 import com.android.systemui.statusbar.NotificationData;
 import com.android.systemui.statusbar.StatusBarState;
 import com.android.systemui.statusbar.policy.HeadsUpManager;
+import com.android.systemui.statusbar.policy.OnHeadsUpChangedListener;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -31,18 +32,18 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * A class to handle notifications and their corresponding groups.
  */
-public class NotificationGroupManager implements HeadsUpManager.OnHeadsUpChangedListener {
+public class NotificationGroupManager implements OnHeadsUpChangedListener {
 
     private final HashMap<String, NotificationGroup> mGroupMap = new HashMap<>();
     private OnGroupChangeListener mListener;
     private int mBarState = -1;
     private HashMap<String, StatusBarNotification> mIsolatedEntries = new HashMap<>();
     private HeadsUpManager mHeadsUpManager;
+    private boolean mIsUpdatingUnchangedGroup;
 
     public void setOnGroupChangeListener(OnGroupChangeListener listener) {
         mListener = listener;
@@ -140,15 +141,6 @@ public class NotificationGroupManager implements HeadsUpManager.OnHeadsUpChanged
         }
     }
 
-    public void onEntryBundlingUpdated(final NotificationData.Entry updated,
-            final String overrideGroupKey) {
-        final StatusBarNotification oldSbn = updated.notification.clone();
-        if (!Objects.equals(oldSbn.getOverrideGroupKey(), overrideGroupKey)) {
-            updated.notification.setOverrideGroupKey(overrideGroupKey);
-            onEntryUpdated(updated, oldSbn);
-        }
-    }
-
     private void updateSuppression(NotificationGroup group) {
         if (group == null) {
             return;
@@ -163,7 +155,9 @@ public class NotificationGroupManager implements HeadsUpManager.OnHeadsUpChanged
             if (group.suppressed) {
                 handleSuppressedSummaryHeadsUpped(group.summary);
             }
-            mListener.onGroupsChanged();
+            if (!mIsUpdatingUnchangedGroup) {
+                mListener.onGroupsChanged();
+            }
         }
     }
 
@@ -192,19 +186,24 @@ public class NotificationGroupManager implements HeadsUpManager.OnHeadsUpChanged
 
     public void onEntryUpdated(NotificationData.Entry entry,
             StatusBarNotification oldNotification) {
+        String oldKey = oldNotification.getGroupKey();
+        String newKey = entry.notification.getGroupKey();
+        boolean groupKeysChanged = !oldKey.equals(newKey);
+        boolean wasGroupChild = isGroupChild(oldNotification);
+        boolean isGroupChild = isGroupChild(entry.notification);
+        mIsUpdatingUnchangedGroup = !groupKeysChanged && wasGroupChild == isGroupChild;
         if (mGroupMap.get(getGroupKey(oldNotification)) != null) {
             onEntryRemovedInternal(entry, oldNotification);
         }
         onEntryAdded(entry);
+        mIsUpdatingUnchangedGroup = false;
         if (isIsolated(entry.notification)) {
             mIsolatedEntries.put(entry.key, entry.notification);
-            String oldKey = oldNotification.getGroupKey();
-            String newKey = entry.notification.getGroupKey();
-            if (!oldKey.equals(newKey)) {
+            if (groupKeysChanged) {
                 updateSuppression(mGroupMap.get(oldKey));
                 updateSuppression(mGroupMap.get(newKey));
             }
-        } else if (!isGroupChild(oldNotification) && isGroupChild(entry.notification)) {
+        } else if (!wasGroupChild && isGroupChild) {
             onEntryBecomingChild(entry);
         }
     }
@@ -417,6 +416,10 @@ public class NotificationGroupManager implements HeadsUpManager.OnHeadsUpChanged
                 child = getIsolatedChild(sbn.getGroupKey());
             }
             if (child != null) {
+                if (child.row.keepInParent() || child.row.isRemoved() || child.row.isDismissed()) {
+                    // the notification is actually already removed, no need to do heads-up on it.
+                    return;
+                }
                 if (mHeadsUpManager.isHeadsUp(child.key)) {
                     mHeadsUpManager.updateNotification(child, true);
                 } else {

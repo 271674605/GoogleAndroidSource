@@ -14,29 +14,43 @@
  * limitations under the License.
  */
 
-#include <android/log.h>
+#define LOG_TAG "nanoapp_cmd"
+
 #include <assert.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <unistd.h>
-#include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <android/log.h>
+
+#include <nanohub/nanohub.h>
 #include <eventnums.h>
 #include <sensType.h>
-#include <signal.h>
-#include <inttypes.h>
-#include <errno.h>
 
-#define LOG_TAG "nanoapp_cmd"
 #define SENSOR_RATE_ONCHANGE    0xFFFFFF01UL
 #define SENSOR_RATE_ONESHOT     0xFFFFFF02UL
 #define SENSOR_HZ(_hz)          ((uint32_t)((_hz) * 1024.0f))
+#define MAX_APP_NAME_LEN        32
 #define MAX_INSTALL_CNT         8
-#define MAX_DOWNLOAD_RETRIES    3
+#define MAX_UNINSTALL_CNT       8
+#define MAX_DOWNLOAD_RETRIES    4
+#define UNINSTALL_CMD           "uninstall"
+
+#define NANOHUB_EXT_APP_DELETE  2
+
+#define LOGE(fmt, ...) do { \
+        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, fmt, ##__VA_ARGS__); \
+        printf(fmt "\n", ##__VA_ARGS__); \
+    } while (0)
 
 enum ConfigCmds
 {
@@ -57,7 +71,7 @@ struct ConfigCmd
     uint16_t flags;
 } __attribute__((packed));
 
-struct AppInfo
+struct App
 {
     uint32_t num;
     uint64_t id;
@@ -150,9 +164,10 @@ bool drain = false;
 bool stop = false;
 char *buf;
 int nread, buf_size = 2048;
-struct AppInfo apps[32];
+struct App apps[32];
 uint8_t appCount;
-char appsToInstall[MAX_INSTALL_CNT][32];
+char appsToInstall[MAX_INSTALL_CNT][MAX_APP_NAME_LEN+1];
+uint64_t appsToUninstall[MAX_UNINSTALL_CNT];
 
 void sig_handle(__attribute__((unused)) int sig)
 {
@@ -165,8 +180,7 @@ FILE *openFile(const char *fname, const char *mode)
 {
     FILE *f = fopen(fname, mode);
     if (f == NULL) {
-        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Failed to open %s: err=%d [%s]", fname, errno, strerror(errno));
-        printf("\nFailed to open %s: err=%d [%s]\n", fname, errno, strerror(errno));
+        LOGE("Failed to open %s: err=%d [%s]", fname, errno, strerror(errno));
     }
     return f;
 }
@@ -185,8 +199,8 @@ void parseInstalledAppInfo()
         return;
 
     while ((numRead = getline(&line, &len, fp)) != -1) {
-        struct AppInfo *currApp = &apps[appCount++];
-        sscanf(line, "app: %d id: %" PRIx64 " ver: %d size: %d\n", &currApp->num, &currApp->id, &currApp->version, &currApp->size);
+        struct App *currApp = &apps[appCount++];
+        sscanf(line, "app: %d id: %" PRIx64 " ver: %" PRIx32 " size: %" PRIx32 "\n", &currApp->num, &currApp->id, &currApp->version, &currApp->size);
     }
 
     fclose(fp);
@@ -195,7 +209,7 @@ void parseInstalledAppInfo()
         free(line);
 }
 
-struct AppInfo *findApp(uint64_t appId)
+struct App *findApp(uint64_t appId)
 {
     uint8_t i;
 
@@ -208,13 +222,12 @@ struct AppInfo *findApp(uint64_t appId)
     return NULL;
 }
 
-int parseConfigAppInfo()
+int parseConfigAppInfo(int *installCnt, int *uninstallCnt)
 {
     FILE *fp;
     char *line = NULL;
     size_t len;
     ssize_t numRead;
-    int installCnt;
 
     fp = openFile("/vendor/firmware/napp_list.cfg", "r");
     if (!fp)
@@ -222,17 +235,22 @@ int parseConfigAppInfo()
 
     parseInstalledAppInfo();
 
-    installCnt = 0;
-    while (((numRead = getline(&line, &len, fp)) != -1) && (installCnt < MAX_INSTALL_CNT)) {
+    *installCnt = *uninstallCnt = 0;
+    while (((numRead = getline(&line, &len, fp)) != -1) && (*installCnt < MAX_INSTALL_CNT) && (*uninstallCnt < MAX_UNINSTALL_CNT)) {
         uint64_t appId;
         uint32_t appVersion;
-        struct AppInfo* installedApp;
+        struct App *installedApp;
 
-        sscanf(line, "%32s %" PRIx64 " %d\n", appsToInstall[installCnt], &appId, &appVersion);
+        sscanf(line, "%" STRINGIFY(MAX_APP_NAME_LEN) "s %" PRIx64 " %" PRIx32 "\n", appsToInstall[*installCnt], &appId, &appVersion);
 
         installedApp = findApp(appId);
-        if (!installedApp || (installedApp->version < appVersion)) {
-            installCnt++;
+        if (strncmp(appsToInstall[*installCnt], UNINSTALL_CMD, MAX_APP_NAME_LEN) == 0) {
+            if (installedApp) {
+                appsToUninstall[*uninstallCnt] = appId;
+                (*uninstallCnt)++;
+            }
+        } else if (!installedApp || (installedApp->version < appVersion)) {
+            (*installCnt)++;
         }
     }
 
@@ -241,7 +259,7 @@ int parseConfigAppInfo()
     if (line)
         free(line);
 
-    return installCnt;
+    return *installCnt + *uninstallCnt;
 }
 
 bool fileWriteData(const char *fname, const void *data, size_t size)
@@ -251,15 +269,13 @@ bool fileWriteData(const char *fname, const void *data, size_t size)
 
     fd = open(fname, O_WRONLY);
     if (fd < 0) {
-        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Failed to open %s: err=%d [%s]", fname, errno, strerror(errno));
-        printf("\nFailed to open %s: err=%d [%s]\n", fname, errno, strerror(errno));
+        LOGE("Failed to open %s: err=%d [%s]", fname, errno, strerror(errno));
         return false;
     }
 
     result = true;
     if ((size_t)write(fd, data, size) != size) {
-        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Failed to write to %s; err=%d [%s]", fname, errno, strerror(errno));
-        printf("\nFailed to write %s; err=%d [%s]\n", fname, errno, strerror(errno));
+        LOGE("Failed to write to %s; err=%d [%s]", fname, errno, strerror(errno));
         result = false;
     }
     close(fd);
@@ -277,6 +293,27 @@ void downloadNanohub()
         printf("done\n");
 }
 
+void removeApps(int updateCnt)
+{
+    uint8_t buffer[sizeof(struct HostMsgHdr) + 1 + sizeof(uint64_t)];
+    struct HostMsgHdr *mHostMsgHdr = (struct HostMsgHdr *)(&buffer[0]);
+    uint8_t *cmd = (uint8_t *)(&buffer[sizeof(struct HostMsgHdr)]);
+    uint64_t *appId = (uint64_t *)(&buffer[sizeof(struct HostMsgHdr) + 1]);
+    int i;
+
+    for (i = 0; i < updateCnt; i++) {
+        mHostMsgHdr->eventId = EVT_APP_FROM_HOST;
+        mHostMsgHdr->appId = APP_ID_MAKE(NANOHUB_VENDOR_GOOGLE, 0);
+        mHostMsgHdr->len = 1 + sizeof(uint64_t);
+        *cmd = NANOHUB_EXT_APP_DELETE;
+        memcpy(appId, &appsToUninstall[i], sizeof(uint64_t));
+        printf("Deleting \"%016" PRIx64 "\"...", appsToUninstall[i]);
+        fflush(stdout);
+        if (fileWriteData("/dev/nanohub", buffer, sizeof(buffer)))
+            printf("done\n");
+    }
+}
+
 void downloadApps(int updateCnt)
 {
     int i;
@@ -287,6 +324,16 @@ void downloadApps(int updateCnt)
         if (fileWriteData("/sys/class/nanohub/nanohub/download_app", appsToInstall[i], strlen(appsToInstall[i])))
             printf("done\n");
     }
+}
+
+void eraseSharedArea()
+{
+    char c = '1';
+
+    printf("Erasing entire nanohub shared area...");
+    fflush(stdout);
+    if (fileWriteData("/sys/class/nanohub/nanohub/erase_shared", &c, sizeof(c)))
+        printf("done\n");
 }
 
 void resetHub()
@@ -305,7 +352,7 @@ int main(int argc, char *argv[])
     int fd;
     int i;
 
-    if (argc < 3 && strcmp(argv[1], "download") != 0) {
+    if (argc < 3 && (argc < 2 || strcmp(argv[1], "download") != 0)) {
         printf("usage: %s <action> <sensor> <data> -d\n", argv[0]);
         printf("       action: config|calibrate|flush|download\n");
         printf("       sensor: accel|(uncal_)gyro|(uncal_)mag|als|prox|baro|temp|orien\n");
@@ -375,24 +422,32 @@ int main(int argc, char *argv[])
             return 1;
         }
     } else if (strcmp(argv[1], "download") == 0) {
+        int installCnt, uninstallCnt;
+
         if (argc != 2) {
             printf("Wrong arg number\n");
             return 1;
         }
         downloadNanohub();
         for (i = 0; i < MAX_DOWNLOAD_RETRIES; i++) {
-            int updateCnt = parseConfigAppInfo();
+            int updateCnt = parseConfigAppInfo(&installCnt, &uninstallCnt);
             if (updateCnt > 0) {
-                downloadApps(updateCnt);
+                if (i == MAX_DOWNLOAD_RETRIES - 1) {
+                    LOGE("Download failed after %d retries; erasing all apps "
+                         "before final attempt", i);
+                    eraseSharedArea();
+                    uninstallCnt = 0;
+                }
+                removeApps(uninstallCnt);
+                downloadApps(installCnt);
                 resetHub();
             } else if (!updateCnt){
                 return 0;
             }
         }
 
-        if (parseConfigAppInfo() != 0) {
-            __android_log_write(ANDROID_LOG_ERROR, LOG_TAG, "Failed to download all apps!");
-            printf("Failed to download all apps!\n");
+        if (parseConfigAppInfo(&installCnt, &uninstallCnt) != 0) {
+            LOGE("Failed to download all apps!");
         }
         return 1;
     } else {

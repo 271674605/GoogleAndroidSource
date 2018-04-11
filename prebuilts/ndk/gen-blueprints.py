@@ -52,13 +52,16 @@ def gen_defaults():
 
         for arch in ['arm', 'arm64', 'mips', 'mips64', 'x86', 'x86_64']:
             arch_path = local_path(
-                'current/platforms/android-{sdk}/arch-{arch}'.format(sdk=sdk, arch=arch))
-            if not os.path.exists(arch_path):
+                'current/platforms/android-{sdk}/arch-{arch}/usr/include'.format(sdk=sdk, arch=arch))
+            if os.path.exists(arch_path):
                 arch_flags.append(
-                    '        {arch}: {{ enabled: false, }},'.format(arch=arch))
+                    '        {arch}: {{\n'
+                    '            export_include_dirs: ["{includes}"],\n'
+                    '        }},'.format(arch=arch, includes=arch_path))
 
         default.append('cc_defaults {{\n'
-                       '    name: "ndk_{version}_defaults",'.format(version=sdk))
+                       '    name: "ndk_{version}_defaults",\n'
+                       '    sdk_version: "{version}",'.format(version=sdk))
         if len(arch_flags) > 0:
             default.append('    arch: {{\n{arch_flags}\n'
                            '    }},'.format(arch_flags='\n'.join(arch_flags)))
@@ -76,31 +79,15 @@ def get_prebuilts(names):
 
 
 def gen_lib_prebuilt(prebuilt, name, version):
-    platform = os.path.join('current', 'platforms',
-                            prebuilt.partition('/')[0])
-    includes = os.path.join(platform, 'arch-{}/usr/include')
-    arch_flags = []
-    for arch in ['arm', 'arm64', 'mips', 'mips64', 'x86', 'x86_64']:
-        inc = includes.format(arch)
-        if os.path.exists(inc):
-            arch_flags.append(
-                '        {arch}: {{\n'
-                '            export_include_dirs: ["{includes}"],\n'
-                '        }},'.format(arch=arch, includes=inc))
     return ('ndk_prebuilt_library {{\n'
-            '    name: "ndk_{name}.{version}",\n'
+            '    name: "{name}.ndk.{version}",\n'
             '    defaults: ["ndk_{version}_defaults"],\n'
-            '    sdk_version: "{version}",\n'
-            '    arch: {{\n{arch_flags}\n'
-            '    }},\n'
-            '}}'.format(name=name, version=version,
-                        arch_flags='\n'.join(arch_flags)))
+            '}}'.format(name=name, version=version))
 
 
 def gen_crt_prebuilt(_, name, version):
     return ('ndk_prebuilt_object {{\n'
             '    name: "ndk_{name}.{version}",\n'
-            '    defaults: ["ndk_{version}_defaults"],\n'
             '    sdk_version: "{version}",\n'
             '}}'.format(name=name, version=version))
 
@@ -110,13 +97,15 @@ def gen_prebuilts(fn, names):
     for prebuilt in get_prebuilts(names):
         name = os.path.splitext(os.path.basename(prebuilt))[0]
         version = sdk_version_from_path(prebuilt)
+        if version < 9:
+            # We don't support anything before Gingerbread any more.
+            continue
         prebuilts.append(fn(prebuilt, name, version))
     return prebuilts
 
 
 def main():
     blueprints = gen_defaults()
-    blueprints.extend(gen_prebuilts(gen_lib_prebuilt, ('libc.so', 'libm.so')))
     blueprints.extend(gen_prebuilts(gen_crt_prebuilt, (
         'crtbegin_so.o',
         'crtend_so.o',

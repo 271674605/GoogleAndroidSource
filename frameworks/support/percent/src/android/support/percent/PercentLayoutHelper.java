@@ -26,8 +26,6 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 
-import android.support.percent.R;
-
 /**
  * Helper for layouts that want to support percentage based dimensions.
  *
@@ -69,7 +67,59 @@ import android.support.percent.R;
  * }
  * </pre>
  * </ol>
+ * @deprecated consider using ConstraintLayout and associated layouts instead. The following shows
+ * how to replicate the functionality of percentage layouts with a ConstraintLayout. The Guidelines
+ * are used to define each percentage break point, and then a Button view is stretched to fill
+ * the gap:
+ *
+ * <pre class="prettyprint">
+ * &lt;android.support.constraint.ConstraintLayout
+ *         xmlns:android="http://schemas.android.com/apk/res/android"
+ *         xmlns:app="http://schemas.android.com/apk/res-auto"
+ *         android:layout_width="match_parent"
+ *         android:layout_height="match_parent"&gt
+ *
+ *     &lt;android.support.constraint.Guideline
+ *         android:layout_width="wrap_content"
+ *         android:layout_height="wrap_content"
+ *         android:id="@+id/left_guideline"
+ *         app:layout_constraintGuide_percent=".15"
+ *         android:orientation="vertical"/&gt
+ *
+ *     &lt;android.support.constraint.Guideline
+ *         android:layout_width="wrap_content"
+ *         android:layout_height="wrap_content"
+ *         android:id="@+id/right_guideline"
+ *         app:layout_constraintGuide_percent=".85"
+ *         android:orientation="vertical"/&gt
+ *
+ *     &lt;android.support.constraint.Guideline
+ *         android:layout_width="wrap_content"
+ *         android:layout_height="wrap_content"
+ *         android:id="@+id/top_guideline"
+ *         app:layout_constraintGuide_percent=".15"
+ *         android:orientation="horizontal"/&gt
+ *
+ *     &lt;android.support.constraint.Guideline
+ *         android:layout_width="wrap_content"
+ *         android:layout_height="wrap_content"
+ *         android:id="@+id/bottom_guideline"
+ *         app:layout_constraintGuide_percent=".85"
+ *         android:orientation="horizontal"/&gt
+ *
+ *     &lt;Button
+ *         android:text="Button"
+ *         android:layout_width="0dp"
+ *         android:layout_height="0dp"
+ *         android:id="@+id/button"
+ *         app:layout_constraintLeft_toLeftOf="@+id/left_guideline"
+ *         app:layout_constraintRight_toRightOf="@+id/right_guideline"
+ *         app:layout_constraintTop_toTopOf="@+id/top_guideline"
+ *         app:layout_constraintBottom_toBottomOf="@+id/bottom_guideline" /&gt
+ *
+ * &lt;/android.support.constraint.ConstraintLayout&gt
  */
+@Deprecated
 public class PercentLayoutHelper {
     private static final String TAG = "PercentLayout";
 
@@ -318,15 +368,15 @@ public class PercentLayoutHelper {
     }
 
     private static boolean shouldHandleMeasuredWidthTooSmall(View view, PercentLayoutInfo info) {
-        int state = ViewCompat.getMeasuredWidthAndState(view) & ViewCompat.MEASURED_STATE_MASK;
-        return state == ViewCompat.MEASURED_STATE_TOO_SMALL && info.widthPercent >= 0 &&
-                info.mPreservedParams.width == ViewGroup.LayoutParams.WRAP_CONTENT;
+        int state = view.getMeasuredWidthAndState() & View.MEASURED_STATE_MASK;
+        return state == View.MEASURED_STATE_TOO_SMALL && info.widthPercent >= 0
+                && info.mPreservedParams.width == ViewGroup.LayoutParams.WRAP_CONTENT;
     }
 
     private static boolean shouldHandleMeasuredHeightTooSmall(View view, PercentLayoutInfo info) {
-        int state = ViewCompat.getMeasuredHeightAndState(view) & ViewCompat.MEASURED_STATE_MASK;
-        return state == ViewCompat.MEASURED_STATE_TOO_SMALL && info.heightPercent >= 0 &&
-                info.mPreservedParams.height == ViewGroup.LayoutParams.WRAP_CONTENT;
+        int state = view.getMeasuredHeightAndState() & View.MEASURED_STATE_MASK;
+        return state == View.MEASURED_STATE_TOO_SMALL && info.heightPercent >= 0
+                && info.mPreservedParams.height == ViewGroup.LayoutParams.WRAP_CONTENT;
     }
 
     /* package */ static class PercentMarginLayoutParams extends ViewGroup.MarginLayoutParams {
@@ -346,7 +396,10 @@ public class PercentLayoutHelper {
     /**
      * Container for information about percentage dimensions and margins. It acts as an extension
      * for {@code LayoutParams}.
+     *
+     * @deprecated use ConstraintLayout and Guidelines for layout support.
      */
+    @Deprecated
     public static class PercentLayoutInfo {
         /** The decimal value of the percentage-based width. */
         public float widthPercent;
@@ -412,21 +465,21 @@ public class PercentLayoutHelper {
                             || mPreservedParams.height == 0) && (heightPercent < 0);
 
             if (widthPercent >= 0) {
-                params.width = (int) (widthHint * widthPercent);
+                params.width = Math.round(widthHint * widthPercent);
             }
 
             if (heightPercent >= 0) {
-                params.height = (int) (heightHint * heightPercent);
+                params.height = Math.round(heightHint * heightPercent);
             }
 
             if (aspectRatio >= 0) {
                 if (widthNotSet) {
-                    params.width = (int) (params.height * aspectRatio);
+                    params.width = Math.round(params.height * aspectRatio);
                     // Keep track that we've filled the width based on the height and aspect ratio.
                     mPreservedParams.mIsWidthComputedFromAspectRatio = true;
                 }
                 if (heightNotSet) {
-                    params.height = (int) (params.width / aspectRatio);
+                    params.height = Math.round(params.width / aspectRatio);
                     // Keep track that we've filled the height based on the width and aspect ratio.
                     mPreservedParams.mIsHeightComputedFromAspectRatio = true;
                 }
@@ -468,26 +521,26 @@ public class PercentLayoutHelper {
                     MarginLayoutParamsCompat.getMarginEnd(params));
 
             if (leftMarginPercent >= 0) {
-                params.leftMargin = (int) (widthHint * leftMarginPercent);
+                params.leftMargin = Math.round(widthHint * leftMarginPercent);
             }
             if (topMarginPercent >= 0) {
-                params.topMargin = (int) (heightHint * topMarginPercent);
+                params.topMargin = Math.round(heightHint * topMarginPercent);
             }
             if (rightMarginPercent >= 0) {
-                params.rightMargin = (int) (widthHint * rightMarginPercent);
+                params.rightMargin = Math.round(widthHint * rightMarginPercent);
             }
             if (bottomMarginPercent >= 0) {
-                params.bottomMargin = (int) (heightHint * bottomMarginPercent);
+                params.bottomMargin = Math.round(heightHint * bottomMarginPercent);
             }
             boolean shouldResolveLayoutDirection = false;
             if (startMarginPercent >= 0) {
                 MarginLayoutParamsCompat.setMarginStart(params,
-                        (int) (widthHint * startMarginPercent));
+                        Math.round(widthHint * startMarginPercent));
                 shouldResolveLayoutDirection = true;
             }
             if (endMarginPercent >= 0) {
                 MarginLayoutParamsCompat.setMarginEnd(params,
-                        (int) (widthHint * endMarginPercent));
+                        Math.round(widthHint * endMarginPercent));
                 shouldResolveLayoutDirection = true;
             }
             if (shouldResolveLayoutDirection && (view != null)) {
@@ -557,7 +610,10 @@ public class PercentLayoutHelper {
      *
      * Your {@code LayoutParams} subclass should contain an instance of {@code PercentLayoutInfo}
      * and the implementation of this interface should be a simple accessor.
+     *
+     * @deprecated this class is deprecated along with its parent class.
      */
+    @Deprecated
     public interface PercentLayoutParams {
         PercentLayoutInfo getPercentLayoutInfo();
     }

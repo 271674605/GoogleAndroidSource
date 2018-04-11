@@ -45,9 +45,10 @@
     <string name="no_vm_number" msgid="4164780423805688336">"Nawawala ang numero ng voicemail"</string>
     <string name="no_vm_number_msg" msgid="1300729501030053828">"Walang nakaimbak na numero ng voicemail sa SIM card."</string>
     <string name="add_vm_number_str" msgid="4676479471644687453">"Magdagdag ng numero"</string>
-    <string name="change_default_dialer_dialog_title" msgid="4430590714918044425">"Baguhin ang iyong default na Dialer app?"</string>
-    <string name="change_default_dialer_with_previous_app_set_text" msgid="3213396537499337949">"Gamitin ang <xliff:g id="NEW_APP">%1$s</xliff:g> sa halip na <xliff:g id="CURRENT_APP">%2$s</xliff:g> bilang default na dialer app mo?"</string>
-    <string name="change_default_dialer_no_previous_app_set_text" msgid="7608426684114545221">"Gamitin ang <xliff:g id="NEW_APP">%s</xliff:g> bilang default na dialer app mo?"</string>
+    <string name="change_default_dialer_dialog_title" msgid="9101655962941740507">"Gawing iyong default na app na Telepono ang <xliff:g id="NEW_APP">%s</xliff:g>?"</string>
+    <string name="change_default_dialer_dialog_affirmative" msgid="8606546663509166276">"Magtakda ng Default"</string>
+    <string name="change_default_dialer_dialog_negative" msgid="9078144617060173845">"Kanselahin"</string>
+    <string name="change_default_dialer_warning_message" msgid="1417671460801684999">"Ang <xliff:g id="NEW_APP">%s</xliff:g> ay magagawang tumawag at kontrolin ang lahat ng aspeto ng tawag. Mga app na pinagkakatiwalaan mo lang ang dapat itakda bilang default na app na Telepono."</string>
     <string name="blocked_numbers" msgid="2751843139572970579">"Mga naka-block na numero"</string>
     <string name="blocked_numbers_msg" msgid="1045015186124965643">"Hindi ka makakatanggap ng mga tawag o mga text mula sa mga naka-block na numero."</string>
     <string name="block_number" msgid="1101252256321306179">"Magdagdag ng numero"</string>
@@ -66,4 +67,20 @@
     <string name="blocked_numbers_block_emergency_number_message" msgid="917851876780698387">"Hindi ma-block ang numerong pang-emergency."</string>
     <string name="blocked_numbers_number_already_blocked_message" msgid="4392247814500811798">"Naka-block na ang <xliff:g id="BLOCKED_NUMBER">%1$s</xliff:g>."</string>
     <string name="toast_personal_call_msg" msgid="5115361633476779723">"Ginagamit ang personal na dialer upang tumawag"</string>
+    <string name="notification_incoming_call" msgid="7713197997773986670">"Tawag sa <xliff:g id="CALL_VIA">%1$s</xliff:g> mula kay <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="notification_incoming_video_call" msgid="6638486071698373893">"Video call sa <xliff:g id="CALL_VIA">%1$s</xliff:g> mula kay <xliff:g id="CALL_FROM">%2$s</xliff:g>"</string>
+    <string name="answering_ends_other_call" msgid="8282145910153766401">"Kung sasagutin, matatapos ang iyong tawag sa <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_calls" msgid="1198589551399049197">"Kung sasagutin, matatapos ang iyong mga tawag sa <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_video_call" msgid="8510410917384186360">"Kung sasagutin, matatapos ang kasalukuyang video call sa <xliff:g id="CALL_VIA">%1$s</xliff:g>"</string>
+    <string name="answering_ends_other_managed_call" msgid="5186137550267947785">"Kung sasagutin, matatapos ang iyong kasalukuyang tawag"</string>
+    <string name="answering_ends_other_managed_calls" msgid="6429838309560397988">"Kung sasagutin, matatapos ang iyong mga kasalukuyang tawag"</string>
+    <string name="answering_ends_other_managed_video_call" msgid="1585423762458248435">"Kung sasagutin, matatapos ang iyong kasalukuyang video call"</string>
+    <string name="answer_incoming_call" msgid="4140530013111794587">"Sagutin"</string>
+    <string name="decline_incoming_call" msgid="806026168661598368">"Tanggihan"</string>
+    <string name="cant_call_due_to_ongoing_call" msgid="4952615196237854748">"Hindi makakatawag dahil sa iyong tawag sa <xliff:g id="OTHER_CALL">%1$s</xliff:g>."</string>
+    <string name="cant_call_due_to_ongoing_calls" msgid="1380804892363503856">"Hindi makakatawag dahil sa iyong mga tawag sa <xliff:g id="OTHER_CALL">%1$s</xliff:g>."</string>
+    <string name="cant_call_due_to_ongoing_unknown_call" msgid="149091978697302211">"Hindi makakatawag dahil sa isang tawag sa isa pang app."</string>
+    <string name="notification_channel_incoming_call" msgid="3513761697082968084">"Mga papasok na tawag"</string>
+    <string name="notification_channel_missed_call" msgid="8727062678632713146">"Mga hindi nasagot na tawag"</string>
+    <string name="alert_outgoing_call" msgid="982908156825958001">"Tatapusin ng pagtawag na ito ang iyong tawag sa <xliff:g id="OTHER_APP">%1$s</xliff:g>."</string>
 </resources>

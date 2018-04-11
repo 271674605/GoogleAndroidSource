@@ -16,8 +16,8 @@
 
 package com.example.android.fingerprintdialog;
 
-import android.app.Activity;
 import android.app.DialogFragment;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Bundle;
@@ -134,11 +134,11 @@ public class FingerprintAuthenticationDialogFragment extends DialogFragment
     }
 
     @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
-        mActivity = (MainActivity) activity;
-        mInputMethodManager = mActivity.getSystemService(InputMethodManager.class);
-        mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(mActivity);
+    public void onAttach(Context context) {
+        super.onAttach(context);
+        mActivity = (MainActivity) getActivity();
+        mInputMethodManager = context.getSystemService(InputMethodManager.class);
+        mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
     }
 
     /**
@@ -181,12 +181,12 @@ public class FingerprintAuthenticationDialogFragment extends DialogFragment
 
             if (mUseFingerprintFutureCheckBox.isChecked()) {
                 // Re-create the key so that fingerprints including new ones are validated.
-                mActivity.createKey();
+                mActivity.createKey(MainActivity.DEFAULT_KEY_NAME, true);
                 mStage = Stage.FINGERPRINT;
             }
         }
         mPassword.setText("");
-        mActivity.onPurchased(false /* without Fingerprint */);
+        mActivity.onPurchased(false /* without Fingerprint */, null);
         dismiss();
     }
 
@@ -243,7 +243,7 @@ public class FingerprintAuthenticationDialogFragment extends DialogFragment
     public void onAuthenticated() {
         // Callback from FingerprintUiHelper. Let the activity know that authentication was
         // successful.
-        mActivity.onPurchased(true /* withFingerprint */);
+        mActivity.onPurchased(true /* withFingerprint */, mCryptoObject);
         dismiss();
     }
 

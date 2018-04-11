@@ -15,6 +15,7 @@
  */
 package com.android.compatibility.common.util;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -36,6 +37,9 @@ public class InvocationResult implements IInvocationResult {
     private String mBuildFingerprint;
     private String mTestPlan;
     private String mCommandLineArgs;
+    private int mNotExecuted = 0;
+    private RetryChecksumStatus mRetryChecksumStatus = RetryChecksumStatus.NotRetry;
+    private File mRetryDirectory = null;
 
     /**
      * {@inheritDoc}
@@ -57,6 +61,18 @@ public class InvocationResult implements IInvocationResult {
             total += m.countResults(result);
         }
         return total;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public int getNotExecuted() {
+        int numTests = 0;
+        for (IModuleResult module : mModuleResults.values()) {
+            numTests += module.getNotExecuted();
+        }
+        return numTests;
     }
 
     /**
@@ -187,5 +203,37 @@ public class InvocationResult implements IInvocationResult {
             }
         }
         return completeModules;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public RetryChecksumStatus getRetryChecksumStatus() {
+        return mRetryChecksumStatus;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setRetryChecksumStatus(RetryChecksumStatus retryStatus) {
+        mRetryChecksumStatus = retryStatus;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public File getRetryDirectory() {
+        return mRetryDirectory;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setRetryDirectory(File resultDir) {
+        mRetryDirectory = resultDir;
     }
 }

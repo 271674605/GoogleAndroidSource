@@ -3,6 +3,7 @@ include $(CLEAR_VARS)
 include $(LOCAL_PATH)/../../../common.mk
 
 LOCAL_MODULE                  := libsdmcore
+LOCAL_PROPRIETARY_MODULE      := true
 LOCAL_MODULE_TAGS             := optional
 LOCAL_C_INCLUDES              := $(common_includes) $(kernel_includes)
 LOCAL_CFLAGS                  := -Wno-missing-field-initializers -Wno-unused-parameter \
@@ -28,6 +29,8 @@ LOCAL_SRC_FILES               := core_interface.cpp \
                                  $(LOCAL_HW_INTF_PATH)/hw_primary.cpp \
                                  $(LOCAL_HW_INTF_PATH)/hw_hdmi.cpp \
                                  $(LOCAL_HW_INTF_PATH)/hw_virtual.cpp \
-                                 $(LOCAL_HW_INTF_PATH)/hw_color_manager.cpp
+                                 $(LOCAL_HW_INTF_PATH)/hw_color_manager.cpp \
+                                 $(LOCAL_HW_INTF_PATH)/hw_scale.cpp \
+                                 $(LOCAL_HW_INTF_PATH)/hw_events.cpp
 
 include $(BUILD_SHARED_LIBRARY)

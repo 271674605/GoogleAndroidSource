@@ -19,15 +19,14 @@
           package="android.support.design.test">
 
     <uses-sdk
-            android:minSdkVersion="7"
+            android:minSdkVersion="14"
             android:targetSdkVersion="23"
             tools:overrideLibrary="android.support.test, android.app, android.support.test.rule,
                       android.support.test.espresso, android.support.test.espresso.idling"/>
 
     <application
             android:supportsRtl="true"
-            android:theme="@style/Theme.AppCompat">
-        <uses-library android:name="android.test.runner"/>
+            android:theme="@style/Theme.Design">
 
         <activity
                 android:theme="@style/Theme.AppCompat.NoActionBar"
@@ -38,16 +37,20 @@
                 android:name="android.support.design.widget.SnackbarActivity"/>
 
         <activity
+            android:theme="@style/Theme.TranslucentNavBar"
+            android:name="android.support.design.widget.SnackbarActivityWithTranslucentNavBar"/>
+
+        <activity
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:name="android.support.design.widget.SnackbarActivityWithFAB"/>
+
+        <activity
                 android:theme="@style/Theme.TranslucentStatus"
                 android:name="android.support.design.widget.DynamicCoordinatorLayoutActivity"/>
 
         <activity
                 android:theme="@style/Theme.AppCompat.NoActionBar"
                 android:name="android.support.design.widget.TabLayoutPoolingActivity"/>
-
-        <activity
-                android:theme="@style/Theme.AppCompat.NoActionBar"
-                android:name="android.support.design.widget.SnackbarBucketTestsActivity"/>
 
         <activity
                 android:theme="@style/Theme.AppCompat.NoActionBar"
@@ -74,16 +77,24 @@
             android:name="android.support.design.widget.NavigationViewActivity"/>
 
         <activity
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:name="android.support.design.widget.BottomNavigationViewActivity"/>
+
+        <activity
               android:theme="@style/Theme.AppCompat.NoActionBar"
               android:name="android.support.design.widget.TextInputLayoutActivity"/>
 
         <activity
                 android:name="android.support.v7.app.AppCompatActivity"/>
 
-    </application>
+        <activity
+            android:name="android.support.design.widget.AppBarLayoutCollapsePinTestActivity"
+            android:theme="@style/Theme.TranslucentStatus"/>
 
-    <instrumentation
-            android:name="android.test.InstrumentationTestRunner"
-            android:targetPackage="android.support.design.test"/>
+        <activity
+            android:name="android.support.design.widget.AppBarWithScrollbarsActivity"
+            android:theme="@style/Theme.AppCompat.Light.DarkActionBar"/>
+
+    </application>
 
 </manifest>

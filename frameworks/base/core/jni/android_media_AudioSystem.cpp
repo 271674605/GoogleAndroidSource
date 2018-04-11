@@ -20,13 +20,14 @@
 #define LOG_TAG "AudioSystem-JNI"
 #include <utils/Log.h>
 
+#include <sstream>
 #include <jni.h>
 #include <JNIHelp.h>
 #include "core_jni_helpers.h"
 
 #include <media/AudioSystem.h>
 #include <media/AudioPolicy.h>
-
+#include <nativehelper/ScopedLocalRef.h>
 #include <system/audio.h>
 #include <system/audio_policy.h>
 #include "android_media_AudioFormat.h"
@@ -325,6 +326,12 @@ android_media_AudioSystem_newAudioSessionId(JNIEnv *env, jobject thiz)
 }
 
 static jint
+android_media_AudioSystem_newAudioPlayerId(JNIEnv *env, jobject thiz)
+{
+    return AudioSystem::newAudioUniqueId(AUDIO_UNIQUE_ID_USE_PLAYER);
+}
+
+static jint
 android_media_AudioSystem_setParameters(JNIEnv *env, jobject thiz, jstring keyValuePairs)
 {
     const jchar* c_keyValuePairs = env->GetStringCritical(keyValuePairs, 0);
@@ -453,6 +460,18 @@ android_media_AudioSystem_getDeviceConnectionState(JNIEnv *env, jobject thiz, ji
                                           c_address));
     env->ReleaseStringUTFChars(device_address, c_address);
     return (jint) state;
+}
+
+static jint
+android_media_AudioSystem_handleDeviceConfigChange(JNIEnv *env, jobject thiz, jint device, jstring device_address, jstring device_name)
+{
+    const char *c_address = env->GetStringUTFChars(device_address, NULL);
+    const char *c_name = env->GetStringUTFChars(device_name, NULL);
+    int status = check_AudioSystem_Command(AudioSystem::handleDeviceConfigChange(static_cast <audio_devices_t>(device),
+                                          c_address, c_name));
+    env->ReleaseStringUTFChars(device_address, c_address);
+    env->ReleaseStringUTFChars(device_name, c_name);
+    return (jint) status;
 }
 
 static jint
@@ -903,6 +922,12 @@ static bool hasFormat(int* formats, size_t size, int format) {
     return false; // not found
 }
 
+// TODO: pull out to separate file
+template <typename T, size_t N>
+static constexpr size_t array_size(const T (&)[N]) {
+    return N;
+}
+
 static jint convertAudioPortFromNative(JNIEnv *env,
                                            jobject *jAudioPort, const struct audio_port *nAudioPort)
 {
@@ -922,6 +947,38 @@ static jint convertAudioPortFromNative(JNIEnv *env,
 
     ALOGV("convertAudioPortFromNative id %d role %d type %d name %s",
         nAudioPort->id, nAudioPort->role, nAudioPort->type, nAudioPort->name);
+
+    // Verify audio port array count info.
+    if (nAudioPort->num_sample_rates > array_size(nAudioPort->sample_rates)
+            || nAudioPort->num_channel_masks > array_size(nAudioPort->channel_masks)
+            || nAudioPort->num_formats > array_size(nAudioPort->formats)
+            || nAudioPort->num_gains > array_size(nAudioPort->gains)) {
+
+        std::stringstream ss;
+        ss << "convertAudioPortFromNative array count out of bounds:"
+                << " num_sample_rates " << nAudioPort->num_sample_rates
+                << " num_channel_masks " << nAudioPort->num_channel_masks
+                << " num_formats " << nAudioPort->num_formats
+                << " num_gains " << nAudioPort->num_gains
+                ;
+        std::string s = ss.str();
+
+        // Prefer to log through Java wtf instead of native ALOGE.
+        ScopedLocalRef<jclass> jLogClass(env, env->FindClass("android/util/Log"));
+        jmethodID jWtfId = (jLogClass.get() == nullptr)
+                ? nullptr
+                : env->GetStaticMethodID(jLogClass.get(), "wtf",
+                        "(Ljava/lang/String;Ljava/lang/String;)I");
+        if (jWtfId != nullptr) {
+            ScopedLocalRef<jstring> jMessage(env, env->NewStringUTF(s.c_str()));
+            ScopedLocalRef<jstring> jTag(env, env->NewStringUTF(LOG_TAG));
+            (void)env->CallStaticIntMethod(jLogClass.get(), jWtfId, jTag.get(), jMessage.get());
+        } else {
+            ALOGE("%s", s.c_str());
+        }
+        jStatus = (jint)AUDIO_JAVA_ERROR;
+        goto exit;
+    }
 
     jSamplingRates = env->NewIntArray(nAudioPort->num_sample_rates);
     if (jSamplingRates == NULL) {
@@ -1066,7 +1123,7 @@ static jint convertAudioPortFromNative(JNIEnv *env,
                                                        &jAudioPortConfig,
                                                        &nAudioPort->active_config);
     if (jStatus != AUDIO_JAVA_SUCCESS) {
-        return jStatus;
+        goto exit;
     }
 
     env->SetObjectField(*jAudioPort, gAudioPortFields.mActiveConfig, jAudioPortConfig);
@@ -1716,8 +1773,10 @@ static const JNINativeMethod gMethods[] = {
     {"isStreamActiveRemotely","(II)Z",  (void *)android_media_AudioSystem_isStreamActiveRemotely},
     {"isSourceActive",      "(I)Z",     (void *)android_media_AudioSystem_isSourceActive},
     {"newAudioSessionId",   "()I",      (void *)android_media_AudioSystem_newAudioSessionId},
+    {"newAudioPlayerId",    "()I",      (void *)android_media_AudioSystem_newAudioPlayerId},
     {"setDeviceConnectionState", "(IILjava/lang/String;Ljava/lang/String;)I", (void *)android_media_AudioSystem_setDeviceConnectionState},
     {"getDeviceConnectionState", "(ILjava/lang/String;)I",  (void *)android_media_AudioSystem_getDeviceConnectionState},
+    {"handleDeviceConfigChange", "(ILjava/lang/String;Ljava/lang/String;)I", (void *)android_media_AudioSystem_handleDeviceConfigChange},
     {"setPhoneState",       "(I)I",     (void *)android_media_AudioSystem_setPhoneState},
     {"setForceUse",         "(II)I",    (void *)android_media_AudioSystem_setForceUse},
     {"getForceUse",         "(I)I",     (void *)android_media_AudioSystem_getForceUse},

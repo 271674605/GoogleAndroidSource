@@ -16,9 +16,10 @@
 
 package android.view;
 
+import static android.Manifest.permission.CONFIGURE_DISPLAY_COLOR_MODE;
+
 import android.annotation.IntDef;
 import android.annotation.RequiresPermission;
-import android.content.Context;
 import android.content.res.CompatibilityInfo;
 import android.content.res.Resources;
 import android.graphics.PixelFormat;
@@ -36,8 +37,6 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.Arrays;
 
-import static android.Manifest.permission.CONFIGURE_DISPLAY_COLOR_TRANSFORM;
-
 /**
  * Provides information about the size and density of a logical display.
  * <p>
@@ -51,7 +50,7 @@ import static android.Manifest.permission.CONFIGURE_DISPLAY_COLOR_TRANSFORM;
  * <li>The real display area specifies the part of the display that contains content
  * including the system decorations.  Even so, the real display area may be smaller than the
  * physical size of the display if the window manager is emulating a smaller display
- * using (adb shell am display-size).  Use the following methods to query the
+ * using (adb shell wm size).  Use the following methods to query the
  * real display area: {@link #getRealSize}, {@link #getRealMetrics}.</li>
  * </ul>
  * </p><p>
@@ -73,7 +72,8 @@ public final class Display {
     private final String mAddress;
     private final int mOwnerUid;
     private final String mOwnerPackageName;
-    private final DisplayAdjustments mDisplayAdjustments;
+    private final Resources mResources;
+    private DisplayAdjustments mDisplayAdjustments;
 
     private DisplayInfo mDisplayInfo; // never null
     private boolean mIsValid;
@@ -165,7 +165,7 @@ public final class Display {
 
     /**
      * Display flag: Indicates that the display is private.  Only the application that
-     * owns the display can create windows on it.
+     * owns the display and apps that are already on the display can create windows on it.
      *
      * @see #getFlags
      */
@@ -194,6 +194,20 @@ public final class Display {
      * @see #getFlags
      */
     public static final int FLAG_ROUND = 1 << 4;
+
+    /**
+     * Display flag: Indicates that the display can show its content when non-secure keyguard is
+     * shown.
+     * <p>
+     * This flag identifies secondary displays that won't show keyguard if it can be dismissed
+     * without entering credentials. Display content will be shown even if other displays are
+     * locked.
+     * </p>
+     *
+     * @see #getFlags
+     * @hide
+     */
+    public static final int FLAG_CAN_SHOW_WITH_INSECURE_KEYGUARD = 1 << 5;
 
     /**
      * Display flag: Indicates that the contents of the display should not be scaled
@@ -285,20 +299,97 @@ public final class Display {
     public static final int STATE_DOZE_SUSPEND = 4;
 
     /**
+     * Display state: The display is on and optimized for VR mode.
+     *
+     * @see #getState
+     * @see android.os.PowerManager#isInteractive
+     */
+    public static final int STATE_VR = 5;
+
+    /* The color mode constants defined below must be kept in sync with the ones in
+     * system/core/include/system/graphics-base.h */
+
+    /**
+     * Display color mode: The current color mode is unknown or invalid.
+     * @hide
+     */
+    public static final int COLOR_MODE_INVALID = -1;
+
+    /**
+     * Display color mode: The default or native gamut of the display.
+     * @hide
+     */
+    public static final int COLOR_MODE_DEFAULT = 0;
+
+    /** @hide */
+    public static final int COLOR_MODE_BT601_625 = 1;
+    /** @hide */
+    public static final int COLOR_MODE_BT601_625_UNADJUSTED = 2;
+    /** @hide */
+    public static final int COLOR_MODE_BT601_525 = 3;
+    /** @hide */
+    public static final int COLOR_MODE_BT601_525_UNADJUSTED = 4;
+    /** @hide */
+    public static final int COLOR_MODE_BT709 = 5;
+    /** @hide */
+    public static final int COLOR_MODE_DCI_P3 = 6;
+    /** @hide */
+    public static final int COLOR_MODE_SRGB = 7;
+    /** @hide */
+    public static final int COLOR_MODE_ADOBE_RGB = 8;
+    /** @hide */
+    public static final int COLOR_MODE_DISPLAY_P3 = 9;
+
+    /**
+     * Indicates that when display is removed, all its activities will be moved to the primary
+     * display and the topmost activity should become focused.
+     *
+     * @hide
+     */
+    public static final int REMOVE_MODE_MOVE_CONTENT_TO_PRIMARY = 0;
+    /**
+     * Indicates that when display is removed, all its stacks and tasks will be removed, all
+     * activities will be destroyed according to the usual lifecycle.
+     *
+     * @hide
+     */
+    public static final int REMOVE_MODE_DESTROY_CONTENT = 1;
+
+    /**
      * Internal method to create a display.
+     * The display created with this method will have a static {@link DisplayAdjustments} applied.
      * Applications should use {@link android.view.WindowManager#getDefaultDisplay()}
      * or {@link android.hardware.display.DisplayManager#getDisplay}
      * to get a display object.
      *
      * @hide
      */
-    public Display(DisplayManagerGlobal global,
-            int displayId, DisplayInfo displayInfo /*not null*/,
+    public Display(DisplayManagerGlobal global, int displayId, /*@NotNull*/ DisplayInfo displayInfo,
             DisplayAdjustments daj) {
+        this(global, displayId, displayInfo, daj, null /*res*/);
+    }
+
+    /**
+     * Internal method to create a display.
+     * The display created with this method will be adjusted based on the adjustments in the
+     * supplied {@link Resources}.
+     *
+     * @hide
+     */
+    public Display(DisplayManagerGlobal global, int displayId, /*@NotNull*/ DisplayInfo displayInfo,
+            Resources res) {
+        this(global, displayId, displayInfo, null /*daj*/, res);
+    }
+
+    private Display(DisplayManagerGlobal global, int displayId,
+            /*@NotNull*/ DisplayInfo displayInfo, DisplayAdjustments daj, Resources res) {
         mGlobal = global;
         mDisplayId = displayId;
         mDisplayInfo = displayInfo;
-        mDisplayAdjustments = new DisplayAdjustments(daj);
+        mResources = res;
+        mDisplayAdjustments = mResources != null
+            ? new DisplayAdjustments(mResources.getConfiguration())
+            : daj != null ? new DisplayAdjustments(daj) : null;
         mIsValid = true;
 
         // Cache properties that cannot change as long as the display is valid.
@@ -443,6 +534,13 @@ public final class Display {
      * @hide
      */
     public DisplayAdjustments getDisplayAdjustments() {
+        if (mResources != null) {
+            final DisplayAdjustments currentAdjustements = mResources.getDisplayAdjustments();
+            if (!mDisplayAdjustments.equals(currentAdjustements)) {
+                mDisplayAdjustments = new DisplayAdjustments(currentAdjustements);
+            }
+        }
+
         return mDisplayAdjustments;
     }
 
@@ -463,20 +561,29 @@ public final class Display {
 
     /**
      * Gets the size of the display, in pixels.
+     * Value returned by this method does not necessarily represent the actual raw size
+     * (native resolution) of the display.
      * <p>
-     * Note that this value should <em>not</em> be used for computing layouts,
-     * since a device will typically have screen decoration (such as a status bar)
-     * along the edges of the display that reduce the amount of application
-     * space available from the size returned here.  Layouts should instead use
-     * the window size.
+     * 1. The returned size may be adjusted to exclude certain system decor elements
+     * that are always visible.
      * </p><p>
-     * The size is adjusted based on the current rotation of the display.
-     * </p><p>
-     * The size returned by this method does not necessarily represent the
-     * actual raw size (native resolution) of the display.  The returned size may
-     * be adjusted to exclude certain system decoration elements that are always visible.
-     * It may also be scaled to provide compatibility with older applications that
+     * 2. It may be scaled to provide compatibility with older applications that
      * were originally designed for smaller displays.
+     * </p><p>
+     * 3. It can be different depending on the WindowManager to which the display belongs.
+     * </p><p>
+     * - If requested from non-Activity context (e.g. Application context via
+     * {@code (WindowManager) getApplicationContext().getSystemService(Context.WINDOW_SERVICE)})
+     * it will report the size of the entire display based on current rotation and with subtracted
+     * system decoration areas.
+     * </p><p>
+     * - If requested from activity (either using {@code getWindowManager()} or
+     * {@code (WindowManager) getSystemService(Context.WINDOW_SERVICE)}) resulting size will
+     * correspond to current app window size. In this case it can be smaller than physical size in
+     * multi-window mode.
+     * </p><p>
+     * Typically for the purposes of layout apps should make a request from activity context
+     * to obtain size available for the app content.
      * </p>
      *
      * @param outSize A {@link Point} object to receive the size information.
@@ -484,7 +591,7 @@ public final class Display {
     public void getSize(Point outSize) {
         synchronized (this) {
             updateDisplayInfoLocked();
-            mDisplayInfo.getAppMetrics(mTempMetrics, mDisplayAdjustments);
+            mDisplayInfo.getAppMetrics(mTempMetrics, getDisplayAdjustments());
             outSize.x = mTempMetrics.widthPixels;
             outSize.y = mTempMetrics.heightPixels;
         }
@@ -499,7 +606,7 @@ public final class Display {
     public void getRectSize(Rect outSize) {
         synchronized (this) {
             updateDisplayInfoLocked();
-            mDisplayInfo.getAppMetrics(mTempMetrics, mDisplayAdjustments);
+            mDisplayInfo.getAppMetrics(mTempMetrics, getDisplayAdjustments());
             outSize.set(0, 0, mTempMetrics.widthPixels, mTempMetrics.heightPixels);
         }
     }
@@ -687,38 +794,43 @@ public final class Display {
     }
 
     /**
-     * Request the display applies a color transform.
+     * Request the display applies a color mode.
      * @hide
      */
-    @RequiresPermission(CONFIGURE_DISPLAY_COLOR_TRANSFORM)
-    public void requestColorTransform(ColorTransform colorTransform) {
-        mGlobal.requestColorTransform(mDisplayId, colorTransform.getId());
+    @RequiresPermission(CONFIGURE_DISPLAY_COLOR_MODE)
+    public void requestColorMode(int colorMode) {
+        mGlobal.requestColorMode(mDisplayId, colorMode);
     }
 
     /**
-     * Returns the active color transform of this display
+     * Returns the active color mode of this display
      * @hide
      */
-    public ColorTransform getColorTransform() {
+    public int getColorMode() {
         synchronized (this) {
             updateDisplayInfoLocked();
-            return mDisplayInfo.getColorTransform();
+            return mDisplayInfo.colorMode;
         }
     }
 
     /**
-     * Returns the default color transform of this display
      * @hide
+     * Get current remove mode of the display - what actions should be performed with the display's
+     * content when it is removed. Default behavior for public displays in this case is to move all
+     * activities to the primary display and make it focused. For private display - destroy all
+     * activities.
+     *
+     * @see #REMOVE_MODE_MOVE_CONTENT_TO_PRIMARY
+     * @see #REMOVE_MODE_DESTROY_CONTENT
      */
-    public ColorTransform getDefaultColorTransform() {
-        synchronized (this) {
-            updateDisplayInfoLocked();
-            return mDisplayInfo.getDefaultColorTransform();
-        }
+    public int getRemoveMode() {
+        return mDisplayInfo.removeMode;
     }
 
     /**
      * Returns the display's HDR capabilities.
+     *
+     * @see #isHdr()
      */
     public HdrCapabilities getHdrCapabilities() {
         synchronized (this) {
@@ -728,14 +840,37 @@ public final class Display {
     }
 
     /**
-     * Gets the supported color transforms of this device.
-     * @hide
+     * Returns whether this display supports any HDR type.
+     *
+     * @see #getHdrCapabilities()
+     * @see HdrCapabilities#getSupportedHdrTypes()
      */
-    public ColorTransform[] getSupportedColorTransforms() {
+    public boolean isHdr() {
         synchronized (this) {
             updateDisplayInfoLocked();
-            ColorTransform[] transforms = mDisplayInfo.supportedColorTransforms;
-            return Arrays.copyOf(transforms, transforms.length);
+            return mDisplayInfo.isHdr();
+        }
+    }
+
+    /**
+     * Returns whether this display can be used to display wide color gamut content.
+     */
+    public boolean isWideColorGamut() {
+        synchronized (this) {
+            updateDisplayInfoLocked();
+            return mDisplayInfo.isWideColorGamut();
+        }
+    }
+
+    /**
+     * Gets the supported color modes of this device.
+     * @hide
+     */
+    public int[] getSupportedColorModes() {
+        synchronized (this) {
+            updateDisplayInfoLocked();
+            int[] colorModes = mDisplayInfo.supportedColorModes;
+            return Arrays.copyOf(colorModes, colorModes.length);
         }
     }
 
@@ -785,13 +920,16 @@ public final class Display {
      * were originally designed for smaller displays.
      * </p><p>
      * 3. It can be different depending on the WindowManager to which the display belongs.
-     * <pre>
+     * </p><p>
      * - If requested from non-Activity context (e.g. Application context via
      * {@code (WindowManager) getApplicationContext().getSystemService(Context.WINDOW_SERVICE)})
-     * metrics will report real size of the display based on current rotation.
-     * - If requested from activity resulting metrics will correspond to current window metrics.
-     * In this case the size can be smaller than physical size in multi-window mode.
-     * </pre>
+     * metrics will report the size of the entire display based on current rotation and with
+     * subtracted system decoration areas.
+     * </p><p>
+     * - If requested from activity (either using {@code getWindowManager()} or
+     * {@code (WindowManager) getSystemService(Context.WINDOW_SERVICE)}) resulting metrics will
+     * correspond to current app window metrics. In this case the size can be smaller than physical
+     * size in multi-window mode.
      * </p>
      *
      * @param outMetrics A {@link DisplayMetrics} object to receive the metrics.
@@ -799,7 +937,7 @@ public final class Display {
     public void getMetrics(DisplayMetrics outMetrics) {
         synchronized (this) {
             updateDisplayInfoLocked();
-            mDisplayInfo.getAppMetrics(outMetrics, mDisplayAdjustments);
+            mDisplayInfo.getAppMetrics(outMetrics, getDisplayAdjustments());
         }
     }
 
@@ -810,7 +948,7 @@ public final class Display {
      * The size is adjusted based on the current rotation of the display.
      * </p><p>
      * The real size may be smaller than the physical size of the screen when the
-     * window manager is emulating a smaller display (using adb shell am display-size).
+     * window manager is emulating a smaller display (using adb shell wm size).
      * </p>
      *
      * @param outSize Set to the real size of the display.
@@ -846,7 +984,8 @@ public final class Display {
      * Gets the state of the display, such as whether it is on or off.
      *
      * @return The state of the display: one of {@link #STATE_OFF}, {@link #STATE_ON},
-     * {@link #STATE_DOZE}, {@link #STATE_DOZE_SUSPEND}, or {@link #STATE_UNKNOWN}.
+     * {@link #STATE_DOZE}, {@link #STATE_DOZE_SUSPEND}, or
+     * {@link #STATE_UNKNOWN}.
      */
     public int getState() {
         synchronized (this) {
@@ -907,7 +1046,7 @@ public final class Display {
         long now = SystemClock.uptimeMillis();
         if (now > mLastCachedAppSizeUpdate + CACHED_APP_SIZE_DURATION_MILLIS) {
             updateDisplayInfoLocked();
-            mDisplayInfo.getAppMetrics(mTempMetrics, mDisplayAdjustments);
+            mDisplayInfo.getAppMetrics(mTempMetrics, getDisplayAdjustments());
             mCachedAppWidthCompat = mTempMetrics.widthPixels;
             mCachedAppHeightCompat = mTempMetrics.heightPixels;
             mLastCachedAppSizeUpdate = now;
@@ -919,7 +1058,7 @@ public final class Display {
     public String toString() {
         synchronized (this) {
             updateDisplayInfoLocked();
-            mDisplayInfo.getAppMetrics(mTempMetrics, mDisplayAdjustments);
+            mDisplayInfo.getAppMetrics(mTempMetrics, getDisplayAdjustments());
             return "Display id " + mDisplayId + ": " + mDisplayInfo
                     + ", " + mTempMetrics + ", isValid=" + mIsValid;
         }
@@ -962,6 +1101,8 @@ public final class Display {
                 return "DOZE";
             case STATE_DOZE_SUSPEND:
                 return "DOZE_SUSPEND";
+            case STATE_VR:
+                return "VR";
             default:
                 return Integer.toString(state);
         }
@@ -1205,6 +1346,33 @@ public final class Display {
             return mMinLuminance;
         }
 
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+
+            if (!(other instanceof HdrCapabilities)) {
+                return false;
+            }
+            HdrCapabilities that = (HdrCapabilities) other;
+
+            return Arrays.equals(mSupportedHdrTypes, that.mSupportedHdrTypes)
+                && mMaxLuminance == that.mMaxLuminance
+                && mMaxAverageLuminance == that.mMaxAverageLuminance
+                && mMinLuminance == that.mMinLuminance;
+        }
+
+        @Override
+        public int hashCode() {
+            int hash = 23;
+            hash = hash * 17 + Arrays.hashCode(mSupportedHdrTypes);
+            hash = hash * 17 + Float.floatToIntBits(mMaxLuminance);
+            hash = hash * 17 + Float.floatToIntBits(mMaxAverageLuminance);
+            hash = hash * 17 + Float.floatToIntBits(mMinLuminance);
+            return hash;
+        }
+
         public static final Creator<HdrCapabilities> CREATOR = new Creator<HdrCapabilities>() {
             @Override
             public HdrCapabilities createFromParcel(Parcel source) {
@@ -1250,90 +1418,5 @@ public final class Display {
         public int describeContents() {
             return 0;
         }
-    }
-
-    /**
-     * A color transform supported by a given display.
-     *
-     * @see Display#getSupportedColorTransforms()
-     * @hide
-     */
-    public static final class ColorTransform implements Parcelable {
-        public static final ColorTransform[] EMPTY_ARRAY = new ColorTransform[0];
-
-        private final int mId;
-        private final int mColorTransform;
-
-        public ColorTransform(int id, int colorTransform) {
-            mId = id;
-            mColorTransform = colorTransform;
-        }
-
-        public int getId() {
-            return mId;
-        }
-
-        public int getColorTransform() {
-            return mColorTransform;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) {
-                return true;
-            }
-            if (!(other instanceof ColorTransform)) {
-                return false;
-            }
-            ColorTransform that = (ColorTransform) other;
-            return mId == that.mId
-                && mColorTransform == that.mColorTransform;
-        }
-
-        @Override
-        public int hashCode() {
-            int hash = 1;
-            hash = hash * 17 + mId;
-            hash = hash * 17 + mColorTransform;
-            return hash;
-        }
-
-        @Override
-        public String toString() {
-            return new StringBuilder("{")
-                    .append("id=").append(mId)
-                    .append(", colorTransform=").append(mColorTransform)
-                    .append("}")
-                    .toString();
-        }
-
-        @Override
-        public int describeContents() {
-            return 0;
-        }
-
-        private ColorTransform(Parcel in) {
-            this(in.readInt(), in.readInt());
-        }
-
-        @Override
-        public void writeToParcel(Parcel out, int parcelableFlags) {
-            out.writeInt(mId);
-            out.writeInt(mColorTransform);
-        }
-
-        @SuppressWarnings("hiding")
-        public static final Parcelable.Creator<ColorTransform> CREATOR
-                = new Parcelable.Creator<ColorTransform>() {
-            @Override
-            public ColorTransform createFromParcel(Parcel in) {
-                return new ColorTransform(in);
-            }
-
-            @Override
-            public ColorTransform[] newArray(int size) {
-                return new ColorTransform[size];
-            }
-        };
     }
 }

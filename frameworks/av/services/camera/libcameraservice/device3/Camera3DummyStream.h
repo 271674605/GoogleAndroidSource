@@ -42,7 +42,7 @@ class Camera3DummyStream :
      * Set up a dummy stream; doesn't actually connect to anything, and uses
      * a default dummy format and size.
      */
-    Camera3DummyStream(int id);
+    explicit Camera3DummyStream(int id);
 
     virtual ~Camera3DummyStream();
 
@@ -60,6 +60,16 @@ class Camera3DummyStream :
      * Return if this output stream is for video encoding.
      */
     bool isVideoStream() const;
+
+    /**
+     * Return if the consumer configuration of this stream is deferred.
+     */
+    virtual bool isConsumerConfigurationDeferred(size_t surface_id) const;
+
+    /**
+     * Set the consumer surfaces to the output stream.
+     */
+    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers);
 
   protected:
 
@@ -89,7 +99,8 @@ class Camera3DummyStream :
     /**
      * Internal Camera3Stream interface
      */
-    virtual status_t getBufferLocked(camera3_stream_buffer *buffer);
+    virtual status_t getBufferLocked(camera3_stream_buffer *buffer,
+            const std::vector<size_t>& surface_ids = std::vector<size_t>());
     virtual status_t returnBufferLocked(
             const camera3_stream_buffer &buffer,
             nsecs_t timestamp);

@@ -45,6 +45,8 @@ def main():
     THRES_L_CP_TEST = 0.02
     # pass/fail threshold of mini size images for crop test
     THRES_XS_CP_TEST = 0.05
+    # Crop test will allow at least THRES_MIN_PIXEL offset
+    THRES_MIN_PIXEL = 4
     PREVIEW_SIZE = (1920, 1080) # preview size
     aspect_ratio_gt = 1  # ground truth
     failed_ar = []  # streams failed the aspect ration test
@@ -68,6 +70,7 @@ def main():
         # Todo: test for radial distortion enabled devices has not yet been
         # implemented
         its.caps.skip_unless(not its.caps.radial_distortion_correction(props))
+        its.caps.skip_unless(its.caps.read_3a(props))
         full_device = its.caps.full_or_better(props)
         limited_device = its.caps.limited(props)
         its.caps.skip_unless(full_device or limited_device)
@@ -76,6 +79,7 @@ def main():
         run_crop_test = (level3_device or full_device) and raw_avlb
         if not run_crop_test:
             print "Crop test skipped"
+        debug = its.caps.debug_mode()
         # Converge 3A and get the estimates.
         sens, exp, gains, xform, focus = cam.do_3a(get_results=True,
                                                    lock_ae=True, lock_awb=True)
@@ -84,7 +88,7 @@ def main():
         print "AWB transform", xform
         print "AF distance", focus
         req = its.objects.manual_capture_request(
-                sens, exp, True, props)
+                sens, exp, focus, True, props)
         xform_rat = its.objects.float_to_rational(xform)
         req["android.colorCorrection.gains"] = gains
         req["android.colorCorrection.transform"] = xform_rat
@@ -103,7 +107,8 @@ def main():
             img_name = "%s_%s_w%d_h%d.png" \
                        % (NAME, "raw", size_raw[1], size_raw[0])
             aspect_ratio_gt, cc_ct_gt, circle_size_raw = measure_aspect_ratio(
-                                                         img_raw, 1, img_name)
+                                                         img_raw, 1, img_name,
+                                                         debug)
             # Normalize the circle size to 1/4 of the image size, so that
             # circle size won"t affect the crop test result
             factor_cp_thres = (min(size_raw[0:1])/4.0) / max(circle_size_raw)
@@ -117,8 +122,11 @@ def main():
             dual_target = fmt_cmpr is not "none"
             # Get the size of "cmpr"
             if dual_target:
-                size_cmpr = its.objects.get_available_output_sizes(
-                        fmt_cmpr, props, fmt["cmpr_size"])[0]
+                sizes = its.objects.get_available_output_sizes(
+                        fmt_cmpr, props, fmt["cmpr_size"])
+                if len(sizes) == 0: # device might not support RAW
+                    continue
+                size_cmpr = sizes[0]
             for size_iter in its.objects.get_available_output_sizes(
                     fmt_iter, props, fmt["iter_max"]):
                 w_iter = size_iter[0]
@@ -150,8 +158,9 @@ def main():
                 img = its.image.convert_capture_to_rgb_image(frm_iter)
                 img_name = "%s_%s_with_%s_w%d_h%d.png" \
                            % (NAME, fmt_iter, fmt_cmpr, w_iter, h_iter)
-                aspect_ratio, cc_ct, _ = measure_aspect_ratio(img, raw_avlb,
-                                                              img_name)
+                aspect_ratio, cc_ct, (cc_w, cc_h) = \
+                        measure_aspect_ratio(img, raw_avlb, img_name,
+                                             debug)
                 # check pass/fail for aspect ratio
                 # image size >= LARGE_SIZE: use THRES_L_AR_TEST
                 # image size == 0 (extreme case): THRES_XS_AR_TEST
@@ -176,14 +185,23 @@ def main():
                     # image size == 0 (extreme case): thres_xs_cp_test
                     # 0 < image size < LARGE_SIZE: scale between
                     # thres_xs_cp_test and thres_l_cp_test
+                    # Also, allow at least THRES_MIN_PIXEL off to
+                    # prevent threshold being too tight for very
+                    # small circle
                     thres_hori_cp_test = max(thres_l_cp_test,
                             thres_xs_cp_test + w_iter *
                             (thres_l_cp_test-thres_xs_cp_test)/LARGE_SIZE)
+                    min_threshold_h = THRES_MIN_PIXEL / cc_w
+                    thres_hori_cp_test = max(thres_hori_cp_test,
+                            min_threshold_h)
                     thres_range_h_cp = (cc_ct_gt["hori"]-thres_hori_cp_test,
                                         cc_ct_gt["hori"]+thres_hori_cp_test)
                     thres_vert_cp_test = max(thres_l_cp_test,
                             thres_xs_cp_test + h_iter *
                             (thres_l_cp_test-thres_xs_cp_test)/LARGE_SIZE)
+                    min_threshold_v = THRES_MIN_PIXEL / cc_h
+                    thres_vert_cp_test = max(thres_vert_cp_test,
+                            min_threshold_v)
                     thres_range_v_cp = (cc_ct_gt["vert"]-thres_vert_cp_test,
                                         cc_ct_gt["vert"]+thres_vert_cp_test)
                     if cc_ct["hori"] < thres_range_h_cp[0] \
@@ -230,7 +248,7 @@ def main():
             assert (failed_image_number_for_crop_test == 0)
 
 
-def measure_aspect_ratio(img, raw_avlb, img_name):
+def measure_aspect_ratio(img, raw_avlb, img_name, debug):
     """ Measure the aspect ratio of the black circle in the test image.
 
     Args:
@@ -238,6 +256,7 @@ def measure_aspect_ratio(img, raw_avlb, img_name):
         raw_avlb: True: raw capture is available; False: raw capture is not
              available.
         img_name: string with image info of format and size.
+        debug: boolean for whether in debug mode.
     Returns:
         aspect_ratio: aspect ratio number in float.
         cc_ct: circle center position relative to the center of image.
@@ -367,7 +386,8 @@ def measure_aspect_ratio(img, raw_avlb, img_name):
     cv2.putText(img, "image center", (text_imgct_x, text_imgct_y),
                 cv2.FONT_HERSHEY_SIMPLEX, line_width/2.0, (255, 0, 0),
                 line_width)
-    its.image.write_image(img/255, img_name, True)
+    if debug:
+        its.image.write_image(img/255, img_name, True)
 
     print "Aspect ratio: %.3f" % aspect_ratio
     print "Circle center position regarding to image center: %.3fx%.3f" % \

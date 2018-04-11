@@ -27,11 +27,10 @@ import com.android.phone.ImsUtil;
 public class DisconnectCauseUtil {
 
    /**
-    * Converts from a disconnect code in {@link android.telephony.DisconnectCause} into a more generic
-    * {@link android.telecom.DisconnectCause}.object, possibly populated with a localized message
-    * and tone.
+    * Converts from a disconnect code in {@link android.telephony.DisconnectCause} into a more
+    * generic {@link android.telecom.DisconnectCause} object, possibly populated with a localized
+    * message and tone.
     *
-    * @param context The context.
     * @param telephonyDisconnectCause The code for the reason for the disconnect.
     */
     public static DisconnectCause toTelecomDisconnectCause(int telephonyDisconnectCause) {
@@ -39,11 +38,10 @@ public class DisconnectCauseUtil {
     }
 
    /**
-    * Converts from a disconnect code in {@link android.telephony.DisconnectCause} into a more generic
-    * {@link android.telecom.DisconnectCause}.object, possibly populated with a localized message
-    * and tone.
+    * Converts from a disconnect code in {@link android.telephony.DisconnectCause} into a more
+    * generic {@link android.telecom.DisconnectCause}.object, possibly populated with a localized
+    * message and tone.
     *
-    * @param context The context.
     * @param telephonyDisconnectCause The code for the reason for the disconnect.
     * @param reason Description of the reason for the disconnect, not intended for the user to see..
     */
@@ -54,7 +52,7 @@ public class DisconnectCauseUtil {
                 toTelecomDisconnectCauseCode(telephonyDisconnectCause),
                 toTelecomDisconnectCauseLabel(context, telephonyDisconnectCause),
                 toTelecomDisconnectCauseDescription(context, telephonyDisconnectCause),
-                toTelecomDisconnectReason(telephonyDisconnectCause, reason),
+                toTelecomDisconnectReason(context,telephonyDisconnectCause, reason),
                 toTelecomDisconnectCauseTone(telephonyDisconnectCause));
     }
 
@@ -125,6 +123,13 @@ public class DisconnectCauseUtil {
             case android.telephony.DisconnectCause.DIAL_MODIFIED_TO_SS:
             case android.telephony.DisconnectCause.DIAL_MODIFIED_TO_DIAL:
             case android.telephony.DisconnectCause.ERROR_UNSPECIFIED:
+            case android.telephony.DisconnectCause.MAXIMUM_NUMBER_OF_CALLS_REACHED:
+            case android.telephony.DisconnectCause.DATA_DISABLED:
+            case android.telephony.DisconnectCause.DATA_LIMIT_REACHED:
+            case android.telephony.DisconnectCause.DIALED_ON_WRONG_SLOT:
+            case android.telephony.DisconnectCause.DIALED_CALL_FORWARDING_WHILE_ROAMING:
+            case android.telephony.DisconnectCause.IMEI_NOT_ACCEPTED:
+            case android.telephony.DisconnectCause.WIFI_LOST:
                 return DisconnectCause.ERROR;
 
             case android.telephony.DisconnectCause.DIALED_MMI:
@@ -136,6 +141,12 @@ public class DisconnectCauseUtil {
             case android.telephony.DisconnectCause.NOT_VALID:
             case android.telephony.DisconnectCause.NOT_DISCONNECTED:
                 return DisconnectCause.UNKNOWN;
+
+            case android.telephony.DisconnectCause.CALL_PULLED:
+                return DisconnectCause.CALL_PULLED;
+
+            case android.telephony.DisconnectCause.ANSWERED_ELSEWHERE:
+                return DisconnectCause.ANSWERED_ELSEWHERE;
 
             default:
                 Log.w("DisconnectCauseUtil.toTelecomDisconnectCauseCode",
@@ -214,6 +225,22 @@ public class DisconnectCauseUtil {
                 resourceId = R.string.callFailed_unobtainable_number;
                 break;
 
+            case android.telephony.DisconnectCause.CALL_PULLED:
+                resourceId = R.string.callEnded_pulled;
+                break;
+
+            case android.telephony.DisconnectCause.MAXIMUM_NUMBER_OF_CALLS_REACHED:
+                resourceId = R.string.callFailed_maximum_reached;
+                break;
+
+            case android.telephony.DisconnectCause.DATA_DISABLED:
+                resourceId = R.string.callFailed_data_disabled;
+                break;
+
+            case android.telephony.DisconnectCause.DATA_LIMIT_REACHED:
+                resourceId = R.string.callFailed_data_limit_reached;
+                break;
+
             default:
                 break;
         }
@@ -281,7 +308,9 @@ public class DisconnectCauseUtil {
                 // TODO: Offer the option to turn the radio on, and automatically retry the call
                 // once network registration is complete.
 
-                if (ImsUtil.isWfcModeWifiOnly(context)) {
+                if (ImsUtil.shouldPromoteWfc(context)) {
+                    resourceId = R.string.incall_error_promote_wfc;
+                } else if (ImsUtil.isWfcModeWifiOnly(context)) {
                     resourceId = R.string.incall_error_wfc_only_no_wireless_network;
                 } else if (ImsUtil.isWfcEnabled(context)) {
                     resourceId = R.string.incall_error_power_off_wfc;
@@ -303,7 +332,9 @@ public class DisconnectCauseUtil {
 
             case android.telephony.DisconnectCause.OUT_OF_SERVICE:
                 // No network connection.
-                if (ImsUtil.isWfcModeWifiOnly(context)) {
+                if (ImsUtil.shouldPromoteWfc(context)) {
+                    resourceId = R.string.incall_error_promote_wfc;
+                } else if (ImsUtil.isWfcModeWifiOnly(context)) {
                     resourceId = R.string.incall_error_wfc_only_no_wireless_network;
                 } else if (ImsUtil.isWfcEnabled(context)) {
                     resourceId = R.string.incall_error_out_of_service_wfc;
@@ -329,18 +360,75 @@ public class DisconnectCauseUtil {
                 resourceId = R.string.callFailed_video_call_tty_enabled;
                 break;
 
+            case android.telephony.DisconnectCause.CALL_PULLED:
+                resourceId = R.string.callEnded_pulled;
+                break;
+
+            case android.telephony.DisconnectCause.MAXIMUM_NUMBER_OF_CALLS_REACHED:
+                resourceId = R.string.callFailed_maximum_reached;
+
             case android.telephony.DisconnectCause.OUTGOING_CANCELED:
                 // We don't want to show any dialog for the canceled case since the call was
                 // either canceled by the user explicitly (end-call button pushed immediately)
                 // or some other app canceled the call and immediately issued a new CALL to
                 // replace it.
+                break;
+
+            case android.telephony.DisconnectCause.DATA_DISABLED:
+                resourceId = R.string.callFailed_data_disabled;
+                break;
+
+            case android.telephony.DisconnectCause.DATA_LIMIT_REACHED:
+                resourceId = R.string.callFailed_data_limit_reached_description;
+                break;
+            case android.telephony.DisconnectCause.DIALED_CALL_FORWARDING_WHILE_ROAMING:
+                resourceId = com.android.internal.R.string.mmiErrorWhileRoaming;
+                break;
+
+            case android.telephony.DisconnectCause.IMEI_NOT_ACCEPTED:
+                resourceId = R.string.callFailed_imei_not_accepted;
+                break;
+
+            case android.telephony.DisconnectCause.WIFI_LOST:
+                resourceId = R.string.callFailed_wifi_lost;
+                break;
+
             default:
                 break;
         }
         return resourceId == null ? "" : context.getResources().getString(resourceId);
     }
 
-    private static String toTelecomDisconnectReason(int telephonyDisconnectCause, String reason) {
+    /**
+     * Maps the telephony {@link android.telephony.DisconnectCause} into a reason string which is
+     * returned in the Telecom {@link DisconnectCause#getReason()}.
+     *
+     * @param context The current context.
+     * @param telephonyDisconnectCause The {@link android.telephony.DisconnectCause} code.
+     * @param reason A reason provided by the caller; only used if a more specific reason cannot
+     *               be determined here.
+     * @return The disconnect reason.
+     */
+    private static String toTelecomDisconnectReason(Context context, int telephonyDisconnectCause,
+            String reason) {
+
+        if (context == null) {
+            return "";
+        }
+
+        switch (telephonyDisconnectCause) {
+            case android.telephony.DisconnectCause.POWER_OFF:
+                // Airplane mode (radio off)
+                // intentional fall-through
+            case android.telephony.DisconnectCause.OUT_OF_SERVICE:
+                // No network connection.
+                if (ImsUtil.shouldPromoteWfc(context)) {
+                    return android.telecom.DisconnectCause.REASON_WIFI_ON_BUT_WFC_OFF;
+                }
+                break;
+        }
+
+        // If no specific code-mapping found, then fall back to using the reason.
         String causeAsString = android.telephony.DisconnectCause.toString(telephonyDisconnectCause);
         if (reason == null) {
             return causeAsString;

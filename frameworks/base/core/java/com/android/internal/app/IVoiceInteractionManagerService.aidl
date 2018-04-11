@@ -22,6 +22,7 @@ import android.os.Bundle;
 
 import com.android.internal.app.IVoiceInteractionSessionShowCallback;
 import com.android.internal.app.IVoiceInteractor;
+import com.android.internal.app.IVoiceInteractionSessionListener;
 import android.hardware.soundtrigger.IRecognitionStatusCallback;
 import android.hardware.soundtrigger.SoundTrigger;
 import android.service.voice.IVoiceInteractionService;
@@ -34,6 +35,7 @@ interface IVoiceInteractionManagerService {
     boolean showSessionFromSession(IBinder token, in Bundle sessionArgs, int flags);
     boolean hideSessionFromSession(IBinder token);
     int startVoiceActivity(IBinder token, in Intent intent, String resolvedType);
+    int startAssistantActivity(IBinder token, in Intent intent, String resolvedType);
     void setKeepAwake(IBinder token, boolean keepAwake);
     void closeSystemDialogs(IBinder token);
     void finish(IBinder token);
@@ -136,4 +138,9 @@ interface IVoiceInteractionManagerService {
      * Called when the lockscreen got shown.
      */
     void onLockscreenShown();
+
+    /**
+     * Register a voice interaction listener.
+     */
+    void registerVoiceInteractionSessionListener(IVoiceInteractionSessionListener listener);
 }

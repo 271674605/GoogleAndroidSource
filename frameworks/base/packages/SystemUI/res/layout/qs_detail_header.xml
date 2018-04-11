@@ -18,33 +18,48 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:paddingLeft="@dimen/qs_detail_header_padding"
+    android:paddingTop="@dimen/qs_detail_header_padding"
+    android:paddingBottom="@dimen/qs_detail_items_padding_top"
     android:paddingEnd="@dimen/qs_panel_padding"
     android:background="@drawable/btn_borderless_rect"
+    android:orientation="vertical"
     android:gravity="center">
 
-    <ImageView
-        android:id="@*android:id/up"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_marginEnd="16dp"
-        android:padding="16dp"
-        android:clickable="true"
-        android:background="?android:attr/selectableItemBackground"
-        android:contentDescription="@*android:string/action_bar_up_description"
-        android:src="?android:attr/homeAsUpIndicator" />
+    <com.android.systemui.ResizingSpace
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/qs_detail_margin_top" />
 
-    <TextView
-        android:id="@android:id/title"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:textAppearance="@style/TextAppearance.QS.DetailHeader" />
+        android:orientation="horizontal">
 
-    <Switch
-        android:id="@android:id/toggle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:clickable="false"
-        android:textAppearance="@style/TextAppearance.QS.DetailHeader" />
+        <TextView
+            android:id="@android:id/title"
+            android:paddingStart="@dimen/qs_detail_header_text_padding"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textDirection="locale"
+            android:textAppearance="@style/TextAppearance.QS.DetailHeader" />
+
+        <ImageView
+            android:id="@+id/settings"
+            android:layout_width="@dimen/qs_detail_image_width"
+            android:layout_height="@dimen/qs_detail_image_height"
+            android:background="?android:attr/selectableItemBackground"
+            android:padding="@dimen/qs_detail_image_padding"
+            android:src="@drawable/ic_settings"
+            android:visibility="gone"/>
+
+        <Switch
+            android:id="@android:id/toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clickable="false"
+            android:textAppearance="@style/TextAppearance.QS.DetailHeader" />
+
+    </LinearLayout>
 
 </com.android.keyguard.AlphaOptimizedLinearLayout>

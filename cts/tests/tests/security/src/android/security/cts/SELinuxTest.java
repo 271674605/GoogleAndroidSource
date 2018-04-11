@@ -18,6 +18,7 @@ package android.security.cts;
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.platform.test.annotations.SecurityTest;
 import android.test.AndroidTestCase;
 
 import junit.framework.TestCase;
@@ -36,6 +37,7 @@ import java.util.HashSet;
 /**
  * Verify that the SELinux configuration is sane.
  */
+@SecurityTest
 public class SELinuxTest extends AndroidTestCase {
 
     static {
@@ -69,8 +71,11 @@ public class SELinuxTest extends AndroidTestCase {
         assertEquals(getFileContext("/data"), "u:object_r:system_data_file:s0");
         assertEquals(getFileContext("/data/app"), "u:object_r:apk_data_file:s0");
         assertEquals(getFileContext("/data/local/tmp"), "u:object_r:shell_data_file:s0");
-        assertEquals(getFileContext("/cache"), "u:object_r:cache_file:s0");
         assertEquals(getFileContext("/sys"), "u:object_r:sysfs:s0");
+        File dir = new File("/cache");
+        if (dir.exists()) {
+            assertEquals(getFileContext("/cache"), "u:object_r:cache_file:s0");
+        }
     }
 
     private static final native String getFileContext(String path);

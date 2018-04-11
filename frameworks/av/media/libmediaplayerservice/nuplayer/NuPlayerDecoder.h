@@ -23,10 +23,13 @@
 
 namespace android {
 
+class MediaCodecBuffer;
+
 struct NuPlayer::Decoder : public DecoderBase {
     Decoder(const sp<AMessage> &notify,
             const sp<Source> &source,
             pid_t pid,
+            uid_t uid,
             const sp<Renderer> &renderer = NULL,
             const sp<Surface> &surface = NULL,
             const sp<CCDecoder> &ccDecoder = NULL);
@@ -36,6 +39,8 @@ struct NuPlayer::Decoder : public DecoderBase {
     // sets the output surface of video decoders.
     virtual status_t setVideoSurface(const sp<Surface> &surface);
 
+    virtual status_t releaseCrypto();
+
 protected:
     virtual ~Decoder();
 
@@ -44,7 +49,6 @@ protected:
     virtual void onConfigure(const sp<AMessage> &format);
     virtual void onSetParameters(const sp<AMessage> &params);
     virtual void onSetRenderer(const sp<Renderer> &renderer);
-    virtual void onGetInputBuffers(Vector<sp<ABuffer> > *dstBuffers);
     virtual void onResume(bool notifyComplete);
     virtual void onFlush();
     virtual void onShutdown(bool notifyComplete);
@@ -54,7 +58,13 @@ private:
     enum {
         kWhatCodecNotify         = 'cdcN',
         kWhatRenderBuffer        = 'rndr',
-        kWhatSetVideoSurface     = 'sSur'
+        kWhatSetVideoSurface     = 'sSur',
+        kWhatAudioOutputFormatChanged = 'aofc',
+        kWhatDrmReleaseCrypto    = 'rDrm',
+    };
+
+    enum {
+        kMaxNumVideoTemporalLayers = 32,
     };
 
     sp<Surface> mSurface;
@@ -70,8 +80,8 @@ private:
 
     List<sp<AMessage> > mPendingInputMessages;
 
-    Vector<sp<ABuffer> > mInputBuffers;
-    Vector<sp<ABuffer> > mOutputBuffers;
+    Vector<sp<MediaCodecBuffer> > mInputBuffers;
+    Vector<sp<MediaCodecBuffer> > mOutputBuffers;
     Vector<sp<ABuffer> > mCSDsForCurrentFormat;
     Vector<sp<ABuffer> > mCSDsToSubmit;
     Vector<bool> mInputBufferIsDequeued;
@@ -79,6 +89,7 @@ private:
     Vector<size_t> mDequeuedInputBuffers;
 
     const pid_t mPid;
+    const uid_t mUid;
     int64_t mSkipRenderingUntilMediaTimeUs;
     int64_t mNumFramesTotal;
     int64_t mNumInputFramesDropped;
@@ -88,8 +99,16 @@ private:
     bool mIsAudio;
     bool mIsVideoAVC;
     bool mIsSecure;
+    bool mIsEncrypted;
+    bool mIsEncryptedObservedEarlier;
     bool mFormatChangePending;
     bool mTimeChangePending;
+    float mFrameRateTotal;
+    float mPlaybackSpeed;
+    int32_t mNumVideoTemporalLayerTotal;
+    int32_t mNumVideoTemporalLayerAllowed;
+    int32_t mCurrentMaxVideoTemporalLayerId;
+    float mVideoTemporalLayerAggregateFps[kMaxNumVideoTemporalLayers];
 
     bool mResumePending;
     AString mComponentName;
@@ -120,6 +139,8 @@ private:
     void finishHandleDiscontinuity(bool flushOnTimeChange);
 
     void notifyResumeCompleteIfNecessary();
+
+    void onReleaseCrypto(const sp<AMessage>& msg);
 
     DISALLOW_EVIL_CONSTRUCTORS(Decoder);
 };

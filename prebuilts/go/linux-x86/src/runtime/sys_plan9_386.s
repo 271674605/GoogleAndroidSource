@@ -178,8 +178,8 @@ TEXT runtime·sigtramp(SB),NOSPLIT,$0
 	RET
 
 	// save args
-	MOVL	ureg+4(SP), CX
-	MOVL	note+8(SP), DX
+	MOVL	ureg+0(FP), CX
+	MOVL	note+4(FP), DX
 
 	// change stack
 	MOVL	g_m(BX), BX
@@ -238,7 +238,7 @@ TEXT runtime·errstr(SB),NOSPLIT,$8-8
 	get_tls(AX)
 	MOVL	g(AX), BX
 	MOVL	g_m(BX), BX
-	MOVL	m_errstr(BX), CX
+	MOVL	(m_mOS+mOS_errstr)(BX), CX
 	MOVL	CX, 0(SP)
 	MOVL	$ERRMAX, 4(SP)
 	CALL	errstr<>(SB)

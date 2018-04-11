@@ -75,39 +75,6 @@ typedef enum OMX_VIDEO_VP8LEVELTYPE {
     OMX_VIDEO_VP8LevelMax = 0x7FFFFFFF
 } OMX_VIDEO_VP8LEVELTYPE;
 
-/** VP9 profiles */
-typedef enum OMX_VIDEO_VP9PROFILETYPE {
-    OMX_VIDEO_VP9Profile0       = 0x1,
-    OMX_VIDEO_VP9Profile1       = 0x2,
-    OMX_VIDEO_VP9Profile2       = 0x4,
-    OMX_VIDEO_VP9Profile3       = 0x8,
-    // HDR profiles also support passing HDR metadata
-    OMX_VIDEO_VP9Profile2HDR    = 0x1000,
-    OMX_VIDEO_VP9Profile3HDR    = 0x2000,
-    OMX_VIDEO_VP9ProfileUnknown = 0x6EFFFFFF,
-    OMX_VIDEO_VP9ProfileMax     = 0x7FFFFFFF
-} OMX_VIDEO_VP9PROFILETYPE;
-
-/** VP9 levels */
-typedef enum OMX_VIDEO_VP9LEVELTYPE {
-    OMX_VIDEO_VP9Level1       = 0x1,
-    OMX_VIDEO_VP9Level11      = 0x2,
-    OMX_VIDEO_VP9Level2       = 0x4,
-    OMX_VIDEO_VP9Level21      = 0x8,
-    OMX_VIDEO_VP9Level3       = 0x10,
-    OMX_VIDEO_VP9Level31      = 0x20,
-    OMX_VIDEO_VP9Level4       = 0x40,
-    OMX_VIDEO_VP9Level41      = 0x80,
-    OMX_VIDEO_VP9Level5       = 0x100,
-    OMX_VIDEO_VP9Level51      = 0x200,
-    OMX_VIDEO_VP9Level52      = 0x400,
-    OMX_VIDEO_VP9Level6       = 0x800,
-    OMX_VIDEO_VP9Level61      = 0x1000,
-    OMX_VIDEO_VP9Level62      = 0x2000,
-    OMX_VIDEO_VP9LevelUnknown = 0x6EFFFFFF,
-    OMX_VIDEO_VP9LevelMax     = 0x7FFFFFFF
-} OMX_VIDEO_VP9LEVELTYPE;
-
 /** VP8 Param */
 typedef struct OMX_VIDEO_PARAM_VP8TYPE {
     OMX_U32 nSize;
@@ -152,7 +119,7 @@ typedef enum OMX_VIDEO_ANDROID_VPXTEMPORALLAYERPATTERNTYPE {
 } OMX_VIDEO_ANDROID_VPXTEMPORALLAYERPATTERNTYPE;
 
 /**
- * Android specific VP8 encoder params
+ * Android specific VP8/VP9 encoder params
  *
  * STRUCT MEMBERS:
  *  nSize                      : Size of the structure in bytes
@@ -170,13 +137,70 @@ typedef struct OMX_VIDEO_PARAM_ANDROID_VP8ENCODERTYPE {
     OMX_U32 nSize;
     OMX_VERSIONTYPE nVersion;
     OMX_U32 nPortIndex;
-    OMX_U32 nKeyFrameInterval;
+    OMX_U32 nKeyFrameInterval;        // distance between consecutive key_frames (including one
+                                      // of the key_frames). 0 means interval is unspecified and
+                                      // can be freely chosen by the codec. 1 means a stream of
+                                      // only key_frames.
+
     OMX_VIDEO_ANDROID_VPXTEMPORALLAYERPATTERNTYPE eTemporalPattern;
     OMX_U32 nTemporalLayerCount;
     OMX_U32 nTemporalLayerBitrateRatio[OMX_VIDEO_ANDROID_MAXVP8TEMPORALLAYERS];
     OMX_U32 nMinQuantizer;
     OMX_U32 nMaxQuantizer;
 } OMX_VIDEO_PARAM_ANDROID_VP8ENCODERTYPE;
+
+/** VP9 profiles */
+typedef enum OMX_VIDEO_VP9PROFILETYPE {
+    OMX_VIDEO_VP9Profile0 = 0x1,
+    OMX_VIDEO_VP9Profile1 = 0x2,
+    OMX_VIDEO_VP9Profile2 = 0x4,
+    OMX_VIDEO_VP9Profile3 = 0x8,
+    // HDR profiles also support passing HDR metadata
+    OMX_VIDEO_VP9Profile2HDR = 0x1000,
+    OMX_VIDEO_VP9Profile3HDR = 0x2000,
+    OMX_VIDEO_VP9ProfileUnknown = 0x6EFFFFFF,
+    OMX_VIDEO_VP9ProfileMax = 0x7FFFFFFF
+} OMX_VIDEO_VP9PROFILETYPE;
+
+/** VP9 levels */
+typedef enum OMX_VIDEO_VP9LEVELTYPE {
+    OMX_VIDEO_VP9Level1  = 0x0,
+    OMX_VIDEO_VP9Level11 = 0x1,
+    OMX_VIDEO_VP9Level2  = 0x2,
+    OMX_VIDEO_VP9Level21 = 0x4,
+    OMX_VIDEO_VP9Level3  = 0x8,
+    OMX_VIDEO_VP9Level31 = 0x10,
+    OMX_VIDEO_VP9Level4  = 0x20,
+    OMX_VIDEO_VP9Level41 = 0x40,
+    OMX_VIDEO_VP9Level5  = 0x80,
+    OMX_VIDEO_VP9Level51 = 0x100,
+    OMX_VIDEO_VP9Level52 = 0x200,
+    OMX_VIDEO_VP9Level6  = 0x400,
+    OMX_VIDEO_VP9Level61 = 0x800,
+    OMX_VIDEO_VP9Level62 = 0x1000,
+    OMX_VIDEO_VP9LevelUnknown = 0x6EFFFFFF,
+    OMX_VIDEO_VP9LevelMax = 0x7FFFFFFF
+} OMX_VIDEO_VP9LEVELTYPE;
+
+/**
+* VP9 Parameters.
+*   Encoder specific parameters (decoders should ignore these fields):
+*     - bErrorResilientMode
+*     - nTileRows
+*     - nTileColumns
+*     - bEnableFrameParallelDecoding
+*/
+typedef struct OMX_VIDEO_PARAM_VP9TYPE {
+    OMX_U32 nSize;
+    OMX_VERSIONTYPE nVersion;
+    OMX_U32 nPortIndex;
+    OMX_VIDEO_VP9PROFILETYPE eProfile;
+    OMX_VIDEO_VP9LEVELTYPE eLevel;
+    OMX_BOOL bErrorResilientMode;
+    OMX_U32 nTileRows;
+    OMX_U32 nTileColumns;
+    OMX_BOOL bEnableFrameParallelDecoding;
+} OMX_VIDEO_PARAM_VP9TYPE;
 
 /** HEVC Profile enum type */
 typedef enum OMX_VIDEO_HEVCPROFILETYPE {
@@ -227,7 +251,10 @@ typedef struct OMX_VIDEO_PARAM_HEVCTYPE {
     OMX_U32 nPortIndex;
     OMX_VIDEO_HEVCPROFILETYPE eProfile;
     OMX_VIDEO_HEVCLEVELTYPE eLevel;
-    OMX_U32 nKeyFrameInterval;
+    OMX_U32 nKeyFrameInterval;        // distance between consecutive I-frames (including one
+                                      // of the I frames). 0 means interval is unspecified and
+                                      // can be freely chosen by the codec. 1 means a stream of
+                                      // only I frames.
 } OMX_VIDEO_PARAM_HEVCTYPE;
 
 /** Structure to define if dependent slice segments should be used */
@@ -289,13 +316,102 @@ typedef enum OMX_VIDEO_DOLBYVISIONLEVELTYPE {
  *  nVersion            : OMX specification version information
  *  nPortIndex          : Port that this structure applies to
  *  nRefreshPeriod      : Intra refreh period in frames. Value 0 means disable intra refresh
-*/
+ */
 typedef struct OMX_VIDEO_CONFIG_ANDROID_INTRAREFRESHTYPE {
     OMX_U32 nSize;
     OMX_VERSIONTYPE nVersion;
     OMX_U32 nPortIndex;
     OMX_U32 nRefreshPeriod;
 } OMX_VIDEO_CONFIG_ANDROID_INTRAREFRESHTYPE;
+
+/** Maximum number of temporal layers supported by AVC/HEVC */
+#define OMX_VIDEO_ANDROID_MAXTEMPORALLAYERS 8
+
+/** temporal layer patterns */
+typedef enum OMX_VIDEO_ANDROID_TEMPORALLAYERINGPATTERNTYPE {
+    OMX_VIDEO_AndroidTemporalLayeringPatternNone = 0,
+    // pattern as defined by WebRTC
+    OMX_VIDEO_AndroidTemporalLayeringPatternWebRTC = 1 << 0,
+    // pattern where frames in any layer other than the base layer only depend on at most the very
+    // last frame from each preceding layer (other than the base layer.)
+    OMX_VIDEO_AndroidTemporalLayeringPatternAndroid = 1 << 1,
+} OMX_VIDEO_ANDROID_TEMPORALLAYERINGPATTERNTYPE;
+
+/**
+ * Android specific param for configuration of temporal layering.
+ * Android only supports temporal layering where successive layers each double the
+ * previous layer's framerate.
+ * NOTE: Reading this parameter at run-time SHALL return actual run-time values.
+ *
+ *  nSize                      : Size of the structure in bytes
+ *  nVersion                   : OMX specification version information
+ *  nPortIndex                 : Port that this structure applies to (output port for encoders)
+ *  eSupportedPatterns         : A bitmask of supported layering patterns
+ *  nLayerCountMax             : Max number of temporal coding layers supported
+ *                               by the encoder (must be at least 1, 1 meaning temporal layering
+ *                               is NOT supported)
+ *  nBLayerCountMax            : Max number of layers that can contain B frames
+ *                               (0) to (nLayerCountMax - 1)
+ *  ePattern                   : Layering pattern.
+ *  nPLayerCountActual         : Number of temporal layers to be coded with non-B frames,
+ *                               starting from and including the base-layer.
+ *                               (1 to nLayerCountMax - nBLayerCountActual)
+ *                               If nPLayerCountActual is 1 and nBLayerCountActual is 0, temporal
+ *                               layering is disabled. Otherwise, it is enabled.
+ *  nBLayerCountActual         : Number of temporal layers to be coded with B frames,
+ *                               starting after non-B layers.
+ *                               (0 to nBLayerCountMax)
+ *  bBitrateRatiosSpecified    : Flag to indicate if layer-wise bitrate
+ *                               distribution is specified.
+ *  nBitrateRatios             : Bitrate ratio (100 based) per layer (index 0 is base layer).
+ *                               Honored if bBitrateRatiosSpecified is set.
+ *                               i.e for 4 layers with desired distribution (25% 25% 25% 25%),
+ *                               nBitrateRatio = {25, 50, 75, 100, ... }
+ *                               Values in indices not less than 'the actual number of layers
+ *                               minus 1' MAY be ignored and assumed to be 100.
+ */
+typedef struct OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE {
+    OMX_U32 nSize;
+    OMX_VERSIONTYPE nVersion;
+    OMX_U32 nPortIndex;
+    OMX_VIDEO_ANDROID_TEMPORALLAYERINGPATTERNTYPE eSupportedPatterns;
+    OMX_U32 nLayerCountMax;
+    OMX_U32 nBLayerCountMax;
+    OMX_VIDEO_ANDROID_TEMPORALLAYERINGPATTERNTYPE ePattern;
+    OMX_U32 nPLayerCountActual;
+    OMX_U32 nBLayerCountActual;
+    OMX_BOOL bBitrateRatiosSpecified;
+    OMX_U32 nBitrateRatios[OMX_VIDEO_ANDROID_MAXTEMPORALLAYERS];
+} OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE;
+
+/**
+ * Android specific config for changing the temporal-layer count or
+ * bitrate-distribution at run-time.
+ *
+ *  nSize                      : Size of the structure in bytes
+ *  nVersion                   : OMX specification version information
+ *  nPortIndex                 : Port that this structure applies to (output port for encoders)
+ *  ePattern                   : Layering pattern.
+ *  nPLayerCountActual         : Number of temporal layers to be coded with non-B frames.
+ *                               (same OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE limits apply.)
+ *  nBLayerCountActual         : Number of temporal layers to be coded with B frames.
+ *                               (same OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE limits apply.)
+ *  bBitrateRatiosSpecified    : Flag to indicate if layer-wise bitrate
+ *                               distribution is specified.
+ *  nBitrateRatios             : Bitrate ratio (100 based, Q16 values) per layer (0 is base layer).
+ *                               Honored if bBitrateRatiosSpecified is set.
+ *                               (same OMX_VIDEO_PARAM_ANDROID_TEMPORALLAYERINGTYPE limits apply.)
+ */
+typedef struct OMX_VIDEO_CONFIG_ANDROID_TEMPORALLAYERINGTYPE {
+    OMX_U32 nSize;
+    OMX_VERSIONTYPE nVersion;
+    OMX_U32 nPortIndex;
+    OMX_VIDEO_ANDROID_TEMPORALLAYERINGPATTERNTYPE ePattern;
+    OMX_U32 nPLayerCountActual;
+    OMX_U32 nBLayerCountActual;
+    OMX_BOOL bBitrateRatiosSpecified;
+    OMX_U32 nBitrateRatios[OMX_VIDEO_ANDROID_MAXTEMPORALLAYERS];
+} OMX_VIDEO_CONFIG_ANDROID_TEMPORALLAYERINGTYPE;
 
 #ifdef __cplusplus
 }

@@ -21,8 +21,8 @@ import junit.framework.Assert;
 import android.location.GnssNavigationMessage;
 import android.util.Log;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 class TestGnssNavigationMessageListener extends GnssNavigationMessage.Callback {
 
     // Timeout in sec for count down latch wait
-    private static final long TIMEOUT_IN_SEC = 90L;
+    private static final int TIMEOUT_IN_SEC = 90;
 
     private volatile int mStatus = -1;
 
@@ -45,7 +45,7 @@ class TestGnssNavigationMessageListener extends GnssNavigationMessage.Callback {
         mTag = tag;
         mCountDownLatch = new CountDownLatch(1);
         mEventsToCollect = eventsToCollect;
-        mEvents = new ArrayList<>(eventsToCollect);
+        mEvents = new CopyOnWriteArrayList<GnssNavigationMessage>();
     }
 
     @Override
@@ -66,7 +66,7 @@ class TestGnssNavigationMessageListener extends GnssNavigationMessage.Callback {
 
     public boolean await() throws InterruptedException {
         Log.i(mTag, "Number of GPS Navigation Message received = " + getEvents().size());
-        return TestUtils.waitFor(mCountDownLatch);
+        return TestUtils.waitFor(mCountDownLatch, TIMEOUT_IN_SEC);
     }
 
     /**

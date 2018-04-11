@@ -90,7 +90,7 @@ public class ArrayObjectAdapter extends ObjectAdapter {
 
     /**
      * Inserts an item into this adapter at the specified index.
-     * If the index is >= {@link #size} an exception will be thrown.
+     * If the index is > {@link #size} an exception will be thrown.
      *
      * @param index The index at which the item should be inserted.
      * @param item The item to insert into the adapter.
@@ -181,5 +181,10 @@ public class ArrayObjectAdapter extends ObjectAdapter {
      */
     public <E> List<E> unmodifiableList() {
         return Collections.unmodifiableList((List<E>) mItems);
+    }
+
+    @Override
+    public boolean isImmediateNotifySupported() {
+        return true;
     }
 }
