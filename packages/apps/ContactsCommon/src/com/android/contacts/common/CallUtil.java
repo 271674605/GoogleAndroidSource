@@ -116,13 +116,20 @@ public class CallUtil {
     }
 
     /**
+     * A variant of {@link #getCallIntent(android.net.Uri)} for calling Voicemail.
+     */
+    public static Intent getVoicemailIntent() {
+        return getCallIntent(Uri.fromParts(PhoneAccount.SCHEME_VOICEMAIL, "", null));
+    }
+
+    /**
      * A variant of {@link #getCallIntent(android.net.Uri)} but also accept a call
      * origin and {@code Account} and {@code VideoCallProfile} state.
      * For more information about call origin, see comments in Phone package (PhoneApp).
      */
     public static Intent getCallIntent(
             Uri uri, String callOrigin, PhoneAccountHandle accountHandle, int videoState) {
-        final Intent intent = new Intent(Intent.ACTION_CALL, uri);
+        final Intent intent = new Intent(Intent.ACTION_CALL_PRIVILEGED, uri);
         intent.putExtra(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, videoState);
         if (callOrigin != null) {
             intent.putExtra(PhoneConstants.EXTRA_CALL_ORIGIN, callOrigin);

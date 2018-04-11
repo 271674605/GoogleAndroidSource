@@ -549,6 +549,7 @@ private:
                                    OMX_PTR                appData,
                                    OMX_U32                bytes,
                                    OMX_U8                 *buffer);
+
 #ifdef MAX_RES_720P
     OMX_ERRORTYPE get_supported_profile_level_for_720p(OMX_VIDEO_PARAM_PROFILELEVELTYPE *profileLevelType);
 #endif
@@ -668,6 +669,7 @@ private:
     //*******************MEMBER VARIABLES *************************
     //*************************************************************
     pthread_mutex_t       m_lock;
+    pthread_mutex_t       c_lock;
     //sem to handle the minimum procesing of commands
     sem_t                 m_cmd_lock;
     bool              m_error_propogated;
@@ -843,11 +845,19 @@ private:
         OMX_ERRORTYPE allocate_buffers_color_convert(OMX_HANDLETYPE hComp,
              OMX_BUFFERHEADERTYPE **bufferHdr,OMX_U32 port,OMX_PTR appData,
              OMX_U32 bytes);
+        OMX_ERRORTYPE use_output_buffer(OMX_HANDLETYPE hComp,
+             OMX_BUFFERHEADERTYPE **bufferHdr, OMX_U32 port, OMX_PTR appData,
+             OMX_U32 bytes, OMX_U8 *buffer);
+
         OMX_ERRORTYPE free_output_buffer(OMX_BUFFERHEADERTYPE *bufferHdr);
+        void enable_native_buffers(bool enable) {m_native_buffers_enabled = enable;}
+        OMX_U32 get_output_stride();
+        OMX_U32 get_output_scanlines();
     private:
         #define MAX_COUNT 32
         omx_vdec *omx;
         bool enabled;
+        bool m_native_buffers_enabled;
         OMX_COLOR_FORMATTYPE ColorFormat;
         void init_members();
         bool color_convert_mode;

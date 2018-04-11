@@ -39,6 +39,8 @@ TARGET_CPU_VARIANT := cortex-a9
 TARGET_USERIMAGES_USE_EXT4 := true
 
 BOARD_SYSTEMIMAGE_PARTITION_SIZE := 681574400
+# Disable journaling on system.img to save space.
+BOARD_SYSTEMIMAGE_JOURNAL_SIZE := 0
 BOARD_USERDATAIMAGE_PARTITION_SIZE := 6567231488
 BOARD_FLASH_BLOCK_SIZE := 4096
 
@@ -96,10 +98,12 @@ BOARD_SEPOLICY_UNION += \
         keystore.te \
         lmkd.te \
         mediaserver.te \
+        recovery.te \
         rild.te \
         sensors_config.te \
         surfaceflinger.te \
         system_app.te \
         system_server.te \
         ueventd.te \
-        vold.te
+        vold.te \
+        radio.te

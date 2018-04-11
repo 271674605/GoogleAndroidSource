@@ -1295,7 +1295,8 @@ static int wpa_supplicant_process_1_of_2_wpa(struct wpa_sm *sm,
 				(unsigned long) maxkeylen);
 			return -1;
 		}
-		if (aes_unwrap(sm->ptk.kek, maxkeylen / 8, key_data, gd->gtk)) {
+		if (aes_unwrap(sm->ptk.kek, 16, maxkeylen / 8, key_data,
+			       gd->gtk)) {
 			wpa_msg(sm->ctx->msg_ctx, MSG_WARNING,
 				"WPA: AES unwrap failed - could not decrypt "
 				"GTK");
@@ -1503,7 +1504,7 @@ static int wpa_supplicant_decrypt_key_data(struct wpa_sm *sm,
 				"WPA: No memory for AES-UNWRAP buffer");
 			return -1;
 		}
-		if (aes_unwrap(sm->ptk.kek, *key_data_len / 8,
+		if (aes_unwrap(sm->ptk.kek, 16, *key_data_len / 8,
 			       key_data, buf)) {
 			os_free(buf);
 			wpa_msg(sm->ctx->msg_ctx, MSG_WARNING,
@@ -1736,6 +1737,9 @@ int wpa_sm_rx_eapol(struct wpa_sm *sm, const u8 *src_addr,
 			wpa_msg(sm->ctx->msg_ctx, MSG_INFO,
 				"WPA: Backwards compatibility: allow invalid "
 				"version for non-CCMP group keys");
+		} else if (ver == WPA_KEY_INFO_TYPE_AES_128_CMAC) {
+			wpa_msg(sm->ctx->msg_ctx, MSG_INFO,
+				"WPA: Interoperability workaround: allow incorrect (should have been HMAC-SHA1), but stronger (is AES-128-CMAC), descriptor version to be used");
 		} else
 			goto out;
 	} else if (sm->pairwise_cipher == WPA_CIPHER_GCMP &&

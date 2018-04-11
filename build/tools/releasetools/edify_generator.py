@@ -201,6 +201,17 @@ class EdifyGenerator(object):
     """Log a message to the screen (if the logs are visible)."""
     self.script.append('ui_print("%s");' % (message,))
 
+  def TunePartition(self, partition, *options):
+    fstab = self.info.get("fstab", None)
+    if fstab:
+      p = fstab[partition]
+      if (p.fs_type not in ( "ext2", "ext3", "ext4")):
+        raise ValueError("Partition %s cannot be tuned\n" % (partition,))
+    self.script.append('tune2fs(' +
+                       "".join(['"%s", ' % (i,) for i in options]) +
+                       '"%s") || abort("Failed to tune partition %s");'
+                       % ( p.device,partition));
+
   def FormatPartition(self, partition):
     """Format the given partition, specified by its mount point (eg,
     "/system")."""
@@ -322,6 +333,10 @@ class EdifyGenerator(object):
   def AppendExtra(self, extra):
     """Append text verbatim to the output script."""
     self.script.append(extra)
+
+  def Unmount(self, mount_point):
+    self.script.append('unmount("%s");' % (mount_point,))
+    self.mounts.remove(mount_point);
 
   def UnmountAll(self):
     for p in sorted(self.mounts):

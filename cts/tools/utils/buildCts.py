@@ -252,18 +252,6 @@ class CtsBuilder(object):
 
     plan = tools.TestPlan(packages)
     plan.Exclude('.*')
-    plan.Include(r'android\.core\.tests\.libcore\.')
-    plan.Include(r'android\.jdwp')
-    for package, test_list in small_tests.iteritems():
-      plan.Exclude(package+'$')
-    for package, test_list in medium_tests.iteritems():
-      plan.Exclude(package+'$')
-    for package, tests_list in new_test_packages.iteritems():
-      plan.Exclude(package+'$')
-    self.__WritePlan(plan, 'CTS-ART')
-
-    plan = tools.TestPlan(packages)
-    plan.Exclude('.*')
     plan.Include(r'com\.drawelements\.')
     self.__WritePlan(plan, 'CTS-DEQP')
 
@@ -357,6 +345,7 @@ def BuildAospSmallSizeTestList():
 def BuildCtsVettedNewPackagesList():
   """ Construct a defaultdict that maps package names that is vetted for L. """
   return {
+      'android.JobScheduler' : [],
       'android.core.tests.libcore.package.harmony_annotation' : [],
       'android.core.tests.libcore.package.harmony_beans' : [],
       'android.core.tests.libcore.package.harmony_java_io' : [],
@@ -383,6 +372,7 @@ def BuildCtsVettedNewPackagesList():
       'android.uiautomation' : [],
       'android.uirendering' : [],
       'android.webgl' : [],
+      'com.drawelements.deqp.gles3' : [],
       'com.drawelements.deqp.gles31' : []}
 
 def BuildCtsFlakyTestList():
